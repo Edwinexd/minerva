@@ -217,6 +217,7 @@ async fn send_message(
             "messages": chat_messages,
             "temperature": temperature,
             "stream": true,
+            "stream_options": { "include_usage": true },
         });
 
         let response = http_client
@@ -247,11 +248,18 @@ async fn send_message(
         // Stream SSE from Cerebras
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut done = false;
 
-        while let Some(chunk) = stream.next().await {
+        'outer: while let Some(chunk) = stream.next().await {
             let chunk = match chunk {
                 Ok(c) => c,
-                Err(_) => break,
+                Err(e) => {
+                    tracing::error!("cerebras stream error: {}", e);
+                    let _ = tx.send(Ok(Event::default().data(
+                        serde_json::json!({"type": "error", "error": format!("Stream interrupted: {}", e)}).to_string()
+                    ))).await;
+                    break;
+                }
             };
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -261,27 +269,59 @@ async fn send_message(
                 buffer = buffer[line_end + 1..].to_string();
 
                 if line == "data: [DONE]" {
-                    break;
+                    done = true;
+                    break 'outer;
                 }
 
                 if let Some(data) = line.strip_prefix("data: ") {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                        // Extract token
-                        if let Some(delta) = parsed["choices"][0]["delta"]["content"].as_str() {
-                            full_text.push_str(delta);
-                            let _ = tx.send(Ok(Event::default().data(
-                                serde_json::json!({"type": "token", "token": delta}).to_string()
-                            ))).await;
-                        }
+                    match serde_json::from_str::<serde_json::Value>(data) {
+                        Ok(parsed) => {
+                            // Check for error response
+                            if let Some(err) = parsed.get("error") {
+                                let msg = err["message"].as_str().unwrap_or("unknown error");
+                                tracing::error!("cerebras error in stream: {}", msg);
+                                let _ = tx.send(Ok(Event::default().data(
+                                    serde_json::json!({"type": "error", "error": msg}).to_string()
+                                ))).await;
+                                break 'outer;
+                            }
 
-                        // Extract usage from final chunk
-                        if let Some(usage) = parsed.get("usage") {
-                            prompt_tokens = usage["prompt_tokens"].as_i64().unwrap_or(0) as i32;
-                            completion_tokens = usage["completion_tokens"].as_i64().unwrap_or(0) as i32;
+                            // Extract token
+                            if let Some(delta) = parsed["choices"][0]["delta"]["content"].as_str() {
+                                full_text.push_str(delta);
+                                if tx.send(Ok(Event::default().data(
+                                    serde_json::json!({"type": "token", "token": delta}).to_string()
+                                ))).await.is_err() {
+                                    tracing::warn!("client disconnected during stream");
+                                    break 'outer;
+                                }
+                            }
+
+                            // Check for finish_reason
+                            if let Some(reason) = parsed["choices"][0]["finish_reason"].as_str() {
+                                if reason == "length" {
+                                    tracing::warn!("cerebras hit max tokens (finish_reason=length)");
+                                }
+                            }
+
+                            // Extract usage from final chunk
+                            if let Some(usage) = parsed.get("usage") {
+                                if !usage.is_null() {
+                                    prompt_tokens = usage["prompt_tokens"].as_i64().unwrap_or(0) as i32;
+                                    completion_tokens = usage["completion_tokens"].as_i64().unwrap_or(0) as i32;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!("skipping unparseable SSE chunk: {}", e);
                         }
                     }
                 }
             }
+        }
+
+        if !done && full_text.is_empty() {
+            tracing::error!("cerebras stream ended without producing any content");
         }
 
         // Save assistant message

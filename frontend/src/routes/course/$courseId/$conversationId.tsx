@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import Markdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import React, { useState, useRef, useEffect, useCallback } from "react"
 import type { Conversation, Message } from "@/lib/types"
 
@@ -249,7 +250,7 @@ function ChatWindow({
 function MarkdownContent({ content, className }: { content: string; className?: string }) {
   return (
     <div className={`prose prose-sm dark:prose-invert max-w-none ${className || ""}`}>
-      <Markdown>{content}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
     </div>
   )
 }

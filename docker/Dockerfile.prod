@@ -5,7 +5,7 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM rust:1.82-bookworm AS backend-builder
+FROM rust:latest AS backend-builder
 WORKDIR /app
 COPY backend/ ./backend/
 WORKDIR /app/backend

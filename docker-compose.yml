@@ -6,9 +6,6 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./backend:/app/backend
-      - cargo-cache:/usr/local/cargo/registry
-      - target-cache:/app/backend/target
       - minerva-data:/data
     environment:
       - DATABASE_URL=postgres://minerva:minerva@postgres:5432/minerva
@@ -65,5 +62,3 @@ volumes:
   minerva-data:
   postgres-data:
   qdrant-data:
-  cargo-cache:
-  target-cache:

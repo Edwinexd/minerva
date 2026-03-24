@@ -17,14 +17,23 @@ use crate::strategy;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/conversations", get(list_conversations).post(create_conversation))
+        .route(
+            "/conversations",
+            get(list_conversations).post(create_conversation),
+        )
         .route("/conversations/all", get(list_all_conversations))
         .route("/conversations/pinned", get(list_pinned_conversations))
         .route("/conversations/{cid}", get(get_conversation))
         .route("/conversations/{cid}/message", post(send_message))
         .route("/conversations/{cid}/pin", put(set_pin))
-        .route("/conversations/{cid}/notes", get(list_notes).post(create_note))
-        .route("/conversations/{cid}/notes/{note_id}", put(update_note).delete(delete_note))
+        .route(
+            "/conversations/{cid}/notes",
+            get(list_notes).post(create_note),
+        )
+        .route(
+            "/conversations/{cid}/notes/{note_id}",
+            put(update_note).delete(delete_note),
+        )
 }
 
 #[derive(Serialize)]
@@ -114,8 +123,7 @@ async fn list_all_conversations(
 ) -> Result<Json<Vec<ConversationWithUserResponse>>, AppError> {
     verify_course_teacher_access(&state, course_id, &user).await?;
 
-    let rows =
-        minerva_db::queries::conversations::list_all_by_course(&state.db, course_id).await?;
+    let rows = minerva_db::queries::conversations::list_all_by_course(&state.db, course_id).await?;
 
     Ok(Json(
         rows.into_iter()
@@ -172,8 +180,7 @@ async fn create_conversation(
     verify_course_access(&state, course_id, user.id).await?;
 
     let id = Uuid::new_v4();
-    let row =
-        minerva_db::queries::conversations::create(&state.db, id, course_id, user.id).await?;
+    let row = minerva_db::queries::conversations::create(&state.db, id, course_id, user.id).await?;
 
     Ok(Json(ConversationResponse {
         id: row.id,
@@ -259,8 +266,15 @@ async fn send_message(
     // Save user message
     let user_msg_id = Uuid::new_v4();
     minerva_db::queries::conversations::insert_message(
-        &state.db, user_msg_id, cid, "user", &body.content,
-        None, None, None, None,
+        &state.db,
+        user_msg_id,
+        cid,
+        "user",
+        &body.content,
+        None,
+        None,
+        None,
+        None,
     )
     .await?;
 
@@ -401,7 +415,12 @@ async fn create_note(
 
     let id = Uuid::new_v4();
     let note = minerva_db::queries::conversations::create_note(
-        &state.db, id, cid, body.message_id, user.id, &body.content,
+        &state.db,
+        id,
+        cid,
+        body.message_id,
+        user.id,
+        &body.content,
     )
     .await?;
 

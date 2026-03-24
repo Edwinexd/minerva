@@ -75,7 +75,11 @@ pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     .await
 }
 
-pub async fn update(db: &PgPool, id: Uuid, input: &UpdateCourse) -> Result<Option<CourseRow>, sqlx::Error> {
+pub async fn update(
+    db: &PgPool,
+    id: Uuid,
+    input: &UpdateCourse,
+) -> Result<Option<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
         r#"UPDATE courses SET
             name = COALESCE($2, name),
@@ -167,17 +171,19 @@ pub async fn list_members(db: &PgPool, course_id: Uuid) -> Result<Vec<MemberRow>
 }
 
 pub async fn is_member(db: &PgPool, course_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
-    let row = sqlx::query(
-        "SELECT 1 FROM course_members WHERE course_id = $1 AND user_id = $2",
-    )
-    .bind(course_id)
-    .bind(user_id)
-    .fetch_optional(db)
-    .await?;
+    let row = sqlx::query("SELECT 1 FROM course_members WHERE course_id = $1 AND user_id = $2")
+        .bind(course_id)
+        .bind(user_id)
+        .fetch_optional(db)
+        .await?;
     Ok(row.is_some())
 }
 
-pub async fn is_course_teacher(db: &PgPool, course_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
+pub async fn is_course_teacher(
+    db: &PgPool,
+    course_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, sqlx::Error> {
     let row = sqlx::query(
         "SELECT 1 FROM course_members WHERE course_id = $1 AND user_id = $2 AND role IN ('teacher', 'ta')",
     )

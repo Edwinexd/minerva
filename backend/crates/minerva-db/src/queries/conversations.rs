@@ -214,10 +214,7 @@ pub async fn delete_note(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
     Ok(result.rows_affected() > 0)
 }
 
-pub async fn find_note_by_id(
-    db: &PgPool,
-    id: Uuid,
-) -> Result<Option<TeacherNoteRow>, sqlx::Error> {
+pub async fn find_note_by_id(db: &PgPool, id: Uuid) -> Result<Option<TeacherNoteRow>, sqlx::Error> {
     sqlx::query_as::<_, TeacherNoteRow>(
         r#"SELECT tn.id, tn.conversation_id, tn.message_id, tn.author_id, tn.content,
             tn.created_at, tn.updated_at, u.display_name AS author_display_name

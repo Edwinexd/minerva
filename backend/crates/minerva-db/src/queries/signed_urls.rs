@@ -46,7 +46,10 @@ pub async fn find_by_token(db: &PgPool, token: &str) -> Result<Option<SignedUrlR
     .await
 }
 
-pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<SignedUrlRow>, sqlx::Error> {
+pub async fn list_by_course(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<Vec<SignedUrlRow>, sqlx::Error> {
     sqlx::query_as::<_, SignedUrlRow>(
         "SELECT id, course_id, created_by, token, expires_at, max_uses, use_count, created_at FROM signed_urls WHERE course_id = $1 ORDER BY created_at DESC",
     )

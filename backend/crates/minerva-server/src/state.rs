@@ -14,7 +14,8 @@ pub struct AppState {
 impl AppState {
     pub async fn new(config: &Config) -> anyhow::Result<Self> {
         let db = minerva_db::postgres::create_pool(&config.database_url).await?;
-        let qdrant = minerva_db::qdrant::create_client(&config.qdrant_url).await
+        let qdrant = minerva_db::qdrant::create_client(&config.qdrant_url)
+            .await
             .map_err(|e| anyhow::anyhow!("qdrant connection failed: {}", e))?;
 
         Ok(Self {

@@ -16,9 +16,14 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
     // RAG lookup (blocks before streaming starts)
     let chunks = common::rag_lookup(
-        &http_client, &ctx.openai_api_key, &ctx.qdrant,
-        &collection_name, &ctx.user_content, ctx.max_chunks,
-    ).await;
+        &http_client,
+        &ctx.openai_api_key,
+        &ctx.qdrant,
+        &collection_name,
+        &ctx.user_content,
+        ctx.max_chunks,
+    )
+    .await;
 
     let chunks_json = serde_json::to_value(&chunks).ok();
     let system = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &chunks);
@@ -26,20 +31,35 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
     let mut full_text = String::new();
     let (prompt_tokens, completion_tokens) = match common::stream_cerebras_to_client(
-        &http_client, &ctx.cerebras_api_key, &ctx.model, ctx.temperature,
-        &messages, &tx, &mut full_text,
-    ).await {
+        &http_client,
+        &ctx.cerebras_api_key,
+        &ctx.model,
+        ctx.temperature,
+        &messages,
+        &tx,
+        &mut full_text,
+    )
+    .await
+    {
         Ok(usage) => usage,
         Err(e) => {
-            let _ = tx.send(Ok(Event::default().data(
-                serde_json::json!({"type": "error", "error": e}).to_string()
-            ))).await;
+            let _ = tx
+                .send(Ok(Event::default().data(
+                    serde_json::json!({"type": "error", "error": e}).to_string(),
+                )))
+                .await;
             return;
         }
     };
 
     common::finalize(
-        &ctx, &tx, &full_text, chunks_json.as_ref(),
-        prompt_tokens, completion_tokens, true,
-    ).await;
+        &ctx,
+        &tx,
+        &full_text,
+        chunks_json.as_ref(),
+        prompt_tokens,
+        completion_tokens,
+        true,
+    )
+    .await;
 }

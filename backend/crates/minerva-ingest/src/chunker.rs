@@ -57,7 +57,8 @@ pub fn chunk_text(text: &str, config: &ChunkerConfig) -> Vec<Chunk> {
             chunk_index += 1;
 
             // Start new chunk with overlap from the end of current
-            let overlap_start = snap_to_char_boundary(&current, current.len().saturating_sub(config.overlap));
+            let overlap_start =
+                snap_to_char_boundary(&current, current.len().saturating_sub(config.overlap));
             current = current[overlap_start..].to_string();
         }
 
@@ -79,7 +80,8 @@ pub fn chunk_text(text: &str, config: &ChunkerConfig) -> Vec<Chunk> {
                 chunk_index += 1;
             }
 
-            let overlap_start = snap_to_char_boundary(&current, split_point.saturating_sub(config.overlap));
+            let overlap_start =
+                snap_to_char_boundary(&current, split_point.saturating_sub(config.overlap));
             current = current[overlap_start..].to_string();
         }
     }
@@ -169,7 +171,13 @@ mod tests {
     #[test]
     fn test_basic_chunking() {
         let text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
-        let chunks = chunk_text(text, &ChunkerConfig { chunk_size: 30, overlap: 5 });
+        let chunks = chunk_text(
+            text,
+            &ChunkerConfig {
+                chunk_size: 30,
+                overlap: 5,
+            },
+        );
         assert!(!chunks.is_empty());
         for chunk in &chunks {
             assert!(!chunk.text.is_empty());
@@ -192,7 +200,13 @@ mod tests {
     #[test]
     fn test_multibyte_text() {
         let text = "Hej alla studenter! Vi ska prata om AI och maskininlarning.\n\nForsta avsnittet handlar om neurala natverk. Det ar ett spannande amne som har forandrat varlden.";
-        let chunks = chunk_text(text, &ChunkerConfig { chunk_size: 60, overlap: 10 });
+        let chunks = chunk_text(
+            text,
+            &ChunkerConfig {
+                chunk_size: 60,
+                overlap: 10,
+            },
+        );
         assert!(!chunks.is_empty());
         for chunk in &chunks {
             assert!(!chunk.text.is_empty());

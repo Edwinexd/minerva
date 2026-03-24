@@ -26,7 +26,12 @@ pub async fn auth_middleware(
             .get("X-Dev-User")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string())
-            .or_else(|| headers.get("REMOTE_USER").and_then(|v| v.to_str().ok()).map(|s| s.to_string()))
+            .or_else(|| {
+                headers
+                    .get("REMOTE_USER")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+            })
             .unwrap_or_else(|| {
                 state
                     .config
@@ -54,15 +59,24 @@ pub async fn auth_middleware(
     Ok(next.run(request).await)
 }
 
-async fn upsert_user(state: &AppState, eppn: &str, display_name: Option<&str>) -> Result<User, AppError> {
+async fn upsert_user(
+    state: &AppState,
+    eppn: &str,
+    display_name: Option<&str>,
+) -> Result<User, AppError> {
     let is_admin = state.config.is_admin(eppn);
 
     let existing = minerva_db::queries::users::find_by_eppn(&state.db, eppn).await?;
 
     if let Some(row) = existing {
-        let role = if is_admin { UserRole::Admin } else { UserRole::parse(&row.role) };
+        let role = if is_admin {
+            UserRole::Admin
+        } else {
+            UserRole::parse(&row.role)
+        };
 
-        minerva_db::queries::users::update_login(&state.db, row.id, display_name, role.as_str()).await?;
+        minerva_db::queries::users::update_login(&state.db, row.id, display_name, role.as_str())
+            .await?;
 
         return Ok(User {
             id: row.id,
@@ -75,7 +89,11 @@ async fn upsert_user(state: &AppState, eppn: &str, display_name: Option<&str>) -
     }
 
     let id = Uuid::new_v4();
-    let role = if is_admin { UserRole::Admin } else { UserRole::Student };
+    let role = if is_admin {
+        UserRole::Admin
+    } else {
+        UserRole::Student
+    };
 
     minerva_db::queries::users::insert(&state.db, id, eppn, display_name, role.as_str()).await?;
 

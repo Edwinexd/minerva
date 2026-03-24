@@ -14,7 +14,10 @@ type HmacSha256 = Hmac<Sha256>;
 
 pub fn course_router() -> Router<AppState> {
     Router::new()
-        .route("/signed-urls", get(list_signed_urls).post(create_signed_url))
+        .route(
+            "/signed-urls",
+            get(list_signed_urls).post(create_signed_url),
+        )
         .route("/signed-urls/{sid}", delete(delete_signed_url))
 }
 
@@ -152,7 +155,9 @@ async fn join_via_token(
     // Check max uses
     if let Some(max) = signed_url.max_uses {
         if signed_url.use_count >= max {
-            return Err(AppError::BadRequest("signed URL has reached max uses".to_string()));
+            return Err(AppError::BadRequest(
+                "signed URL has reached max uses".to_string(),
+            ));
         }
     }
 

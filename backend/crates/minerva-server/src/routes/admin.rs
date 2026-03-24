@@ -67,7 +67,9 @@ async fn update_user_role(
 
     // Only allow setting to teacher or student (not admin)
     if body.role != "teacher" && body.role != "student" {
-        return Err(AppError::BadRequest("role must be 'teacher' or 'student'".to_string()));
+        return Err(AppError::BadRequest(
+            "role must be 'teacher' or 'student'".to_string(),
+        ));
     }
 
     let updated = minerva_db::queries::users::update_role(&state.db, id, &body.role).await?;

@@ -63,11 +63,10 @@ pub async fn list_all(db: &PgPool) -> Result<Vec<UserRow>, sqlx::Error> {
 }
 
 pub async fn update_role(db: &PgPool, user_id: Uuid, role: &str) -> Result<bool, sqlx::Error> {
-    let result =
-        sqlx::query("UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2")
-            .bind(role)
-            .bind(user_id)
-            .execute(db)
-            .await?;
+    let result = sqlx::query("UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2")
+        .bind(role)
+        .bind(user_id)
+        .execute(db)
+        .await?;
     Ok(result.rows_affected() > 0)
 }

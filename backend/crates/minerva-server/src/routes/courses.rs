@@ -11,7 +11,10 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_courses).post(create_course))
-        .route("/{id}", get(get_course).put(update_course).delete(archive_course))
+        .route(
+            "/{id}",
+            get(get_course).put(update_course).delete(archive_course),
+        )
         .route("/{id}/members", get(list_members).post(add_member))
         .route("/{id}/members/{user_id}", delete(remove_member))
 }
@@ -247,7 +250,9 @@ async fn add_member(
     let role = body.role.as_deref().unwrap_or("student");
     minerva_db::queries::courses::add_member(&state.db, id, target_id, role).await?;
 
-    Ok(Json(serde_json::json!({ "added": true, "user_id": target_id })))
+    Ok(Json(
+        serde_json::json!({ "added": true, "user_id": target_id }),
+    ))
 }
 
 async fn remove_member(

@@ -19,6 +19,13 @@ repos:
         types: [text]
         exclude: (\.lock|node_modules|target|dist|\.gen\.)
 
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: bash -c 'cd backend && cargo fmt --all -- --check'
+        language: system
+        pass_filenames: false
+        files: \.rs$|Cargo\.toml$
+
       - id: cargo-check
         name: cargo check
         entry: bash -c 'cd backend && cargo check'

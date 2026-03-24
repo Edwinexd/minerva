@@ -34,11 +34,13 @@ impl Config {
                 .parse()
                 .unwrap_or(3000),
             database_url: env::var("DATABASE_URL")?,
-            qdrant_url: env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6334".to_string()),
+            qdrant_url: env::var("QDRANT_URL")
+                .unwrap_or_else(|_| "http://localhost:6334".to_string()),
             cerebras_api_key: env::var("CEREBRAS_API_KEY")?,
             openai_api_key: env::var("OPENAI_API_KEY")?,
             hmac_secret: env::var("MINERVA_HMAC_SECRET")?,
-            docs_path: env::var("MINERVA_DOCS_PATH").unwrap_or_else(|_| "./data/documents".to_string()),
+            docs_path: env::var("MINERVA_DOCS_PATH")
+                .unwrap_or_else(|_| "./data/documents".to_string()),
             admin_usernames,
             dev_mode: env::var("MINERVA_DEV_MODE").unwrap_or_default() == "true",
         })

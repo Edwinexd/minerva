@@ -11,7 +11,10 @@ pub fn extract_text(path: &Path) -> Result<String, String> {
             return Ok(text);
         }
         Ok(_) => {
-            tracing::debug!("pdf-extract returned empty text for {:?}, trying pdftotext", path);
+            tracing::debug!(
+                "pdf-extract returned empty text for {:?}, trying pdftotext",
+                path
+            );
         }
         Err(e) => {
             tracing::debug!("pdf-extract failed for {:?}: {}, trying pdftotext", path, e);

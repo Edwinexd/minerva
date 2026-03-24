@@ -6,7 +6,11 @@ use tokio::sync::mpsc;
 use crate::error::AppError;
 
 /// Build the system prompt with optional RAG chunks.
-pub fn build_system_prompt(course_name: &str, custom_prompt: &Option<String>, chunks: &[String]) -> String {
+pub fn build_system_prompt(
+    course_name: &str,
+    custom_prompt: &Option<String>,
+    chunks: &[String],
+) -> String {
     let mut prompt = format!(
         "You are a helpful teaching assistant for the course '{}'. Answer questions based on the provided course materials. If you cannot answer from the materials, say so clearly.",
         course_name
@@ -56,8 +60,12 @@ pub async fn rag_lookup(
     max_chunks: i32,
 ) -> Vec<String> {
     let embedding = match minerva_ingest::embedder::embed_texts(
-        client, openai_key, std::slice::from_ref(&query.to_string()),
-    ).await {
+        client,
+        openai_key,
+        std::slice::from_ref(&query.to_string()),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("embedding failed: {}, skipping RAG", e);
@@ -72,23 +80,26 @@ pub async fn rag_lookup(
 
     match qdrant
         .search_points(
-            SearchPointsBuilder::new(collection_name, vector, max_chunks as u64)
-                .with_payload(true),
+            SearchPointsBuilder::new(collection_name, vector, max_chunks as u64).with_payload(true),
         )
         .await
     {
-        Ok(result) => result.result.iter().filter_map(|point| {
-            let payload = &point.payload;
-            let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => return None,
-            };
-            let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => String::new(),
-            };
-            Some(format!("[Source: {}]\n{}", filename, text))
-        }).collect(),
+        Ok(result) => result
+            .result
+            .iter()
+            .filter_map(|point| {
+                let payload = &point.payload;
+                let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
+                    Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                    _ => return None,
+                };
+                let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
+                    Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                    _ => String::new(),
+                };
+                Some(format!("[Source: {}]\n{}", filename, text))
+            })
+            .collect(),
         Err(e) => {
             tracing::warn!("qdrant search failed: {}, skipping RAG", e);
             Vec::new()
@@ -155,15 +166,22 @@ pub async fn stream_cerebras_to_client(
             if let Some(data) = line.strip_prefix("data: ") {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
                     if let Some(err) = parsed.get("error") {
-                        let msg = err["message"].as_str().unwrap_or("unknown error").to_string();
+                        let msg = err["message"]
+                            .as_str()
+                            .unwrap_or("unknown error")
+                            .to_string();
                         return Err(msg);
                     }
 
                     if let Some(delta) = parsed["choices"][0]["delta"]["content"].as_str() {
                         full_text.push_str(delta);
-                        if tx.send(Ok(Event::default().data(
-                            serde_json::json!({"type": "token", "token": delta}).to_string()
-                        ))).await.is_err() {
+                        if tx
+                            .send(Ok(Event::default().data(
+                                serde_json::json!({"type": "token", "token": delta}).to_string(),
+                            )))
+                            .await
+                            .is_err()
+                        {
                             return Err("client disconnected".to_string());
                         }
                     }
@@ -171,7 +189,8 @@ pub async fn stream_cerebras_to_client(
                     if let Some(usage) = parsed.get("usage") {
                         if !usage.is_null() {
                             prompt_tokens = usage["prompt_tokens"].as_i64().unwrap_or(0) as i32;
-                            completion_tokens = usage["completion_tokens"].as_i64().unwrap_or(0) as i32;
+                            completion_tokens =
+                                usage["completion_tokens"].as_i64().unwrap_or(0) as i32;
                         }
                     }
                 }
@@ -194,10 +213,17 @@ pub async fn finalize(
 ) {
     let assistant_msg_id = uuid::Uuid::new_v4();
     let _ = minerva_db::queries::conversations::insert_message(
-        &ctx.db, assistant_msg_id, ctx.conversation_id, "assistant", full_text,
-        chunks_json, Some(&ctx.model),
-        Some(prompt_tokens), Some(completion_tokens),
-    ).await;
+        &ctx.db,
+        assistant_msg_id,
+        ctx.conversation_id,
+        "assistant",
+        full_text,
+        chunks_json,
+        Some(&ctx.model),
+        Some(prompt_tokens),
+        Some(completion_tokens),
+    )
+    .await;
 
     if ctx.is_first_message {
         let title: String = ctx.user_content.chars().take(60).collect();
@@ -206,21 +232,31 @@ pub async fn finalize(
         } else {
             title
         };
-        let _ = minerva_db::queries::conversations::update_title(&ctx.db, ctx.conversation_id, &title).await;
+        let _ =
+            minerva_db::queries::conversations::update_title(&ctx.db, ctx.conversation_id, &title)
+                .await;
     }
 
     let _ = minerva_db::queries::usage::record_usage(
-        &ctx.db, ctx.user_id, ctx.course_id,
-        prompt_tokens as i64, completion_tokens as i64, 0,
-    ).await;
+        &ctx.db,
+        ctx.user_id,
+        ctx.course_id,
+        prompt_tokens as i64,
+        completion_tokens as i64,
+        0,
+    )
+    .await;
 
-    let _ = tx.send(Ok(Event::default().data(
-        serde_json::json!({
-            "type": "done",
-            "tokens_prompt": prompt_tokens,
-            "tokens_completion": completion_tokens,
-            "rag_injected": rag_injected,
-            "chunks_used": chunks_json,
-        }).to_string()
-    ))).await;
+    let _ = tx
+        .send(Ok(Event::default().data(
+            serde_json::json!({
+                "type": "done",
+                "tokens_prompt": prompt_tokens,
+                "tokens_completion": completion_tokens,
+                "rag_injected": rag_injected,
+                "chunks_used": chunks_json,
+            })
+            .to_string(),
+        )))
+        .await;
 }

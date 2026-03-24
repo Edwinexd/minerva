@@ -38,11 +38,7 @@ pub async fn process_document(
         msg
     })?;
 
-    tracing::info!(
-        "extracted {} chars from {}",
-        text.len(),
-        filename,
-    );
+    tracing::info!("extracted {} chars from {}", text.len(), filename,);
 
     // 2. Chunk
     let chunks = chunker::chunk_text(&text, &ChunkerConfig::default());

@@ -88,10 +88,7 @@ async fn upload_document(
         .map_err(|e| AppError::BadRequest(format!("multipart error: {}", e)))?
         .ok_or_else(|| AppError::BadRequest("no file provided".to_string()))?;
 
-    let filename = field
-        .file_name()
-        .unwrap_or("document.pdf")
-        .to_string();
+    let filename = field.file_name().unwrap_or("document.pdf").to_string();
     let content_type = field
         .content_type()
         .unwrap_or("application/pdf")
@@ -217,18 +214,23 @@ async fn list_chunks(
     let collection_name = format!("course_{}", course_id);
 
     // Check if collection exists
-    let exists = state.qdrant.collection_exists(&collection_name).await
+    let exists = state
+        .qdrant
+        .collection_exists(&collection_name)
+        .await
         .unwrap_or(false);
     if !exists {
         return Ok(Json(Vec::new()));
     }
 
     // Scroll through all points with this document_id
-    let filter = qdrant_client::qdrant::Filter::must([
-        qdrant_client::qdrant::Condition::matches("document_id", doc_id.to_string()),
-    ]);
+    let filter = qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
+        "document_id",
+        doc_id.to_string(),
+    )]);
 
-    let result = state.qdrant
+    let result = state
+        .qdrant
         .scroll(
             ScrollPointsBuilder::new(&collection_name)
                 .filter(filter)
@@ -255,7 +257,11 @@ async fn list_chunks(
                 Some(qdrant_client::qdrant::value::Kind::IntegerValue(i)) => *i,
                 _ => 0,
             };
-            Some(ChunkResponse { chunk_index, text, filename })
+            Some(ChunkResponse {
+                chunk_index,
+                text,
+                filename,
+            })
         })
         .collect();
 
@@ -294,7 +300,11 @@ async fn search_chunks(
     }
 
     let collection_name = format!("course_{}", course_id);
-    let exists = state.qdrant.collection_exists(&collection_name).await.unwrap_or(false);
+    let exists = state
+        .qdrant
+        .collection_exists(&collection_name)
+        .await
+        .unwrap_or(false);
     if !exists {
         return Ok(Json(Vec::new()));
     }
@@ -302,44 +312,57 @@ async fn search_chunks(
     // Embed the query
     let client = reqwest::Client::new();
     let embedding = minerva_ingest::embedder::embed_texts(
-        &client, &state.config.openai_api_key, std::slice::from_ref(&params.q),
+        &client,
+        &state.config.openai_api_key,
+        std::slice::from_ref(&params.q),
     )
     .await
     .map_err(|e| AppError::Internal(format!("embedding failed: {}", e)))?;
 
-    let vector = embedding.embeddings.into_iter().next()
+    let vector = embedding
+        .embeddings
+        .into_iter()
+        .next()
         .ok_or_else(|| AppError::Internal("no embedding returned".to_string()))?;
 
     let limit = params.limit.unwrap_or(10);
 
-    let result = state.qdrant
-        .search_points(
-            SearchPointsBuilder::new(&collection_name, vector, limit)
-                .with_payload(true),
-        )
+    let result = state
+        .qdrant
+        .search_points(SearchPointsBuilder::new(&collection_name, vector, limit).with_payload(true))
         .await
         .map_err(|e| AppError::Internal(format!("qdrant search failed: {}", e)))?;
 
-    let results: Vec<SearchResult> = result.result.iter().filter_map(|point| {
-        let payload = &point.payload;
-        let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
-            Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-            _ => return None,
-        };
-        let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
-            Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-            _ => String::new(),
-        };
-        let document_id = match payload.get("document_id").and_then(|v| v.kind.as_ref()) {
-            Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-            _ => String::new(),
-        };
-        let chunk_index = match payload.get("chunk_index").and_then(|v| v.kind.as_ref()) {
-            Some(qdrant_client::qdrant::value::Kind::IntegerValue(i)) => *i,
-            _ => 0,
-        };
-        Some(SearchResult { score: point.score, text, filename, document_id, chunk_index })
-    }).collect();
+    let results: Vec<SearchResult> = result
+        .result
+        .iter()
+        .filter_map(|point| {
+            let payload = &point.payload;
+            let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => return None,
+            };
+            let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => String::new(),
+            };
+            let document_id = match payload.get("document_id").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => String::new(),
+            };
+            let chunk_index = match payload.get("chunk_index").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::IntegerValue(i)) => *i,
+                _ => 0,
+            };
+            Some(SearchResult {
+                score: point.score,
+                text,
+                filename,
+                document_id,
+                chunk_index,
+            })
+        })
+        .collect();
 
     Ok(Json(results))
 }

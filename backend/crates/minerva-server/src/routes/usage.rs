@@ -9,13 +9,11 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 pub fn course_router() -> Router<AppState> {
-    Router::new()
-        .route("/usage", get(get_course_usage))
+    Router::new().route("/usage", get(get_course_usage))
 }
 
 pub fn admin_router() -> Router<AppState> {
-    Router::new()
-        .route("/usage", get(get_all_usage))
+    Router::new().route("/usage", get(get_all_usage))
 }
 
 #[derive(Serialize)]

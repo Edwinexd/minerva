@@ -35,11 +35,17 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let mut total_completion_tokens = 0i32;
     let mut flare_iterations = 0usize;
 
-    tracing::info!("flare: starting generation for conversation {}", ctx.conversation_id);
+    tracing::info!(
+        "flare: starting generation for conversation {}",
+        ctx.conversation_id
+    );
 
     loop {
         if flare_iterations >= MAX_FLARE_ITERATIONS {
-            tracing::info!("flare: reached max iterations ({}), finishing", MAX_FLARE_ITERATIONS);
+            tracing::info!(
+                "flare: reached max iterations ({}), finishing",
+                MAX_FLARE_ITERATIONS
+            );
             break;
         }
         flare_iterations += 1;
@@ -64,7 +70,9 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
         tracing::debug!(
             "flare: iteration {} - streaming with {} chunks, {} chars so far",
-            flare_iterations, all_chunks.len(), full_text.len()
+            flare_iterations,
+            all_chunks.len(),
+            full_text.len()
         );
 
         // Stream from Cerebras, buffering tokens and detecting sentence boundaries
@@ -99,7 +107,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         if completed {
             tracing::info!(
                 "flare: generation completed after {} iterations, {} total chars",
-                flare_iterations, full_text.len()
+                flare_iterations,
+                full_text.len()
             );
             break;
         }
@@ -142,7 +151,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         if added_new {
             tracing::info!(
                 "flare: found {} new relevant chunks, total context now {} chunks",
-                new_chunks.len(), all_chunks.len()
+                new_chunks.len(),
+                all_chunks.len()
             );
             // Loop back and continue generation with the new context.
             // The full_text already includes everything streamed so far, and on the
@@ -237,7 +247,10 @@ async fn stream_until_sentence(
             if let Some(data) = line.strip_prefix("data: ") {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
                     if let Some(err) = parsed.get("error") {
-                        let msg = err["message"].as_str().unwrap_or("unknown error").to_string();
+                        let msg = err["message"]
+                            .as_str()
+                            .unwrap_or("unknown error")
+                            .to_string();
                         return Err(msg);
                     }
 
@@ -258,19 +271,13 @@ async fn stream_until_sentence(
 
                         // Check if we hit a sentence boundary
                         if has_sentence_boundary(&sentence_buffer) {
-                            return Ok((
-                                sentence_buffer,
-                                prompt_tokens,
-                                completion_tokens,
-                                false,
-                            ));
+                            return Ok((sentence_buffer, prompt_tokens, completion_tokens, false));
                         }
                     }
 
                     if let Some(usage) = parsed.get("usage") {
                         if !usage.is_null() {
-                            prompt_tokens =
-                                usage["prompt_tokens"].as_i64().unwrap_or(0) as i32;
+                            prompt_tokens = usage["prompt_tokens"].as_i64().unwrap_or(0) as i32;
                             completion_tokens =
                                 usage["completion_tokens"].as_i64().unwrap_or(0) as i32;
                         }

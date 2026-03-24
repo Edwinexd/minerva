@@ -30,7 +30,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         let coll = collection_name.clone();
 
         tokio::spawn(async move {
-            let chunks = common::rag_lookup(&client, &key, &qdrant, &coll, &query, max_chunks).await;
+            let chunks =
+                common::rag_lookup(&client, &key, &qdrant, &coll, &query, max_chunks).await;
             let _ = rag_tx.send(chunks);
         });
     }
@@ -43,16 +44,30 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
     // Phase 1: stream without RAG, checking for RAG results between chunks
     let phase1 = stream_with_rag_check(
-        &http_client, &ctx.cerebras_api_key, &ctx.model, ctx.temperature,
-        &initial_messages, &tx, &mut full_text, &mut rag_rx,
-    ).await;
+        &http_client,
+        &ctx.cerebras_api_key,
+        &ctx.model,
+        ctx.temperature,
+        &initial_messages,
+        &tx,
+        &mut full_text,
+        &mut rag_rx,
+    )
+    .await;
 
     match phase1 {
-        StreamResult::Completed { prompt_tokens, completion_tokens } => {
+        StreamResult::Completed {
+            prompt_tokens,
+            completion_tokens,
+        } => {
             total_prompt += prompt_tokens;
             total_completion += completion_tokens;
         }
-        StreamResult::RagArrived { prompt_tokens, completion_tokens, rag_chunks } => {
+        StreamResult::RagArrived {
+            prompt_tokens,
+            completion_tokens,
+            rag_chunks,
+        } => {
             total_prompt += prompt_tokens;
             total_completion += completion_tokens;
             rag_injected = true;
@@ -60,13 +75,13 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
             tracing::info!(
                 "parallel: RAG arrived after {} chars, continuing with {} chunks",
-                full_text.len(), rag_chunks.len()
+                full_text.len(),
+                rag_chunks.len()
             );
 
             // Build continued prompt with RAG + partial assistant output
-            let system_with_rag = common::build_system_prompt(
-                &ctx.course_name, &ctx.custom_prompt, &rag_chunks,
-            );
+            let system_with_rag =
+                common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &rag_chunks);
             let mut continued = common::build_chat_messages(&system_with_rag, &ctx.history);
 
             if !full_text.is_empty() {
@@ -82,36 +97,60 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
             // Phase 2: continue with RAG context
             match common::stream_cerebras_to_client(
-                &http_client, &ctx.cerebras_api_key, &ctx.model, ctx.temperature,
-                &continued, &tx, &mut full_text,
-            ).await {
+                &http_client,
+                &ctx.cerebras_api_key,
+                &ctx.model,
+                ctx.temperature,
+                &continued,
+                &tx,
+                &mut full_text,
+            )
+            .await
+            {
                 Ok((pt, ct)) => {
                     total_prompt += pt;
                     total_completion += ct;
                 }
                 Err(e) => {
-                    let _ = tx.send(Ok(Event::default().data(
-                        serde_json::json!({"type": "error", "error": e}).to_string()
-                    ))).await;
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::json!({"type": "error", "error": e}).to_string(),
+                        )))
+                        .await;
                 }
             }
         }
         StreamResult::Error(e) => {
-            let _ = tx.send(Ok(Event::default().data(
-                serde_json::json!({"type": "error", "error": e}).to_string()
-            ))).await;
+            let _ = tx
+                .send(Ok(Event::default().data(
+                    serde_json::json!({"type": "error", "error": e}).to_string(),
+                )))
+                .await;
         }
     }
 
     common::finalize(
-        &ctx, &tx, &full_text, chunks_json.as_ref(),
-        total_prompt, total_completion, rag_injected,
-    ).await;
+        &ctx,
+        &tx,
+        &full_text,
+        chunks_json.as_ref(),
+        total_prompt,
+        total_completion,
+        rag_injected,
+    )
+    .await;
 }
 
 enum StreamResult {
-    Completed { prompt_tokens: i32, completion_tokens: i32 },
-    RagArrived { prompt_tokens: i32, completion_tokens: i32, rag_chunks: Vec<String> },
+    Completed {
+        prompt_tokens: i32,
+        completion_tokens: i32,
+    },
+    RagArrived {
+        prompt_tokens: i32,
+        completion_tokens: i32,
+        rag_chunks: Vec<String>,
+    },
     Error(String),
 }
 

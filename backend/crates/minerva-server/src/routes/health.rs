@@ -23,7 +23,10 @@ pub async fn models(State(state): State<AppState>) -> Json<Value> {
     let client = reqwest::Client::new();
     let result = client
         .get("https://api.cerebras.ai/v1/models")
-        .header("Authorization", format!("Bearer {}", state.config.cerebras_api_key))
+        .header(
+            "Authorization",
+            format!("Bearer {}", state.config.cerebras_api_key),
+        )
         .send()
         .await;
 

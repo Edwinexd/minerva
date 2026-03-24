@@ -10,33 +10,53 @@
 
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
+import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
+import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
   path: "/",
   getParentRoute: () => rootRouteImport,
 } as any)
+const TeacherIndexRoute = TeacherIndexRouteImport.update({
+  id: "/teacher/",
+  path: "/teacher/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeacherCoursesCourseIdRoute = TeacherCoursesCourseIdRouteImport.update({
+  id: "/teacher/courses/$courseId",
+  path: "/teacher/courses/$courseId",
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
+  "/teacher/": typeof TeacherIndexRoute
+  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/teacher": typeof TeacherIndexRoute
+  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
+  "/teacher/": typeof TeacherIndexRoute
+  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: "/"
+  fullPaths: "/" | "/teacher/" | "/teacher/courses/$courseId"
   fileRoutesByTo: FileRoutesByTo
-  to: "/"
-  id: "__root__" | "/"
+  to: "/" | "/teacher" | "/teacher/courses/$courseId"
+  id: "__root__" | "/" | "/teacher/" | "/teacher/courses/$courseId"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  TeacherIndexRoute: typeof TeacherIndexRoute
+  TeacherCoursesCourseIdRoute: typeof TeacherCoursesCourseIdRoute
 }
 
 declare module "@tanstack/react-router" {
@@ -48,11 +68,27 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/teacher/": {
+      id: "/teacher/"
+      path: "/teacher"
+      fullPath: "/teacher/"
+      preLoaderRoute: typeof TeacherIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/teacher/courses/$courseId": {
+      id: "/teacher/courses/$courseId"
+      path: "/teacher/courses/$courseId"
+      fullPath: "/teacher/courses/$courseId"
+      preLoaderRoute: typeof TeacherCoursesCourseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  TeacherIndexRoute: TeacherIndexRoute,
+  TeacherCoursesCourseIdRoute: TeacherCoursesCourseIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -3,7 +3,6 @@ use axum::http::HeaderMap;
 use axum::middleware::Next;
 use axum::response::Response;
 use minerva_core::models::{User, UserRole, ADMIN_USERNAME};
-use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -27,56 +26,37 @@ pub async fn auth_middleware(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let user = upsert_user(&state.db, eppn, display_name.as_deref()).await?;
+    let user = upsert_user(&state, eppn, display_name.as_deref()).await?;
     request.extensions_mut().insert(user);
 
     Ok(next.run(request).await)
 }
 
-async fn upsert_user(db: &PgPool, eppn: &str, display_name: Option<&str>) -> Result<User, AppError> {
+async fn upsert_user(state: &AppState, eppn: &str, display_name: Option<&str>) -> Result<User, AppError> {
     let username = eppn.split('@').next().unwrap_or(eppn);
     let is_admin = username == ADMIN_USERNAME;
 
-    // Check existing user first
-    let existing = sqlx::query_as::<_, (Uuid, String, Option<String>, String, chrono::NaiveDateTime, chrono::NaiveDateTime)>(
-        "SELECT id, eppn, display_name, role, created_at, updated_at FROM users WHERE eppn = $1"
-    )
-    .bind(eppn)
-    .fetch_optional(db)
-    .await?;
+    let existing = minerva_db::queries::users::find_by_eppn(&state.db, eppn).await?;
 
     if let Some(row) = existing {
-        let role = if is_admin { UserRole::Admin } else { UserRole::parse(&row.3) };
+        let role = if is_admin { UserRole::Admin } else { UserRole::parse(&row.role) };
 
-        // Update display name and timestamp
-        sqlx::query("UPDATE users SET display_name = COALESCE($1, display_name), role = $2, updated_at = NOW() WHERE id = $3")
-            .bind(display_name)
-            .bind(role.as_str())
-            .bind(row.0)
-            .execute(db)
-            .await?;
+        minerva_db::queries::users::update_login(&state.db, row.id, display_name, role.as_str()).await?;
 
         return Ok(User {
-            id: row.0,
-            eppn: row.1,
-            display_name: display_name.map(|s| s.to_string()).or(row.2),
+            id: row.id,
+            eppn: row.eppn,
+            display_name: display_name.map(|s| s.to_string()).or(row.display_name),
             role,
-            created_at: row.4,
-            updated_at: row.5,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         });
     }
 
-    // New user
     let id = Uuid::new_v4();
     let role = if is_admin { UserRole::Admin } else { UserRole::Student };
 
-    sqlx::query("INSERT INTO users (id, eppn, display_name, role) VALUES ($1, $2, $3, $4)")
-        .bind(id)
-        .bind(eppn)
-        .bind(display_name)
-        .bind(role.as_str())
-        .execute(db)
-        .await?;
+    minerva_db::queries::users::insert(&state.db, id, eppn, display_name, role.as_str()).await?;
 
     let now = chrono::Utc::now().naive_utc();
     Ok(User {

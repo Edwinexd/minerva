@@ -1,3 +1,7 @@
+mod admin;
+mod courses;
+mod health;
+
 use axum::extract::Extension;
 use axum::middleware;
 use axum::routing::get;
@@ -11,15 +15,13 @@ use crate::state::AppState;
 pub fn api_router(state: AppState) -> Router<AppState> {
     let authed = Router::new()
         .route("/auth/me", get(me))
+        .nest("/courses", courses::router())
+        .nest("/admin", admin::router())
         .route_layer(middleware::from_fn_with_state(state, auth_middleware));
 
     Router::new()
-        .route("/health", get(health))
+        .route("/health", get(health::health))
         .merge(authed)
-}
-
-async fn health() -> Json<Value> {
-    Json(json!({ "status": "ok", "service": "minerva" }))
 }
 
 async fn me(Extension(user): Extension<User>) -> Json<Value> {

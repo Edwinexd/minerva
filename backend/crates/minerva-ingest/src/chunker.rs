@@ -23,6 +23,16 @@ impl Default for ChunkerConfig {
     }
 }
 
+/// Snap a byte offset to the nearest char boundary (rounding down).
+fn snap_to_char_boundary(s: &str, pos: usize) -> usize {
+    let pos = pos.min(s.len());
+    let mut p = pos;
+    while p > 0 && !s.is_char_boundary(p) {
+        p -= 1;
+    }
+    p
+}
+
 /// Chunk text using a sliding window approach that respects paragraph boundaries.
 pub fn chunk_text(text: &str, config: &ChunkerConfig) -> Vec<Chunk> {
     let cleaned = clean_text(text);
@@ -47,7 +57,7 @@ pub fn chunk_text(text: &str, config: &ChunkerConfig) -> Vec<Chunk> {
             chunk_index += 1;
 
             // Start new chunk with overlap from the end of current
-            let overlap_start = current.len().saturating_sub(config.overlap);
+            let overlap_start = snap_to_char_boundary(&current, current.len().saturating_sub(config.overlap));
             current = current[overlap_start..].to_string();
         }
 
@@ -69,7 +79,7 @@ pub fn chunk_text(text: &str, config: &ChunkerConfig) -> Vec<Chunk> {
                 chunk_index += 1;
             }
 
-            let overlap_start = split_point.saturating_sub(config.overlap);
+            let overlap_start = snap_to_char_boundary(&current, split_point.saturating_sub(config.overlap));
             current = current[overlap_start..].to_string();
         }
     }
@@ -92,7 +102,6 @@ fn clean_text(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
 
     // Detect repeated headers/footers (lines that appear on many "pages")
-    // Simple heuristic: skip very short lines that appear 3+ times
     let mut line_counts = std::collections::HashMap::new();
     for line in &lines {
         let trimmed = line.trim();
@@ -129,7 +138,7 @@ fn split_paragraphs(text: &str) -> Vec<String> {
 /// Find a good split point near the target position.
 /// Prefers splitting at paragraph breaks, then sentence boundaries, then word boundaries.
 fn find_split_point(text: &str, target: usize) -> usize {
-    let target = target.min(text.len());
+    let target = snap_to_char_boundary(text, target);
 
     // Look for paragraph break near target
     if let Some(pos) = text[..target].rfind("\n\n") {
@@ -178,5 +187,15 @@ mod tests {
         let chunks = chunk_text("Hello world.", &ChunkerConfig::default());
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].text, "Hello world.");
+    }
+
+    #[test]
+    fn test_multibyte_text() {
+        let text = "Hej alla studenter! Vi ska prata om AI och maskininlarning.\n\nForsta avsnittet handlar om neurala natverk. Det ar ett spannande amne som har forandrat varlden.";
+        let chunks = chunk_text(text, &ChunkerConfig { chunk_size: 60, overlap: 10 });
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert!(!chunk.text.is_empty());
+        }
     }
 }

@@ -79,7 +79,7 @@ async fn upsert_user(state: &AppState, eppn: &str, display_name: Option<&str>) -
 
     minerva_db::queries::users::insert(&state.db, id, eppn, display_name, role.as_str()).await?;
 
-    let now = chrono::Utc::now().naive_utc();
+    let now = chrono::Utc::now();
     Ok(User {
         id,
         eppn: eppn.to_string(),

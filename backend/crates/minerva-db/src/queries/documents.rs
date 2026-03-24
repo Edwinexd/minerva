@@ -12,8 +12,8 @@ pub struct DocumentRow {
     pub chunk_count: Option<i32>,
     pub error_msg: Option<String>,
     pub uploaded_by: Uuid,
-    pub created_at: chrono::NaiveDateTime,
-    pub processed_at: Option<chrono::NaiveDateTime>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub processed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub async fn insert(

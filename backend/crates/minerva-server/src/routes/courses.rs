@@ -45,8 +45,8 @@ struct CourseResponse {
     system_prompt: Option<String>,
     max_chunks: i32,
     active: bool,
-    created_at: chrono::NaiveDateTime,
-    updated_at: chrono::NaiveDateTime,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl From<minerva_db::queries::courses::CourseRow> for CourseResponse {
@@ -178,7 +178,7 @@ struct MemberResponse {
     eppn: Option<String>,
     display_name: Option<String>,
     role: String,
-    added_at: chrono::NaiveDateTime,
+    added_at: chrono::DateTime<chrono::Utc>,
 }
 
 async fn list_members(

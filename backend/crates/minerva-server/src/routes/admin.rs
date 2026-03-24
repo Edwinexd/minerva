@@ -27,8 +27,8 @@ struct UserResponse {
     eppn: String,
     display_name: Option<String>,
     role: String,
-    created_at: chrono::NaiveDateTime,
-    updated_at: chrono::NaiveDateTime,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 async fn list_users(

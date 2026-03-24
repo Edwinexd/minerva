@@ -31,6 +31,12 @@ export const courseDocumentsQuery = (courseId: string) =>
     refetchInterval: 5000, // Poll for processing status updates
   })
 
+export const modelsQuery = queryOptions({
+  queryKey: ["models"],
+  queryFn: () => api.get<{ models: { id: string; name: string }[] }>("/models"),
+  staleTime: Infinity,
+})
+
 export const conversationsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations"],

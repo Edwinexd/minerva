@@ -1,4 +1,4 @@
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -42,8 +42,8 @@ pub struct User {
     pub eppn: String,
     pub display_name: Option<String>,
     pub role: UserRole,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,8 +58,8 @@ pub struct Course {
     pub system_prompt: Option<String>,
     pub max_chunks: i32,
     pub active: bool,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +93,7 @@ pub struct CourseMember {
     pub course_id: Uuid,
     pub user_id: Uuid,
     pub role: CourseMemberRole,
-    pub added_at: NaiveDateTime,
+    pub added_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,8 +136,8 @@ pub struct Document {
     pub chunk_count: i32,
     pub error_msg: Option<String>,
     pub uploaded_by: Uuid,
-    pub created_at: NaiveDateTime,
-    pub processed_at: Option<NaiveDateTime>,
+    pub created_at: DateTime<Utc>,
+    pub processed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,8 +146,8 @@ pub struct Conversation {
     pub course_id: Uuid,
     pub user_id: Uuid,
     pub title: Option<String>,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,5 +160,5 @@ pub struct Message {
     pub model_used: Option<String>,
     pub tokens_prompt: Option<i32>,
     pub tokens_completion: Option<i32>,
-    pub created_at: NaiveDateTime,
+    pub created_at: DateTime<Utc>,
 }

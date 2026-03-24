@@ -13,8 +13,8 @@ pub struct CourseRow {
     pub system_prompt: Option<String>,
     pub max_chunks: i32,
     pub active: bool,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub struct CreateCourse {
@@ -114,7 +114,7 @@ pub struct MemberRow {
     pub course_id: Uuid,
     pub user_id: Uuid,
     pub role: String,
-    pub added_at: chrono::NaiveDateTime,
+    pub added_at: chrono::DateTime<chrono::Utc>,
     pub eppn: Option<String>,
     pub display_name: Option<String>,
 }

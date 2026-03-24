@@ -7,10 +7,10 @@ pub struct SignedUrlRow {
     pub course_id: Uuid,
     pub created_by: Uuid,
     pub token: String,
-    pub expires_at: chrono::NaiveDateTime,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
     pub max_uses: Option<i32>,
     pub use_count: i32,
-    pub created_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub async fn create(
@@ -19,7 +19,7 @@ pub async fn create(
     course_id: Uuid,
     created_by: Uuid,
     token: &str,
-    expires_at: chrono::NaiveDateTime,
+    expires_at: chrono::DateTime<chrono::Utc>,
     max_uses: Option<i32>,
 ) -> Result<SignedUrlRow, sqlx::Error> {
     sqlx::query_as::<_, SignedUrlRow>(

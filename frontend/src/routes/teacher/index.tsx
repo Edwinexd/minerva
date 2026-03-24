@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useState } from "react"
 import type { Course } from "@/lib/types"
 
@@ -22,12 +23,8 @@ export const Route = createFileRoute("/teacher/")({
 })
 
 function TeacherDashboard() {
-  const { data: courses, isLoading } = useQuery(coursesQuery)
+  const { data: courses, isLoading, error } = useQuery(coursesQuery)
   const [showCreate, setShowCreate] = useState(false)
-
-  if (isLoading) {
-    return <p className="text-muted-foreground">Loading courses...</p>
-  }
 
   return (
     <div className="space-y-6">
@@ -40,13 +37,32 @@ function TeacherDashboard() {
 
       {showCreate && <CreateCourseForm onCreated={() => setShowCreate(false)} />}
 
-      {courses && courses.length === 0 && !showCreate && (
-        <p className="text-muted-foreground">
-          No courses yet. Create your first course to get started.
-        </p>
+      {error && (
+        <p className="text-destructive">Failed to load courses: {error.message}</p>
       )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {isLoading &&
+          Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i}>
+              <CardHeader>
+                <Skeleton className="h-5 w-3/4" />
+                <Skeleton className="h-4 w-1/2 mt-2" />
+              </CardHeader>
+              <CardContent>
+                <div className="flex gap-2">
+                  <Skeleton className="h-5 w-20" />
+                  <Skeleton className="h-5 w-16" />
+                  <Skeleton className="h-5 w-16" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        {courses?.length === 0 && !showCreate && (
+          <p className="text-muted-foreground col-span-full">
+            No courses yet. Create your first course to get started.
+          </p>
+        )}
         {courses?.map((course) => (
           <CourseCard key={course.id} course={course} />
         ))}

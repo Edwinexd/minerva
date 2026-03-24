@@ -24,8 +24,8 @@ struct ConversationResponse {
     id: Uuid,
     course_id: Uuid,
     title: Option<String>,
-    created_at: chrono::NaiveDateTime,
-    updated_at: chrono::NaiveDateTime,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Serialize)]
@@ -37,7 +37,7 @@ struct MessageResponse {
     model_used: Option<String>,
     tokens_prompt: Option<i32>,
     tokens_completion: Option<i32>,
-    created_at: chrono::NaiveDateTime,
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 async fn list_conversations(

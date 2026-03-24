@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { courseQuery, courseMembersQuery, courseDocumentsQuery } from "@/lib/queries"
+import { courseQuery, courseMembersQuery, courseDocumentsQuery, modelsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,6 +17,14 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import React, { useState } from "react"
 import type { Course, Document as DocType } from "@/lib/types"
 
@@ -28,7 +36,13 @@ function CourseEditPage() {
   const { courseId } = Route.useParams()
   const { data: course, isLoading } = useQuery(courseQuery(courseId))
 
-  if (isLoading) return <p className="text-muted-foreground">Loading...</p>
+  if (isLoading) return (
+    <div className="space-y-6">
+      <Skeleton className="h-8 w-64" />
+      <Skeleton className="h-10 w-80" />
+      <Skeleton className="h-64 w-full" />
+    </div>
+  )
   if (!course) return <p className="text-muted-foreground">Course not found</p>
 
   return (
@@ -40,6 +54,7 @@ function CourseEditPage() {
           <TabsTrigger value="config">Configuration</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
+          <TabsTrigger value="invite">Invite Links</TabsTrigger>
         </TabsList>
 
         <TabsContent value="config" className="mt-4">
@@ -53,6 +68,10 @@ function CourseEditPage() {
         <TabsContent value="documents" className="mt-4">
           <DocumentsPanel courseId={courseId} />
         </TabsContent>
+
+        <TabsContent value="invite" className="mt-4">
+          <InviteLinksPanel courseId={courseId} />
+        </TabsContent>
       </Tabs>
     </div>
   )
@@ -60,6 +79,7 @@ function CourseEditPage() {
 
 function CourseConfigForm({ course }: { course: Course }) {
   const queryClient = useQueryClient()
+  const { data: modelsData } = useQuery(modelsQuery)
   const [name, setName] = useState(course.name)
   const [description, setDescription] = useState(course.description || "")
   const [contextRatio, setContextRatio] = useState(course.context_ratio)
@@ -149,13 +169,19 @@ function CourseConfigForm({ course }: { course: Course }) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="model">Model</Label>
-            <Input
-              id="model"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="llama-3.3-70b"
-            />
+            <Label>Model</Label>
+            <Select value={model} onValueChange={(v) => v && setModel(v)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a model" />
+              </SelectTrigger>
+              <SelectContent>
+                {modelsData?.models.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-2">
@@ -388,6 +414,109 @@ function DocumentsPanel({ courseId }: { courseId: string }) {
                   onClick={() => deleteMutation.mutate(doc.id)}
                 >
                   Delete
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function InviteLinksPanel({ courseId }: { courseId: string }) {
+  const queryClient = useQueryClient()
+  const { data: links, isLoading } = useQuery({
+    queryKey: ["courses", courseId, "signed-urls"],
+    queryFn: () =>
+      api.get<
+        {
+          id: string
+          token: string
+          url: string
+          expires_at: string
+          max_uses: number | null
+          use_count: number
+        }[]
+      >(`/courses/${courseId}/signed-urls`),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (data: { expires_in_hours?: number; max_uses?: number }) =>
+      api.post(`/courses/${courseId}/signed-urls`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "signed-urls"],
+      })
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      api.delete(`/courses/${courseId}/signed-urls/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "signed-urls"],
+      })
+    },
+  })
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Invite Links</CardTitle>
+        <CardDescription>
+          Generate signed URLs for students to join this course
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Button
+          onClick={() => createMutation.mutate({ expires_in_hours: 168 })}
+          disabled={createMutation.isPending}
+        >
+          {createMutation.isPending ? "Generating..." : "Generate Link (7 days)"}
+        </Button>
+
+        {isLoading && (
+          <div className="space-y-2">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {links?.map((link) => (
+            <div
+              key={link.id}
+              className="flex items-center justify-between py-2 border-b last:border-0"
+            >
+              <div className="space-y-1 flex-1 min-w-0">
+                <code className="text-xs bg-muted px-2 py-1 rounded block truncate">
+                  {window.location.origin}/api/join/{link.token}
+                </code>
+                <div className="flex gap-3 text-xs text-muted-foreground">
+                  <span>Expires: {new Date(link.expires_at).toLocaleDateString()}</span>
+                  <span>Used: {link.use_count}{link.max_uses ? `/${link.max_uses}` : ""}</span>
+                </div>
+              </div>
+              <div className="flex gap-2 ml-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(
+                      `${window.location.origin}/api/join/${link.token}`,
+                    )
+                  }}
+                >
+                  Copy
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => deleteMutation.mutate(link.id)}
+                >
+                  Revoke
                 </Button>
               </div>
             </div>

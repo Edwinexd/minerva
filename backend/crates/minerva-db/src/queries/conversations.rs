@@ -7,8 +7,8 @@ pub struct ConversationRow {
     pub course_id: Uuid,
     pub user_id: Uuid,
     pub title: Option<String>,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -21,7 +21,7 @@ pub struct MessageRow {
     pub model_used: Option<String>,
     pub tokens_prompt: Option<i32>,
     pub tokens_completion: Option<i32>,
-    pub created_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub async fn create(

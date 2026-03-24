@@ -25,8 +25,8 @@ struct DocumentResponse {
     status: String,
     chunk_count: Option<i32>,
     error_msg: Option<String>,
-    created_at: chrono::NaiveDateTime,
-    processed_at: Option<chrono::NaiveDateTime>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    processed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {

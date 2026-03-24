@@ -28,10 +28,10 @@ struct SignedUrlResponse {
     course_id: Uuid,
     token: String,
     url: String,
-    expires_at: chrono::NaiveDateTime,
+    expires_at: chrono::DateTime<chrono::Utc>,
     max_uses: Option<i32>,
     use_count: i32,
-    created_at: chrono::NaiveDateTime,
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Deserialize)]
@@ -56,12 +56,12 @@ async fn create_signed_url(
 
     let id = Uuid::new_v4();
     let hours = body.expires_in_hours.unwrap_or(168); // Default 1 week
-    let expires_at = chrono::Utc::now().naive_utc() + chrono::Duration::hours(hours);
+    let expires_at = chrono::Utc::now() + chrono::Duration::hours(hours);
 
     // Generate HMAC token
     let mut mac = HmacSha256::new_from_slice(state.config.hmac_secret.as_bytes())
         .map_err(|_| AppError::Internal("hmac key error".to_string()))?;
-    mac.update(format!("{}:{}:{}", course_id, id, expires_at.and_utc().timestamp()).as_bytes());
+    mac.update(format!("{}:{}:{}", course_id, id, expires_at.timestamp()).as_bytes());
     let token = hex::encode(mac.finalize().into_bytes());
 
     let row = minerva_db::queries::signed_urls::create(
@@ -144,7 +144,7 @@ async fn join_via_token(
         .ok_or(AppError::NotFound)?;
 
     // Check expiry
-    let now = chrono::Utc::now().naive_utc();
+    let now = chrono::Utc::now();
     if now > signed_url.expires_at {
         return Err(AppError::BadRequest("signed URL has expired".to_string()));
     }

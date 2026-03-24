@@ -31,6 +31,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
 
     Router::new()
         .route("/health", get(health::health))
+        .route("/models", get(health::models))
         .route("/dev/config", get(dev_config))
         .merge(authed)
 }

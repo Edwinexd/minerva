@@ -1,12 +1,24 @@
 FROM rust:latest AS builder
 
-RUN apt-get update && apt-get install -y poppler-utils && apt-get clean && rm -r /var/lib/apt/lists/*
-
 WORKDIR /app/backend
-COPY backend/ .
-RUN cargo build
 
-FROM debian:bookworm-slim
+# Phase 1: cache dependencies
+COPY backend/Cargo.toml backend/Cargo.lock ./
+COPY backend/crates/minerva-core/Cargo.toml crates/minerva-core/Cargo.toml
+COPY backend/crates/minerva-db/Cargo.toml crates/minerva-db/Cargo.toml
+COPY backend/crates/minerva-ingest/Cargo.toml crates/minerva-ingest/Cargo.toml
+COPY backend/crates/minerva-server/Cargo.toml crates/minerva-server/Cargo.toml
+RUN mkdir -p crates/minerva-core/src crates/minerva-db/src crates/minerva-ingest/src crates/minerva-server/src && \
+    echo "fn main() {}" > crates/minerva-server/src/main.rs && \
+    touch crates/minerva-core/src/lib.rs crates/minerva-db/src/lib.rs crates/minerva-ingest/src/lib.rs && \
+    cargo build && \
+    rm -rf crates/*/src
+
+# Phase 2: build actual code (deps cached)
+COPY backend/ .
+RUN touch crates/*/src/*.rs && cargo build
+
+FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y poppler-utils ca-certificates libssl3 && apt-get clean && rm -r /var/lib/apt/lists/*
 
 COPY --from=builder /app/backend/target/debug/minerva /usr/local/bin/

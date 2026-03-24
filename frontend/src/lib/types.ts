@@ -33,8 +33,32 @@ export interface Conversation {
   id: string
   course_id: string
   title: string | null
+  pinned: boolean
   created_at: string
   updated_at: string
+}
+
+export interface ConversationWithUser extends Conversation {
+  user_id: string
+  user_eppn: string | null
+  user_display_name: string | null
+  message_count: number | null
+}
+
+export interface TeacherNote {
+  id: string
+  conversation_id: string
+  message_id: string | null
+  author_id: string
+  author_display_name: string | null
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ConversationDetail {
+  messages: Message[]
+  notes: TeacherNote[]
 }
 
 export interface Message {

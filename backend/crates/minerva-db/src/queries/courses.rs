@@ -176,3 +176,14 @@ pub async fn is_member(db: &PgPool, course_id: Uuid, user_id: Uuid) -> Result<bo
     .await?;
     Ok(row.is_some())
 }
+
+pub async fn is_course_teacher(db: &PgPool, course_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT 1 FROM course_members WHERE course_id = $1 AND user_id = $2 AND role IN ('teacher', 'ta')",
+    )
+    .bind(course_id)
+    .bind(user_id)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.is_some())
+}

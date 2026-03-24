@@ -72,8 +72,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             if !full_text.is_empty() {
                 continued.push(serde_json::json!({
                     "role": "assistant",
-                    "prefix": true,
                     "content": full_text,
+                }));
+                continued.push(serde_json::json!({
+                    "role": "user",
+                    "content": "Continue your response from exactly where you left off. Do not repeat what you already said.",
                 }));
             }
 

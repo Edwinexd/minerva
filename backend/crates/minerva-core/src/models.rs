@@ -146,6 +146,18 @@ pub struct Conversation {
     pub course_id: Uuid,
     pub user_id: Uuid,
     pub title: Option<String>,
+    pub pinned: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeacherNote {
+    pub id: Uuid,
+    pub conversation_id: Uuid,
+    pub message_id: Option<Uuid>,
+    pub author_id: Uuid,
+    pub content: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

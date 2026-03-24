@@ -3,17 +3,19 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   courseQuery,
   conversationsQuery,
-  conversationMessagesQuery,
+  conversationDetailQuery,
+  pinnedConversationsQuery,
   userQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Badge } from "@/components/ui/badge"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import React, { useState, useRef, useEffect, useCallback } from "react"
-import type { Conversation, Message } from "@/lib/types"
+import type { Conversation, Message, TeacherNote } from "@/lib/types"
 
 export const Route = createFileRoute("/course/$courseId/$conversationId")({
   component: ChatPage,
@@ -24,6 +26,7 @@ function ChatPage() {
   const navigate = useNavigate()
   const { data: course } = useQuery(courseQuery(courseId))
   const { data: conversations, isLoading: convLoading } = useQuery(conversationsQuery(courseId))
+  const { data: pinned, isLoading: pinnedLoading } = useQuery(pinnedConversationsQuery(courseId))
   const queryClient = useQueryClient()
 
   const createConversation = useMutation({
@@ -39,6 +42,9 @@ function ChatPage() {
       })
     },
   })
+
+  const isPinnedView = pinned?.some((p) => p.id === conversationId) &&
+    !conversations?.some((c) => c.id === conversationId)
 
   return (
     <div className="flex h-[calc(100vh-120px)] gap-4">
@@ -65,9 +71,38 @@ function ChatPage() {
                   : "hover:bg-muted"
               }`}
             >
+              {conv.pinned && <span className="mr-1" title="Pinned">*</span>}
               {conv.title || "New conversation"}
             </Link>
           ))}
+
+          {pinned && pinned.length > 0 && (
+            <>
+              <div className="text-xs font-medium text-muted-foreground pt-3 pb-1 border-t mt-2">
+                Pinned by teacher
+              </div>
+              {pinnedLoading && <Skeleton className="h-9 w-full mb-1" />}
+              {pinned
+                .filter((p) => !conversations?.some((c) => c.id === p.id))
+                .map((conv) => (
+                  <Link
+                    key={conv.id}
+                    to="/course/$courseId/$conversationId"
+                    params={{ courseId, conversationId: conv.id }}
+                    className={`block w-full text-left px-3 py-2 rounded text-sm truncate ${
+                      conversationId === conv.id
+                        ? "bg-secondary text-secondary-foreground"
+                        : "hover:bg-muted"
+                    }`}
+                  >
+                    <span className="text-muted-foreground text-xs">
+                      {conv.user_display_name || conv.user_eppn || "Student"}
+                    </span>
+                    <span className="block">{conv.title || "Conversation"}</span>
+                  </Link>
+                ))}
+            </>
+          )}
         </div>
         {course && (
           <div className="text-xs text-muted-foreground pt-2 border-t mt-2">
@@ -77,7 +112,11 @@ function ChatPage() {
       </div>
 
       <div className="flex-1 flex flex-col">
-        <ChatWindow courseId={courseId} conversationId={conversationId} />
+        <ChatWindow
+          courseId={courseId}
+          conversationId={conversationId}
+          readOnly={isPinnedView}
+        />
       </div>
     </div>
   )
@@ -86,13 +125,17 @@ function ChatPage() {
 function ChatWindow({
   courseId,
   conversationId,
+  readOnly = false,
 }: {
   courseId: string
   conversationId: string
+  readOnly?: boolean
 }) {
-  const { data: messages, isLoading } = useQuery(
-    conversationMessagesQuery(courseId, conversationId),
+  const { data, isLoading } = useQuery(
+    conversationDetailQuery(courseId, conversationId),
   )
+  const messages = data?.messages
+  const notes = data?.notes || []
   const { data: user } = useQuery(userQuery)
   const isTeacher = user?.role === "teacher" || user?.role === "admin"
   const queryClient = useQueryClient()
@@ -108,6 +151,19 @@ function ChatWindow({
     chunks_used: string[] | null
   } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Index notes by message_id for inline display
+  const notesByMessage = new Map<string, TeacherNote[]>()
+  const conversationNotes: TeacherNote[] = []
+  for (const note of notes) {
+    if (note.message_id) {
+      const existing = notesByMessage.get(note.message_id) || []
+      existing.push(note)
+      notesByMessage.set(note.message_id, existing)
+    } else {
+      conversationNotes.push(note)
+    }
+  }
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -205,13 +261,25 @@ function ChatWindow({
     <>
       <div className="flex-1 overflow-y-auto pr-4">
         <div className="space-y-4 py-4">
+          {conversationNotes.length > 0 && (
+            <div className="space-y-2">
+              {conversationNotes.map((note) => (
+                <TeacherNoteInline key={note.id} note={note} />
+              ))}
+            </div>
+          )}
           {isLoading && Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className={`flex ${i % 2 === 0 ? "justify-end" : "justify-start"}`}>
               <Skeleton className="h-12 w-64 rounded-lg" />
             </div>
           ))}
           {messages?.map((msg) => (
-            <ChatBubble key={msg.id} message={msg} />
+            <React.Fragment key={msg.id}>
+              <ChatBubble message={msg} />
+              {notesByMessage.get(msg.id)?.map((note) => (
+                <TeacherNoteInline key={note.id} note={note} />
+              ))}
+            </React.Fragment>
           ))}
           {pendingUserMsg && (
             <div className="flex justify-end">
@@ -253,19 +321,41 @@ function ChatWindow({
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex gap-2 pt-4 border-t">
-        <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about the course materials..."
-          disabled={streaming}
-          className="flex-1"
-        />
-        <Button type="submit" disabled={streaming || !input.trim()}>
-          Send
-        </Button>
-      </form>
+      {!readOnly && (
+        <form onSubmit={handleSubmit} className="flex gap-2 pt-4 border-t">
+          <Input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask about the course materials..."
+            disabled={streaming}
+            className="flex-1"
+          />
+          <Button type="submit" disabled={streaming || !input.trim()}>
+            Send
+          </Button>
+        </form>
+      )}
     </>
+  )
+}
+
+function TeacherNoteInline({ note }: { note: TeacherNote }) {
+  return (
+    <div className="flex justify-center">
+      <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-2 max-w-[80%]">
+        <div className="flex items-center gap-2 mb-1">
+          <Badge variant="outline" className="text-xs border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300">
+            Teacher note
+          </Badge>
+          {note.author_display_name && (
+            <span className="text-xs text-muted-foreground">{note.author_display_name}</span>
+          )}
+        </div>
+        <div className="prose prose-sm dark:prose-invert max-w-none">
+          <Markdown remarkPlugins={[remarkGfm]}>{note.content}</Markdown>
+        </div>
+      </div>
+    </div>
   )
 }
 

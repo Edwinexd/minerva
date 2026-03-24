@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { Conversation, Course, CourseMember, Document, Message, User } from "./types"
+import type { Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, TeacherNote, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -43,8 +43,26 @@ export const conversationsQuery = (courseId: string) =>
     queryFn: () => api.get<Conversation[]>(`/courses/${courseId}/conversations`),
   })
 
-export const conversationMessagesQuery = (courseId: string, conversationId: string) =>
+export const allConversationsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "conversations", "all"],
+    queryFn: () => api.get<ConversationWithUser[]>(`/courses/${courseId}/conversations/all`),
+  })
+
+export const pinnedConversationsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "conversations", "pinned"],
+    queryFn: () => api.get<ConversationWithUser[]>(`/courses/${courseId}/conversations/pinned`),
+  })
+
+export const conversationDetailQuery = (courseId: string, conversationId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", conversationId],
-    queryFn: () => api.get<Message[]>(`/courses/${courseId}/conversations/${conversationId}`),
+    queryFn: () => api.get<ConversationDetail>(`/courses/${courseId}/conversations/${conversationId}`),
+  })
+
+export const conversationNotesQuery = (courseId: string, conversationId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "conversations", conversationId, "notes"],
+    queryFn: () => api.get<TeacherNote[]>(`/courses/${courseId}/conversations/${conversationId}/notes`),
   })

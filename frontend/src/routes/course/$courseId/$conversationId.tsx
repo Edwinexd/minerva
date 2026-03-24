@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   courseQuery,
@@ -12,16 +12,16 @@ import { Skeleton } from "@/components/ui/skeleton"
 import React, { useState, useRef, useEffect, useCallback } from "react"
 import type { Conversation, Message } from "@/lib/types"
 
-export const Route = createFileRoute("/course/$courseId")({
+export const Route = createFileRoute("/course/$courseId/$conversationId")({
   component: ChatPage,
 })
 
 function ChatPage() {
-  const { courseId } = Route.useParams()
+  const { courseId, conversationId } = Route.useParams()
+  const navigate = useNavigate()
   const { data: course } = useQuery(courseQuery(courseId))
-  const { data: conversations, isLoading } = useQuery(conversationsQuery(courseId))
+  const { data: conversations, isLoading: convLoading } = useQuery(conversationsQuery(courseId))
   const queryClient = useQueryClient()
-  const [activeConversation, setActiveConversation] = useState<string | null>(null)
 
   const createConversation = useMutation({
     mutationFn: () =>
@@ -30,15 +30,12 @@ function ChatPage() {
       queryClient.invalidateQueries({
         queryKey: ["courses", courseId, "conversations"],
       })
-      setActiveConversation(conv.id)
+      navigate({
+        to: "/course/$courseId/$conversationId",
+        params: { courseId, conversationId: conv.id },
+      })
     },
   })
-
-  useEffect(() => {
-    if (conversations && conversations.length > 0 && !activeConversation) {
-      setActiveConversation(conversations[0].id)
-    }
-  }, [conversations, activeConversation])
 
   return (
     <div className="flex h-[calc(100vh-120px)] gap-4">
@@ -51,21 +48,22 @@ function ChatPage() {
           New Chat
         </Button>
         <div className="space-y-1 overflow-y-auto flex-1">
-          {isLoading && Array.from({ length: 3 }).map((_, i) => (
+          {convLoading && Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-9 w-full mb-1" />
           ))}
           {conversations?.map((conv) => (
-            <button
+            <Link
               key={conv.id}
-              onClick={() => setActiveConversation(conv.id)}
-              className={`w-full text-left px-3 py-2 rounded text-sm truncate ${
-                activeConversation === conv.id
+              to="/course/$courseId/$conversationId"
+              params={{ courseId, conversationId: conv.id }}
+              className={`block w-full text-left px-3 py-2 rounded text-sm truncate ${
+                conversationId === conv.id
                   ? "bg-secondary text-secondary-foreground"
                   : "hover:bg-muted"
               }`}
             >
               {conv.title || "New conversation"}
-            </button>
+            </Link>
           ))}
         </div>
         {course && (
@@ -76,15 +74,7 @@ function ChatPage() {
       </div>
 
       <div className="flex-1 flex flex-col">
-        {activeConversation ? (
-          <ChatWindow courseId={courseId} conversationId={activeConversation} />
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground">
-            {conversations?.length === 0
-              ? "Create a new chat to get started."
-              : "Select a conversation."}
-          </div>
-        )}
+        <ChatWindow courseId={courseId} conversationId={conversationId} />
       </div>
     </div>
   )
@@ -115,6 +105,15 @@ function ChatWindow({
   useEffect(() => {
     scrollToBottom()
   }, [messages, streamedTokens, scrollToBottom])
+
+  // Reset state when conversation changes
+  useEffect(() => {
+    setStreaming(false)
+    setStreamedTokens("")
+    setPendingUserMsg(null)
+    setError(null)
+    setInput("")
+  }, [conversationId])
 
   const sendMessage = async (content: string) => {
     setError(null)

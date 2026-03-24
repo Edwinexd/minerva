@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { courseQuery, courseMembersQuery, courseDocumentsQuery, modelsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
@@ -47,7 +47,12 @@ function CourseEditPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold tracking-tight">{course.name}</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold tracking-tight">{course.name}</h2>
+        <Link to="/course/$courseId" params={{ courseId }}>
+          <Button variant="outline">Try Chat</Button>
+        </Link>
+      </div>
 
       <Tabs defaultValue="config">
         <TabsList>

@@ -2,11 +2,13 @@ use axum::extract::{Extension, Path, State};
 use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures::stream::{self, Stream};
+use futures::{Stream, StreamExt};
 use minerva_core::models::User;
 use qdrant_client::qdrant::SearchPointsBuilder;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -142,15 +144,8 @@ async fn send_message(
     // Save user message
     let user_msg_id = Uuid::new_v4();
     minerva_db::queries::conversations::insert_message(
-        &state.db,
-        user_msg_id,
-        cid,
-        "user",
-        &body.content,
-        None,
-        None,
-        None,
-        None,
+        &state.db, user_msg_id, cid, "user", &body.content,
+        None, None, None, None,
     )
     .await?;
 
@@ -160,52 +155,35 @@ async fn send_message(
     // Embed the query
     let http_client = reqwest::Client::new();
     let query_embedding = minerva_ingest::embedder::embed_texts(
-        &http_client,
-        &state.config.openai_api_key,
-        std::slice::from_ref(&body.content),
+        &http_client, &state.config.openai_api_key, std::slice::from_ref(&body.content),
     )
     .await
     .map_err(|e| AppError::Internal(format!("embedding failed: {}", e)))?;
 
-    let query_vector = query_embedding
-        .embeddings
-        .into_iter()
-        .next()
+    let query_vector = query_embedding.embeddings.into_iter().next()
         .ok_or_else(|| AppError::Internal("no embedding returned".to_string()))?;
 
     // Search Qdrant
     let collection_name = format!("course_{}", course_id);
-    let search_result = state
-        .qdrant
+    let chunks: Vec<String> = match state.qdrant
         .search_points(
             SearchPointsBuilder::new(&collection_name, query_vector, course.max_chunks as u64)
                 .with_payload(true),
         )
-        .await;
-
-    let chunks: Vec<String> = match search_result {
-        Ok(result) => result
-            .result
-            .iter()
-            .filter_map(|point| {
-                let payload = &point.payload;
-                let text = payload.get("text").and_then(|v| match &v.kind {
-                    Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => Some(s.clone()),
-                    _ => None,
-                })?;
-                let filename = payload
-                    .get("filename")
-                    .and_then(|v| match &v.kind {
-                        Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => {
-                            Some(s.clone())
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or_default();
-
-                Some(format!("[Source: {}]\n{}", filename, text))
-            })
-            .collect(),
+        .await
+    {
+        Ok(result) => result.result.iter().filter_map(|point| {
+            let payload = &point.payload;
+            let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => return None,
+            };
+            let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => String::new(),
+            };
+            Some(format!("[Source: {}]\n{}", filename, text))
+        }).collect(),
         Err(e) => {
             tracing::warn!("qdrant search failed: {}, proceeding without context", e);
             Vec::new()
@@ -216,71 +194,119 @@ async fn send_message(
 
     // Build prompt
     let system_prompt = build_system_prompt(&course, &chunks);
-    let messages = build_chat_messages(&system_prompt, &history, &course);
+    let chat_messages = build_chat_messages(&system_prompt, &history, &course);
 
-    // Stream from Cerebras
+    // Set up channel for streaming
+    let (tx, rx) = mpsc::channel::<Result<Event, AppError>>(32);
+
     let db = state.db.clone();
     let api_key = state.config.cerebras_api_key.clone();
     let model = course.model.clone();
     let temperature = course.temperature;
+    let user_id = conv.user_id;
 
-    let stream = stream::once(async move {
-        // We'll collect the full response and stream it
-        let cerebras_response = call_cerebras_streaming(
-            &http_client,
-            &api_key,
-            &model,
-            temperature,
-            &messages,
-        )
-        .await;
+    tokio::spawn(async move {
+        let mut full_text = String::new();
+        let mut prompt_tokens = 0i32;
+        let mut completion_tokens = 0i32;
 
-        match cerebras_response {
-            Ok((full_text, prompt_tokens, completion_tokens)) => {
-                // Save assistant message
-                let assistant_msg_id = Uuid::new_v4();
-                let _ = minerva_db::queries::conversations::insert_message(
-                    &db,
-                    assistant_msg_id,
-                    cid,
-                    "assistant",
-                    &full_text,
-                    chunks_json.as_ref(),
-                    Some(&model),
-                    Some(prompt_tokens),
-                    Some(completion_tokens),
-                )
-                .await;
+        let body = serde_json::json!({
+            "model": model,
+            "messages": chat_messages,
+            "temperature": temperature,
+            "stream": true,
+        });
 
-                // Record usage
-                let _ = minerva_db::queries::usage::record_usage(
-                    &db,
-                    conv.user_id,
-                    course_id,
-                    prompt_tokens as i64,
-                    completion_tokens as i64,
-                    0, // embedding tokens tracked separately
-                )
-                .await;
+        let response = http_client
+            .post("https://api.cerebras.ai/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&body)
+            .send()
+            .await;
 
-                Ok(Event::default().data(serde_json::json!({
-                    "type": "message",
-                    "content": full_text,
-                    "chunks_used": chunks_json,
-                    "tokens_prompt": prompt_tokens,
-                    "tokens_completion": completion_tokens,
-                }).to_string()))
+        let response = match response {
+            Ok(r) if r.status().is_success() => r,
+            Ok(r) => {
+                let status = r.status();
+                let body = r.text().await.unwrap_or_default();
+                let _ = tx.send(Ok(Event::default().data(
+                    serde_json::json!({"type": "error", "error": format!("Cerebras API error {}: {}", status, body)}).to_string()
+                ))).await;
+                return;
             }
-            Err(e) => Ok(Event::default().data(
-                serde_json::json!({
-                    "type": "error",
-                    "error": e,
-                })
-                .to_string(),
-            )),
+            Err(e) => {
+                let _ = tx.send(Ok(Event::default().data(
+                    serde_json::json!({"type": "error", "error": format!("Request failed: {}", e)}).to_string()
+                ))).await;
+                return;
+            }
+        };
+
+        // Stream SSE from Cerebras
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(_) => break,
+            };
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process complete SSE lines
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].trim().to_string();
+                buffer = buffer[line_end + 1..].to_string();
+
+                if line == "data: [DONE]" {
+                    break;
+                }
+
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                        // Extract token
+                        if let Some(delta) = parsed["choices"][0]["delta"]["content"].as_str() {
+                            full_text.push_str(delta);
+                            let _ = tx.send(Ok(Event::default().data(
+                                serde_json::json!({"type": "token", "token": delta}).to_string()
+                            ))).await;
+                        }
+
+                        // Extract usage from final chunk
+                        if let Some(usage) = parsed.get("usage") {
+                            prompt_tokens = usage["prompt_tokens"].as_i64().unwrap_or(0) as i32;
+                            completion_tokens = usage["completion_tokens"].as_i64().unwrap_or(0) as i32;
+                        }
+                    }
+                }
+            }
         }
+
+        // Save assistant message
+        let assistant_msg_id = Uuid::new_v4();
+        let _ = minerva_db::queries::conversations::insert_message(
+            &db, assistant_msg_id, cid, "assistant", &full_text,
+            chunks_json.as_ref(), Some(&model),
+            Some(prompt_tokens), Some(completion_tokens),
+        ).await;
+
+        // Record usage
+        let _ = minerva_db::queries::usage::record_usage(
+            &db, user_id, course_id,
+            prompt_tokens as i64, completion_tokens as i64, 0,
+        ).await;
+
+        // Send done event
+        let _ = tx.send(Ok(Event::default().data(
+            serde_json::json!({
+                "type": "done",
+                "tokens_prompt": prompt_tokens,
+                "tokens_completion": completion_tokens,
+            }).to_string()
+        ))).await;
     });
 
+    let stream = ReceiverStream::new(rx);
     Ok(Sse::new(Box::pin(stream)))
 }
 
@@ -317,7 +343,6 @@ fn build_chat_messages(
         "content": system_prompt,
     })];
 
-    // Add conversation history (skip the latest user message since it's the current one)
     for msg in history.iter() {
         messages.push(serde_json::json!({
             "role": msg.role,
@@ -326,76 +351,6 @@ fn build_chat_messages(
     }
 
     messages
-}
-
-#[derive(Deserialize)]
-struct CerebrasResponse {
-    choices: Vec<CerebrasChoice>,
-    usage: Option<CerebrasUsage>,
-}
-
-#[derive(Deserialize)]
-struct CerebrasChoice {
-    message: CerebrasMessage,
-}
-
-#[derive(Deserialize)]
-struct CerebrasMessage {
-    content: String,
-}
-
-#[derive(Deserialize)]
-struct CerebrasUsage {
-    prompt_tokens: i32,
-    completion_tokens: i32,
-}
-
-async fn call_cerebras_streaming(
-    client: &reqwest::Client,
-    api_key: &str,
-    model: &str,
-    temperature: f64,
-    messages: &[serde_json::Value],
-) -> Result<(String, i32, i32), String> {
-    // For now, use non-streaming to simplify; we'll add true SSE streaming later
-    let body = serde_json::json!({
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "stream": false,
-    });
-
-    let response = client
-        .post("https://api.cerebras.ai/v1/chat/completions")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("cerebras request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("cerebras API error {}: {}", status, body));
-    }
-
-    let result: CerebrasResponse = response
-        .json()
-        .await
-        .map_err(|e| format!("failed to parse cerebras response: {}", e))?;
-
-    let content = result
-        .choices
-        .first()
-        .map(|c| c.message.content.clone())
-        .unwrap_or_default();
-
-    let (prompt_tokens, completion_tokens) = result
-        .usage
-        .map(|u| (u.prompt_tokens, u.completion_tokens))
-        .unwrap_or((0, 0));
-
-    Ok((content, prompt_tokens, completion_tokens))
 }
 
 async fn verify_course_access(

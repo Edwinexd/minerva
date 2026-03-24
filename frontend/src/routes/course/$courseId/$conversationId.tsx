@@ -9,6 +9,7 @@ import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import Markdown from "react-markdown"
 import React, { useState, useRef, useEffect, useCallback } from "react"
 import type { Conversation, Message } from "@/lib/types"
 
@@ -211,7 +212,7 @@ function ChatWindow({
             <div className="flex justify-start">
               <div className="bg-muted rounded-lg px-4 py-2 max-w-[80%]">
                 {streamedTokens ? (
-                  <p className="text-sm whitespace-pre-wrap">{streamedTokens}</p>
+                  <MarkdownContent content={streamedTokens} />
                 ) : (
                   <div className="flex gap-1">
                     <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
@@ -245,6 +246,14 @@ function ChatWindow({
   )
 }
 
+function MarkdownContent({ content, className }: { content: string; className?: string }) {
+  return (
+    <div className={`prose prose-sm dark:prose-invert max-w-none ${className || ""}`}>
+      <Markdown>{content}</Markdown>
+    </div>
+  )
+}
+
 function ChatBubble({ message }: { message: Message }) {
   const isUser = message.role === "user"
 
@@ -255,7 +264,11 @@ function ChatBubble({ message }: { message: Message }) {
           isUser ? "bg-primary text-primary-foreground" : "bg-muted"
         }`}
       >
-        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+        {isUser ? (
+          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+        ) : (
+          <MarkdownContent content={message.content} />
+        )}
         {!isUser && message.tokens_prompt != null && (
           <p className="text-xs text-muted-foreground mt-1">
             {message.tokens_prompt + (message.tokens_completion || 0)} tokens

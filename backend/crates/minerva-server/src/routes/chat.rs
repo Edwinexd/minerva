@@ -204,6 +204,8 @@ async fn send_message(
     let model = course.model.clone();
     let temperature = course.temperature;
     let user_id = conv.user_id;
+    let is_first_message = history.len() <= 1; // Only the user message we just inserted
+    let user_content = body.content.clone();
 
     tokio::spawn(async move {
         let mut full_text = String::new();
@@ -289,6 +291,17 @@ async fn send_message(
             chunks_json.as_ref(), Some(&model),
             Some(prompt_tokens), Some(completion_tokens),
         ).await;
+
+        // Auto-generate conversation title from first user message
+        if is_first_message {
+            let title: String = user_content.chars().take(60).collect();
+            let title = if user_content.chars().count() > 60 {
+                format!("{}...", title.trim())
+            } else {
+                title
+            };
+            let _ = minerva_db::queries::conversations::update_title(&db, cid, &title).await;
+        }
 
         // Record usage
         let _ = minerva_db::queries::usage::record_usage(

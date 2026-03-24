@@ -31,6 +31,7 @@ struct UpdateCourseRequest {
     model: Option<String>,
     system_prompt: Option<String>,
     max_chunks: Option<i32>,
+    strategy: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -44,6 +45,7 @@ struct CourseResponse {
     model: String,
     system_prompt: Option<String>,
     max_chunks: i32,
+    strategy: String,
     active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
@@ -61,6 +63,7 @@ impl From<minerva_db::queries::courses::CourseRow> for CourseResponse {
             model: row.model,
             system_prompt: row.system_prompt,
             max_chunks: row.max_chunks,
+            strategy: row.strategy,
             active: row.active,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -146,6 +149,7 @@ async fn update_course(
         model: body.model,
         system_prompt: body.system_prompt,
         max_chunks: body.max_chunks,
+        strategy: body.strategy,
     };
 
     let row = minerva_db::queries::courses::update(&state.db, id, &input)

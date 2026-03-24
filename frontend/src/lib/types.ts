@@ -15,6 +15,7 @@ export interface Course {
   model: string
   system_prompt: string | null
   max_chunks: number
+  strategy: string
   active: boolean
   created_at: string
   updated_at: string

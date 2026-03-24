@@ -3,6 +3,7 @@ mod config;
 mod error;
 mod routes;
 mod state;
+mod strategy;
 
 use axum::Router;
 use tower_http::cors::CorsLayer;

@@ -92,6 +92,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [model, setModel] = useState(course.model)
   const [systemPrompt, setSystemPrompt] = useState(course.system_prompt || "")
   const [maxChunks, setMaxChunks] = useState(course.max_chunks)
+  const [strategy, setStrategy] = useState(course.strategy)
 
   const mutation = useMutation({
     mutationFn: (data: Record<string, unknown>) =>
@@ -122,6 +123,7 @@ function CourseConfigForm({ course }: { course: Course }) {
               model,
               system_prompt: systemPrompt || null,
               max_chunks: maxChunks,
+              strategy,
             })
           }}
         >
@@ -187,6 +189,31 @@ function CourseConfigForm({ course }: { course: Course }) {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Generation Strategy</Label>
+            <Select value={strategy} onValueChange={(v) => v && setStrategy(v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="parallel">
+                  Parallel (fast first token, inject RAG mid-stream)
+                </SelectItem>
+                <SelectItem value="simple">
+                  Simple (retrieve first, then generate)
+                </SelectItem>
+                <SelectItem value="flare">
+                  FLARE (sentence-level active retrieval)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Parallel starts streaming instantly and injects RAG context when ready.
+              Simple waits for RAG before generating. FLARE retrieves after each sentence
+              using the generated text as the query.
+            </p>
           </div>
 
           <div className="space-y-2">

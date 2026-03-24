@@ -12,6 +12,7 @@ pub struct CourseRow {
     pub model: String,
     pub system_prompt: Option<String>,
     pub max_chunks: i32,
+    pub strategy: String,
     pub active: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -31,13 +32,14 @@ pub struct UpdateCourse {
     pub model: Option<String>,
     pub system_prompt: Option<String>,
     pub max_chunks: Option<i32>,
+    pub strategy: Option<String>,
 }
 
 pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<CourseRow, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
         r#"INSERT INTO courses (id, name, description, owner_id)
         VALUES ($1, $2, $3, $4)
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, active, created_at, updated_at"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at"#,
     )
     .bind(id)
     .bind(&input.name)
@@ -49,7 +51,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
 
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
     )
     .bind(id)
     .fetch_optional(db)
@@ -58,7 +60,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx
 
 pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, active, created_at, updated_at FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
     )
     .bind(owner_id)
     .fetch_all(db)
@@ -67,7 +69,7 @@ pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>
 
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",
     )
     .fetch_all(db)
     .await
@@ -83,9 +85,10 @@ pub async fn update(db: &PgPool, id: Uuid, input: &UpdateCourse) -> Result<Optio
             model = COALESCE($6, model),
             system_prompt = COALESCE($7, system_prompt),
             max_chunks = COALESCE($8, max_chunks),
+            strategy = COALESCE($9, strategy),
             updated_at = NOW()
         WHERE id = $1 AND active = true
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, active, created_at, updated_at"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at"#,
     )
     .bind(id)
     .bind(&input.name)
@@ -95,6 +98,7 @@ pub async fn update(db: &PgPool, id: Uuid, input: &UpdateCourse) -> Result<Optio
     .bind(&input.model)
     .bind(&input.system_prompt)
     .bind(input.max_chunks)
+    .bind(&input.strategy)
     .fetch_optional(db)
     .await
 }

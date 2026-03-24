@@ -220,6 +220,7 @@ pub async fn finalize(
             "tokens_prompt": prompt_tokens,
             "tokens_completion": completion_tokens,
             "rag_injected": rag_injected,
+            "chunks_used": chunks_json,
         }).to_string()
     ))).await;
 }

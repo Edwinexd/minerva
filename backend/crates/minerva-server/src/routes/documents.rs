@@ -1,8 +1,9 @@
-use axum::extract::{Extension, Multipart, Path, State};
+use axum::extract::{Extension, Multipart, Path, Query, State};
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use minerva_core::models::User;
-use serde::Serialize;
+use qdrant_client::qdrant::{ScrollPointsBuilder, SearchPointsBuilder};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -13,6 +14,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_documents).post(upload_document))
         .route("/{doc_id}", delete(delete_document))
+        .route("/{doc_id}/chunks", get(list_chunks))
+        .route("/search", get(search_chunks))
 }
 
 #[derive(Serialize)]
@@ -188,4 +191,155 @@ async fn delete_document(
     // TODO: Also delete vectors from Qdrant for this document
 
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+#[derive(Serialize)]
+struct ChunkResponse {
+    chunk_index: i64,
+    text: String,
+    filename: String,
+}
+
+/// List all chunks for a specific document from Qdrant.
+async fn list_chunks(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Vec<ChunkResponse>>, AppError> {
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if course.owner_id != user.id && !user.role.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    let collection_name = format!("course_{}", course_id);
+
+    // Check if collection exists
+    let exists = state.qdrant.collection_exists(&collection_name).await
+        .unwrap_or(false);
+    if !exists {
+        return Ok(Json(Vec::new()));
+    }
+
+    // Scroll through all points with this document_id
+    let filter = qdrant_client::qdrant::Filter::must([
+        qdrant_client::qdrant::Condition::matches("document_id", doc_id.to_string()),
+    ]);
+
+    let result = state.qdrant
+        .scroll(
+            ScrollPointsBuilder::new(&collection_name)
+                .filter(filter)
+                .with_payload(true)
+                .limit(1000),
+        )
+        .await
+        .map_err(|e| AppError::Internal(format!("qdrant scroll failed: {}", e)))?;
+
+    let mut chunks: Vec<ChunkResponse> = result
+        .result
+        .iter()
+        .filter_map(|point| {
+            let payload = &point.payload;
+            let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => return None,
+            };
+            let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => String::new(),
+            };
+            let chunk_index = match payload.get("chunk_index").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::IntegerValue(i)) => *i,
+                _ => 0,
+            };
+            Some(ChunkResponse { chunk_index, text, filename })
+        })
+        .collect();
+
+    chunks.sort_by_key(|c| c.chunk_index);
+    Ok(Json(chunks))
+}
+
+#[derive(Deserialize)]
+struct SearchQuery {
+    q: String,
+    limit: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct SearchResult {
+    score: f32,
+    text: String,
+    filename: String,
+    document_id: String,
+    chunk_index: i64,
+}
+
+/// Search chunks by semantic similarity. Teachers can test RAG queries.
+async fn search_chunks(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+    Query(params): Query<SearchQuery>,
+) -> Result<Json<Vec<SearchResult>>, AppError> {
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if course.owner_id != user.id && !user.role.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    let collection_name = format!("course_{}", course_id);
+    let exists = state.qdrant.collection_exists(&collection_name).await.unwrap_or(false);
+    if !exists {
+        return Ok(Json(Vec::new()));
+    }
+
+    // Embed the query
+    let client = reqwest::Client::new();
+    let embedding = minerva_ingest::embedder::embed_texts(
+        &client, &state.config.openai_api_key, std::slice::from_ref(&params.q),
+    )
+    .await
+    .map_err(|e| AppError::Internal(format!("embedding failed: {}", e)))?;
+
+    let vector = embedding.embeddings.into_iter().next()
+        .ok_or_else(|| AppError::Internal("no embedding returned".to_string()))?;
+
+    let limit = params.limit.unwrap_or(10);
+
+    let result = state.qdrant
+        .search_points(
+            SearchPointsBuilder::new(&collection_name, vector, limit)
+                .with_payload(true),
+        )
+        .await
+        .map_err(|e| AppError::Internal(format!("qdrant search failed: {}", e)))?;
+
+    let results: Vec<SearchResult> = result.result.iter().filter_map(|point| {
+        let payload = &point.payload;
+        let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
+            Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+            _ => return None,
+        };
+        let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
+            Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+            _ => String::new(),
+        };
+        let document_id = match payload.get("document_id").and_then(|v| v.kind.as_ref()) {
+            Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+            _ => String::new(),
+        };
+        let chunk_index = match payload.get("chunk_index").and_then(|v| v.kind.as_ref()) {
+            Some(qdrant_client::qdrant::value::Kind::IntegerValue(i)) => *i,
+            _ => 0,
+        };
+        Some(SearchResult { score: point.score, text, filename, document_id, chunk_index })
+    }).collect();
+
+    Ok(Json(results))
 }

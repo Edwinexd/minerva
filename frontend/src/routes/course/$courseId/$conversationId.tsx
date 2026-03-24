@@ -4,6 +4,7 @@ import {
   courseQuery,
   conversationsQuery,
   conversationMessagesQuery,
+  userQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -92,12 +93,20 @@ function ChatWindow({
   const { data: messages, isLoading } = useQuery(
     conversationMessagesQuery(courseId, conversationId),
   )
+  const { data: user } = useQuery(userQuery)
+  const isTeacher = user?.role === "teacher" || user?.role === "admin"
   const queryClient = useQueryClient()
   const [input, setInput] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [streamedTokens, setStreamedTokens] = useState("")
   const [pendingUserMsg, setPendingUserMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [lastDoneData, setLastDoneData] = useState<{
+    tokens_prompt: number
+    tokens_completion: number
+    rag_injected: boolean
+    chunks_used: string[] | null
+  } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = useCallback(() => {
@@ -157,6 +166,8 @@ function ChatWindow({
                 const data = JSON.parse(line.slice(6))
                 if (data.type === "token") {
                   setStreamedTokens((prev) => prev + data.token)
+                } else if (data.type === "done") {
+                  setLastDoneData(data)
                 } else if (data.type === "error") {
                   setError(data.error)
                 }
@@ -224,6 +235,17 @@ function ChatWindow({
               </div>
             </div>
           )}
+          {!streaming && lastDoneData && isTeacher && (
+            <div className="text-xs text-muted-foreground bg-muted/50 rounded p-3 space-y-1">
+              <div className="flex gap-4">
+                <span>Tokens: {lastDoneData.tokens_prompt + lastDoneData.tokens_completion}</span>
+                <span>RAG: {lastDoneData.rag_injected ? "yes" : "no"}</span>
+                {lastDoneData.chunks_used && (
+                  <span>Chunks: {lastDoneData.chunks_used.length}</span>
+                )}
+              </div>
+            </div>
+          )}
           {error && (
             <p className="text-sm text-destructive text-center">{error}</p>
           )}
@@ -257,6 +279,8 @@ function MarkdownContent({ content, className }: { content: string; className?: 
 
 function ChatBubble({ message }: { message: Message }) {
   const isUser = message.role === "user"
+  const [showSources, setShowSources] = useState(false)
+  const chunks: string[] | null = message.chunks_used as string[] | null
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -270,10 +294,35 @@ function ChatBubble({ message }: { message: Message }) {
         ) : (
           <MarkdownContent content={message.content} />
         )}
-        {!isUser && message.tokens_prompt != null && (
-          <p className="text-xs text-muted-foreground mt-1">
-            {message.tokens_prompt + (message.tokens_completion || 0)} tokens
-          </p>
+        {!isUser && (
+          <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+            {message.tokens_prompt != null && (
+              <span>{message.tokens_prompt + (message.tokens_completion || 0)} tokens</span>
+            )}
+            {chunks && chunks.length > 0 && (
+              <button
+                className="underline hover:text-foreground"
+                onClick={() => setShowSources(!showSources)}
+              >
+                {chunks.length} source{chunks.length > 1 ? "s" : ""} {showSources ? "^" : "v"}
+              </button>
+            )}
+          </div>
+        )}
+        {showSources && chunks && (
+          <div className="mt-2 space-y-2 border-t pt-2">
+            {chunks.map((chunk, i) => {
+              const sourceMatch = chunk.match(/^\[Source: (.+?)\]\n/)
+              const source = sourceMatch ? sourceMatch[1] : "Unknown"
+              const text = sourceMatch ? chunk.slice(sourceMatch[0].length) : chunk
+              return (
+                <div key={i} className="text-xs">
+                  <span className="font-medium text-muted-foreground">{source}</span>
+                  <p className="text-muted-foreground/80 mt-0.5 line-clamp-3">{text}</p>
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
     </div>

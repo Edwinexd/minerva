@@ -2,7 +2,7 @@ use axum::extract::{Request, State};
 use axum::http::HeaderMap;
 use axum::middleware::Next;
 use axum::response::Response;
-use minerva_core::models::{User, UserRole, ADMIN_USERNAME};
+use minerva_core::models::{User, UserRole};
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -33,8 +33,7 @@ pub async fn auth_middleware(
 }
 
 async fn upsert_user(state: &AppState, eppn: &str, display_name: Option<&str>) -> Result<User, AppError> {
-    let username = eppn.split('@').next().unwrap_or(eppn);
-    let is_admin = username == ADMIN_USERNAME;
+    let is_admin = state.config.is_admin(eppn);
 
     let existing = minerva_db::queries::users::find_by_eppn(&state.db, eppn).await?;
 

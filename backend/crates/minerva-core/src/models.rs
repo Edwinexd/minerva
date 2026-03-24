@@ -162,6 +162,3 @@ pub struct Message {
     pub tokens_completion: Option<i32>,
     pub created_at: NaiveDateTime,
 }
-
-/// Hardcoded admin username (eppn prefix before @)
-pub const ADMIN_USERNAME: &str = "edsu8469";

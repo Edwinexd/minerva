@@ -14,7 +14,7 @@ repos:
     hooks:
       - id: ban-emdashes
         name: ban emdashes
-        entry: bash -c 'if grep -rn "\xe2\x80\x94" "$@"; then echo "Emdashes found! Use -- or a hyphen instead."; exit 1; fi'
+        entry: bash -c 'if grep -Pn "\xe2\x80\x94" "$@" --; then echo "Emdashes found! Use -- or a hyphen instead."; exit 1; fi'
         language: system
         types: [text]
         exclude: (\.lock|node_modules|target|dist|\.gen\.)

@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { Course, CourseMember, User } from "./types"
+import type { Course, CourseMember, Document, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -22,4 +22,11 @@ export const courseMembersQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "members"],
     queryFn: () => api.get<CourseMember[]>(`/courses/${courseId}/members`),
+  })
+
+export const courseDocumentsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "documents"],
+    queryFn: () => api.get<Document[]>(`/courses/${courseId}/documents`),
+    refetchInterval: 5000, // Poll for processing status updates
   })

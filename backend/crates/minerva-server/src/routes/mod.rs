@@ -1,5 +1,6 @@
 mod admin;
 mod courses;
+mod documents;
 mod health;
 
 use axum::extract::Extension;
@@ -16,6 +17,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
     let authed = Router::new()
         .route("/auth/me", get(me))
         .nest("/courses", courses::router())
+        .nest("/courses/{course_id}/documents", documents::router())
         .nest("/admin", admin::router())
         .route_layer(middleware::from_fn_with_state(state, auth_middleware));
 

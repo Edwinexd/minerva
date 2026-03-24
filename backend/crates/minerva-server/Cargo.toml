@@ -29,4 +29,7 @@ thiserror.workspace = true
 dotenvy.workspace = true
 sqlx.workspace = true
 qdrant-client.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+hex.workspace = true
 anyhow = "1"

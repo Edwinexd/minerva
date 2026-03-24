@@ -1,0 +1,96 @@
+use sqlx::PgPool;
+use uuid::Uuid;
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct UsageDailyRow {
+    pub user_id: Uuid,
+    pub course_id: Uuid,
+    pub date: chrono::NaiveDate,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub embedding_tokens: i64,
+    pub request_count: i32,
+}
+
+pub async fn record_usage(
+    db: &PgPool,
+    user_id: Uuid,
+    course_id: Uuid,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    embedding_tokens: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO usage_daily (user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count)
+        VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, 1)
+        ON CONFLICT (user_id, course_id, date)
+        DO UPDATE SET
+            prompt_tokens = usage_daily.prompt_tokens + $3,
+            completion_tokens = usage_daily.completion_tokens + $4,
+            embedding_tokens = usage_daily.embedding_tokens + $5,
+            request_count = usage_daily.request_count + 1"#,
+    )
+    .bind(user_id)
+    .bind(course_id)
+    .bind(prompt_tokens)
+    .bind(completion_tokens)
+    .bind(embedding_tokens)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_course_usage(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<Vec<UsageDailyRow>, sqlx::Error> {
+    sqlx::query_as::<_, UsageDailyRow>(
+        "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
+    )
+    .bind(course_id)
+    .fetch_all(db)
+    .await
+}
+
+pub async fn get_all_usage(db: &PgPool) -> Result<Vec<UsageDailyRow>, sqlx::Error> {
+    sqlx::query_as::<_, UsageDailyRow>(
+        "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count FROM usage_daily ORDER BY date DESC",
+    )
+    .fetch_all(db)
+    .await
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct UsageSummaryRow {
+    pub course_id: Uuid,
+    pub total_prompt_tokens: Option<i64>,
+    pub total_completion_tokens: Option<i64>,
+    pub total_embedding_tokens: Option<i64>,
+    pub total_requests: Option<i64>,
+}
+
+pub async fn get_course_summary(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<UsageSummaryRow, sqlx::Error> {
+    sqlx::query_as::<_, UsageSummaryRow>(
+        r#"SELECT course_id,
+            SUM(prompt_tokens) as total_prompt_tokens,
+            SUM(completion_tokens) as total_completion_tokens,
+            SUM(embedding_tokens) as total_embedding_tokens,
+            SUM(request_count)::bigint as total_requests
+        FROM usage_daily WHERE course_id = $1 GROUP BY course_id"#,
+    )
+    .bind(course_id)
+    .fetch_optional(db)
+    .await
+    .map(|opt| {
+        opt.unwrap_or(UsageSummaryRow {
+            course_id,
+            total_prompt_tokens: Some(0),
+            total_completion_tokens: Some(0),
+            total_embedding_tokens: Some(0),
+            total_requests: Some(0),
+        })
+    })
+}

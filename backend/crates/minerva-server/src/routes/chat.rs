@@ -252,7 +252,16 @@ async fn send_message(
                 )
                 .await;
 
-                // TODO: Update usage_daily
+                // Record usage
+                let _ = minerva_db::queries::usage::record_usage(
+                    &db,
+                    conv.user_id,
+                    course_id,
+                    prompt_tokens as i64,
+                    completion_tokens as i64,
+                    0, // embedding tokens tracked separately
+                )
+                .await;
 
                 Ok(Event::default().data(serde_json::json!({
                     "type": "message",

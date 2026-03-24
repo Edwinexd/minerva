@@ -3,6 +3,8 @@ mod chat;
 mod courses;
 mod documents;
 mod health;
+mod signed_urls;
+mod usage;
 
 use axum::extract::Extension;
 use axum::middleware;
@@ -20,7 +22,11 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/courses", courses::router())
         .nest("/courses/{course_id}/documents", documents::router())
         .nest("/courses/{course_id}", chat::router())
+        .nest("/courses/{course_id}", signed_urls::course_router())
+        .nest("/courses/{course_id}", usage::course_router())
         .nest("/admin", admin::router())
+        .merge(usage::admin_router())
+        .merge(signed_urls::join_router())
         .route_layer(middleware::from_fn_with_state(state, auth_middleware));
 
     Router::new()

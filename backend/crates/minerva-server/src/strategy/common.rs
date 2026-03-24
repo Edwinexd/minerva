@@ -6,15 +6,24 @@ use tokio::sync::mpsc;
 use crate::error::AppError;
 
 /// Build the system prompt with optional RAG chunks.
+/// When chunks are empty (e.g. parallel phase 1), uses a generic prompt
+/// that doesn't tell the model to refuse -- since context may arrive later.
 pub fn build_system_prompt(
     course_name: &str,
     custom_prompt: &Option<String>,
     chunks: &[String],
 ) -> String {
-    let mut prompt = format!(
-        "You are a helpful teaching assistant for the course '{}'. Answer questions based on the provided course materials. If you cannot answer from the materials, say so clearly.",
-        course_name
-    );
+    let mut prompt = if chunks.is_empty() {
+        format!(
+            "You are a helpful teaching assistant for the course '{}'. Answer the student's question to the best of your ability.",
+            course_name
+        )
+    } else {
+        format!(
+            "You are a helpful teaching assistant for the course '{}'. Answer questions based on the provided course materials. If the answer is not in the materials, say so clearly.",
+            course_name
+        )
+    };
 
     if let Some(ref custom) = custom_prompt {
         prompt.push_str("\n\nAdditional instructions: ");

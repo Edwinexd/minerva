@@ -1,0 +1,32 @@
+[package]
+name = "minerva-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "minerva"
+path = "src/main.rs"
+
+[dependencies]
+minerva-core = { path = "../minerva-core" }
+minerva-db = { path = "../minerva-db" }
+minerva-ingest = { path = "../minerva-ingest" }
+
+axum.workspace = true
+axum-extra.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+futures.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+dotenvy.workspace = true
+sqlx.workspace = true
+qdrant-client.workspace = true
+anyhow = "1"

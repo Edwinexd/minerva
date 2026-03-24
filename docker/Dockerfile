@@ -1,0 +1,26 @@
+FROM node:22-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+FROM rust:1.82-bookworm AS backend-builder
+WORKDIR /app
+COPY backend/ ./backend/
+WORKDIR /app/backend
+ENV SQLX_OFFLINE=true
+RUN cargo build --release
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y poppler-utils ca-certificates libssl3 && apt-get clean && rm -r /var/lib/apt/lists/*
+
+COPY --from=backend-builder /app/backend/target/release/minerva /usr/local/bin/
+COPY --from=frontend-builder /app/frontend/dist /app/static
+COPY backend/migrations /app/migrations
+
+WORKDIR /app
+ENV MINERVA_DOCS_PATH=/data/documents
+VOLUME ["/data"]
+EXPOSE 3000
+CMD ["minerva"]

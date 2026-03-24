@@ -1,0 +1,15 @@
+[package]
+name = "minerva-ingest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+minerva-db = { path = "../minerva-db" }
+
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true

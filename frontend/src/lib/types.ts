@@ -28,6 +28,25 @@ export interface CourseMember {
   added_at: string
 }
 
+export interface Conversation {
+  id: string
+  course_id: string
+  title: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Message {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  chunks_used: string[] | null
+  model_used: string | null
+  tokens_prompt: number | null
+  tokens_completion: number | null
+  created_at: string
+}
+
 export interface Document {
   id: string
   course_id: string

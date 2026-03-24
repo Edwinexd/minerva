@@ -1,4 +1,5 @@
 mod admin;
+mod chat;
 mod courses;
 mod documents;
 mod health;
@@ -18,6 +19,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .route("/auth/me", get(me))
         .nest("/courses", courses::router())
         .nest("/courses/{course_id}/documents", documents::router())
+        .nest("/courses/{course_id}", chat::router())
         .nest("/admin", admin::router())
         .route_layer(middleware::from_fn_with_state(state, auth_middleware));
 

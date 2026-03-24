@@ -117,11 +117,15 @@ function ChatWindow({
     mutationFn: async (content: string) => {
       setStreamingMessage("")
 
+      const devUser = localStorage.getItem("minerva-dev-user")
+      const headers: Record<string, string> = { "Content-Type": "application/json" }
+      if (devUser) headers["X-Dev-User"] = devUser
+
       const response = await fetch(
         `/api/courses/${courseId}/conversations/${conversationId}/message`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ content }),
         },
       )

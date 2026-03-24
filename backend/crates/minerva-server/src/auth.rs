@@ -10,23 +10,45 @@ use crate::state::AppState;
 
 /// Extracts user from Shibboleth headers set by Apache mod_shib.
 /// REMOTE_USER contains the eppn (e.g. edsu8469@SU.SE).
+///
+/// In dev mode (MINERVA_DEV_MODE=true):
+/// - Reads X-Dev-User header instead of REMOTE_USER
+/// - Falls back to first admin in MINERVA_ADMINS, or "dev@SU.SE"
 pub async fn auth_middleware(
     State(state): State<AppState>,
     headers: HeaderMap,
     mut request: Request,
     next: Next,
 ) -> Result<Response, AppError> {
-    let eppn = headers
-        .get("REMOTE_USER")
-        .and_then(|v| v.to_str().ok())
-        .ok_or(AppError::Unauthorized)?;
+    let eppn = if state.config.dev_mode {
+        // Dev mode: X-Dev-User header, or fall back to first admin / default
+        headers
+            .get("X-Dev-User")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .or_else(|| headers.get("REMOTE_USER").and_then(|v| v.to_str().ok()).map(|s| s.to_string()))
+            .unwrap_or_else(|| {
+                state
+                    .config
+                    .admin_usernames
+                    .first()
+                    .map(|u| format!("{}@SU.SE", u))
+                    .unwrap_or_else(|| "dev@SU.SE".to_string())
+            })
+    } else {
+        headers
+            .get("REMOTE_USER")
+            .and_then(|v| v.to_str().ok())
+            .ok_or(AppError::Unauthorized)?
+            .to_string()
+    };
 
     let display_name = headers
         .get("displayName")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let user = upsert_user(&state, eppn, display_name.as_deref()).await?;
+    let user = upsert_user(&state, &eppn, display_name.as_deref()).await?;
     request.extensions_mut().insert(user);
 
     Ok(next.run(request).await)

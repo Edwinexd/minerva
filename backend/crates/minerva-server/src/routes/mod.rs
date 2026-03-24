@@ -6,7 +6,7 @@ mod health;
 mod signed_urls;
 mod usage;
 
-use axum::extract::Extension;
+use axum::extract::{Extension, State};
 use axum::middleware;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -31,6 +31,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
 
     Router::new()
         .route("/health", get(health::health))
+        .route("/dev/config", get(dev_config))
         .merge(authed)
 }
 
@@ -40,5 +41,29 @@ async fn me(Extension(user): Extension<User>) -> Json<Value> {
         "eppn": user.eppn,
         "display_name": user.display_name,
         "role": user.role,
+    }))
+}
+
+/// Returns dev mode config (available dev users). Only responds in dev mode.
+async fn dev_config(State(state): State<AppState>) -> Json<Value> {
+    if !state.config.dev_mode {
+        return Json(json!({ "dev_mode": false }));
+    }
+
+    let mut dev_users = vec![
+        json!({ "eppn": "student@SU.SE", "label": "Student" }),
+        json!({ "eppn": "teacher@SU.SE", "label": "Teacher" }),
+    ];
+
+    for admin in &state.config.admin_usernames {
+        dev_users.push(json!({
+            "eppn": format!("{}@SU.SE", admin),
+            "label": format!("Admin ({})", admin),
+        }));
+    }
+
+    Json(json!({
+        "dev_mode": true,
+        "users": dev_users,
     }))
 }

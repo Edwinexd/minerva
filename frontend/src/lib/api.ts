@@ -1,12 +1,21 @@
 const API_BASE = "/api"
 
+function devHeaders(): Record<string, string> {
+  const devUser = localStorage.getItem("minerva-dev-user")
+  if (devUser) {
+    return { "X-Dev-User": devUser }
+  }
+  return {}
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
     headers: {
       "Content-Type": "application/json",
+      ...devHeaders(),
       ...options?.headers,
     },
-    ...options,
   })
 
   if (!res.ok) {
@@ -23,6 +32,7 @@ async function uploadFile<T>(path: string, file: File): Promise<T> {
 
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
+    headers: devHeaders(),
     body: formData,
   })
 

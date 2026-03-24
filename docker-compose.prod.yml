@@ -1,41 +1,25 @@
 services:
-  backend:
+  minerva:
     build:
       context: .
-      dockerfile: docker/Dockerfile.dev
+      dockerfile: docker/Dockerfile.prod
     ports:
       - "3000:3000"
     volumes:
-      - ./backend:/app/backend
-      - cargo-cache:/usr/local/cargo/registry
-      - target-cache:/app/backend/target
       - minerva-data:/data
     environment:
       - DATABASE_URL=postgres://minerva:minerva@postgres:5432/minerva
       - QDRANT_URL=http://qdrant:6334
       - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - MINERVA_HMAC_SECRET=${MINERVA_HMAC_SECRET:-dev-secret-change-me}
+      - MINERVA_HMAC_SECRET=${MINERVA_HMAC_SECRET}
       - MINERVA_DOCS_PATH=/data/documents
-      - MINERVA_ADMINS=${MINERVA_ADMINS:-edsu8469}
-      - MINERVA_DEV_MODE=true
+      - MINERVA_ADMINS=${MINERVA_ADMINS}
     depends_on:
       postgres:
         condition: service_healthy
       qdrant:
         condition: service_started
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: ../docker/Dockerfile.frontend-dev
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-    environment:
-      - VITE_DEV_MODE=true
 
   postgres:
     image: postgres:16-alpine
@@ -43,8 +27,6 @@ services:
       POSTGRES_USER: minerva
       POSTGRES_PASSWORD: minerva
       POSTGRES_DB: minerva
-    ports:
-      - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -55,9 +37,6 @@ services:
 
   qdrant:
     image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
     volumes:
       - qdrant-data:/qdrant/storage
 
@@ -65,5 +44,3 @@ volumes:
   minerva-data:
   postgres-data:
   qdrant-data:
-  cargo-cache:
-  target-cache:

@@ -14,6 +14,8 @@ pub struct Config {
     /// Comma-separated list of admin eppn usernames (prefix before @).
     /// e.g. "edsu8469,isak1234"
     pub admin_usernames: Vec<String>,
+    /// When true, allows dev auth bypass (X-Dev-User header or default user)
+    pub dev_mode: bool,
 }
 
 impl Config {
@@ -38,6 +40,7 @@ impl Config {
             hmac_secret: env::var("MINERVA_HMAC_SECRET")?,
             docs_path: env::var("MINERVA_DOCS_PATH").unwrap_or_else(|_| "./data/documents".to_string()),
             admin_usernames,
+            dev_mode: env::var("MINERVA_DEV_MODE").unwrap_or_default() == "true",
         })
     }
 

@@ -536,7 +536,7 @@ function InviteLinksPanel({ courseId }: { courseId: string }) {
             >
               <div className="space-y-1 flex-1 min-w-0">
                 <code className="text-xs bg-muted px-2 py-1 rounded block truncate">
-                  {window.location.origin}/api/join/{link.token}
+                  {window.location.origin}/join/{link.token}
                 </code>
                 <div className="flex gap-3 text-xs text-muted-foreground">
                   <span>Expires: {new Date(link.expires_at).toLocaleDateString()}</span>
@@ -549,7 +549,7 @@ function InviteLinksPanel({ courseId }: { courseId: string }) {
                   size="sm"
                   onClick={() => {
                     navigator.clipboard.writeText(
-                      `${window.location.origin}/api/join/${link.token}`,
+                      `${window.location.origin}/join/${link.token}`,
                     )
                   }}
                 >

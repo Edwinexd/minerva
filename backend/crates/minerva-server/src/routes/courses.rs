@@ -80,8 +80,11 @@ async fn list_courses(
 ) -> Result<Json<Vec<CourseResponse>>, AppError> {
     let rows = if user.role.is_admin() {
         minerva_db::queries::courses::list_all(&state.db).await?
-    } else {
+    } else if user.role.is_teacher_or_above() {
         minerva_db::queries::courses::list_by_owner(&state.db, user.id).await?
+    } else {
+        // Students see courses they're a member of
+        minerva_db::queries::courses::list_by_member(&state.db, user.id).await?
     };
     Ok(Json(rows.into_iter().map(CourseResponse::from).collect()))
 }

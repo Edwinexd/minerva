@@ -67,6 +67,19 @@ pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>
     .await
 }
 
+pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
+    sqlx::query_as::<_, CourseRow>(
+        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.strategy, c.active, c.created_at, c.updated_at
+        FROM courses c
+        JOIN course_members cm ON cm.course_id = c.id
+        WHERE cm.user_id = $1 AND c.active = true
+        ORDER BY c.updated_at DESC"#,
+    )
+    .bind(user_id)
+    .fetch_all(db)
+    .await
+}
+
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
         "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",

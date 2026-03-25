@@ -91,6 +91,8 @@ async fn upsert_user(
     let id = Uuid::new_v4();
     let role = if is_admin {
         UserRole::Admin
+    } else if state.config.dev_mode && eppn.starts_with("teacher") {
+        UserRole::Teacher
     } else {
         UserRole::Student
     };

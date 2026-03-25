@@ -9,7 +9,7 @@ use super::GenerationContext;
 use crate::error::AppError;
 
 /// Similarity threshold for FLARE retrieval-triggered regeneration.
-const SIMILARITY_THRESHOLD: f32 = 0.7;
+const SIMILARITY_THRESHOLD: f32 = 0.35;
 
 /// Maximum number of FLARE retrieval iterations to prevent infinite loops.
 const MAX_FLARE_ITERATIONS: usize = 10;
@@ -28,16 +28,27 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let http_client = reqwest::Client::new();
     let collection_name = format!("course_{}", ctx.course_id);
 
-    // Start with no RAG context -- FLARE retrieves as needed during generation
-    let mut all_chunks: Vec<String> = Vec::new();
+    // Per the FLARE paper: start with an initial retrieval using the user's question
+    let initial_chunks = common::rag_lookup(
+        &http_client,
+        &ctx.openai_api_key,
+        &ctx.qdrant,
+        &collection_name,
+        &ctx.user_content,
+        ctx.max_chunks,
+    )
+    .await;
+
+    let mut all_chunks: Vec<String> = initial_chunks;
     let mut full_text = String::new();
     let mut total_prompt_tokens = 0i32;
     let mut total_completion_tokens = 0i32;
     let mut flare_iterations = 0usize;
 
     tracing::info!(
-        "flare: starting generation for conversation {}",
-        ctx.conversation_id
+        "flare: starting generation for conversation {} with {} initial chunks",
+        ctx.conversation_id,
+        all_chunks.len()
     );
 
     loop {

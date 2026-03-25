@@ -2,6 +2,7 @@ use axum::response::sse::Event;
 use futures::StreamExt;
 use qdrant_client::qdrant::SearchPointsBuilder;
 use reqwest::Response;
+use std::collections::HashSet;
 use tokio::sync::mpsc;
 
 use crate::error::AppError;
@@ -11,6 +12,36 @@ const MAX_RETRIES: u32 = 3;
 
 /// Initial backoff delay between retries.
 const INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// A chunk returned by RAG lookup, carrying metadata for display filtering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RagChunk {
+    pub document_id: String,
+    pub filename: String,
+    pub text: String,
+}
+
+impl RagChunk {
+    /// Format for inclusion in the LLM system prompt (always full text).
+    pub fn formatted(&self) -> String {
+        format!("[Source: {}]\n{}", self.filename, self.text)
+    }
+}
+
+/// Build the list of chunk strings to send to the client/store in DB.
+/// Non-displayable sources have their text stripped.
+pub fn chunks_for_client(chunks: &[RagChunk], hidden_doc_ids: &HashSet<String>) -> Vec<String> {
+    chunks
+        .iter()
+        .map(|c| {
+            if hidden_doc_ids.contains(&c.document_id) {
+                format!("[Source: {}]", c.filename)
+            } else {
+                c.formatted()
+            }
+        })
+        .collect()
+}
 
 /// Send a request to the Cerebras API with retry on 5XX / network errors.
 /// Returns the successful response or the last error as a formatted string.
@@ -76,7 +107,7 @@ pub async fn cerebras_request_with_retry(
 pub fn build_system_prompt(
     course_name: &str,
     custom_prompt: &Option<String>,
-    chunks: &[String],
+    chunks: &[RagChunk],
 ) -> String {
     let mut prompt = if chunks.is_empty() {
         format!(
@@ -97,7 +128,8 @@ pub fn build_system_prompt(
 
     if !chunks.is_empty() {
         prompt.push_str("\n\nRelevant course materials:\n---\n");
-        prompt.push_str(&chunks.join("\n---\n"));
+        let formatted: Vec<String> = chunks.iter().map(|c| c.formatted()).collect();
+        prompt.push_str(&formatted.join("\n---\n"));
         prompt.push_str("\n---");
     }
 
@@ -124,7 +156,7 @@ pub fn build_chat_messages(
     messages
 }
 
-/// Perform RAG lookup: embed query, search Qdrant, return chunk texts.
+/// Perform RAG lookup: embed query, search Qdrant, return structured chunks.
 pub async fn rag_lookup(
     client: &reqwest::Client,
     openai_key: &str,
@@ -132,7 +164,7 @@ pub async fn rag_lookup(
     collection_name: &str,
     query: &str,
     max_chunks: i32,
-) -> Vec<String> {
+) -> Vec<RagChunk> {
     let embedding = match minerva_ingest::embedder::embed_texts(
         client,
         openai_key,
@@ -171,7 +203,15 @@ pub async fn rag_lookup(
                     Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
                     _ => String::new(),
                 };
-                Some(format!("[Source: {}]\n{}", filename, text))
+                let document_id = match payload.get("document_id").and_then(|v| v.kind.as_ref()) {
+                    Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                    _ => String::new(),
+                };
+                Some(RagChunk {
+                    document_id,
+                    filename,
+                    text,
+                })
             })
             .collect(),
         Err(e) => {

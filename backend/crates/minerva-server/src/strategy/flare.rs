@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use super::common;
+use super::common::RagChunk;
 use super::GenerationContext;
 use crate::error::AppError;
 
@@ -39,7 +40,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     )
     .await;
 
-    let mut all_chunks: Vec<String> = initial_chunks;
+    let mut all_chunks: Vec<RagChunk> = initial_chunks;
     let mut full_text = String::new();
     let mut total_prompt_tokens = 0i32;
     let mut total_completion_tokens = 0i32;
@@ -171,10 +172,14 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         break;
     }
 
+    let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
+        .await
+        .unwrap_or_default();
     let chunks_json = if all_chunks.is_empty() {
         None
     } else {
-        serde_json::to_value(&all_chunks).ok()
+        let client_chunks = common::chunks_for_client(&all_chunks, &hidden);
+        serde_json::to_value(&client_chunks).ok()
     };
 
     // Estimate tokens for interrupted streams
@@ -401,7 +406,7 @@ async fn flare_retrieve(
     collection_name: &str,
     query: &str,
     max_chunks: i32,
-) -> Vec<String> {
+) -> Vec<RagChunk> {
     let embedding = match minerva_ingest::embedder::embed_texts(
         client,
         openai_key,
@@ -454,12 +459,20 @@ async fn flare_retrieve(
                 Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
                 _ => String::new(),
             };
+            let document_id = match payload.get("document_id").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => String::new(),
+            };
             tracing::debug!(
                 "flare: retrieved chunk from '{}' score {:.3}",
                 filename,
                 point.score
             );
-            Some(format!("[Source: {}]\n{}", filename, text))
+            Some(RagChunk {
+                document_id,
+                filename,
+                text,
+            })
         })
         .collect()
 }

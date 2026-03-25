@@ -25,7 +25,12 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     )
     .await;
 
-    let chunks_json = serde_json::to_value(&chunks).ok();
+    let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
+        .await
+        .unwrap_or_default();
+    let client_chunks = common::chunks_for_client(&chunks, &hidden);
+    let chunks_json = serde_json::to_value(&client_chunks).ok();
+
     let system = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &chunks);
     let messages = common::build_chat_messages(&system, &ctx.history);
 

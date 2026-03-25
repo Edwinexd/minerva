@@ -13,7 +13,7 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_documents).post(upload_document))
-        .route("/{doc_id}", delete(delete_document))
+        .route("/{doc_id}", delete(delete_document).patch(patch_document))
         .route("/{doc_id}/chunks", get(list_chunks))
         .route("/search", get(search_chunks))
 }
@@ -28,6 +28,7 @@ struct DocumentResponse {
     status: String,
     chunk_count: Option<i32>,
     error_msg: Option<String>,
+    displayable: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     processed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -43,6 +44,7 @@ impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
             status: row.status,
             chunk_count: row.chunk_count,
             error_msg: row.error_msg,
+            displayable: row.displayable,
             created_at: row.created_at,
             processed_at: row.processed_at,
         }
@@ -163,6 +165,32 @@ async fn upload_document(
     });
 
     Ok(Json(DocumentResponse::from(row)))
+}
+
+#[derive(Deserialize)]
+struct PatchDocumentBody {
+    displayable: Option<bool>,
+}
+
+async fn patch_document(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<PatchDocumentBody>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if course.owner_id != user.id && !user.role.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    if let Some(displayable) = body.displayable {
+        minerva_db::queries::documents::update_displayable(&state.db, doc_id, displayable).await?;
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 async fn delete_document(

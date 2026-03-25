@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
 use super::common;
+use super::common::RagChunk;
 use super::GenerationContext;
 use crate::error::AppError;
 
@@ -20,7 +21,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let initial_messages = common::build_chat_messages(&system_no_rag, &ctx.history);
 
     // Spawn RAG lookup in parallel
-    let (rag_tx, mut rag_rx) = oneshot::channel::<Vec<String>>();
+    let (rag_tx, mut rag_rx) = oneshot::channel::<Vec<RagChunk>>();
     {
         let client = http_client.clone();
         let key = ctx.openai_api_key.clone();
@@ -71,7 +72,13 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             total_prompt += prompt_tokens;
             total_completion += completion_tokens;
             rag_injected = true;
-            chunks_json = serde_json::to_value(&rag_chunks).ok();
+
+            let hidden =
+                minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
+                    .await
+                    .unwrap_or_default();
+            let client_chunks = common::chunks_for_client(&rag_chunks, &hidden);
+            chunks_json = serde_json::to_value(&client_chunks).ok();
 
             tracing::info!(
                 "parallel: RAG arrived after {} chars, continuing with {} chunks",
@@ -155,7 +162,7 @@ enum StreamResult {
     RagArrived {
         prompt_tokens: i32,
         completion_tokens: i32,
-        rag_chunks: Vec<String>,
+        rag_chunks: Vec<RagChunk>,
     },
     Error(String),
 }
@@ -171,7 +178,7 @@ async fn stream_with_rag_check(
     messages: &[serde_json::Value],
     tx: &mpsc::Sender<Result<Event, AppError>>,
     full_text: &mut String,
-    rag_rx: &mut oneshot::Receiver<Vec<String>>,
+    rag_rx: &mut oneshot::Receiver<Vec<RagChunk>>,
 ) -> StreamResult {
     let body = serde_json::json!({
         "model": model,

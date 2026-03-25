@@ -12,6 +12,7 @@ pub struct DocumentRow {
     pub chunk_count: Option<i32>,
     pub error_msg: Option<String>,
     pub uploaded_by: Uuid,
+    pub displayable: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub processed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -28,7 +29,7 @@ pub async fn insert(
     sqlx::query_as::<_, DocumentRow>(
         r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by)
         VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, created_at, processed_at"#,
+        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at"#,
     )
     .bind(id)
     .bind(course_id)
@@ -42,7 +43,7 @@ pub async fn insert(
 
 pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as::<_, DocumentRow>(
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, created_at, processed_at FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
     )
     .bind(course_id)
     .fetch_all(db)
@@ -51,11 +52,37 @@ pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<Document
 
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as::<_, DocumentRow>(
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, created_at, processed_at FROM documents WHERE id = $1",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at FROM documents WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(db)
     .await
+}
+
+pub async fn update_displayable(
+    db: &PgPool,
+    id: Uuid,
+    displayable: bool,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("UPDATE documents SET displayable = $1 WHERE id = $2")
+        .bind(displayable)
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Returns the set of document IDs in a course that are NOT displayable.
+pub async fn hidden_document_ids(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<std::collections::HashSet<String>, sqlx::Error> {
+    let rows: Vec<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM documents WHERE course_id = $1 AND displayable = FALSE")
+            .bind(course_id)
+            .fetch_all(db)
+            .await?;
+    Ok(rows.into_iter().map(|(id,)| id.to_string()).collect())
 }
 
 pub async fn delete(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {

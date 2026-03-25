@@ -414,6 +414,16 @@ function DocumentsPanel({ courseId }: { courseId: string }) {
     },
   })
 
+  const toggleDisplayableMutation = useMutation({
+    mutationFn: ({ docId, displayable }: { docId: string; displayable: boolean }) =>
+      api.patch(`/courses/${courseId}/documents/${docId}`, { displayable }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "documents"],
+      })
+    },
+  })
+
   const statusColor = (status: string) => {
     if (status === "ready") return "default" as const
     if (status === "processing") return "secondary" as const
@@ -477,6 +487,19 @@ function DocumentsPanel({ courseId }: { courseId: string }) {
                     error
                   </span>
                 )}
+                <Button
+                  variant={doc.displayable ? "outline" : "secondary"}
+                  size="sm"
+                  title={doc.displayable ? "Students can see source text" : "Source text hidden from students"}
+                  onClick={() =>
+                    toggleDisplayableMutation.mutate({
+                      docId: doc.id,
+                      displayable: !doc.displayable,
+                    })
+                  }
+                >
+                  {doc.displayable ? "Visible" : "Hidden"}
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"

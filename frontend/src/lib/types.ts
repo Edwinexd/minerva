@@ -111,6 +111,7 @@ export interface Document {
   status: "pending" | "processing" | "ready" | "failed"
   chunk_count: number
   error_msg: string | null
+  displayable: boolean
   uploaded_by: string
   created_at: string
   processed_at: string | null

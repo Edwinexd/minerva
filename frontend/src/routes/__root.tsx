@@ -27,7 +27,7 @@ function RootLayout() {
   })
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
       <header className="border-b px-6 py-4">
         <div className="flex items-center justify-between max-w-7xl mx-auto">
           <Link to="/" className="text-xl font-bold tracking-tight hover:opacity-80">
@@ -54,9 +54,19 @@ function RootLayout() {
           </nav>
         </div>
       </header>
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-7xl mx-auto px-6 py-8 flex-1 w-full">
         <Outlet />
       </main>
+      <footer className="border-t px-6 py-4 mt-auto">
+        <div className="flex items-center justify-between max-w-7xl mx-auto text-xs text-muted-foreground">
+          <span>
+            <a href="https://github.com/Edwinexd/minerva" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">Minerva</a>
+            {" "}is licensed under{" "}
+            <a href="https://github.com/Edwinexd/minerva?tab=AGPL-3.0-1-ov-file" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">AGPL-3.0</a>
+          </span>
+          <a href="mailto:lambda@dsv.su.se" className="hover:text-foreground underline">lambda@dsv.su.se</a>
+        </div>
+      </footer>
     </div>
   )
 }

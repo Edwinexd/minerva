@@ -19,6 +19,13 @@ repos:
         types: [text]
         exclude: (\.lock|node_modules|target|dist|\.gen\.)
 
+      - id: tsc-check
+        name: tsc check
+        entry: bash -c 'cd frontend && npx tsc -b'
+        language: system
+        pass_filenames: false
+        files: \.(ts|tsx)$
+
       - id: cargo-fmt
         name: cargo fmt
         entry: bash -c 'cd backend && cargo fmt --all -- --check'

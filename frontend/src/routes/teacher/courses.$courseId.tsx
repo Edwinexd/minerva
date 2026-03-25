@@ -28,7 +28,7 @@ import {
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import React, { useMemo, useState } from "react"
-import type { ConversationWithUser, Course, Document as DocType, TeacherNote, TopicGroup } from "@/lib/types"
+import type { ConversationWithUser, Course, Document as DocType, TeacherNote } from "@/lib/types"
 
 export const Route = createFileRoute("/teacher/courses/$courseId")({
   component: CourseEditPage,

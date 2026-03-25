@@ -164,9 +164,10 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             }
 
             tracing::debug!("flare: no new chunks found, continuing without restart");
+            continue; // Keep generating - just no new context to add
         }
 
-        // StreamOutcome::Completed or no new chunks - we're done
+        // StreamOutcome::Completed - model finished naturally
         break;
     }
 
@@ -353,28 +354,54 @@ async fn stream_with_logprobs(
 }
 
 /// Check for a sentence/paragraph boundary in the buffer.
+/// Avoids triggering inside markdown tables, code blocks, or lists.
 fn is_sentence_boundary(text: &str) -> bool {
-    if text.len() < 80 {
+    if text.len() < 100 {
         return false;
     }
-    if text.contains("\n\n") {
-        return true;
-    }
-    if text.len() > 200 {
-        let trimmed = text.trim_end();
-        if trimmed.ends_with(". ")
-            || trimmed.ends_with(".\n")
-            || trimmed.ends_with('.')
-            || trimmed.ends_with("? ")
-            || trimmed.ends_with("?\n")
-            || trimmed.ends_with('?')
-            || trimmed.ends_with("! ")
-            || trimmed.ends_with("!\n")
-            || trimmed.ends_with('!')
-        {
-            return true;
+
+    // Don't trigger inside markdown tables (lines starting with |)
+    if let Some(last_line) = text.lines().last() {
+        let trimmed_line = last_line.trim();
+        if trimmed_line.starts_with('|') || trimmed_line.starts_with("|-") {
+            return false;
         }
     }
+
+    // Don't trigger inside code blocks
+    let fence_count = text.matches("```").count();
+    if !fence_count.is_multiple_of(2) {
+        return false; // Inside an unclosed code block
+    }
+
+    // Don't trigger inside markdown lists (last line starts with - or *)
+    if let Some(last_line) = text.lines().last() {
+        let trimmed_line = last_line.trim();
+        if trimmed_line.starts_with("- ") || trimmed_line.starts_with("* ") {
+            return false;
+        }
+    }
+
+    // Paragraph break is always a good boundary
+    if text.ends_with("\n\n") {
+        return true;
+    }
+
+    // For long buffers, check if we ended a sentence cleanly
+    if text.len() > 300 {
+        let trimmed = text.trim_end();
+        let last_char = trimmed.chars().last().unwrap_or(' ');
+        if last_char == '.' || last_char == '?' || last_char == '!' {
+            // Make sure we're not inside a table row or list
+            if let Some(last_line) = trimmed.lines().last() {
+                let ll = last_line.trim();
+                if !ll.starts_with('|') && !ll.starts_with("- ") && !ll.starts_with("* ") {
+                    return true;
+                }
+            }
+        }
+    }
+
     false
 }
 

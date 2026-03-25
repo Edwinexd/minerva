@@ -42,6 +42,7 @@ async fn me(Extension(user): Extension<User>) -> Json<Value> {
         "eppn": user.eppn,
         "display_name": user.display_name,
         "role": user.role,
+        "suspended": user.suspended,
     }))
 }
 

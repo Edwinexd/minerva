@@ -1,9 +1,74 @@
 use axum::response::sse::Event;
 use futures::StreamExt;
 use qdrant_client::qdrant::SearchPointsBuilder;
+use reqwest::Response;
 use tokio::sync::mpsc;
 
 use crate::error::AppError;
+
+/// Maximum number of retries for transient Cerebras API errors (5XX, timeouts).
+const MAX_RETRIES: u32 = 3;
+
+/// Initial backoff delay between retries.
+const INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Send a request to the Cerebras API with retry on 5XX / network errors.
+/// Returns the successful response or the last error as a formatted string.
+pub async fn cerebras_request_with_retry(
+    client: &reqwest::Client,
+    api_key: &str,
+    body: &serde_json::Value,
+) -> Result<Response, String> {
+    let mut last_err = String::new();
+
+    for attempt in 0..=MAX_RETRIES {
+        if attempt > 0 {
+            let backoff = INITIAL_BACKOFF * 2u32.pow(attempt - 1);
+            tracing::warn!(
+                "cerebras: retry {}/{} after {:?}",
+                attempt,
+                MAX_RETRIES,
+                backoff
+            );
+            tokio::time::sleep(backoff).await;
+        }
+
+        let result = client
+            .post("https://api.cerebras.ai/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(body)
+            .send()
+            .await;
+
+        match result {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    return Ok(response);
+                }
+                if status.is_server_error() {
+                    let body_text = response.text().await.unwrap_or_default();
+                    last_err = format!("Cerebras API error {}: {}", status, body_text);
+                    tracing::warn!("cerebras: {}", last_err);
+                    continue;
+                }
+                // Client errors (4XX) are not retryable
+                let body_text = response.text().await.unwrap_or_default();
+                return Err(format!("Cerebras API error {}: {}", status, body_text));
+            }
+            Err(e) if e.is_timeout() || e.is_connect() => {
+                last_err = format!("Request failed: {}", e);
+                tracing::warn!("cerebras: {}", last_err);
+                continue;
+            }
+            Err(e) => {
+                return Err(format!("Request failed: {}", e));
+            }
+        }
+    }
+
+    Err(last_err)
+}
 
 /// Build the system prompt with optional RAG chunks.
 /// When chunks are empty (e.g. parallel phase 1), uses a generic prompt
@@ -135,19 +200,7 @@ pub async fn stream_cerebras_to_client(
         "stream_options": { "include_usage": true },
     });
 
-    let response = client
-        .post("https://api.cerebras.ai/v1/chat/completions")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Cerebras API error {}: {}", status, body));
-    }
+    let response = cerebras_request_with_retry(client, api_key, &body).await?;
 
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();

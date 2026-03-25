@@ -263,6 +263,15 @@ async fn send_message(
         return Err(AppError::Forbidden);
     }
 
+    // Enforce daily token limit (0 = unlimited)
+    if course.daily_token_limit > 0 {
+        let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user.id, course_id)
+            .await?;
+        if used >= course.daily_token_limit {
+            return Err(AppError::QuotaExceeded);
+        }
+    }
+
     // Save user message
     let user_msg_id = Uuid::new_v4();
     minerva_db::queries::conversations::insert_message(

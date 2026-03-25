@@ -17,6 +17,9 @@ pub enum AppError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
+    #[error("daily token quota exceeded")]
+    QuotaExceeded,
+
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
 
@@ -31,6 +34,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, self.to_string()),
             AppError::Forbidden => (StatusCode::FORBIDDEN, self.to_string()),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            AppError::QuotaExceeded => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
             AppError::Database(e) => {
                 tracing::error!("database error: {:?}", e);
                 (

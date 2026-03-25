@@ -42,6 +42,14 @@ function RootLayout() {
                 Dashboard
               </Link>
             )}
+            {user && user.role === "admin" && (
+              <Link
+                to="/admin"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                Admin
+              </Link>
+            )}
             {devConfig?.dev_mode && devConfig.users ? (
               <DevUserSwitcher users={devConfig.users} />
             ) : (

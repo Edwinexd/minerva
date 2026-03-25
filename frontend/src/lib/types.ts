@@ -3,6 +3,7 @@ export interface User {
   eppn: string
   display_name: string | null
   role: "student" | "teacher" | "admin"
+  suspended?: boolean
 }
 
 export interface Course {
@@ -16,9 +17,30 @@ export interface Course {
   system_prompt: string | null
   max_chunks: number
   strategy: string
+  daily_token_limit: number
   active: boolean
   created_at: string
   updated_at: string
+}
+
+export interface AdminUser {
+  id: string
+  eppn: string
+  display_name: string | null
+  role: string
+  suspended: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface UsageRecord {
+  user_id: string
+  course_id: string
+  date: string
+  prompt_tokens: number
+  completion_tokens: number
+  embedding_tokens: number
+  request_count: number
 }
 
 export interface CourseMember {

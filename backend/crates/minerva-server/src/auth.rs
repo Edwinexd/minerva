@@ -54,6 +54,11 @@ pub async fn auth_middleware(
         .map(|s| s.to_string());
 
     let user = upsert_user(&state, &eppn, display_name.as_deref()).await?;
+
+    if user.suspended {
+        return Err(AppError::Forbidden);
+    }
+
     request.extensions_mut().insert(user);
 
     Ok(next.run(request).await)
@@ -83,6 +88,7 @@ async fn upsert_user(
             eppn: row.eppn,
             display_name: display_name.map(|s| s.to_string()).or(row.display_name),
             role,
+            suspended: row.suspended,
             created_at: row.created_at,
             updated_at: row.updated_at,
         });
@@ -105,6 +111,7 @@ async fn upsert_user(
         eppn: eppn.to_string(),
         display_name: display_name.map(|s| s.to_string()),
         role,
+        suspended: false,
         created_at: now,
         updated_at: now,
     })

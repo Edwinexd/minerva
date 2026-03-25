@@ -12,6 +12,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/users", get(list_users))
         .route("/users/{id}/role", put(update_user_role))
+        .route("/users/{id}/suspended", put(update_user_suspended))
 }
 
 fn require_admin(user: &User) -> Result<(), AppError> {
@@ -27,6 +28,7 @@ struct UserResponse {
     eppn: String,
     display_name: Option<String>,
     role: String,
+    suspended: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -45,6 +47,7 @@ async fn list_users(
                 eppn: r.eppn,
                 display_name: r.display_name,
                 role: r.role,
+                suspended: r.suspended,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             })
@@ -73,6 +76,32 @@ async fn update_user_role(
     }
 
     let updated = minerva_db::queries::users::update_role(&state.db, id, &body.role).await?;
+    if !updated {
+        return Err(AppError::NotFound);
+    }
+
+    Ok(Json(serde_json::json!({ "updated": true })))
+}
+
+#[derive(Deserialize)]
+struct UpdateSuspendedRequest {
+    suspended: bool,
+}
+
+async fn update_user_suspended(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateSuspendedRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+
+    // Prevent admins from suspending themselves
+    if id == user.id {
+        return Err(AppError::BadRequest("cannot suspend yourself".to_string()));
+    }
+
+    let updated = minerva_db::queries::users::set_suspended(&state.db, id, body.suspended).await?;
     if !updated {
         return Err(AppError::NotFound);
     }

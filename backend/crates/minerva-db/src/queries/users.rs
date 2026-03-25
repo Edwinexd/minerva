@@ -7,13 +7,14 @@ pub struct UserRow {
     pub eppn: String,
     pub display_name: Option<String>,
     pub role: String,
+    pub suspended: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub async fn find_by_eppn(db: &PgPool, eppn: &str) -> Result<Option<UserRow>, sqlx::Error> {
     sqlx::query_as::<_, UserRow>(
-        "SELECT id, eppn, display_name, role, created_at, updated_at FROM users WHERE eppn = $1",
+        "SELECT id, eppn, display_name, role, suspended, created_at, updated_at FROM users WHERE eppn = $1",
     )
     .bind(eppn)
     .fetch_optional(db)
@@ -56,10 +57,23 @@ pub async fn update_login(
 
 pub async fn list_all(db: &PgPool) -> Result<Vec<UserRow>, sqlx::Error> {
     sqlx::query_as::<_, UserRow>(
-        "SELECT id, eppn, display_name, role, created_at, updated_at FROM users ORDER BY eppn",
+        "SELECT id, eppn, display_name, role, suspended, created_at, updated_at FROM users ORDER BY eppn",
     )
     .fetch_all(db)
     .await
+}
+
+pub async fn set_suspended(
+    db: &PgPool,
+    user_id: Uuid,
+    suspended: bool,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("UPDATE users SET suspended = $1, updated_at = NOW() WHERE id = $2")
+        .bind(suspended)
+        .bind(user_id)
+        .execute(db)
+        .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn update_role(db: &PgPool, user_id: Uuid, role: &str) -> Result<bool, sqlx::Error> {

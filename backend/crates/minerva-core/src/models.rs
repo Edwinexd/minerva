@@ -42,6 +42,7 @@ pub struct User {
     pub eppn: String,
     pub display_name: Option<String>,
     pub role: UserRole,
+    pub suspended: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -57,6 +58,7 @@ pub struct Course {
     pub model: String,
     pub system_prompt: Option<String>,
     pub max_chunks: i32,
+    pub daily_token_limit: i64,
     pub active: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

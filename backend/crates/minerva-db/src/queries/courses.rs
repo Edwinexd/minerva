@@ -13,6 +13,7 @@ pub struct CourseRow {
     pub system_prompt: Option<String>,
     pub max_chunks: i32,
     pub strategy: String,
+    pub daily_token_limit: i64,
     pub active: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -33,13 +34,14 @@ pub struct UpdateCourse {
     pub system_prompt: Option<String>,
     pub max_chunks: Option<i32>,
     pub strategy: Option<String>,
+    pub daily_token_limit: Option<i64>,
 }
 
 pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<CourseRow, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
         r#"INSERT INTO courses (id, name, description, owner_id)
         VALUES ($1, $2, $3, $4)
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, daily_token_limit, active, created_at, updated_at"#,
     )
     .bind(id)
     .bind(&input.name)
@@ -51,7 +53,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
 
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, daily_token_limit, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
     )
     .bind(id)
     .fetch_optional(db)
@@ -60,7 +62,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx
 
 pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, daily_token_limit, active, created_at, updated_at FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
     )
     .bind(owner_id)
     .fetch_all(db)
@@ -69,7 +71,7 @@ pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>
 
 pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
-        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.strategy, c.active, c.created_at, c.updated_at
+        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.strategy, c.daily_token_limit, c.active, c.created_at, c.updated_at
         FROM courses c
         JOIN course_members cm ON cm.course_id = c.id
         WHERE cm.user_id = $1 AND c.active = true
@@ -82,7 +84,7 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>
 
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, daily_token_limit, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",
     )
     .fetch_all(db)
     .await
@@ -103,9 +105,10 @@ pub async fn update(
             system_prompt = COALESCE($7, system_prompt),
             max_chunks = COALESCE($8, max_chunks),
             strategy = COALESCE($9, strategy),
+            daily_token_limit = COALESCE($10, daily_token_limit),
             updated_at = NOW()
         WHERE id = $1 AND active = true
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, active, created_at, updated_at"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, daily_token_limit, active, created_at, updated_at"#,
     )
     .bind(id)
     .bind(&input.name)
@@ -116,6 +119,7 @@ pub async fn update(
     .bind(&input.system_prompt)
     .bind(input.max_chunks)
     .bind(&input.strategy)
+    .bind(input.daily_token_limit)
     .fetch_optional(db)
     .await
 }

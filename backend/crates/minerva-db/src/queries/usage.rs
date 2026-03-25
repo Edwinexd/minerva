@@ -60,6 +60,21 @@ pub async fn get_all_usage(db: &PgPool) -> Result<Vec<UsageDailyRow>, sqlx::Erro
     .await
 }
 
+pub async fn get_user_daily_tokens(
+    db: &PgPool,
+    user_id: Uuid,
+    course_id: Uuid,
+) -> Result<i64, sqlx::Error> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT COALESCE(prompt_tokens + completion_tokens, 0) FROM usage_daily WHERE user_id = $1 AND course_id = $2 AND date = CURRENT_DATE",
+    )
+    .bind(user_id)
+    .bind(course_id)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|r| r.0).unwrap_or(0))
+}
+
 #[derive(Debug, sqlx::FromRow)]
 pub struct UsageSummaryRow {
     pub course_id: Uuid,

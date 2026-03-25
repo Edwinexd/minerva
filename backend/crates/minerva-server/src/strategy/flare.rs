@@ -230,19 +230,7 @@ async fn stream_with_logprobs(
         "stream_options": { "include_usage": true },
     });
 
-    let response = client
-        .post("https://api.cerebras.ai/v1/chat/completions")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Cerebras API error {}: {}", status, body));
-    }
+    let response = common::cerebras_request_with_retry(client, api_key, &body).await?;
 
     let mut stream = response.bytes_stream();
     let mut sse_buffer = String::new();

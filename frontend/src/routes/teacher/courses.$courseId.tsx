@@ -110,6 +110,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [systemPrompt, setSystemPrompt] = useState(course.system_prompt || "")
   const [maxChunks, setMaxChunks] = useState(course.max_chunks)
   const [strategy, setStrategy] = useState(course.strategy)
+  const [dailyTokenLimit, setDailyTokenLimit] = useState(course.daily_token_limit)
 
   const mutation = useMutation({
     mutationFn: (data: Record<string, unknown>) =>
@@ -141,6 +142,7 @@ function CourseConfigForm({ course }: { course: Course }) {
               system_prompt: systemPrompt || null,
               max_chunks: maxChunks,
               strategy,
+              daily_token_limit: dailyTokenLimit,
             })
           }}
         >
@@ -244,6 +246,24 @@ function CourseConfigForm({ course }: { course: Course }) {
               max={50}
             />
           </div>
+
+          <Separator />
+
+          <div className="space-y-2">
+            <Label htmlFor="dailyTokenLimit">Daily Token Limit per Student</Label>
+            <Input
+              id="dailyTokenLimit"
+              type="number"
+              value={dailyTokenLimit}
+              onChange={(e) => setDailyTokenLimit(parseInt(e.target.value) || 0)}
+              min={0}
+            />
+            <p className="text-xs text-muted-foreground">
+              Maximum tokens a student can use per day in this course. Set to 0 for unlimited.
+            </p>
+          </div>
+
+          <Separator />
 
           <div className="space-y-2">
             <Label htmlFor="systemPrompt">Custom System Prompt</Label>

@@ -181,20 +181,9 @@ async fn stream_with_rag_check(
         "stream_options": { "include_usage": true },
     });
 
-    let response = match client
-        .post("https://api.cerebras.ai/v1/chat/completions")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&body)
-        .send()
-        .await
-    {
-        Ok(r) if r.status().is_success() => r,
-        Ok(r) => {
-            let status = r.status();
-            let body = r.text().await.unwrap_or_default();
-            return StreamResult::Error(format!("Cerebras API error {}: {}", status, body));
-        }
-        Err(e) => return StreamResult::Error(format!("Request failed: {}", e)),
+    let response = match common::cerebras_request_with_retry(client, api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => return StreamResult::Error(e),
     };
 
     let mut stream = response.bytes_stream();

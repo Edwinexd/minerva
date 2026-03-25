@@ -35,6 +35,7 @@ struct UpdateCourseRequest {
     system_prompt: Option<String>,
     max_chunks: Option<i32>,
     strategy: Option<String>,
+    daily_token_limit: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -49,6 +50,7 @@ struct CourseResponse {
     system_prompt: Option<String>,
     max_chunks: i32,
     strategy: String,
+    daily_token_limit: i64,
     active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
@@ -67,6 +69,7 @@ impl From<minerva_db::queries::courses::CourseRow> for CourseResponse {
             system_prompt: row.system_prompt,
             max_chunks: row.max_chunks,
             strategy: row.strategy,
+            daily_token_limit: row.daily_token_limit,
             active: row.active,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -156,6 +159,7 @@ async fn update_course(
         system_prompt: body.system_prompt,
         max_chunks: body.max_chunks,
         strategy: body.strategy,
+        daily_token_limit: body.daily_token_limit,
     };
 
     let row = minerva_db::queries::courses::update(&state.db, id, &input)

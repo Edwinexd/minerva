@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
+import { Route as AdminIndexRouteImport } from "./routes/admin/index"
 import { Route as JoinTokenRouteImport } from "./routes/join/$token"
 import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
 import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
@@ -24,6 +25,11 @@ const IndexRoute = IndexRouteImport.update({
 const TeacherIndexRoute = TeacherIndexRouteImport.update({
   id: "/teacher/",
   path: "/teacher/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: "/admin/",
+  path: "/admin/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const JoinTokenRoute = JoinTokenRouteImport.update({
@@ -51,6 +57,7 @@ const CourseCourseIdConversationIdRoute =
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/join/$token": typeof JoinTokenRoute
+  "/admin/": typeof AdminIndexRoute
   "/teacher/": typeof TeacherIndexRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRoute
@@ -59,6 +66,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/join/$token": typeof JoinTokenRoute
+  "/admin": typeof AdminIndexRoute
   "/teacher": typeof TeacherIndexRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRoute
@@ -68,6 +76,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/join/$token": typeof JoinTokenRoute
+  "/admin/": typeof AdminIndexRoute
   "/teacher/": typeof TeacherIndexRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRoute
@@ -78,6 +87,7 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/join/$token"
+    | "/admin/"
     | "/teacher/"
     | "/course/$courseId/$conversationId"
     | "/teacher/courses/$courseId"
@@ -86,6 +96,7 @@ export interface FileRouteTypes {
   to:
     | "/"
     | "/join/$token"
+    | "/admin"
     | "/teacher"
     | "/course/$courseId/$conversationId"
     | "/teacher/courses/$courseId"
@@ -94,6 +105,7 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/join/$token"
+    | "/admin/"
     | "/teacher/"
     | "/course/$courseId/$conversationId"
     | "/teacher/courses/$courseId"
@@ -103,6 +115,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   JoinTokenRoute: typeof JoinTokenRoute
+  AdminIndexRoute: typeof AdminIndexRoute
   TeacherIndexRoute: typeof TeacherIndexRoute
   CourseCourseIdConversationIdRoute: typeof CourseCourseIdConversationIdRoute
   TeacherCoursesCourseIdRoute: typeof TeacherCoursesCourseIdRoute
@@ -123,6 +136,13 @@ declare module "@tanstack/react-router" {
       path: "/teacher"
       fullPath: "/teacher/"
       preLoaderRoute: typeof TeacherIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/admin/": {
+      id: "/admin/"
+      path: "/admin"
+      fullPath: "/admin/"
+      preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/join/$token": {
@@ -159,6 +179,7 @@ declare module "@tanstack/react-router" {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   JoinTokenRoute: JoinTokenRoute,
+  AdminIndexRoute: AdminIndexRoute,
   TeacherIndexRoute: TeacherIndexRoute,
   CourseCourseIdConversationIdRoute: CourseCourseIdConversationIdRoute,
   TeacherCoursesCourseIdRoute: TeacherCoursesCourseIdRoute,

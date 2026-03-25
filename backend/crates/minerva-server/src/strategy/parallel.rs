@@ -85,13 +85,19 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             let mut continued = common::build_chat_messages(&system_with_rag, &ctx.history);
 
             if !full_text.is_empty() {
+                // Add continuation instruction to system prompt
+                if let Some(sys_msg) = continued.first_mut() {
+                    if let Some(content) = sys_msg.get("content").and_then(|c| c.as_str()) {
+                        let new_content = format!(
+                            "{}\n\nYou are continuing a response that was already started. Additional context has been retrieved. Continue seamlessly from where the response left off. Do not repeat anything already written.",
+                            content,
+                        );
+                        sys_msg["content"] = serde_json::Value::String(new_content);
+                    }
+                }
                 continued.push(serde_json::json!({
                     "role": "assistant",
                     "content": full_text,
-                }));
-                continued.push(serde_json::json!({
-                    "role": "user",
-                    "content": "Continue your response from exactly where you left off. Do not repeat what you already said.",
                 }));
             }
 

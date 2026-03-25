@@ -65,17 +65,23 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         let system = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &all_chunks);
         let mut messages = common::build_chat_messages(&system, &ctx.history);
 
-        // If we already have partial output, append it to the last user message
-        // as context so the model continues naturally. We frame it as:
-        // "You already started answering with: <partial>. Continue from where you left off."
+        // If we already have partial output, add continuation context to the system
+        // prompt and set the partial text as the last assistant message. The model
+        // treats this as its own prior output and continues naturally from it.
         if !full_text.is_empty() {
+            if let Some(sys_msg) = messages.first_mut() {
+                if let Some(content) = sys_msg.get("content").and_then(|c| c.as_str()) {
+                    let new_content = format!(
+                        "{}\n\nYou are continuing a response that was already started. Additional context has been retrieved. Continue seamlessly from where the response left off. Do not repeat anything already written.",
+                        content,
+                    );
+                    sys_msg["content"] = serde_json::Value::String(new_content);
+                }
+            }
+            // The model sees its own partial output and continues from it
             messages.push(serde_json::json!({
                 "role": "assistant",
                 "content": full_text,
-            }));
-            messages.push(serde_json::json!({
-                "role": "user",
-                "content": "Continue your response from exactly where you left off. Do not repeat what you already said.",
             }));
         }
 

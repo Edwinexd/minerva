@@ -94,6 +94,14 @@ export interface Message {
   created_at: string
 }
 
+export interface TopicGroup {
+  topic: string
+  conversation_count: number
+  unique_users: number
+  total_messages: number
+  conversation_ids: string[]
+}
+
 export interface Document {
   id: string
   course_id: string

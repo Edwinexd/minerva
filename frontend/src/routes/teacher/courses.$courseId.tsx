@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { courseQuery, courseMembersQuery, courseDocumentsQuery, modelsQuery, allConversationsQuery, conversationDetailQuery } from "@/lib/queries"
+import { courseQuery, courseMembersQuery, courseDocumentsQuery, modelsQuery, allConversationsQuery, conversationDetailQuery, popularTopicsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,8 +27,8 @@ import {
 } from "@/components/ui/select"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import React, { useState } from "react"
-import type { ConversationWithUser, Course, Document as DocType, TeacherNote } from "@/lib/types"
+import React, { useMemo, useState } from "react"
+import type { ConversationWithUser, Course, Document as DocType, TeacherNote, TopicGroup } from "@/lib/types"
 
 export const Route = createFileRoute("/teacher/courses/$courseId")({
   component: CourseEditPage,
@@ -197,7 +197,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           <div className="space-y-2">
             <Label>Model</Label>
             <Select value={model} onValueChange={(v) => v && setModel(v)}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full truncate">
                 <SelectValue placeholder="Select a model" />
               </SelectTrigger>
               <SelectContent>
@@ -213,7 +213,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           <div className="space-y-2">
             <Label>Generation Strategy</Label>
             <Select value={strategy} onValueChange={(v) => v && setStrategy(v)}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full truncate">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -776,7 +776,9 @@ function ChunkBrowser({ courseId }: { courseId: string }) {
 
 function ConversationsPanel({ courseId }: { courseId: string }) {
   const { data: conversations, isLoading } = useQuery(allConversationsQuery(courseId))
+  const { data: topics, isLoading: topicsLoading } = useQuery(popularTopicsQuery(courseId))
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   const pinMutation = useMutation({
@@ -789,9 +791,23 @@ function ConversationsPanel({ courseId }: { courseId: string }) {
     },
   })
 
+  const activeTopic = useMemo(
+    () => topics?.find((t) => t.topic === selectedTopic) ?? null,
+    [topics, selectedTopic],
+  )
+
+  // Filter conversations when a topic is active
+  const topicConvIds = useMemo(
+    () => activeTopic ? new Set(activeTopic.conversation_ids) : null,
+    [activeTopic],
+  )
+  const displayConversations = topicConvIds
+    ? (conversations || []).filter((c) => topicConvIds.has(c.id))
+    : (conversations || [])
+
   // Group conversations by user
   const grouped = new Map<string, { label: string; conversations: ConversationWithUser[] }>()
-  for (const conv of conversations || []) {
+  for (const conv of displayConversations) {
     const key = conv.user_id
     if (!grouped.has(key)) {
       grouped.set(key, {
@@ -804,9 +820,70 @@ function ConversationsPanel({ courseId }: { courseId: string }) {
 
   return (
     <div className="space-y-4">
+      {!topicsLoading && topics && topics.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Popular Topics</CardTitle>
+            <CardDescription>
+              Common themes extracted from student messages across all conversations
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-3">
+              <Select
+                value={selectedTopic ?? ""}
+                onValueChange={(v) => setSelectedTopic(v || null)}
+              >
+                <SelectTrigger className="w-72">
+                  <SelectValue placeholder="Filter by topic..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {topics.map((t) => (
+                    <SelectItem key={t.topic} value={t.topic}>
+                      {t.topic} ({t.conversation_count} convos, {t.unique_users} students)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedTopic && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedTopic(null)}
+                >
+                  Clear filter
+                </Button>
+              )}
+            </div>
+            {activeTopic && (
+              <div className="text-sm text-muted-foreground">
+                {activeTopic.conversation_count} conversations, {activeTopic.unique_users} students, {activeTopic.total_messages} total messages
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      {topicsLoading && (
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-4 w-64 mt-1" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-10 w-72" />
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardHeader>
-          <CardTitle>Student Conversations</CardTitle>
+          <CardTitle>
+            Student Conversations
+            {activeTopic && (
+              <Badge variant="secondary" className="ml-2 font-normal">
+                Filtered: {activeTopic.topic}
+              </Badge>
+            )}
+          </CardTitle>
           <CardDescription>
             View all student conversations. Pin good answers to make them visible to all students.
           </CardDescription>
@@ -819,8 +896,10 @@ function ConversationsPanel({ courseId }: { courseId: string }) {
               <Skeleton className="h-10 w-full" />
             </div>
           )}
-          {!isLoading && conversations?.length === 0 && (
-            <p className="text-muted-foreground text-sm">No conversations yet.</p>
+          {!isLoading && displayConversations.length === 0 && (
+            <p className="text-muted-foreground text-sm">
+              {activeTopic ? "No conversations match this topic." : "No conversations yet."}
+            </p>
           )}
           <div className="space-y-6">
             {Array.from(grouped.entries()).map(([userId, group]) => (

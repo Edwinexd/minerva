@@ -275,6 +275,29 @@ pub async fn insert_message(
     .await
 }
 
+#[derive(Debug, sqlx::FromRow)]
+pub struct ConversationMessageTextRow {
+    pub conversation_id: Uuid,
+    pub content: String,
+}
+
+/// Fetch all user messages for a course (for topic analysis).
+pub async fn list_user_messages_by_course(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<Vec<ConversationMessageTextRow>, sqlx::Error> {
+    sqlx::query_as::<_, ConversationMessageTextRow>(
+        r#"SELECT m.conversation_id, m.content
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id
+        WHERE c.course_id = $1 AND m.role = 'user'
+        ORDER BY m.created_at ASC"#,
+    )
+    .bind(course_id)
+    .fetch_all(db)
+    .await
+}
+
 pub async fn update_title(db: &PgPool, id: Uuid, title: &str) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE conversations SET title = $1, updated_at = NOW() WHERE id = $2")
         .bind(title)

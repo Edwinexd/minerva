@@ -11,6 +11,8 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
+use std::collections::{HashMap, HashSet};
+
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::strategy;
@@ -23,6 +25,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/conversations/all", get(list_all_conversations))
         .route("/conversations/pinned", get(list_pinned_conversations))
+        .route("/conversations/topics", get(popular_topics))
         .route("/conversations/{cid}", get(get_conversation))
         .route("/conversations/{cid}/message", post(send_message))
         .route("/conversations/{cid}/pin", put(set_pin))
@@ -170,6 +173,289 @@ async fn list_pinned_conversations(
             })
             .collect(),
     ))
+}
+
+// ── Popular topics ──────────────────────────────────────────────────────
+
+const STOP_WORDS: &[&str] = &[
+    "a",
+    "an",
+    "the",
+    "and",
+    "or",
+    "but",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "of",
+    "with",
+    "by",
+    "from",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "will",
+    "would",
+    "could",
+    "should",
+    "may",
+    "might",
+    "shall",
+    "can",
+    "cannot",
+    "not",
+    "no",
+    "it",
+    "its",
+    "i",
+    "me",
+    "my",
+    "we",
+    "our",
+    "you",
+    "your",
+    "he",
+    "she",
+    "they",
+    "them",
+    "their",
+    "this",
+    "that",
+    "these",
+    "those",
+    "what",
+    "which",
+    "who",
+    "whom",
+    "how",
+    "when",
+    "where",
+    "why",
+    "if",
+    "then",
+    "than",
+    "so",
+    "as",
+    "about",
+    "up",
+    "out",
+    "just",
+    "also",
+    "some",
+    "any",
+    "all",
+    "each",
+    "every",
+    "more",
+    "much",
+    "many",
+    "very",
+    "too",
+    "other",
+    "into",
+    "over",
+    "after",
+    "before",
+    "between",
+    "through",
+    "during",
+    "there",
+    "here",
+    "help",
+    "question",
+    "explain",
+    "understand",
+    "need",
+    "want",
+    "know",
+    "tell",
+    "please",
+    "thanks",
+    "hi",
+    "hello",
+    "hey",
+    "like",
+    "get",
+    "make",
+    "use",
+    "using",
+    "used",
+    "way",
+    "don",
+    "doesn",
+    "didn",
+    "won",
+    "wouldn",
+    "couldn",
+    "shouldn",
+    "isn",
+    "aren",
+    "wasn",
+    "weren",
+    "hasn",
+    "haven",
+    "hadn",
+    "can",
+    "im",
+    "ive",
+    "youre",
+    "thing",
+    "things",
+    "something",
+    "anything",
+    "nothing",
+    "everything",
+    "really",
+    "actually",
+    "basically",
+    "think",
+    "going",
+    "try",
+    "trying",
+    "work",
+    "working",
+    "works",
+    "example",
+    "different",
+    "same",
+    "new",
+];
+
+fn tokenize(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '\'')
+        .filter(|w| w.len() > 2)
+        .map(|w| w.trim_matches('\'').to_string())
+        .filter(|w| w.len() > 2)
+        .collect()
+}
+
+#[derive(Serialize)]
+struct TopicResponse {
+    topic: String,
+    conversation_count: usize,
+    unique_users: usize,
+    total_messages: usize,
+    conversation_ids: Vec<Uuid>,
+}
+
+async fn popular_topics(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<Vec<TopicResponse>>, AppError> {
+    verify_course_teacher_access(&state, course_id, &user).await?;
+
+    // Fetch all user messages and conversation metadata
+    let messages =
+        minerva_db::queries::conversations::list_user_messages_by_course(&state.db, course_id)
+            .await?;
+    let all_convs =
+        minerva_db::queries::conversations::list_all_by_course(&state.db, course_id).await?;
+
+    // Build lookup: conversation_id -> (user_id, message_count)
+    let conv_meta: HashMap<Uuid, (Uuid, i64)> = all_convs
+        .iter()
+        .map(|c| (c.id, (c.user_id, c.message_count.unwrap_or(0))))
+        .collect();
+
+    let stop: HashSet<&str> = STOP_WORDS.iter().copied().collect();
+
+    // Group messages by conversation and extract tokens per conversation
+    let mut conv_tokens: HashMap<Uuid, HashSet<String>> = HashMap::new();
+    for msg in &messages {
+        let tokens = tokenize(&msg.content);
+        let entry = conv_tokens.entry(msg.conversation_id).or_default();
+        for token in &tokens {
+            if !stop.contains(token.as_str()) {
+                entry.insert(token.clone());
+            }
+        }
+        // Also extract bigrams
+        for pair in tokens.windows(2) {
+            let a = &pair[0];
+            let b = &pair[1];
+            if !stop.contains(a.as_str()) && !stop.contains(b.as_str()) {
+                entry.insert(format!("{} {}", a, b));
+            }
+        }
+    }
+
+    // Count in how many conversations each term appears
+    let mut term_convs: HashMap<String, HashSet<Uuid>> = HashMap::new();
+    for (cid, tokens) in &conv_tokens {
+        for token in tokens {
+            term_convs.entry(token.clone()).or_default().insert(*cid);
+        }
+    }
+
+    // Sort candidates: prefer bigrams, then by conversation count
+    let mut candidates: Vec<(String, HashSet<Uuid>)> = term_convs
+        .into_iter()
+        .filter(|(_, convs)| convs.len() >= 2)
+        .collect();
+    candidates.sort_by(|a, b| {
+        let a_bigram = a.0.contains(' ');
+        let b_bigram = b.0.contains(' ');
+        // Bigrams first, then by count desc
+        b_bigram.cmp(&a_bigram).then(b.1.len().cmp(&a.1.len()))
+    });
+
+    // Greedily pick topics avoiding too much overlap
+    let mut assigned: HashSet<Uuid> = HashSet::new();
+    let mut topics: Vec<TopicResponse> = Vec::new();
+
+    for (term, conv_ids) in &candidates {
+        let unassigned: Vec<&Uuid> = conv_ids
+            .iter()
+            .filter(|id| !assigned.contains(id))
+            .collect();
+        if unassigned.len() < 2 {
+            continue;
+        }
+
+        let mut unique_users = HashSet::new();
+        let mut total_messages: usize = 0;
+        let mut cids: Vec<Uuid> = Vec::new();
+
+        for cid in conv_ids {
+            if let Some((user_id, msg_count)) = conv_meta.get(cid) {
+                unique_users.insert(*user_id);
+                total_messages += *msg_count as usize;
+            }
+            cids.push(*cid);
+        }
+
+        topics.push(TopicResponse {
+            topic: term.clone(),
+            conversation_count: conv_ids.len(),
+            unique_users: unique_users.len(),
+            total_messages,
+            conversation_ids: cids,
+        });
+
+        for cid in conv_ids {
+            assigned.insert(*cid);
+        }
+
+        if topics.len() >= 15 {
+            break;
+        }
+    }
+
+    Ok(Json(topics))
 }
 
 async fn create_conversation(

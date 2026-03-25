@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, TeacherNote, UsageRecord, User } from "./types"
+import type { AdminUser, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -53,6 +53,12 @@ export const pinnedConversationsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", "pinned"],
     queryFn: () => api.get<ConversationWithUser[]>(`/courses/${courseId}/conversations/pinned`),
+  })
+
+export const popularTopicsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "conversations", "topics"],
+    queryFn: () => api.get<TopicGroup[]>(`/courses/${courseId}/conversations/topics`),
   })
 
 export const conversationDetailQuery = (courseId: string, conversationId: string) =>

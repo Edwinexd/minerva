@@ -1,6 +1,5 @@
 use axum::response::sse::Event;
 use futures::StreamExt;
-use qdrant_client::qdrant::SearchPointsBuilder;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -8,27 +7,28 @@ use super::common;
 use super::GenerationContext;
 use crate::error::AppError;
 
-/// Similarity threshold for FLARE retrieval-triggered regeneration.
+/// Log-probability threshold below which a token is considered "low confidence".
+/// -2.0 corresponds to roughly <13% probability. The FLARE paper uses token
+/// probability thresholds; we use logprobs since that's what Cerebras returns.
+const LOGPROB_THRESHOLD: f64 = -2.0;
+
+/// Qdrant similarity threshold for FLARE retrieval results.
 const SIMILARITY_THRESHOLD: f32 = 0.35;
 
-/// Maximum number of FLARE retrieval iterations to prevent infinite loops.
-const MAX_FLARE_ITERATIONS: usize = 10;
+/// Maximum number of retrieval-triggered restarts to prevent infinite loops.
+const MAX_FLARE_RESTARTS: usize = 5;
 
 /// FLARE strategy: Forward-Looking Active REtrieval augmented generation.
 ///
-/// Generates text by streaming from Cerebras, buffering until sentence boundaries.
-/// After each sentence, the generated sentence is used as a retrieval query against
-/// Qdrant. If high-similarity results are found (above SIMILARITY_THRESHOLD), the
-/// prompt is rebuilt with retrieved context and generation continues from that point.
-///
-/// This differs from simple RAG (which retrieves once using the user question) by
-/// using the model's own generated text as retrieval queries, catching cases where
-/// the model needs information it didn't know to ask for.
+/// Uses Cerebras logprobs to detect low-confidence tokens. When the model
+/// generates a sentence containing uncertain tokens, that sentence is used
+/// as a retrieval query. If relevant chunks are found, generation restarts
+/// from that point with enriched context.
 pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError>>) {
     let http_client = reqwest::Client::new();
     let collection_name = format!("course_{}", ctx.course_id);
 
-    // Per the FLARE paper: start with an initial retrieval using the user's question
+    // Initial retrieval using user's question (per the paper)
     let initial_chunks = common::rag_lookup(
         &http_client,
         &ctx.openai_api_key,
@@ -43,57 +43,37 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let mut full_text = String::new();
     let mut total_prompt_tokens = 0i32;
     let mut total_completion_tokens = 0i32;
-    let mut flare_iterations = 0usize;
+    let mut restarts = 0usize;
 
     tracing::info!(
-        "flare: starting generation for conversation {} with {} initial chunks",
-        ctx.conversation_id,
-        all_chunks.len()
+        "flare: starting with {} initial chunks for conversation {}",
+        all_chunks.len(),
+        ctx.conversation_id
     );
 
     loop {
-        if flare_iterations >= MAX_FLARE_ITERATIONS {
-            tracing::info!(
-                "flare: reached max iterations ({}), finishing",
-                MAX_FLARE_ITERATIONS
-            );
-            break;
-        }
-        flare_iterations += 1;
-
-        // Build the prompt with whatever chunks we have so far
         let system = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &all_chunks);
         let mut messages = common::build_chat_messages(&system, &ctx.history);
 
-        // If we already have partial output, add continuation context to the system
-        // prompt and set the partial text as the last assistant message. The model
-        // treats this as its own prior output and continues naturally from it.
         if !full_text.is_empty() {
+            // Continuation: inject instruction in system prompt, partial text as assistant msg
             if let Some(sys_msg) = messages.first_mut() {
                 if let Some(content) = sys_msg.get("content").and_then(|c| c.as_str()) {
                     let new_content = format!(
-                        "{}\n\nYou are continuing a response that was already started. Additional context has been retrieved. Continue seamlessly from where the response left off. Do not repeat anything already written.",
+                        "{}\n\nYou are continuing a response. Additional relevant context has been retrieved. Continue seamlessly from where the response left off. Do not repeat anything already written.",
                         content,
                     );
                     sys_msg["content"] = serde_json::Value::String(new_content);
                 }
             }
-            // The model sees its own partial output and continues from it
             messages.push(serde_json::json!({
                 "role": "assistant",
                 "content": full_text,
             }));
         }
 
-        tracing::debug!(
-            "flare: iteration {} - streaming with {} chunks, {} chars so far",
-            flare_iterations,
-            all_chunks.len(),
-            full_text.len()
-        );
-
-        // Stream from Cerebras, buffering tokens and detecting sentence boundaries
-        let result = stream_until_sentence(
+        // Stream with logprobs, checking confidence per sentence
+        let result = stream_with_logprobs(
             &http_client,
             &ctx.cerebras_api_key,
             &ctx.model,
@@ -104,89 +84,90 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         )
         .await;
 
-        let (sentence, prompt_tokens, completion_tokens, completed) = match result {
-            Ok(r) => r,
+        let outcome = match result {
+            Ok(o) => o,
             Err(e) => {
-                tracing::error!("flare: streaming error: {}", e);
+                tracing::error!("flare: stream error: {}", e);
                 let _ = tx
                     .send(Ok(Event::default().data(
                         serde_json::json!({"type": "error", "error": e}).to_string(),
                     )))
                     .await;
-                return;
+                break;
             }
         };
 
-        // Usage stats may be 0 for interrupted streams (sentence boundary hit before [DONE]).
-        // Estimate from text length as fallback (~4 chars per token).
-        if prompt_tokens > 0 {
-            total_prompt_tokens += prompt_tokens;
-            total_completion_tokens += completion_tokens;
-        } else if !sentence.is_empty() {
-            total_completion_tokens += (sentence.len() / 4) as i32;
-        }
+        total_prompt_tokens += outcome.prompt_tokens;
+        total_completion_tokens += outcome.completion_tokens;
 
-        // If the stream completed (model finished generating), we are done
-        if completed {
-            tracing::info!(
-                "flare: generation completed after {} iterations, {} total chars",
-                flare_iterations,
-                full_text.len()
-            );
-            break;
-        }
-
-        // Use the generated sentence as a retrieval query
-        let trimmed_sentence = sentence.trim();
-        if trimmed_sentence.is_empty() {
-            continue;
-        }
-
-        tracing::debug!(
-            "flare: checking retrieval for sentence: {:?}",
-            truncate_for_log(trimmed_sentence, 100)
-        );
-
-        let new_chunks = flare_retrieve(
-            &http_client,
-            &ctx.openai_api_key,
-            &ctx.qdrant,
-            &collection_name,
-            trimmed_sentence,
-            ctx.max_chunks,
-        )
-        .await;
-
-        if new_chunks.is_empty() {
-            tracing::debug!("flare: no relevant chunks found, continuing generation");
-            continue;
-        }
-
-        // We found relevant chunks -- add any new ones to context (capped at max_chunks)
-        let mut added_new = false;
-        for chunk in &new_chunks {
-            if all_chunks.len() >= ctx.max_chunks as usize {
+        if let StreamOutcome::LowConfidenceSentence { sentence } = &outcome.kind {
+            if restarts >= MAX_FLARE_RESTARTS {
+                tracing::info!(
+                    "flare: max restarts ({}) reached, finishing",
+                    MAX_FLARE_RESTARTS
+                );
+                // Let the stream finish naturally on the next iteration
+                // by running one more time without checking confidence
+                let final_result = common::stream_cerebras_to_client(
+                    &http_client,
+                    &ctx.cerebras_api_key,
+                    &ctx.model,
+                    ctx.temperature,
+                    &messages,
+                    &tx,
+                    &mut full_text,
+                )
+                .await;
+                if let Ok((pt, ct)) = final_result {
+                    total_prompt_tokens += pt;
+                    total_completion_tokens += ct;
+                }
                 break;
             }
-            if !all_chunks.contains(chunk) {
-                all_chunks.push(chunk.clone());
-                added_new = true;
+
+            tracing::info!(
+                "flare: low-confidence sentence detected, retrieving (restart {}/{})",
+                restarts + 1,
+                MAX_FLARE_RESTARTS
+            );
+
+            // Use the low-confidence sentence as a retrieval query
+            let new_chunks = flare_retrieve(
+                &http_client,
+                &ctx.openai_api_key,
+                &ctx.qdrant,
+                &collection_name,
+                sentence,
+                ctx.max_chunks,
+            )
+            .await;
+
+            let mut added = false;
+            for chunk in &new_chunks {
+                if all_chunks.len() >= ctx.max_chunks as usize {
+                    break;
+                }
+                if !all_chunks.contains(chunk) {
+                    all_chunks.push(chunk.clone());
+                    added = true;
+                }
             }
+
+            if added {
+                restarts += 1;
+                tracing::info!(
+                    "flare: added new chunks, total now {}. Restarting from {} chars.",
+                    all_chunks.len(),
+                    full_text.len()
+                );
+                continue; // Restart generation with new context
+            }
+
+            tracing::debug!("flare: no new chunks found, continuing without restart");
         }
 
-        if added_new {
-            tracing::info!(
-                "flare: found {} new relevant chunks, total context now {} chunks",
-                new_chunks.len(),
-                all_chunks.len()
-            );
-            // Loop back and continue generation with the new context.
-            // The full_text already includes everything streamed so far, and on the
-            // next iteration we pass it as assistant prefix, so the model continues
-            // from where it was but now has the retrieved context available.
-        } else {
-            tracing::debug!("flare: retrieved chunks already in context, continuing");
-        }
+        // StreamOutcome::Completed or no new chunks - we're done
+        break;
     }
 
     let chunks_json = if all_chunks.is_empty() {
@@ -194,6 +175,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     } else {
         serde_json::to_value(&all_chunks).ok()
     };
+
+    // Estimate tokens for interrupted streams
+    if total_prompt_tokens == 0 && !full_text.is_empty() {
+        total_completion_tokens = (full_text.len() / 4) as i32;
+    }
 
     common::finalize(
         &ctx,
@@ -207,15 +193,24 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     .await;
 }
 
-/// Stream from Cerebras and buffer until a sentence boundary is detected.
-///
-/// Returns `(sentence, prompt_tokens, completion_tokens, completed)` where:
-/// - `sentence` is the text of the last buffered segment (up to the sentence boundary)
-/// - `completed` is true if the model finished generating (stream ended)
-///
-/// All tokens are forwarded to the client via `tx` as they arrive.
-/// `full_text` is appended with all generated tokens.
-async fn stream_until_sentence(
+struct StreamWithLogprobsResult {
+    prompt_tokens: i32,
+    completion_tokens: i32,
+    kind: StreamOutcome,
+}
+
+enum StreamOutcome {
+    /// Model finished generating naturally
+    Completed,
+    /// A sentence with low-confidence tokens was detected
+    LowConfidenceSentence { sentence: String },
+}
+
+/// Stream from Cerebras with logprobs enabled.
+/// Buffers tokens into sentences. When a sentence boundary is hit, checks
+/// if any token in that sentence had logprob below the threshold.
+/// If so, returns the sentence for retrieval. Otherwise keeps streaming.
+async fn stream_with_logprobs(
     client: &reqwest::Client,
     api_key: &str,
     model: &str,
@@ -223,12 +218,14 @@ async fn stream_until_sentence(
     messages: &[serde_json::Value],
     tx: &mpsc::Sender<Result<Event, AppError>>,
     full_text: &mut String,
-) -> Result<(String, i32, i32, bool), String> {
+) -> Result<StreamWithLogprobsResult, String> {
     let body = serde_json::json!({
         "model": model,
         "messages": messages,
         "temperature": temperature,
         "stream": true,
+        "logprobs": true,
+        "top_logprobs": 1,
         "stream_options": { "include_usage": true },
     });
 
@@ -249,16 +246,14 @@ async fn stream_until_sentence(
     let mut stream = response.bytes_stream();
     let mut sse_buffer = String::new();
     let mut sentence_buffer = String::new();
+    let mut sentence_has_low_confidence = false;
     let mut prompt_tokens = 0i32;
     let mut completion_tokens = 0i32;
 
     while let Some(chunk) = stream.next().await {
         let chunk = match chunk {
             Ok(c) => c,
-            Err(e) => {
-                tracing::error!("flare: stream error: {}", e);
-                return Err(format!("Stream interrupted: {}", e));
-            }
+            Err(e) => return Err(format!("Stream error: {}", e)),
         };
         sse_buffer.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -267,7 +262,11 @@ async fn stream_until_sentence(
             sse_buffer = sse_buffer[line_end + 1..].to_string();
 
             if line == "data: [DONE]" {
-                return Ok((sentence_buffer, prompt_tokens, completion_tokens, true));
+                return Ok(StreamWithLogprobsResult {
+                    prompt_tokens,
+                    completion_tokens,
+                    kind: StreamOutcome::Completed,
+                });
             }
 
             if let Some(data) = line.strip_prefix("data: ") {
@@ -280,27 +279,60 @@ async fn stream_until_sentence(
                         return Err(msg);
                     }
 
-                    if let Some(delta) = parsed["choices"][0]["delta"]["content"].as_str() {
-                        full_text.push_str(delta);
-                        sentence_buffer.push_str(delta);
+                    // Extract token content and logprob
+                    if let Some(choice) = parsed["choices"].get(0) {
+                        if let Some(delta_content) = choice["delta"]["content"].as_str() {
+                            full_text.push_str(delta_content);
+                            sentence_buffer.push_str(delta_content);
 
-                        // Stream token to client immediately
-                        if tx
-                            .send(Ok(Event::default().data(
-                                serde_json::json!({"type": "token", "token": delta}).to_string(),
-                            )))
-                            .await
-                            .is_err()
-                        {
-                            return Err("client disconnected".to_string());
-                        }
+                            // Stream to client immediately
+                            if tx
+                                .send(Ok(Event::default().data(
+                                    serde_json::json!({"type": "token", "token": delta_content})
+                                        .to_string(),
+                                )))
+                                .await
+                                .is_err()
+                            {
+                                return Err("client disconnected".to_string());
+                            }
 
-                        // Check if we hit a sentence boundary
-                        if has_sentence_boundary(&sentence_buffer) {
-                            return Ok((sentence_buffer, prompt_tokens, completion_tokens, false));
+                            // Check logprob for this token
+                            if let Some(logprobs) = choice.get("logprobs") {
+                                if let Some(content_logprobs) = logprobs["content"].as_array() {
+                                    for lp in content_logprobs {
+                                        if let Some(logprob) = lp["logprob"].as_f64() {
+                                            if logprob < LOGPROB_THRESHOLD {
+                                                sentence_has_low_confidence = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Check for sentence boundary
+                            if is_sentence_boundary(&sentence_buffer) {
+                                if sentence_has_low_confidence {
+                                    tracing::debug!(
+                                        "flare: low-confidence sentence: {:?}",
+                                        truncate_for_log(&sentence_buffer, 80)
+                                    );
+                                    return Ok(StreamWithLogprobsResult {
+                                        prompt_tokens,
+                                        completion_tokens,
+                                        kind: StreamOutcome::LowConfidenceSentence {
+                                            sentence: sentence_buffer,
+                                        },
+                                    });
+                                }
+                                // Sentence was confident, reset buffer for next sentence
+                                sentence_buffer.clear();
+                                sentence_has_low_confidence = false;
+                            }
                         }
                     }
 
+                    // Extract usage from final chunk
                     if let Some(usage) = parsed.get("usage") {
                         if !usage.is_null() {
                             prompt_tokens = usage["prompt_tokens"].as_i64().unwrap_or(0) as i32;
@@ -313,33 +345,22 @@ async fn stream_until_sentence(
         }
     }
 
-    // Stream ended without [DONE] marker
-    Ok((sentence_buffer, prompt_tokens, completion_tokens, true))
+    Ok(StreamWithLogprobsResult {
+        prompt_tokens,
+        completion_tokens,
+        kind: StreamOutcome::Completed,
+    })
 }
 
-/// Check if the buffer contains a complete paragraph/section boundary.
-///
-/// We use paragraph breaks (\n\n) as the primary boundary, not sentence-ending
-/// punctuation like ". ", because that triggers too aggressively inside markdown
-/// tables, lists, and other structured content. Paragraph breaks are more
-/// reliable semantic boundaries for retrieval decisions.
-///
-/// Also requires a minimum buffer size to avoid triggering on very short fragments.
-fn has_sentence_boundary(text: &str) -> bool {
-    // Minimum chars before we even consider checking -- avoids micro-fragments
-    if text.len() < 100 {
+/// Check for a sentence/paragraph boundary in the buffer.
+fn is_sentence_boundary(text: &str) -> bool {
+    if text.len() < 80 {
         return false;
     }
-
-    // Primary: paragraph break (double newline)
     if text.contains("\n\n") {
         return true;
     }
-
-    // Secondary: if we have accumulated a lot of text without a paragraph break,
-    // check for sentence-ending punctuation at the very end of the buffer.
-    // This handles cases where the model generates long single paragraphs.
-    if text.len() > 300 {
+    if text.len() > 200 {
         let trimmed = text.trim_end();
         if trimmed.ends_with(". ")
             || trimmed.ends_with(".\n")
@@ -354,12 +375,10 @@ fn has_sentence_boundary(text: &str) -> bool {
             return true;
         }
     }
-
     false
 }
 
-/// Embed a sentence and search Qdrant for similar chunks above the similarity threshold.
-/// Returns chunk texts only if results meet the threshold.
+/// Search Qdrant with a similarity threshold for FLARE retrieval.
 async fn flare_retrieve(
     client: &reqwest::Client,
     openai_key: &str,
@@ -377,7 +396,7 @@ async fn flare_retrieve(
     {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!("flare: embedding failed: {}, skipping retrieval", e);
+            tracing::warn!("flare: embedding failed: {}", e);
             return Vec::new();
         }
     };
@@ -387,19 +406,22 @@ async fn flare_retrieve(
         None => return Vec::new(),
     };
 
-    // Search with score_threshold so we only get high-confidence results
     let search_result = qdrant
         .search_points(
-            SearchPointsBuilder::new(collection_name, vector, max_chunks as u64)
-                .with_payload(true)
-                .score_threshold(SIMILARITY_THRESHOLD),
+            qdrant_client::qdrant::SearchPointsBuilder::new(
+                collection_name,
+                vector,
+                max_chunks as u64,
+            )
+            .with_payload(true)
+            .score_threshold(SIMILARITY_THRESHOLD),
         )
         .await;
 
     let result = match search_result {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!("flare: qdrant search failed: {}, skipping retrieval", e);
+            tracing::warn!("flare: qdrant search failed: {}", e);
             return Vec::new();
         }
     };
@@ -418,7 +440,7 @@ async fn flare_retrieve(
                 _ => String::new(),
             };
             tracing::debug!(
-                "flare: retrieved chunk from '{}' with score {:.3}",
+                "flare: retrieved chunk from '{}' score {:.3}",
                 filename,
                 point.score
             );
@@ -427,7 +449,6 @@ async fn flare_retrieve(
         .collect()
 }
 
-/// Truncate a string for logging purposes.
 fn truncate_for_log(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()

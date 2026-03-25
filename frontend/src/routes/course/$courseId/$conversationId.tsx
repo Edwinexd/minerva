@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
+import { ChevronDown, ChevronUp } from "lucide-react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import React, { useState, useRef, useEffect, useCallback } from "react"
@@ -394,7 +395,8 @@ function ChatBubble({ message }: { message: Message }) {
                 className="underline hover:text-foreground"
                 onClick={() => setShowSources(!showSources)}
               >
-                {chunks.length} source{chunks.length > 1 ? "s" : ""} {showSources ? "^" : "v"}
+                {chunks.length} source{chunks.length > 1 ? "s" : ""}
+                {showSources ? <ChevronUp className="inline w-3 h-3 ml-0.5" /> : <ChevronDown className="inline w-3 h-3 ml-0.5" />}
               </button>
             )}
           </div>

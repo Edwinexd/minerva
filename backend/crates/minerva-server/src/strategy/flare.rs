@@ -291,19 +291,44 @@ async fn stream_until_sentence(
     Ok((sentence_buffer, prompt_tokens, completion_tokens, true))
 }
 
-/// Check if the buffer contains a complete sentence boundary.
-/// Looks for sentence-ending punctuation followed by whitespace or newline.
+/// Check if the buffer contains a complete paragraph/section boundary.
+///
+/// We use paragraph breaks (\n\n) as the primary boundary, not sentence-ending
+/// punctuation like ". ", because that triggers too aggressively inside markdown
+/// tables, lists, and other structured content. Paragraph breaks are more
+/// reliable semantic boundaries for retrieval decisions.
+///
+/// Also requires a minimum buffer size to avoid triggering on very short fragments.
 fn has_sentence_boundary(text: &str) -> bool {
-    let terminators = [". ", ".\n", ".\t", "? ", "?\n", "?\t", "! ", "!\n", "!\t"];
-    for t in &terminators {
-        if text.contains(t) {
-            return true;
-        }
+    // Minimum chars before we even consider checking -- avoids micro-fragments
+    if text.len() < 100 {
+        return false;
     }
-    // Also check for paragraph breaks
+
+    // Primary: paragraph break (double newline)
     if text.contains("\n\n") {
         return true;
     }
+
+    // Secondary: if we have accumulated a lot of text without a paragraph break,
+    // check for sentence-ending punctuation at the very end of the buffer.
+    // This handles cases where the model generates long single paragraphs.
+    if text.len() > 300 {
+        let trimmed = text.trim_end();
+        if trimmed.ends_with(". ")
+            || trimmed.ends_with(".\n")
+            || trimmed.ends_with('.')
+            || trimmed.ends_with("? ")
+            || trimmed.ends_with("?\n")
+            || trimmed.ends_with('?')
+            || trimmed.ends_with("! ")
+            || trimmed.ends_with("!\n")
+            || trimmed.ends_with('!')
+        {
+            return true;
+        }
+    }
+
     false
 }
 

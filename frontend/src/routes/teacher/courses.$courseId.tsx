@@ -470,6 +470,8 @@ function DocumentsPanel({ courseId }: { courseId: string }) {
 
 function InviteLinksPanel({ courseId }: { courseId: string }) {
   const queryClient = useQueryClient()
+  const [expiresHours, setExpiresHours] = useState(168)
+  const [maxUses, setMaxUses] = useState("")
   const { data: links, isLoading } = useQuery({
     queryKey: ["courses", courseId, "signed-urls"],
     queryFn: () =>
@@ -514,12 +516,42 @@ function InviteLinksPanel({ courseId }: { courseId: string }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Button
-          onClick={() => createMutation.mutate({ expires_in_hours: 168 })}
-          disabled={createMutation.isPending}
-        >
-          {createMutation.isPending ? "Generating..." : "Generate Link (7 days)"}
-        </Button>
+        <div className="flex gap-2 items-end">
+          <div className="space-y-1">
+            <Label className="text-xs">Duration</Label>
+            <select
+              value={expiresHours}
+              onChange={(e) => setExpiresHours(Number(e.target.value))}
+              className="border rounded px-2 py-1.5 text-sm bg-background"
+            >
+              <option value={1}>1 hour</option>
+              <option value={24}>1 day</option>
+              <option value={168}>7 days</option>
+              <option value={720}>30 days</option>
+              <option value={8760}>1 year</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Max uses (optional)</Label>
+            <Input
+              type="number"
+              value={maxUses}
+              onChange={(e) => setMaxUses(e.target.value)}
+              placeholder="unlimited"
+              className="w-28"
+              min={1}
+            />
+          </div>
+          <Button
+            onClick={() => createMutation.mutate({
+              expires_in_hours: expiresHours,
+              max_uses: maxUses ? parseInt(maxUses) : undefined,
+            })}
+            disabled={createMutation.isPending}
+          >
+            {createMutation.isPending ? "Generating..." : "Generate Link"}
+          </Button>
+        </div>
 
         {isLoading && (
           <div className="space-y-2">

@@ -84,6 +84,7 @@ function CourseCard({ course }: { course: Course }) {
         <CardContent>
           <div className="flex gap-2 text-xs">
             <Badge variant="secondary">{course.model}</Badge>
+            <Badge variant="outline">{course.strategy}</Badge>
             <Badge variant="outline">T={course.temperature}</Badge>
             <Badge variant="outline">
               {Math.round(course.context_ratio * 100)}% RAG

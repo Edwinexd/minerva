@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { coursesQuery, userQuery } from "@/lib/queries"
 import {
@@ -9,12 +9,28 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useEffect } from "react"
 
 export const Route = createFileRoute("/")({
   component: Home,
 })
 
 function Home() {
+  const { data: user } = useQuery(userQuery)
+  const navigate = useNavigate()
+
+  // Teachers and admins go straight to dashboard
+  useEffect(() => {
+    if (user && (user.role === "teacher" || user.role === "admin")) {
+      navigate({ to: "/teacher", replace: true })
+    }
+  }, [user, navigate])
+
+  // Students see their courses
+  return <StudentHome />
+}
+
+function StudentHome() {
   const { data: user } = useQuery(userQuery)
   const { data: courses, isLoading, error } = useQuery(coursesQuery)
 
@@ -24,13 +40,7 @@ function Home() {
         <h2 className="text-2xl font-bold tracking-tight">
           {user ? `Welcome, ${user.display_name || user.eppn}` : "Minerva"}
         </h2>
-        <p className="text-muted-foreground mt-1">
-          {user?.role === "student"
-            ? "Your courses"
-            : user?.role === "teacher" || user?.role === "admin"
-              ? "Your courses"
-              : "High-performance RAG for course materials"}
-        </p>
+        <p className="text-muted-foreground mt-1">Your courses</p>
       </div>
 
       {error && (
@@ -71,9 +81,7 @@ function Home() {
 
       {!isLoading && courses?.length === 0 && (
         <p className="text-muted-foreground">
-          {user?.role === "student"
-            ? "You haven't been added to any courses yet. Ask your teacher for an invite link."
-            : "No courses yet."}
+          You haven't been added to any courses yet. Ask your teacher for an invite link.
         </p>
       )}
     </div>

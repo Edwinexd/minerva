@@ -111,8 +111,14 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             }
         };
 
-        total_prompt_tokens += prompt_tokens;
-        total_completion_tokens += completion_tokens;
+        // Usage stats may be 0 for interrupted streams (sentence boundary hit before [DONE]).
+        // Estimate from text length as fallback (~4 chars per token).
+        if prompt_tokens > 0 {
+            total_prompt_tokens += prompt_tokens;
+            total_completion_tokens += completion_tokens;
+        } else if !sentence.is_empty() {
+            total_completion_tokens += (sentence.len() / 4) as i32;
+        }
 
         // If the stream completed (model finished generating), we are done
         if completed {
@@ -150,9 +156,12 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             continue;
         }
 
-        // We found relevant chunks -- add any new ones to context
+        // We found relevant chunks -- add any new ones to context (capped at max_chunks)
         let mut added_new = false;
         for chunk in &new_chunks {
+            if all_chunks.len() >= ctx.max_chunks as usize {
+                break;
+            }
             if !all_chunks.contains(chunk) {
                 all_chunks.push(chunk.clone());
                 added_new = true;

@@ -4,11 +4,11 @@ Minerva is a retrieval-augmented generation (RAG) platform built for educational
 
 ## Features
 
-- **Multiple RAG strategies** -- simple, parallel (stream while retrieving), and FLARE (logprobs-guided retrieval)
-- **Course management** -- teachers create courses, upload PDFs, and invite students via links
-- **Role-based access** -- students, teachers, and admins with Shibboleth (SAML) authentication
-- **Usage tracking** -- per-student token usage, daily breakdowns, configurable limits
-- **Admin dashboard** -- manage users, suspend accounts, view system-wide usage
+- **Multiple RAG strategies:** simple, parallel (stream while retrieving), and FLARE (logprobs-guided retrieval)
+- **Course management:** teachers create courses, upload PDFs, and invite students via links
+- **Role-based access:** students, teachers, and admins with Shibboleth (SAML) authentication
+- **Usage tracking:** per-student token usage, daily breakdowns, configurable limits
+- **Admin dashboard:** manage users, suspend accounts, view system-wide usage
 
 ## Tech stack
 

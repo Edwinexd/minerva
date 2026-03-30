@@ -34,4 +34,5 @@ sha2.workspace = true
 hex.workspace = true
 rand.workspace = true
 tokio-stream = "0.1"
+base64 = "0.22"
 anyhow = "1"

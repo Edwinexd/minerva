@@ -157,6 +157,22 @@ class api_client {
     }
 
     /**
+     * Create an embed token for a user scoped to a course.
+     *
+     * @param string $minervacid Minerva course UUID.
+     * @param string $eppn User's eppn.
+     * @param string|null $displayname User's display name.
+     * @return object Token info with token, expires_at.
+     */
+    public function create_embed_token(string $minervacid, string $eppn, ?string $displayname = null): object {
+        $body = ['eppn' => $eppn];
+        if ($displayname !== null) {
+            $body['display_name'] = $displayname;
+        }
+        return $this->request('POST', "/integration/courses/{$minervacid}/embed-token", $body);
+    }
+
+    /**
      * Make an HTTP request to the Minerva API.
      *
      * @param string $method HTTP method.

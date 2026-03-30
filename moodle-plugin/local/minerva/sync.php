@@ -66,7 +66,8 @@ foreach ($modinfo->get_cms() as $cm) {
     }
 
     $component = 'mod_' . $cm->modname;
-    $files = $fs->get_area_files($context->id, $component, 'content', false, 'filename', false);
+    $modcontext = context_module::instance($cm->id);
+    $files = $fs->get_area_files($modcontext->id, $component, 'content', false, 'filename', false);
 
     foreach ($files as $file) {
         if ($file->is_directory()) {

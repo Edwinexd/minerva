@@ -3,8 +3,9 @@ mod api_keys;
 mod chat;
 mod courses;
 mod documents;
+pub mod embed;
 mod health;
-mod integration;
+pub mod integration;
 mod signed_urls;
 mod usage;
 
@@ -37,6 +38,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .route("/models", get(health::models))
         .route("/dev/config", get(dev_config))
         .nest("/integration", integration::router())
+        .nest("/embed", embed::router())
         .merge(authed)
 }
 

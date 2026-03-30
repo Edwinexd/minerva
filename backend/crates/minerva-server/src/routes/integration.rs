@@ -11,6 +11,7 @@ use axum::extract::{Multipart, Path, State};
 use axum::http::HeaderMap;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -31,6 +32,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/courses/{course_id}/documents",
             post(upload_document).get(list_documents),
+        )
+        .route(
+            "/courses/{course_id}/embed-token",
+            post(create_embed_token),
         )
 }
 
@@ -363,4 +368,123 @@ async fn upload_document(
         chunk_count: row.chunk_count,
         created_at: row.created_at,
     }))
+}
+
+// -- Embed tokens --
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// Embed token lifetime: 8 hours.
+const EMBED_TOKEN_TTL_SECS: i64 = 8 * 3600;
+
+#[derive(Deserialize)]
+struct CreateEmbedTokenRequest {
+    eppn: String,
+    display_name: Option<String>,
+}
+
+#[derive(Serialize)]
+struct EmbedTokenResponse {
+    token: String,
+    expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Create a short-lived HMAC-signed embed token for a student.
+///
+/// The token encodes `course_id:user_id:expires_ts` and is signed with
+/// the server's HMAC secret. The `/api/embed/` routes validate it.
+async fn create_embed_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<CreateEmbedTokenRequest>,
+) -> Result<Json<EmbedTokenResponse>, AppError> {
+    authenticate_for_course(&state, &headers, course_id).await?;
+
+    // Ensure the user exists.
+    let user = minerva_db::queries::users::find_by_eppn(&state.db, &body.eppn).await?;
+    let user_id = match user {
+        Some(u) => u.id,
+        None => {
+            let id = Uuid::new_v4();
+            minerva_db::queries::users::insert(
+                &state.db,
+                id,
+                &body.eppn,
+                body.display_name.as_deref(),
+                "student",
+            )
+            .await?;
+            id
+        }
+    };
+
+    // Ensure the user is a course member.
+    if !minerva_db::queries::courses::is_member(&state.db, course_id, user_id).await? {
+        minerva_db::queries::courses::add_member(&state.db, course_id, user_id, "student").await?;
+    }
+
+    let expires_at = chrono::Utc::now() + chrono::Duration::seconds(EMBED_TOKEN_TTL_SECS);
+    let payload = format!("{}:{}:{}", course_id, user_id, expires_at.timestamp());
+
+    let mut mac = HmacSha256::new_from_slice(state.config.hmac_secret.as_bytes())
+        .map_err(|_| AppError::Internal("hmac key error".into()))?;
+    mac.update(payload.as_bytes());
+    let sig = hex::encode(mac.finalize().into_bytes());
+
+    // Token format: base64url(course_id:user_id:expires_ts:signature)
+    let token_raw = format!("{}:{}", payload, sig);
+    let token = base64_url_encode(&token_raw);
+
+    Ok(Json(EmbedTokenResponse { token, expires_at }))
+}
+
+/// Verify an embed token and return (course_id, user_id).
+pub fn verify_embed_token(
+    hmac_secret: &str,
+    token: &str,
+) -> Result<(Uuid, Uuid), AppError> {
+    let decoded = base64_url_decode(token)
+        .map_err(|_| AppError::Unauthorized)?;
+
+    // Format: course_id:user_id:expires_ts:signature
+    let parts: Vec<&str> = decoded.splitn(4, ':').collect();
+    if parts.len() != 4 {
+        return Err(AppError::Unauthorized);
+    }
+
+    let course_id: Uuid = parts[0].parse().map_err(|_| AppError::Unauthorized)?;
+    let user_id: Uuid = parts[1].parse().map_err(|_| AppError::Unauthorized)?;
+    let expires_ts: i64 = parts[2].parse().map_err(|_| AppError::Unauthorized)?;
+    let sig = parts[3];
+
+    // Check expiry.
+    let now = chrono::Utc::now().timestamp();
+    if now > expires_ts {
+        return Err(AppError::Unauthorized);
+    }
+
+    // Verify HMAC.
+    let payload = format!("{}:{}:{}", course_id, user_id, expires_ts);
+    let mut mac = HmacSha256::new_from_slice(hmac_secret.as_bytes())
+        .map_err(|_| AppError::Internal("hmac key error".into()))?;
+    mac.update(payload.as_bytes());
+    let expected = hex::encode(mac.finalize().into_bytes());
+
+    if sig != expected {
+        return Err(AppError::Unauthorized);
+    }
+
+    Ok((course_id, user_id))
+}
+
+fn base64_url_encode(input: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(input.as_bytes())
+}
+
+fn base64_url_decode(input: &str) -> Result<String, Box<dyn std::error::Error>> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(input)?;
+    Ok(String::from_utf8(bytes)?)
 }

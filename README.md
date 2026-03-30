@@ -85,6 +85,47 @@ docker pull ghcr.io/edwinexd/minerva:master
 
 See [.env.example](.env.example) for defaults.
 
+## Moodle integration
+
+A Moodle local plugin (`local_minerva`) is included in `moodle-plugin/`. It embeds the AI chat inside Moodle courses via iframe, syncs enrolments, and uploads course materials. See [moodle-plugin/local/minerva/](moodle-plugin/local/minerva/) for setup.
+
+### Routes that must be excluded from SSO / Shibboleth
+
+The main application sits behind Apache `mod_shib` which sets the `REMOTE_USER` header. The following API paths and frontend routes must **not** be behind Shibboleth (i.e. they need `ShibRequestSetting requireSession 0` or should be excluded from the `<Location>` block):
+
+| Path prefix | Purpose |
+|-------------|---------|
+| `/api/health` | Health check endpoint |
+| `/api/models` | Model list (public) |
+| `/api/dev/config` | Dev mode config (no-ops in production) |
+| `/api/integration/*` | Integration API for external services (Moodle plugin). Authenticated via per-course API keys (Bearer token), not SSO. |
+| `/api/embed/*` | Embeddable chat API for iframe usage. Authenticated via HMAC-signed embed tokens, not SSO. |
+| `/embed/*` | Frontend embed route (iframe chat UI). Uses embed tokens from query params, not SSO. |
+
+**Example Apache config** (adjust to your setup):
+
+```apache
+# Protect the main application with Shibboleth.
+<Location />
+    AuthType shibboleth
+    ShibRequestSetting requireSession 1
+    Require valid-user
+</Location>
+
+# Exclude routes that use their own auth (integration API, embed).
+<LocationMatch "^/api/(health|models|dev|integration|embed)">
+    ShibRequestSetting requireSession 0
+    Require all granted
+</LocationMatch>
+
+<LocationMatch "^/embed/">
+    ShibRequestSetting requireSession 0
+    Require all granted
+</LocationMatch>
+```
+
+All other routes (`/api/auth/*`, `/api/courses/*`, `/api/admin/*`, the main frontend at `/`, `/course/*`, `/teacher/*`, `/admin/*`) require Shibboleth authentication which provides the `REMOTE_USER` header.
+
 ## License
 
 [AGPL-3.0](LICENSE)

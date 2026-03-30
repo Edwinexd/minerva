@@ -85,7 +85,7 @@ class observer {
         $displayname = trim($user->firstname . ' ' . $user->lastname);
 
         try {
-            $client = new api_client();
+            $client = api_client::from_link($link);
 
             if ($action === 'add') {
                 $client->add_member($link->minerva_course_id, $eppn, $displayname);

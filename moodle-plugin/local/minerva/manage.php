@@ -17,6 +17,9 @@
 /**
  * Manage the link between a Moodle course and a Minerva course.
  *
+ * Teachers configure the Minerva API URL, API key, and select a course.
+ * Credentials are stored per course link, not globally.
+ *
  * @package    local_minerva
  * @copyright  2026 DSV, Stockholm University
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -53,7 +56,7 @@ if ($action === 'sync' && confirm_sesskey()) {
     $link = $DB->get_record('local_minerva_links', ['courseid' => $courseid]);
     if ($link) {
         try {
-            $client = new \local_minerva\api_client();
+            $client = \local_minerva\api_client::from_link($link);
             $enrolledusers = get_enrolled_users($context, '', 0,
                 'u.id, u.username, u.firstname, u.lastname');
             $added = 0;
@@ -73,17 +76,7 @@ if ($action === 'sync' && confirm_sesskey()) {
     }
 }
 
-// Check if API is configured.
-$apiurl = get_config('local_minerva', 'apiurl');
-$apikey = get_config('local_minerva', 'apikey');
-
 echo $OUTPUT->header();
-
-if (empty($apiurl) || empty($apikey)) {
-    echo $OUTPUT->notification(get_string('no_api_configured', 'local_minerva'), 'warning');
-    echo $OUTPUT->footer();
-    exit;
-}
 
 // Get current link.
 $link = $DB->get_record('local_minerva_links', ['courseid' => $courseid]);
@@ -93,7 +86,10 @@ if ($link) {
     echo html_writer::tag('div',
         html_writer::tag('strong', get_string('linked_course', 'local_minerva') . ': ') .
         s($link->minerva_course_name) .
-        ' (' . s($link->minerva_course_id) . ')',
+        ' (' . s($link->minerva_course_id) . ')' .
+        html_writer::empty_tag('br') .
+        html_writer::tag('small', get_string('settings_apiurl', 'local_minerva') . ': ' .
+            s($link->minerva_api_url), ['class' => 'text-muted']),
         ['class' => 'alert alert-info']
     );
 
@@ -118,13 +114,17 @@ if ($link) {
     }
 } else {
     // Show form to link a course.
-    try {
-        $client = new \local_minerva\api_client();
-        $minervacourses = $client->list_courses();
-    } catch (\Exception $e) {
-        echo $OUTPUT->notification($e->getMessage(), 'error');
-        echo $OUTPUT->footer();
-        exit;
+    // Try to fetch course list if API creds were submitted (for dropdown mode).
+    $minervacourses = null;
+    $submittedurl = optional_param('minerva_api_url', '', PARAM_URL);
+    $submittedkey = optional_param('minerva_api_key', '', PARAM_RAW);
+    if (!empty($submittedurl) && !empty($submittedkey)) {
+        try {
+            $client = new \local_minerva\api_client($submittedurl, $submittedkey);
+            $minervacourses = $client->list_courses();
+        } catch (\Exception $e) {
+            // Will be caught by form validation.
+        }
     }
 
     $form = new \local_minerva\form\link_course_form($pageurl, [
@@ -136,19 +136,27 @@ if ($link) {
     }
 
     if ($data = $form->get_data()) {
-        // Find the selected course name.
-        $coursename = '';
-        foreach ($minervacourses as $mc) {
-            if ($mc->id === $data->minerva_course_id) {
-                $coursename = $mc->name;
-                break;
+        // Fetch the course name from Minerva to cache it.
+        $coursename = $data->minerva_course_id;
+        try {
+            $client = new \local_minerva\api_client($data->minerva_api_url, $data->minerva_api_key);
+            $courses = $client->list_courses();
+            foreach ($courses as $mc) {
+                if ($mc->id === $data->minerva_course_id) {
+                    $coursename = $mc->name;
+                    break;
+                }
             }
+        } catch (\Exception $e) {
+            // Use UUID as fallback name.
         }
 
         $record = new stdClass();
         $record->courseid = $courseid;
-        $record->minerva_course_id = $data->minerva_course_id;
+        $record->minerva_course_id = trim($data->minerva_course_id);
         $record->minerva_course_name = $coursename;
+        $record->minerva_api_url = rtrim($data->minerva_api_url, '/');
+        $record->minerva_api_key = $data->minerva_api_key;
         $record->timecreated = time();
         $record->timemodified = time();
         $DB->insert_record('local_minerva_links', $record);

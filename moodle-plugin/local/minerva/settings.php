@@ -27,23 +27,6 @@ defined('MOODLE_INTERNAL') || die();
 if ($hassiteconfig) {
     $settings = new admin_settingpage('local_minerva', get_string('pluginname', 'local_minerva'));
 
-    // Minerva API base URL.
-    $settings->add(new admin_setting_configtext(
-        'local_minerva/apiurl',
-        get_string('settings_apiurl', 'local_minerva'),
-        get_string('settings_apiurl_desc', 'local_minerva'),
-        '',
-        PARAM_URL
-    ));
-
-    // API key for integration endpoints.
-    $settings->add(new admin_setting_configpasswordunmask(
-        'local_minerva/apikey',
-        get_string('settings_apikey', 'local_minerva'),
-        get_string('settings_apikey_desc', 'local_minerva'),
-        ''
-    ));
-
     // Auto-sync enrollment on enrol/unenrol events.
     $settings->add(new admin_setting_configcheckbox(
         'local_minerva/autosync_enrolment',

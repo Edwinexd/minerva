@@ -38,15 +38,27 @@ class api_client {
     /**
      * Constructor.
      *
-     * @throws \moodle_exception if the plugin is not configured.
+     * @param string $apiurl Minerva API base URL.
+     * @param string $apikey Minerva API key.
+     * @throws \moodle_exception if credentials are empty.
      */
-    public function __construct() {
-        $this->baseurl = rtrim(get_config('local_minerva', 'apiurl'), '/');
-        $this->apikey = get_config('local_minerva', 'apikey');
+    public function __construct(string $apiurl, string $apikey) {
+        $this->baseurl = rtrim($apiurl, '/');
+        $this->apikey = $apikey;
 
         if (empty($this->baseurl) || empty($this->apikey)) {
             throw new \moodle_exception('no_api_configured', 'local_minerva');
         }
+    }
+
+    /**
+     * Create a client from a course link record.
+     *
+     * @param object $link A local_minerva_links record.
+     * @return self
+     */
+    public static function from_link(object $link): self {
+        return new self($link->minerva_api_url, $link->minerva_api_key);
     }
 
     /**

@@ -48,23 +48,33 @@ $PAGE->set_title(get_string('sync_materials', 'local_minerva'));
 $PAGE->set_heading($course->fullname . ' - ' . get_string('sync_materials', 'local_minerva'));
 $PAGE->set_pagelayout('admin');
 
-// Find all PDF files in the course.
+// Find all visible PDF files in the course.
+// Only sync files from activities that are visible to students.
+$modinfo = get_fast_modinfo($course);
 $fs = get_file_storage();
-$files = $fs->get_area_files($context->id, 'mod_resource', 'content', false, 'filename', false);
-
-// Also check mod_folder.
-$folderfiles = $fs->get_area_files($context->id, 'mod_folder', 'content', false, 'filename', false);
-$files = array_merge($files, $folderfiles);
-
-// Filter to PDFs only.
 $pdffiles = [];
-foreach ($files as $file) {
-    if ($file->is_directory()) {
+
+foreach ($modinfo->get_cms() as $cm) {
+    // Skip hidden/unavailable activities - respect resource visibility.
+    if (!$cm->visible || !$cm->available) {
         continue;
     }
-    $mimetype = $file->get_mimetype();
-    if ($mimetype === 'application/pdf') {
-        $pdffiles[] = $file;
+
+    // Only look at resource and folder modules.
+    if (!in_array($cm->modname, ['resource', 'folder'])) {
+        continue;
+    }
+
+    $component = 'mod_' . $cm->modname;
+    $files = $fs->get_area_files($context->id, $component, 'content', false, 'filename', false);
+
+    foreach ($files as $file) {
+        if ($file->is_directory()) {
+            continue;
+        }
+        if ($file->get_mimetype() === 'application/pdf') {
+            $pdffiles[] = $file;
+        }
     }
 }
 
@@ -82,7 +92,7 @@ foreach ($pdffiles as $file) {
 if ($confirm && confirm_sesskey()) {
     // Perform the sync.
     try {
-        $client = new \local_minerva\api_client();
+        $client = \local_minerva\api_client::from_link($link);
     } catch (\Exception $e) {
         redirect($manageurl, $e->getMessage(), null, \core\output\notification::NOTIFY_ERROR);
     }

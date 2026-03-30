@@ -7,6 +7,8 @@
         <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" COMMENT="Moodle course ID"/>
         <FIELD NAME="minerva_course_id" TYPE="char" LENGTH="36" NOTNULL="true" COMMENT="Minerva course UUID"/>
         <FIELD NAME="minerva_course_name" TYPE="char" LENGTH="255" NOTNULL="false" COMMENT="Cached name of the Minerva course"/>
+        <FIELD NAME="minerva_api_url" TYPE="char" LENGTH="512" NOTNULL="true" COMMENT="Minerva API base URL for this course"/>
+        <FIELD NAME="minerva_api_key" TYPE="char" LENGTH="255" NOTNULL="true" COMMENT="Minerva API key for this course"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true"/>
       </FIELDS>

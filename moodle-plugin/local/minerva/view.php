@@ -37,7 +37,7 @@ if (!$link) {
     throw new moodle_exception('no_link', 'local_minerva');
 }
 
-$apiurl = rtrim(get_config('local_minerva', 'apiurl'), '/');
+$apiurl = rtrim($link->minerva_api_url, '/');
 // Build the frontend URL (strip /api suffix if present to get the base).
 $frontendurl = preg_replace('#/api$#', '', $apiurl);
 $chaturl = $frontendurl . '/course/' . $link->minerva_course_id;

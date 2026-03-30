@@ -58,15 +58,13 @@ class sync_enrolments extends \core\task\scheduled_task {
             return;
         }
 
-        try {
-            $client = new api_client();
-        } catch (\Exception $e) {
-            mtrace('Minerva API not configured: ' . $e->getMessage());
-            return;
-        }
-
         foreach ($links as $link) {
-            $this->sync_course($client, $link);
+            try {
+                $client = api_client::from_link($link);
+                $this->sync_course($client, $link);
+            } catch (\Exception $e) {
+                mtrace("  Course {$link->courseid}: API not configured - " . $e->getMessage());
+            }
         }
     }
 

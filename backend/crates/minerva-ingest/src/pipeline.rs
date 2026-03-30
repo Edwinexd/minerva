@@ -67,41 +67,36 @@ pub async fn process_document(
 
     // 3 & 4. Embed + Upsert (strategy depends on provider)
     let collection_name = format!("course_{}", course_id);
+
+    let build_payload = |chunk: &chunker::Chunk| -> std::collections::HashMap<String, qdrant_client::qdrant::Value> {
+        [
+            ("document_id".to_string(), document_id.to_string().into()),
+            ("course_id".to_string(), course_id.to_string().into()),
+            ("chunk_index".to_string(), (chunk.index as i64).into()),
+            ("text".to_string(), chunk.text.clone().into()),
+            ("filename".to_string(), filename.to_string().into()),
+        ]
+        .into_iter()
+        .collect()
+    };
+
     let embedding_tokens = match embedding_provider {
         "qdrant" => {
-            // Qdrant server-side inference: no client-side embedding needed
             let dims = qdrant_model_dimensions(embedding_model);
             ensure_collection(qdrant, &collection_name, dims).await?;
 
             let points: Vec<PointStruct> = chunks
                 .iter()
                 .map(|chunk| {
-                    let point_id = Uuid::new_v4().to_string();
-                    let payload: std::collections::HashMap<String, qdrant_client::qdrant::Value> = [
-                        ("document_id".to_string(), document_id.to_string().into()),
-                        ("course_id".to_string(), course_id.to_string().into()),
-                        ("chunk_index".to_string(), (chunk.index as i64).into()),
-                        ("text".to_string(), chunk.text.clone().into()),
-                        ("filename".to_string(), filename.to_string().into()),
-                    ]
-                    .into_iter()
-                    .collect();
-
                     PointStruct::new(
-                        point_id,
+                        Uuid::new_v4().to_string(),
                         Document::new(chunk.text.clone(), embedding_model),
-                        payload,
+                        build_payload(chunk),
                     )
                 })
                 .collect();
 
-            // Batch upsert in groups of 100
-            for batch in points.chunks(100) {
-                qdrant
-                    .upsert_points(UpsertPointsBuilder::new(&collection_name, batch.to_vec()))
-                    .await
-                    .map_err(|e| format!("qdrant upsert failed: {}", e))?;
-            }
+            upsert_batched(qdrant, &collection_name, points).await?;
 
             tracing::info!(
                 "upserted {} chunks via qdrant server-side inference (model: {})",
@@ -109,10 +104,9 @@ pub async fn process_document(
                 embedding_model,
             );
 
-            0i64 // no external API tokens used
+            0i64
         }
         _ => {
-            // OpenAI client-side embedding (default)
             ensure_collection(qdrant, &collection_name, 1536).await?;
 
             let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
@@ -135,28 +129,15 @@ pub async fn process_document(
                 .iter()
                 .zip(embedding_result.embeddings.iter())
                 .map(|(chunk, embedding)| {
-                    let point_id = Uuid::new_v4().to_string();
-                    let payload: std::collections::HashMap<String, qdrant_client::qdrant::Value> = [
-                        ("document_id".to_string(), document_id.to_string().into()),
-                        ("course_id".to_string(), course_id.to_string().into()),
-                        ("chunk_index".to_string(), (chunk.index as i64).into()),
-                        ("text".to_string(), chunk.text.clone().into()),
-                        ("filename".to_string(), filename.to_string().into()),
-                    ]
-                    .into_iter()
-                    .collect();
-
-                    PointStruct::new(point_id, embedding.clone(), payload)
+                    PointStruct::new(
+                        Uuid::new_v4().to_string(),
+                        embedding.clone(),
+                        build_payload(chunk),
+                    )
                 })
                 .collect();
 
-            // Batch upsert in groups of 100
-            for batch in points.chunks(100) {
-                qdrant
-                    .upsert_points(UpsertPointsBuilder::new(&collection_name, batch.to_vec()))
-                    .await
-                    .map_err(|e| format!("qdrant upsert failed: {}", e))?;
-            }
+            upsert_batched(qdrant, &collection_name, points).await?;
 
             embedding_result.total_tokens
         }
@@ -182,6 +163,20 @@ pub async fn process_document(
 pub struct ProcessResult {
     pub chunk_count: i32,
     pub embedding_tokens: i64,
+}
+
+async fn upsert_batched(
+    qdrant: &Qdrant,
+    collection_name: &str,
+    points: Vec<PointStruct>,
+) -> Result<(), String> {
+    for batch in points.chunks(100) {
+        qdrant
+            .upsert_points(UpsertPointsBuilder::new(collection_name, batch.to_vec()))
+            .await
+            .map_err(|e| format!("qdrant upsert failed: {}", e))?;
+    }
+    Ok(())
 }
 
 async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Result<(), String> {

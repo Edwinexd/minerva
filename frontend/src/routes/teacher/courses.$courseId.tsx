@@ -115,6 +115,8 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [systemPrompt, setSystemPrompt] = useState(course.system_prompt || "")
   const [maxChunks, setMaxChunks] = useState(course.max_chunks)
   const [strategy, setStrategy] = useState(course.strategy)
+  const [embeddingProvider, setEmbeddingProvider] = useState(course.embedding_provider)
+  const [embeddingModel, setEmbeddingModel] = useState(course.embedding_model)
   const [dailyTokenLimit, setDailyTokenLimit] = useState(course.daily_token_limit)
 
   const mutation = useMutation({
@@ -147,6 +149,8 @@ function CourseConfigForm({ course }: { course: Course }) {
               system_prompt: systemPrompt || null,
               max_chunks: maxChunks,
               strategy,
+              embedding_provider: embeddingProvider,
+              embedding_model: embeddingModel,
               daily_token_limit: dailyTokenLimit,
             })
           }}
@@ -239,6 +243,57 @@ function CourseConfigForm({ course }: { course: Course }) {
               using the generated text as the query.
             </p>
           </div>
+
+          <div className="space-y-2">
+            <Label>Embedding Provider</Label>
+            <Select value={embeddingProvider} onValueChange={(v) => v && setEmbeddingProvider(v)}>
+              <SelectTrigger className="w-full truncate">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="openai">
+                  OpenAI (client-side, text-embedding-3-small)
+                </SelectItem>
+                <SelectItem value="qdrant">
+                  Qdrant FastEmbed (server-side, local)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              OpenAI requires an API key but offers higher quality embeddings.
+              Qdrant FastEmbed runs locally with zero latency and no API cost.
+              Changing provider requires re-uploading documents.
+            </p>
+          </div>
+
+          {embeddingProvider === "qdrant" && (
+            <div className="space-y-2">
+              <Label>Embedding Model</Label>
+              <Select value={embeddingModel} onValueChange={(v) => v && setEmbeddingModel(v)}>
+                <SelectTrigger className="w-full truncate">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sentence-transformers/all-MiniLM-L6-v2">
+                    all-MiniLM-L6-v2 (384d, fast, good quality)
+                  </SelectItem>
+                  <SelectItem value="BAAI/bge-small-en-v1.5">
+                    BGE Small EN v1.5 (384d, optimized for retrieval)
+                  </SelectItem>
+                  <SelectItem value="BAAI/bge-base-en-v1.5">
+                    BGE Base EN v1.5 (768d, higher quality)
+                  </SelectItem>
+                  <SelectItem value="nomic-ai/nomic-embed-text-v1.5">
+                    Nomic Embed Text v1.5 (768d, long context)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The embedding model used by Qdrant for server-side inference.
+                Changing model requires re-uploading documents.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="maxChunks">Max Retrieved Chunks</Label>

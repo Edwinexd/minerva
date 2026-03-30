@@ -414,93 +414,36 @@ async fn flare_retrieve(
     embedding_provider: &str,
     embedding_model: &str,
 ) -> Vec<RagChunk> {
-    let scored_points = if embedding_provider == "qdrant" {
-        use qdrant_client::qdrant::{Document, Query, QueryPointsBuilder};
-
-        match qdrant
-            .query(
-                QueryPointsBuilder::new(collection_name)
-                    .query(Query::new_nearest(Document::new(query, embedding_model)))
-                    .with_payload(true)
-                    .limit(max_chunks as u64)
-                    .score_threshold(SIMILARITY_THRESHOLD),
-            )
-            .await
-        {
-            Ok(r) => r.result,
-            Err(e) => {
-                tracing::warn!("flare: qdrant query failed: {}", e);
-                return Vec::new();
-            }
-        }
-    } else {
-        let embedding = match minerva_ingest::embedder::embed_texts(
-            client,
-            openai_key,
-            std::slice::from_ref(&query.to_string()),
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("flare: embedding failed: {}", e);
-                return Vec::new();
-            }
-        };
-
-        let vector = match embedding.embeddings.into_iter().next() {
-            Some(v) => v,
-            None => return Vec::new(),
-        };
-
-        match qdrant
-            .search_points(
-                qdrant_client::qdrant::SearchPointsBuilder::new(
-                    collection_name,
-                    vector,
-                    max_chunks as u64,
-                )
-                .with_payload(true)
-                .score_threshold(SIMILARITY_THRESHOLD),
-            )
-            .await
-        {
-            Ok(r) => r.result,
-            Err(e) => {
-                tracing::warn!("flare: qdrant search failed: {}", e);
-                return Vec::new();
-            }
-        }
-    };
-
-    scored_points
-        .iter()
-        .filter_map(|point| {
-            let payload = &point.payload;
-            let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => return None,
-            };
-            let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => String::new(),
-            };
-            let document_id = match payload.get("document_id").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => String::new(),
-            };
-            tracing::debug!(
-                "flare: retrieved chunk from '{}' score {:.3}",
-                filename,
-                point.score
-            );
-            Some(RagChunk {
-                document_id,
-                filename,
-                text,
+    match common::embedding_search(
+        client,
+        openai_key,
+        qdrant,
+        collection_name,
+        query,
+        max_chunks as u64,
+        Some(SIMILARITY_THRESHOLD),
+        embedding_provider,
+        embedding_model,
+    )
+    .await
+    {
+        Ok(points) => points
+            .iter()
+            .filter_map(|point| {
+                let chunk = common::scored_point_to_rag_chunk(point)?;
+                tracing::debug!(
+                    "flare: retrieved chunk from '{}' score {:.3}",
+                    chunk.filename,
+                    point.score
+                );
+                Some(chunk)
             })
-        })
-        .collect()
+            .collect(),
+        Err(e) => {
+            tracing::warn!("flare: {}", e);
+            Vec::new()
+        }
+    }
 }
 
 fn truncate_for_log(s: &str, max_len: usize) -> String {

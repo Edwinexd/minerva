@@ -1,8 +1,10 @@
 use axum::response::sse::Event;
 use futures::StreamExt;
-use qdrant_client::qdrant::SearchPointsBuilder;
+use qdrant_client::qdrant::{
+    value::Kind, Document, Query, QueryPointsBuilder, SearchPointsBuilder, ScoredPoint,
+};
 use reqwest::Response;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 
 use crate::error::AppError;
@@ -42,6 +44,99 @@ pub fn chunks_for_client(chunks: &[RagChunk], hidden_doc_ids: &HashSet<String>) 
         })
         .collect()
 }
+
+// ── Qdrant payload helpers ──────────────────────────────────────────
+
+/// Extract a string field from a Qdrant point payload, returning None if missing.
+pub fn payload_string(
+    payload: &HashMap<String, qdrant_client::qdrant::Value>,
+    key: &str,
+) -> Option<String> {
+    match payload.get(key).and_then(|v| v.kind.as_ref()) {
+        Some(Kind::StringValue(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+/// Extract an integer field from a Qdrant point payload.
+pub fn payload_int(
+    payload: &HashMap<String, qdrant_client::qdrant::Value>,
+    key: &str,
+) -> Option<i64> {
+    match payload.get(key).and_then(|v| v.kind.as_ref()) {
+        Some(Kind::IntegerValue(i)) => Some(*i),
+        _ => None,
+    }
+}
+
+/// Parse a scored point into a RagChunk. Returns None if the required `text`
+/// field is missing.
+pub fn scored_point_to_rag_chunk(point: &ScoredPoint) -> Option<RagChunk> {
+    let text = payload_string(&point.payload, "text")?;
+    Some(RagChunk {
+        document_id: payload_string(&point.payload, "document_id").unwrap_or_default(),
+        filename: payload_string(&point.payload, "filename").unwrap_or_default(),
+        text,
+    })
+}
+
+// ── Embedding-aware Qdrant search ──────────────────────────────────
+
+/// Run a nearest-neighbour search against Qdrant, dispatching to either
+/// server-side inference (Document query) or client-side OpenAI embeddings
+/// depending on the course's `embedding_provider`.
+pub async fn embedding_search(
+    client: &reqwest::Client,
+    openai_key: &str,
+    qdrant: &qdrant_client::Qdrant,
+    collection_name: &str,
+    query: &str,
+    limit: u64,
+    score_threshold: Option<f32>,
+    embedding_provider: &str,
+    embedding_model: &str,
+) -> Result<Vec<ScoredPoint>, String> {
+    if embedding_provider == "qdrant" {
+        let mut builder = QueryPointsBuilder::new(collection_name)
+            .query(Query::new_nearest(Document::new(query, embedding_model)))
+            .with_payload(true)
+            .limit(limit);
+        if let Some(threshold) = score_threshold {
+            builder = builder.score_threshold(threshold);
+        }
+        qdrant
+            .query(builder)
+            .await
+            .map(|r| r.result)
+            .map_err(|e| format!("qdrant query failed: {}", e))
+    } else {
+        let embed_result = minerva_ingest::embedder::embed_texts(
+            client,
+            openai_key,
+            std::slice::from_ref(&query.to_string()),
+        )
+        .await?;
+
+        let vector = embed_result
+            .embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| "no embedding returned".to_string())?;
+
+        let mut builder =
+            SearchPointsBuilder::new(collection_name, vector, limit).with_payload(true);
+        if let Some(threshold) = score_threshold {
+            builder = builder.score_threshold(threshold);
+        }
+        qdrant
+            .search_points(builder)
+            .await
+            .map(|r| r.result)
+            .map_err(|e| format!("qdrant search failed: {}", e))
+    }
+}
+
+// ── Cerebras helpers ───────────────────────────────────────────────
 
 /// Send a request to the Cerebras API with retry on 5XX / network errors.
 /// Returns the successful response or the last error as a formatted string.
@@ -156,8 +251,8 @@ pub fn build_chat_messages(
     messages
 }
 
-/// Perform RAG lookup: embed query, search Qdrant, return structured chunks.
-/// Supports both OpenAI client-side embedding and Qdrant server-side inference.
+/// Perform RAG lookup: search Qdrant, return structured chunks.
+/// Dispatches to OpenAI or Qdrant server-side embeddings based on provider.
 pub async fn rag_lookup(
     client: &reqwest::Client,
     openai_key: &str,
@@ -168,84 +263,25 @@ pub async fn rag_lookup(
     embedding_provider: &str,
     embedding_model: &str,
 ) -> Vec<RagChunk> {
-    let scored_points = if embedding_provider == "qdrant" {
-        // Qdrant server-side inference
-        use qdrant_client::qdrant::{Document, Query, QueryPointsBuilder};
-
-        match qdrant
-            .query(
-                QueryPointsBuilder::new(collection_name)
-                    .query(Query::new_nearest(Document::new(query, embedding_model)))
-                    .with_payload(true)
-                    .limit(max_chunks as u64),
-            )
-            .await
-        {
-            Ok(result) => result.result,
-            Err(e) => {
-                tracing::warn!("qdrant query failed: {}, skipping RAG", e);
-                return Vec::new();
-            }
+    match embedding_search(
+        client,
+        openai_key,
+        qdrant,
+        collection_name,
+        query,
+        max_chunks as u64,
+        None,
+        embedding_provider,
+        embedding_model,
+    )
+    .await
+    {
+        Ok(points) => points.iter().filter_map(scored_point_to_rag_chunk).collect(),
+        Err(e) => {
+            tracing::warn!("{}, skipping RAG", e);
+            Vec::new()
         }
-    } else {
-        // OpenAI client-side embedding
-        let embedding = match minerva_ingest::embedder::embed_texts(
-            client,
-            openai_key,
-            std::slice::from_ref(&query.to_string()),
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("embedding failed: {}, skipping RAG", e);
-                return Vec::new();
-            }
-        };
-
-        let vector = match embedding.embeddings.into_iter().next() {
-            Some(v) => v,
-            None => return Vec::new(),
-        };
-
-        match qdrant
-            .search_points(
-                SearchPointsBuilder::new(collection_name, vector, max_chunks as u64)
-                    .with_payload(true),
-            )
-            .await
-        {
-            Ok(result) => result.result,
-            Err(e) => {
-                tracing::warn!("qdrant search failed: {}, skipping RAG", e);
-                return Vec::new();
-            }
-        }
-    };
-
-    scored_points
-        .iter()
-        .filter_map(|point| {
-            let payload = &point.payload;
-            let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => return None,
-            };
-            let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => String::new(),
-            };
-            let document_id = match payload.get("document_id").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => String::new(),
-            };
-            Some(RagChunk {
-                document_id,
-                filename,
-                text,
-            })
-        })
-        .collect()
+    }
 }
 
 /// Stream a Cerebras completion to the client via tx, appending tokens to full_text.

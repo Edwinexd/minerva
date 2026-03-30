@@ -17,6 +17,8 @@ export interface Course {
   system_prompt: string | null
   max_chunks: number
   strategy: string
+  embedding_provider: string
+  embedding_model: string
   daily_token_limit: number
   active: boolean
   created_at: string

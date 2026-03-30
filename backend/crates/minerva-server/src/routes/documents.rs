@@ -2,7 +2,7 @@ use axum::extract::{Extension, Multipart, Path, Query, State};
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use minerva_core::models::User;
-use qdrant_client::qdrant::{ScrollPointsBuilder, SearchPointsBuilder};
+use qdrant_client::qdrant::ScrollPointsBuilder;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -275,23 +275,13 @@ async fn list_chunks(
         .result
         .iter()
         .filter_map(|point| {
-            let payload = &point.payload;
-            let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => return None,
-            };
-            let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => String::new(),
-            };
-            let chunk_index = match payload.get("chunk_index").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::IntegerValue(i)) => *i,
-                _ => 0,
-            };
+            use crate::strategy::common::{payload_int, payload_string};
+
+            let text = payload_string(&point.payload, "text")?;
             Some(ChunkResponse {
-                chunk_index,
+                chunk_index: payload_int(&point.payload, "chunk_index").unwrap_or(0),
                 text,
-                filename,
+                filename: payload_string(&point.payload, "filename").unwrap_or_default(),
             })
         })
         .collect();
@@ -341,80 +331,34 @@ async fn search_chunks(
     }
 
     let limit = params.limit.unwrap_or(10);
+    let client = reqwest::Client::new();
 
-    let scored_points = if course.embedding_provider == "qdrant" {
-        // Qdrant server-side inference: query with Document
-        use qdrant_client::qdrant::{Document, Query, QueryPointsBuilder};
-
-        let query_result = state
-            .qdrant
-            .query(
-                QueryPointsBuilder::new(&collection_name)
-                    .query(Query::new_nearest(Document::new(
-                        params.q.clone(),
-                        &course.embedding_model,
-                    )))
-                    .with_payload(true)
-                    .limit(limit),
-            )
-            .await
-            .map_err(|e| AppError::Internal(format!("qdrant query failed: {}", e)))?;
-
-        query_result.result
-    } else {
-        // OpenAI client-side embedding
-        let client = reqwest::Client::new();
-        let embedding = minerva_ingest::embedder::embed_texts(
-            &client,
-            &state.config.openai_api_key,
-            std::slice::from_ref(&params.q),
-        )
-        .await
-        .map_err(|e| AppError::Internal(format!("embedding failed: {}", e)))?;
-
-        let vector = embedding
-            .embeddings
-            .into_iter()
-            .next()
-            .ok_or_else(|| AppError::Internal("no embedding returned".to_string()))?;
-
-        let result = state
-            .qdrant
-            .search_points(
-                SearchPointsBuilder::new(&collection_name, vector, limit).with_payload(true),
-            )
-            .await
-            .map_err(|e| AppError::Internal(format!("qdrant search failed: {}", e)))?;
-
-        result.result
-    };
+    let scored_points = crate::strategy::common::embedding_search(
+        &client,
+        &state.config.openai_api_key,
+        &state.qdrant,
+        &collection_name,
+        &params.q,
+        limit,
+        None,
+        &course.embedding_provider,
+        &course.embedding_model,
+    )
+    .await
+    .map_err(|e| AppError::Internal(e))?;
 
     let results: Vec<SearchResult> = scored_points
         .iter()
         .filter_map(|point| {
-            let payload = &point.payload;
-            let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => return None,
-            };
-            let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => String::new(),
-            };
-            let document_id = match payload.get("document_id").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                _ => String::new(),
-            };
-            let chunk_index = match payload.get("chunk_index").and_then(|v| v.kind.as_ref()) {
-                Some(qdrant_client::qdrant::value::Kind::IntegerValue(i)) => *i,
-                _ => 0,
-            };
+            use crate::strategy::common::{payload_int, payload_string};
+
+            let text = payload_string(&point.payload, "text")?;
             Some(SearchResult {
                 score: point.score,
                 text,
-                filename,
-                document_id,
-                chunk_index,
+                filename: payload_string(&point.payload, "filename").unwrap_or_default(),
+                document_id: payload_string(&point.payload, "document_id").unwrap_or_default(),
+                chunk_index: payload_int(&point.payload, "chunk_index").unwrap_or(0),
             })
         })
         .collect();

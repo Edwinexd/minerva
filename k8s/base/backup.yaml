@@ -1,0 +1,60 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: minerva
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: backup
+              image: postgres:16-alpine
+              env:
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: minerva-secrets
+                      key: POSTGRES_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: minerva-secrets
+                      key: POSTGRES_PASSWORD
+                - name: PGHOST
+                  value: postgres
+                - name: PGDATABASE
+                  value: minerva
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  BACKUP_FILE="/backups/minerva-$(date +%Y-%m-%d_%H%M%S).sql.gz"
+                  echo "Starting backup to $BACKUP_FILE"
+                  pg_dump --no-owner --no-acl | gzip > "$BACKUP_FILE"
+                  echo "Backup completed: $(ls -lh $BACKUP_FILE)"
+                  # Keep only the last 14 daily backups
+                  ls -t /backups/minerva-*.sql.gz 2>/dev/null | tail -n +15 | xargs -r rm -f
+                  echo "Cleanup completed. Current backups:"
+                  ls -lh /backups/
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backups
+              resources:
+                requests:
+                  memory: "128Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "512Mi"
+                  cpu: "500m"
+          restartPolicy: OnFailure
+          volumes:
+            - name: backup-storage
+              hostPath:
+                path: /data0/minerva/backups
+                type: DirectoryOrCreate

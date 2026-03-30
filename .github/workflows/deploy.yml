@@ -1,0 +1,83 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [master]
+  repository_dispatch:
+    types: [deploy]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (e.g. master, sha-abc1234, v1.0.0)"
+        required: false
+        default: "master"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      IMAGE_TAG: ${{ github.event.client_payload.tag || inputs.image_tag || 'master' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image tag in kustomization
+        run: |
+          cd k8s/overlays/prod
+          sed -i "s/newTag: .*/newTag: ${{ env.IMAGE_TAG }}/" kustomization.yaml
+
+      - name: Install WireGuard
+        run: sudo apt-get update && sudo apt-get install -y wireguard
+
+      - name: Setup WireGuard
+        run: |
+          echo "${{ secrets.WIREGUARD_CONFIG }}" | sed "/^\[Interface\]/a PrivateKey = ${{ secrets.WIREGUARD_PRIVATE_KEY }}" | sudo tee /etc/wireguard/wg0.conf
+          sudo chmod 600 /etc/wireguard/wg0.conf
+          sudo wg-quick up wg0
+
+      - name: Setup SSH tunnel
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan minerva.dsv.su.se >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -fN -L 6443:127.0.0.1:6443 ci@minerva.dsv.su.se
+
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Create k8s secrets file
+        run: |
+          echo "${{ secrets.K8S_SECRETS }}" | base64 -d > k8s/overlays/prod/secrets.yaml
+
+      - name: Create ghcr.io pull secret
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --namespace=minerva \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GHCR_PAT }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy to Kubernetes
+        run: |
+          echo "Deploying image tag: ${{ env.IMAGE_TAG }}"
+          kubectl apply -k k8s/overlays/prod
+          kubectl rollout restart deployment/minerva-app -n minerva
+          kubectl rollout status deployment/postgres -n minerva --timeout=120s
+          kubectl rollout status deployment/qdrant -n minerva --timeout=120s
+          kubectl rollout status deployment/minerva-app -n minerva --timeout=300s
+
+      - name: Teardown
+        if: always()
+        run: |
+          pkill -f "ssh -fN -L 6443" || true
+          sudo wg-quick down wg0 || true

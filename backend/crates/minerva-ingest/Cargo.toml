@@ -17,4 +17,4 @@ chrono.workspace = true
 futures.workspace = true
 sqlx.workspace = true
 qdrant-client.workspace = true
-pdf-extract = "0.8"
+pdf-extract = "0.10"

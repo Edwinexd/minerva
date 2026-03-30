@@ -73,7 +73,6 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.1"
-          tools: cs2pr, phpcs, phpstan
 
       - name: Syntax check
         run: find . -name '*.php' -exec php -l {} + | (! grep -v 'No syntax errors')
@@ -82,10 +81,11 @@ jobs:
         run: |
           composer global config allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer global require moodlehq/moodle-cs
-          phpcs --config-set installed_paths "$(composer global config home)/vendor/moodlehq/moodle-cs"
 
       - name: Code style
-        run: phpcs --standard=moodle --extensions=php .
+        run: |
+          PHPCS="$(composer global config home)/vendor/bin/phpcs"
+          "$PHPCS" --standard=moodle --extensions=php .
 
   emdash-check:
     name: Ban emdashes

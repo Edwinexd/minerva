@@ -3,6 +3,7 @@ mod chat;
 mod courses;
 mod documents;
 mod health;
+mod integration;
 mod signed_urls;
 mod usage;
 
@@ -33,6 +34,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .route("/health", get(health::health))
         .route("/models", get(health::models))
         .route("/dev/config", get(dev_config))
+        .nest("/integration", integration::router())
         .merge(authed)
 }
 

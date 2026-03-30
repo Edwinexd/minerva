@@ -16,9 +16,6 @@ pub struct Config {
     pub admin_usernames: Vec<String>,
     /// When true, allows dev auth bypass (X-Dev-User header or default user)
     pub dev_mode: bool,
-    /// Optional API key for service-to-service integration (e.g. Moodle plugin).
-    /// Set via MINERVA_API_KEY. When set, the /api/integration/* routes are enabled.
-    pub api_key: Option<String>,
 }
 
 impl Config {
@@ -46,7 +43,6 @@ impl Config {
                 .unwrap_or_else(|_| "./data/documents".to_string()),
             admin_usernames,
             dev_mode: env::var("MINERVA_DEV_MODE").unwrap_or_default() == "true",
-            api_key: env::var("MINERVA_API_KEY").ok().filter(|s| !s.is_empty()),
         })
     }
 

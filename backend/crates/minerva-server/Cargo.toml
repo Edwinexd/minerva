@@ -32,5 +32,6 @@ qdrant-client.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 hex.workspace = true
+rand.workspace = true
 tokio-stream = "0.1"
 anyhow = "1"

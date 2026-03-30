@@ -1,14 +1,18 @@
 //! Integration API for external services (e.g. Moodle plugin).
 //!
-//! Authenticated via `Authorization: Bearer <MINERVA_API_KEY>` header.
-//! Provides admin-level access for user management, enrollment sync,
-//! course listing, and document upload.
+//! Authenticated via `Authorization: Bearer <api_key>` header where
+//! the api_key is a per-course key created by teachers via the UI.
+//! The key is hashed (SHA-256) and looked up in the `api_keys` table.
+//!
+//! Routes that include a course_id verify the key belongs to that course.
+//! The `/courses` list endpoint returns only courses the key has access to.
 
 use axum::extract::{Multipart, Path, State};
 use axum::http::HeaderMap;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -30,14 +34,12 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-/// Validates the API key from Authorization header.
-pub fn validate_api_key(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
-    let configured_key = state
-        .config
-        .api_key
-        .as_ref()
-        .ok_or(AppError::Internal("integration API not configured".into()))?;
-
+/// Extract and validate the API key from the Authorization header.
+/// Returns the API key row (with course_id scope).
+async fn authenticate(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<minerva_db::queries::api_keys::ApiKeyRow, AppError> {
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -47,10 +49,35 @@ pub fn validate_api_key(state: &AppState, headers: &HeaderMap) -> Result<(), App
         .strip_prefix("Bearer ")
         .ok_or(AppError::Unauthorized)?;
 
-    if token != configured_key {
-        return Err(AppError::Unauthorized);
-    }
+    // Hash the provided key and look it up.
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    let key_hash = hex::encode(hasher.finalize());
 
+    let api_key = minerva_db::queries::api_keys::find_by_hash(&state.db, &key_hash)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    // Update last_used_at (fire-and-forget).
+    let db = state.db.clone();
+    let key_id = api_key.id;
+    tokio::spawn(async move {
+        let _ = minerva_db::queries::api_keys::touch_last_used(&db, key_id).await;
+    });
+
+    Ok(api_key)
+}
+
+/// Authenticate and verify the key is scoped to the given course.
+async fn authenticate_for_course(
+    state: &AppState,
+    headers: &HeaderMap,
+    course_id: Uuid,
+) -> Result<(), AppError> {
+    let api_key = authenticate(state, headers).await?;
+    if api_key.course_id != course_id {
+        return Err(AppError::Forbidden);
+    }
     Ok(())
 }
 
@@ -74,24 +101,24 @@ struct UserInfo {
 
 // -- Handlers --
 
-/// List all active courses.
+/// List courses the API key has access to (i.e. the key's course).
 async fn list_courses(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<CourseInfo>>, AppError> {
-    validate_api_key(&state, &headers)?;
+    let api_key = authenticate(&state, &headers).await?;
 
-    let rows = minerva_db::queries::courses::list_all(&state.db).await?;
-    Ok(Json(
-        rows.into_iter()
-            .map(|r| CourseInfo {
-                id: r.id,
-                name: r.name,
-                description: r.description,
-                active: r.active,
-            })
-            .collect(),
-    ))
+    // Return only the course this key is scoped to.
+    let course = minerva_db::queries::courses::find_by_id(&state.db, api_key.course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    Ok(Json(vec![CourseInfo {
+        id: course.id,
+        name: course.name,
+        description: course.description,
+        active: course.active,
+    }]))
 }
 
 #[derive(Deserialize)]
@@ -106,7 +133,8 @@ async fn ensure_user(
     headers: HeaderMap,
     Json(body): Json<EnsureUserRequest>,
 ) -> Result<Json<UserInfo>, AppError> {
-    validate_api_key(&state, &headers)?;
+    // Any valid API key can ensure users exist.
+    authenticate(&state, &headers).await?;
 
     let existing = minerva_db::queries::users::find_by_eppn(&state.db, &body.eppn).await?;
     match existing {
@@ -150,14 +178,12 @@ async fn add_member(
     Path(course_id): Path<Uuid>,
     Json(body): Json<AddMemberRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    validate_api_key(&state, &headers)?;
+    authenticate_for_course(&state, &headers, course_id).await?;
 
-    // Verify course exists
     minerva_db::queries::courses::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Ensure user exists
     let user = minerva_db::queries::users::find_by_eppn(&state.db, &body.eppn).await?;
     let user_id = match user {
         Some(u) => u.id,
@@ -189,7 +215,7 @@ async fn remove_member_by_eppn(
     headers: HeaderMap,
     Path((course_id, eppn)): Path<(Uuid, String)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    validate_api_key(&state, &headers)?;
+    authenticate_for_course(&state, &headers, course_id).await?;
 
     let user = minerva_db::queries::users::find_by_eppn(&state.db, &eppn)
         .await?
@@ -215,7 +241,7 @@ async fn list_documents(
     headers: HeaderMap,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<DocumentInfo>>, AppError> {
-    validate_api_key(&state, &headers)?;
+    authenticate_for_course(&state, &headers, course_id).await?;
 
     minerva_db::queries::courses::find_by_id(&state.db, course_id)
         .await?
@@ -242,7 +268,7 @@ async fn upload_document(
     Path(course_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<DocumentInfo>, AppError> {
-    validate_api_key(&state, &headers)?;
+    authenticate_for_course(&state, &headers, course_id).await?;
 
     minerva_db::queries::courses::find_by_id(&state.db, course_id)
         .await?

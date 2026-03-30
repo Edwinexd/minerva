@@ -80,6 +80,7 @@ jobs:
 
       - name: Install Moodle coding standards
         run: |
+          composer global config allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer global require moodlehq/moodle-cs
           phpcs --config-set installed_paths "$(composer global config home)/vendor/moodlehq/moodle-cs"
 

@@ -33,10 +33,7 @@ pub fn router() -> Router<AppState> {
             "/courses/{course_id}/documents",
             post(upload_document).get(list_documents),
         )
-        .route(
-            "/courses/{course_id}/embed-token",
-            post(create_embed_token),
-        )
+        .route("/courses/{course_id}/embed-token", post(create_embed_token))
 }
 
 /// Extract and validate the API key from the Authorization header.
@@ -440,12 +437,8 @@ async fn create_embed_token(
 }
 
 /// Verify an embed token and return (course_id, user_id).
-pub fn verify_embed_token(
-    hmac_secret: &str,
-    token: &str,
-) -> Result<(Uuid, Uuid), AppError> {
-    let decoded = base64_url_decode(token)
-        .map_err(|_| AppError::Unauthorized)?;
+pub fn verify_embed_token(hmac_secret: &str, token: &str) -> Result<(Uuid, Uuid), AppError> {
+    let decoded = base64_url_decode(token).map_err(|_| AppError::Unauthorized)?;
 
     // Format: course_id:user_id:expires_ts:signature
     let parts: Vec<&str> = decoded.splitn(4, ':').collect();

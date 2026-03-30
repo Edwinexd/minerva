@@ -27,9 +27,18 @@ use crate::strategy;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/course/{course_id}", get(get_course))
-        .route("/course/{course_id}/conversations", get(list_conversations).post(create_conversation))
-        .route("/course/{course_id}/conversations/{cid}", get(get_conversation))
-        .route("/course/{course_id}/conversations/{cid}/message", post(send_message))
+        .route(
+            "/course/{course_id}/conversations",
+            get(list_conversations).post(create_conversation),
+        )
+        .route(
+            "/course/{course_id}/conversations/{cid}",
+            get(get_conversation),
+        )
+        .route(
+            "/course/{course_id}/conversations/{cid}/message",
+            post(send_message),
+        )
         .route("/course/{course_id}/me", get(get_me))
 }
 
@@ -242,9 +251,8 @@ async fn send_message(
 
     // Enforce daily token limit.
     if course.daily_token_limit > 0 {
-        let used =
-            minerva_db::queries::usage::get_user_daily_tokens(&state.db, user_id, course_id)
-                .await?;
+        let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user_id, course_id)
+            .await?;
         if used >= course.daily_token_limit {
             return Err(AppError::QuotaExceeded);
         }

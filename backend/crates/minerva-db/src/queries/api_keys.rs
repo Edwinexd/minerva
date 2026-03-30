@@ -58,12 +58,11 @@ pub async fn find_by_hash(db: &PgPool, key_hash: &str) -> Result<Option<ApiKeyRo
 }
 
 pub async fn delete(db: &PgPool, id: Uuid, course_id: Uuid) -> Result<bool, sqlx::Error> {
-    let result =
-        sqlx::query("DELETE FROM api_keys WHERE id = $1 AND course_id = $2")
-            .bind(id)
-            .bind(course_id)
-            .execute(db)
-            .await?;
+    let result = sqlx::query("DELETE FROM api_keys WHERE id = $1 AND course_id = $2")
+        .bind(id)
+        .bind(course_id)
+        .execute(db)
+        .await?;
     Ok(result.rows_affected() > 0)
 }
 

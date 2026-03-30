@@ -109,7 +109,7 @@ The main application sits behind Apache `mod_shib` which sets the `REMOTE_USER` 
     Require valid-user
 </Location>
 
-# Exclude Moodle integration and embed routes — they use their own auth.
+# Exclude Moodle integration and embed routes -- they use their own auth.
 <LocationMatch "^/api/(integration|embed)">
     ShibRequestSetting requireSession 0
     Require all granted

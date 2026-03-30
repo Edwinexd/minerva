@@ -91,16 +91,13 @@ A Moodle local plugin (`local_minerva`) is included in `moodle-plugin/`. It embe
 
 ### Routes that must be excluded from SSO / Shibboleth
 
-The main application sits behind Apache `mod_shib` which sets the `REMOTE_USER` header. The following API paths and frontend routes must **not** be behind Shibboleth (i.e. they need `ShibRequestSetting requireSession 0` or should be excluded from the `<Location>` block):
+The main application sits behind Apache `mod_shib` which sets the `REMOTE_USER` header. The Moodle plugin communicates server-side (API keys) and via iframes (embed tokens), so these three path prefixes must be excluded from Shibboleth:
 
-| Path prefix | Purpose |
-|-------------|---------|
-| `/api/health` | Health check endpoint |
-| `/api/models` | Model list (public) |
-| `/api/dev/config` | Dev mode config (no-ops in production) |
-| `/api/integration/*` | Integration API for external services (Moodle plugin). Authenticated via per-course API keys (Bearer token), not SSO. |
-| `/api/embed/*` | Embeddable chat API for iframe usage. Authenticated via HMAC-signed embed tokens, not SSO. |
-| `/embed/*` | Frontend embed route (iframe chat UI). Uses embed tokens from query params, not SSO. |
+| Path prefix | Auth method | Why |
+|-------------|-------------|-----|
+| `/api/integration/*` | Per-course API key (Bearer token) | Moodle server-to-server calls (enrolment sync, material upload, token creation) |
+| `/api/embed/*` | HMAC-signed embed token | Iframe chat API (conversations, streaming) |
+| `/embed/*` | Embed token (query param) | Iframe frontend route |
 
 **Example Apache config** (adjust to your setup):
 
@@ -112,8 +109,8 @@ The main application sits behind Apache `mod_shib` which sets the `REMOTE_USER` 
     Require valid-user
 </Location>
 
-# Exclude routes that use their own auth (integration API, embed).
-<LocationMatch "^/api/(health|models|dev|integration|embed)">
+# Exclude Moodle integration and embed routes — they use their own auth.
+<LocationMatch "^/api/(integration|embed)">
     ShibRequestSetting requireSession 0
     Require all granted
 </LocationMatch>
@@ -124,7 +121,7 @@ The main application sits behind Apache `mod_shib` which sets the `REMOTE_USER` 
 </LocationMatch>
 ```
 
-All other routes (`/api/auth/*`, `/api/courses/*`, `/api/admin/*`, the main frontend at `/`, `/course/*`, `/teacher/*`, `/admin/*`) require Shibboleth authentication which provides the `REMOTE_USER` header.
+Everything else stays behind Shibboleth.
 
 ## License
 

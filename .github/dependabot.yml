@@ -1,0 +1,56 @@
+version: 2
+
+updates:
+  # Rust (backend)
+  - package-ecosystem: cargo
+    directory: /backend
+    schedule:
+      interval: weekly
+    target-branch: master
+    open-pull-requests-limit: 10
+    groups:
+      rust-deps:
+        patterns:
+          - "*"
+
+  # npm (frontend)
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    target-branch: master
+    open-pull-requests-limit: 10
+    groups:
+      npm-deps:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+
+  # Docker
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+    target-branch: master
+
+  # Terraform
+  - package-ecosystem: terraform
+    directory: /terraform
+    schedule:
+      interval: monthly
+    target-branch: master
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: master

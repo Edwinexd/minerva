@@ -92,3 +92,37 @@ pub async fn delete(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
         .await?;
     Ok(result.rows_affected() > 0)
 }
+
+/// Atomically claim up to `limit` pending documents for processing.
+/// Uses `FOR UPDATE SKIP LOCKED` so multiple workers won't grab the same row.
+/// Atomically claim up to `limit` pending documents for processing.
+/// Uses `FOR UPDATE SKIP LOCKED` so multiple workers won't grab the same row.
+pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, sqlx::Error> {
+    sqlx::query_as::<_, DocumentRow>(
+        r#"UPDATE documents
+        SET status = 'processing'
+        WHERE id IN (
+            SELECT id FROM documents
+            WHERE status = 'pending'
+            ORDER BY created_at ASC
+            LIMIT $1
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at"#,
+    )
+    .bind(limit)
+    .fetch_all(db)
+    .await
+}
+
+/// Reset documents stuck in 'processing' back to 'pending'.
+/// Used on startup for crash recovery: any document still marked 'processing'
+/// was interrupted by a server restart.
+pub async fn reset_stale_processing(db: &PgPool) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE documents SET status = 'pending' WHERE status = 'processing'",
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
+}

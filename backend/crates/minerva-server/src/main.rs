@@ -4,6 +4,7 @@ mod error;
 mod routes;
 mod state;
 mod strategy;
+mod worker;
 
 use axum::Router;
 use tower_http::cors::CorsLayer;
@@ -23,6 +24,9 @@ async fn main() -> anyhow::Result<()> {
 
     let config = config::Config::from_env()?;
     let state = state::AppState::new(&config).await?;
+
+    // Start the background document-processing worker.
+    worker::start(state.clone(), config.max_concurrent_ingests);
 
     let app = Router::new()
         .nest("/api", routes::api_router(state.clone()))

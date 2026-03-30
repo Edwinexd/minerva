@@ -17,6 +17,8 @@ pub struct Config {
     pub admin_usernames: Vec<String>,
     /// When true, allows dev auth bypass (X-Dev-User header or default user)
     pub dev_mode: bool,
+    /// Maximum number of documents processed concurrently by the background worker.
+    pub max_concurrent_ingests: usize,
 }
 
 impl Config {
@@ -44,6 +46,10 @@ impl Config {
                 .unwrap_or_else(|_| "./data/documents".to_string()),
             admin_usernames,
             dev_mode: env::var("MINERVA_DEV_MODE").unwrap_or_default() == "true",
+            max_concurrent_ingests: env::var("MINERVA_MAX_CONCURRENT_INGESTS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(4),
         })
     }
 

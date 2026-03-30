@@ -14,7 +14,6 @@ use axum::{Json, Router};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -311,6 +310,7 @@ async fn upload_document(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    // Insert as 'pending'. The background worker will pick it up.
     let row = minerva_db::queries::documents::insert(
         &state.db,
         doc_id,
@@ -321,45 +321,6 @@ async fn upload_document(
         course.owner_id,
     )
     .await?;
-
-    // Spawn background processing
-    let db = state.db.clone();
-    let qdrant = Arc::clone(&state.qdrant);
-    let api_key = state.config.openai_api_key.clone();
-    let fname = filename.clone();
-    let fpath = file_path.clone();
-    let emb_provider = course.embedding_provider.clone();
-    let emb_model = course.embedding_model.clone();
-
-    tokio::spawn(async move {
-        let client = reqwest::Client::new();
-        let path = std::path::Path::new(&fpath);
-
-        match minerva_ingest::pipeline::process_document(
-            &db, &qdrant, &client, &api_key, doc_id, course_id, path, &fname,
-            &emb_provider, &emb_model,
-        )
-        .await
-        {
-            Ok(result) => {
-                tracing::info!(
-                    "integration: document {} processed: {} chunks",
-                    doc_id,
-                    result.chunk_count,
-                );
-            }
-            Err(e) => {
-                tracing::error!("integration: document {} processing failed: {}", doc_id, e);
-                let _ = sqlx::query(
-                    "UPDATE documents SET status = 'failed', error_msg = $1 WHERE id = $2",
-                )
-                .bind(&e)
-                .bind(doc_id)
-                .execute(&db)
-                .await;
-            }
-        }
-    });
 
     Ok(Json(DocumentInfo {
         id: row.id,

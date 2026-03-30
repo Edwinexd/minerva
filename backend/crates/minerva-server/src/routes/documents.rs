@@ -4,7 +4,6 @@ use axum::{Json, Router};
 use minerva_core::models::User;
 use qdrant_client::qdrant::ScrollPointsBuilder;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -115,7 +114,8 @@ async fn upload_document(
         .await
         .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;
 
-    // Insert document record
+    // Insert document record as 'pending'. The background worker will pick it
+    // up and process it with bounded concurrency.
     let row = minerva_db::queries::documents::insert(
         &state.db,
         doc_id,
@@ -126,46 +126,6 @@ async fn upload_document(
         user.id,
     )
     .await?;
-
-    // Spawn background processing task
-    let db = state.db.clone();
-    let qdrant = Arc::clone(&state.qdrant);
-    let api_key = state.config.openai_api_key.clone();
-    let fname = filename.clone();
-    let fpath = file_path.clone();
-    let emb_provider = course.embedding_provider.clone();
-    let emb_model = course.embedding_model.clone();
-
-    tokio::spawn(async move {
-        let client = reqwest::Client::new();
-        let path = std::path::Path::new(&fpath);
-
-        match minerva_ingest::pipeline::process_document(
-            &db, &qdrant, &client, &api_key, doc_id, course_id, path, &fname,
-            &emb_provider, &emb_model,
-        )
-        .await
-        {
-            Ok(result) => {
-                tracing::info!(
-                    "document {} processed: {} chunks, {} embedding tokens",
-                    doc_id,
-                    result.chunk_count,
-                    result.embedding_tokens,
-                );
-            }
-            Err(e) => {
-                tracing::error!("document {} processing failed: {}", doc_id, e);
-                let _ = sqlx::query(
-                    "UPDATE documents SET status = 'failed', error_msg = $1 WHERE id = $2",
-                )
-                .bind(&e)
-                .bind(doc_id)
-                .execute(&db)
-                .await;
-            }
-        }
-    });
 
     Ok(Json(DocumentResponse::from(row)))
 }

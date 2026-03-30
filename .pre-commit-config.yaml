@@ -46,3 +46,10 @@ repos:
         language: system
         pass_filenames: false
         files: \.rs$|Cargo\.toml$
+
+      - id: phpcs-moodle
+        name: phpcs moodle
+        entry: bash -c 'PHPCS="$(composer global config home 2>/dev/null)/vendor/bin/phpcs" && "$PHPCS" --standard=moodle --extensions=php moodle-plugin/local/minerva/'
+        language: system
+        pass_filenames: false
+        files: \.php$

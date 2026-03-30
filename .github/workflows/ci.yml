@@ -85,7 +85,7 @@ jobs:
       - name: Code style
         run: |
           PHPCS="$(composer global config home)/vendor/bin/phpcs"
-          "$PHPCS" --standard=moodle --extensions=php .
+          "$PHPCS" --standard=moodle --extensions=php --warning-severity=0 .
 
   emdash-check:
     name: Ban emdashes

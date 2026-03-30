@@ -143,7 +143,8 @@ if ($link) {
             $client = new \local_minerva\api_client($submittedurl, $submittedkey);
             $minervacourses = $client->list_courses();
         } catch (\Exception $e) {
-            // Will be caught by form validation.
+            // Will be caught by form validation later.
+            debugging($e->getMessage(), DEBUG_DEVELOPER);
         }
     }
 
@@ -170,6 +171,7 @@ if ($link) {
             }
         } catch (\Exception $e) {
             // Use UUID as fallback name.
+            debugging($e->getMessage(), DEBUG_DEVELOPER);
         }
 
         $record = new stdClass();

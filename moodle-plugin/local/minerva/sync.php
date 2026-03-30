@@ -80,8 +80,12 @@ foreach ($modinfo->get_cms() as $cm) {
 }
 
 // Check which files have already been synced.
-$alreadysynced = $DB->get_records_menu('local_minerva_sync_log',
-    ['courseid' => $courseid], '', 'contenthash, id');
+$alreadysynced = $DB->get_records_menu(
+    'local_minerva_sync_log',
+    ['courseid' => $courseid],
+    '',
+    'contenthash, id'
+);
 
 $newfiles = [];
 foreach ($pdffiles as $file) {
@@ -122,16 +126,22 @@ if ($confirm && confirm_sesskey()) {
 
             $uploaded++;
         } catch (\Exception $e) {
-            debugging("Failed to upload {$file->get_filename()}: " . $e->getMessage(),
-                DEBUG_NORMAL);
+            debugging(
+                "Failed to upload {$file->get_filename()}: " . $e->getMessage(),
+                DEBUG_NORMAL
+            );
         } finally {
             @unlink($tmpfile);
         }
     }
 
     $a = (object)['uploaded' => $uploaded];
-    redirect($manageurl, get_string('sync_materials_done', 'local_minerva', $a), null,
-        \core\output\notification::NOTIFY_SUCCESS);
+    redirect(
+        $manageurl,
+        get_string('sync_materials_done', 'local_minerva', $a),
+        null,
+        \core\output\notification::NOTIFY_SUCCESS
+    );
 }
 
 echo $OUTPUT->header();
@@ -152,7 +162,8 @@ if (empty($newfiles)) {
     echo html_writer::end_tag('ul');
 
     if (count($pdffiles) > count($newfiles)) {
-        echo html_writer::tag('p',
+        echo html_writer::tag(
+            'p',
             count($pdffiles) - count($newfiles) . ' file(s) already synced previously.',
             ['class' => 'text-muted']
         );

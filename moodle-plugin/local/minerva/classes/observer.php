@@ -16,8 +16,6 @@
 
 namespace local_minerva;
 
-defined('MOODLE_INTERNAL') || die();
-
 /**
  * Event observer for enrolment changes.
  *

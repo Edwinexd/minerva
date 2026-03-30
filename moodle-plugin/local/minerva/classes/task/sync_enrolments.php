@@ -19,8 +19,6 @@ namespace local_minerva\task;
 use local_minerva\api_client;
 use local_minerva\observer;
 
-defined('MOODLE_INTERNAL') || die();
-
 /**
  * Scheduled task to sync Moodle enrolments to Minerva.
  *

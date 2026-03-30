@@ -8,6 +8,7 @@ pub struct Config {
     pub database_url: String,
     pub qdrant_url: String,
     pub cerebras_api_key: String,
+    /// OpenAI API key for embeddings. Optional if all courses use qdrant embedding provider.
     pub openai_api_key: String,
     pub hmac_secret: String,
     pub docs_path: String,
@@ -37,7 +38,7 @@ impl Config {
             qdrant_url: env::var("QDRANT_URL")
                 .unwrap_or_else(|_| "http://localhost:6334".to_string()),
             cerebras_api_key: env::var("CEREBRAS_API_KEY")?,
-            openai_api_key: env::var("OPENAI_API_KEY")?,
+            openai_api_key: env::var("OPENAI_API_KEY").unwrap_or_default(),
             hmac_secret: env::var("MINERVA_HMAC_SECRET")?,
             docs_path: env::var("MINERVA_DOCS_PATH")
                 .unwrap_or_else(|_| "./data/documents".to_string()),

@@ -157,6 +157,7 @@ pub fn build_chat_messages(
 }
 
 /// Perform RAG lookup: embed query, search Qdrant, return structured chunks.
+/// Supports both OpenAI client-side embedding and Qdrant server-side inference.
 pub async fn rag_lookup(
     client: &reqwest::Client,
     openai_key: &str,
@@ -164,61 +165,87 @@ pub async fn rag_lookup(
     collection_name: &str,
     query: &str,
     max_chunks: i32,
+    embedding_provider: &str,
+    embedding_model: &str,
 ) -> Vec<RagChunk> {
-    let embedding = match minerva_ingest::embedder::embed_texts(
-        client,
-        openai_key,
-        std::slice::from_ref(&query.to_string()),
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!("embedding failed: {}, skipping RAG", e);
-            return Vec::new();
+    let scored_points = if embedding_provider == "qdrant" {
+        // Qdrant server-side inference
+        use qdrant_client::qdrant::{Document, Query, QueryPointsBuilder};
+
+        match qdrant
+            .query(
+                QueryPointsBuilder::new(collection_name)
+                    .query(Query::new_nearest(Document::new(query, embedding_model)))
+                    .with_payload(true)
+                    .limit(max_chunks as u64),
+            )
+            .await
+        {
+            Ok(result) => result.result,
+            Err(e) => {
+                tracing::warn!("qdrant query failed: {}, skipping RAG", e);
+                return Vec::new();
+            }
         }
-    };
-
-    let vector = match embedding.embeddings.into_iter().next() {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
-
-    match qdrant
-        .search_points(
-            SearchPointsBuilder::new(collection_name, vector, max_chunks as u64).with_payload(true),
+    } else {
+        // OpenAI client-side embedding
+        let embedding = match minerva_ingest::embedder::embed_texts(
+            client,
+            openai_key,
+            std::slice::from_ref(&query.to_string()),
         )
         .await
-    {
-        Ok(result) => result
-            .result
-            .iter()
-            .filter_map(|point| {
-                let payload = &point.payload;
-                let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
-                    Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                    _ => return None,
-                };
-                let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
-                    Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                    _ => String::new(),
-                };
-                let document_id = match payload.get("document_id").and_then(|v| v.kind.as_ref()) {
-                    Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
-                    _ => String::new(),
-                };
-                Some(RagChunk {
-                    document_id,
-                    filename,
-                    text,
-                })
-            })
-            .collect(),
-        Err(e) => {
-            tracing::warn!("qdrant search failed: {}, skipping RAG", e);
-            Vec::new()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("embedding failed: {}, skipping RAG", e);
+                return Vec::new();
+            }
+        };
+
+        let vector = match embedding.embeddings.into_iter().next() {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
+
+        match qdrant
+            .search_points(
+                SearchPointsBuilder::new(collection_name, vector, max_chunks as u64)
+                    .with_payload(true),
+            )
+            .await
+        {
+            Ok(result) => result.result,
+            Err(e) => {
+                tracing::warn!("qdrant search failed: {}, skipping RAG", e);
+                return Vec::new();
+            }
         }
-    }
+    };
+
+    scored_points
+        .iter()
+        .filter_map(|point| {
+            let payload = &point.payload;
+            let text = match payload.get("text").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => return None,
+            };
+            let filename = match payload.get("filename").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => String::new(),
+            };
+            let document_id = match payload.get("document_id").and_then(|v| v.kind.as_ref()) {
+                Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => s.clone(),
+                _ => String::new(),
+            };
+            Some(RagChunk {
+                document_id,
+                filename,
+                text,
+            })
+        })
+        .collect()
 }
 
 /// Stream a Cerebras completion to the client via tx, appending tokens to full_text.

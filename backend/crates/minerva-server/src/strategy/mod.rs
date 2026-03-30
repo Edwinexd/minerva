@@ -21,6 +21,8 @@ pub struct GenerationContext {
     pub user_id: Uuid,
     pub cerebras_api_key: String,
     pub openai_api_key: String,
+    pub embedding_provider: String,
+    pub embedding_model: String,
     pub history: Vec<minerva_db::queries::conversations::MessageRow>,
     pub user_content: String,
     pub is_first_message: bool,

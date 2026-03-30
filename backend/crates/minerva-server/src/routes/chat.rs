@@ -591,6 +591,8 @@ async fn send_message(
         user_id: conv.user_id,
         cerebras_api_key: state.config.cerebras_api_key.clone(),
         openai_api_key: state.config.openai_api_key.clone(),
+        embedding_provider: course.embedding_provider,
+        embedding_model: course.embedding_model,
         history,
         user_content: body.content,
         is_first_message,

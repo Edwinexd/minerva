@@ -37,6 +37,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &collection_name,
         &ctx.user_content,
         ctx.max_chunks,
+        &ctx.embedding_provider,
+        &ctx.embedding_model,
     )
     .await;
 
@@ -140,6 +142,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 &collection_name,
                 sentence,
                 ctx.max_chunks,
+                &ctx.embedding_provider,
+                &ctx.embedding_model,
             )
             .await;
 
@@ -399,6 +403,7 @@ fn is_sentence_boundary(text: &str) -> bool {
 }
 
 /// Search Qdrant with a similarity threshold for FLARE retrieval.
+#[allow(clippy::too_many_arguments)]
 async fn flare_retrieve(
     client: &reqwest::Client,
     openai_key: &str,
@@ -406,48 +411,69 @@ async fn flare_retrieve(
     collection_name: &str,
     query: &str,
     max_chunks: i32,
+    embedding_provider: &str,
+    embedding_model: &str,
 ) -> Vec<RagChunk> {
-    let embedding = match minerva_ingest::embedder::embed_texts(
-        client,
-        openai_key,
-        std::slice::from_ref(&query.to_string()),
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!("flare: embedding failed: {}", e);
-            return Vec::new();
-        }
-    };
+    let scored_points = if embedding_provider == "qdrant" {
+        use qdrant_client::qdrant::{Document, Query, QueryPointsBuilder};
 
-    let vector = match embedding.embeddings.into_iter().next() {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
-
-    let search_result = qdrant
-        .search_points(
-            qdrant_client::qdrant::SearchPointsBuilder::new(
-                collection_name,
-                vector,
-                max_chunks as u64,
+        match qdrant
+            .query(
+                QueryPointsBuilder::new(collection_name)
+                    .query(Query::new_nearest(Document::new(query, embedding_model)))
+                    .with_payload(true)
+                    .limit(max_chunks as u64)
+                    .score_threshold(SIMILARITY_THRESHOLD),
             )
-            .with_payload(true)
-            .score_threshold(SIMILARITY_THRESHOLD),
+            .await
+        {
+            Ok(r) => r.result,
+            Err(e) => {
+                tracing::warn!("flare: qdrant query failed: {}", e);
+                return Vec::new();
+            }
+        }
+    } else {
+        let embedding = match minerva_ingest::embedder::embed_texts(
+            client,
+            openai_key,
+            std::slice::from_ref(&query.to_string()),
         )
-        .await;
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("flare: embedding failed: {}", e);
+                return Vec::new();
+            }
+        };
 
-    let result = match search_result {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!("flare: qdrant search failed: {}", e);
-            return Vec::new();
+        let vector = match embedding.embeddings.into_iter().next() {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
+
+        match qdrant
+            .search_points(
+                qdrant_client::qdrant::SearchPointsBuilder::new(
+                    collection_name,
+                    vector,
+                    max_chunks as u64,
+                )
+                .with_payload(true)
+                .score_threshold(SIMILARITY_THRESHOLD),
+            )
+            .await
+        {
+            Ok(r) => r.result,
+            Err(e) => {
+                tracing::warn!("flare: qdrant search failed: {}", e);
+                return Vec::new();
+            }
         }
     };
 
-    result
-        .result
+    scored_points
         .iter()
         .filter_map(|point| {
             let payload = &point.payload;

@@ -133,6 +133,8 @@ async fn upload_document(
     let api_key = state.config.openai_api_key.clone();
     let fname = filename.clone();
     let fpath = file_path.clone();
+    let emb_provider = course.embedding_provider.clone();
+    let emb_model = course.embedding_model.clone();
 
     tokio::spawn(async move {
         let client = reqwest::Client::new();
@@ -140,6 +142,7 @@ async fn upload_document(
 
         match minerva_ingest::pipeline::process_document(
             &db, &qdrant, &client, &api_key, doc_id, course_id, path, &fname,
+            &emb_provider, &emb_model,
         )
         .await
         {
@@ -337,32 +340,56 @@ async fn search_chunks(
         return Ok(Json(Vec::new()));
     }
 
-    // Embed the query
-    let client = reqwest::Client::new();
-    let embedding = minerva_ingest::embedder::embed_texts(
-        &client,
-        &state.config.openai_api_key,
-        std::slice::from_ref(&params.q),
-    )
-    .await
-    .map_err(|e| AppError::Internal(format!("embedding failed: {}", e)))?;
-
-    let vector = embedding
-        .embeddings
-        .into_iter()
-        .next()
-        .ok_or_else(|| AppError::Internal("no embedding returned".to_string()))?;
-
     let limit = params.limit.unwrap_or(10);
 
-    let result = state
-        .qdrant
-        .search_points(SearchPointsBuilder::new(&collection_name, vector, limit).with_payload(true))
-        .await
-        .map_err(|e| AppError::Internal(format!("qdrant search failed: {}", e)))?;
+    let scored_points = if course.embedding_provider == "qdrant" {
+        // Qdrant server-side inference: query with Document
+        use qdrant_client::qdrant::{Document, Query, QueryPointsBuilder};
 
-    let results: Vec<SearchResult> = result
-        .result
+        let query_result = state
+            .qdrant
+            .query(
+                QueryPointsBuilder::new(&collection_name)
+                    .query(Query::new_nearest(Document::new(
+                        params.q.clone(),
+                        &course.embedding_model,
+                    )))
+                    .with_payload(true)
+                    .limit(limit),
+            )
+            .await
+            .map_err(|e| AppError::Internal(format!("qdrant query failed: {}", e)))?;
+
+        query_result.result
+    } else {
+        // OpenAI client-side embedding
+        let client = reqwest::Client::new();
+        let embedding = minerva_ingest::embedder::embed_texts(
+            &client,
+            &state.config.openai_api_key,
+            std::slice::from_ref(&params.q),
+        )
+        .await
+        .map_err(|e| AppError::Internal(format!("embedding failed: {}", e)))?;
+
+        let vector = embedding
+            .embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| AppError::Internal("no embedding returned".to_string()))?;
+
+        let result = state
+            .qdrant
+            .search_points(
+                SearchPointsBuilder::new(&collection_name, vector, limit).with_payload(true),
+            )
+            .await
+            .map_err(|e| AppError::Internal(format!("qdrant search failed: {}", e)))?;
+
+        result.result
+    };
+
+    let results: Vec<SearchResult> = scored_points
         .iter()
         .filter_map(|point| {
             let payload = &point.payload;

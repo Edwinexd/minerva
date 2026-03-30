@@ -328,6 +328,8 @@ async fn upload_document(
     let api_key = state.config.openai_api_key.clone();
     let fname = filename.clone();
     let fpath = file_path.clone();
+    let emb_provider = course.embedding_provider.clone();
+    let emb_model = course.embedding_model.clone();
 
     tokio::spawn(async move {
         let client = reqwest::Client::new();
@@ -335,6 +337,7 @@ async fn upload_document(
 
         match minerva_ingest::pipeline::process_document(
             &db, &qdrant, &client, &api_key, doc_id, course_id, path, &fname,
+            &emb_provider, &emb_model,
         )
         .await
         {

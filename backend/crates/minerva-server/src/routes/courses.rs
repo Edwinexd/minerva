@@ -35,6 +35,8 @@ struct UpdateCourseRequest {
     system_prompt: Option<String>,
     max_chunks: Option<i32>,
     strategy: Option<String>,
+    embedding_provider: Option<String>,
+    embedding_model: Option<String>,
     daily_token_limit: Option<i64>,
 }
 
@@ -50,6 +52,8 @@ struct CourseResponse {
     system_prompt: Option<String>,
     max_chunks: i32,
     strategy: String,
+    embedding_provider: String,
+    embedding_model: String,
     daily_token_limit: i64,
     active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -69,6 +73,8 @@ impl From<minerva_db::queries::courses::CourseRow> for CourseResponse {
             system_prompt: row.system_prompt,
             max_chunks: row.max_chunks,
             strategy: row.strategy,
+            embedding_provider: row.embedding_provider,
+            embedding_model: row.embedding_model,
             daily_token_limit: row.daily_token_limit,
             active: row.active,
             created_at: row.created_at,
@@ -159,6 +165,8 @@ async fn update_course(
         system_prompt: body.system_prompt,
         max_chunks: body.max_chunks,
         strategy: body.strategy,
+        embedding_provider: body.embedding_provider,
+        embedding_model: body.embedding_model,
         daily_token_limit: body.daily_token_limit,
     };
 

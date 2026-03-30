@@ -1,8 +1,10 @@
 name: Deploy to Production
 
 on:
-  push:
+  workflow_run:
+    workflows: [Docker]
     branches: [master]
+    types: [completed]
   repository_dispatch:
     types: [deploy]
   workflow_dispatch:
@@ -13,7 +15,28 @@ on:
         default: "master"
 
 jobs:
+  build-plugin:
+    name: Build Moodle plugin
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package Moodle plugin
+        run: |
+          cd moodle-plugin/local
+          zip -r "$GITHUB_WORKSPACE/local_minerva.zip" minerva/
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moodle-plugin
+          path: local_minerva.zip
+
   deploy:
+    needs: [build-plugin]
     runs-on: ubuntu-latest
     environment: prod
     env:

@@ -61,6 +61,31 @@ jobs:
       - name: Build
         run: npm run build
 
+  moodle-plugin:
+    name: Moodle plugin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: moodle-plugin/local/minerva
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          tools: cs2pr, phpcs, phpstan
+
+      - name: Syntax check
+        run: find . -name '*.php' -exec php -l {} + | (! grep -v 'No syntax errors')
+
+      - name: Install Moodle coding standards
+        run: |
+          composer global require moodlehq/moodle-cs
+          phpcs --config-set installed_paths "$(composer global config home)/vendor/moodlehq/moodle-cs"
+
+      - name: Code style
+        run: phpcs --standard=moodle --extensions=php .
+
   emdash-check:
     name: Ban emdashes
     runs-on: ubuntu-latest
@@ -69,7 +94,7 @@ jobs:
 
       - name: Check for emdashes
         run: |
-          if grep -rn $'\xe2\x80\x94' --include='*.rs' --include='*.ts' --include='*.tsx' --include='*.toml' --include='*.yml' --include='*.yaml' --include='*.md' --include='*.sql' .; then
+          if grep -rn $'\xe2\x80\x94' --include='*.rs' --include='*.ts' --include='*.tsx' --include='*.toml' --include='*.yml' --include='*.yaml' --include='*.md' --include='*.sql' --include='*.php' .; then
             echo "::error::Emdashes found! Use -- or a hyphen instead."
             exit 1
           fi

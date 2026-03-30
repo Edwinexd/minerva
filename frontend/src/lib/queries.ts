@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -71,6 +71,12 @@ export const conversationNotesQuery = (courseId: string, conversationId: string)
   queryOptions({
     queryKey: ["courses", courseId, "conversations", conversationId, "notes"],
     queryFn: () => api.get<TeacherNote[]>(`/courses/${courseId}/conversations/${conversationId}/notes`),
+  })
+
+export const apiKeysQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "api-keys"],
+    queryFn: () => api.get<ApiKey[]>(`/courses/${courseId}/api-keys`),
   })
 
 export const adminUsersQuery = queryOptions({

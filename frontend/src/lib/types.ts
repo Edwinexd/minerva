@@ -102,6 +102,22 @@ export interface TopicGroup {
   conversation_ids: string[]
 }
 
+export interface ApiKey {
+  id: string
+  name: string
+  key_prefix: string
+  created_at: string
+  last_used_at: string | null
+}
+
+export interface ApiKeyCreated {
+  id: string
+  name: string
+  key: string
+  key_prefix: string
+  created_at: string
+}
+
 export interface Document {
   id: string
   course_id: string

@@ -1,0 +1,490 @@
+//! Integration API for external services (e.g. Moodle plugin).
+//!
+//! Authenticated via `Authorization: Bearer <api_key>` header where
+//! the api_key is a per-course key created by teachers via the UI.
+//! The key is hashed (SHA-256) and looked up in the `api_keys` table.
+//!
+//! Routes that include a course_id verify the key belongs to that course.
+//! The `/courses` list endpoint returns only courses the key has access to.
+
+use axum::extract::{Multipart, Path, State};
+use axum::http::HeaderMap;
+use axum::routing::{delete, get, post};
+use axum::{Json, Router};
+use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::sync::Arc;
+use uuid::Uuid;
+
+use crate::error::AppError;
+use crate::state::AppState;
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/courses", get(list_courses))
+        .route("/users/ensure", post(ensure_user))
+        .route("/courses/{course_id}/members", post(add_member))
+        .route(
+            "/courses/{course_id}/members/by-eppn/{eppn}",
+            delete(remove_member_by_eppn),
+        )
+        .route(
+            "/courses/{course_id}/documents",
+            post(upload_document).get(list_documents),
+        )
+        .route(
+            "/courses/{course_id}/embed-token",
+            post(create_embed_token),
+        )
+}
+
+/// Extract and validate the API key from the Authorization header.
+/// Returns the API key row (with course_id scope).
+async fn authenticate(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<minerva_db::queries::api_keys::ApiKeyRow, AppError> {
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(AppError::Unauthorized)?;
+
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(AppError::Unauthorized)?;
+
+    // Hash the provided key and look it up.
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    let key_hash = hex::encode(hasher.finalize());
+
+    let api_key = minerva_db::queries::api_keys::find_by_hash(&state.db, &key_hash)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    // Update last_used_at (fire-and-forget).
+    let db = state.db.clone();
+    let key_id = api_key.id;
+    tokio::spawn(async move {
+        let _ = minerva_db::queries::api_keys::touch_last_used(&db, key_id).await;
+    });
+
+    Ok(api_key)
+}
+
+/// Authenticate and verify the key is scoped to the given course.
+async fn authenticate_for_course(
+    state: &AppState,
+    headers: &HeaderMap,
+    course_id: Uuid,
+) -> Result<(), AppError> {
+    let api_key = authenticate(state, headers).await?;
+    if api_key.course_id != course_id {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+// -- Responses --
+
+#[derive(Serialize)]
+struct CourseInfo {
+    id: Uuid,
+    name: String,
+    description: Option<String>,
+    active: bool,
+}
+
+#[derive(Serialize)]
+struct UserInfo {
+    id: Uuid,
+    eppn: String,
+    display_name: Option<String>,
+    created: bool,
+}
+
+// -- Handlers --
+
+/// List courses the API key has access to (i.e. the key's course).
+async fn list_courses(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<CourseInfo>>, AppError> {
+    let api_key = authenticate(&state, &headers).await?;
+
+    // Return only the course this key is scoped to.
+    let course = minerva_db::queries::courses::find_by_id(&state.db, api_key.course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    Ok(Json(vec![CourseInfo {
+        id: course.id,
+        name: course.name,
+        description: course.description,
+        active: course.active,
+    }]))
+}
+
+#[derive(Deserialize)]
+struct EnsureUserRequest {
+    eppn: String,
+    display_name: Option<String>,
+}
+
+/// Find or create a user by eppn. Returns the user ID.
+async fn ensure_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<EnsureUserRequest>,
+) -> Result<Json<UserInfo>, AppError> {
+    // Any valid API key can ensure users exist.
+    authenticate(&state, &headers).await?;
+
+    let existing = minerva_db::queries::users::find_by_eppn(&state.db, &body.eppn).await?;
+    match existing {
+        Some(user) => Ok(Json(UserInfo {
+            id: user.id,
+            eppn: user.eppn,
+            display_name: user.display_name,
+            created: false,
+        })),
+        None => {
+            let id = Uuid::new_v4();
+            minerva_db::queries::users::insert(
+                &state.db,
+                id,
+                &body.eppn,
+                body.display_name.as_deref(),
+                "student",
+            )
+            .await?;
+            Ok(Json(UserInfo {
+                id,
+                eppn: body.eppn,
+                display_name: body.display_name,
+                created: true,
+            }))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct AddMemberRequest {
+    eppn: String,
+    display_name: Option<String>,
+    role: Option<String>,
+}
+
+/// Add a user to a course by eppn. Creates the user if they don't exist.
+async fn add_member(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<AddMemberRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    authenticate_for_course(&state, &headers, course_id).await?;
+
+    minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let user = minerva_db::queries::users::find_by_eppn(&state.db, &body.eppn).await?;
+    let user_id = match user {
+        Some(u) => u.id,
+        None => {
+            let id = Uuid::new_v4();
+            minerva_db::queries::users::insert(
+                &state.db,
+                id,
+                &body.eppn,
+                body.display_name.as_deref(),
+                "student",
+            )
+            .await?;
+            id
+        }
+    };
+
+    let role = body.role.as_deref().unwrap_or("student");
+    minerva_db::queries::courses::add_member(&state.db, course_id, user_id, role).await?;
+
+    Ok(Json(
+        serde_json::json!({ "added": true, "user_id": user_id }),
+    ))
+}
+
+/// Remove a user from a course by eppn.
+async fn remove_member_by_eppn(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((course_id, eppn)): Path<(Uuid, String)>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    authenticate_for_course(&state, &headers, course_id).await?;
+
+    let user = minerva_db::queries::users::find_by_eppn(&state.db, &eppn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let removed =
+        minerva_db::queries::courses::remove_member(&state.db, course_id, user.id).await?;
+    Ok(Json(serde_json::json!({ "removed": removed })))
+}
+
+#[derive(Serialize)]
+struct DocumentInfo {
+    id: Uuid,
+    filename: String,
+    status: String,
+    chunk_count: Option<i32>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// List documents for a course.
+async fn list_documents(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<Vec<DocumentInfo>>, AppError> {
+    authenticate_for_course(&state, &headers, course_id).await?;
+
+    minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let rows = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| DocumentInfo {
+                id: r.id,
+                filename: r.filename,
+                status: r.status,
+                chunk_count: r.chunk_count,
+                created_at: r.created_at,
+            })
+            .collect(),
+    ))
+}
+
+/// Upload a document to a course (multipart form with a PDF file).
+async fn upload_document(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(course_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> Result<Json<DocumentInfo>, AppError> {
+    authenticate_for_course(&state, &headers, course_id).await?;
+
+    minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let field = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("multipart error: {}", e)))?
+        .ok_or_else(|| AppError::BadRequest("no file provided".to_string()))?;
+
+    let filename = field.file_name().unwrap_or("document.pdf").to_string();
+    let content_type = field
+        .content_type()
+        .unwrap_or("application/pdf")
+        .to_string();
+    let data = field
+        .bytes()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("failed to read file: {}", e)))?;
+
+    let size_bytes = data.len() as i64;
+    let doc_id = Uuid::new_v4();
+
+    // Save file to disk
+    let dir = format!("{}/{}", state.config.docs_path, course_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
+
+    let file_path = format!("{}/{}.pdf", dir, doc_id);
+    tokio::fs::write(&file_path, &data)
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;
+
+    // Get course owner as uploader
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let row = minerva_db::queries::documents::insert(
+        &state.db,
+        doc_id,
+        course_id,
+        &filename,
+        &content_type,
+        size_bytes,
+        course.owner_id,
+    )
+    .await?;
+
+    // Spawn background processing
+    let db = state.db.clone();
+    let qdrant = Arc::clone(&state.qdrant);
+    let api_key = state.config.openai_api_key.clone();
+    let fname = filename.clone();
+    let fpath = file_path.clone();
+
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        let path = std::path::Path::new(&fpath);
+
+        match minerva_ingest::pipeline::process_document(
+            &db, &qdrant, &client, &api_key, doc_id, course_id, path, &fname,
+        )
+        .await
+        {
+            Ok(result) => {
+                tracing::info!(
+                    "integration: document {} processed: {} chunks",
+                    doc_id,
+                    result.chunk_count,
+                );
+            }
+            Err(e) => {
+                tracing::error!("integration: document {} processing failed: {}", doc_id, e);
+                let _ = sqlx::query(
+                    "UPDATE documents SET status = 'failed', error_msg = $1 WHERE id = $2",
+                )
+                .bind(&e)
+                .bind(doc_id)
+                .execute(&db)
+                .await;
+            }
+        }
+    });
+
+    Ok(Json(DocumentInfo {
+        id: row.id,
+        filename: row.filename,
+        status: row.status,
+        chunk_count: row.chunk_count,
+        created_at: row.created_at,
+    }))
+}
+
+// -- Embed tokens --
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// Embed token lifetime: 8 hours.
+const EMBED_TOKEN_TTL_SECS: i64 = 8 * 3600;
+
+#[derive(Deserialize)]
+struct CreateEmbedTokenRequest {
+    eppn: String,
+    display_name: Option<String>,
+}
+
+#[derive(Serialize)]
+struct EmbedTokenResponse {
+    token: String,
+    expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Create a short-lived HMAC-signed embed token for a student.
+///
+/// The token encodes `course_id:user_id:expires_ts` and is signed with
+/// the server's HMAC secret. The `/api/embed/` routes validate it.
+async fn create_embed_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<CreateEmbedTokenRequest>,
+) -> Result<Json<EmbedTokenResponse>, AppError> {
+    authenticate_for_course(&state, &headers, course_id).await?;
+
+    // Ensure the user exists.
+    let user = minerva_db::queries::users::find_by_eppn(&state.db, &body.eppn).await?;
+    let user_id = match user {
+        Some(u) => u.id,
+        None => {
+            let id = Uuid::new_v4();
+            minerva_db::queries::users::insert(
+                &state.db,
+                id,
+                &body.eppn,
+                body.display_name.as_deref(),
+                "student",
+            )
+            .await?;
+            id
+        }
+    };
+
+    // Ensure the user is a course member.
+    if !minerva_db::queries::courses::is_member(&state.db, course_id, user_id).await? {
+        minerva_db::queries::courses::add_member(&state.db, course_id, user_id, "student").await?;
+    }
+
+    let expires_at = chrono::Utc::now() + chrono::Duration::seconds(EMBED_TOKEN_TTL_SECS);
+    let payload = format!("{}:{}:{}", course_id, user_id, expires_at.timestamp());
+
+    let mut mac = HmacSha256::new_from_slice(state.config.hmac_secret.as_bytes())
+        .map_err(|_| AppError::Internal("hmac key error".into()))?;
+    mac.update(payload.as_bytes());
+    let sig = hex::encode(mac.finalize().into_bytes());
+
+    // Token format: base64url(course_id:user_id:expires_ts:signature)
+    let token_raw = format!("{}:{}", payload, sig);
+    let token = base64_url_encode(&token_raw);
+
+    Ok(Json(EmbedTokenResponse { token, expires_at }))
+}
+
+/// Verify an embed token and return (course_id, user_id).
+pub fn verify_embed_token(
+    hmac_secret: &str,
+    token: &str,
+) -> Result<(Uuid, Uuid), AppError> {
+    let decoded = base64_url_decode(token)
+        .map_err(|_| AppError::Unauthorized)?;
+
+    // Format: course_id:user_id:expires_ts:signature
+    let parts: Vec<&str> = decoded.splitn(4, ':').collect();
+    if parts.len() != 4 {
+        return Err(AppError::Unauthorized);
+    }
+
+    let course_id: Uuid = parts[0].parse().map_err(|_| AppError::Unauthorized)?;
+    let user_id: Uuid = parts[1].parse().map_err(|_| AppError::Unauthorized)?;
+    let expires_ts: i64 = parts[2].parse().map_err(|_| AppError::Unauthorized)?;
+    let sig = parts[3];
+
+    // Check expiry.
+    let now = chrono::Utc::now().timestamp();
+    if now > expires_ts {
+        return Err(AppError::Unauthorized);
+    }
+
+    // Verify HMAC.
+    let payload = format!("{}:{}:{}", course_id, user_id, expires_ts);
+    let mut mac = HmacSha256::new_from_slice(hmac_secret.as_bytes())
+        .map_err(|_| AppError::Internal("hmac key error".into()))?;
+    mac.update(payload.as_bytes());
+    let expected = hex::encode(mac.finalize().into_bytes());
+
+    if sig != expected {
+        return Err(AppError::Unauthorized);
+    }
+
+    Ok((course_id, user_id))
+}
+
+fn base64_url_encode(input: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(input.as_bytes())
+}
+
+fn base64_url_decode(input: &str) -> Result<String, Box<dyn std::error::Error>> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(input)?;
+    Ok(String::from_utf8(bytes)?)
+}

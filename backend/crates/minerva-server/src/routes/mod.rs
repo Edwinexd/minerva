@@ -1,8 +1,11 @@
 mod admin;
+mod api_keys;
 mod chat;
 mod courses;
 mod documents;
+pub mod embed;
 mod health;
+pub mod integration;
 mod signed_urls;
 mod usage;
 
@@ -23,6 +26,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/courses/{course_id}/documents", documents::router())
         .nest("/courses/{course_id}", chat::router())
         .nest("/courses/{course_id}", signed_urls::course_router())
+        .nest("/courses/{course_id}", api_keys::router())
         .nest("/courses/{course_id}", usage::course_router())
         .nest("/admin", admin::router())
         .merge(usage::admin_router())
@@ -33,6 +37,8 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .route("/health", get(health::health))
         .route("/models", get(health::models))
         .route("/dev/config", get(dev_config))
+        .nest("/integration", integration::router())
+        .nest("/embed", embed::router())
         .merge(authed)
 }
 

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="local/minerva/db" VERSION="2026033000" COMMENT="Minerva plugin tables">
+  <TABLES>
+    <TABLE NAME="local_minerva_links" COMMENT="Links between Moodle courses and Minerva courses">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" COMMENT="Moodle course ID"/>
+        <FIELD NAME="minerva_course_id" TYPE="char" LENGTH="36" NOTNULL="true" COMMENT="Minerva course UUID"/>
+        <FIELD NAME="minerva_course_name" TYPE="char" LENGTH="255" NOTNULL="false" COMMENT="Cached name of the Minerva course"/>
+        <FIELD NAME="minerva_api_url" TYPE="char" LENGTH="512" NOTNULL="true" COMMENT="Minerva API base URL for this course"/>
+        <FIELD NAME="minerva_api_key" TYPE="char" LENGTH="255" NOTNULL="true" COMMENT="Minerva API key for this course"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="courseid_unique" TYPE="unique" FIELDS="courseid"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="minerva_course_id_idx" UNIQUE="false" FIELDS="minerva_course_id"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_minerva_sync_log" COMMENT="Log of material sync operations">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="contenthash" TYPE="char" LENGTH="40" NOTNULL="true" COMMENT="SHA1 hash of the synced file"/>
+        <FIELD NAME="filename" TYPE="char" LENGTH="255" NOTNULL="true"/>
+        <FIELD NAME="minerva_doc_id" TYPE="char" LENGTH="36" NOTNULL="false" COMMENT="Minerva document UUID"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="courseid_hash" UNIQUE="true" FIELDS="courseid, contenthash"/>
+      </INDEXES>
+    </TABLE>
+  </TABLES>
+</XMLDB>

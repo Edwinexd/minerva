@@ -85,6 +85,44 @@ docker pull ghcr.io/edwinexd/minerva:master
 
 See [.env.example](.env.example) for defaults.
 
+## Moodle integration
+
+A Moodle local plugin (`local_minerva`) is included in `moodle-plugin/`. It embeds the AI chat inside Moodle courses via iframe, syncs enrolments, and uploads course materials. See [moodle-plugin/local/minerva/](moodle-plugin/local/minerva/) for setup.
+
+### Routes that must be excluded from SSO / Shibboleth
+
+The main application sits behind Apache `mod_shib` which sets the `REMOTE_USER` header. The Moodle plugin communicates server-side (API keys) and via iframes (embed tokens), so these three path prefixes must be excluded from Shibboleth:
+
+| Path prefix | Auth method | Why |
+|-------------|-------------|-----|
+| `/api/integration/*` | Per-course API key (Bearer token) | Moodle server-to-server calls (enrolment sync, material upload, token creation) |
+| `/api/embed/*` | HMAC-signed embed token | Iframe chat API (conversations, streaming) |
+| `/embed/*` | Embed token (query param) | Iframe frontend route |
+
+**Example Apache config** (adjust to your setup):
+
+```apache
+# Protect the main application with Shibboleth.
+<Location />
+    AuthType shibboleth
+    ShibRequestSetting requireSession 1
+    Require valid-user
+</Location>
+
+# Exclude Moodle integration and embed routes — they use their own auth.
+<LocationMatch "^/api/(integration|embed)">
+    ShibRequestSetting requireSession 0
+    Require all granted
+</LocationMatch>
+
+<LocationMatch "^/embed/">
+    ShibRequestSetting requireSession 0
+    Require all granted
+</LocationMatch>
+```
+
+Everything else stays behind Shibboleth.
+
 ## License
 
 [AGPL-3.0](LICENSE)

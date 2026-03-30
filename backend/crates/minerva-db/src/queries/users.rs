@@ -12,6 +12,15 @@ pub struct UserRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<UserRow>, sqlx::Error> {
+    sqlx::query_as::<_, UserRow>(
+        "SELECT id, eppn, display_name, role, suspended, created_at, updated_at FROM users WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await
+}
+
 pub async fn find_by_eppn(db: &PgPool, eppn: &str) -> Result<Option<UserRow>, sqlx::Error> {
     sqlx::query_as::<_, UserRow>(
         "SELECT id, eppn, display_name, role, suspended, created_at, updated_at FROM users WHERE eppn = $1",

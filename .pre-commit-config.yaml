@@ -49,7 +49,7 @@ repos:
 
       - id: phpcs-moodle
         name: phpcs moodle
-        entry: bash -c 'PHPCS="$(composer global config home 2>/dev/null)/vendor/bin/phpcs" && "$PHPCS" --standard=moodle --extensions=php moodle-plugin/local/minerva/'
+        entry: bash -c 'PHPCS="$(composer global config home 2>/dev/null)/vendor/bin/phpcs" && "$PHPCS" --standard=moodle --extensions=php moodle-plugin/local/minerva/ moodle-plugin/mod/minerva/'
         language: system
         pass_filenames: false
         files: \.php$

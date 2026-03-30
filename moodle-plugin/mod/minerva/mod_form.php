@@ -15,17 +15,36 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Plugin version and other metadata.
+ * Activity creation/edit form for mod_minerva.
  *
- * @package    local_minerva
+ * @package    mod_minerva
  * @copyright  2026 DSV, Stockholm University
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->component = 'local_minerva';
-$plugin->version   = 2026033001;
-$plugin->requires  = 2022112800; // Moodle 4.1+.
-$plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = '0.1.0';
+require_once($CFG->dirroot . '/course/moodleform_mod.php');
+
+/**
+ * Minerva activity form.
+ */
+class mod_minerva_mod_form extends moodleform_mod {
+    /**
+     * Define the form.
+     */
+    protected function definition(): void {
+        $mform = $this->_form;
+
+        $mform->addElement('header', 'general', get_string('general', 'form'));
+
+        $mform->addElement('text', 'name', get_string('name'), ['size' => 64]);
+        $mform->setType('name', PARAM_TEXT);
+        $mform->addRule('name', null, 'required', null, 'client');
+        $mform->setDefault('name', get_string('chat_title', 'mod_minerva'));
+
+        $this->standard_intro_elements();
+        $this->standard_coursemodule_elements();
+        $this->add_action_buttons();
+    }
+}

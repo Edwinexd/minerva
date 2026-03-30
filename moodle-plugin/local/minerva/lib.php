@@ -36,21 +36,6 @@ function local_minerva_extend_navigation_course(
 ): void {
     global $DB;
 
-    // Only show if the course is linked to Minerva.
-    $link = $DB->get_record('local_minerva_links', ['courseid' => $course->id]);
-
-    if ($link && has_capability('local/minerva:view', $context)) {
-        $url = new moodle_url('/local/minerva/view.php', ['id' => $course->id]);
-        $parentnode->add(
-            get_string('minerva_assistant', 'local_minerva'),
-            $url,
-            navigation_node::TYPE_CUSTOM,
-            null,
-            'minerva_assistant',
-            new pix_icon('i/star', '')
-        );
-    }
-
     if (has_capability('local/minerva:manage', $context)) {
         $url = new moodle_url('/local/minerva/manage.php', ['id' => $course->id]);
         $parentnode->add(

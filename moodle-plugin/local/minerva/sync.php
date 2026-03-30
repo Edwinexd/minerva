@@ -48,51 +48,8 @@ $PAGE->set_title(get_string('sync_materials', 'local_minerva'));
 $PAGE->set_heading($course->fullname . ' - ' . get_string('sync_materials', 'local_minerva'));
 $PAGE->set_pagelayout('admin');
 
-// Find all visible PDF files in the course.
-// Only sync files from activities that are visible to students.
-$modinfo = get_fast_modinfo($course);
-$fs = get_file_storage();
-$pdffiles = [];
-
-foreach ($modinfo->get_cms() as $cm) {
-    // Skip hidden/unavailable activities - respect resource visibility.
-    if (!$cm->visible || !$cm->available) {
-        continue;
-    }
-
-    // Only look at resource and folder modules.
-    if (!in_array($cm->modname, ['resource', 'folder'])) {
-        continue;
-    }
-
-    $component = 'mod_' . $cm->modname;
-    $modcontext = context_module::instance($cm->id);
-    $files = $fs->get_area_files($modcontext->id, $component, 'content', false, 'filename', false);
-
-    foreach ($files as $file) {
-        if ($file->is_directory()) {
-            continue;
-        }
-        if ($file->get_mimetype() === 'application/pdf') {
-            $pdffiles[] = $file;
-        }
-    }
-}
-
-// Check which files have already been synced.
-$alreadysynced = $DB->get_records_menu(
-    'local_minerva_sync_log',
-    ['courseid' => $courseid],
-    '',
-    'contenthash, id'
-);
-
-$newfiles = [];
-foreach ($pdffiles as $file) {
-    if (!isset($alreadysynced[$file->get_contenthash()])) {
-        $newfiles[] = $file;
-    }
-}
+// Find PDF files that haven't been synced yet.
+$newfiles = \local_minerva\task\sync_materials::find_unsynced_pdfs($course, $courseid);
 
 if ($confirm && confirm_sesskey()) {
     // Perform the sync.
@@ -160,14 +117,6 @@ if (empty($newfiles)) {
         echo html_writer::tag('li', s($file->get_filename()) . " ({$size})");
     }
     echo html_writer::end_tag('ul');
-
-    if (count($pdffiles) > count($newfiles)) {
-        echo html_writer::tag(
-            'p',
-            count($pdffiles) - count($newfiles) . ' file(s) already synced previously.',
-            ['class' => 'text-muted']
-        );
-    }
 
     $confirmurl = new moodle_url($pageurl, ['confirm' => 1, 'sesskey' => sesskey()]);
     echo html_writer::link($confirmurl, get_string('sync_materials', 'local_minerva'), [

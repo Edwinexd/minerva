@@ -25,9 +25,12 @@
 defined('MOODLE_INTERNAL') || die();
 
 $string['pluginname'] = 'Minerva AI Assistant';
-$string['settings_apiurl'] = 'Minerva API URL';
-$string['settings_apiurl_desc'] = 'Base URL of the Minerva instance (e.g. https://minerva.dsv.su.se/api). Configured per course link.';
-$string['settings_apiurl_help'] = 'The base URL of the Minerva API (e.g. https://minerva.dsv.su.se/api). This is set per course by the teacher.';
+$string['settings_apiurl'] = 'Minerva URL';
+$string['settings_apiurl_desc'] = 'URL of the Minerva instance (e.g. https://minerva.dsv.su.se). Configured per course link.';
+$string['settings_apiurl_admin_desc'] = 'If set, this URL is used for all course links and teachers cannot change it. Leave empty to let teachers enter the URL per course.';
+$string['settings_apiurl_help'] = 'The URL of the Minerva instance (e.g. https://minerva.dsv.su.se). This is set per course by the teacher.';
+$string['settings_public_url'] = 'Minerva public URL';
+$string['settings_public_url_desc'] = 'Browser-accessible URL for the Minerva embed. Only needed when it differs from the Minerva URL above (e.g. local development). Leave empty in production.';
 $string['settings_apikey'] = 'API key';
 $string['settings_apikey_desc'] = 'API key for the Minerva integration endpoints (MINERVA_API_KEY). Configured per course link.';
 $string['settings_connection'] = 'Minerva connection';
@@ -67,5 +70,8 @@ $string['chat_description'] = 'Ask questions about the course material.';
 $string['open_in_new_tab'] = 'Open in new tab';
 $string['privacy:metadata'] = 'The Minerva plugin sends user identifiers (eppn) to the external Minerva service for authentication and enrolment sync.';
 
-// Task.
+// Tasks.
 $string['task_sync_enrolments'] = 'Sync enrolments to Minerva';
+$string['task_sync_materials'] = 'Sync materials to Minerva';
+$string['settings_autosync_materials'] = 'Auto-sync materials';
+$string['settings_autosync_materials_desc'] = 'Automatically upload new PDF files from linked courses to Minerva every 30 minutes.';

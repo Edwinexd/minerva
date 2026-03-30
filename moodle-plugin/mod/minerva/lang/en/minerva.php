@@ -15,17 +15,23 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Plugin version and other metadata.
+ * Language strings for mod_minerva.
  *
- * @package    local_minerva
+ * @package    mod_minerva
  * @copyright  2026 DSV, Stockholm University
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->component = 'local_minerva';
-$plugin->version   = 2026033001;
-$plugin->requires  = 2022112800; // Moodle 4.1+.
-$plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = '0.1.0';
+$string['pluginname'] = 'Minerva AI Assistant';
+$string['modulename'] = 'Minerva AI Assistant';
+$string['modulenameplural'] = 'Minerva AI Assistants';
+$string['pluginadministration'] = 'Minerva AI Assistant administration';
+$string['minerva:addinstance'] = 'Add a Minerva AI Assistant';
+$string['minerva:view'] = 'View Minerva AI Assistant';
+$string['no_course_link'] = 'This course is not linked to Minerva yet. Go to Minerva settings to connect it first.';
+$string['chat_title'] = 'Minerva AI Assistant';
+$string['chat_description'] = 'Ask questions about the course material.';
+$string['open_in_new_tab'] = 'Open in new tab';
+$string['privacy:metadata'] = 'The Minerva activity module sends user identifiers (eppn) to the external Minerva service for authentication.';

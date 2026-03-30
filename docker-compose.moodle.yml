@@ -1,0 +1,45 @@
+services:
+  moodle-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: moodle
+      POSTGRES_USER: moodle
+      POSTGRES_PASSWORD: moodle
+    volumes:
+      - moodle_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moodle"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - default
+      - superrag
+
+  moodle:
+    image: moodlehq/moodle-php-apache:8.1
+    ports:
+      - "8088:80"
+    volumes:
+      - moodle_src:/var/www/html
+      - moodle_moodledata:/var/www/moodledata
+      - ./moodle-plugin/local/minerva:/var/www/html/local/minerva
+      - ./moodle-plugin/mod/minerva:/var/www/html/mod/minerva
+      - ./docker/moodle-entrypoint.sh:/moodle-entrypoint.sh
+    entrypoint: ["/bin/bash", "/moodle-entrypoint.sh"]
+    depends_on:
+      moodle-db:
+        condition: service_healthy
+    networks:
+      - default
+      - superrag
+
+volumes:
+  moodle_db_data:
+  moodle_src:
+  moodle_moodledata:
+
+networks:
+  superrag:
+    external: true
+    name: super-rag_default

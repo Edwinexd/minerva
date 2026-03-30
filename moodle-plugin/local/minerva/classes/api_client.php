@@ -40,7 +40,12 @@ class api_client {
      * @throws \moodle_exception if credentials are empty.
      */
     public function __construct(string $apiurl, string $apikey) {
-        $this->baseurl = rtrim($apiurl, '/');
+        $url = rtrim($apiurl, '/');
+        // Accept either instance URL or full API URL.
+        if (!str_ends_with($url, '/api')) {
+            $url .= '/api';
+        }
+        $this->baseurl = $url;
         $this->apikey = $apikey;
 
         if (empty($this->baseurl) || empty($this->apikey)) {

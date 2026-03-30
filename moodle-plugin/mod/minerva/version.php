@@ -17,15 +17,18 @@
 /**
  * Plugin version and other metadata.
  *
- * @package    local_minerva
+ * @package    mod_minerva
  * @copyright  2026 DSV, Stockholm University
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->component = 'local_minerva';
-$plugin->version   = 2026033001;
+$plugin->component = 'mod_minerva';
+$plugin->version   = 2026033000;
 $plugin->requires  = 2022112800; // Moodle 4.1+.
 $plugin->maturity  = MATURITY_ALPHA;
 $plugin->release   = '0.1.0';
+$plugin->dependencies = [
+    'local_minerva' => 2026033000,
+];

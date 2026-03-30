@@ -27,11 +27,37 @@ defined('MOODLE_INTERNAL') || die();
 if ($hassiteconfig) {
     $settings = new admin_settingpage('local_minerva', get_string('pluginname', 'local_minerva'));
 
+    // Minerva instance URL (optional site-wide lock).
+    $settings->add(new admin_setting_configtext(
+        'local_minerva/minerva_url',
+        get_string('settings_apiurl', 'local_minerva'),
+        get_string('settings_apiurl_admin_desc', 'local_minerva'),
+        '',
+        PARAM_URL
+    ));
+
+    // Public URL for the embed iframe (only needed when it differs from the API URL, e.g. local dev).
+    $settings->add(new admin_setting_configtext(
+        'local_minerva/minerva_public_url',
+        get_string('settings_public_url', 'local_minerva'),
+        get_string('settings_public_url_desc', 'local_minerva'),
+        '',
+        PARAM_URL
+    ));
+
     // Auto-sync enrollment on enrol/unenrol events.
     $settings->add(new admin_setting_configcheckbox(
         'local_minerva/autosync_enrolment',
         get_string('settings_autosync', 'local_minerva'),
         get_string('settings_autosync_desc', 'local_minerva'),
+        1
+    ));
+
+    // Auto-sync materials on schedule.
+    $settings->add(new admin_setting_configcheckbox(
+        'local_minerva/autosync_materials',
+        get_string('settings_autosync_materials', 'local_minerva'),
+        get_string('settings_autosync_materials_desc', 'local_minerva'),
         1
     ));
 

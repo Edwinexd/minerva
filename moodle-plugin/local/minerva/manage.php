@@ -133,51 +133,24 @@ if ($link) {
         ]);
     }
 } else {
-    // Show form to link a course.
-    // Try to fetch course list if API creds were submitted (for dropdown mode).
-    $minervacourses = null;
-    $submittedurl = optional_param('minerva_api_url', '', PARAM_URL);
-    $submittedkey = optional_param('minerva_api_key', '', PARAM_RAW);
-    if (!empty($submittedurl) && !empty($submittedkey)) {
-        try {
-            $client = new \local_minerva\api_client($submittedurl, $submittedkey);
-            $minervacourses = $client->list_courses();
-        } catch (\Exception $e) {
-            // Will be caught by form validation later.
-            debugging($e->getMessage(), DEBUG_DEVELOPER);
-        }
-    }
-
-    $form = new \local_minerva\form\link_course_form(
-        $pageurl,
-        ['minerva_courses' => $minervacourses]
-    );
+    // Link form: just URL (if not locked) + API key.
+    // The key is scoped to a single course, so we resolve it automatically.
+    $form = new \local_minerva\form\link_course_form($pageurl);
 
     if ($form->is_cancelled()) {
         redirect(new moodle_url('/course/view.php', ['id' => $courseid]));
     }
 
     if ($data = $form->get_data()) {
-        // Fetch the course name from Minerva to cache it.
-        $coursename = $data->minerva_course_id;
-        try {
-            $client = new \local_minerva\api_client($data->minerva_api_url, $data->minerva_api_key);
-            $courses = $client->list_courses();
-            foreach ($courses as $mc) {
-                if ($mc->id === $data->minerva_course_id) {
-                    $coursename = $mc->name;
-                    break;
-                }
-            }
-        } catch (\Exception $e) {
-            // Use UUID as fallback name.
-            debugging($e->getMessage(), DEBUG_DEVELOPER);
-        }
+        // Resolve the course from the API key.
+        $client = new \local_minerva\api_client($data->minerva_api_url, $data->minerva_api_key);
+        $courses = $client->list_courses();
+        $mc = reset($courses);
 
         $record = new stdClass();
         $record->courseid = $courseid;
-        $record->minerva_course_id = trim($data->minerva_course_id);
-        $record->minerva_course_name = $coursename;
+        $record->minerva_course_id = $mc->id;
+        $record->minerva_course_name = $mc->name;
         $record->minerva_api_url = rtrim($data->minerva_api_url, '/');
         $record->minerva_api_key = $data->minerva_api_key;
         $record->timecreated = time();

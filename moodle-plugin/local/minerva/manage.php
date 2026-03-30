@@ -47,8 +47,12 @@ $PAGE->set_pagelayout('admin');
 // Handle unlink action.
 if ($action === 'unlink' && confirm_sesskey()) {
     $DB->delete_records('local_minerva_links', ['courseid' => $courseid]);
-    redirect($pageurl, get_string('link_removed', 'local_minerva'), null,
-        \core\output\notification::NOTIFY_SUCCESS);
+    redirect(
+        $pageurl,
+        get_string('link_removed', 'local_minerva'),
+        null,
+        \core\output\notification::NOTIFY_SUCCESS
+    );
 }
 
 // Handle sync enrolment action.
@@ -57,8 +61,12 @@ if ($action === 'sync' && confirm_sesskey()) {
     if ($link) {
         try {
             $client = \local_minerva\api_client::from_link($link);
-            $enrolledusers = get_enrolled_users($context, '', 0,
-                'u.id, u.username, u.firstname, u.lastname');
+            $enrolledusers = get_enrolled_users(
+                $context,
+                '',
+                0,
+                'u.id, u.username, u.firstname, u.lastname'
+            );
             $added = 0;
             foreach ($enrolledusers as $user) {
                 $eppn = \local_minerva\observer::get_eppn($user);
@@ -67,11 +75,19 @@ if ($action === 'sync' && confirm_sesskey()) {
                 $added++;
             }
             $a = (object)['added' => $added, 'removed' => 0];
-            redirect($pageurl, get_string('sync_enrolment_done', 'local_minerva', $a), null,
-                \core\output\notification::NOTIFY_SUCCESS);
+            redirect(
+                $pageurl,
+                get_string('sync_enrolment_done', 'local_minerva', $a),
+                null,
+                \core\output\notification::NOTIFY_SUCCESS
+            );
         } catch (\Exception $e) {
-            redirect($pageurl, $e->getMessage(), null,
-                \core\output\notification::NOTIFY_ERROR);
+            redirect(
+                $pageurl,
+                $e->getMessage(),
+                null,
+                \core\output\notification::NOTIFY_ERROR
+            );
         }
     }
 }
@@ -83,13 +99,17 @@ $link = $DB->get_record('local_minerva_links', ['courseid' => $courseid]);
 
 if ($link) {
     // Show current link and management options.
-    echo html_writer::tag('div',
+    echo html_writer::tag(
+        'div',
         html_writer::tag('strong', get_string('linked_course', 'local_minerva') . ': ') .
-        s($link->minerva_course_name) .
-        ' (' . s($link->minerva_course_id) . ')' .
-        html_writer::empty_tag('br') .
-        html_writer::tag('small', get_string('settings_apiurl', 'local_minerva') . ': ' .
-            s($link->minerva_api_url), ['class' => 'text-muted']),
+            s($link->minerva_course_name) .
+            ' (' . s($link->minerva_course_id) . ')' .
+            html_writer::empty_tag('br') .
+            html_writer::tag(
+                'small',
+                get_string('settings_apiurl', 'local_minerva') . ': ' . s($link->minerva_api_url),
+                ['class' => 'text-muted']
+            ),
         ['class' => 'alert alert-info']
     );
 
@@ -127,9 +147,10 @@ if ($link) {
         }
     }
 
-    $form = new \local_minerva\form\link_course_form($pageurl, [
-        'minerva_courses' => $minervacourses,
-    ]);
+    $form = new \local_minerva\form\link_course_form(
+        $pageurl,
+        ['minerva_courses' => $minervacourses]
+    );
 
     if ($form->is_cancelled()) {
         redirect(new moodle_url('/course/view.php', ['id' => $courseid]));
@@ -161,8 +182,12 @@ if ($link) {
         $record->timemodified = time();
         $DB->insert_record('local_minerva_links', $record);
 
-        redirect($pageurl, get_string('link_saved', 'local_minerva'), null,
-            \core\output\notification::NOTIFY_SUCCESS);
+        redirect(
+            $pageurl,
+            get_string('link_saved', 'local_minerva'),
+            null,
+            \core\output\notification::NOTIFY_SUCCESS
+        );
     }
 
     $form->set_data(['courseid' => $courseid]);

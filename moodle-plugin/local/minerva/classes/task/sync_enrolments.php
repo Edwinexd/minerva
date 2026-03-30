@@ -31,7 +31,6 @@ defined('MOODLE_INTERNAL') || die();
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class sync_enrolments extends \core\task\scheduled_task {
-
     /**
      * Return the task's name.
      *

@@ -28,7 +28,6 @@ defined('MOODLE_INTERNAL') || die();
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class api_client {
-
     /** @var string Base URL of the Minerva API. */
     private string $baseurl;
 
@@ -94,8 +93,12 @@ class api_client {
      * @param string $role Role in the course (student, teacher, ta).
      * @return object Result with added, user_id.
      */
-    public function add_member(string $minervacid, string $eppn, ?string $displayname = null,
-            string $role = 'student'): object {
+    public function add_member(
+        string $minervacid,
+        string $eppn,
+        ?string $displayname = null,
+        string $role = 'student'
+    ): object {
         $body = ['eppn' => $eppn, 'role' => $role];
         if ($displayname !== null) {
             $body['display_name'] = $displayname;
@@ -149,8 +152,13 @@ class api_client {
         $httpcode = $curl->get_info()['http_code'] ?? 0;
 
         if ($httpcode < 200 || $httpcode >= 300) {
-            throw new \moodle_exception('api_error', 'local_minerva', '', null,
-                "HTTP {$httpcode}: {$response}");
+            throw new \moodle_exception(
+                'api_error',
+                'local_minerva',
+                '',
+                null,
+                "HTTP {$httpcode}: {$response}"
+            );
         }
 
         return json_decode($response);
@@ -210,8 +218,13 @@ class api_client {
         $httpcode = $curl->get_info()['http_code'] ?? 0;
 
         if ($httpcode < 200 || $httpcode >= 300) {
-            throw new \moodle_exception('api_error', 'local_minerva', '', null,
-                "HTTP {$httpcode} on {$method} {$path}: {$response}");
+            throw new \moodle_exception(
+                'api_error',
+                'local_minerva',
+                '',
+                null,
+                "HTTP {$httpcode} on {$method} {$path}: {$response}"
+            );
         }
 
         return json_decode($response);

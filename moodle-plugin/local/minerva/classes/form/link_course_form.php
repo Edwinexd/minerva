@@ -31,7 +31,6 @@ require_once($CFG->libdir . '/formslib.php');
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class link_course_form extends \moodleform {
-
     /**
      * Define the form elements.
      */
@@ -39,23 +38,37 @@ class link_course_form extends \moodleform {
         $mform = $this->_form;
 
         // Connection settings.
-        $mform->addElement('header', 'connectionhdr',
-            get_string('settings_connection', 'local_minerva'));
+        $mform->addElement(
+            'header',
+            'connectionhdr',
+            get_string('settings_connection', 'local_minerva')
+        );
 
-        $mform->addElement('text', 'minerva_api_url',
-            get_string('settings_apiurl', 'local_minerva'), ['size' => 60]);
+        $mform->addElement(
+            'text',
+            'minerva_api_url',
+            get_string('settings_apiurl', 'local_minerva'),
+            ['size' => 60]
+        );
         $mform->setType('minerva_api_url', PARAM_URL);
         $mform->addRule('minerva_api_url', null, 'required', null, 'client');
         $mform->addHelpButton('minerva_api_url', 'settings_apiurl', 'local_minerva');
 
-        $mform->addElement('passwordunmask', 'minerva_api_key',
-            get_string('settings_apikey', 'local_minerva'), ['size' => 60]);
+        $mform->addElement(
+            'passwordunmask',
+            'minerva_api_key',
+            get_string('settings_apikey', 'local_minerva'),
+            ['size' => 60]
+        );
         $mform->setType('minerva_api_key', PARAM_RAW);
         $mform->addRule('minerva_api_key', null, 'required', null, 'client');
 
         // Course selection.
-        $mform->addElement('header', 'coursehdr',
-            get_string('select_minerva_course', 'local_minerva'));
+        $mform->addElement(
+            'header',
+            'coursehdr',
+            get_string('select_minerva_course', 'local_minerva')
+        );
 
         // If we already have a list of courses (second step), show dropdown.
         $courses = $this->_customdata['minerva_courses'] ?? null;
@@ -68,12 +81,20 @@ class link_course_form extends \moodleform {
                 }
                 $options[$course->id] = $label;
             }
-            $mform->addElement('select', 'minerva_course_id',
-                get_string('select_minerva_course', 'local_minerva'), $options);
+            $mform->addElement(
+                'select',
+                'minerva_course_id',
+                get_string('select_minerva_course', 'local_minerva'),
+                $options
+            );
         } else {
             // First step: text field for course UUID.
-            $mform->addElement('text', 'minerva_course_id',
-                get_string('minerva_course_id', 'local_minerva'), ['size' => 40]);
+            $mform->addElement(
+                'text',
+                'minerva_course_id',
+                get_string('minerva_course_id', 'local_minerva'),
+                ['size' => 40]
+            );
             $mform->addHelpButton('minerva_course_id', 'minerva_course_id', 'local_minerva');
         }
         $mform->setType('minerva_course_id', PARAM_RAW);
@@ -109,8 +130,11 @@ class link_course_form extends \moodleform {
                 $client = new \local_minerva\api_client($data['minerva_api_url'], $data['minerva_api_key']);
                 $client->list_courses();
             } catch (\Exception $e) {
-                $errors['minerva_api_key'] = get_string('connection_failed', 'local_minerva',
-                    $e->getMessage());
+                $errors['minerva_api_key'] = get_string(
+                    'connection_failed',
+                    'local_minerva',
+                    $e->getMessage()
+                );
             }
         }
 

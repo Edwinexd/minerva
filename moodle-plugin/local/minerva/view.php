@@ -70,7 +70,8 @@ echo $OUTPUT->header();
 
 echo html_writer::tag('p', get_string('chat_description', 'local_minerva'));
 
-echo html_writer::tag('p',
+echo html_writer::tag(
+    'p',
     html_writer::link($chaturl, get_string('open_in_new_tab', 'local_minerva'), [
         'target' => '_blank',
         'class' => 'btn btn-secondary',

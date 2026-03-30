@@ -31,8 +31,11 @@ defined('MOODLE_INTERNAL') || die();
  * @param stdClass $course
  * @param context_course $context
  */
-function local_minerva_extend_navigation_course(navigation_node $parentnode, stdClass $course,
-        context_course $context): void {
+function local_minerva_extend_navigation_course(
+    navigation_node $parentnode,
+    stdClass $course,
+    context_course $context
+): void {
     global $DB;
 
     // Only show if the course is linked to Minerva.

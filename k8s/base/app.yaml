@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: minerva
-          image: ghcr.io/edwinexd/minerva:master
+          image: ghcr.io/edwinexd/minerva:latest
           ports:
             - containerPort: 3000
           env:

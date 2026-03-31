@@ -140,7 +140,7 @@ function EmbedPage() {
 
   if (!token) {
     return (
-      <div className="flex items-center justify-center h-screen bg-background text-foreground">
+      <div className="flex items-center justify-center h-dvh bg-background text-foreground">
         <p className="text-destructive">Missing authentication token.</p>
       </div>
     )
@@ -148,7 +148,7 @@ function EmbedPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-background text-foreground">
+      <div className="flex items-center justify-center h-dvh bg-background text-foreground">
         <div className="flex gap-1">
           <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
           <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
@@ -160,14 +160,14 @@ function EmbedPage() {
 
   if (error && !course) {
     return (
-      <div className="flex items-center justify-center h-screen bg-background text-foreground">
+      <div className="flex items-center justify-center h-dvh bg-background text-foreground">
         <p className="text-destructive">{error}</p>
       </div>
     )
   }
 
   return (
-    <div className="flex h-screen bg-background text-foreground">
+    <div className="flex h-dvh bg-background text-foreground">
       {/* Sidebar */}
       <div className="w-56 border-r flex flex-col p-3">
         <Button size="sm" className="mb-3" onClick={createConversation}>

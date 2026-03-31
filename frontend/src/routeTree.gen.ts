@@ -8,120 +8,120 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as TeacherIndexRouteImport } from './routes/teacher/index'
-import { Route as AdminIndexRouteImport } from './routes/admin/index'
-import { Route as JoinTokenRouteImport } from './routes/join/$token'
-import { Route as EmbedCourseIdRouteImport } from './routes/embed/$courseId'
-import { Route as CourseCourseIdIndexRouteImport } from './routes/course/$courseId/index'
-import { Route as TeacherCoursesCourseIdRouteImport } from './routes/teacher/courses.$courseId'
-import { Route as CourseCourseIdConversationIdRouteImport } from './routes/course/$courseId/$conversationId'
+import { Route as rootRouteImport } from "./routes/__root"
+import { Route as IndexRouteImport } from "./routes/index"
+import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
+import { Route as AdminIndexRouteImport } from "./routes/admin/index"
+import { Route as JoinTokenRouteImport } from "./routes/join/$token"
+import { Route as EmbedCourseIdRouteImport } from "./routes/embed/$courseId"
+import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
+import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
+import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
 
 const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+  id: "/",
+  path: "/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const TeacherIndexRoute = TeacherIndexRouteImport.update({
-  id: '/teacher/',
-  path: '/teacher/',
+  id: "/teacher/",
+  path: "/teacher/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
-  id: '/admin/',
-  path: '/admin/',
+  id: "/admin/",
+  path: "/admin/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const JoinTokenRoute = JoinTokenRouteImport.update({
-  id: '/join/$token',
-  path: '/join/$token',
+  id: "/join/$token",
+  path: "/join/$token",
   getParentRoute: () => rootRouteImport,
 } as any)
 const EmbedCourseIdRoute = EmbedCourseIdRouteImport.update({
-  id: '/embed/$courseId',
-  path: '/embed/$courseId',
+  id: "/embed/$courseId",
+  path: "/embed/$courseId",
   getParentRoute: () => rootRouteImport,
 } as any)
 const CourseCourseIdIndexRoute = CourseCourseIdIndexRouteImport.update({
-  id: '/course/$courseId/',
-  path: '/course/$courseId/',
+  id: "/course/$courseId/",
+  path: "/course/$courseId/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const TeacherCoursesCourseIdRoute = TeacherCoursesCourseIdRouteImport.update({
-  id: '/teacher/courses/$courseId',
-  path: '/teacher/courses/$courseId',
+  id: "/teacher/courses/$courseId",
+  path: "/teacher/courses/$courseId",
   getParentRoute: () => rootRouteImport,
 } as any)
 const CourseCourseIdConversationIdRoute =
   CourseCourseIdConversationIdRouteImport.update({
-    id: '/course/$courseId/$conversationId',
-    path: '/course/$courseId/$conversationId',
+    id: "/course/$courseId/$conversationId",
+    path: "/course/$courseId/$conversationId",
     getParentRoute: () => rootRouteImport,
   } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/embed/$courseId': typeof EmbedCourseIdRoute
-  '/join/$token': typeof JoinTokenRoute
-  '/admin/': typeof AdminIndexRoute
-  '/teacher/': typeof TeacherIndexRoute
-  '/course/$courseId/$conversationId': typeof CourseCourseIdConversationIdRoute
-  '/teacher/courses/$courseId': typeof TeacherCoursesCourseIdRoute
-  '/course/$courseId/': typeof CourseCourseIdIndexRoute
+  "/": typeof IndexRoute
+  "/embed/$courseId": typeof EmbedCourseIdRoute
+  "/join/$token": typeof JoinTokenRoute
+  "/admin/": typeof AdminIndexRoute
+  "/teacher/": typeof TeacherIndexRoute
+  "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
+  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRoute
+  "/course/$courseId/": typeof CourseCourseIdIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/embed/$courseId': typeof EmbedCourseIdRoute
-  '/join/$token': typeof JoinTokenRoute
-  '/admin': typeof AdminIndexRoute
-  '/teacher': typeof TeacherIndexRoute
-  '/course/$courseId/$conversationId': typeof CourseCourseIdConversationIdRoute
-  '/teacher/courses/$courseId': typeof TeacherCoursesCourseIdRoute
-  '/course/$courseId': typeof CourseCourseIdIndexRoute
+  "/": typeof IndexRoute
+  "/embed/$courseId": typeof EmbedCourseIdRoute
+  "/join/$token": typeof JoinTokenRoute
+  "/admin": typeof AdminIndexRoute
+  "/teacher": typeof TeacherIndexRoute
+  "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
+  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRoute
+  "/course/$courseId": typeof CourseCourseIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/embed/$courseId': typeof EmbedCourseIdRoute
-  '/join/$token': typeof JoinTokenRoute
-  '/admin/': typeof AdminIndexRoute
-  '/teacher/': typeof TeacherIndexRoute
-  '/course/$courseId/$conversationId': typeof CourseCourseIdConversationIdRoute
-  '/teacher/courses/$courseId': typeof TeacherCoursesCourseIdRoute
-  '/course/$courseId/': typeof CourseCourseIdIndexRoute
+  "/": typeof IndexRoute
+  "/embed/$courseId": typeof EmbedCourseIdRoute
+  "/join/$token": typeof JoinTokenRoute
+  "/admin/": typeof AdminIndexRoute
+  "/teacher/": typeof TeacherIndexRoute
+  "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
+  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRoute
+  "/course/$courseId/": typeof CourseCourseIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
-    | '/embed/$courseId'
-    | '/join/$token'
-    | '/admin/'
-    | '/teacher/'
-    | '/course/$courseId/$conversationId'
-    | '/teacher/courses/$courseId'
-    | '/course/$courseId/'
+    | "/"
+    | "/embed/$courseId"
+    | "/join/$token"
+    | "/admin/"
+    | "/teacher/"
+    | "/course/$courseId/$conversationId"
+    | "/teacher/courses/$courseId"
+    | "/course/$courseId/"
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
-    | '/embed/$courseId'
-    | '/join/$token'
-    | '/admin'
-    | '/teacher'
-    | '/course/$courseId/$conversationId'
-    | '/teacher/courses/$courseId'
-    | '/course/$courseId'
+    | "/"
+    | "/embed/$courseId"
+    | "/join/$token"
+    | "/admin"
+    | "/teacher"
+    | "/course/$courseId/$conversationId"
+    | "/teacher/courses/$courseId"
+    | "/course/$courseId"
   id:
-    | '__root__'
-    | '/'
-    | '/embed/$courseId'
-    | '/join/$token'
-    | '/admin/'
-    | '/teacher/'
-    | '/course/$courseId/$conversationId'
-    | '/teacher/courses/$courseId'
-    | '/course/$courseId/'
+    | "__root__"
+    | "/"
+    | "/embed/$courseId"
+    | "/join/$token"
+    | "/admin/"
+    | "/teacher/"
+    | "/course/$courseId/$conversationId"
+    | "/teacher/courses/$courseId"
+    | "/course/$courseId/"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -135,61 +135,61 @@ export interface RootRouteChildren {
   CourseCourseIdIndexRoute: typeof CourseCourseIdIndexRoute
 }
 
-declare module '@tanstack/react-router' {
+declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
+    "/": {
+      id: "/"
+      path: "/"
+      fullPath: "/"
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/teacher/': {
-      id: '/teacher/'
-      path: '/teacher'
-      fullPath: '/teacher/'
+    "/teacher/": {
+      id: "/teacher/"
+      path: "/teacher"
+      fullPath: "/teacher/"
       preLoaderRoute: typeof TeacherIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/admin/': {
-      id: '/admin/'
-      path: '/admin'
-      fullPath: '/admin/'
+    "/admin/": {
+      id: "/admin/"
+      path: "/admin"
+      fullPath: "/admin/"
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/join/$token': {
-      id: '/join/$token'
-      path: '/join/$token'
-      fullPath: '/join/$token'
+    "/join/$token": {
+      id: "/join/$token"
+      path: "/join/$token"
+      fullPath: "/join/$token"
       preLoaderRoute: typeof JoinTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/embed/$courseId': {
-      id: '/embed/$courseId'
-      path: '/embed/$courseId'
-      fullPath: '/embed/$courseId'
+    "/embed/$courseId": {
+      id: "/embed/$courseId"
+      path: "/embed/$courseId"
+      fullPath: "/embed/$courseId"
       preLoaderRoute: typeof EmbedCourseIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/course/$courseId/': {
-      id: '/course/$courseId/'
-      path: '/course/$courseId'
-      fullPath: '/course/$courseId/'
+    "/course/$courseId/": {
+      id: "/course/$courseId/"
+      path: "/course/$courseId"
+      fullPath: "/course/$courseId/"
       preLoaderRoute: typeof CourseCourseIdIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/teacher/courses/$courseId': {
-      id: '/teacher/courses/$courseId'
-      path: '/teacher/courses/$courseId'
-      fullPath: '/teacher/courses/$courseId'
+    "/teacher/courses/$courseId": {
+      id: "/teacher/courses/$courseId"
+      path: "/teacher/courses/$courseId"
+      fullPath: "/teacher/courses/$courseId"
       preLoaderRoute: typeof TeacherCoursesCourseIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/course/$courseId/$conversationId': {
-      id: '/course/$courseId/$conversationId'
-      path: '/course/$courseId/$conversationId'
-      fullPath: '/course/$courseId/$conversationId'
+    "/course/$courseId/$conversationId": {
+      id: "/course/$courseId/$conversationId"
+      path: "/course/$courseId/$conversationId"
+      fullPath: "/course/$courseId/$conversationId"
       preLoaderRoute: typeof CourseCourseIdConversationIdRouteImport
       parentRoute: typeof rootRouteImport
     }

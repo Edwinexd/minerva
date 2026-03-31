@@ -17,10 +17,15 @@
 /**
  * View the Minerva AI assistant chat embedded in the course.
  *
+ * DEPRECATED: This activity module is deprecated. Use LTI 1.3 integration
+ * instead, which provides embedded chat directly from the LMS without needing
+ * a separate activity module. See the LTI tab in Minerva's course settings.
+ *
  * Fetches an embed token via the integration API and loads the
  * Minerva chat frontend inside an iframe.
  *
  * @package    mod_minerva
+ * @deprecated Since 0.2.0. Use LTI 1.3 integration instead.
  * @copyright  2026 DSV, Stockholm University
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -68,6 +73,11 @@ $PAGE->set_heading($course->fullname);
 $PAGE->set_activity_record($instance);
 
 echo $OUTPUT->header();
+
+echo $OUTPUT->notification(
+    get_string('deprecated_notice', 'mod_minerva'),
+    \core\output\notification::NOTIFY_WARNING
+);
 
 echo html_writer::tag(
     'p',

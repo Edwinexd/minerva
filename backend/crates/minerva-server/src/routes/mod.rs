@@ -1,5 +1,6 @@
 mod admin;
 mod api_keys;
+mod canvas;
 mod chat;
 mod courses;
 pub(crate) mod documents;
@@ -29,6 +30,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/courses/{course_id}", signed_urls::course_router())
         .nest("/courses/{course_id}", api_keys::router())
         .nest("/courses/{course_id}", lti::course_router())
+        .nest("/courses/{course_id}", canvas::course_router())
         .nest("/courses/{course_id}", usage::course_router())
         .nest("/admin", admin::router())
         .merge(usage::admin_router())

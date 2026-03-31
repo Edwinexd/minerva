@@ -35,3 +35,4 @@ $string['chat_title'] = 'Minerva AI Assistant';
 $string['chat_description'] = 'Ask questions about the course material.';
 $string['open_in_new_tab'] = 'Open in new tab';
 $string['privacy:metadata'] = 'The Minerva activity module sends user identifiers (eppn) to the external Minerva service for authentication.';
+$string['deprecated_notice'] = 'This activity module is deprecated and will be removed in a future release. Please use LTI 1.3 integration instead, which provides the same embedded chat experience directly from the LMS. Ask your administrator to configure Minerva as an LTI tool.';

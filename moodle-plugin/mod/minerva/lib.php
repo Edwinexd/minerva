@@ -17,7 +17,12 @@
 /**
  * Library functions for mod_minerva.
  *
+ * DEPRECATED: This activity module is deprecated. Use LTI 1.3 integration
+ * instead, which provides embedded chat directly from the LMS without needing
+ * a separate activity module. See the LTI tab in Minerva's course settings.
+ *
  * @package    mod_minerva
+ * @deprecated Since 0.2.0. Use LTI 1.3 integration instead.
  * @copyright  2026 DSV, Stockholm University
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */

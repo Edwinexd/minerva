@@ -154,6 +154,32 @@ export interface LtiRegistration {
   moodle_config: MoodleToolConfig
 }
 
+export interface CanvasConnection {
+  id: string
+  course_id: string
+  name: string
+  canvas_base_url: string
+  canvas_course_id: string
+  auto_sync: boolean
+  created_at: string
+  updated_at: string
+  last_synced_at: string | null
+}
+
+export interface CanvasFileInfo {
+  id: string
+  filename: string
+  content_type: string | null
+  size: number
+  already_synced: boolean
+}
+
+export interface CanvasSyncResult {
+  synced: number
+  skipped: number
+  errors: string[]
+}
+
 export interface Document {
   id: string
   course_id: string

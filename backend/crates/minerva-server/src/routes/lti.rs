@@ -457,15 +457,17 @@ async fn create_registration(
     let row = minerva_db::queries::lti::create_registration(
         &state.db,
         id,
-        course_id,
-        &body.name,
-        issuer,
-        &body.client_id,
-        body.deployment_id.as_deref(),
-        &auth_login_url,
-        &auth_token_url,
-        &platform_jwks_url,
-        user.id,
+        &minerva_db::queries::lti::CreateRegistration {
+            course_id,
+            name: &body.name,
+            issuer,
+            client_id: &body.client_id,
+            deployment_id: body.deployment_id.as_deref(),
+            auth_login_url: &auth_login_url,
+            auth_token_url: &auth_token_url,
+            platform_jwks_url: &platform_jwks_url,
+            created_by: user.id,
+        },
     )
     .await
     .map_err(|e| {

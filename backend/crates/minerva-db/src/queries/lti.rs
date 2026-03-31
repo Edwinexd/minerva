@@ -19,18 +19,22 @@ pub struct RegistrationRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+pub struct CreateRegistration<'a> {
+    pub course_id: Uuid,
+    pub name: &'a str,
+    pub issuer: &'a str,
+    pub client_id: &'a str,
+    pub deployment_id: Option<&'a str>,
+    pub auth_login_url: &'a str,
+    pub auth_token_url: &'a str,
+    pub platform_jwks_url: &'a str,
+    pub created_by: Uuid,
+}
+
 pub async fn create_registration(
     db: &PgPool,
     id: Uuid,
-    course_id: Uuid,
-    name: &str,
-    issuer: &str,
-    client_id: &str,
-    deployment_id: Option<&str>,
-    auth_login_url: &str,
-    auth_token_url: &str,
-    platform_jwks_url: &str,
-    created_by: Uuid,
+    input: &CreateRegistration<'_>,
 ) -> Result<RegistrationRow, sqlx::Error> {
     sqlx::query_as::<_, RegistrationRow>(
         r#"INSERT INTO lti_registrations (id, course_id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by)
@@ -38,15 +42,15 @@ pub async fn create_registration(
         RETURNING id, course_id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at"#,
     )
     .bind(id)
-    .bind(course_id)
-    .bind(name)
-    .bind(issuer)
-    .bind(client_id)
-    .bind(deployment_id)
-    .bind(auth_login_url)
-    .bind(auth_token_url)
-    .bind(platform_jwks_url)
-    .bind(created_by)
+    .bind(input.course_id)
+    .bind(input.name)
+    .bind(input.issuer)
+    .bind(input.client_id)
+    .bind(input.deployment_id)
+    .bind(input.auth_login_url)
+    .bind(input.auth_token_url)
+    .bind(input.platform_jwks_url)
+    .bind(input.created_by)
     .fetch_one(db)
     .await
 }

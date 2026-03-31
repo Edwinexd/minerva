@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, LtiRegistration, LtiSetup, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -77,6 +77,19 @@ export const apiKeysQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "api-keys"],
     queryFn: () => api.get<ApiKey[]>(`/courses/${courseId}/api-keys`),
+  })
+
+export const ltiSetupQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "lti", "setup"],
+    queryFn: () => api.get<LtiSetup>(`/courses/${courseId}/lti/setup`),
+    staleTime: Infinity,
+  })
+
+export const ltiRegistrationsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "lti"],
+    queryFn: () => api.get<LtiRegistration[]>(`/courses/${courseId}/lti`),
   })
 
 export const adminUsersQuery = queryOptions({

@@ -120,6 +120,39 @@ export interface ApiKeyCreated {
   created_at: string
 }
 
+export interface MoodleToolConfig {
+  tool_url: string
+  lti_version: string
+  public_key_type: string
+  public_keyset_url: string
+  initiate_login_url: string
+  redirection_uris: string
+  custom_parameters: string
+  default_launch_container: string
+  share_name: boolean
+  share_email: boolean
+  accept_grades: boolean
+}
+
+export interface LtiSetup {
+  moodle_tool_config: MoodleToolConfig
+  steps: string[]
+}
+
+export interface LtiRegistration {
+  id: string
+  course_id: string
+  name: string
+  issuer: string
+  client_id: string
+  deployment_id: string | null
+  auth_login_url: string
+  auth_token_url: string
+  platform_jwks_url: string
+  created_at: string
+  moodle_config: MoodleToolConfig
+}
+
 export interface Document {
   id: string
   course_id: string

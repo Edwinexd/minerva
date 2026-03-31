@@ -319,7 +319,7 @@ fn build_setup_response(base_url: &str) -> LtiSetupResponse {
                 config.custom_parameters,
             ),
             "Under Services, leave defaults (no grade passback needed).".into(),
-            "Under Privacy, enable 'Share launcher's name' and 'Share launcher's email'.".into(),
+            "Under Privacy, 'Share launcher's name' is optional (populates display names).".into(),
             "Save. Moodle will show the tool's registration details.".into(),
             "Copy the Platform ID (issuer), Client ID, Deployment ID, and the platform endpoints (Authentication request URL, Access token URL, Public keyset URL) from Moodle.".into(),
             "Back in Minerva, create an LTI registration for this course with those values.".into(),
@@ -495,7 +495,7 @@ fn build_moodle_config(base_url: &str) -> MoodleToolConfig {
         custom_parameters: "user_eppn=$User.username",
         default_launch_container: "Embed",
         share_name: true,
-        share_email: true,
+        share_email: false,
         accept_grades: false,
     }
 }

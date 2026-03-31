@@ -92,10 +92,7 @@ pub struct LtiLaunchClaims {
     )]
     pub message_type: Option<String>,
 
-    #[serde(
-        rename = "https://purl.imsglobal.org/spec/lti/claim/version",
-        default
-    )]
+    #[serde(rename = "https://purl.imsglobal.org/spec/lti/claim/version", default)]
     pub version: Option<String>,
 
     #[serde(
@@ -104,16 +101,10 @@ pub struct LtiLaunchClaims {
     )]
     pub deployment_id: Option<String>,
 
-    #[serde(
-        rename = "https://purl.imsglobal.org/spec/lti/claim/roles",
-        default
-    )]
+    #[serde(rename = "https://purl.imsglobal.org/spec/lti/claim/roles", default)]
     pub roles: Vec<String>,
 
-    #[serde(
-        rename = "https://purl.imsglobal.org/spec/lti/claim/context",
-        default
-    )]
+    #[serde(rename = "https://purl.imsglobal.org/spec/lti/claim/context", default)]
     pub context: Option<LtiContext>,
 
     #[serde(
@@ -122,10 +113,7 @@ pub struct LtiLaunchClaims {
     )]
     pub resource_link: Option<LtiResourceLink>,
 
-    #[serde(
-        rename = "https://purl.imsglobal.org/spec/lti/claim/custom",
-        default
-    )]
+    #[serde(rename = "https://purl.imsglobal.org/spec/lti/claim/custom", default)]
     pub custom: Option<HashMap<String, serde_json::Value>>,
 
     #[serde(

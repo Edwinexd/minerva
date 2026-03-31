@@ -1,4 +1,4 @@
-import { createRootRouteWithContext, Link, Outlet, useParams } from "@tanstack/react-router"
+import { createRootRouteWithContext, Link, Outlet } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { QueryClient } from "@tanstack/react-query"
 import { userQuery } from "@/lib/queries"

@@ -77,7 +77,6 @@ pub async fn find_registration_by_issuer(
     .await
 }
 
-
 pub async fn list_registrations_for_course(
     db: &PgPool,
     course_id: Uuid,

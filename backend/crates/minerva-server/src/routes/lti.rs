@@ -1,14 +1,14 @@
 //! LTI 1.3 Tool Provider endpoints.
 //!
 //! Public endpoints (no Shibboleth / API key auth):
-//!   GET/POST /lti/login  — OIDC third-party initiated login
-//!   POST     /lti/launch — Validate id_token, create session, redirect to embed
-//!   GET      /lti/jwks   — Serve tool public keys
+//!   GET/POST /lti/login  -- OIDC third-party initiated login
+//!   POST     /lti/launch -- Validate id_token, create session, redirect to embed
+//!   GET      /lti/jwks   -- Serve tool public keys
 //!
 //! Course-level endpoints (behind auth_middleware, course teacher/owner):
-//!   GET    /courses/{course_id}/lti          — List LTI registrations
-//!   POST   /courses/{course_id}/lti          — Register LTI connection
-//!   DELETE /courses/{course_id}/lti/{id}     — Remove registration
+//!   GET    /courses/{course_id}/lti          -- List LTI registrations
+//!   POST   /courses/{course_id}/lti          -- Register LTI connection
+//!   DELETE /courses/{course_id}/lti/{id}     -- Remove registration
 
 use axum::extract::{Path, Query, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -35,7 +35,10 @@ const EMBED_TOKEN_TTL_SECS: i64 = 8 * 3600;
 
 pub fn public_router() -> Router<AppState> {
     Router::new()
-        .route("/login", get(login_initiation_get).post(login_initiation_post))
+        .route(
+            "/login",
+            get(login_initiation_get).post(login_initiation_post),
+        )
         .route("/launch", post(handle_launch))
         .route("/jwks", get(jwks))
         .route("/icon.svg", get(icon))
@@ -64,7 +67,7 @@ struct LoginInitiationParams {
     lti_deployment_id: Option<String>,
 }
 
-/// GET /lti/login — Moodle redirects here with query params.
+/// GET /lti/login -- Moodle redirects here with query params.
 async fn login_initiation_get(
     State(state): State<AppState>,
     Query(params): Query<LoginInitiationParams>,
@@ -72,7 +75,7 @@ async fn login_initiation_get(
     do_login_initiation(state, params).await
 }
 
-/// POST /lti/login — Moodle may POST form-encoded params instead.
+/// POST /lti/login -- Moodle may POST form-encoded params instead.
 async fn login_initiation_post(
     State(state): State<AppState>,
     Form(params): Form<LoginInitiationParams>,
@@ -85,9 +88,10 @@ async fn do_login_initiation(
     params: LoginInitiationParams,
 ) -> Result<Response, AppError> {
     // Look up registration by issuer + client_id. client_id is required.
-    let client_id = params.client_id.as_deref().ok_or_else(|| {
-        AppError::BadRequest("client_id is required in login initiation".into())
-    })?;
+    let client_id = params
+        .client_id
+        .as_deref()
+        .ok_or_else(|| AppError::BadRequest("client_id is required in login initiation".into()))?;
 
     let registration =
         minerva_db::queries::lti::find_registration_by_issuer(&state.db, &params.iss, client_id)
@@ -168,7 +172,7 @@ async fn handle_launch(
         .await?
         .ok_or_else(|| AppError::BadRequest("invalid or expired state".into()))?;
 
-    // 2. Fetch the registration — this tells us which Minerva course.
+    // 2. Fetch the registration -- this tells us which Minerva course.
     let registration =
         minerva_db::queries::lti::find_registration_by_id(&state.db, launch.registration_id)
             .await?
@@ -177,9 +181,13 @@ async fn handle_launch(
     let course_id = registration.course_id;
 
     // 3. Validate the JWT.
-    let claims =
-        lti::validate_launch_jwt(&registration, &form.id_token, &launch.nonce, &state.http_client)
-            .await?;
+    let claims = lti::validate_launch_jwt(
+        &registration,
+        &form.id_token,
+        &launch.nonce,
+        &state.http_client,
+    )
+    .await?;
 
     // 4. Verify deployment_id if one was registered.
     if let Some(ref expected) = registration.deployment_id {
@@ -221,7 +229,7 @@ async fn handle_launch(
 
     // 7. Find or create the user.
     //    If the user already exists (e.g. via Shibboleth), reuse their record but
-    //    do NOT modify their role or display name — LTI should not alter existing accounts.
+    //    do NOT modify their role or display name -- LTI should not alter existing accounts.
     //    Only populate display_name on newly created users.
     let user = match minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await? {
         Some(u) => u,
@@ -236,7 +244,7 @@ async fn handle_launch(
     };
 
     // 8. Add course membership if not already a member.
-    //    Never downgrade an existing member's role — only add if they're not already in the course.
+    //    Never downgrade an existing member's role -- only add if they're not already in the course.
     let course_role = lti::lti_roles_to_course_role(&claims.roles);
     if !minerva_db::queries::courses::is_member(&state.db, course_id, user.id).await? {
         minerva_db::queries::courses::add_member(&state.db, course_id, user.id, course_role)
@@ -261,7 +269,9 @@ async fn handle_launch(
     // 10. Redirect to the embed UI via JS (avoids token leaking in Referer).
     let embed_path = format!(
         "/embed/{}?token={}&lti_client_id={}",
-        course_id, token, urlencoding::encode(&registration.client_id)
+        course_id,
+        token,
+        urlencoding::encode(&registration.client_id)
     );
 
     // Both course_id (UUID) and token (base64url) are safe for interpolation,
@@ -293,17 +303,14 @@ async fn icon() -> Response {
   <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
         font-family="system-ui,sans-serif" font-weight="700" font-size="28" fill="#f8fafc">M</text>
 </svg>"##;
-    (
-        [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
-        svg,
-    ).into_response()
+    ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], svg).into_response()
 }
 
 // ---------------------------------------------------------------------------
 // Course-level: LTI setup + registration management
 // ---------------------------------------------------------------------------
 
-/// GET /courses/{course_id}/lti/setup — returns everything the teacher needs
+/// GET /courses/{course_id}/lti/setup -- returns everything the teacher needs
 /// to configure Moodle BEFORE creating a registration in Minerva.
 async fn lti_setup(
     State(state): State<AppState>,
@@ -334,7 +341,7 @@ fn build_setup_response(base_url: &str) -> LtiSetupResponse {
             format!("Set Initiate login URL to: {}", config.initiate_login_url),
             format!("Set Redirection URI(s) to: {}", config.redirection_uris),
             format!(
-                "Under Custom parameters, add: {} — this links Moodle users to their Minerva identity. Without it, students launched from Moodle will be separate users from those who log in directly.",
+                "Under Custom parameters, add: {} -- this links Moodle users to their Minerva identity. Without it, students launched from Moodle will be separate users from those who log in directly.",
                 config.custom_parameters,
             ),
             "Under Services, leave defaults (no grade passback needed).".into(),
@@ -416,11 +423,11 @@ struct CreateRegistrationRequest {
     issuer: String,
     client_id: String,
     deployment_id: Option<String>,
-    /// Optional — defaults to {issuer}/mod/lti/auth.php
+    /// Optional -- defaults to {issuer}/mod/lti/auth.php
     auth_login_url: Option<String>,
-    /// Optional — defaults to {issuer}/mod/lti/token.php
+    /// Optional -- defaults to {issuer}/mod/lti/token.php
     auth_token_url: Option<String>,
-    /// Optional — defaults to {issuer}/mod/lti/certs.php
+    /// Optional -- defaults to {issuer}/mod/lti/certs.php
     platform_jwks_url: Option<String>,
 }
 
@@ -433,13 +440,16 @@ async fn create_registration(
     require_course_teacher(&state, course_id, &user).await?;
 
     let issuer = body.issuer.trim_end_matches('/');
-    let auth_login_url = body.auth_login_url
+    let auth_login_url = body
+        .auth_login_url
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("{}/mod/lti/auth.php", issuer));
-    let auth_token_url = body.auth_token_url
+    let auth_token_url = body
+        .auth_token_url
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("{}/mod/lti/token.php", issuer));
-    let platform_jwks_url = body.platform_jwks_url
+    let platform_jwks_url = body
+        .platform_jwks_url
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("{}/mod/lti/certs.php", issuer));
 
@@ -460,9 +470,7 @@ async fn create_registration(
     .await
     .map_err(|e| {
         if e.to_string().contains("duplicate key") {
-            AppError::BadRequest(
-                "a registration with this issuer/client_id already exists".into(),
-            )
+            AppError::BadRequest("a registration with this issuer/client_id already exists".into())
         } else {
             AppError::Database(e)
         }

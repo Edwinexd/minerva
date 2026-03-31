@@ -1407,7 +1407,7 @@ function LtiPanel({ courseId }: { courseId: string }) {
 
   return (
     <div className="space-y-4">
-      {/* Step 1: Moodle setup info — always visible */}
+      {/* Step 1: Moodle setup info */}
       <Card>
         <CardHeader>
           <CardTitle>Moodle Configuration</CardTitle>

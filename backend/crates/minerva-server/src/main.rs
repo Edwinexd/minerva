@@ -7,8 +7,8 @@ mod state;
 mod strategy;
 mod worker;
 
-use axum::Router;
 use axum::response::{IntoResponse, Response};
+use axum::Router;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -33,7 +33,10 @@ async fn main() -> anyhow::Result<()> {
 
     let mut app = Router::new()
         .nest("/api", routes::api_router(state.clone()))
-        .nest("/lti", routes::lti::public_router().with_state(state.clone()));
+        .nest(
+            "/lti",
+            routes::lti::public_router().with_state(state.clone()),
+        );
 
     if let Some(ref static_dir) = config.static_dir {
         let index = format!("{}/index.html", static_dir);
@@ -58,7 +61,10 @@ async fn main() -> anyhow::Result<()> {
                         for (k, v) in headers.iter() {
                             response = response.header(k, v);
                         }
-                        response.body(axum::body::Body::from(body)).unwrap().into_response()
+                        response
+                            .body(axum::body::Body::from(body))
+                            .unwrap()
+                            .into_response()
                     }
                     Err(_) => axum::http::StatusCode::BAD_GATEWAY.into_response(),
                 }

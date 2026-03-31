@@ -25,7 +25,10 @@ pub fn start(state: AppState, max_concurrent: usize) {
         // Crash recovery: any document left in 'processing' was interrupted.
         match minerva_db::queries::documents::reset_stale_processing(&state.db).await {
             Ok(0) => {}
-            Ok(n) => tracing::info!("worker: reset {} stale processing document(s) to pending", n),
+            Ok(n) => tracing::info!(
+                "worker: reset {} stale processing document(s) to pending",
+                n
+            ),
             Err(e) => tracing::error!("worker: failed to reset stale documents: {}", e),
         }
 
@@ -39,19 +42,15 @@ pub fn start(state: AppState, max_concurrent: usize) {
                 continue;
             }
 
-            let docs = match minerva_db::queries::documents::claim_pending(
-                &state.db,
-                available,
-            )
-            .await
-            {
-                Ok(docs) => docs,
-                Err(e) => {
-                    tracing::error!("worker: failed to claim pending documents: {}", e);
-                    tokio::time::sleep(POLL_INTERVAL).await;
-                    continue;
-                }
-            };
+            let docs =
+                match minerva_db::queries::documents::claim_pending(&state.db, available).await {
+                    Ok(docs) => docs,
+                    Err(e) => {
+                        tracing::error!("worker: failed to claim pending documents: {}", e);
+                        tokio::time::sleep(POLL_INTERVAL).await;
+                        continue;
+                    }
+                };
 
             if docs.is_empty() {
                 tokio::time::sleep(POLL_INTERVAL).await;
@@ -71,21 +70,24 @@ pub fn start(state: AppState, max_concurrent: usize) {
                     let _permit = permit; // held until this task completes
 
                     // Look up course to get embedding config.
-                    let course = match minerva_db::queries::courses::find_by_id(&db, doc.course_id)
-                        .await
-                    {
-                        Ok(Some(c)) => c,
-                        Ok(None) => {
-                            tracing::error!("worker: course {} not found for doc {}", doc.course_id, doc.id);
-                            set_failed(&db, doc.id, "course not found").await;
-                            return;
-                        }
-                        Err(e) => {
-                            tracing::error!("worker: db error looking up course: {}", e);
-                            set_failed(&db, doc.id, &format!("db error: {}", e)).await;
-                            return;
-                        }
-                    };
+                    let course =
+                        match minerva_db::queries::courses::find_by_id(&db, doc.course_id).await {
+                            Ok(Some(c)) => c,
+                            Ok(None) => {
+                                tracing::error!(
+                                    "worker: course {} not found for doc {}",
+                                    doc.course_id,
+                                    doc.id
+                                );
+                                set_failed(&db, doc.id, "course not found").await;
+                                return;
+                            }
+                            Err(e) => {
+                                tracing::error!("worker: db error looking up course: {}", e);
+                                set_failed(&db, doc.id, &format!("db error: {}", e)).await;
+                                return;
+                            }
+                        };
 
                     let file_path = format!("{}/{}/{}.pdf", docs_path, doc.course_id, doc.id);
                     let path = std::path::Path::new(&file_path);

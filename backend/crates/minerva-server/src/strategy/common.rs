@@ -1,7 +1,7 @@
 use axum::response::sse::Event;
 use futures::StreamExt;
 use qdrant_client::qdrant::{
-    value::Kind, Document, Query, QueryPointsBuilder, SearchPointsBuilder, ScoredPoint,
+    value::Kind, Document, Query, QueryPointsBuilder, ScoredPoint, SearchPointsBuilder,
 };
 use reqwest::Response;
 use std::collections::{HashMap, HashSet};
@@ -85,6 +85,7 @@ pub fn scored_point_to_rag_chunk(point: &ScoredPoint) -> Option<RagChunk> {
 /// Run a nearest-neighbour search against Qdrant, dispatching to either
 /// server-side inference (Document query) or client-side OpenAI embeddings
 /// depending on the course's `embedding_provider`.
+#[allow(clippy::too_many_arguments)]
 pub async fn embedding_search(
     client: &reqwest::Client,
     openai_key: &str,
@@ -253,6 +254,7 @@ pub fn build_chat_messages(
 
 /// Perform RAG lookup: search Qdrant, return structured chunks.
 /// Dispatches to OpenAI or Qdrant server-side embeddings based on provider.
+#[allow(clippy::too_many_arguments)]
 pub async fn rag_lookup(
     client: &reqwest::Client,
     openai_key: &str,
@@ -276,7 +278,10 @@ pub async fn rag_lookup(
     )
     .await
     {
-        Ok(points) => points.iter().filter_map(scored_point_to_rag_chunk).collect(),
+        Ok(points) => points
+            .iter()
+            .filter_map(scored_point_to_rag_chunk)
+            .collect(),
         Err(e) => {
             tracing::warn!("{}, skipping RAG", e);
             Vec::new()

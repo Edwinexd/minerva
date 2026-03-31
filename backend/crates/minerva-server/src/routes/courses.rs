@@ -156,6 +156,53 @@ async fn update_course(
         return Err(AppError::Forbidden);
     }
 
+    // Validate embedding_provider
+    if let Some(ref provider) = body.embedding_provider {
+        if !minerva_ingest::pipeline::VALID_EMBEDDING_PROVIDERS.contains(&provider.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "invalid embedding_provider: {}",
+                provider
+            )));
+        }
+    }
+
+    // Validate embedding_model based on the effective provider
+    let effective_provider = body
+        .embedding_provider
+        .as_deref()
+        .unwrap_or(&existing.embedding_provider);
+
+    if effective_provider == "qdrant" {
+        if let Some(ref model) = body.embedding_model {
+            let valid = minerva_ingest::pipeline::VALID_QDRANT_MODELS
+                .iter()
+                .any(|(name, _)| *name == model.as_str());
+            if !valid {
+                return Err(AppError::BadRequest(format!(
+                    "invalid qdrant embedding_model: {}",
+                    model
+                )));
+            }
+        }
+    }
+
+    // For openai provider, force the embedding_model to the canonical value
+    let embedding_model = if effective_provider == "openai" {
+        body.embedding_model
+            .as_ref()
+            .map(|_| minerva_ingest::pipeline::OPENAI_EMBEDDING_MODEL.to_string())
+            .or_else(|| {
+                // If switching to openai, ensure the model column is updated
+                if body.embedding_provider.is_some() {
+                    Some(minerva_ingest::pipeline::OPENAI_EMBEDDING_MODEL.to_string())
+                } else {
+                    None
+                }
+            })
+    } else {
+        body.embedding_model
+    };
+
     let input = minerva_db::queries::courses::UpdateCourse {
         name: body.name,
         description: body.description,
@@ -166,7 +213,7 @@ async fn update_course(
         max_chunks: body.max_chunks,
         strategy: body.strategy,
         embedding_provider: body.embedding_provider,
-        embedding_model: body.embedding_model,
+        embedding_model,
         daily_token_limit: body.daily_token_limit,
     };
 

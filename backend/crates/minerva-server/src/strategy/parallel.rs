@@ -34,7 +34,14 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
         tokio::spawn(async move {
             let chunks = common::rag_lookup(
-                &client, &key, &qdrant, &coll, &query, max_chunks, &emb_provider, &emb_model,
+                &client,
+                &key,
+                &qdrant,
+                &coll,
+                &query,
+                max_chunks,
+                &emb_provider,
+                &emb_model,
             )
             .await;
             let _ = rag_tx.send(chunks);

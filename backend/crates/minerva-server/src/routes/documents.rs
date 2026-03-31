@@ -305,7 +305,7 @@ async fn search_chunks(
         &course.embedding_model,
     )
     .await
-    .map_err(|e| AppError::Internal(e))?;
+    .map_err(AppError::Internal)?;
 
     let results: Vec<SearchResult> = scored_points
         .iter()

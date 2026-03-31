@@ -12,16 +12,24 @@ use crate::chunker::{self, ChunkerConfig};
 use crate::embedder;
 use crate::pdf;
 
+pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "qdrant"];
+
+pub const VALID_QDRANT_MODELS: &[(&str, u64)] = &[
+    ("sentence-transformers/all-MiniLM-L6-v2", 384),
+    ("BAAI/bge-small-en-v1.5", 384),
+    ("BAAI/bge-base-en-v1.5", 768),
+    ("nomic-ai/nomic-embed-text-v1.5", 768),
+];
+
+pub const OPENAI_EMBEDDING_MODEL: &str = "text-embedding-3-small";
+const OPENAI_EMBEDDING_DIMENSIONS: u64 = 1536;
+
 /// Known embedding model dimensions for Qdrant server-side inference.
-fn qdrant_model_dimensions(model: &str) -> u64 {
-    match model {
-        "sentence-transformers/all-MiniLM-L6-v2" => 384,
-        "BAAI/bge-small-en-v1.5" => 384,
-        "BAAI/bge-base-en-v1.5" => 768,
-        "nomic-ai/nomic-embed-text-v1.5" => 768,
-        "Qdrant/clip-ViT-B-32-vision" => 512,
-        _ => 384, // safe default for most small models
-    }
+fn qdrant_model_dimensions(model: &str) -> Option<u64> {
+    VALID_QDRANT_MODELS
+        .iter()
+        .find(|(name, _)| *name == model)
+        .map(|(_, dims)| *dims)
 }
 
 /// Run the full document ingestion pipeline:
@@ -43,9 +51,6 @@ pub async fn process_document(
     embedding_provider: &str,
     embedding_model: &str,
 ) -> Result<ProcessResult, String> {
-    // Mark as processing
-    set_status(db, document_id, "processing", None).await;
-
     // 1. Extract text
     let text = pdf::extract_text(file_path).map_err(|e| {
         let msg = format!("text extraction failed: {}", e);
@@ -82,7 +87,9 @@ pub async fn process_document(
 
     let embedding_tokens = match embedding_provider {
         "qdrant" => {
-            let dims = qdrant_model_dimensions(embedding_model);
+            let dims = qdrant_model_dimensions(embedding_model).ok_or_else(|| {
+                format!("unsupported qdrant embedding model: {}", embedding_model)
+            })?;
             ensure_collection(qdrant, &collection_name, dims).await?;
 
             let points: Vec<PointStruct> = chunks
@@ -107,17 +114,16 @@ pub async fn process_document(
             0i64
         }
         _ => {
-            ensure_collection(qdrant, &collection_name, 1536).await?;
+            ensure_collection(qdrant, &collection_name, OPENAI_EMBEDDING_DIMENSIONS).await?;
 
             let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
-            let embedding_result =
-                embedder::embed_texts(http_client, openai_api_key, &chunk_texts)
-                    .await
-                    .map_err(|e| {
-                        let msg = format!("embedding failed: {}", e);
-                        tracing::error!("{}", msg);
-                        msg
-                    })?;
+            let embedding_result = embedder::embed_texts(http_client, openai_api_key, &chunk_texts)
+                .await
+                .map_err(|e| {
+                    let msg = format!("embedding failed: {}", e);
+                    tracing::error!("{}", msg);
+                    msg
+                })?;
 
             tracing::info!(
                 "embedded {} chunks using {} tokens",
@@ -185,7 +191,32 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
         .await
         .map_err(|e| format!("qdrant collection check failed: {}", e))?;
 
-    if !exists {
+    if exists {
+        // Verify dimensions match the existing collection
+        let info = qdrant
+            .collection_info(name)
+            .await
+            .map_err(|e| format!("qdrant collection info failed: {}", e))?;
+
+        if let Some(config) = info.result.and_then(|r| r.config) {
+            if let Some(params) = config.params {
+                let existing_dims = params.vectors_config.and_then(|vc| vc.config).and_then(
+                    |config| match config {
+                        qdrant_client::qdrant::vectors_config::Config::Params(p) => Some(p.size),
+                        _ => None,
+                    },
+                );
+                if let Some(existing) = existing_dims {
+                    if existing != dimensions {
+                        return Err(format!(
+                            "collection {} has dimension {} but provider requires {}; re-upload documents after deleting existing ones",
+                            name, existing, dimensions
+                        ));
+                    }
+                }
+            }
+        }
+    } else {
         qdrant
             .create_collection(
                 CreateCollectionBuilder::new(name)
@@ -194,7 +225,11 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
             .await
             .map_err(|e| format!("qdrant collection creation failed: {}", e))?;
 
-        tracing::info!("created qdrant collection {} (dimensions: {})", name, dimensions);
+        tracing::info!(
+            "created qdrant collection {} (dimensions: {})",
+            name,
+            dimensions
+        );
     }
 
     Ok(())

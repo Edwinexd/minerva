@@ -75,7 +75,7 @@ jobs:
           chmod 600 ~/.kube/config
 
       - name: Install kubectl
-        uses: azure/setup-kubectl@v4
+        uses: azure/setup-kubectl@v5
 
       - name: Create k8s secrets file
         run: |

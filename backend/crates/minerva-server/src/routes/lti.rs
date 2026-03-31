@@ -220,12 +220,11 @@ async fn handle_launch(
     let display_name = claims.name.as_deref();
 
     // 7. Find or create the user.
+    //    If the user already exists (e.g. via Shibboleth), reuse their record but
+    //    do NOT modify their role or display name — LTI should not alter existing accounts.
+    //    Only populate display_name on newly created users.
     let user = match minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await? {
-        Some(u) => {
-            minerva_db::queries::users::update_login(&state.db, u.id, display_name, &u.role)
-                .await?;
-            u
-        }
+        Some(u) => u,
         None => {
             let id = Uuid::new_v4();
             minerva_db::queries::users::insert(&state.db, id, &eppn, display_name, "student")
@@ -236,9 +235,13 @@ async fn handle_launch(
         }
     };
 
-    // 8. Upsert course membership — always update role so promotions (student → teacher) apply.
+    // 8. Add course membership if not already a member.
+    //    Never downgrade an existing member's role — only add if they're not already in the course.
     let course_role = lti::lti_roles_to_course_role(&claims.roles);
-    minerva_db::queries::courses::add_member(&state.db, course_id, user.id, course_role).await?;
+    if !minerva_db::queries::courses::is_member(&state.db, course_id, user.id).await? {
+        minerva_db::queries::courses::add_member(&state.db, course_id, user.id, course_role)
+            .await?;
+    }
 
     // 9. Generate an embed token (reuses the existing HMAC mechanism).
     let expires_at = chrono::Utc::now() + chrono::Duration::seconds(EMBED_TOKEN_TTL_SECS);

@@ -14,7 +14,7 @@ services:
       retries: 10
     networks:
       - default
-      - superrag
+      - minerva
 
   moodle:
     image: moodlehq/moodle-php-apache:8.1
@@ -32,7 +32,7 @@ services:
         condition: service_healthy
     networks:
       - default
-      - superrag
+      - minerva
 
 volumes:
   moodle_db_data:
@@ -40,6 +40,6 @@ volumes:
   moodle_moodledata:
 
 networks:
-  superrag:
+  minerva:
     external: true
-    name: super-rag_default
+    name: minerva_default

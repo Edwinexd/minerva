@@ -38,6 +38,7 @@ pub fn public_router() -> Router<AppState> {
         .route("/login", get(login_initiation_get).post(login_initiation_post))
         .route("/launch", post(handle_launch))
         .route("/jwks", get(jwks))
+        .route("/icon.svg", get(icon))
 }
 
 /// Course-level routes for managing LTI registrations (teacher/owner only).
@@ -280,6 +281,18 @@ async fn jwks(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(state.lti.jwks_json.clone())
 }
 
+async fn icon() -> Response {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="14" fill="#1e293b"/>
+  <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+        font-family="system-ui,sans-serif" font-weight="700" font-size="28" fill="#f8fafc">M</text>
+</svg>"##;
+    (
+        [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+        svg,
+    ).into_response()
+}
+
 // ---------------------------------------------------------------------------
 // Course-level: LTI setup + registration management
 // ---------------------------------------------------------------------------
@@ -364,6 +377,8 @@ struct MoodleToolConfig {
     custom_parameters: &'static str,
     /// "Default launch container"
     default_launch_container: &'static str,
+    /// "Icon URL" in Moodle (optional, under "Show more...")
+    icon_url: String,
     /// "Share launcher's name with tool"
     share_name: bool,
     /// "Share launcher's email with tool"
@@ -395,9 +410,12 @@ struct CreateRegistrationRequest {
     issuer: String,
     client_id: String,
     deployment_id: Option<String>,
-    auth_login_url: String,
-    auth_token_url: String,
-    platform_jwks_url: String,
+    /// Optional — defaults to {issuer}/mod/lti/auth.php
+    auth_login_url: Option<String>,
+    /// Optional — defaults to {issuer}/mod/lti/token.php
+    auth_token_url: Option<String>,
+    /// Optional — defaults to {issuer}/mod/lti/certs.php
+    platform_jwks_url: Option<String>,
 }
 
 async fn create_registration(
@@ -408,18 +426,29 @@ async fn create_registration(
 ) -> Result<Json<RegistrationResponse>, AppError> {
     require_course_teacher(&state, course_id, &user).await?;
 
+    let issuer = body.issuer.trim_end_matches('/');
+    let auth_login_url = body.auth_login_url
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("{}/mod/lti/auth.php", issuer));
+    let auth_token_url = body.auth_token_url
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("{}/mod/lti/token.php", issuer));
+    let platform_jwks_url = body.platform_jwks_url
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("{}/mod/lti/certs.php", issuer));
+
     let id = Uuid::new_v4();
     let row = minerva_db::queries::lti::create_registration(
         &state.db,
         id,
         course_id,
         &body.name,
-        &body.issuer,
+        issuer,
         &body.client_id,
         body.deployment_id.as_deref(),
-        &body.auth_login_url,
-        &body.auth_token_url,
-        &body.platform_jwks_url,
+        &auth_login_url,
+        &auth_token_url,
+        &platform_jwks_url,
         user.id,
     )
     .await
@@ -494,6 +523,7 @@ fn build_moodle_config(base_url: &str) -> MoodleToolConfig {
         redirection_uris: format!("{}/lti/launch", base_url),
         custom_parameters: "user_eppn=$User.username",
         default_launch_container: "Embed",
+        icon_url: format!("{}/lti/icon.svg", base_url),
         share_name: true,
         share_email: false,
         accept_grades: false,

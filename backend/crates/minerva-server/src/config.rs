@@ -26,6 +26,8 @@ pub struct Config {
     /// Public base URL for this Minerva instance (e.g. "https://minerva.dsv.su.se").
     /// Used to construct absolute LTI tool URLs.
     pub base_url: String,
+    /// Dev-only: proxy unmatched requests to this URL (e.g. Vite dev server).
+    pub dev_proxy: Option<String>,
 }
 
 impl Config {
@@ -66,6 +68,7 @@ impl Config {
                 .unwrap_or_else(|_| "https://minerva.dsv.su.se".to_string())
                 .trim_end_matches('/')
                 .to_string(),
+            dev_proxy: env::var("MINERVA_DEV_PROXY").ok().filter(|s| !s.is_empty()),
         })
     }
 

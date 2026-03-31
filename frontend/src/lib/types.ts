@@ -129,6 +129,7 @@ export interface MoodleToolConfig {
   redirection_uris: string
   custom_parameters: string
   default_launch_container: string
+  icon_url: string
   share_name: boolean
   share_email: boolean
   accept_grades: boolean

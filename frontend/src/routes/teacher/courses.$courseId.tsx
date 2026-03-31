@@ -1368,10 +1368,6 @@ function LtiPanel({ courseId }: { courseId: string }) {
   const [name, setName] = useState("")
   const [issuer, setIssuer] = useState("")
   const [clientId, setClientId] = useState("")
-  const [deploymentId, setDeploymentId] = useState("")
-  const [authLoginUrl, setAuthLoginUrl] = useState("")
-  const [authTokenUrl, setAuthTokenUrl] = useState("")
-  const [platformJwksUrl, setPlatformJwksUrl] = useState("")
   const [copiedField, setCopiedField] = useState<string | null>(null)
 
   const createMutation = useMutation({
@@ -1379,20 +1375,12 @@ function LtiPanel({ courseId }: { courseId: string }) {
       name: string
       issuer: string
       client_id: string
-      deployment_id?: string
-      auth_login_url: string
-      auth_token_url: string
-      platform_jwks_url: string
     }) => api.post<LtiRegistration>(`/courses/${courseId}/lti`, data),
     onSuccess: () => {
       setShowForm(false)
       setName("")
       setIssuer("")
       setClientId("")
-      setDeploymentId("")
-      setAuthLoginUrl("")
-      setAuthTokenUrl("")
-      setPlatformJwksUrl("")
       queryClient.invalidateQueries({
         queryKey: ["courses", courseId, "lti"],
       })
@@ -1492,10 +1480,6 @@ function LtiPanel({ courseId }: { courseId: string }) {
                   name: name.trim(),
                   issuer: issuer.trim(),
                   client_id: clientId.trim(),
-                  deployment_id: deploymentId.trim() || undefined,
-                  auth_login_url: authLoginUrl.trim(),
-                  auth_token_url: authTokenUrl.trim(),
-                  platform_jwks_url: platformJwksUrl.trim(),
                 })
               }}
             >
@@ -1513,22 +1497,6 @@ function LtiPanel({ courseId }: { courseId: string }) {
               <div className="space-y-2">
                 <Label htmlFor="lti-client-id">Client ID</Label>
                 <Input id="lti-client-id" value={clientId} onChange={(e) => setClientId(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lti-deployment-id">Deployment ID (optional)</Label>
-                <Input id="lti-deployment-id" value={deploymentId} onChange={(e) => setDeploymentId(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lti-auth-login">Authentication request URL</Label>
-                <Input id="lti-auth-login" value={authLoginUrl} onChange={(e) => setAuthLoginUrl(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lti-auth-token">Access token URL</Label>
-                <Input id="lti-auth-token" value={authTokenUrl} onChange={(e) => setAuthTokenUrl(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lti-jwks">Public keyset URL</Label>
-                <Input id="lti-jwks" value={platformJwksUrl} onChange={(e) => setPlatformJwksUrl(e.target.value)} />
               </div>
 
               {createMutation.isError && (

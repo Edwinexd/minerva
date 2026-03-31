@@ -8,6 +8,7 @@ mod strategy;
 mod worker;
 
 use axum::Router;
+use axum::response::{IntoResponse, Response};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -38,6 +39,32 @@ async fn main() -> anyhow::Result<()> {
         let index = format!("{}/index.html", static_dir);
         app = app.fallback_service(ServeDir::new(static_dir).fallback(ServeFile::new(index)));
         tracing::info!("serving static files from {}", static_dir);
+    } else if let Some(ref proxy_url) = config.dev_proxy {
+        let proxy_url_log = proxy_url.clone();
+        let proxy_url = proxy_url.clone();
+        let client = state.http_client.clone();
+        app = app.fallback(move |req: axum::extract::Request| {
+            let proxy_url = proxy_url.clone();
+            let client = client.clone();
+            async move {
+                let uri = req.uri().to_string();
+                let url = format!("{}{}", proxy_url, uri);
+                match client.get(&url).send().await {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        let headers = resp.headers().clone();
+                        let body = resp.bytes().await.unwrap_or_default();
+                        let mut response = Response::builder().status(status);
+                        for (k, v) in headers.iter() {
+                            response = response.header(k, v);
+                        }
+                        response.body(axum::body::Body::from(body)).unwrap().into_response()
+                    }
+                    Err(_) => axum::http::StatusCode::BAD_GATEWAY.into_response(),
+                }
+            }
+        });
+        tracing::info!("dev proxy fallback to {}", proxy_url_log);
     }
 
     let app = app

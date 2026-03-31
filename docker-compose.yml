@@ -3,19 +3,20 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.dev
-    ports:
-      - "3000:3000"
+    network_mode: host
     volumes:
       - minerva-data:/data
     environment:
-      - DATABASE_URL=postgres://minerva:minerva@postgres:5432/minerva
-      - QDRANT_URL=http://qdrant:6334
+      - DATABASE_URL=postgres://minerva:minerva@localhost:5432/minerva
+      - QDRANT_URL=http://localhost:6334
       - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - MINERVA_HMAC_SECRET=${MINERVA_HMAC_SECRET:-dev-secret-change-me}
       - MINERVA_DOCS_PATH=/data/documents
       - MINERVA_ADMINS=${MINERVA_ADMINS:-edsu8469}
       - MINERVA_DEV_MODE=true
+      - MINERVA_BASE_URL=http://localhost:3000
+      - MINERVA_DEV_PROXY=http://localhost:5173
     depends_on:
       postgres:
         condition: service_healthy
@@ -26,14 +27,10 @@ services:
     build:
       context: ./frontend
       dockerfile: ../docker/Dockerfile.frontend-dev
-    ports:
-      - "5173:5173"
+    network_mode: host
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
-    environment:
-      - VITE_DEV_MODE=true
-      - VITE_API_URL=http://backend:3000
 
   postgres:
     image: postgres:16-alpine

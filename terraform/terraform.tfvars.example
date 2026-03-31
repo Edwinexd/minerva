@@ -1,0 +1,28 @@
+github_owner = "Edwinexd"
+github_repo  = "minerva"
+
+kubeconfig            = "base64-encoded kubeconfig from /etc/rancher/k3s/k3s.yaml"
+wireguard_private_key = "WireGuard private key for CI VPN peer"
+wireguard_config      = <<-EOT
+[Interface]
+Address = 10.x.x.x/32
+DNS = 193.11.30.200
+
+[Peer]
+AllowedIPs = 0.0.0.0/0
+Endpoint = 193.10.9.20:51820
+PublicKey = ...
+EOT
+
+ssh_private_key = <<-EOT
+-----BEGIN OPENSSH PRIVATE KEY-----
+...
+-----END OPENSSH PRIVATE KEY-----
+EOT
+
+# Application secrets
+postgres_password   = "generate with: openssl rand -base64 24"
+minerva_hmac_secret = "generate with: openssl rand -base64 32"
+minerva_admins      = "edsu8469"
+cerebras_api_key    = "csk-..."
+openai_api_key      = "sk-proj-..."

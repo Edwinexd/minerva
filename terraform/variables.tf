@@ -7,7 +7,7 @@ variable "github_owner" {
 variable "github_repo" {
   description = "GitHub repository name"
   type        = string
-  default     = "super-rag"
+  default     = "minerva"
 }
 
 # =============================================================================
@@ -38,11 +38,6 @@ variable "ssh_private_key" {
   sensitive   = true
 }
 
-variable "ghcr_pat" {
-  description = "GitHub PAT with read:packages scope for pulling private images from ghcr.io"
-  type        = string
-  sensitive   = true
-}
 
 # =============================================================================
 # Application Secrets (used to generate k8s secrets.yaml)

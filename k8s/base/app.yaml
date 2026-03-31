@@ -13,8 +13,6 @@ spec:
       labels:
         app: minerva-app
     spec:
-      imagePullSecrets:
-        - name: ghcr-secret
       containers:
         - name: minerva
           image: ghcr.io/edwinexd/minerva:master

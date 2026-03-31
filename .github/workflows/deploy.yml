@@ -81,15 +81,6 @@ jobs:
         run: |
           echo "${{ secrets.K8S_SECRETS }}" | base64 -d > k8s/overlays/prod/secrets.yaml
 
-      - name: Create ghcr.io pull secret
-        run: |
-          kubectl create secret docker-registry ghcr-secret \
-            --namespace=minerva \
-            --docker-server=ghcr.io \
-            --docker-username=${{ github.actor }} \
-            --docker-password=${{ secrets.GHCR_PAT }} \
-            --dry-run=client -o yaml | kubectl apply -f -
-
       - name: Deploy to Kubernetes
         run: |
           echo "Deploying image tag: ${{ env.IMAGE_TAG }}"

@@ -8,6 +8,7 @@ mod worker;
 
 use axum::Router;
 use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -28,8 +29,15 @@ async fn main() -> anyhow::Result<()> {
     // Start the background document-processing worker.
     worker::start(state.clone(), config.max_concurrent_ingests);
 
-    let app = Router::new()
-        .nest("/api", routes::api_router(state.clone()))
+    let mut app = Router::new().nest("/api", routes::api_router(state.clone()));
+
+    if let Some(ref static_dir) = config.static_dir {
+        let index = format!("{}/index.html", static_dir);
+        app = app.fallback_service(ServeDir::new(static_dir).fallback(ServeFile::new(index)));
+        tracing::info!("serving static files from {}", static_dir);
+    }
+
+    let app = app
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

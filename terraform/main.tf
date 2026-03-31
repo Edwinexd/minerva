@@ -84,10 +84,3 @@ resource "github_actions_environment_secret" "prod_k8s_secrets" {
   secret_name     = "K8S_SECRETS"
   plaintext_value = base64encode(local.k8s_secrets_yaml)
 }
-
-resource "github_actions_environment_secret" "prod_ghcr_pat" {
-  repository      = data.github_repository.repo.name
-  environment     = github_repository_environment.prod.environment
-  secret_name     = "GHCR_PAT"
-  plaintext_value = var.ghcr_pat
-}

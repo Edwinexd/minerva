@@ -34,6 +34,7 @@ COPY backend/migrations /app/migrations
 
 WORKDIR /app
 ENV MINERVA_DOCS_PATH=/data/documents
+ENV MINERVA_STATIC_DIR=/app/static
 VOLUME ["/data"]
 EXPOSE 3000
 CMD ["minerva"]

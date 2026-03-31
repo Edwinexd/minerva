@@ -19,6 +19,8 @@ pub struct Config {
     pub dev_mode: bool,
     /// Maximum number of documents processed concurrently by the background worker.
     pub max_concurrent_ingests: usize,
+    /// Directory containing the frontend static files (built SPA).
+    pub static_dir: Option<String>,
 }
 
 impl Config {
@@ -50,6 +52,9 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(4),
+            static_dir: env::var("MINERVA_STATIC_DIR")
+                .ok()
+                .filter(|p| std::path::Path::new(p).is_dir()),
         })
     }
 

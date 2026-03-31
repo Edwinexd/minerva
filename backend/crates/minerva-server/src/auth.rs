@@ -8,11 +8,11 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::state::AppState;
 
-/// Extracts user from Shibboleth headers set by Apache mod_shib.
-/// X-Remote-User contains the eppn (e.g. edsu8469@SU.SE).
+/// Extracts user from Shibboleth headers set by Apache mod_shib (ShibUseHeaders On).
+/// mod_shib sets `eppn` header with the eduPersonPrincipalName (e.g. edsu8469@SU.SE).
 ///
 /// In dev mode (MINERVA_DEV_MODE=true):
-/// - Reads X-Dev-User header instead of REMOTE_USER
+/// - Reads X-Dev-User header instead of eppn
 /// - Falls back to first admin in MINERVA_ADMINS, or "dev@SU.SE"
 pub async fn auth_middleware(
     State(state): State<AppState>,
@@ -28,7 +28,7 @@ pub async fn auth_middleware(
             .map(|s| s.to_string())
             .or_else(|| {
                 headers
-                    .get("X-Remote-User")
+                    .get("eppn")
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_string())
             })
@@ -42,7 +42,7 @@ pub async fn auth_middleware(
             })
     } else {
         headers
-            .get("X-Remote-User")
+            .get("eppn")
             .and_then(|v| v.to_str().ok())
             .ok_or(AppError::Unauthorized)?
             .to_string()

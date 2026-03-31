@@ -12,7 +12,7 @@ on:
       image_tag:
         description: "Image tag to deploy (e.g. master, sha-abc1234, v1.0.0)"
         required: false
-        default: "master"
+        default: "latest"
 
 jobs:
   build-plugin:
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: prod
     env:
-      IMAGE_TAG: ${{ github.event.client_payload.tag || inputs.image_tag || 'master' }}
+      IMAGE_TAG: ${{ github.event.client_payload.tag || inputs.image_tag || 'latest' }}
 
     steps:
       - name: Checkout

@@ -100,6 +100,7 @@ struct MeResponse {
     id: Uuid,
     eppn: String,
     display_name: Option<String>,
+    lti_client_id: Option<String>,
 }
 
 // -- Handlers --
@@ -115,10 +116,16 @@ async fn get_me(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    // Check if this course has an LTI registration.
+    let lti_regs =
+        minerva_db::queries::lti::list_registrations_for_course(&state.db, course_id).await?;
+    let lti_client_id = lti_regs.first().map(|r| r.client_id.clone());
+
     Ok(Json(MeResponse {
         id: user.id,
         eppn: user.eppn,
         display_name: user.display_name,
+        lti_client_id,
     }))
 }
 

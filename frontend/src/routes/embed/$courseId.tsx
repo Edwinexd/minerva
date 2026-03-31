@@ -36,19 +36,34 @@ interface EmbedConversationDetail {
   messages: EmbedMessage[]
 }
 
+interface EmbedMe {
+  id: string
+  eppn: string
+  display_name: string | null
+  lti_client_id: string | null
+}
+
 // -- Route definition --
 
 export const Route = createFileRoute("/embed/$courseId")({
   component: EmbedPage,
 })
 
-/** Read `?token=...` from the URL. */
+/** Read query params from the URL. */
 function useToken(): string | null {
   const [token] = useState(() => {
     const params = new URLSearchParams(window.location.search)
     return params.get("token")
   })
   return token
+}
+
+function useLtiClientId(): string | null {
+  const [id] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get("lti_client_id")
+  })
+  return id
 }
 
 /** Thin wrapper around fetch for the embed API. */
@@ -81,14 +96,16 @@ async function embedPost<T>(path: string, token: string, body?: unknown): Promis
 function EmbedPage() {
   const { courseId } = Route.useParams()
   const token = useToken()
+  const ltiClientId = useLtiClientId()
 
   const [course, setCourse] = useState<EmbedCourse | null>(null)
+  const [me, setMe] = useState<EmbedMe | null>(null)
   const [conversations, setConversations] = useState<EmbedConversation[]>([])
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Load course and conversations on mount.
+  // Load course, user, and conversations on mount.
   useEffect(() => {
     if (!token) {
       setError("Missing authentication token.")
@@ -98,12 +115,14 @@ function EmbedPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const [c, convs] = await Promise.all([
+        const [c, convs, meData] = await Promise.all([
           embedGet<EmbedCourse>(`/course/${courseId}`, token),
           embedGet<EmbedConversation[]>(`/course/${courseId}/conversations`, token),
+          embedGet<EmbedMe>(`/course/${courseId}/me`, token),
         ])
         if (cancelled) return
         setCourse(c)
+        setMe(meData)
         setConversations(convs)
         if (convs.length > 0) {
           setActiveConvId(convs[0].id)
@@ -140,7 +159,7 @@ function EmbedPage() {
 
   if (!token) {
     return (
-      <div className="flex items-center justify-center h-dvh bg-background text-foreground">
+      <div className="flex items-center justify-center h-full bg-background text-foreground">
         <p className="text-destructive">Missing authentication token.</p>
       </div>
     )
@@ -148,7 +167,7 @@ function EmbedPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-dvh bg-background text-foreground">
+      <div className="flex items-center justify-center h-full bg-background text-foreground">
         <div className="flex gap-1">
           <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
           <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
@@ -160,14 +179,14 @@ function EmbedPage() {
 
   if (error && !course) {
     return (
-      <div className="flex items-center justify-center h-dvh bg-background text-foreground">
+      <div className="flex items-center justify-center h-full bg-background text-foreground">
         <p className="text-destructive">{error}</p>
       </div>
     )
   }
 
   return (
-    <div className="flex h-dvh bg-background text-foreground">
+    <div className="flex h-full bg-background text-foreground">
       {/* Sidebar */}
       <div className="w-56 border-r flex flex-col p-3">
         <Button size="sm" className="mb-3" onClick={createConversation}>

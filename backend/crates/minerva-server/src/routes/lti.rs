@@ -259,7 +259,10 @@ async fn handle_launch(
     };
 
     // 10. Redirect to the embed UI via JS (avoids token leaking in Referer).
-    let embed_path = format!("/embed/{}?token={}", course_id, token);
+    let embed_path = format!(
+        "/embed/{}?token={}&lti_client_id={}",
+        course_id, token, urlencoding::encode(&registration.client_id)
+    );
 
     // Both course_id (UUID) and token (base64url) are safe for interpolation,
     // but escape anyway for defense-in-depth.

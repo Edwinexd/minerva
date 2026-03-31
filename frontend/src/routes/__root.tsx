@@ -1,9 +1,9 @@
-import { createRootRouteWithContext, Link, Outlet } from "@tanstack/react-router"
+import { createRootRouteWithContext, Link, Outlet, useParams } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { QueryClient } from "@tanstack/react-query"
 import { userQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 
 interface RouterContext {
   queryClient: QueryClient
@@ -14,27 +14,58 @@ interface DevConfig {
   users?: { eppn: string; label: string }[]
 }
 
+interface EmbedMe {
+  id: string
+  eppn: string
+  display_name: string | null
+  lti_client_id: string | null
+}
+
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
 })
 
 function RootLayout() {
-  const { data: user } = useQuery(userQuery)
+  const isEmbed = window.location.pathname.startsWith("/embed/")
+
+  const embedParams = useMemo(() => {
+    if (!isEmbed) return null
+    const params = new URLSearchParams(window.location.search)
+    return {
+      token: params.get("token"),
+      ltiClientId: params.get("lti_client_id"),
+      courseId: window.location.pathname.split("/embed/")[1]?.split("?")[0],
+    }
+  }, [isEmbed])
+
+  const { data: user } = useQuery({ ...userQuery, enabled: !isEmbed })
   const { data: devConfig } = useQuery({
     queryKey: ["dev", "config"],
     queryFn: () => api.get<DevConfig>("/dev/config"),
     staleTime: Infinity,
+    enabled: !isEmbed,
+  })
+
+  const { data: embedMe } = useQuery({
+    queryKey: ["embed", "me", embedParams?.courseId],
+    queryFn: () => {
+      const { courseId, token } = embedParams!
+      return fetch(`/api/embed/course/${courseId}/me?token=${encodeURIComponent(token!)}`)
+        .then((r) => r.json() as Promise<EmbedMe>)
+    },
+    enabled: isEmbed && !!embedParams?.token,
+    staleTime: Infinity,
   })
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
+    <div className={`${isEmbed ? "h-dvh" : "min-h-screen"} bg-background text-foreground flex flex-col`}>
       <header className="border-b px-6 py-4">
         <div className="flex items-center justify-between max-w-7xl mx-auto">
           <Link to="/" className="text-xl font-bold tracking-tight hover:opacity-80">
             Minerva
           </Link>
           <nav className="flex items-center gap-4 text-sm">
-            {user && (user.role === "teacher" || user.role === "admin") && (
+            {!isEmbed && user && (user.role === "teacher" || user.role === "admin") && (
               <Link
                 to="/teacher"
                 className="text-muted-foreground hover:text-foreground"
@@ -42,7 +73,7 @@ function RootLayout() {
                 Dashboard
               </Link>
             )}
-            {user && user.role === "admin" && (
+            {!isEmbed && user && user.role === "admin" && (
               <Link
                 to="/admin"
                 className="text-muted-foreground hover:text-foreground"
@@ -50,19 +81,22 @@ function RootLayout() {
                 Admin
               </Link>
             )}
-            {devConfig?.dev_mode && devConfig.users ? (
+            {!isEmbed && devConfig?.dev_mode && devConfig.users ? (
               <DevUserSwitcher users={devConfig.users} />
-            ) : (
-              user && (
-                <span className="text-muted-foreground">
-                  {user.display_name || user.eppn}
-                </span>
-              )
+            ) : !isEmbed && user ? (
+              <span className="text-muted-foreground">
+                {user.display_name || user.eppn}
+              </span>
+            ) : null}
+            {isEmbed && embedMe && (
+              <span className="text-muted-foreground">
+                {embedMe.eppn}{embedMe.lti_client_id && ` via LTI (${embedMe.lti_client_id})`}
+              </span>
             )}
           </nav>
         </div>
       </header>
-      <main className="max-w-7xl mx-auto px-6 py-8 flex-1 w-full">
+      <main className={`${isEmbed ? "flex-1 min-h-0" : "max-w-7xl mx-auto px-6 py-8 flex-1 w-full"}`}>
         <Outlet />
       </main>
       <footer className="border-t px-6 py-4 mt-auto">

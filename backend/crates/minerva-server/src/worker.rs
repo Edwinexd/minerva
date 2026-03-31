@@ -2,7 +2,7 @@
 //!
 //! Instead of spawning an unbounded `tokio::spawn` per upload, documents are
 //! inserted as `pending` and this worker polls the `documents` table using
-//! `SELECT … FOR UPDATE SKIP LOCKED` — a standard Postgres job-queue pattern.
+//! `SELECT ... FOR UPDATE SKIP LOCKED` -- a standard Postgres job-queue pattern.
 //!
 //! Concurrency is bounded by a semaphore so we never overwhelm the embedding
 //! API, Qdrant, or server memory when a teacher syncs a large course at once.

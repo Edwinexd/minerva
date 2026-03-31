@@ -16,6 +16,7 @@ spec:
       containers:
         - name: minerva
           image: ghcr.io/edwinexd/minerva:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
           env:

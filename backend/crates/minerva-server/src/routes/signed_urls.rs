@@ -1,7 +1,7 @@
 use axum::extract::{Extension, Path, State};
 use axum::routing::{delete, get};
 use axum::{Json, Router};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use minerva_core::models::User;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;

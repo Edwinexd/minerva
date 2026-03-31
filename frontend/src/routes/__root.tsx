@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { QueryClient } from "@tanstack/react-query"
 import { userQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { ExternalLink } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
 
 interface RouterContext {
@@ -61,9 +62,15 @@ function RootLayout() {
     <div className={`${isEmbed ? "h-dvh" : "min-h-screen"} bg-background text-foreground flex flex-col`}>
       <header className="border-b px-6 py-4">
         <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <Link to="/" className="text-xl font-bold tracking-tight hover:opacity-80">
-            Minerva
-          </Link>
+          {isEmbed ? (
+            <a href="/" target="_blank" rel="noopener noreferrer" className="text-xl font-bold tracking-tight hover:opacity-80 flex items-center gap-1.5">
+              Minerva <ExternalLink className="w-4 h-4" />
+            </a>
+          ) : (
+            <Link to="/" className="text-xl font-bold tracking-tight hover:opacity-80">
+              Minerva
+            </Link>
+          )}
           <nav className="flex items-center gap-4 text-sm">
             {!isEmbed && user && (user.role === "teacher" || user.role === "admin") && (
               <Link

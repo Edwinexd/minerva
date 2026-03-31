@@ -9,7 +9,7 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 /// Extracts user from Shibboleth headers set by Apache mod_shib.
-/// REMOTE_USER contains the eppn (e.g. edsu8469@SU.SE).
+/// X-Remote-User contains the eppn (e.g. edsu8469@SU.SE).
 ///
 /// In dev mode (MINERVA_DEV_MODE=true):
 /// - Reads X-Dev-User header instead of REMOTE_USER
@@ -28,7 +28,7 @@ pub async fn auth_middleware(
             .map(|s| s.to_string())
             .or_else(|| {
                 headers
-                    .get("REMOTE_USER")
+                    .get("X-Remote-User")
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_string())
             })
@@ -42,7 +42,7 @@ pub async fn auth_middleware(
             })
     } else {
         headers
-            .get("REMOTE_USER")
+            .get("X-Remote-User")
             .and_then(|v| v.to_str().ok())
             .ok_or(AppError::Unauthorized)?
             .to_string()

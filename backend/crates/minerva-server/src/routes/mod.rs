@@ -2,7 +2,7 @@ mod admin;
 mod api_keys;
 mod chat;
 mod courses;
-mod documents;
+pub(crate) mod documents;
 pub mod embed;
 mod health;
 pub mod integration;

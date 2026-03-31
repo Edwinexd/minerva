@@ -137,9 +137,15 @@ class api_client {
      * @param string $minervacid Minerva course UUID.
      * @param string $filepath Local path to the file.
      * @param string $filename Original filename.
+     * @param string $mimetype MIME type of the file.
      * @return object Document info with id, filename, status.
      */
-    public function upload_document(string $minervacid, string $filepath, string $filename): object {
+    public function upload_document(
+        string $minervacid,
+        string $filepath,
+        string $filename,
+        string $mimetype = 'application/octet-stream'
+    ): object {
         $url = $this->baseurl . "/integration/courses/{$minervacid}/documents";
 
         $curl = new \curl();
@@ -148,7 +154,7 @@ class api_client {
         ]);
 
         $params = [
-            'file' => new \CURLFile($filepath, 'application/pdf', $filename),
+            'file' => new \CURLFile($filepath, $mimetype, $filename),
         ];
 
         $response = $curl->post($url, $params);

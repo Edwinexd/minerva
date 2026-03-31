@@ -89,7 +89,25 @@ pub fn start(state: AppState, max_concurrent: usize) {
                             }
                         };
 
-                    let file_path = format!("{}/{}/{}.pdf", docs_path, doc.course_id, doc.id);
+                    let ext = crate::routes::documents::extension_from_filename(&doc.filename);
+
+                    // Only process PDFs for now; store other types as 'unsupported'.
+                    if ext != "pdf" {
+                        tracing::info!(
+                            "worker: document {} ({}) is not a PDF, marking as unsupported",
+                            doc.id,
+                            doc.filename,
+                        );
+                        let _ = sqlx::query(
+                            "UPDATE documents SET status = 'unsupported' WHERE id = $1",
+                        )
+                        .bind(doc.id)
+                        .execute(&db)
+                        .await;
+                        return;
+                    }
+
+                    let file_path = format!("{}/{}/{}.{}", docs_path, doc.course_id, doc.id, ext);
                     let path = std::path::Path::new(&file_path);
                     let client = reqwest::Client::new();
 

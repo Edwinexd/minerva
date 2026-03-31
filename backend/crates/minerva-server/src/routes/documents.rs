@@ -9,6 +9,9 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::state::AppState;
 
+/// Maximum upload size: 50 MB.
+pub const MAX_UPLOAD_BYTES: i64 = 50 * 1_000_000;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_documents).post(upload_document))
@@ -89,10 +92,10 @@ async fn upload_document(
         .map_err(|e| AppError::BadRequest(format!("multipart error: {}", e)))?
         .ok_or_else(|| AppError::BadRequest("no file provided".to_string()))?;
 
-    let filename = field.file_name().unwrap_or("document.pdf").to_string();
+    let filename = field.file_name().unwrap_or("document").to_string();
     let content_type = field
         .content_type()
-        .unwrap_or("application/pdf")
+        .unwrap_or("application/octet-stream")
         .to_string();
     let data = field
         .bytes()
@@ -100,6 +103,14 @@ async fn upload_document(
         .map_err(|e| AppError::BadRequest(format!("failed to read file: {}", e)))?;
 
     let size_bytes = data.len() as i64;
+    if size_bytes > MAX_UPLOAD_BYTES {
+        return Err(AppError::BadRequest(format!(
+            "file too large: {} bytes (max {} MB)",
+            size_bytes,
+            MAX_UPLOAD_BYTES / 1_000_000
+        )));
+    }
+
     let doc_id = Uuid::new_v4();
 
     // Save file to disk
@@ -109,7 +120,8 @@ async fn upload_document(
         .await
         .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
 
-    let file_path = format!("{}/{}.pdf", dir, doc_id);
+    let ext = extension_from_filename(&filename);
+    let file_path = format!("{}/{}.{}", dir, doc_id, ext);
     tokio::fs::write(&file_path, &data)
         .await
         .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;
@@ -172,9 +184,16 @@ async fn delete_document(
     // Delete from DB
     minerva_db::queries::documents::delete(&state.db, doc_id).await?;
 
-    // Delete file from disk
-    let file_path = format!("{}/{}/{}.pdf", state.config.docs_path, course_id, doc_id);
-    let _ = tokio::fs::remove_file(&file_path).await;
+    // Delete file from disk -- try common extensions since we don't store the ext in DB.
+    for ext in &["pdf", "docx", "doc", "pptx", "ppt", "txt", "html", "url"] {
+        let file_path = format!(
+            "{}/{}/{}.{}",
+            state.config.docs_path, course_id, doc_id, ext
+        );
+        if tokio::fs::remove_file(&file_path).await.is_ok() {
+            break;
+        }
+    }
 
     // TODO: Also delete vectors from Qdrant for this document
 
@@ -324,4 +343,12 @@ async fn search_chunks(
         .collect();
 
     Ok(Json(results))
+}
+
+/// Extract file extension from a filename, defaulting to "bin".
+pub fn extension_from_filename(filename: &str) -> &str {
+    std::path::Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin")
 }

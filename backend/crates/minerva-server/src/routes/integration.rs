@@ -281,10 +281,10 @@ async fn upload_document(
         .map_err(|e| AppError::BadRequest(format!("multipart error: {}", e)))?
         .ok_or_else(|| AppError::BadRequest("no file provided".to_string()))?;
 
-    let filename = field.file_name().unwrap_or("document.pdf").to_string();
+    let filename = field.file_name().unwrap_or("document").to_string();
     let content_type = field
         .content_type()
-        .unwrap_or("application/pdf")
+        .unwrap_or("application/octet-stream")
         .to_string();
     let data = field
         .bytes()
@@ -292,6 +292,14 @@ async fn upload_document(
         .map_err(|e| AppError::BadRequest(format!("failed to read file: {}", e)))?;
 
     let size_bytes = data.len() as i64;
+    if size_bytes > super::documents::MAX_UPLOAD_BYTES {
+        return Err(AppError::BadRequest(format!(
+            "file too large: {} bytes (max {} MB)",
+            size_bytes,
+            super::documents::MAX_UPLOAD_BYTES / 1_000_000
+        )));
+    }
+
     let doc_id = Uuid::new_v4();
 
     // Save file to disk
@@ -300,7 +308,8 @@ async fn upload_document(
         .await
         .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
 
-    let file_path = format!("{}/{}.pdf", dir, doc_id);
+    let ext = super::documents::extension_from_filename(&filename);
+    let file_path = format!("{}/{}.{}", dir, doc_id, ext);
     tokio::fs::write(&file_path, &data)
         .await
         .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;

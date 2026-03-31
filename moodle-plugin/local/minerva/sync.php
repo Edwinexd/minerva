@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Sync course materials (PDF files) to the linked Minerva course.
+ * Sync course materials to the linked Minerva course.
  *
  * @package    local_minerva
  * @copyright  2026 DSV, Stockholm University
@@ -48,8 +48,11 @@ $PAGE->set_title(get_string('sync_materials', 'local_minerva'));
 $PAGE->set_heading($course->fullname . ' - ' . get_string('sync_materials', 'local_minerva'));
 $PAGE->set_pagelayout('admin');
 
-// Find PDF files that haven't been synced yet.
-$newfiles = \local_minerva\task\sync_materials::find_unsynced_pdfs($course, $courseid);
+// Find resources that haven't been synced yet.
+$resources = \local_minerva\task\sync_materials::find_unsynced_resources($course, $courseid);
+$newfiles = $resources['files'];
+$newurls = $resources['urls'];
+$totalcount = count($newfiles) + count($newurls);
 
 if ($confirm && confirm_sesskey()) {
     // Perform the sync.
@@ -60,8 +63,8 @@ if ($confirm && confirm_sesskey()) {
     }
 
     $uploaded = 0;
+
     foreach ($newfiles as $file) {
-        // Copy file to a temp location for upload.
         $tmpfile = tempnam(sys_get_temp_dir(), 'minerva_');
         $file->copy_content_to($tmpfile);
 
@@ -69,10 +72,10 @@ if ($confirm && confirm_sesskey()) {
             $result = $client->upload_document(
                 $link->minerva_course_id,
                 $tmpfile,
-                $file->get_filename()
+                $file->get_filename(),
+                $file->get_mimetype() ?: 'application/octet-stream'
             );
 
-            // Log the sync.
             $record = new stdClass();
             $record->courseid = $courseid;
             $record->contenthash = $file->get_contenthash();
@@ -85,6 +88,38 @@ if ($confirm && confirm_sesskey()) {
         } catch (\Exception $e) {
             debugging(
                 "Failed to upload {$file->get_filename()}: " . $e->getMessage(),
+                DEBUG_NORMAL
+            );
+        } finally {
+            @unlink($tmpfile);
+        }
+    }
+
+    foreach ($newurls as $urlinfo) {
+        $tmpfile = tempnam(sys_get_temp_dir(), 'minerva_');
+        file_put_contents($tmpfile, $urlinfo->url);
+
+        try {
+            $filename = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $urlinfo->name) . '.url';
+            $result = $client->upload_document(
+                $link->minerva_course_id,
+                $tmpfile,
+                $filename,
+                'text/x-url'
+            );
+
+            $record = new stdClass();
+            $record->courseid = $courseid;
+            $record->contenthash = $urlinfo->contenthash;
+            $record->filename = $filename;
+            $record->minerva_doc_id = $result->id ?? '';
+            $record->timecreated = time();
+            $DB->insert_record('local_minerva_sync_log', $record);
+
+            $uploaded++;
+        } catch (\Exception $e) {
+            debugging(
+                "Failed to upload URL {$urlinfo->name}: " . $e->getMessage(),
                 DEBUG_NORMAL
             );
         } finally {
@@ -105,16 +140,19 @@ echo $OUTPUT->header();
 
 echo html_writer::tag('p', get_string('sync_materials_desc', 'local_minerva'));
 
-if (empty($newfiles)) {
+if ($totalcount === 0) {
     echo $OUTPUT->notification(get_string('sync_materials_none', 'local_minerva'), 'info');
     echo html_writer::link($manageurl, get_string('back'), ['class' => 'btn btn-secondary']);
 } else {
-    echo html_writer::tag('p', 'Found ' . count($newfiles) . ' new PDF file(s) to sync:');
+    echo html_writer::tag('p', "Found {$totalcount} new resource(s) to sync:");
 
     echo html_writer::start_tag('ul');
     foreach ($newfiles as $file) {
         $size = display_size($file->get_filesize());
         echo html_writer::tag('li', s($file->get_filename()) . " ({$size})");
+    }
+    foreach ($newurls as $urlinfo) {
+        echo html_writer::tag('li', s($urlinfo->name) . ' (URL)');
     }
     echo html_writer::end_tag('ul');
 

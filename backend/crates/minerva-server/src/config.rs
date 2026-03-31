@@ -21,6 +21,11 @@ pub struct Config {
     pub max_concurrent_ingests: usize,
     /// Directory containing the frontend static files (built SPA).
     pub static_dir: Option<String>,
+    /// Seed for deterministic LTI RSA key generation. Falls back to HMAC secret.
+    pub lti_key_seed: String,
+    /// Public base URL for this Minerva instance (e.g. "https://minerva.dsv.su.se").
+    /// Used to construct absolute LTI tool URLs.
+    pub base_url: String,
 }
 
 impl Config {
@@ -55,6 +60,12 @@ impl Config {
             static_dir: env::var("MINERVA_STATIC_DIR")
                 .ok()
                 .filter(|p| std::path::Path::new(p).is_dir()),
+            lti_key_seed: env::var("MINERVA_LTI_KEY_SEED")
+                .unwrap_or_else(|_| env::var("MINERVA_HMAC_SECRET").unwrap_or_default()),
+            base_url: env::var("MINERVA_BASE_URL")
+                .unwrap_or_else(|_| "https://minerva.dsv.su.se".to_string())
+                .trim_end_matches('/')
+                .to_string(),
         })
     }
 

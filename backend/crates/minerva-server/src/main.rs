@@ -1,6 +1,7 @@
 mod auth;
 mod config;
 mod error;
+pub mod lti;
 mod routes;
 mod state;
 mod strategy;
@@ -29,7 +30,9 @@ async fn main() -> anyhow::Result<()> {
     // Start the background document-processing worker.
     worker::start(state.clone(), config.max_concurrent_ingests);
 
-    let mut app = Router::new().nest("/api", routes::api_router(state.clone()));
+    let mut app = Router::new()
+        .nest("/api", routes::api_router(state.clone()))
+        .nest("/lti", routes::lti::public_router().with_state(state.clone()));
 
     if let Some(ref static_dir) = config.static_dir {
         let index = format!("{}/index.html", static_dir);

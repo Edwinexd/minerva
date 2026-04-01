@@ -1,8 +1,8 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use qdrant_client::qdrant::{
-    CreateCollectionBuilder, Distance, Document, PointStruct, UpsertPointsBuilder,
-    VectorParamsBuilder,
+    CreateCollectionBuilder, Distance, PointStruct, UpsertPointsBuilder, VectorParamsBuilder,
 };
 use qdrant_client::Qdrant;
 use sqlx::PgPool;
@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::chunker::{self, ChunkerConfig};
 use crate::embedder;
+use crate::fastembed_embedder::FastEmbedder;
 use crate::pdf;
 
 pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "qdrant"];
@@ -44,6 +45,7 @@ pub async fn process_document(
     qdrant: &Qdrant,
     http_client: &reqwest::Client,
     openai_api_key: &str,
+    fastembed: &Arc<FastEmbedder>,
     document_id: Uuid,
     course_id: Uuid,
     file_path: &Path,
@@ -92,12 +94,16 @@ pub async fn process_document(
             })?;
             ensure_collection(qdrant, &collection_name, dims).await?;
 
+            let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
+            let embeddings = fastembed.embed(embedding_model, chunk_texts).await?;
+
             let points: Vec<PointStruct> = chunks
                 .iter()
-                .map(|chunk| {
+                .zip(embeddings.iter())
+                .map(|(chunk, embedding)| {
                     PointStruct::new(
                         Uuid::new_v4().to_string(),
-                        Document::new(chunk.text.clone(), embedding_model),
+                        embedding.clone(),
                         build_payload(chunk),
                     )
                 })
@@ -106,7 +112,7 @@ pub async fn process_document(
             upsert_batched(qdrant, &collection_name, points).await?;
 
             tracing::info!(
-                "upserted {} chunks via qdrant server-side inference (model: {})",
+                "upserted {} chunks via fastembed (model: {})",
                 chunks.len(),
                 embedding_model,
             );

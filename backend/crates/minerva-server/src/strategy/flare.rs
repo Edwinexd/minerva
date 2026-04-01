@@ -33,6 +33,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let initial_chunks = common::rag_lookup(
         &http_client,
         &ctx.openai_api_key,
+        &ctx.fastembed,
         &ctx.qdrant,
         &collection_name,
         &ctx.user_content,
@@ -138,6 +139,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             let new_chunks = flare_retrieve(
                 &http_client,
                 &ctx.openai_api_key,
+                &ctx.fastembed,
                 &ctx.qdrant,
                 &collection_name,
                 sentence,
@@ -407,6 +409,7 @@ fn is_sentence_boundary(text: &str) -> bool {
 async fn flare_retrieve(
     client: &reqwest::Client,
     openai_key: &str,
+    fastembed: &Arc<minerva_ingest::fastembed_embedder::FastEmbedder>,
     qdrant: &Arc<qdrant_client::Qdrant>,
     collection_name: &str,
     query: &str,
@@ -417,6 +420,7 @@ async fn flare_retrieve(
     match common::embedding_search(
         client,
         openai_key,
+        fastembed,
         qdrant,
         collection_name,
         query,

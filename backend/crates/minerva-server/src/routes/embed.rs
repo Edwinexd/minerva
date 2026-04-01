@@ -305,6 +305,7 @@ async fn send_message(
         is_first_message,
         db: state.db.clone(),
         qdrant: Arc::clone(&state.qdrant),
+        fastembed: Arc::clone(&state.fastembed),
     };
 
     tokio::spawn(async move {

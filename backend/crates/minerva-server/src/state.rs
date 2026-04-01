@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::lti::LtiKeyPair;
+use minerva_ingest::fastembed_embedder::FastEmbedder;
 use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -12,6 +13,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub lti: Arc<LtiKeyPair>,
     pub http_client: reqwest::Client,
+    pub fastembed: Arc<FastEmbedder>,
 }
 
 impl AppState {
@@ -30,6 +32,7 @@ impl AppState {
             config: Arc::new(config.clone()),
             lti: Arc::new(lti),
             http_client: reqwest::Client::new(),
+            fastembed: Arc::new(FastEmbedder::new()),
         })
     }
 }

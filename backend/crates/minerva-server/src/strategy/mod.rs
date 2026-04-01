@@ -28,6 +28,7 @@ pub struct GenerationContext {
     pub is_first_message: bool,
     pub db: sqlx::PgPool,
     pub qdrant: std::sync::Arc<qdrant_client::Qdrant>,
+    pub fastembed: std::sync::Arc<minerva_ingest::fastembed_embedder::FastEmbedder>,
 }
 
 /// Run the appropriate strategy based on the strategy name.

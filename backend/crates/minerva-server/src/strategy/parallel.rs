@@ -25,6 +25,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     {
         let client = http_client.clone();
         let key = ctx.openai_api_key.clone();
+        let fastembed = Arc::clone(&ctx.fastembed);
         let qdrant = Arc::clone(&ctx.qdrant);
         let query = ctx.user_content.clone();
         let max_chunks = ctx.max_chunks;
@@ -36,6 +37,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             let chunks = common::rag_lookup(
                 &client,
                 &key,
+                &fastembed,
                 &qdrant,
                 &coll,
                 &query,

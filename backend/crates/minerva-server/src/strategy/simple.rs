@@ -18,6 +18,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let chunks = common::rag_lookup(
         &http_client,
         &ctx.openai_api_key,
+        &ctx.fastembed,
         &ctx.qdrant,
         &collection_name,
         &ctx.user_content,

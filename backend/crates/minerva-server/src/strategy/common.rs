@@ -1,10 +1,10 @@
 use axum::response::sse::Event;
 use futures::StreamExt;
-use qdrant_client::qdrant::{
-    value::Kind, Document, Query, QueryPointsBuilder, ScoredPoint, SearchPointsBuilder,
-};
+use minerva_ingest::fastembed_embedder::FastEmbedder;
+use qdrant_client::qdrant::{value::Kind, ScoredPoint, SearchPointsBuilder};
 use reqwest::Response;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::error::AppError;
@@ -83,12 +83,13 @@ pub fn scored_point_to_rag_chunk(point: &ScoredPoint) -> Option<RagChunk> {
 // ── Embedding-aware Qdrant search ──────────────────────────────────
 
 /// Run a nearest-neighbour search against Qdrant, dispatching to either
-/// server-side inference (Document query) or client-side OpenAI embeddings
+/// client-side FastEmbed or client-side OpenAI embeddings
 /// depending on the course's `embedding_provider`.
 #[allow(clippy::too_many_arguments)]
 pub async fn embedding_search(
     client: &reqwest::Client,
     openai_key: &str,
+    fastembed: &Arc<FastEmbedder>,
     qdrant: &qdrant_client::Qdrant,
     collection_name: &str,
     query: &str,
@@ -97,19 +98,14 @@ pub async fn embedding_search(
     embedding_provider: &str,
     embedding_model: &str,
 ) -> Result<Vec<ScoredPoint>, String> {
-    if embedding_provider == "qdrant" {
-        let mut builder = QueryPointsBuilder::new(collection_name)
-            .query(Query::new_nearest(Document::new(query, embedding_model)))
-            .with_payload(true)
-            .limit(limit);
-        if let Some(threshold) = score_threshold {
-            builder = builder.score_threshold(threshold);
-        }
-        qdrant
-            .query(builder)
-            .await
-            .map(|r| r.result)
-            .map_err(|e| format!("qdrant query failed: {}", e))
+    let vector = if embedding_provider == "qdrant" {
+        let embeddings = fastembed
+            .embed(embedding_model, vec![query.to_string()])
+            .await?;
+        embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| "no embedding returned from fastembed".to_string())?
     } else {
         let embed_result = minerva_ingest::embedder::embed_texts(
             client,
@@ -117,24 +113,22 @@ pub async fn embedding_search(
             std::slice::from_ref(&query.to_string()),
         )
         .await?;
-
-        let vector = embed_result
+        embed_result
             .embeddings
             .into_iter()
             .next()
-            .ok_or_else(|| "no embedding returned".to_string())?;
+            .ok_or_else(|| "no embedding returned".to_string())?
+    };
 
-        let mut builder =
-            SearchPointsBuilder::new(collection_name, vector, limit).with_payload(true);
-        if let Some(threshold) = score_threshold {
-            builder = builder.score_threshold(threshold);
-        }
-        qdrant
-            .search_points(builder)
-            .await
-            .map(|r| r.result)
-            .map_err(|e| format!("qdrant search failed: {}", e))
+    let mut builder = SearchPointsBuilder::new(collection_name, vector, limit).with_payload(true);
+    if let Some(threshold) = score_threshold {
+        builder = builder.score_threshold(threshold);
     }
+    qdrant
+        .search_points(builder)
+        .await
+        .map(|r| r.result)
+        .map_err(|e| format!("qdrant search failed: {}", e))
 }
 
 // ── Cerebras helpers ───────────────────────────────────────────────
@@ -253,11 +247,12 @@ pub fn build_chat_messages(
 }
 
 /// Perform RAG lookup: search Qdrant, return structured chunks.
-/// Dispatches to OpenAI or Qdrant server-side embeddings based on provider.
+/// Dispatches to OpenAI or FastEmbed embeddings based on provider.
 #[allow(clippy::too_many_arguments)]
 pub async fn rag_lookup(
     client: &reqwest::Client,
     openai_key: &str,
+    fastembed: &Arc<FastEmbedder>,
     qdrant: &qdrant_client::Qdrant,
     collection_name: &str,
     query: &str,
@@ -268,6 +263,7 @@ pub async fn rag_lookup(
     match embedding_search(
         client,
         openai_key,
+        fastembed,
         qdrant,
         collection_name,
         query,

@@ -17,4 +17,5 @@ chrono.workspace = true
 futures.workspace = true
 sqlx.workspace = true
 qdrant-client.workspace = true
+fastembed.workspace = true
 pdf-extract = "0.10"

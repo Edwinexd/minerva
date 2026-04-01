@@ -63,6 +63,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
                 let permit = semaphore.clone().acquire_owned().await.unwrap();
                 let db = state.db.clone();
                 let qdrant = Arc::clone(&state.qdrant);
+                let fastembed = Arc::clone(&state.fastembed);
                 let openai_api_key = state.config.openai_api_key.clone();
                 let docs_path = state.config.docs_path.clone();
 
@@ -116,6 +117,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
                         &qdrant,
                         &client,
                         &openai_api_key,
+                        &fastembed,
                         doc.id,
                         doc.course_id,
                         path,

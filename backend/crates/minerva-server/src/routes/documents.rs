@@ -315,6 +315,7 @@ async fn search_chunks(
     let scored_points = crate::strategy::common::embedding_search(
         &client,
         &state.config.openai_api_key,
+        &state.fastembed,
         &state.qdrant,
         &collection_name,
         &params.q,

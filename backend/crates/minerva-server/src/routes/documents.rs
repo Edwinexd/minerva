@@ -14,7 +14,14 @@ pub const MAX_UPLOAD_BYTES: i64 = 50 * 1_000_000;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/", get(list_documents).post(upload_document))
+        .route(
+            "/",
+            get(list_documents)
+                .post(upload_document)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    MAX_UPLOAD_BYTES as usize,
+                )),
+        )
         .route("/{doc_id}", delete(delete_document).patch(patch_document))
         .route("/{doc_id}/chunks", get(list_chunks))
         .route("/search", get(search_chunks))

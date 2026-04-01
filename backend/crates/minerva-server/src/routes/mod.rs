@@ -38,6 +38,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/health", get(health::health))
         .route("/models", get(health::models))
+        .route("/embedding-benchmarks", get(health::embedding_benchmarks))
         .route("/dev/config", get(dev_config))
         .nest("/integration", integration::router())
         .nest("/embed", embed::router())

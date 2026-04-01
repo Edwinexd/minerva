@@ -72,6 +72,11 @@ pub async fn models(State(state): State<AppState>) -> Json<Value> {
     Json(json!({ "models": models }))
 }
 
+pub async fn embedding_benchmarks(State(state): State<AppState>) -> Json<Value> {
+    let results = state.fastembed.get_benchmarks().await;
+    Json(json!({ "benchmarks": results }))
+}
+
 fn fallback_models() -> Vec<Value> {
     vec![
         json!({ "id": "llama-3.3-70b", "name": "Llama 3.3 70B" }),

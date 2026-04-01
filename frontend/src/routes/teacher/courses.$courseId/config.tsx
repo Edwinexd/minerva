@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { courseQuery, modelsQuery } from "@/lib/queries"
+import { courseQuery, modelsQuery, embeddingBenchmarksQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -39,6 +39,7 @@ function ConfigPage() {
 function CourseConfigForm({ course }: { course: Course }) {
   const queryClient = useQueryClient()
   const { data: modelsData } = useQuery(modelsQuery)
+  const { data: benchmarksData } = useQuery(embeddingBenchmarksQuery)
   const [name, setName] = useState(course.name)
   const [description, setDescription] = useState(course.description || "")
   const [contextRatio, setContextRatio] = useState(course.context_ratio)
@@ -206,23 +207,26 @@ function CourseConfigForm({ course }: { course: Course }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="sentence-transformers/all-MiniLM-L6-v2">
-                    all-MiniLM-L6-v2 (384d, fast, good quality)
-                  </SelectItem>
-                  <SelectItem value="BAAI/bge-small-en-v1.5">
-                    BGE Small EN v1.5 (384d, optimized for retrieval)
-                  </SelectItem>
-                  <SelectItem value="BAAI/bge-base-en-v1.5">
-                    BGE Base EN v1.5 (768d, higher quality)
-                  </SelectItem>
-                  <SelectItem value="nomic-ai/nomic-embed-text-v1.5">
-                    Nomic Embed Text v1.5 (768d, long context)
-                  </SelectItem>
+                  {[
+                    { id: "sentence-transformers/all-MiniLM-L6-v2", name: "all-MiniLM-L6-v2", dims: 384, desc: "fast, good quality" },
+                    { id: "BAAI/bge-small-en-v1.5", name: "BGE Small EN v1.5", dims: 384, desc: "optimized for retrieval" },
+                    { id: "BAAI/bge-base-en-v1.5", name: "BGE Base EN v1.5", dims: 768, desc: "higher quality" },
+                    { id: "nomic-ai/nomic-embed-text-v1.5", name: "Nomic Embed Text v1.5", dims: 768, desc: "long context" },
+                  ].map((m) => {
+                    const bench = benchmarksData?.benchmarks.find((b) => b.model === m.id)
+                    const speed = bench ? ` - ${Math.round(bench.embeddings_per_second)} emb/s` : ""
+                    return (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name} ({m.dims}d, {m.desc}{speed})
+                      </SelectItem>
+                    )
+                  })}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                The embedding model used by Qdrant for server-side inference.
+                The embedding model used for server-side inference.
                 Changing model requires re-uploading documents.
+                {benchmarksData?.benchmarks.length ? " Speed measured on this server at startup." : ""}
               </p>
             </div>
           )}

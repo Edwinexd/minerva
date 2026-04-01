@@ -26,13 +26,29 @@ impl AppState {
         let lti = LtiKeyPair::from_seed(&config.lti_key_seed)?;
         tracing::info!("LTI 1.3 provider ready (kid={})", lti.kid);
 
+        let fastembed = Arc::new(FastEmbedder::new());
+
+        // Benchmark all supported FastEmbed models on startup.
+        tracing::info!("running fastembed model benchmarks...");
+        match fastembed
+            .run_benchmarks(minerva_ingest::pipeline::VALID_QDRANT_MODELS)
+            .await
+        {
+            Ok(results) => {
+                tracing::info!("fastembed benchmarks complete ({} models)", results.len());
+            }
+            Err(e) => {
+                tracing::warn!("fastembed benchmarks failed: {}", e);
+            }
+        }
+
         Ok(Self {
             db,
             qdrant: Arc::new(qdrant),
             config: Arc::new(config.clone()),
             lti: Arc::new(lti),
             http_client: reqwest::Client::new(),
-            fastembed: Arc::new(FastEmbedder::new()),
+            fastembed,
         })
     }
 }

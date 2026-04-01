@@ -37,6 +37,20 @@ export const modelsQuery = queryOptions({
   staleTime: Infinity,
 })
 
+export interface EmbeddingBenchmark {
+  model: string
+  dimensions: number
+  embeddings_per_second: number
+  total_ms: number
+  corpus_size: number
+}
+
+export const embeddingBenchmarksQuery = queryOptions({
+  queryKey: ["embedding-benchmarks"],
+  queryFn: () => api.get<{ benchmarks: EmbeddingBenchmark[] }>("/embedding-benchmarks"),
+  staleTime: Infinity,
+})
+
 export const conversationsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations"],

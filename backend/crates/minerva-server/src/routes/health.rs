@@ -79,8 +79,8 @@ pub async fn embedding_benchmarks(State(state): State<AppState>) -> Json<Value> 
 
 fn fallback_models() -> Vec<Value> {
     vec![
-        json!({ "id": "llama-3.3-70b", "name": "Llama 3.3 70B" }),
-        json!({ "id": "llama-4-scout-17b-16e-instruct", "name": "Llama 4 Scout 17B" }),
-        json!({ "id": "qwen-3-32b", "name": "Qwen 3 32B" }),
+        json!({ "id": "qwen-3-235b-a22b-instruct-2507", "name": "Qwen 3 235B A22B Instruct" }),
+        json!({ "id": "llama3.1-8b", "name": "Llama 3.1 8B" }),
+        json!({ "id": "gpt-oss-120b", "name": "GPT OSS 120B" }),
     ]
 }

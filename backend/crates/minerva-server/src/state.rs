@@ -28,20 +28,6 @@ impl AppState {
 
         let fastembed = Arc::new(FastEmbedder::new());
 
-        // Benchmark all supported FastEmbed models on startup.
-        tracing::info!("running fastembed model benchmarks...");
-        match fastembed
-            .run_benchmarks(minerva_ingest::pipeline::VALID_QDRANT_MODELS)
-            .await
-        {
-            Ok(results) => {
-                tracing::info!("fastembed benchmarks complete ({} models)", results.len());
-            }
-            Err(e) => {
-                tracing::warn!("fastembed benchmarks failed: {}", e);
-            }
-        }
-
         Ok(Self {
             db,
             qdrant: Arc::new(qdrant),

@@ -98,7 +98,7 @@ The main application sits behind Apache `mod_shib` which sets the `REMOTE_USER` 
 | `/api/integration/*` | Per-course API key (Bearer token) | Moodle server-to-server calls (enrolment sync, material upload, token creation) |
 | `/api/embed/*` | HMAC-signed embed token | Iframe chat API (conversations, streaming) |
 | `/embed/*` | Embed token (query param) | Iframe frontend route |
-| `/lti/*` | LTI 1.3 (OIDC + signed JWT) | LTI login, launch, JWKS endpoints — called by the LMS directly |
+| `/lti/*` | LTI 1.3 (OIDC + signed JWT) | LTI login, launch, JWKS endpoints -- called by the LMS directly |
 
 **Example Apache config** (adjust to your setup):
 

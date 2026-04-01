@@ -31,6 +31,23 @@ async fn main() -> anyhow::Result<()> {
     // Start the background document-processing worker.
     worker::start(state.clone(), config.max_concurrent_ingests);
 
+    // Benchmark FastEmbed models in the background (doesn't block startup).
+    let fastembed = state.fastembed.clone();
+    tokio::spawn(async move {
+        tracing::info!("running fastembed model benchmarks...");
+        match fastembed
+            .run_benchmarks(minerva_ingest::pipeline::VALID_QDRANT_MODELS)
+            .await
+        {
+            Ok(results) => {
+                tracing::info!("fastembed benchmarks complete ({} models)", results.len());
+            }
+            Err(e) => {
+                tracing::warn!("fastembed benchmarks failed: {}", e);
+            }
+        }
+    });
+
     let mut app = Router::new()
         .nest("/api", routes::api_router(state.clone()))
         .nest(

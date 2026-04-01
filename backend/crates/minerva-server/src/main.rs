@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         tracing::info!("running fastembed model benchmarks...");
         match fastembed
-            .run_benchmarks(minerva_ingest::pipeline::VALID_QDRANT_MODELS)
+            .run_benchmarks(minerva_ingest::pipeline::VALID_LOCAL_MODELS)
             .await
         {
             Ok(results) => {

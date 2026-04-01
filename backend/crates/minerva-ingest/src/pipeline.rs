@@ -13,9 +13,9 @@ use crate::embedder;
 use crate::fastembed_embedder::FastEmbedder;
 use crate::pdf;
 
-pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "qdrant"];
+pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "local"];
 
-pub const VALID_QDRANT_MODELS: &[(&str, u64)] = &[
+pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
     ("sentence-transformers/all-MiniLM-L6-v2", 384),
     ("BAAI/bge-small-en-v1.5", 384),
     ("BAAI/bge-base-en-v1.5", 768),
@@ -25,9 +25,8 @@ pub const VALID_QDRANT_MODELS: &[(&str, u64)] = &[
 pub const OPENAI_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 const OPENAI_EMBEDDING_DIMENSIONS: u64 = 1536;
 
-/// Known embedding model dimensions for Qdrant server-side inference.
-fn qdrant_model_dimensions(model: &str) -> Option<u64> {
-    VALID_QDRANT_MODELS
+fn local_model_dimensions(model: &str) -> Option<u64> {
+    VALID_LOCAL_MODELS
         .iter()
         .find(|(name, _)| *name == model)
         .map(|(_, dims)| *dims)
@@ -88,10 +87,9 @@ pub async fn process_document(
     };
 
     let embedding_tokens = match embedding_provider {
-        "qdrant" => {
-            let dims = qdrant_model_dimensions(embedding_model).ok_or_else(|| {
-                format!("unsupported qdrant embedding model: {}", embedding_model)
-            })?;
+        "local" => {
+            let dims = local_model_dimensions(embedding_model)
+                .ok_or_else(|| format!("unsupported local embedding model: {}", embedding_model))?;
             ensure_collection(qdrant, &collection_name, dims).await?;
 
             let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();

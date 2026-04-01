@@ -172,14 +172,14 @@ async fn update_course(
         .as_deref()
         .unwrap_or(&existing.embedding_provider);
 
-    if effective_provider == "qdrant" {
+    if effective_provider == "local" {
         if let Some(ref model) = body.embedding_model {
-            let valid = minerva_ingest::pipeline::VALID_QDRANT_MODELS
+            let valid = minerva_ingest::pipeline::VALID_LOCAL_MODELS
                 .iter()
                 .any(|(name, _)| *name == model.as_str());
             if !valid {
                 return Err(AppError::BadRequest(format!(
-                    "invalid qdrant embedding_model: {}",
+                    "invalid local embedding_model: {}",
                     model
                 )));
             }

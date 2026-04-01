@@ -184,22 +184,21 @@ function CourseConfigForm({ course }: { course: Course }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="openai">
-                  OpenAI (client-side, text-embedding-3-small)
+                <SelectItem value="local">
+                  Local (FastEmbedding)
                 </SelectItem>
-                <SelectItem value="qdrant">
-                  Qdrant FastEmbed (server-side, local)
+                <SelectItem value="openai">
+                  OpenAI (text-embedding-3-small)
                 </SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              OpenAI requires an API key but offers higher quality embeddings.
-              Qdrant FastEmbed runs locally with zero latency and no API cost.
-              Changing provider requires re-uploading documents.
+              Local runs on this server with zero latency and no API cost.
+              OpenAI requires an API key. Changing provider requires re-uploading documents.
             </p>
           </div>
 
-          {embeddingProvider === "qdrant" && (
+          {embeddingProvider === "local" && (
             <div className="space-y-2">
               <Label>Embedding Model</Label>
               <Select value={embeddingModel} onValueChange={(v) => v && setEmbeddingModel(v)}>
@@ -224,7 +223,6 @@ function CourseConfigForm({ course }: { course: Course }) {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                The embedding model used for server-side inference.
                 Changing model requires re-uploading documents.
                 {benchmarksData?.benchmarks.length ? " Speed measured on this server at startup." : ""}
               </p>

@@ -8,7 +8,7 @@ pub struct Config {
     pub database_url: String,
     pub qdrant_url: String,
     pub cerebras_api_key: String,
-    /// OpenAI API key for embeddings. Optional if all courses use qdrant embedding provider.
+    /// OpenAI API key for embeddings. Optional if all courses use local embedding provider.
     pub openai_api_key: String,
     pub hmac_secret: String,
     pub docs_path: String,

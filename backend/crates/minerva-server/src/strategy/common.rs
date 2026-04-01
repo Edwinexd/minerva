@@ -83,8 +83,8 @@ pub fn scored_point_to_rag_chunk(point: &ScoredPoint) -> Option<RagChunk> {
 // ── Embedding-aware Qdrant search ──────────────────────────────────
 
 /// Run a nearest-neighbour search against Qdrant, dispatching to either
-/// client-side FastEmbed or client-side OpenAI embeddings
-/// depending on the course's `embedding_provider`.
+/// local FastEmbed or OpenAI embeddings depending on the course's
+/// `embedding_provider`.
 #[allow(clippy::too_many_arguments)]
 pub async fn embedding_search(
     client: &reqwest::Client,
@@ -98,7 +98,7 @@ pub async fn embedding_search(
     embedding_provider: &str,
     embedding_model: &str,
 ) -> Result<Vec<ScoredPoint>, String> {
-    let vector = if embedding_provider == "qdrant" {
+    let vector = if embedding_provider == "local" {
         let embeddings = fastembed
             .embed(embedding_model, vec![query.to_string()])
             .await?;

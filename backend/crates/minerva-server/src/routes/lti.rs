@@ -344,6 +344,10 @@ fn build_setup_response(base_url: &str) -> LtiSetupResponse {
                 "Under Custom parameters, add: {} -- this links Moodle users to their Minerva identity. Without it, students launched from Moodle will be separate users from those who log in directly.",
                 config.custom_parameters,
             ),
+            format!(
+                "Under 'Show more...', set Icon URL to: {}",
+                config.icon_url,
+            ),
             "Under Services, leave defaults (no grade passback needed).".into(),
             "Under Privacy, 'Share launcher's name' is optional (populates display names).".into(),
             "Save. Moodle will show the tool's registration details.".into(),

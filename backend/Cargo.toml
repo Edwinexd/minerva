@@ -37,7 +37,7 @@ hex = "0.4"
 rand = "0.10"
 jsonwebtoken = "10"
 rsa = "0.9"
-rand_chacha = "0.3"
+rand_chacha = "0.9"
 urlencoding = "2"
 
 # Utilities

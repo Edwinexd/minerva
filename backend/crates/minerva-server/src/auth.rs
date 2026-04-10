@@ -70,49 +70,34 @@ async fn upsert_user(
     display_name: Option<&str>,
 ) -> Result<User, AppError> {
     let is_admin = state.config.is_admin(eppn);
-
-    let existing = minerva_db::queries::users::find_by_eppn(&state.db, eppn).await?;
-
-    if let Some(row) = existing {
-        let role = if is_admin {
-            UserRole::Admin
-        } else {
-            UserRole::parse(&row.role)
-        };
-
-        minerva_db::queries::users::update_login(&state.db, row.id, display_name, role.as_str())
-            .await?;
-
-        return Ok(User {
-            id: row.id,
-            eppn: row.eppn,
-            display_name: display_name.map(|s| s.to_string()).or(row.display_name),
-            role,
-            suspended: row.suspended,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        });
-    }
-
-    let id = Uuid::new_v4();
     let role = if is_admin {
         UserRole::Admin
     } else if state.config.dev_mode && eppn.starts_with("teacher") {
         UserRole::Teacher
     } else {
-        UserRole::Student
+        // For existing users, preserve their current role unless they're an admin
+        minerva_db::queries::users::find_by_eppn(&state.db, eppn)
+            .await?
+            .map(|r| UserRole::parse(&r.role))
+            .unwrap_or(UserRole::Student)
     };
 
-    minerva_db::queries::users::insert(&state.db, id, eppn, display_name, role.as_str()).await?;
+    let row = minerva_db::queries::users::upsert(
+        &state.db,
+        Uuid::new_v4(),
+        eppn,
+        display_name,
+        role.as_str(),
+    )
+    .await?;
 
-    let now = chrono::Utc::now();
     Ok(User {
-        id,
-        eppn: eppn.to_string(),
-        display_name: display_name.map(|s| s.to_string()),
-        role,
-        suspended: false,
-        created_at: now,
-        updated_at: now,
+        id: row.id,
+        eppn: row.eppn,
+        display_name: row.display_name,
+        role: UserRole::parse(&row.role),
+        suspended: row.suspended,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
     })
 }

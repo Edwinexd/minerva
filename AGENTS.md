@@ -2,6 +2,12 @@
 
 Deployment pipeline and production access for Minerva.
 
+## Local Development
+
+- **Dev stack:** `docker compose -f docker-compose.yml up -d` -- backend, frontend, postgres, qdrant
+- **Moodle test:** `docker compose -f docker-compose.moodle.yml up -d` -- local Moodle instance (port 8088, admin/Admin123!)
+- **Moodle plugin repo:** `Edwinexd/moodle-local_minerva` -- auto-synced from `moodle-plugin/local/minerva/` via `sync-moodle-plugin.yml` workflow (requires `MOODLE_SYNC_TOKEN` secret)
+
 ## Container Image
 
 - **Registry:** ghcr.io/edwinexd/minerva (private)

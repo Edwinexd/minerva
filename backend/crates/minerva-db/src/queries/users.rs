@@ -37,14 +37,40 @@ pub async fn insert(
     display_name: Option<&str>,
     role: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO users (id, eppn, display_name, role) VALUES ($1, $2, $3, $4)")
-        .bind(id)
-        .bind(eppn)
-        .bind(display_name)
-        .bind(role)
-        .execute(db)
-        .await?;
+    sqlx::query(
+        "INSERT INTO users (id, eppn, display_name, role) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (eppn) DO NOTHING",
+    )
+    .bind(id)
+    .bind(eppn)
+    .bind(display_name)
+    .bind(role)
+    .execute(db)
+    .await?;
     Ok(())
+}
+
+pub async fn upsert(
+    db: &PgPool,
+    id: Uuid,
+    eppn: &str,
+    display_name: Option<&str>,
+    role: &str,
+) -> Result<UserRow, sqlx::Error> {
+    sqlx::query_as::<_, UserRow>(
+        "INSERT INTO users (id, eppn, display_name, role) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (eppn) DO UPDATE SET
+            display_name = COALESCE($3, users.display_name),
+            role = $4,
+            updated_at = NOW()
+         RETURNING id, eppn, display_name, role, suspended, created_at, updated_at",
+    )
+    .bind(id)
+    .bind(eppn)
+    .bind(display_name)
+    .bind(role)
+    .fetch_one(db)
+    .await
 }
 
 pub async fn update_login(

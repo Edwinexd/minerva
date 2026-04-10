@@ -24,7 +24,6 @@ services:
       - moodle_src:/var/www/html
       - moodle_moodledata:/var/www/moodledata
       - ./moodle-plugin/local/minerva:/var/www/html/local/minerva
-      - ./moodle-plugin/mod/minerva:/var/www/html/mod/minerva
       - ./docker/moodle-entrypoint.sh:/moodle-entrypoint.sh
     entrypoint: ["/bin/bash", "/moodle-entrypoint.sh"]
     depends_on:

@@ -43,6 +43,7 @@ locals {
       MINERVA_ADMINS: "${var.minerva_admins}"
       CEREBRAS_API_KEY: "${var.cerebras_api_key}"
       OPENAI_API_KEY: "${var.openai_api_key}"
+      MINERVA_SERVICE_API_KEY: "${var.minerva_service_api_key}"
   YAML
 }
 
@@ -83,4 +84,26 @@ resource "github_actions_environment_secret" "prod_k8s_secrets" {
   environment     = github_repository_environment.prod.environment
   secret_name     = "K8S_SECRETS"
   plaintext_value = base64encode(local.k8s_secrets_yaml)
+}
+
+# =============================================================================
+# Repository Secrets (transcript pipeline)
+# =============================================================================
+
+resource "github_actions_secret" "service_api_key" {
+  repository      = data.github_repository.repo.name
+  secret_name     = "MINERVA_SERVICE_API_KEY"
+  plaintext_value = var.minerva_service_api_key
+}
+
+resource "github_actions_secret" "su_username" {
+  repository      = data.github_repository.repo.name
+  secret_name     = "SU_USERNAME"
+  plaintext_value = var.su_username
+}
+
+resource "github_actions_secret" "su_password" {
+  repository      = data.github_repository.repo.name
+  secret_name     = "SU_PASSWORD"
+  plaintext_value = var.su_password
 }

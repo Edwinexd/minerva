@@ -113,6 +113,37 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
     .await
 }
 
+/// List documents awaiting external transcript processing.
+/// These are play.dsv.su.se URL documents that the worker has triaged.
+pub async fn list_awaiting_transcripts(db: &PgPool) -> Result<Vec<DocumentRow>, sqlx::Error> {
+    sqlx::query_as::<_, DocumentRow>(
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// Update a document's filename, mime_type, size, and reset status to 'pending'.
+/// Used when replacing a URL stub with actual transcript content.
+pub async fn replace_with_transcript(
+    db: &PgPool,
+    id: Uuid,
+    filename: &str,
+    mime_type: &str,
+    size_bytes: i64,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE documents SET filename = $1, mime_type = $2, size_bytes = $3, status = 'pending', error_msg = NULL, chunk_count = NULL, processed_at = NULL WHERE id = $4 AND status = 'awaiting_transcript'",
+    )
+    .bind(filename)
+    .bind(mime_type)
+    .bind(size_bytes)
+    .bind(id)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Reset documents stuck in 'processing' back to 'pending'.
 /// Used on startup for crash recovery: any document still marked 'processing'
 /// was interrupted by a server restart.

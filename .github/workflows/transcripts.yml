@@ -1,0 +1,27 @@
+name: Fetch Transcripts
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  fetch-transcripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests dsv-wrapper
+
+      - name: Fetch and submit transcripts
+        env:
+          MINERVA_API_URL: https://minerva.dsv.su.se
+          MINERVA_SERVICE_API_KEY: ${{ secrets.MINERVA_SERVICE_API_KEY }}
+          SU_USERNAME: ${{ secrets.SU_USERNAME }}
+          SU_PASSWORD: ${{ secrets.SU_PASSWORD }}
+        run: python scripts/fetch_transcripts.py

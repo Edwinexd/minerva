@@ -92,10 +92,46 @@ pub fn start(state: AppState, max_concurrent: usize) {
 
                     let ext = crate::routes::documents::extension_from_filename(&doc.filename);
 
-                    // Only process PDFs for now; store other types as 'unsupported'.
-                    if ext != "pdf" {
+                    // URL documents: check if they're play.dsv.su.se links that
+                    // the external transcript pipeline can handle.
+                    if ext == "url" {
+                        let file_path =
+                            format!("{}/{}/{}.{}", docs_path, doc.course_id, doc.id, ext);
+                        let url = tokio::fs::read_to_string(&file_path)
+                            .await
+                            .unwrap_or_default();
+                        if url.contains("play.dsv.su.se") {
+                            tracing::info!(
+                                "worker: document {} ({}) is a play.dsv.su.se URL, awaiting transcript",
+                                doc.id,
+                                doc.filename,
+                            );
+                            let _ = sqlx::query(
+                                "UPDATE documents SET status = 'awaiting_transcript' WHERE id = $1",
+                            )
+                            .bind(doc.id)
+                            .execute(&db)
+                            .await;
+                        } else {
+                            tracing::info!(
+                                "worker: document {} ({}) is a non-play URL, marking as unsupported",
+                                doc.id,
+                                doc.filename,
+                            );
+                            let _ = sqlx::query(
+                                "UPDATE documents SET status = 'unsupported' WHERE id = $1",
+                            )
+                            .bind(doc.id)
+                            .execute(&db)
+                            .await;
+                        }
+                        return;
+                    }
+
+                    // Only process supported file types; store others as 'unsupported'.
+                    if ext != "pdf" && ext != "txt" {
                         tracing::info!(
-                            "worker: document {} ({}) is not a PDF, marking as unsupported",
+                            "worker: document {} ({}) is not a supported type, marking as unsupported",
                             doc.id,
                             doc.filename,
                         );

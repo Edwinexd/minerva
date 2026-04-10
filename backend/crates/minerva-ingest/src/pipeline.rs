@@ -53,13 +53,23 @@ pub async fn process_document(
     embedding_model: &str,
 ) -> Result<ProcessResult, String> {
     // 1. Extract text
-    let text = pdf::extract_text(file_path).map_err(|e| {
-        let msg = format!("text extraction failed: {}", e);
-        tracing::error!("{}", msg);
-        msg
-    })?;
+    let is_text_file = file_path.extension().is_some_and(|e| e == "txt");
 
-    tracing::info!("extracted {} chars from {}", text.len(), filename,);
+    let text = if is_text_file {
+        std::fs::read_to_string(file_path).map_err(|e| {
+            let msg = format!("failed to read text file: {}", e);
+            tracing::error!("{}", msg);
+            msg
+        })?
+    } else {
+        pdf::extract_text(file_path).map_err(|e| {
+            let msg = format!("text extraction failed: {}", e);
+            tracing::error!("{}", msg);
+            msg
+        })?
+    };
+
+    tracing::info!("extracted {} chars from {}", text.len(), filename);
 
     // 2. Chunk
     let chunks = chunker::chunk_text(&text, &ChunkerConfig::default());

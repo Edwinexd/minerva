@@ -7,6 +7,7 @@ pub mod embed;
 mod health;
 pub mod integration;
 pub mod lti;
+pub mod service;
 mod signed_urls;
 mod usage;
 
@@ -41,6 +42,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .route("/embedding-benchmarks", get(health::embedding_benchmarks))
         .route("/dev/config", get(dev_config))
         .nest("/integration", integration::router())
+        .nest("/service", service::router())
         .nest("/embed", embed::router())
         .merge(authed)
 }

@@ -77,3 +77,21 @@ variable "openai_api_key" {
   type        = string
   sensitive   = true
 }
+
+variable "minerva_service_api_key" {
+  description = "Global service API key for automated pipelines (e.g. transcript fetcher)"
+  type        = string
+  sensitive   = true
+}
+
+variable "su_username" {
+  description = "Stockholm University username for play.dsv.su.se transcript fetching"
+  type        = string
+  sensitive   = true
+}
+
+variable "su_password" {
+  description = "Stockholm University password for play.dsv.su.se transcript fetching"
+  type        = string
+  sensitive   = true
+}

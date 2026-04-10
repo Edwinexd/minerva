@@ -96,6 +96,7 @@ The main application sits behind Apache `mod_shib` which sets the `REMOTE_USER` 
 | Path prefix | Auth method | Why |
 |-------------|-------------|-----|
 | `/api/integration/*` | Per-course API key (Bearer token) | Moodle server-to-server calls (enrolment sync, material upload, token creation) |
+| `/api/service/*` | Global service API key (Bearer token) | Automated pipelines (e.g. transcript fetcher from GitHub Actions) |
 | `/api/embed/*` | HMAC-signed embed token | Iframe chat API (conversations, streaming) |
 | `/embed/*` | Embed token (query param) | Iframe frontend route |
 | `/lti/*` | LTI 1.3 (OIDC + signed JWT) | LTI login, launch, JWKS endpoints -- called by the LMS directly |
@@ -110,8 +111,8 @@ The main application sits behind Apache `mod_shib` which sets the `REMOTE_USER` 
     Require valid-user
 </Location>
 
-# Exclude Moodle integration and embed routes -- they use their own auth.
-<LocationMatch "^/api/(integration|embed)">
+# Exclude integration, service, and embed routes -- they use their own auth.
+<LocationMatch "^/api/(integration|service|embed)">
     ShibRequestSetting requireSession 0
     Require all granted
 </LocationMatch>

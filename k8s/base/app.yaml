@@ -53,6 +53,11 @@ spec:
                 secretKeyRef:
                   name: minerva-secrets
                   key: OPENAI_API_KEY
+            - name: MINERVA_SERVICE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minerva-secrets
+                  key: MINERVA_SERVICE_API_KEY
           volumeMounts:
             - name: app-data
               mountPath: /data

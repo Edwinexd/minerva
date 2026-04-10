@@ -28,6 +28,9 @@ pub struct Config {
     pub base_url: String,
     /// Dev-only: proxy unmatched requests to this URL (e.g. Vite dev server).
     pub dev_proxy: Option<String>,
+    /// Global service API key for automated pipelines (e.g. transcript fetcher).
+    /// Authenticated via `Authorization: Bearer <key>` on service endpoints.
+    pub service_api_key: Option<String>,
 }
 
 impl Config {
@@ -69,6 +72,9 @@ impl Config {
                 .trim_end_matches('/')
                 .to_string(),
             dev_proxy: env::var("MINERVA_DEV_PROXY").ok().filter(|s| !s.is_empty()),
+            service_api_key: env::var("MINERVA_SERVICE_API_KEY")
+                .ok()
+                .filter(|s| !s.is_empty()),
         })
     }
 

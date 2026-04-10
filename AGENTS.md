@@ -92,7 +92,7 @@ Indexes video transcripts from DSV Play into Minerva as searchable documents.
 3. `transcripts.yml` workflow runs hourly, calls `GET /api/service/pending-transcripts`
 4. Python script (`scripts/fetch_transcripts.py`) uses `dsv-wrapper` to fetch VTT transcripts
 5. Script posts transcript text back via `POST /api/service/documents/{id}/transcript`
-6. Backend saves as `.txt`, changes mime to `text/plain`, resets to `pending` — worker then claims, chunks + embeds it
+6. Backend saves as `.txt`, changes mime to `text/plain`, resets to `pending` -- worker then claims, chunks + embeds it
 
 **Service API:** `/api/service/` routes use `MINERVA_SERVICE_API_KEY` (env var, not per-course). Separate from `/api/integration/` to avoid SSO routing.
 

@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install requests dsv-wrapper
+        run: pip install requests git+https://github.com/Edwinexd/dsv-wrapper.git
 
       - name: Fetch and submit transcripts
         env:

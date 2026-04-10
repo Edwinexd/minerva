@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: image-prune
+  namespace: minerva
+spec:
+  schedule: "0 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          hostPID: true
+          containers:
+            - name: prune
+              image: rancher/k3s:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  echo "Pruning unused container images..."
+                  crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock rmi --prune
+                  echo "Remaining images:"
+                  crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images
+              volumeMounts:
+                - name: containerd-sock
+                  mountPath: /run/k3s/containerd/containerd.sock
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "128Mi"
+                  cpu: "200m"
+              securityContext:
+                privileged: true
+          restartPolicy: OnFailure
+          volumes:
+            - name: containerd-sock
+              hostPath:
+                path: /run/k3s/containerd/containerd.sock
+                type: Socket

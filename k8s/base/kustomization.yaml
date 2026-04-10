@@ -12,3 +12,4 @@ resources:
   - app.yaml
   - app-svc.yaml
   - backup.yaml
+  - image-prune.yaml

@@ -154,22 +154,34 @@ async fn list_pinned_conversations(
 ) -> Result<Json<Vec<ConversationWithUserResponse>>, AppError> {
     verify_course_access(&state, course_id, user.id).await?;
 
+    let is_teacher = is_course_teacher_or_admin(&state, course_id, &user).await?;
     let rows =
         minerva_db::queries::conversations::list_pinned_by_course(&state.db, course_id).await?;
 
     Ok(Json(
         rows.into_iter()
-            .map(|r| ConversationWithUserResponse {
-                id: r.id,
-                course_id: r.course_id,
-                user_id: r.user_id,
-                title: r.title,
-                pinned: r.pinned,
-                created_at: r.created_at,
-                updated_at: r.updated_at,
-                user_eppn: r.user_eppn,
-                user_display_name: r.user_display_name,
-                message_count: r.message_count,
+            .map(|r| {
+                let is_own = r.user_id == user.id;
+                ConversationWithUserResponse {
+                    id: r.id,
+                    course_id: r.course_id,
+                    user_id: r.user_id,
+                    title: r.title,
+                    pinned: r.pinned,
+                    created_at: r.created_at,
+                    updated_at: r.updated_at,
+                    user_eppn: if is_teacher || is_own {
+                        r.user_eppn
+                    } else {
+                        None
+                    },
+                    user_display_name: if is_teacher || is_own {
+                        r.user_display_name
+                    } else {
+                        None
+                    },
+                    message_count: r.message_count,
+                }
             })
             .collect(),
     ))

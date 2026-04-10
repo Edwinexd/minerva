@@ -23,12 +23,10 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Package Moodle plugins
+      - name: Package Moodle plugin
         run: |
           cd moodle-plugin/local
           zip -r "$GITHUB_WORKSPACE/local_minerva-${{ steps.version.outputs.version }}.zip" minerva/
-          cd "$GITHUB_WORKSPACE/moodle-plugin/mod"
-          zip -r "$GITHUB_WORKSPACE/mod_minerva-${{ steps.version.outputs.version }}.zip" minerva/
 
       - name: Generate release notes
         id: notes
@@ -42,20 +40,21 @@ jobs:
 
           ## Moodle Plugin
 
-          Download both plugin zips below:
-          - `local_minerva` -- extract into Moodle `local/` directory (admin settings, enrolment sync, scheduled tasks)
-          - `mod_minerva` -- extract into Moodle `mod/` directory (activity module for course pages)
+          The sync plugin (`local_minerva`) is available at
+          [Edwinexd/moodle-local_minerva](https://github.com/Edwinexd/moodle-local_minerva)
+          and is also attached as a zip below. Extract into Moodle `local/` directory and run
+          the Moodle upgrade.
 
-          Then run the Moodle upgrade.
+          Chat integration uses LTI 1.3 -- no activity module plugin required.
 
           ## Setup
 
           1. Deploy the Minerva Docker image
-          2. Install both Moodle plugins and run the upgrade
+          2. Install the Moodle `local_minerva` plugin and run the upgrade
           3. Set the Minerva URL in Site Administration > Plugins > Minerva AI Assistant
           4. In the teacher course page, go to **API Keys** tab and create a key
           5. Link the Moodle course using the API key via Minerva settings in the course nav
-          6. Add the "Minerva AI Assistant" activity to the course page
+          6. Add Minerva as an LTI 1.3 External Tool in the course
           NOTES
 
       - name: Create GitHub Release
@@ -66,4 +65,3 @@ jobs:
           append_body: true
           files: |
             local_minerva-${{ steps.version.outputs.version }}.zip
-            mod_minerva-${{ steps.version.outputs.version }}.zip

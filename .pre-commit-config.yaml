@@ -14,7 +14,10 @@ repos:
     hooks:
       - id: ban-emdashes
         name: ban emdashes
-        entry: bash -c 'if grep -Pn "\xe2\x80\x94" "$@" --; then echo "Emdashes found! Use -- or a hyphen instead."; exit 1; fi'
+        # Uses perl for portability: BSD grep on macOS has no -P, and `bash -c '...' "$@"`
+        # drops the first arg into $0, so the original grep-based hook silently passed.
+        # Matches the em dash as raw UTF-8 bytes (0xE2 0x80 0x94) to avoid Perl encoding setup.
+        entry: 'perl -ne ''if (/\xe2\x80\x94/) { print STDERR "$ARGV:$.: $_"; $found = 1 } END { exit($found ? 1 : 0) }'''
         language: system
         types: [text]
         exclude: (\.lock|node_modules|target|dist|\.gen\.)

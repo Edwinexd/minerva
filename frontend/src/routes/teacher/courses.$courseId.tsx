@@ -17,6 +17,7 @@ const TABS = [
   { value: "invite", label: "Invite Links" },
   { value: "lti", label: "LTI" },
   { value: "api-keys", label: "API Keys" },
+  { value: "play-designations", label: "Play Designations" },
   { value: "rag", label: "RAG Debug" },
   { value: "usage", label: "Usage" },
 ] as const

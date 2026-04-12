@@ -112,6 +112,20 @@ export interface ApiKey {
   last_used_at: string | null
 }
 
+export interface PlayCourseCatalogEntry {
+  code: string
+  name: string
+  updated_at: string
+}
+
+export interface PlayDesignation {
+  id: string
+  designation: string
+  created_at: string
+  last_synced_at: string | null
+  last_error: string | null
+}
+
 export interface ApiKeyCreated {
   id: string
   name: string

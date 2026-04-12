@@ -23,6 +23,7 @@ import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/cours
 import { Route as TeacherCoursesCourseIdIndexRouteImport } from "./routes/teacher/courses.$courseId/index"
 import { Route as TeacherCoursesCourseIdUsageRouteImport } from "./routes/teacher/courses.$courseId/usage"
 import { Route as TeacherCoursesCourseIdRagRouteImport } from "./routes/teacher/courses.$courseId/rag"
+import { Route as TeacherCoursesCourseIdPlayDesignationsRouteImport } from "./routes/teacher/courses.$courseId/play-designations"
 import { Route as TeacherCoursesCourseIdMembersRouteImport } from "./routes/teacher/courses.$courseId/members"
 import { Route as TeacherCoursesCourseIdLtiRouteImport } from "./routes/teacher/courses.$courseId/lti"
 import { Route as TeacherCoursesCourseIdInviteRouteImport } from "./routes/teacher/courses.$courseId/invite"
@@ -105,6 +106,12 @@ const TeacherCoursesCourseIdRagRoute =
     path: "/rag",
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
+const TeacherCoursesCourseIdPlayDesignationsRoute =
+  TeacherCoursesCourseIdPlayDesignationsRouteImport.update({
+    id: "/play-designations",
+    path: "/play-designations",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
 const TeacherCoursesCourseIdMembersRoute =
   TeacherCoursesCourseIdMembersRouteImport.update({
     id: "/members",
@@ -167,6 +174,7 @@ export interface FileRoutesByFullPath {
   "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
   "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
   "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
+  "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
   "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
   "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
   "/teacher/courses/$courseId/": typeof TeacherCoursesCourseIdIndexRoute
@@ -188,6 +196,7 @@ export interface FileRoutesByTo {
   "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
   "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
   "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
+  "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
   "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
   "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdIndexRoute
@@ -212,6 +221,7 @@ export interface FileRoutesById {
   "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
   "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
   "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
+  "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
   "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
   "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
   "/teacher/courses/$courseId/": typeof TeacherCoursesCourseIdIndexRoute
@@ -237,6 +247,7 @@ export interface FileRouteTypes {
     | "/teacher/courses/$courseId/invite"
     | "/teacher/courses/$courseId/lti"
     | "/teacher/courses/$courseId/members"
+    | "/teacher/courses/$courseId/play-designations"
     | "/teacher/courses/$courseId/rag"
     | "/teacher/courses/$courseId/usage"
     | "/teacher/courses/$courseId/"
@@ -258,6 +269,7 @@ export interface FileRouteTypes {
     | "/teacher/courses/$courseId/invite"
     | "/teacher/courses/$courseId/lti"
     | "/teacher/courses/$courseId/members"
+    | "/teacher/courses/$courseId/play-designations"
     | "/teacher/courses/$courseId/rag"
     | "/teacher/courses/$courseId/usage"
     | "/teacher/courses/$courseId"
@@ -281,6 +293,7 @@ export interface FileRouteTypes {
     | "/teacher/courses/$courseId/invite"
     | "/teacher/courses/$courseId/lti"
     | "/teacher/courses/$courseId/members"
+    | "/teacher/courses/$courseId/play-designations"
     | "/teacher/courses/$courseId/rag"
     | "/teacher/courses/$courseId/usage"
     | "/teacher/courses/$courseId/"
@@ -397,6 +410,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof TeacherCoursesCourseIdRagRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
+    "/teacher/courses/$courseId/play-designations": {
+      id: "/teacher/courses/$courseId/play-designations"
+      path: "/play-designations"
+      fullPath: "/teacher/courses/$courseId/play-designations"
+      preLoaderRoute: typeof TeacherCoursesCourseIdPlayDesignationsRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
     "/teacher/courses/$courseId/members": {
       id: "/teacher/courses/$courseId/members"
       path: "/members"
@@ -471,6 +491,7 @@ interface TeacherCoursesCourseIdRouteChildren {
   TeacherCoursesCourseIdInviteRoute: typeof TeacherCoursesCourseIdInviteRoute
   TeacherCoursesCourseIdLtiRoute: typeof TeacherCoursesCourseIdLtiRoute
   TeacherCoursesCourseIdMembersRoute: typeof TeacherCoursesCourseIdMembersRoute
+  TeacherCoursesCourseIdPlayDesignationsRoute: typeof TeacherCoursesCourseIdPlayDesignationsRoute
   TeacherCoursesCourseIdRagRoute: typeof TeacherCoursesCourseIdRagRoute
   TeacherCoursesCourseIdUsageRoute: typeof TeacherCoursesCourseIdUsageRoute
   TeacherCoursesCourseIdIndexRoute: typeof TeacherCoursesCourseIdIndexRoute
@@ -486,6 +507,8 @@ const TeacherCoursesCourseIdRouteChildren: TeacherCoursesCourseIdRouteChildren =
     TeacherCoursesCourseIdInviteRoute: TeacherCoursesCourseIdInviteRoute,
     TeacherCoursesCourseIdLtiRoute: TeacherCoursesCourseIdLtiRoute,
     TeacherCoursesCourseIdMembersRoute: TeacherCoursesCourseIdMembersRoute,
+    TeacherCoursesCourseIdPlayDesignationsRoute:
+      TeacherCoursesCourseIdPlayDesignationsRoute,
     TeacherCoursesCourseIdRagRoute: TeacherCoursesCourseIdRagRoute,
     TeacherCoursesCourseIdUsageRoute: TeacherCoursesCourseIdUsageRoute,
     TeacherCoursesCourseIdIndexRoute: TeacherCoursesCourseIdIndexRoute,

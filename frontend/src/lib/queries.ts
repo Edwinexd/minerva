@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, LtiRegistration, LtiSetup, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -92,6 +92,18 @@ export const apiKeysQuery = (courseId: string) =>
     queryKey: ["courses", courseId, "api-keys"],
     queryFn: () => api.get<ApiKey[]>(`/courses/${courseId}/api-keys`),
   })
+
+export const playDesignationsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "play-designations"],
+    queryFn: () => api.get<PlayDesignation[]>(`/courses/${courseId}/play-designations`),
+  })
+
+export const playCourseCatalogQuery = queryOptions({
+  queryKey: ["play-courses-catalog"],
+  queryFn: () => api.get<PlayCourseCatalogEntry[]>(`/play-courses-catalog`),
+  staleTime: 5 * 60 * 1000,
+})
 
 export const ltiSetupQuery = (courseId: string) =>
   queryOptions({

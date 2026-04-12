@@ -6,7 +6,7 @@
 
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -21,6 +21,16 @@ pub fn router() -> Router<AppState> {
             "/documents/{document_id}/transcript",
             post(submit_transcript),
         )
+        .route("/play-designations", get(list_play_designations))
+        .route(
+            "/play-designations/{designation_id}/mark-synced",
+            post(mark_designation_synced),
+        )
+        .route(
+            "/courses/{course_id}/documents/url",
+            post(create_url_document),
+        )
+        .route("/play-courses", put(replace_play_course_catalog))
 }
 
 /// Authenticate using the global service API key (MINERVA_SERVICE_API_KEY).
@@ -177,4 +187,241 @@ async fn submit_transcript(
             "provide either 'text' or 'error'".to_string(),
         ))
     }
+}
+
+// -- Play designations (discovery) --
+
+#[derive(Serialize)]
+struct PlayDesignationServiceInfo {
+    id: Uuid,
+    course_id: Uuid,
+    designation: String,
+    last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// List all configured play.dsv.su.se designations across all courses.
+/// Used by the transcript pipeline to discover new presentations.
+async fn list_play_designations(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<PlayDesignationServiceInfo>>, AppError> {
+    authenticate_service(&state, &headers)?;
+
+    let rows = minerva_db::queries::play_designations::list_all(&state.db).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| PlayDesignationServiceInfo {
+                id: r.id,
+                course_id: r.course_id,
+                designation: r.designation,
+                last_synced_at: r.last_synced_at,
+            })
+            .collect(),
+    ))
+}
+
+#[derive(Deserialize)]
+struct MarkSyncedRequest {
+    /// Optional error message. If absent, sync is marked as successful.
+    error: Option<String>,
+}
+
+async fn mark_designation_synced(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(designation_id): Path<Uuid>,
+    Json(body): Json<MarkSyncedRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    authenticate_service(&state, &headers)?;
+
+    let existing = minerva_db::queries::play_designations::find_by_id(&state.db, designation_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if let Some(err) = &body.error {
+        minerva_db::queries::play_designations::mark_synced_error(&state.db, existing.id, err)
+            .await?;
+        Ok(Json(serde_json::json!({ "status": "error", "error": err })))
+    } else {
+        minerva_db::queries::play_designations::mark_synced_ok(&state.db, existing.id).await?;
+        Ok(Json(serde_json::json!({ "status": "ok" })))
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateUrlDocumentRequest {
+    /// URL to index (e.g. `https://play.dsv.su.se/presentation/{uuid}`).
+    url: String,
+    /// Human-readable filename (without `.url` suffix required).
+    filename: String,
+}
+
+#[derive(Serialize)]
+struct CreateUrlDocumentResponse {
+    id: Uuid,
+    course_id: Uuid,
+    filename: String,
+    status: String,
+    created: bool,
+}
+
+/// Sanitize a filename: strip path separators, disallow `..`, trim whitespace,
+/// and cap length. Ensures `.url` suffix.
+fn sanitize_url_filename(raw: &str) -> Result<String, AppError> {
+    let mut name: String = raw
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | '\0'))
+        .collect::<String>()
+        .trim()
+        .to_string();
+
+    if name.is_empty() || name == "." || name == ".." {
+        return Err(AppError::BadRequest("filename is empty".into()));
+    }
+
+    // Cap at 200 chars before the .url suffix.
+    if !name.ends_with(".url") {
+        if name.len() > 200 {
+            name.truncate(200);
+        }
+        name.push_str(".url");
+    } else if name.len() > 204 {
+        name.truncate(200);
+        name.push_str(".url");
+    }
+
+    Ok(name)
+}
+
+/// Idempotently create a URL document in a course.
+///
+/// If a `text/x-url` document already exists in the course whose stored URL
+/// matches, returns that document (created=false). Otherwise creates a new
+/// document with status='pending' which the worker will triage.
+async fn create_url_document(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<CreateUrlDocumentRequest>,
+) -> Result<Json<CreateUrlDocumentResponse>, AppError> {
+    authenticate_service(&state, &headers)?;
+
+    let url = body.url.trim().to_string();
+    if url.is_empty() || url.len() > 2048 {
+        return Err(AppError::BadRequest("url must be 1-2048 characters".into()));
+    }
+
+    let filename = sanitize_url_filename(&body.filename)?;
+
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    // Idempotency: look for an existing text/x-url document in this course
+    // whose on-disk URL matches.
+    let existing_docs =
+        minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+    for doc in &existing_docs {
+        if doc.mime_type != "text/x-url" {
+            continue;
+        }
+        let file_path = format!(
+            "{}/{}/{}.url",
+            state.config.docs_path, doc.course_id, doc.id
+        );
+        if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
+            if content.trim() == url {
+                return Ok(Json(CreateUrlDocumentResponse {
+                    id: doc.id,
+                    course_id: doc.course_id,
+                    filename: doc.filename.clone(),
+                    status: doc.status.clone(),
+                    created: false,
+                }));
+            }
+        }
+    }
+
+    // Create new URL document.
+    let doc_id = Uuid::new_v4();
+    let dir = format!("{}/{}", state.config.docs_path, course_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
+
+    let file_path = format!("{}/{}.url", dir, doc_id);
+    tokio::fs::write(&file_path, url.as_bytes())
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to write url file: {}", e)))?;
+
+    let size_bytes = url.len() as i64;
+    let row = minerva_db::queries::documents::insert(
+        &state.db,
+        doc_id,
+        course_id,
+        &filename,
+        "text/x-url",
+        size_bytes,
+        course.owner_id,
+    )
+    .await?;
+
+    tracing::info!(
+        "service created url document {} in course {} ({})",
+        row.id,
+        course_id,
+        url,
+    );
+
+    Ok(Json(CreateUrlDocumentResponse {
+        id: row.id,
+        course_id: row.course_id,
+        filename: row.filename,
+        status: row.status,
+        created: true,
+    }))
+}
+
+// -- Play course catalog --
+
+#[derive(Deserialize)]
+struct PlayCourseEntry {
+    code: String,
+    name: String,
+}
+
+/// Replace/upsert the cached catalog of play.dsv.su.se course designations.
+/// Pushed by the transcript pipeline at the start of each run.
+async fn replace_play_course_catalog(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Vec<PlayCourseEntry>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    authenticate_service(&state, &headers)?;
+
+    let entries: Vec<(String, String)> = body
+        .into_iter()
+        .filter_map(|e| {
+            let code = e.code.trim().to_string();
+            let name = e.name.trim().to_string();
+            if code.is_empty() || name.is_empty() {
+                None
+            } else {
+                Some((code, name))
+            }
+        })
+        .collect();
+
+    let n = entries.len();
+    let upserted =
+        minerva_db::queries::play_course_catalog::upsert_many(&state.db, &entries).await?;
+
+    tracing::info!(
+        "play catalog upsert: {} submitted, {} rows touched",
+        n,
+        upserted
+    );
+    Ok(Json(
+        serde_json::json!({ "submitted": n, "upserted": upserted }),
+    ))
 }

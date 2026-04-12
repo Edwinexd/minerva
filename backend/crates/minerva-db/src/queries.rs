@@ -3,6 +3,8 @@ pub mod conversations;
 pub mod courses;
 pub mod documents;
 pub mod lti;
+pub mod play_course_catalog;
+pub mod play_designations;
 pub mod signed_urls;
 pub mod usage;
 pub mod users;

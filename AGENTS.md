@@ -98,6 +98,17 @@ Indexes video transcripts from DSV Play into Minerva as searchable documents.
 
 **Manual trigger:** `gh workflow run transcripts.yml`
 
+**Play designation discovery:** Teachers can configure play.dsv.su.se course designation codes (e.g. `PROG1`) per Minerva course via the "Play Designations" tab. Each hourly run:
+1. **Catalog push** -- unions `/tag/Lecture` + `/tag/Föreläsning` via `PlayClient.get_courses_by_tag()` and uploads `[{code,name}, ...]` to `PUT /api/service/play-courses`. The frontend reads this via `GET /api/play-courses-catalog` to populate a `<datalist>` autocomplete; free-text entry is still accepted since the catalog isn't guaranteed complete.
+2. **Discovery** -- for each watched designation, `PlayClient.get_presentations()` returns the newest playlist (highest playlist_id = current term); each presentation is idempotently registered via `POST /api/service/courses/{id}/documents/url` (server dedups by URL content across existing `text/x-url` docs in the course).
+3. **Transcript fetch** -- existing phase: pending `awaiting_transcript` docs get VTT pulled and posted back.
+
+dsv-wrapper methods used: `get_courses_by_tag(tag)`, `get_presentations(designation)`, `get_transcript_text(uuid)`.
+
+## TODO
+
+- [ ] Add `snowflake-arctic-embed-m-v2.0` (768 dims, ~311 MB INT8) as a local embedding model once fastembed-rs PR #239 is merged -- multilingual (Swedish+English), replaces English-only models. Track: https://github.com/Anush008/fastembed-rs/pull/239
+
 ## Terraform
 
 Manages GitHub environment secrets for the `prod` environment. Generates `K8S_SECRETS` manifest from individual secret variables.

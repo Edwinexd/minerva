@@ -11,6 +11,7 @@ services:
       - QDRANT_URL=http://localhost:6334
       - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MINERVA_SERVICE_API_KEY=${MINERVA_SERVICE_API_KEY:-}
       - MINERVA_HMAC_SECRET=${MINERVA_HMAC_SECRET:-dev-secret-change-me}
       - MINERVA_DOCS_PATH=/data/documents
       - MINERVA_ADMINS=${MINERVA_ADMINS:-edsu8469}

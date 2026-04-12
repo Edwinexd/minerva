@@ -2,7 +2,7 @@ use axum::extract::{Extension, Multipart, Path, Query, State};
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use minerva_core::models::User;
-use qdrant_client::qdrant::ScrollPointsBuilder;
+use qdrant_client::qdrant::{DeletePointsBuilder, ScrollPointsBuilder};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -188,6 +188,31 @@ async fn delete_document(
         return Err(AppError::Forbidden);
     }
 
+    // Delete vectors from Qdrant first -- if this fails we can retry safely
+    // without leaving orphaned vectors behind.
+    let collection_name = format!("course_{}", course_id);
+    let collection_exists = state
+        .qdrant
+        .collection_exists(&collection_name)
+        .await
+        .unwrap_or(false);
+    if collection_exists {
+        let filter =
+            qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
+                "document_id",
+                doc_id.to_string(),
+            )]);
+        state
+            .qdrant
+            .delete_points(
+                DeletePointsBuilder::new(&collection_name)
+                    .points(filter)
+                    .wait(true),
+            )
+            .await
+            .map_err(|e| AppError::Internal(format!("qdrant delete failed: {}", e)))?;
+    }
+
     // Delete from DB
     minerva_db::queries::documents::delete(&state.db, doc_id).await?;
 
@@ -201,8 +226,6 @@ async fn delete_document(
             break;
         }
     }
-
-    // TODO: Also delete vectors from Qdrant for this document
 
     Ok(Json(serde_json::json!({ "deleted": true })))
 }

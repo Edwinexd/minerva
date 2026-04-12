@@ -168,6 +168,34 @@ export interface LtiRegistration {
   moodle_config: MoodleToolConfig
 }
 
+export interface SystemMetrics {
+  disk: {
+    path: string
+    total_bytes: number
+    free_bytes: number
+    used_bytes: number
+  } | null
+  database: {
+    size_bytes: number | null
+    table_counts: { name: string; rows: number }[]
+  }
+  documents: {
+    count: number
+    total_bytes: number
+    pending: number
+    failed: number
+  }
+  qdrant: {
+    reachable: boolean
+    collections: {
+      name: string
+      points_count: number | null
+      indexed_vectors_count: number | null
+      segments_count: number | null
+    }[]
+  }
+}
+
 export interface Document {
   id: string
   course_id: string

@@ -10,6 +10,7 @@ pub mod lti;
 mod play_designations;
 pub mod service;
 mod signed_urls;
+mod system;
 mod usage;
 
 use axum::extract::{Extension, State};
@@ -35,6 +36,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/courses/{course_id}", lti::course_router())
         .nest("/courses/{course_id}", usage::course_router())
         .nest("/admin", admin::router())
+        .nest("/admin", system::router())
         .merge(usage::admin_router())
         .merge(signed_urls::join_router())
         .route_layer(middleware::from_fn_with_state(state, auth_middleware));

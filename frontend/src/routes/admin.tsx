@@ -8,6 +8,7 @@ export const Route = createFileRoute("/admin")({
 const TABS = [
   { value: "usage", label: "Platform Usage" },
   { value: "users", label: "User Management" },
+  { value: "system", label: "System" },
 ] as const
 
 const VALID_TABS = new Set(TABS.map((t) => t.value))

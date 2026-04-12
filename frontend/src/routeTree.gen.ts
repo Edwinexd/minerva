@@ -17,6 +17,7 @@ import { Route as JoinTokenRouteImport } from "./routes/join/$token"
 import { Route as EmbedCourseIdRouteImport } from "./routes/embed/$courseId"
 import { Route as AdminUsersRouteImport } from "./routes/admin/users"
 import { Route as AdminUsageRouteImport } from "./routes/admin/usage"
+import { Route as AdminSystemRouteImport } from "./routes/admin/system"
 import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
 import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
 import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
@@ -70,6 +71,11 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
 const AdminUsageRoute = AdminUsageRouteImport.update({
   id: "/usage",
   path: "/usage",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSystemRoute = AdminSystemRouteImport.update({
+  id: "/system",
+  path: "/system",
   getParentRoute: () => AdminRoute,
 } as any)
 const CourseCourseIdIndexRoute = CourseCourseIdIndexRouteImport.update({
@@ -158,6 +164,7 @@ const TeacherCoursesCourseIdApiKeysRoute =
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/admin": typeof AdminRouteWithChildren
+  "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRoute
   "/embed/$courseId": typeof EmbedCourseIdRoute
@@ -181,6 +188,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRoute
   "/embed/$courseId": typeof EmbedCourseIdRoute
@@ -205,6 +213,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/admin": typeof AdminRouteWithChildren
+  "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRoute
   "/embed/$courseId": typeof EmbedCourseIdRoute
@@ -231,6 +240,7 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/admin"
+    | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
     | "/embed/$courseId"
@@ -254,6 +264,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
+    | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
     | "/embed/$courseId"
@@ -277,6 +288,7 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/admin"
+    | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
     | "/embed/$courseId"
@@ -366,6 +378,13 @@ declare module "@tanstack/react-router" {
       path: "/usage"
       fullPath: "/admin/usage"
       preLoaderRoute: typeof AdminUsageRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/admin/system": {
+      id: "/admin/system"
+      path: "/system"
+      fullPath: "/admin/system"
+      preLoaderRoute: typeof AdminSystemRouteImport
       parentRoute: typeof AdminRoute
     }
     "/course/$courseId/": {
@@ -470,12 +489,14 @@ declare module "@tanstack/react-router" {
 }
 
 interface AdminRouteChildren {
+  AdminSystemRoute: typeof AdminSystemRoute
   AdminUsageRoute: typeof AdminUsageRoute
   AdminUsersRoute: typeof AdminUsersRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminSystemRoute: AdminSystemRoute,
   AdminUsageRoute: AdminUsageRoute,
   AdminUsersRoute: AdminUsersRoute,
   AdminIndexRoute: AdminIndexRoute,

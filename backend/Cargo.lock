@@ -2337,6 +2337,7 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "jsonwebtoken",
+ "libc",
  "minerva-core",
  "minerva-db",
  "minerva-ingest",

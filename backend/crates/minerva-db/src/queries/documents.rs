@@ -98,7 +98,7 @@ pub async fn delete(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
 pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as::<_, DocumentRow>(
         r#"UPDATE documents
-        SET status = 'processing'
+        SET status = 'processing', processing_started_at = NOW()
         WHERE id IN (
             SELECT id FROM documents
             WHERE status = 'pending'
@@ -148,8 +148,34 @@ pub async fn replace_with_transcript(
 /// Used on startup for crash recovery: any document still marked 'processing'
 /// was interrupted by a server restart.
 pub async fn reset_stale_processing(db: &PgPool) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query("UPDATE documents SET status = 'pending' WHERE status = 'processing'")
-        .execute(db)
-        .await?;
+    let result = sqlx::query(
+        "UPDATE documents SET status = 'pending', processing_started_at = NULL WHERE status = 'processing'",
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Reset documents that have been stuck in 'processing' for longer than
+/// `min_age_seconds`. Run periodically so a silently-panicked or wedged
+/// processing task doesn't leave a document stuck until the next pod restart.
+///
+/// Documents being actively processed (started <= threshold ago) are left
+/// alone. The threshold should comfortably exceed the worst-case processing
+/// time for a single document.
+pub async fn reset_stale_processing_older_than(
+    db: &PgPool,
+    min_age_seconds: i64,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        r#"UPDATE documents
+        SET status = 'pending', processing_started_at = NULL
+        WHERE status = 'processing'
+          AND (processing_started_at IS NULL
+               OR processing_started_at < NOW() - make_interval(secs => $1))"#,
+    )
+    .bind(min_age_seconds as f64)
+    .execute(db)
+    .await?;
     Ok(result.rows_affected())
 }

@@ -6,6 +6,12 @@
 //!
 //! Concurrency is bounded by a semaphore so we never overwhelm the embedding
 //! API, Qdrant, or server memory when a teacher syncs a large course at once.
+//!
+//! Stuck-doc recovery has two tiers:
+//! * Startup: `reset_stale_processing` unconditionally resets anything left
+//!   in `processing` -- covers crashes/OOMs that skipped graceful shutdown.
+//! * Periodic sweep: `reset_stale_processing_older_than(STALE_THRESHOLD_SECS)`
+//!   handles docs wedged by a silent task panic inside a still-running pod.
 
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -15,12 +21,46 @@ use crate::state::AppState;
 /// How often the worker checks for new pending documents.
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How often the periodic sweeper runs.
+const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// A document whose `processing_started_at` is older than this is considered
+/// wedged and will be reset to `pending` by the sweeper. Must comfortably
+/// exceed any legitimate processing time (largest transcripts + model load).
+const STALE_THRESHOLD_SECS: i64 = 600;
+
 /// Start the background document-processing worker.
 ///
 /// On startup it resets any documents stuck in `processing` (crash recovery),
 /// then enters a loop that claims pending documents and processes them with
 /// bounded concurrency.
 pub fn start(state: AppState, max_concurrent: usize) {
+    // Periodic sweeper: rescue documents whose processing task died silently
+    // (e.g. panic inside the spawned task). Runs independently of the main
+    // poll loop so a wedged main loop can't block the safety net.
+    {
+        let db = state.db.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(SWEEP_INTERVAL).await;
+                match minerva_db::queries::documents::reset_stale_processing_older_than(
+                    &db,
+                    STALE_THRESHOLD_SECS,
+                )
+                .await
+                {
+                    Ok(0) => {}
+                    Ok(n) => tracing::warn!(
+                        "worker: sweeper reset {} document(s) wedged in 'processing' for > {}s",
+                        n,
+                        STALE_THRESHOLD_SECS,
+                    ),
+                    Err(e) => tracing::error!("worker: sweeper failed: {}", e),
+                }
+            }
+        });
+    }
+
     tokio::spawn(async move {
         // Crash recovery: any document left in 'processing' was interrupted.
         match minerva_db::queries::documents::reset_stale_processing(&state.db).await {
@@ -66,8 +106,13 @@ pub fn start(state: AppState, max_concurrent: usize) {
                 let fastembed = Arc::clone(&state.fastembed);
                 let openai_api_key = state.config.openai_api_key.clone();
                 let docs_path = state.config.docs_path.clone();
+                let doc_id = doc.id;
 
-                tokio::spawn(async move {
+                // Inner task does the work. Outer task awaits its JoinHandle
+                // so panics become explicit log lines + a 'failed' status,
+                // instead of silently wedging the document in 'processing'.
+                let inner_db = db.clone();
+                let inner = tokio::spawn(async move {
                     let _permit = permit; // held until this task completes
 
                     // Look up course to get embedding config.
@@ -174,6 +219,22 @@ pub fn start(state: AppState, max_concurrent: usize) {
                         Err(e) => {
                             tracing::error!("worker: document {} processing failed: {}", doc.id, e);
                             set_failed(&db, doc.id, &e).await;
+                        }
+                    }
+                });
+
+                // Supervisor: catch panics so we learn about them (and so the
+                // doc doesn't sit in 'processing' until the next pod restart).
+                tokio::spawn(async move {
+                    match inner.await {
+                        Ok(()) => {}
+                        Err(e) if e.is_panic() => {
+                            tracing::error!("worker: document {} task panicked: {:?}", doc_id, e,);
+                            set_failed(&inner_db, doc_id, "processing task panicked").await;
+                        }
+                        Err(e) => {
+                            tracing::error!("worker: document {} task cancelled: {}", doc_id, e,);
+                            set_failed(&inner_db, doc_id, "processing task cancelled").await;
                         }
                     }
                 });

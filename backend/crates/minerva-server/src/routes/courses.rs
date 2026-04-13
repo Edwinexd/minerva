@@ -34,6 +34,7 @@ struct UpdateCourseRequest {
     model: Option<String>,
     system_prompt: Option<String>,
     max_chunks: Option<i32>,
+    min_score: Option<f32>,
     strategy: Option<String>,
     embedding_provider: Option<String>,
     embedding_model: Option<String>,
@@ -51,6 +52,7 @@ struct CourseResponse {
     model: String,
     system_prompt: Option<String>,
     max_chunks: i32,
+    min_score: f32,
     strategy: String,
     embedding_provider: String,
     embedding_model: String,
@@ -72,6 +74,7 @@ impl From<minerva_db::queries::courses::CourseRow> for CourseResponse {
             model: row.model,
             system_prompt: row.system_prompt,
             max_chunks: row.max_chunks,
+            min_score: row.min_score,
             strategy: row.strategy,
             embedding_provider: row.embedding_provider,
             embedding_model: row.embedding_model,
@@ -156,6 +159,16 @@ async fn update_course(
         return Err(AppError::Forbidden);
     }
 
+    // Threshold is a magnitude (we filter on abs(score)), so a negative
+    // value would never match. Reject it before it hits the CHECK constraint.
+    if let Some(score) = body.min_score {
+        if !(0.0..=1.0).contains(&score) || score.is_nan() {
+            return Err(AppError::BadRequest(
+                "min_score must be between 0.0 and 1.0".into(),
+            ));
+        }
+    }
+
     // Validate embedding_provider
     if let Some(ref provider) = body.embedding_provider {
         if !minerva_ingest::pipeline::VALID_EMBEDDING_PROVIDERS.contains(&provider.as_str()) {
@@ -211,6 +224,7 @@ async fn update_course(
         model: body.model,
         system_prompt: body.system_prompt,
         max_chunks: body.max_chunks,
+        min_score: body.min_score,
         strategy: body.strategy,
         embedding_provider: body.embedding_provider,
         embedding_model,

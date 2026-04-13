@@ -23,6 +23,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &collection_name,
         &ctx.user_content,
         ctx.max_chunks,
+        ctx.min_score,
         &ctx.embedding_provider,
         &ctx.embedding_model,
     )

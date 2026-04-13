@@ -16,6 +16,7 @@ pub struct GenerationContext {
     pub model: String,
     pub temperature: f64,
     pub max_chunks: i32,
+    pub min_score: f32,
     pub course_id: Uuid,
     pub conversation_id: Uuid,
     pub user_id: Uuid,

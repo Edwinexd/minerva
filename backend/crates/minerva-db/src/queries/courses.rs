@@ -12,6 +12,7 @@ pub struct CourseRow {
     pub model: String,
     pub system_prompt: Option<String>,
     pub max_chunks: i32,
+    pub min_score: f32,
     pub strategy: String,
     pub embedding_provider: String,
     pub embedding_model: String,
@@ -35,6 +36,7 @@ pub struct UpdateCourse {
     pub model: Option<String>,
     pub system_prompt: Option<String>,
     pub max_chunks: Option<i32>,
+    pub min_score: Option<f32>,
     pub strategy: Option<String>,
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
@@ -45,7 +47,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
     sqlx::query_as::<_, CourseRow>(
         r#"INSERT INTO courses (id, name, description, owner_id)
         VALUES ($1, $2, $3, $4)
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at"#,
     )
     .bind(id)
     .bind(&input.name)
@@ -57,7 +59,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
 
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
     )
     .bind(id)
     .fetch_optional(db)
@@ -66,7 +68,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx
 
 pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
     )
     .bind(owner_id)
     .fetch_all(db)
@@ -88,7 +90,7 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>
 
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as::<_, CourseRow>(
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",
     )
     .fetch_all(db)
     .await
@@ -112,9 +114,10 @@ pub async fn update(
             daily_token_limit = COALESCE($10, daily_token_limit),
             embedding_provider = COALESCE($11, embedding_provider),
             embedding_model = COALESCE($12, embedding_model),
+            min_score = COALESCE($13, min_score),
             updated_at = NOW()
         WHERE id = $1 AND active = true
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at"#,
     )
     .bind(id)
     .bind(&input.name)
@@ -128,6 +131,7 @@ pub async fn update(
     .bind(input.daily_token_limit)
     .bind(&input.embedding_provider)
     .bind(&input.embedding_model)
+    .bind(input.min_score)
     .fetch_optional(db)
     .await
 }

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
-import { courseDocumentsQuery } from "@/lib/queries"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { courseDocumentsQuery, courseQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -13,7 +13,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Slider } from "@/components/ui/slider"
+import { Label } from "@/components/ui/label"
 import { useState } from "react"
+import type { Course } from "@/lib/types"
 
 export const Route = createFileRoute("/teacher/courses/$courseId/rag")({
   component: RagPage,
@@ -21,20 +24,47 @@ export const Route = createFileRoute("/teacher/courses/$courseId/rag")({
 
 function RagPage() {
   const { courseId } = Route.useParams()
+  const { data: course } = useQuery(courseQuery(courseId))
   return (
     <div className="space-y-4">
-      <RagDebugPanel courseId={courseId} />
+      <RagDebugPanel courseId={courseId} course={course} />
       <ChunkBrowser courseId={courseId} />
     </div>
   )
 }
 
-function RagDebugPanel({ courseId }: { courseId: string }) {
+function RagDebugPanel({
+  courseId,
+  course,
+}: {
+  courseId: string
+  course?: Course
+}) {
+  const queryClient = useQueryClient()
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<
     { score: number; text: string; filename: string; chunk_index: number }[]
   >([])
   const [searching, setSearching] = useState(false)
+  // Local preview threshold; defaults to the saved course value but can be
+  // dragged around to see what cutoff WOULD do without saving. "Save"
+  // persists the value back to the course config.
+  const [previewThreshold, setPreviewThreshold] = useState<number | null>(null)
+  const effectiveThreshold = previewThreshold ?? course?.min_score ?? 0
+  const dirty =
+    course != null &&
+    previewThreshold != null &&
+    Math.abs(previewThreshold - course.min_score) > 1e-6
+
+  const saveMutation = useMutation({
+    mutationFn: (min_score: number) =>
+      api.put<Course>(`/courses/${courseId}`, { min_score }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["courses", courseId] })
+      queryClient.invalidateQueries({ queryKey: ["courses"] })
+      setPreviewThreshold(null)
+    },
+  })
 
   const doSearch = async () => {
     if (!query.trim()) return
@@ -51,13 +81,15 @@ function RagDebugPanel({ courseId }: { courseId: string }) {
     }
   }
 
+  const includedCount = results.filter((r) => r.score >= effectiveThreshold).length
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>RAG Search</CardTitle>
         <CardDescription>
-          Test semantic search against your course documents. See what chunks
-          the RAG engine would retrieve for a given query.
+          Test semantic search against your course documents. Drag the
+          threshold to preview which chunks would be sent to the model.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -79,22 +111,96 @@ function RagDebugPanel({ courseId }: { courseId: string }) {
           </Button>
         </form>
 
+        {course && (
+          <div className="space-y-2 rounded border p-3 bg-muted/30">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-sm">
+                Min similarity threshold:{" "}
+                <span className="font-mono">{effectiveThreshold.toFixed(2)}</span>
+                {dirty && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    (preview, saved value is {course.min_score.toFixed(2)})
+                  </span>
+                )}
+              </Label>
+              {results.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {includedCount} of {results.length} chunks would be included
+                </span>
+              )}
+            </div>
+            <Slider
+              value={[effectiveThreshold]}
+              onValueChange={(v) =>
+                setPreviewThreshold(Array.isArray(v) ? v[0] : v)
+              }
+              min={0}
+              max={1}
+              step={0.01}
+            />
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                disabled={!dirty || saveMutation.isPending}
+                onClick={() => {
+                  if (previewThreshold != null) saveMutation.mutate(previewThreshold)
+                }}
+              >
+                {saveMutation.isPending ? "Saving..." : "Save threshold"}
+              </Button>
+              {dirty && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPreviewThreshold(null)}
+                  disabled={saveMutation.isPending}
+                >
+                  Reset
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
         {results.length > 0 && (
           <div className="space-y-3">
-            {results.map((r, i) => (
-              <div key={i} className="border rounded p-3 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{r.filename}</span>
-                  <Badge variant={r.score > 0.7 ? "default" : r.score > 0.5 ? "secondary" : "outline"}>
-                    {r.score.toFixed(3)}
-                  </Badge>
+            {results.map((r, i) => {
+              const included = r.score >= effectiveThreshold
+              return (
+                <div
+                  key={i}
+                  className={`border rounded p-3 space-y-1 ${
+                    included ? "" : "opacity-50 border-dashed"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium truncate">{r.filename}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge
+                        variant={
+                          included
+                            ? r.score > 0.7
+                              ? "default"
+                              : "secondary"
+                            : "outline"
+                        }
+                      >
+                        {r.score.toFixed(3)}
+                      </Badge>
+                      <Badge variant={included ? "default" : "outline"}>
+                        {included ? "included" : "excluded"}
+                      </Badge>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Chunk #{r.chunk_index}
+                  </p>
+                  <p className="text-sm whitespace-pre-wrap line-clamp-4">{r.text}</p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Chunk #{r.chunk_index}
-                </p>
-                <p className="text-sm whitespace-pre-wrap line-clamp-4">{r.text}</p>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </CardContent>

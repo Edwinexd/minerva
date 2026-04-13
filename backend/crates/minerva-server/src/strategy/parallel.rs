@@ -29,6 +29,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         let qdrant = Arc::clone(&ctx.qdrant);
         let query = ctx.user_content.clone();
         let max_chunks = ctx.max_chunks;
+        let min_score = ctx.min_score;
         let coll = collection_name.clone();
         let emb_provider = ctx.embedding_provider.clone();
         let emb_model = ctx.embedding_model.clone();
@@ -42,6 +43,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 &coll,
                 &query,
                 max_chunks,
+                min_score,
                 &emb_provider,
                 &emb_model,
             )

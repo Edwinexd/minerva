@@ -649,6 +649,7 @@ async fn send_message(
         model: course.model,
         temperature: course.temperature,
         max_chunks: course.max_chunks,
+        min_score: course.min_score,
         course_id,
         conversation_id: cid,
         user_id: conv.user_id,

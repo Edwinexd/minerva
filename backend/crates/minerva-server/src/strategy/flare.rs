@@ -38,6 +38,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &collection_name,
         &ctx.user_content,
         ctx.max_chunks,
+        ctx.min_score,
         &ctx.embedding_provider,
         &ctx.embedding_model,
     )
@@ -136,6 +137,10 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             );
 
             // Use the low-confidence sentence as a retrieval query
+            // Mid-stream FLARE retrieval keeps its own paper-derived floor
+            // (SIMILARITY_THRESHOLD) but tightens to the course's configured
+            // min_score when the teacher has set a stricter value.
+            let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
             let new_chunks = flare_retrieve(
                 &http_client,
                 &ctx.openai_api_key,
@@ -144,6 +149,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 &collection_name,
                 sentence,
                 ctx.max_chunks,
+                flare_threshold,
                 &ctx.embedding_provider,
                 &ctx.embedding_model,
             )
@@ -414,6 +420,7 @@ async fn flare_retrieve(
     collection_name: &str,
     query: &str,
     max_chunks: i32,
+    score_threshold: f32,
     embedding_provider: &str,
     embedding_model: &str,
 ) -> Vec<RagChunk> {
@@ -425,7 +432,7 @@ async fn flare_retrieve(
         collection_name,
         query,
         max_chunks as u64,
-        Some(SIMILARITY_THRESHOLD),
+        Some(score_threshold),
         embedding_provider,
         embedding_model,
     )

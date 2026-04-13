@@ -47,6 +47,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [model, setModel] = useState(course.model)
   const [systemPrompt, setSystemPrompt] = useState(course.system_prompt || "")
   const [maxChunks, setMaxChunks] = useState(course.max_chunks)
+  const [minScore, setMinScore] = useState(course.min_score)
   const [strategy, setStrategy] = useState(course.strategy)
   const [embeddingProvider, setEmbeddingProvider] = useState(course.embedding_provider)
   const [embeddingModel, setEmbeddingModel] = useState(course.embedding_model)
@@ -81,6 +82,7 @@ function CourseConfigForm({ course }: { course: Course }) {
               model,
               system_prompt: systemPrompt || null,
               max_chunks: maxChunks,
+              min_score: minScore,
               strategy,
               embedding_provider: embeddingProvider,
               embedding_model: embeddingModel,
@@ -239,6 +241,22 @@ function CourseConfigForm({ course }: { course: Course }) {
               min={1}
               max={50}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Minimum Similarity Score: {minScore.toFixed(2)}</Label>
+            <Slider
+              value={[minScore]}
+              onValueChange={(v) => setMinScore(Array.isArray(v) ? v[0] : v)}
+              min={0}
+              max={1}
+              step={0.01}
+            />
+            <p className="text-xs text-muted-foreground">
+              Chunks scoring below this threshold are dropped before being sent
+              to the model. 0 disables the filter (top-K only). Use the RAG tab
+              to preview which chunks pass for a sample question.
+            </p>
           </div>
 
           <Separator />

@@ -1,0 +1,17 @@
+# Build artifacts -- the big offender. backend/target is multi-GB after a
+# local cargo build and was being shipped into the build context on every
+# COPY, blowing up Docker build time even though the multi-stage build
+# never reads it.
+backend/target
+frontend/node_modules
+frontend/dist
+
+# Not needed inside the image
+.git
+.github
+venv
+.venv
+**/__pycache__
+**/.DS_Store
+**/.env
+**/.env.local

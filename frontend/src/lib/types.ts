@@ -16,6 +16,7 @@ export interface Course {
   model: string
   system_prompt: string | null
   max_chunks: number
+  min_score: number
   strategy: string
   embedding_provider: string
   embedding_model: string

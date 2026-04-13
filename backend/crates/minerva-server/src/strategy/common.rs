@@ -248,6 +248,10 @@ pub fn build_chat_messages(
 
 /// Perform RAG lookup: search Qdrant, return structured chunks.
 /// Dispatches to OpenAI or FastEmbed embeddings based on provider.
+///
+/// `min_score` is forwarded to Qdrant's `score_threshold` so filtering
+/// happens server-side (no point dragging filtered-out vectors over the
+/// wire). 0.0 disables the filter.
 #[allow(clippy::too_many_arguments)]
 pub async fn rag_lookup(
     client: &reqwest::Client,
@@ -257,9 +261,15 @@ pub async fn rag_lookup(
     collection_name: &str,
     query: &str,
     max_chunks: i32,
+    min_score: f32,
     embedding_provider: &str,
     embedding_model: &str,
 ) -> Vec<RagChunk> {
+    let threshold = if min_score > 0.0 {
+        Some(min_score)
+    } else {
+        None
+    };
     match embedding_search(
         client,
         openai_key,
@@ -268,7 +278,7 @@ pub async fn rag_lookup(
         collection_name,
         query,
         max_chunks as u64,
-        None,
+        threshold,
         embedding_provider,
         embedding_model,
     )

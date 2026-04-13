@@ -37,6 +37,10 @@ pub fn router() -> Router<AppState> {
             "/conversations/{cid}/notes/{note_id}",
             put(update_note).delete(delete_note),
         )
+        .route(
+            "/conversations/{cid}/messages/{message_id}/feedback",
+            put(set_feedback),
+        )
 }
 
 #[derive(Serialize)]
@@ -88,9 +92,24 @@ struct TeacherNoteResponse {
 }
 
 #[derive(Serialize)]
+struct MessageFeedbackResponse {
+    id: Uuid,
+    message_id: Uuid,
+    user_id: Uuid,
+    rating: String,
+    category: Option<String>,
+    comment: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+    user_eppn: Option<String>,
+    user_display_name: Option<String>,
+}
+
+#[derive(Serialize)]
 struct ConversationDetailResponse {
     messages: Vec<MessageResponse>,
     notes: Vec<TeacherNoteResponse>,
+    feedback: Vec<MessageFeedbackResponse>,
 }
 
 async fn list_conversations(
@@ -509,6 +528,37 @@ async fn get_conversation(
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
     let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;
+    let feedback_rows =
+        minerva_db::queries::message_feedback::list_for_conversation(&state.db, cid).await?;
+
+    // Hide eppn/display_name from non-teachers viewing other students' feedback
+    // on a pinned conversation; the conversation owner sees their own anyway.
+    let feedback = feedback_rows
+        .into_iter()
+        .map(|f| {
+            let is_own = f.user_id == user.id;
+            MessageFeedbackResponse {
+                id: f.id,
+                message_id: f.message_id,
+                user_id: f.user_id,
+                rating: f.rating,
+                category: f.category,
+                comment: f.comment,
+                created_at: f.created_at,
+                updated_at: f.updated_at,
+                user_eppn: if is_teacher || is_own {
+                    f.user_eppn
+                } else {
+                    None
+                },
+                user_display_name: if is_teacher || is_own {
+                    f.user_display_name
+                } else {
+                    None
+                },
+            }
+        })
+        .collect();
 
     Ok(Json(ConversationDetailResponse {
         messages: messages
@@ -537,6 +587,7 @@ async fn get_conversation(
                 updated_at: n.updated_at,
             })
             .collect(),
+        feedback,
     }))
 }
 
@@ -779,6 +830,73 @@ async fn delete_note(
 
     let deleted = minerva_db::queries::conversations::delete_note(&state.db, note_id).await?;
     Ok(Json(serde_json::json!({ "deleted": deleted })))
+}
+
+// Message feedback (thumbs up / thumbs down)
+
+#[derive(Deserialize)]
+struct SetFeedbackRequest {
+    rating: String,
+    category: Option<String>,
+    comment: Option<String>,
+}
+
+async fn set_feedback(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, cid, message_id)): Path<(Uuid, Uuid, Uuid)>,
+    Json(body): Json<SetFeedbackRequest>,
+) -> Result<Json<MessageFeedbackResponse>, AppError> {
+    verify_course_access(&state, course_id, user.id).await?;
+
+    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if conv.course_id != course_id || conv.user_id != user.id {
+        return Err(AppError::Forbidden);
+    }
+
+    if body.rating != "up" && body.rating != "down" {
+        return Err(AppError::BadRequest("rating must be 'up' or 'down'".into()));
+    }
+
+    // Ensure message belongs to this conversation and is an assistant message.
+    let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
+    let msg = messages
+        .iter()
+        .find(|m| m.id == message_id)
+        .ok_or(AppError::NotFound)?;
+    if msg.role != "assistant" {
+        return Err(AppError::BadRequest(
+            "feedback only applies to assistant messages".into(),
+        ));
+    }
+
+    let category = body.category.as_deref().filter(|s| !s.is_empty());
+    let comment = body.comment.as_deref().filter(|s| !s.is_empty());
+
+    let row = minerva_db::queries::message_feedback::upsert(
+        &state.db,
+        message_id,
+        user.id,
+        &body.rating,
+        category,
+        comment,
+    )
+    .await?;
+
+    Ok(Json(MessageFeedbackResponse {
+        id: row.id,
+        message_id: row.message_id,
+        user_id: row.user_id,
+        rating: row.rating,
+        category: row.category,
+        comment: row.comment,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        user_eppn: Some(user.eppn.clone()),
+        user_display_name: user.display_name.clone(),
+    }))
 }
 
 // Access helpers

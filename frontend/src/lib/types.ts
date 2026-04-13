@@ -83,6 +83,29 @@ export interface TeacherNote {
 export interface ConversationDetail {
   messages: Message[]
   notes: TeacherNote[]
+  feedback: MessageFeedback[]
+}
+
+export const FEEDBACK_CATEGORIES = [
+  { value: "incorrect", label: "Incorrect or misleading" },
+  { value: "off-topic", label: "Off-topic / not about the course" },
+  { value: "incomplete", label: "Incomplete answer" },
+  { value: "unclear", label: "Hard to understand" },
+  { value: "harmful", label: "Harmful or inappropriate" },
+  { value: "other", label: "Other" },
+] as const
+
+export interface MessageFeedback {
+  id: string
+  message_id: string
+  user_id: string
+  rating: "up" | "down"
+  category: string | null
+  comment: string | null
+  created_at: string
+  updated_at: string
+  user_eppn: string | null
+  user_display_name: string | null
 }
 
 export interface Message {

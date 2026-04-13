@@ -108,6 +108,7 @@ dsv-wrapper methods used: `get_courses_by_tag(tag)`, `get_presentations(designat
 ## TODO
 
 - [ ] Add `snowflake-arctic-embed-m-v2.0` (768 dims, ~311 MB INT8) as a local embedding model once fastembed-rs PR #239 is merged -- multilingual (Swedish+English), replaces English-only models. Track: https://github.com/Anush008/fastembed-rs/pull/239
+- [ ] Fix the 42 pre-existing `react-refresh/only-export-components` lint errors across the route files in `frontend/src/routes/`. Pattern: every TanStack Router file-based route exports a non-component `Route` const alongside its inline page component, which trips the rule. Fix by moving the page component into a sibling file (e.g. `frontend/src/components/<area>/<page>.tsx`) and having the route file only do `createFileRoute(...)({ component: () => <Page ... /> })`. See `frontend/src/routes/course/$courseId/$conversationId.tsx` + `frontend/src/components/chat/chat-page.tsx` for the template.
 
 ## Terraform
 

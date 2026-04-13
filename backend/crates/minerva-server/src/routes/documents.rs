@@ -143,6 +143,7 @@ async fn upload_document(
         &content_type,
         size_bytes,
         user.id,
+        None,
     )
     .await?;
 

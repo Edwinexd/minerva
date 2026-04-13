@@ -295,9 +295,11 @@ fn sanitize_url_filename(raw: &str) -> Result<String, AppError> {
 
 /// Idempotently create a URL document in a course.
 ///
-/// If a `text/x-url` document already exists in the course whose stored URL
-/// matches, returns that document (created=false). Otherwise creates a new
-/// document with status='pending' which the worker will triage.
+/// Dedup key is the `source_url` column (enforced atomically by a partial
+/// unique index on `(course_id, source_url)`). If a document with the same
+/// origin URL already exists -- regardless of its current status or mime_type
+/// (a successful transcript fetch rewrites mime_type to text/plain) -- return
+/// it with `created=false`.
 async fn create_url_document(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -317,29 +319,18 @@ async fn create_url_document(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Idempotency: look for an existing text/x-url document in this course
-    // whose on-disk URL matches.
-    let existing_docs =
-        minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
-    for doc in &existing_docs {
-        if doc.mime_type != "text/x-url" {
-            continue;
-        }
-        let file_path = format!(
-            "{}/{}/{}.url",
-            state.config.docs_path, doc.course_id, doc.id
-        );
-        if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
-            if content.trim() == url {
-                return Ok(Json(CreateUrlDocumentResponse {
-                    id: doc.id,
-                    course_id: doc.course_id,
-                    filename: doc.filename.clone(),
-                    status: doc.status.clone(),
-                    created: false,
-                }));
-            }
-        }
+    // Fast path: already tracked.
+    if let Some(doc) =
+        minerva_db::queries::documents::find_by_course_source_url(&state.db, course_id, &url)
+            .await?
+    {
+        return Ok(Json(CreateUrlDocumentResponse {
+            id: doc.id,
+            course_id: doc.course_id,
+            filename: doc.filename,
+            status: doc.status,
+            created: false,
+        }));
     }
 
     // Create new URL document.
@@ -355,7 +346,7 @@ async fn create_url_document(
         .map_err(|e| AppError::Internal(format!("failed to write url file: {}", e)))?;
 
     let size_bytes = url.len() as i64;
-    let row = minerva_db::queries::documents::insert(
+    let insert_result = minerva_db::queries::documents::insert(
         &state.db,
         doc_id,
         course_id,
@@ -363,8 +354,35 @@ async fn create_url_document(
         "text/x-url",
         size_bytes,
         course.owner_id,
+        Some(&url),
     )
-    .await?;
+    .await;
+
+    let row = match insert_result {
+        Ok(row) => row,
+        Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+            // Concurrent creator won the race. Clean up our orphan file and
+            // return the winner.
+            let _ = tokio::fs::remove_file(&file_path).await;
+            let existing = minerva_db::queries::documents::find_by_course_source_url(
+                &state.db, course_id, &url,
+            )
+            .await?
+            .ok_or_else(|| {
+                AppError::Internal(
+                    "unique violation on source_url but no matching row found".into(),
+                )
+            })?;
+            return Ok(Json(CreateUrlDocumentResponse {
+                id: existing.id,
+                course_id: existing.course_id,
+                filename: existing.filename,
+                status: existing.status,
+                created: false,
+            }));
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     tracing::info!(
         "service created url document {} in course {} ({})",

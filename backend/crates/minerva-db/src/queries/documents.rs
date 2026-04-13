@@ -15,8 +15,14 @@ pub struct DocumentRow {
     pub displayable: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub processed_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Origin URL for URL-sourced documents (preserved across the
+    /// awaiting_transcript -> text/plain transition so dedup stays correct).
+    pub source_url: Option<String>,
 }
 
+const DOCUMENT_COLUMNS: &str = "id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url";
+
+#[allow(clippy::too_many_arguments)]
 pub async fn insert(
     db: &PgPool,
     id: Uuid,
@@ -25,11 +31,14 @@ pub async fn insert(
     mime_type: &str,
     size_bytes: i64,
     uploaded_by: Uuid,
+    source_url: Option<&str>,
 ) -> Result<DocumentRow, sqlx::Error> {
     sqlx::query_as::<_, DocumentRow>(
-        r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at"#,
+        &format!(
+            r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING {DOCUMENT_COLUMNS}"#,
+        ),
     )
     .bind(id)
     .bind(course_id)
@@ -37,24 +46,41 @@ pub async fn insert(
     .bind(mime_type)
     .bind(size_bytes)
     .bind(uploaded_by)
+    .bind(source_url)
     .fetch_one(db)
     .await
 }
 
 pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<DocumentRow>, sqlx::Error> {
-    sqlx::query_as::<_, DocumentRow>(
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
-    )
+    sqlx::query_as::<_, DocumentRow>(&format!(
+        "SELECT {DOCUMENT_COLUMNS} FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
+    ))
     .bind(course_id)
     .fetch_all(db)
     .await
 }
 
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<DocumentRow>, sqlx::Error> {
-    sqlx::query_as::<_, DocumentRow>(
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at FROM documents WHERE id = $1",
-    )
+    sqlx::query_as::<_, DocumentRow>(&format!(
+        "SELECT {DOCUMENT_COLUMNS} FROM documents WHERE id = $1",
+    ))
     .bind(id)
+    .fetch_optional(db)
+    .await
+}
+
+/// Look up a document in a course by its origin URL. Used for idempotency
+/// in the URL-document creation flow.
+pub async fn find_by_course_source_url(
+    db: &PgPool,
+    course_id: Uuid,
+    source_url: &str,
+) -> Result<Option<DocumentRow>, sqlx::Error> {
+    sqlx::query_as::<_, DocumentRow>(&format!(
+        "SELECT {DOCUMENT_COLUMNS} FROM documents WHERE course_id = $1 AND source_url = $2",
+    ))
+    .bind(course_id)
+    .bind(source_url)
     .fetch_optional(db)
     .await
 }
@@ -96,7 +122,7 @@ pub async fn delete(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
 /// Atomically claim up to `limit` pending documents for processing.
 /// Uses `FOR UPDATE SKIP LOCKED` so multiple workers won't grab the same row.
 pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, sqlx::Error> {
-    sqlx::query_as::<_, DocumentRow>(
+    sqlx::query_as::<_, DocumentRow>(&format!(
         r#"UPDATE documents
         SET status = 'processing', processing_started_at = NOW()
         WHERE id IN (
@@ -106,8 +132,8 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at"#,
-    )
+        RETURNING {DOCUMENT_COLUMNS}"#,
+    ))
     .bind(limit)
     .fetch_all(db)
     .await
@@ -116,9 +142,9 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
 /// List documents awaiting external transcript processing.
 /// These are play.dsv.su.se URL documents that the worker has triaged.
 pub async fn list_awaiting_transcripts(db: &PgPool) -> Result<Vec<DocumentRow>, sqlx::Error> {
-    sqlx::query_as::<_, DocumentRow>(
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
-    )
+    sqlx::query_as::<_, DocumentRow>(&format!(
+        "SELECT {DOCUMENT_COLUMNS} FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
+    ))
     .fetch_all(db)
     .await
 }

@@ -328,6 +328,7 @@ async fn upload_document(
         &content_type,
         size_bytes,
         course.owner_id,
+        None,
     )
     .await?;
 

@@ -2,6 +2,7 @@ pub mod api_keys;
 pub mod conversations;
 pub mod courses;
 pub mod documents;
+pub mod external_auth;
 pub mod lti;
 pub mod message_feedback;
 pub mod play_course_catalog;

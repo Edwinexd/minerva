@@ -53,6 +53,29 @@ pub async fn auth_middleware(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    // External-auth users carry the `ext:` prefix and a JTI header (set by
+    // Apache mod_lua after HMAC validation). Apache already verified the
+    // signature; we additionally enforce per-invite revocation via the DB so
+    // an admin can kill a single token without rotating the shared secret.
+    if eppn.starts_with("ext:") {
+        let jti = headers
+            .get("X-Minerva-Ext-Jti")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+            .ok_or(AppError::Unauthorized)?;
+        let invite = minerva_db::queries::external_auth::find_by_jti(&state.db, jti)
+            .await?
+            .ok_or(AppError::Unauthorized)?;
+        if invite.revoked_at.is_some() || chrono::Utc::now() > invite.expires_at {
+            return Err(AppError::Unauthorized);
+        }
+        if invite.eppn != eppn {
+            // JTI/eppn mismatch -- shouldn't happen unless the cookie was
+            // forged with a stolen secret. Reject defensively.
+            return Err(AppError::Unauthorized);
+        }
+    }
+
     let user = upsert_user(&state, &eppn, display_name.as_deref()).await?;
 
     if user.suspended {

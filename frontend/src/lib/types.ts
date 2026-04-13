@@ -192,6 +192,22 @@ export interface LtiRegistration {
   moodle_config: MoodleToolConfig
 }
 
+export interface ExternalAuthInvite {
+  id: string
+  jti: string
+  eppn: string
+  display_name: string | null
+  created_at: string
+  expires_at: string
+  revoked_at: string | null
+}
+
+export interface ExternalAuthInviteCreated extends ExternalAuthInvite {
+  /// Single-use callback URL. Only returned at creation; the raw token cannot
+  /// be retrieved later -- if the admin loses it, revoke and re-mint.
+  url: string
+}
+
 export interface SystemMetrics {
   disk: {
     path: string

@@ -4,6 +4,7 @@ mod chat;
 mod courses;
 pub(crate) mod documents;
 pub mod embed;
+mod external_auth;
 mod health;
 pub mod integration;
 pub mod lti;
@@ -36,6 +37,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/courses/{course_id}", lti::course_router())
         .nest("/courses/{course_id}", usage::course_router())
         .nest("/admin", admin::router())
+        .nest("/admin", external_auth::admin_router())
         .nest("/admin", system::router())
         .merge(usage::admin_router())
         .merge(signed_urls::join_router())
@@ -49,6 +51,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/integration", integration::router())
         .nest("/service", service::router())
         .nest("/embed", embed::router())
+        .merge(external_auth::public_router())
         .merge(authed)
 }
 

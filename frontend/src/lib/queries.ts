@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -126,6 +126,11 @@ export const adminUsersQuery = queryOptions({
 export const adminUsageQuery = queryOptions({
   queryKey: ["admin", "usage"],
   queryFn: () => api.get<UsageRecord[]>("/usage"),
+})
+
+export const externalAuthInvitesQuery = queryOptions({
+  queryKey: ["admin", "external-invites"],
+  queryFn: () => api.get<ExternalAuthInvite[]>("/admin/external-invites"),
 })
 
 export const adminSystemMetricsQuery = queryOptions({

@@ -105,6 +105,54 @@ Indexes video transcripts from DSV Play into Minerva as searchable documents.
 
 dsv-wrapper methods used: `get_courses_by_tag(tag)`, `get_presentations(designation)`, `get_transcript_text(uuid)`.
 
+## External-Auth Invites (non-Shibboleth users)
+
+Lets admins grant time-limited access to people without SU/DSV Shibboleth
+accounts (e.g. external collaborators).
+
+**Flow:**
+1. Admin opens `/admin/external-invites`, mints an invite (eppn + display
+   name + days, max 60). Backend HMAC-signs an opaque token with
+   `MINERVA_HMAC_SECRET`, inserts a row in `external_auth_invites` (id,
+   jti, eppn, expires_at, revoked_at), and returns a one-shot callback URL.
+2. External user clicks the link → `GET /api/external-auth/callback?token=...`
+   re-verifies sig + DB row, sets `minerva_ext` HttpOnly cookie, redirects to `/`.
+3. On every subsequent request Apache mod_rewrite spots the cookie and
+   rewrites to `/__ext_proxy__/...` -- a `<LocationMatch>` that bypasses
+   Shibboleth but enforces auth via mod_lua. The Lua hook validates the
+   cookie's HMAC + expiry **entirely in Apache** (pure-Lua SHA-256 +
+   HMAC, no subrequest, no shell-out) using the secret from
+   `/etc/apache2/secrets/minerva-hmac` (mirrors `MINERVA_HMAC_SECRET`).
+   On success it sets `eppn`, `displayName`, and `X-Minerva-Ext-Jti`
+   request headers; the request then proxies to the backend with the
+   `/__ext_proxy__/` prefix stripped.
+4. Backend `auth_middleware` reads `eppn` (same path as Shib users) and
+   for `ext:`-prefixed eppns additionally looks up `X-Minerva-Ext-Jti` in
+   `external_auth_invites` to enforce per-invite revocation. Apache strips
+   any client-supplied identity headers `early`, so the only path to a
+   populated header is via mod_shib or our Lua hook.
+
+**Where the pieces live:**
+- Backend: `backend/crates/minerva-server/src/routes/external_auth.rs`
+- Migration: `backend/migrations/20260413000004_external_auth_invites.sql`
+- Frontend: `frontend/src/routes/admin/external-invites.tsx`
+- Apache vhost + Lua: `apache/` (manual server-side install -- see
+  `apache/README.md`. The DSV-managed `shib-dsv.conf` is left alone.)
+
+**Operational notes:**
+- New invites default to student role; promote to teacher via
+  `/admin/users` after the user logs in once.
+- Revocation = `DELETE /api/admin/external-invites/{id}` (UI button). Sets
+  `revoked_at`; the next request fails the backend's JTI check.
+- The HMAC secret is shared with embed/integration/LTI tokens; rotating it
+  also kills those. For per-invite revocation use the table.
+- mod_lua must be enabled on the prod Apache (`a2enmod lua`). The package
+  ships with Debian's Apache (`liblua5.4-0`) but isn't enabled by default.
+  `apache2.HTTP_*` constants aren't exposed by this build, so the script
+  returns raw integer status codes.
+- `/etc/apache2/secrets/minerva-hmac` must be updated by hand whenever
+  `MINERVA_HMAC_SECRET` rotates -- it does not auto-sync from k8s.
+
 ## TODO
 
 - [ ] Add `snowflake-arctic-embed-m-v2.0` (768 dims, ~311 MB INT8) as a local embedding model once fastembed-rs PR #239 is merged -- multilingual (Swedish+English), replaces English-only models. Track: https://github.com/Anush008/fastembed-rs/pull/239

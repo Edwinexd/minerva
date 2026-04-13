@@ -18,6 +18,7 @@ import { Route as EmbedCourseIdRouteImport } from "./routes/embed/$courseId"
 import { Route as AdminUsersRouteImport } from "./routes/admin/users"
 import { Route as AdminUsageRouteImport } from "./routes/admin/usage"
 import { Route as AdminSystemRouteImport } from "./routes/admin/system"
+import { Route as AdminExternalInvitesRouteImport } from "./routes/admin/external-invites"
 import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
 import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
 import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
@@ -76,6 +77,11 @@ const AdminUsageRoute = AdminUsageRouteImport.update({
 const AdminSystemRoute = AdminSystemRouteImport.update({
   id: "/system",
   path: "/system",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminExternalInvitesRoute = AdminExternalInvitesRouteImport.update({
+  id: "/external-invites",
+  path: "/external-invites",
   getParentRoute: () => AdminRoute,
 } as any)
 const CourseCourseIdIndexRoute = CourseCourseIdIndexRouteImport.update({
@@ -164,6 +170,7 @@ const TeacherCoursesCourseIdApiKeysRoute =
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/admin": typeof AdminRouteWithChildren
+  "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRoute
@@ -188,6 +195,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRoute
@@ -213,6 +221,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/admin": typeof AdminRouteWithChildren
+  "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRoute
@@ -240,6 +249,7 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/admin"
+    | "/admin/external-invites"
     | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
@@ -264,6 +274,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
+    | "/admin/external-invites"
     | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
@@ -288,6 +299,7 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/admin"
+    | "/admin/external-invites"
     | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
@@ -385,6 +397,13 @@ declare module "@tanstack/react-router" {
       path: "/system"
       fullPath: "/admin/system"
       preLoaderRoute: typeof AdminSystemRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/admin/external-invites": {
+      id: "/admin/external-invites"
+      path: "/external-invites"
+      fullPath: "/admin/external-invites"
+      preLoaderRoute: typeof AdminExternalInvitesRouteImport
       parentRoute: typeof AdminRoute
     }
     "/course/$courseId/": {
@@ -489,6 +508,7 @@ declare module "@tanstack/react-router" {
 }
 
 interface AdminRouteChildren {
+  AdminExternalInvitesRoute: typeof AdminExternalInvitesRoute
   AdminSystemRoute: typeof AdminSystemRoute
   AdminUsageRoute: typeof AdminUsageRoute
   AdminUsersRoute: typeof AdminUsersRoute
@@ -496,6 +516,7 @@ interface AdminRouteChildren {
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminExternalInvitesRoute: AdminExternalInvitesRoute,
   AdminSystemRoute: AdminSystemRoute,
   AdminUsageRoute: AdminUsageRoute,
   AdminUsersRoute: AdminUsersRoute,

@@ -90,14 +90,18 @@ jobs:
 
   apache:
     name: Apache (Lua + vhost configtest)
+    # Run inside a Debian container so apt package names match the prod
+    # host (libapache2-mod-lua, libapache2-mod-shib2). Ubuntu 24.04 ships
+    # mod_lua bundled differently and would skew the test.
     runs-on: ubuntu-latest
+    container: debian:bookworm
     steps:
       - uses: actions/checkout@v6
 
       - name: Install lua + apache + mods
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt-get update
+          apt-get install -y --no-install-recommends \
             lua5.4 apache2 libapache2-mod-lua libapache2-mod-shib
 
       - name: Lua syntax + unit tests
@@ -107,25 +111,25 @@ jobs:
 
       - name: Stage minerva apache config in this runner
         run: |
-          sudo install -d -m 0750 -o root -g www-data /etc/apache2/secrets
+          install -d -m 0750 -o root -g www-data /etc/apache2/secrets
           # configtest just needs the file to exist; the value is unused here.
-          echo dummy | sudo tee /etc/apache2/secrets/minerva-hmac >/dev/null
-          sudo chown root:www-data /etc/apache2/secrets/minerva-hmac
-          sudo chmod 0640 /etc/apache2/secrets/minerva-hmac
+          echo dummy > /etc/apache2/secrets/minerva-hmac
+          chown root:www-data /etc/apache2/secrets/minerva-hmac
+          chmod 0640 /etc/apache2/secrets/minerva-hmac
 
-          sudo install -d -m 0755 /etc/apache2/lua
-          sudo install -m 0644 apache/minerva-ext-auth.lua /etc/apache2/lua/minerva-ext-auth.lua
+          install -d -m 0755 /etc/apache2/lua
+          install -m 0644 apache/minerva-ext-auth.lua /etc/apache2/lua/minerva-ext-auth.lua
 
           # Drop the Debian default site so our vhost is the only one and any
           # name conflict surfaces immediately.
-          sudo rm -f /etc/apache2/sites-enabled/000-default.conf
-          sudo install -m 0644 apache/minerva-app.conf /etc/apache2/sites-enabled/minerva-app.conf
+          rm -f /etc/apache2/sites-enabled/000-default.conf
+          install -m 0644 apache/minerva-app.conf /etc/apache2/sites-enabled/minerva-app.conf
 
-          # Ensure the same mods we use in prod are loaded.
-          sudo a2enmod ssl proxy proxy_http proxy_wstunnel rewrite headers lua shib >/dev/null
+          # Same mods as prod.
+          a2enmod ssl proxy proxy_http proxy_wstunnel rewrite headers lua shib >/dev/null
 
       - name: apache2ctl configtest
-        run: sudo apache2ctl configtest
+        run: apache2ctl configtest
 
   emdash-check:
     name: Ban emdashes

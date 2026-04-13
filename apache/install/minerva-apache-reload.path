@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch Minerva apache config for changes
+After=apache2.service
+
+[Path]
+PathChanged=/etc/apache2/sites-enabled/minerva-app.conf
+PathChanged=/etc/apache2/lua/minerva-ext-auth.lua
+Unit=minerva-apache-reload.service
+
+[Install]
+WantedBy=multi-user.target

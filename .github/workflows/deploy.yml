@@ -90,6 +90,41 @@ jobs:
           kubectl rollout status deployment/qdrant -n minerva --timeout=120s
           kubectl rollout status deployment/minerva-app -n minerva --timeout=300s
 
+      - name: Deploy Apache config + Lua
+        # Apache vhost / Lua hook on the prod host, deployed via the same
+        # SSH session. ci can write the two files directly (see
+        # apache/install/bootstrap.sh -- group `apache-deploy` + chmod 0664)
+        # and a systemd path unit (minerva-apache-reload.path) watches the
+        # files, runs configtest, and reloads apache. ci never needs sudo.
+        run: |
+          set -euo pipefail
+          HOST=ci@minerva.dsv.su.se
+          # Snapshot the reload-stamp before pushing so we can detect when
+          # the path-unit-triggered service has run.
+          BEFORE=$(ssh "$HOST" 'cat /var/log/minerva-apache-reload.stamp 2>/dev/null || echo never')
+          AFTER="$BEFORE"
+          echo "stamp before: $BEFORE"
+
+          # Overwrite contents in place; the bootstrap-set 0664 root:apache-deploy
+          # perms on the targets are preserved across scp updates.
+          scp apache/minerva-app.conf      "$HOST:/etc/apache2/sites-enabled/minerva-app.conf"
+          scp apache/minerva-ext-auth.lua  "$HOST:/etc/apache2/lua/minerva-ext-auth.lua"
+
+          # Wait up to ~20s for the path-watcher's service to fire. If
+          # nothing changed (e.g. files identical to what was already
+          # there), the stamp won't update and that's fine.
+          for i in $(seq 1 20); do
+            AFTER=$(ssh "$HOST" 'cat /var/log/minerva-apache-reload.stamp 2>/dev/null || echo never')
+            [[ "$AFTER" != "$BEFORE" ]] && break
+            sleep 1
+          done
+
+          if [[ "$AFTER" == "$BEFORE" ]]; then
+            echo "::notice::stamp unchanged -- either files were identical or the reload service didn't fire (check journalctl -u minerva-apache-reload)"
+          else
+            echo "stamp after:  $AFTER"
+          fi
+
       - name: Teardown
         if: always()
         run: |

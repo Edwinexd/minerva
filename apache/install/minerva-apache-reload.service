@@ -1,0 +1,18 @@
+[Unit]
+Description=Reload apache2 after a Minerva config/lua change
+After=apache2.service
+# Avoid retry storms if multiple files are written in quick succession
+# (CI scp's two files back-to-back).
+StartLimitIntervalSec=10
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+# Validate before reloading. If configtest fails, apache stays on the
+# previous in-memory config -- the bad file sits on disk for the admin
+# to investigate via `journalctl -u minerva-apache-reload`.
+ExecStart=/usr/sbin/apache2ctl configtest
+ExecStart=/bin/systemctl reload apache2
+# Log the outcome to a path ci can read so the deploy step can confirm.
+ExecStartPost=/bin/sh -c 'date -Iseconds > /var/log/minerva-apache-reload.stamp'
+ExecStartPost=/bin/chmod 0644 /var/log/minerva-apache-reload.stamp

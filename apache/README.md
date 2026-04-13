@@ -1,55 +1,101 @@
 # Apache config (production)
 
-These files live on the prod server (`minerva.dsv.su.se`), not in any container.
-They are **manually deployed** -- Apache there is hand-maintained, not
-DSV-managed (the DSV-managed `shib-dsv.conf` is left alone).
+These files are deployed to the prod host (`minerva.dsv.su.se`) by the
+`Deploy to Production` workflow (see `.github/workflows/deploy.yml`).
+The DSV-managed `shib-dsv.conf` is left alone.
 
 ## Files
 
-- `minerva-app.conf` → `/etc/apache2/sites-enabled/minerva-app.conf`
-- `minerva-ext-auth.lua` → `/etc/apache2/lua/minerva-ext-auth.lua`
+| Repo                                          | Server path                                             |
+| --------------------------------------------- | ------------------------------------------------------- |
+| `apache/minerva-app.conf`                     | `/etc/apache2/sites-enabled/minerva-app.conf`           |
+| `apache/minerva-ext-auth.lua`                 | `/etc/apache2/lua/minerva-ext-auth.lua`                 |
+| `apache/install/minerva-apache-reload.path`   | `/etc/systemd/system/minerva-apache-reload.path`        |
+| `apache/install/minerva-apache-reload.service`| `/etc/systemd/system/minerva-apache-reload.service`     |
+| (manual)                                      | `/etc/apache2/secrets/minerva-hmac` (mirror of `MINERVA_HMAC_SECRET`) |
 
-## First-time install / external-auth rollout
+## How auto-deploy works
+
+CI never `sudo`s. `apache/install/bootstrap.sh` (run once by a human admin)
+chgrps the two managed files to the `apache-deploy` group and adds the
+`ci` user to that group, so `ci` can `scp` updates straight onto them.
+A systemd path unit watches both files and runs `apache2ctl configtest`
++ `systemctl reload apache2` on change. The service writes a timestamp
+to `/var/log/minerva-apache-reload.stamp` so the deploy step can confirm
+the reload happened.
+
+If `apache2ctl configtest` fails, apache stays on its previous in-memory
+config. The bad file remains on disk for inspection -- look at
+`journalctl -u minerva-apache-reload`.
+
+## First-time bootstrap (human admin, once)
 
 ```bash
+# 1. SSH to the server as a user with sudo
 ssh minerva
-sudo a2enmod lua headers rewrite                 # rewrite/headers already on; lua is new
-sudo install -d -m 0755 /etc/apache2/lua
-# Copy from your checkout (rsync, scp, or paste):
-sudo cp /path/to/repo/apache/minerva-ext-auth.lua /etc/apache2/lua/
-sudo cp /path/to/repo/apache/minerva-app.conf /etc/apache2/sites-enabled/
-sudo apache2ctl configtest
-sudo systemctl reload apache2
+
+# 2. Clone the repo (or scp the apache/install/ folder onto the host)
+git clone git@github.com:Edwinexd/minerva.git /tmp/minerva-bootstrap
+sudo bash /tmp/minerva-bootstrap/apache/install/bootstrap.sh
+
+# 3. Install the HMAC secret (matches MINERVA_HMAC_SECRET in k8s)
+sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
+    kubectl get secret -n minerva minerva-secrets \
+    -o jsonpath='{.data.MINERVA_HMAC_SECRET}' | base64 -d \
+    | sudo tee /etc/apache2/secrets/minerva-hmac >/dev/null
+sudo chown root:www-data /etc/apache2/secrets/minerva-hmac
+sudo chmod 0640 /etc/apache2/secrets/minerva-hmac
+
+# 4. Trigger the first deploy (push or workflow_dispatch)
+gh workflow run deploy.yml
 ```
 
-## Verifying the cookie path
+After that, every push to `master` updates apache automatically.
 
-End-to-end smoke test: mint an invite via the admin UI, click the link in a
-private browser window. The expected sequence:
+## Local tests
 
-1. `GET /api/external-auth/callback?token=...` → `302 /` with `Set-Cookie: minerva_ext=...`
-2. `GET /` → mod_rewrite matches the cookie, rewrites to `/__ext_proxy__/`,
-   Lua hook subrequests `/api/external-auth/verify`, backend returns 200 +
-   `X-Minerva-Eppn` header, Lua sets `eppn` request header, request proxies
-   to backend at port 30090, backend's `auth_middleware` sees the eppn and
-   serves the SPA.
+`apache/test/run.sh` runs the pure-Lua HMAC/SHA-256 vectors (RFC 4231)
+and the token-verify edge cases. Requires `lua5.4`.
 
-Failure modes worth checking:
+```bash
+brew install lua            # macOS, or `apt install lua5.4` on Linux
+bash apache/test/run.sh
+```
 
-- Bad cookie (`minerva_ext=garbage`) → Apache returns 401 (Lua hook gets
-  non-200 from verify subrequest).
-- No cookie → mod_rewrite doesn't fire, request hits Shib path as normal.
-- Revoked invite → backend's verify returns 401, Apache returns 401.
+CI runs the same suite plus an `apache2ctl configtest` against the
+vhost in a Debian runner with mod_lua + mod_shib installed.
+
+## How the cookie path actually flows
+
+1. `GET /api/external-auth/callback?token=...` → backend verifies token
+   + `external_auth_invites` row → `302 /` with
+   `Set-Cookie: minerva_ext=<token>; HttpOnly; Secure; SameSite=Lax`.
+2. Subsequent `GET /<anything>`:
+   - mod_rewrite spots the cookie, internally rewrites the URI to
+     `/__ext_proxy__/<original>`.
+   - `<LocationMatch ^/__ext_proxy__/>` runs `LuaHookAccessChecker`
+     (no Shib here). Lua reads the cookie, validates HMAC + expiry,
+     sets `eppn`, `displayName`, `X-Minerva-Ext-Jti` request headers.
+   - `ProxyPassMatch` strips the prefix and forwards to the backend.
+3. Backend `auth_middleware` reads `eppn` (same path as Shib users) and
+   for `ext:`-prefixed eppns additionally looks up the JTI in the DB to
+   enforce per-invite revocation. On any failure it returns 401 with a
+   `Set-Cookie: minerva_ext=; Max-Age=0` header so the frontend's
+   reload-on-401 doesn't loop.
 
 ## Why this shape
 
-- mod_lua is in Apache (one less moving part than a separate auth daemon)
-  but Lua doesn't ship HMAC/base64 -- so all crypto stays in the Rust app
-  via the `/api/external-auth/verify` subrequest.
+- mod_lua's stock build on Debian Apache 2.4 has no HTTP client, no
+  subrequest API, no HMAC, no base64. SHA-256 is therefore implemented
+  in pure Lua (see `minerva-ext-auth.lua`); the test suite covers it
+  against RFC 4231 vectors.
 - The `/__ext_proxy__/` URL prefix is internal-only; mod_rewrite is the
-  *only* way to reach it (no external request can; LocationMatch checks
-  the Lua hook, not the prefix). The prefix is purely a vehicle for
-  attaching different auth directives to otherwise-identical paths.
-- `RequestHeader unset eppn early` runs before any auth, so even on the
-  bypass path a client cannot inject their own `eppn`. mod_lua puts the
-  header back from the verified subrequest response.
+  only way to reach it. The prefix is a vehicle for attaching different
+  auth directives to otherwise-identical paths -- using `<If>` inside
+  `<Location />` was tried and broken because it short-circuits the
+  carve-outs for `/api/health`, `/lti`, etc.
+- `RequestHeader unset eppn early` strips client-supplied identity
+  headers before any auth runs, so the bypass path can't be header-
+  spoofed even though Shib is off there.
+- mod_lua on this build doesn't expose `apache2.HTTP_*` constants; the
+  script returns raw integer status codes (401, 500, etc.).

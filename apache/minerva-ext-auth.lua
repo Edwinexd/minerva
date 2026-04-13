@@ -18,8 +18,16 @@
 -- Defense in depth: this script enforces signature + expiry. The backend
 -- additionally checks the JTI against `external_auth_invites.revoked_at`,
 -- so an admin can revoke individual invites without rotating the secret.
+--
+-- The pure-Lua helpers (sha256, hmac_sha256, b64url_decode, parse_token,
+-- verify_token) are exposed via the returned `_M` table so the test
+-- harness in apache/test/ can exercise them outside Apache. mod_lua
+-- discards the return value of the loaded script -- the real entry
+-- point is `check_ext_auth`, defined as a global below.
 
-require "apache2"
+-- `apache2` is a pre-injected global in mod_lua; outside Apache (test
+-- harness) it's absent, so we tolerate either.
+local apache2_mod = rawget(_G, "apache2") or { OK = 0, DECLINED = -1 }
 
 local SECRET_PATH = "/etc/apache2/secrets/minerva-hmac"
 local COOKIE_NAME = "minerva_ext"
@@ -190,7 +198,53 @@ local function get_cookie(r, name)
 end
 
 -- ---------------------------------------------------------------------------
--- Access checker: validates the cookie, sets identity headers.
+-- Pure token verification (no Apache deps). Returns the parsed claims
+-- table { jti, eppn, display_name } on success, or `nil, reason` on
+-- failure where reason is one of "malformed", "expired", "bad_signature",
+-- "bad_eppn". Tests in apache/test/ call this directly.
+-- ---------------------------------------------------------------------------
+
+local function verify_token(secret, cookie_value, now)
+    if not cookie_value or cookie_value == "" then
+        return nil, "malformed"
+    end
+    local raw = b64url_decode(cookie_value)
+    if not raw or raw == "" then return nil, "malformed" end
+
+    -- Token format: jti:eppn_b64:display_b64:exp_ts:hex_sig
+    -- (eppn is base64-encoded inside because it contains `:` -- see Rust
+    --  external_auth::mint_token for the matching producer.)
+    local jti, eppn_b64, display_b64, exp_ts, sig =
+        raw:match("^([^:]+):([^:]+):([^:]*):([^:]+):([^:]+)$")
+    if not jti then return nil, "malformed" end
+
+    local exp_n = tonumber(exp_ts)
+    if not exp_n then return nil, "malformed" end
+    if (now or os.time()) > exp_n then return nil, "expired" end
+
+    local payload = jti .. ":" .. eppn_b64 .. ":" .. display_b64 .. ":" .. exp_ts
+    local expected = tohex(hmac_sha256(secret, payload))
+    if not ct_eq(expected, sig) then return nil, "bad_signature" end
+
+    local eppn = b64url_decode(eppn_b64)
+    if not eppn or eppn == "" then return nil, "bad_eppn" end
+    -- Defensive: the eppn embedded in our own tokens always carries the
+    -- ext: prefix. A token without it is either malformed or forged with
+    -- a different signing scheme; either way, reject.
+    if not eppn:find("^ext:") then return nil, "bad_eppn" end
+
+    local display_name = nil
+    if display_b64 ~= "" then
+        local d = b64url_decode(display_b64)
+        if d and d ~= "" then display_name = d end
+    end
+
+    return { jti = jti, eppn = eppn, display_name = display_name }
+end
+
+-- ---------------------------------------------------------------------------
+-- Access checker (the actual Apache hook). Wraps verify_token with
+-- cookie extraction, secret loading, and request-header injection.
 --
 -- This hook is mounted only on the cookie-bypass `/__ext_proxy__/` path
 -- (see minerva-app.conf), reached via mod_rewrite when the cookie is
@@ -205,60 +259,37 @@ end
 
 function check_ext_auth(r)
     local cookie = get_cookie(r, COOKIE_NAME)
-    if not cookie or cookie == "" then
-        return 401
-    end
+    if not cookie or cookie == "" then return 401 end
 
     local secret = load_secret()
     if not secret then
-        -- 500 numeric literal: not all mod_lua builds expose
-        -- apache2.HTTP_INTERNAL_SERVER_ERROR.
         r:err("minerva-ext-auth: secret file unreadable: " .. SECRET_PATH)
         return 500
     end
 
-    local raw = b64url_decode(cookie)
-    if not raw or raw == "" then
-        return 401
+    local claims, _reason = verify_token(secret, cookie)
+    if not claims then return 401 end
+
+    r.headers_in["eppn"] = claims.eppn
+    r.headers_in["X-Minerva-Ext-Jti"] = claims.jti
+    if claims.display_name then
+        r.headers_in["displayName"] = claims.display_name
     end
 
-    -- Token format: jti:eppn_b64:display_b64:exp_ts:hex_sig
-    -- (eppn is base64-encoded inside because it contains `:` -- see Rust
-    --  external_auth::mint_token for the matching producer.)
-    local jti, eppn_b64, display_b64, exp_ts, sig =
-        raw:match("^([^:]+):([^:]+):([^:]*):([^:]+):([^:]+)$")
-    if not jti then return 401 end
-
-    local exp_n = tonumber(exp_ts)
-    if not exp_n or os.time() > exp_n then
-        return 401
-    end
-
-    local payload = jti .. ":" .. eppn_b64 .. ":" .. display_b64 .. ":" .. exp_ts
-    local expected = tohex(hmac_sha256(secret, payload))
-    if not ct_eq(expected, sig) then
-        return 401
-    end
-
-    local eppn = b64url_decode(eppn_b64)
-    if not eppn or eppn == "" then return 401 end
-
-    -- Sanity: the eppn embedded in our own tokens always carries the ext:
-    -- prefix. A token without it is either malformed or forged with a
-    -- different signing scheme; either way, reject.
-    if not eppn:find("^ext:") then
-        return 401
-    end
-
-    r.headers_in["eppn"] = eppn
-    r.headers_in["X-Minerva-Ext-Jti"] = jti
-
-    if display_b64 ~= "" then
-        local display = b64url_decode(display_b64)
-        if display and display ~= "" then
-            r.headers_in["displayName"] = display
-        end
-    end
-
-    return apache2.OK
+    return apache2_mod.OK
 end
+
+-- ---------------------------------------------------------------------------
+-- Module table for tests. mod_lua discards the return value of the
+-- script when loading it via `LuaHookAccessChecker`, so this is purely
+-- for the test harness in apache/test/.
+-- ---------------------------------------------------------------------------
+
+return {
+    sha256       = sha256,
+    hmac_sha256  = hmac_sha256,
+    tohex        = tohex,
+    ct_eq        = ct_eq,
+    b64url_decode = b64url_decode,
+    verify_token = verify_token,
+}

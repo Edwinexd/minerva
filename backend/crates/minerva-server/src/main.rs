@@ -28,6 +28,16 @@ async fn main() -> anyhow::Result<()> {
     let config = config::Config::from_env()?;
     let state = state::AppState::new(&config).await?;
 
+    // One-shot backfill of the document_id payload index across pre-existing
+    // course_* collections. New collections get the index at creation time.
+    // Runs in the background so a slow/unhealthy Qdrant doesn't block startup.
+    {
+        let qdrant = state.qdrant.clone();
+        tokio::spawn(async move {
+            backfill_document_id_indexes(&qdrant).await;
+        });
+    }
+
     // Start the background document-processing worker.
     worker::start(state.clone(), config.max_concurrent_ingests);
 
@@ -102,4 +112,33 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Walk every `course_*` collection and idempotently add the `document_id`
+/// payload index. Existing indexes return an error from Qdrant which we
+/// log and ignore -- the goal is to bring older deployments up to speed
+/// without requiring a manual migration step.
+async fn backfill_document_id_indexes(qdrant: &qdrant_client::Qdrant) {
+    let collections = match qdrant.list_collections().await {
+        Ok(resp) => resp.collections,
+        Err(e) => {
+            tracing::warn!(
+                "qdrant: index backfill skipped, list_collections failed: {}",
+                e
+            );
+            return;
+        }
+    };
+    let course_collections: Vec<String> = collections
+        .into_iter()
+        .map(|c| c.name)
+        .filter(|n| n.starts_with("course_"))
+        .collect();
+    tracing::info!(
+        "qdrant: backfilling document_id index across {} course collection(s)",
+        course_collections.len()
+    );
+    for name in course_collections {
+        minerva_ingest::pipeline::ensure_document_id_index(qdrant, &name).await;
+    }
 }

@@ -2,7 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use qdrant_client::qdrant::{
-    CreateCollectionBuilder, Distance, PointStruct, UpsertPointsBuilder, VectorParamsBuilder,
+    CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, Distance, FieldType, PointStruct,
+    UpsertPointsBuilder, VectorParamsBuilder,
 };
 use qdrant_client::Qdrant;
 use sqlx::PgPool;
@@ -239,6 +240,11 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
             .await
             .map_err(|e| format!("qdrant collection creation failed: {}", e))?;
 
+        // Create payload index up-front so the very first delete/scroll on
+        // this collection benefits. Only done at creation time so we don't
+        // pay a round-trip on every subsequent upload.
+        ensure_document_id_index(qdrant, name).await;
+
         tracing::info!(
             "created qdrant collection {} (dimensions: {})",
             name,
@@ -247,6 +253,30 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
     }
 
     Ok(())
+}
+
+/// Idempotent keyword payload index on `document_id` -- the field we filter
+/// on when deleting or scrolling chunks for a single document. Without it
+/// those operations do a full collection scan.
+///
+/// Errors are logged at debug level and swallowed: an existing index causes
+/// Qdrant to return an error, and a genuinely missing one just degrades
+/// performance rather than breaking anything.
+pub async fn ensure_document_id_index(qdrant: &Qdrant, collection: &str) {
+    if let Err(e) = qdrant
+        .create_field_index(CreateFieldIndexCollectionBuilder::new(
+            collection,
+            "document_id",
+            FieldType::Keyword,
+        ))
+        .await
+    {
+        tracing::debug!(
+            "qdrant: document_id index on {} not created (likely already exists): {}",
+            collection,
+            e
+        );
+    }
 }
 
 async fn set_status(db: &PgPool, doc_id: Uuid, status: &str, error_msg: Option<&str>) {

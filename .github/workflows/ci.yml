@@ -94,15 +94,18 @@ jobs:
     # host (libapache2-mod-lua, libapache2-mod-shib2). Ubuntu 24.04 ships
     # mod_lua bundled differently and would skew the test.
     runs-on: ubuntu-latest
-    container: debian:bookworm
+    container: debian:trixie
     steps:
       - uses: actions/checkout@v6
 
       - name: Install lua + apache + mods
+        # mod_lua is bundled into apache2-bin on Debian trixie (no
+        # separate libapache2-mod-lua package), so just installing
+        # apache2 brings it along. mod_shib lives in its own package.
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            lua5.4 apache2 libapache2-mod-lua libapache2-mod-shib
+            lua5.4 apache2 libapache2-mod-shib
 
       - name: Lua syntax + unit tests
         env:

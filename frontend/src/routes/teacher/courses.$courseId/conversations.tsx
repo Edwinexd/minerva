@@ -274,6 +274,28 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
 
   return (
     <div className="ml-4 border-l-2 pl-4 py-2 space-y-3 max-h-[600px] overflow-y-auto">
+      <div className="space-y-2">
+        <Label className="text-xs">Add a general note to this conversation</Label>
+        <div className="flex gap-2">
+          <Textarea
+            value={noteForMessage === null ? noteContent : ""}
+            onChange={(e) => { setNoteForMessage(null); setNoteContent(e.target.value) }}
+            placeholder="Teacher's note visible to all students when pinned..."
+            rows={2}
+            className="flex-1"
+          />
+          <Button
+            size="sm"
+            className="self-end"
+            onClick={() => handleAddNote()}
+            disabled={addNoteMutation.isPending || !noteContent.trim() || noteForMessage !== null}
+          >
+            Add Note
+          </Button>
+        </div>
+      </div>
+      <Separator />
+
       {conversationNotes.map((note) => (
         <NoteDisplay key={note.id} note={note} onDelete={() => deleteNoteMutation.mutate(note.id)} />
       ))}
@@ -336,28 +358,6 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
           )}
         </React.Fragment>
       ))}
-
-      <Separator />
-      <div className="space-y-2">
-        <Label className="text-xs">Add a general note to this conversation</Label>
-        <div className="flex gap-2">
-          <Textarea
-            value={noteForMessage === null ? noteContent : ""}
-            onChange={(e) => { setNoteForMessage(null); setNoteContent(e.target.value) }}
-            placeholder="Teacher's note visible to all students when pinned..."
-            rows={2}
-            className="flex-1"
-          />
-          <Button
-            size="sm"
-            className="self-end"
-            onClick={() => handleAddNote()}
-            disabled={addNoteMutation.isPending || !noteContent.trim() || noteForMessage !== null}
-          >
-            Add Note
-          </Button>
-        </div>
-      </div>
     </div>
   )
 }

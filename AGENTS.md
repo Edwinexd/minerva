@@ -223,3 +223,17 @@ Manages GitHub environment secrets for the `prod` environment. Generates `K8S_SE
 ```bash
 cd terraform && terraform apply -var-file="secrets.tfvars"
 ```
+
+## Identity Pseudonymization for External Users
+
+`ext:` users see two-word EFF-wordlist pseudonyms (`"Wombling Wombat"` /
+`wombling.wombat@domain`) instead of real eppns and display names for all
+non-admin users. Pseudonyms are derived deterministically via SHA-256 +
+ChaCha8 RNG seeded from `MINERVA_HMAC_SECRET + eppn`; the map is rebuilt
+per-request, nothing persisted. Admins and the viewer themselves always pass
+through unchanged.
+
+**Implementation:** `backend/crates/minerva-server/src/ext_obfuscate.rs`
+
+Applied in: course members list, conversation lists, conversation detail
+(feedback + teacher notes), and note CRUD responses.

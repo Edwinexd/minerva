@@ -14,6 +14,7 @@ use uuid::Uuid;
 use std::collections::{HashMap, HashSet};
 
 use crate::error::AppError;
+use crate::ext_obfuscate::{self, Pseudonymizer};
 use crate::state::AppState;
 use crate::strategy;
 
@@ -146,20 +147,25 @@ async fn list_all_conversations(
     verify_course_teacher_access(&state, course_id, &user).await?;
 
     let rows = minerva_db::queries::conversations::list_all_by_course(&state.db, course_id).await?;
+    let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
 
     Ok(Json(
         rows.into_iter()
-            .map(|r| ConversationWithUserResponse {
-                id: r.id,
-                course_id: r.course_id,
-                user_id: r.user_id,
-                title: r.title,
-                pinned: r.pinned,
-                created_at: r.created_at,
-                updated_at: r.updated_at,
-                user_eppn: r.user_eppn,
-                user_display_name: r.user_display_name,
-                message_count: r.message_count,
+            .map(|r| {
+                let (user_eppn, user_display_name) =
+                    ext_obfuscate::apply(ps.as_ref(), r.user_id, r.user_eppn, r.user_display_name);
+                ConversationWithUserResponse {
+                    id: r.id,
+                    course_id: r.course_id,
+                    user_id: r.user_id,
+                    title: r.title,
+                    pinned: r.pinned,
+                    created_at: r.created_at,
+                    updated_at: r.updated_at,
+                    user_eppn,
+                    user_display_name,
+                    message_count: r.message_count,
+                }
             })
             .collect(),
     ))
@@ -176,11 +182,19 @@ async fn list_pinned_conversations(
     let is_teacher = is_course_teacher_or_admin(&state, course_id, &user).await?;
     let rows =
         minerva_db::queries::conversations::list_pinned_by_course(&state.db, course_id).await?;
+    let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
 
     Ok(Json(
         rows.into_iter()
             .map(|r| {
                 let is_own = r.user_id == user.id;
+                let (raw_eppn, raw_display) = if is_teacher || is_own {
+                    (r.user_eppn, r.user_display_name)
+                } else {
+                    (None, None)
+                };
+                let (user_eppn, user_display_name) =
+                    ext_obfuscate::apply(ps.as_ref(), r.user_id, raw_eppn, raw_display);
                 ConversationWithUserResponse {
                     id: r.id,
                     course_id: r.course_id,
@@ -189,16 +203,8 @@ async fn list_pinned_conversations(
                     pinned: r.pinned,
                     created_at: r.created_at,
                     updated_at: r.updated_at,
-                    user_eppn: if is_teacher || is_own {
-                        r.user_eppn
-                    } else {
-                        None
-                    },
-                    user_display_name: if is_teacher || is_own {
-                        r.user_display_name
-                    } else {
-                        None
-                    },
+                    user_eppn,
+                    user_display_name,
                     message_count: r.message_count,
                 }
             })
@@ -530,6 +536,7 @@ async fn get_conversation(
     let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;
     let feedback_rows =
         minerva_db::queries::message_feedback::list_for_conversation(&state.db, cid).await?;
+    let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
 
     // Hide eppn/display_name from non-teachers viewing other students' feedback
     // on a pinned conversation; the conversation owner sees their own anyway.
@@ -537,6 +544,13 @@ async fn get_conversation(
         .into_iter()
         .map(|f| {
             let is_own = f.user_id == user.id;
+            let (raw_eppn, raw_display) = if is_teacher || is_own {
+                (f.user_eppn, f.user_display_name)
+            } else {
+                (None, None)
+            };
+            let (user_eppn, user_display_name) =
+                ext_obfuscate::apply(ps.as_ref(), f.user_id, raw_eppn, raw_display);
             MessageFeedbackResponse {
                 id: f.id,
                 message_id: f.message_id,
@@ -546,16 +560,8 @@ async fn get_conversation(
                 comment: f.comment,
                 created_at: f.created_at,
                 updated_at: f.updated_at,
-                user_eppn: if is_teacher || is_own {
-                    f.user_eppn
-                } else {
-                    None
-                },
-                user_display_name: if is_teacher || is_own {
-                    f.user_display_name
-                } else {
-                    None
-                },
+                user_eppn,
+                user_display_name,
             }
         })
         .collect();
@@ -576,15 +582,19 @@ async fn get_conversation(
             .collect(),
         notes: notes
             .into_iter()
-            .map(|n| TeacherNoteResponse {
-                id: n.id,
-                conversation_id: n.conversation_id,
-                message_id: n.message_id,
-                author_id: n.author_id,
-                author_display_name: n.author_display_name,
-                content: n.content,
-                created_at: n.created_at,
-                updated_at: n.updated_at,
+            .map(|n| {
+                let (_, author_display_name) =
+                    ext_obfuscate::apply(ps.as_ref(), n.author_id, None, n.author_display_name);
+                TeacherNoteResponse {
+                    id: n.id,
+                    conversation_id: n.conversation_id,
+                    message_id: n.message_id,
+                    author_id: n.author_id,
+                    author_display_name,
+                    content: n.content,
+                    created_at: n.created_at,
+                    updated_at: n.updated_at,
+                }
             })
             .collect(),
         feedback,
@@ -741,19 +751,24 @@ async fn list_notes(
     }
 
     let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;
+    let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
 
     Ok(Json(
         notes
             .into_iter()
-            .map(|n| TeacherNoteResponse {
-                id: n.id,
-                conversation_id: n.conversation_id,
-                message_id: n.message_id,
-                author_id: n.author_id,
-                author_display_name: n.author_display_name,
-                content: n.content,
-                created_at: n.created_at,
-                updated_at: n.updated_at,
+            .map(|n| {
+                let (_, author_display_name) =
+                    ext_obfuscate::apply(ps.as_ref(), n.author_id, None, n.author_display_name);
+                TeacherNoteResponse {
+                    id: n.id,
+                    conversation_id: n.conversation_id,
+                    message_id: n.message_id,
+                    author_id: n.author_id,
+                    author_display_name,
+                    content: n.content,
+                    created_at: n.created_at,
+                    updated_at: n.updated_at,
+                }
             })
             .collect(),
     ))
@@ -809,13 +824,16 @@ async fn update_note(
     let note = minerva_db::queries::conversations::update_note(&state.db, note_id, &body.content)
         .await?
         .ok_or(AppError::NotFound)?;
+    let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
+    let (_, author_display_name) =
+        ext_obfuscate::apply(ps.as_ref(), note.author_id, None, note.author_display_name);
 
     Ok(Json(TeacherNoteResponse {
         id: note.id,
         conversation_id: note.conversation_id,
         message_id: note.message_id,
         author_id: note.author_id,
-        author_display_name: note.author_display_name,
+        author_display_name,
         content: note.content,
         created_at: note.created_at,
         updated_at: note.updated_at,

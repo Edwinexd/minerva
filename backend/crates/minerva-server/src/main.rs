@@ -1,6 +1,7 @@
 mod auth;
 mod config;
 mod error;
+mod ext_obfuscate;
 pub mod lti;
 mod routes;
 mod state;

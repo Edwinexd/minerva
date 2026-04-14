@@ -293,14 +293,24 @@ async fn list_members(
     }
 
     let rows = minerva_db::queries::courses::list_members(&state.db, id).await?;
+    let ps = crate::ext_obfuscate::Pseudonymizer::for_viewer(
+        &state.db,
+        &user,
+        &state.config.hmac_secret,
+    )
+    .await?;
     Ok(Json(
         rows.into_iter()
-            .map(|r| MemberResponse {
-                user_id: r.user_id,
-                eppn: r.eppn,
-                display_name: r.display_name,
-                role: r.role,
-                added_at: r.added_at,
+            .map(|r| {
+                let (eppn, display_name) =
+                    crate::ext_obfuscate::apply(ps.as_ref(), r.user_id, r.eppn, r.display_name);
+                MemberResponse {
+                    user_id: r.user_id,
+                    eppn,
+                    display_name,
+                    role: r.role,
+                    added_at: r.added_at,
+                }
             })
             .collect(),
     ))

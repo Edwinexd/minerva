@@ -29,6 +29,12 @@ const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
 /// exceed any legitimate processing time (largest transcripts + model load).
 const STALE_THRESHOLD_SECS: i64 = 600;
 
+/// How often the Canvas auto-sync loop checks for due connections. Effective
+/// lag is at most this plus `canvas_auto_sync_interval_hours`, so a 24h
+/// interval never drifts more than ~25h in practice.
+const CANVAS_AUTO_SYNC_CHECK_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(60 * 60);
+
 /// Start the background document-processing worker.
 ///
 /// On startup it resets any documents stuck in `processing` (crash recovery),
@@ -56,6 +62,61 @@ pub fn start(state: AppState, max_concurrent: usize) {
                         STALE_THRESHOLD_SECS,
                     ),
                     Err(e) => tracing::error!("worker: sweeper failed: {}", e),
+                }
+            }
+        });
+    }
+
+    // Canvas auto-sync: periodic re-sync for connections with auto_sync=true
+    // whose last_synced_at is older than the configured interval. Runs
+    // sequentially across due connections so we don't stampede Canvas.
+    let interval_hours = state.config.canvas_auto_sync_interval_hours;
+    if interval_hours > 0 {
+        let state = state.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(CANVAS_AUTO_SYNC_CHECK_INTERVAL).await;
+                let due = match minerva_db::queries::canvas::find_due_for_auto_sync(
+                    &state.db,
+                    interval_hours,
+                )
+                .await
+                {
+                    Ok(rows) => rows,
+                    Err(e) => {
+                        tracing::error!("canvas auto-sync: query failed: {}", e);
+                        continue;
+                    }
+                };
+                if due.is_empty() {
+                    continue;
+                }
+                tracing::info!(
+                    "canvas auto-sync: {} connection(s) due (interval {}h)",
+                    due.len(),
+                    interval_hours,
+                );
+                for conn in due {
+                    let conn_id = conn.id;
+                    let name = conn.name.clone();
+                    match crate::routes::canvas::run_sync(&state, &conn).await {
+                        Ok(r) => tracing::info!(
+                            "canvas auto-sync: connection {} ({}): {} new, {} resynced, {} skipped, {} errors, {} warnings",
+                            conn_id,
+                            name,
+                            r.synced,
+                            r.resynced,
+                            r.skipped,
+                            r.errors.len(),
+                            r.warnings.len(),
+                        ),
+                        Err(e) => tracing::error!(
+                            "canvas auto-sync: connection {} ({}) failed: {}",
+                            conn_id,
+                            name,
+                            e,
+                        ),
+                    }
                 }
             }
         });
@@ -174,7 +235,11 @@ pub fn start(state: AppState, max_concurrent: usize) {
                     }
 
                     // Only process supported file types; store others as 'unsupported'.
-                    if ext != "pdf" && ext != "txt" {
+                    let is_supported = matches!(
+                        ext,
+                        "pdf" | "txt" | "html" | "htm" | "md" | "rst" | "csv" | "tsv"
+                    );
+                    if !is_supported {
                         tracing::info!(
                             "worker: document {} ({}) is not a supported type, marking as unsupported",
                             doc.id,

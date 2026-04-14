@@ -91,6 +91,37 @@ pub async fn update_last_synced(db: &PgPool, id: Uuid) -> Result<(), sqlx::Error
     Ok(())
 }
 
+pub async fn set_auto_sync(db: &PgPool, id: Uuid, auto_sync: bool) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE canvas_connections SET auto_sync = $2, updated_at = NOW() WHERE id = $1",
+        id,
+        auto_sync,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Auto-sync candidates: connections with `auto_sync = true` whose
+/// `last_synced_at` is null or older than `interval_hours` ago.
+/// Ordered by oldest-synced-first so a backlog drains fairly.
+pub async fn find_due_for_auto_sync(
+    db: &PgPool,
+    interval_hours: i32,
+) -> Result<Vec<ConnectionRow>, sqlx::Error> {
+    sqlx::query_as!(
+        ConnectionRow,
+        r#"SELECT id, course_id, name, canvas_base_url, canvas_api_token, canvas_course_id, auto_sync, created_by, created_at, updated_at, last_synced_at
+        FROM canvas_connections
+        WHERE auto_sync = true
+          AND (last_synced_at IS NULL OR last_synced_at < NOW() - make_interval(hours => $1))
+        ORDER BY last_synced_at NULLS FIRST"#,
+        interval_hours,
+    )
+    .fetch_all(db)
+    .await
+}
+
 // -- Sync log rows --
 
 #[derive(Debug, Clone)]

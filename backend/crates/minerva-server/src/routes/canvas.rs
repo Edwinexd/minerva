@@ -24,7 +24,7 @@
 //!   GET    /courses/{course_id}/canvas/{connection_id}/files -- Preview items
 
 use axum::extract::{Path, State};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Extension, Json, Router};
 use chrono::{DateTime, Utc};
 use qdrant_client::qdrant::DeletePointsBuilder;
@@ -41,6 +41,7 @@ pub fn course_router() -> Router<AppState> {
         .route("/canvas", get(list_connections).post(create_connection))
         .route("/canvas/lookup-courses", post(lookup_courses))
         .route("/canvas/{connection_id}", delete(delete_connection))
+        .route("/canvas/{connection_id}/auto-sync", patch(update_auto_sync))
         .route("/canvas/{connection_id}/sync", post(trigger_sync))
         .route("/canvas/{connection_id}/files", get(list_canvas_items))
 }
@@ -729,12 +730,12 @@ async fn list_canvas_items(
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize)]
-struct SyncResult {
-    synced: usize,
-    resynced: usize,
-    skipped: usize,
-    errors: Vec<String>,
-    warnings: Vec<String>,
+pub struct SyncResult {
+    pub synced: usize,
+    pub resynced: usize,
+    pub skipped: usize,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
 }
 
 async fn trigger_sync(
@@ -752,7 +753,19 @@ async fn trigger_sync(
         return Err(AppError::NotFound);
     }
 
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let result = run_sync(&state, &conn).await?;
+    Ok(Json(result))
+}
+
+/// Core sync routine, callable from both the manual HTTP trigger and the
+/// background auto-sync loop. Performs discovery, iterates items, updates
+/// `last_synced_at`. Errors are per-item (returned in `SyncResult.errors`);
+/// only infra failures (e.g. course row missing) bubble up.
+pub async fn run_sync(
+    state: &AppState,
+    conn: &minerva_db::queries::canvas::ConnectionRow,
+) -> Result<SyncResult, AppError> {
+    let course = minerva_db::queries::courses::find_by_id(&state.db, conn.course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -764,8 +777,7 @@ async fn trigger_sync(
     )
     .await;
 
-    let existing =
-        minerva_db::queries::canvas::synced_log_by_canvas_id(&state.db, connection_id).await?;
+    let existing = minerva_db::queries::canvas::synced_log_by_canvas_id(&state.db, conn.id).await?;
 
     let mut result = SyncResult {
         synced: 0,
@@ -778,9 +790,11 @@ async fn trigger_sync(
     for item in disc.items {
         let prev = existing.get(&item.key);
         let outcome = match item.kind {
-            ItemKind::File => sync_file(&state, &conn, course.owner_id, &item, prev).await,
-            ItemKind::Page => sync_page(&state, &conn, course.owner_id, &item, prev).await,
-            ItemKind::Url => sync_url(&state, &conn, course.owner_id, course_id, &item, prev).await,
+            ItemKind::File => sync_file(state, conn, course.owner_id, &item, prev).await,
+            ItemKind::Page => sync_page(state, conn, course.owner_id, &item, prev).await,
+            ItemKind::Url => {
+                sync_url(state, conn, course.owner_id, conn.course_id, &item, prev).await
+            }
         };
 
         match outcome {
@@ -793,9 +807,39 @@ async fn trigger_sync(
         }
     }
 
-    let _ = minerva_db::queries::canvas::update_last_synced(&state.db, connection_id).await;
+    let _ = minerva_db::queries::canvas::update_last_synced(&state.db, conn.id).await;
 
-    Ok(Json(result))
+    Ok(result)
+}
+
+#[derive(Deserialize)]
+struct AutoSyncRequest {
+    auto_sync: bool,
+}
+
+async fn update_auto_sync(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, connection_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<AutoSyncRequest>,
+) -> Result<Json<ConnectionResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+
+    let conn = minerva_db::queries::canvas::find_connection(&state.db, connection_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if conn.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+
+    minerva_db::queries::canvas::set_auto_sync(&state.db, connection_id, body.auto_sync).await?;
+
+    let row = minerva_db::queries::canvas::find_connection(&state.db, connection_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    Ok(Json(ConnectionResponse::from(row)))
 }
 
 enum Outcome {

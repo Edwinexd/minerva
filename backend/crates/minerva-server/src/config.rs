@@ -39,6 +39,9 @@ pub struct Config {
     /// first login. Sums all tokens across courses they own. 0 = unlimited.
     /// Admin overrides per-user via /admin/users.
     pub default_owner_daily_token_limit: i64,
+    /// How often a Canvas connection with `auto_sync = true` re-syncs.
+    /// Measured in hours; 0 disables the background loop entirely.
+    pub canvas_auto_sync_interval_hours: i32,
 }
 
 impl Config {
@@ -91,6 +94,10 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(500_000),
+            canvas_auto_sync_interval_hours: env::var("MINERVA_CANVAS_AUTO_SYNC_INTERVAL_HOURS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(24),
         })
     }
 

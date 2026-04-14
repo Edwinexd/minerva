@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
@@ -112,6 +113,19 @@ function CanvasPage() {
       })
       queryClient.invalidateQueries({
         queryKey: ["courses", courseId, "documents"],
+      })
+    },
+  })
+
+  const autoSyncMutation = useMutation({
+    mutationFn: ({ connId, autoSync }: { connId: string; autoSync: boolean }) =>
+      api.patch<CanvasConnection>(
+        `/courses/${courseId}/canvas/${connId}/auto-sync`,
+        { auto_sync: autoSync },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "canvas"],
       })
     },
   })
@@ -249,22 +263,35 @@ function CanvasPage() {
             {connections?.map((conn) => (
               <div
                 key={conn.id}
-                className="space-y-2 py-3 border-b last:border-0"
+                className="space-y-3 py-3 border-b last:border-0"
               >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="space-y-1 flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-1 min-w-0 sm:flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-sm">{conn.name}</span>
                       <Badge variant="secondary">Course {conn.canvas_course_id}</Badge>
                     </div>
-                    <div className="text-xs text-muted-foreground truncate">{conn.canvas_base_url}</div>
+                    <div className="text-xs text-muted-foreground break-all">{conn.canvas_base_url}</div>
                     {conn.last_synced_at && (
                       <div className="text-xs text-muted-foreground">
                         Last synced: {new Date(conn.last_synced_at).toLocaleString()}
                       </div>
                     )}
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground pt-1 cursor-pointer select-none">
+                      <Checkbox
+                        checked={conn.auto_sync}
+                        onCheckedChange={(checked) =>
+                          autoSyncMutation.mutate({
+                            connId: conn.id,
+                            autoSync: checked === true,
+                          })
+                        }
+                        disabled={autoSyncMutation.isPending}
+                      />
+                      <span>Auto-sync daily</span>
+                    </label>
                   </div>
-                  <div className="flex gap-2 shrink-0">
+                  <div className="flex flex-wrap gap-2 sm:shrink-0">
                     <Button
                       variant="outline"
                       size="sm"

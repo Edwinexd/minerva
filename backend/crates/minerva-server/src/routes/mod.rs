@@ -1,6 +1,6 @@
 mod admin;
 mod api_keys;
-mod canvas;
+pub(crate) mod canvas;
 mod chat;
 mod courses;
 pub(crate) mod documents;

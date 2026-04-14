@@ -41,7 +41,8 @@ pub fn public_router() -> Router<AppState> {
         )
         .route("/launch", post(handle_launch))
         .route("/jwks", get(jwks))
-        .route("/icon.svg", get(icon))
+        .route("/icon.svg", get(icon_svg))
+        .route("/icon.png", get(icon_png))
 }
 
 /// Course-level routes for managing LTI registrations (teacher/owner only).
@@ -297,10 +298,17 @@ async fn jwks(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(state.lti.jwks_json.clone())
 }
 
-async fn icon() -> Response {
+async fn icon_svg() -> Response {
     // Kept in sync with frontend/public/favicon.svg -- update both when the brand changes.
     const SVG: &str = include_str!("../../assets/favicon.svg");
     ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], SVG).into_response()
+}
+
+// Moodle 4 CSS-masks SVG activity icons with the theme accent color, so a branded
+// SVG renders as a flat blob. PNGs bypass that treatment -- advertise this one to Moodle.
+async fn icon_png() -> Response {
+    const PNG: &[u8] = include_bytes!("../../assets/favicon.png");
+    ([(axum::http::header::CONTENT_TYPE, "image/png")], PNG).into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -540,7 +548,7 @@ fn build_moodle_config(base_url: &str) -> MoodleToolConfig {
         redirection_uris: format!("{}/lti/launch", base_url),
         custom_parameters: "user_eppn=$User.username",
         default_launch_container: "Embed",
-        icon_url: format!("{}/lti/icon.svg", base_url),
+        icon_url: format!("{}/lti/icon.png", base_url),
         share_name: true,
         share_email: false,
         accept_grades: false,

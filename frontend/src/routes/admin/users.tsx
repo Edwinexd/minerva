@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { Menu } from "@base-ui/react/menu"
+import { MoreHorizontalIcon } from "lucide-react"
 import { adminUsersQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -135,7 +137,11 @@ function UserRow({ user }: { user: AdminUser }) {
               </SelectContent>
             </Select>
             {user.role_manually_set && (
-              <Badge variant="outline" title="Locked from rule auto-promotion">
+              <Badge
+                variant="outline"
+                className="h-6 px-2.5"
+                title="Locked from rule auto-promotion"
+              >
                 locked
               </Badge>
             )}
@@ -153,36 +159,57 @@ function UserRow({ user }: { user: AdminUser }) {
         )}
       </td>
       <td className="py-2">
-        <div className="flex flex-wrap items-center gap-2">
-          {user.role !== "admin" && user.role_manually_set && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => unlockMutation.mutate()}
-              disabled={unlockMutation.isPending}
-              title="Allow rule-based auto-promotion to apply on next login"
-            >
-              Unlock
-            </Button>
-          )}
-          {user.role !== "admin" && (
-            <Button
-              variant={user.suspended ? "outline" : "destructive"}
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => suspendMutation.mutate(!user.suspended)}
-              disabled={suspendMutation.isPending}
-            >
-              {user.suspended ? "Unsuspend" : "Suspend"}
-            </Button>
-          )}
-          {suspendMutation.isError && (
-            <span className="text-xs text-destructive">
-              {suspendMutation.error.message}
-            </span>
-          )}
-        </div>
+        {user.role !== "admin" && (
+          <div className="flex items-center gap-2">
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    aria-label="User actions"
+                  >
+                    <MoreHorizontalIcon className="size-4" />
+                  </Button>
+                }
+              />
+              <Menu.Portal>
+                <Menu.Positioner
+                  side="bottom"
+                  align="end"
+                  sideOffset={4}
+                  className="isolate z-50"
+                >
+                  <Menu.Popup className="min-w-40 origin-(--transform-origin) rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+                    {user.role_manually_set && (
+                      <Menu.Item
+                        className="relative flex cursor-default items-center rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50"
+                        disabled={unlockMutation.isPending}
+                        onClick={() => unlockMutation.mutate()}
+                      >
+                        Unlock role
+                      </Menu.Item>
+                    )}
+                    <Menu.Item
+                      className="relative flex cursor-default items-center rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 data-[variant=destructive]:text-destructive data-[variant=destructive]:data-highlighted:bg-destructive/10"
+                      data-variant={user.suspended ? undefined : "destructive"}
+                      disabled={suspendMutation.isPending}
+                      onClick={() => suspendMutation.mutate(!user.suspended)}
+                    >
+                      {user.suspended ? "Unsuspend" : "Suspend"}
+                    </Menu.Item>
+                  </Menu.Popup>
+                </Menu.Positioner>
+              </Menu.Portal>
+            </Menu.Root>
+            {suspendMutation.isError && (
+              <span className="text-xs text-destructive">
+                {suspendMutation.error.message}
+              </span>
+            )}
+          </div>
+        )}
       </td>
     </tr>
   )

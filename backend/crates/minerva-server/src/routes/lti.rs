@@ -298,12 +298,9 @@ async fn jwks(State(state): State<AppState>) -> Json<serde_json::Value> {
 }
 
 async fn icon() -> Response {
-    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="14" fill="#1e293b"/>
-  <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
-        font-family="system-ui,sans-serif" font-weight="700" font-size="28" fill="#f8fafc">M</text>
-</svg>"##;
-    ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], svg).into_response()
+    // Kept in sync with frontend/public/favicon.svg -- update both when the brand changes.
+    const SVG: &str = include_str!("../../assets/favicon.svg");
+    ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], SVG).into_response()
 }
 
 // ---------------------------------------------------------------------------

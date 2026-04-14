@@ -88,6 +88,7 @@ function LtiPage() {
                 { label: "Initiate login URL", value: config.initiate_login_url, key: "login" },
                 { label: "Redirection URI(s)", value: config.redirection_uris, key: "redirect" },
                 { label: "Custom parameters", value: config.custom_parameters, key: "custom" },
+                { label: "Icon URL (under 'Show more...')", value: config.icon_url, key: "icon" },
               ].map(({ label, value, key }) => (
                 <div key={key} className="flex items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">

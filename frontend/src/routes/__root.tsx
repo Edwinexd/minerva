@@ -64,10 +64,12 @@ function RootLayout() {
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 max-w-7xl mx-auto min-w-0">
           {isEmbed ? (
             <a href="/" target="_blank" rel="noopener noreferrer" className="text-xl font-bold tracking-tight hover:opacity-80 flex items-center gap-1.5">
+              <img src="/favicon.svg" alt="" className="w-6 h-6" />
               Minerva <ExternalLink className="w-4 h-4" />
             </a>
           ) : (
-            <Link to="/" className="text-xl font-bold tracking-tight hover:opacity-80">
+            <Link to="/" className="text-xl font-bold tracking-tight hover:opacity-80 flex items-center gap-2">
+              <img src="/favicon.svg" alt="" className="w-6 h-6" />
               Minerva
             </Link>
           )}

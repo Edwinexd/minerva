@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
-import { ChevronDown, ChevronUp } from "lucide-react"
+import { ChevronDown, ChevronUp, Menu, X } from "lucide-react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import React, { useState, useRef, useEffect, useCallback } from "react"
@@ -58,9 +58,46 @@ function ChatPage({
   const isPinnedView = pinned?.some((p) => p.id === conversationId) &&
     !conversations?.some((c) => c.id === conversationId)
 
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [conversationId])
+
   return (
-    <div className="flex h-[calc(100vh-120px)] gap-4">
-      <div className="w-64 border-r pr-4 flex flex-col">
+    <div className="relative flex h-[calc(100vh-120px)] gap-4">
+      <Button
+        variant="outline"
+        size="sm"
+        className="md:hidden absolute top-0 left-0 z-20"
+        onClick={() => setSidebarOpen(true)}
+        aria-label="Open conversations"
+      >
+        <Menu className="w-4 h-4" />
+      </Button>
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-30 bg-background/60"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <div
+        className={`${
+          sidebarOpen
+            ? "fixed inset-y-0 left-0 z-40 w-72 bg-background border-r p-4 flex flex-col md:static md:inset-auto md:w-64 md:p-0 md:pr-4 md:bg-transparent"
+            : "hidden md:flex md:w-64 border-r pr-4 flex-col"
+        }`}
+      >
+        <div className="md:hidden flex justify-end mb-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close conversations"
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
         <Button
           className="mb-4"
           onClick={() => createConversation.mutate()}
@@ -123,7 +160,7 @@ function ChatPage({
         )}
       </div>
 
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0 pl-10 md:pl-0">
         <ChatWindow
           courseId={courseId}
           conversationId={conversationId}

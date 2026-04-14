@@ -60,8 +60,8 @@ function RootLayout() {
 
   return (
     <div className={`${isEmbed ? "h-dvh" : "min-h-screen"} bg-background text-foreground flex flex-col`}>
-      <header className="border-b px-6 py-4">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
+      <header className="border-b px-4 sm:px-6 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 max-w-7xl mx-auto min-w-0">
           {isEmbed ? (
             <a href="/" target="_blank" rel="noopener noreferrer" className="text-xl font-bold tracking-tight hover:opacity-80 flex items-center gap-1.5">
               Minerva <ExternalLink className="w-4 h-4" />
@@ -71,7 +71,7 @@ function RootLayout() {
               Minerva
             </Link>
           )}
-          <nav className="flex items-center gap-4 text-sm">
+          <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm min-w-0">
             {!isEmbed && user && (user.role === "teacher" || user.role === "admin") && (
               <Link
                 to="/teacher"
@@ -103,11 +103,11 @@ function RootLayout() {
           </nav>
         </div>
       </header>
-      <main className={`${isEmbed ? "flex-1 min-h-0" : "max-w-7xl mx-auto px-6 py-8 flex-1 w-full"}`}>
+      <main className={`${isEmbed ? "flex-1 min-h-0" : "max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full min-w-0"}`}>
         <Outlet />
       </main>
-      <footer className="border-t px-6 py-4 mt-auto">
-        <div className="flex items-center justify-between max-w-7xl mx-auto text-xs text-muted-foreground">
+      <footer className="border-t px-4 sm:px-6 py-4 mt-auto">
+        <div className="flex flex-wrap items-center justify-between gap-2 max-w-7xl mx-auto text-xs text-muted-foreground">
           <span>
             <a href="https://github.com/Edwinexd/minerva" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">Minerva</a>
             {" "}is licensed under{" "}
@@ -143,7 +143,7 @@ function DevUserSwitcher({
       <select
         value={selected}
         onChange={(e) => setSelected(e.target.value)}
-        className="border rounded px-2 py-1 text-sm bg-background"
+        className="border rounded px-2 py-1 text-sm bg-background max-w-[12rem] min-w-0"
       >
         {users.map((u) => (
           <option key={u.eppn} value={u.eppn}>

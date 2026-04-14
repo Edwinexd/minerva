@@ -1,5 +1,12 @@
 import { createFileRoute, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 export const Route = createFileRoute("/admin")({
   component: AdminLayout,
@@ -25,11 +32,34 @@ function AdminLayout() {
     <div className="space-y-6">
       <h2 className="text-2xl font-bold tracking-tight">Platform Admin</h2>
 
+      <div className="md:hidden">
+        <Select
+          value={activeTab}
+          onValueChange={(value) => {
+            if (value) navigate({ to: `/admin/${value}` } as any)
+          }}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue>
+              {TABS.find((t) => t.value === activeTab)?.label}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {TABS.map((tab) => (
+              <SelectItem key={tab.value} value={tab.value}>
+                {tab.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <Tabs
         value={activeTab}
         onValueChange={(value: unknown) => {
           navigate({ to: `/admin/${value}` } as any)
         }}
+        className="hidden md:flex"
       >
         <TabsList>
           {TABS.map((tab) => (

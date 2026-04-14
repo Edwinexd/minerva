@@ -54,7 +54,7 @@ function MembersPage() {
       </CardHeader>
       <CardContent className="space-y-4">
         <form
-          className="flex gap-2"
+          className="flex flex-wrap gap-2"
           onSubmit={(e) => {
             e.preventDefault()
             if (eppn) addMutation.mutate({ eppn, role })
@@ -64,12 +64,12 @@ function MembersPage() {
             value={eppn}
             onChange={(e) => setEppn(e.target.value)}
             placeholder="username@SU.SE"
-            className="flex-1"
+            className="flex-1 min-w-[12rem]"
           />
           <select
             value={role}
             onChange={(e) => setRole(e.target.value)}
-            className="border rounded px-2 text-sm"
+            className="border rounded px-2 py-1 text-sm bg-background"
           >
             <option value="student">Student</option>
             <option value="ta">TA</option>
@@ -86,19 +86,19 @@ function MembersPage() {
           {members?.map((m) => (
             <div
               key={m.user_id}
-              className="flex items-center justify-between py-2 border-b last:border-0"
+              className="flex flex-wrap items-center justify-between gap-2 py-2 border-b last:border-0"
             >
-              <div>
+              <div className="min-w-0 break-words">
                 <span className="font-medium">
                   {m.display_name || m.eppn}
                 </span>
                 {m.display_name && (
-                  <span className="text-muted-foreground text-sm ml-2">
+                  <span className="text-muted-foreground text-sm ml-2 break-all">
                     {m.eppn}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <Badge variant="outline">{m.role}</Badge>
                 <Button
                   variant="ghost"

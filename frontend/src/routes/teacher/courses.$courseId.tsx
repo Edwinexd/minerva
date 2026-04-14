@@ -3,6 +3,13 @@ import { useQuery } from "@tanstack/react-query"
 import { courseQuery } from "@/lib/queries"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 
 export const Route = createFileRoute("/teacher/courses/$courseId")({
@@ -35,8 +42,8 @@ function CourseEditPage() {
 
   if (isLoading) return (
     <div className="space-y-6">
-      <Skeleton className="h-8 w-64" />
-      <Skeleton className="h-10 w-80" />
+      <Skeleton className="h-8 w-full max-w-64" />
+      <Skeleton className="h-10 w-full max-w-80" />
       <Skeleton className="h-64 w-full" />
     </div>
   )
@@ -51,11 +58,34 @@ function CourseEditPage() {
         </Link>
       </div>
 
+      <div className="md:hidden">
+        <Select
+          value={activeTab}
+          onValueChange={(value) => {
+            if (value) navigate({ to: `/teacher/courses/${courseId}/${value}` } as any)
+          }}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue>
+              {TABS.find((t) => t.value === activeTab)?.label}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {TABS.map((tab) => (
+              <SelectItem key={tab.value} value={tab.value}>
+                {tab.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <Tabs
         value={activeTab}
         onValueChange={(value: unknown) => {
           navigate({ to: `/teacher/courses/${courseId}/${value}` } as any)
         }}
+        className="hidden md:flex"
       >
         <TabsList>
           {TABS.map((tab) => (

@@ -85,12 +85,12 @@ function ConversationsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <Select
                 value={selectedTopic ?? ""}
                 onValueChange={(v) => setSelectedTopic(v || null)}
               >
-                <SelectTrigger className="w-72">
+                <SelectTrigger className="w-full sm:w-72">
                   <SelectValue placeholder="Filter by topic..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -126,7 +126,7 @@ function ConversationsPage() {
             <Skeleton className="h-4 w-64 mt-1" />
           </CardHeader>
           <CardContent>
-            <Skeleton className="h-10 w-72" />
+            <Skeleton className="h-10 w-full sm:w-72" />
           </CardContent>
         </Card>
       )}

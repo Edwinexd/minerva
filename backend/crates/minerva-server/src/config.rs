@@ -31,6 +31,14 @@ pub struct Config {
     /// Global service API key for automated pipelines (e.g. transcript fetcher).
     /// Authenticated via `Authorization: Bearer <key>` on service endpoints.
     pub service_api_key: Option<String>,
+    /// Default per-student-per-day token cap applied to newly created courses
+    /// when the request omits `daily_token_limit` or sends 0. Existing courses
+    /// are unaffected. 0 disables the default (= unlimited new courses).
+    pub default_course_daily_token_limit: i64,
+    /// Default per-owner aggregate daily token cap applied to *new* users on
+    /// first login. Sums all tokens across courses they own. 0 = unlimited.
+    /// Admin overrides per-user via /admin/users.
+    pub default_owner_daily_token_limit: i64,
 }
 
 impl Config {
@@ -75,6 +83,14 @@ impl Config {
             service_api_key: env::var("MINERVA_SERVICE_API_KEY")
                 .ok()
                 .filter(|s| !s.is_empty()),
+            default_course_daily_token_limit: env::var("MINERVA_DEFAULT_COURSE_DAILY_TOKEN_LIMIT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(100_000),
+            default_owner_daily_token_limit: env::var("MINERVA_DEFAULT_OWNER_DAILY_TOKEN_LIMIT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(500_000),
         })
     }
 

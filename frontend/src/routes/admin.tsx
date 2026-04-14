@@ -15,6 +15,7 @@ export const Route = createFileRoute("/admin")({
 const TABS = [
   { value: "usage", label: "Platform Usage" },
   { value: "users", label: "User Management" },
+  { value: "rules", label: "Role Rules" },
   { value: "external-invites", label: "External Invites" },
   { value: "system", label: "System" },
 ] as const

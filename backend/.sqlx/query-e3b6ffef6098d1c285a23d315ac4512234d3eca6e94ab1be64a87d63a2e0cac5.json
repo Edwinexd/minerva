@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, created_at, updated_at FROM users WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "eppn",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "suspended",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "role_manually_set",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "owner_daily_token_limit",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e3b6ffef6098d1c285a23d315ac4512234d3eca6e94ab1be64a87d63a2e0cac5"
+}

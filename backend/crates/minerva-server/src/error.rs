@@ -20,6 +20,9 @@ pub enum AppError {
     #[error("daily token quota exceeded")]
     QuotaExceeded,
 
+    #[error("course owner has reached their daily AI spending cap; contact lambda@dsv.su.se to request an increase")]
+    OwnerQuotaExceeded,
+
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
 
@@ -35,6 +38,7 @@ impl IntoResponse for AppError {
             AppError::Forbidden => (StatusCode::FORBIDDEN, self.to_string()),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             AppError::QuotaExceeded => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
+            AppError::OwnerQuotaExceeded => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
             AppError::Database(e) => {
                 tracing::error!("database error: {:?}", e);
                 (

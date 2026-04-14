@@ -22,7 +22,27 @@ use minerva_core::models::User;
 use serde_json::{json, Value};
 
 use crate::auth::auth_middleware;
+use crate::error::AppError;
 use crate::state::AppState;
+use uuid::Uuid;
+
+/// Reject the request if the course owner has hit their aggregate daily
+/// token cap (summed across every course they own). 0 = unlimited.
+/// Called from chat + embed routes before invoking the LLM.
+pub(crate) async fn enforce_owner_cap(state: &AppState, owner_id: Uuid) -> Result<(), AppError> {
+    let owner = minerva_db::queries::users::find_by_id(&state.db, owner_id).await?;
+    let Some(owner) = owner else {
+        return Ok(());
+    };
+    if owner.owner_daily_token_limit <= 0 {
+        return Ok(());
+    }
+    let used = minerva_db::queries::usage::get_owner_daily_tokens(&state.db, owner_id).await?;
+    if used >= owner.owner_daily_token_limit {
+        return Err(AppError::OwnerQuotaExceeded);
+    }
+    Ok(())
+}
 
 pub fn api_router(state: AppState) -> Router<AppState> {
     let authed = Router::new()

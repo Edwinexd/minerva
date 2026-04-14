@@ -41,6 +41,7 @@ rand_chacha = "0.3"
 urlencoding = "2"
 
 # Utilities
+regex = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"

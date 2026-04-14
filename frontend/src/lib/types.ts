@@ -34,8 +34,62 @@ export interface AdminUser {
   display_name: string | null
   role: string
   suspended: boolean
+  role_manually_set: boolean
+  owner_daily_token_limit: number
   created_at: string
   updated_at: string
+}
+
+export type RoleRuleAttribute =
+  | "eppn"
+  | "displayName"
+  | "affiliation"
+  | "entitlement"
+  | "mail"
+  | "cn"
+  | "sn"
+  | "givenName"
+
+export const ROLE_RULE_ATTRIBUTES: RoleRuleAttribute[] = [
+  "eppn",
+  "displayName",
+  "affiliation",
+  "entitlement",
+  "mail",
+  "cn",
+  "sn",
+  "givenName",
+]
+
+export type RoleRuleOperator =
+  | "contains"
+  | "not_contains"
+  | "regex"
+  | "not_regex"
+
+export const ROLE_RULE_OPERATORS: RoleRuleOperator[] = [
+  "contains",
+  "not_contains",
+  "regex",
+  "not_regex",
+]
+
+export interface RoleRuleCondition {
+  id: string
+  rule_id: string
+  attribute: string
+  operator: string
+  value: string
+}
+
+export interface RoleRule {
+  id: string
+  name: string
+  target_role: "student" | "teacher"
+  enabled: boolean
+  created_at: string
+  updated_at: string
+  conditions: RoleRuleCondition[]
 }
 
 export interface UsageRecord {

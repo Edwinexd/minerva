@@ -7,6 +7,7 @@ pub mod lti;
 pub mod message_feedback;
 pub mod play_course_catalog;
 pub mod play_designations;
+pub mod role_rules;
 pub mod signed_urls;
 pub mod usage;
 pub mod users;

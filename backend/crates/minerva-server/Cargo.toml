@@ -34,6 +34,7 @@ sha2.workspace = true
 hex.workspace = true
 rand.workspace = true
 jsonwebtoken.workspace = true
+regex.workspace = true
 rsa.workspace = true
 rand_chacha.workspace = true
 urlencoding.workspace = true

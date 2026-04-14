@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET owner_daily_token_limit = $1, updated_at = NOW() WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aa1354a949ffe085088d6b5e1a9f186f5f181e66b0e00877910ecb8410a42c90"
+}

@@ -127,6 +127,10 @@ async fn create_course(
         name: body.name,
         description: body.description,
         owner_id: user.id,
+        // Apply the platform-wide default per-student-per-day cap. Teachers
+        // can adjust (including to 0 = unlimited) via PUT afterwards; the
+        // per-owner aggregate cap on `users` is the real spend backstop.
+        daily_token_limit: state.config.default_course_daily_token_limit,
     };
 
     let row = minerva_db::queries::courses::create(&state.db, id, &input).await?;

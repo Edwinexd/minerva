@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, eppn, display_name, role, suspended, created_at, updated_at FROM users WHERE id = $1",
+  "query": "SELECT id, name, target_role, enabled, created_at, updated_at FROM role_rules ORDER BY created_at",
   "describe": {
     "columns": [
       {
@@ -10,49 +10,41 @@
       },
       {
         "ordinal": 1,
-        "name": "eppn",
+        "name": "name",
         "type_info": "Text"
       },
       {
         "ordinal": 2,
-        "name": "display_name",
+        "name": "target_role",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "role",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 4,
-        "name": "suspended",
+        "name": "enabled",
         "type_info": "Bool"
       },
       {
-        "ordinal": 5,
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
       false,
-      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "5f1ec241b50357ec100830a19fb079a2057aa6d4d97fb39996c97062e424a787"
+  "hash": "57099fb320d90baa72b96c0404a11b30413b6f52afa82fec293fe5f9c6d8c062"
 }

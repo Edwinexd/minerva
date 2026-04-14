@@ -2483,6 +2483,7 @@ dependencies = [
  "qdrant-client",
  "rand 0.10.0",
  "rand_chacha 0.3.1",
+ "regex",
  "reqwest 0.13.2",
  "rsa",
  "serde",

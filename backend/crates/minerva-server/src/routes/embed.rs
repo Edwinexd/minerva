@@ -20,6 +20,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::enforce_owner_cap;
 use crate::routes::integration::verify_embed_token;
 use crate::state::AppState;
 use crate::strategy;
@@ -256,7 +257,7 @@ async fn send_message(
         return Err(AppError::Forbidden);
     }
 
-    // Enforce daily token limit.
+    // Enforce per-student-per-course daily cap (0 = unlimited).
     if course.daily_token_limit > 0 {
         let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user_id, course_id)
             .await?;
@@ -264,6 +265,8 @@ async fn send_message(
             return Err(AppError::QuotaExceeded);
         }
     }
+    // Enforce the course owner's aggregate cap across all owned courses.
+    enforce_owner_cap(&state, course.owner_id).await?;
 
     // Save user message.
     let user_msg_id = Uuid::new_v4();

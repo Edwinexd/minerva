@@ -77,6 +77,22 @@ pub async fn get_user_daily_tokens(
     Ok(row.unwrap_or(0))
 }
 
+/// Sum of (prompt_tokens + completion_tokens) today across every course
+/// owned by `owner_id`. Used to enforce the per-owner aggregate cap so a
+/// teacher's spend across all their courses stays under one budget.
+pub async fn get_owner_daily_tokens(db: &PgPool, owner_id: Uuid) -> Result<i64, sqlx::Error> {
+    let row = sqlx::query_scalar!(
+        r#"SELECT COALESCE(SUM(u.prompt_tokens + u.completion_tokens), 0)::bigint AS "total!"
+           FROM usage_daily u
+           JOIN courses c ON c.id = u.course_id
+           WHERE c.owner_id = $1 AND u.date = CURRENT_DATE"#,
+        owner_id,
+    )
+    .fetch_one(db)
+    .await?;
+    Ok(row)
+}
+
 #[derive(Debug)]
 pub struct UsageSummaryRow {
     pub course_id: Uuid,

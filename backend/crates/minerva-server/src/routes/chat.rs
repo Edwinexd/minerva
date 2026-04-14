@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::error::AppError;
 use crate::ext_obfuscate::{self, Pseudonymizer};
+use crate::routes::enforce_owner_cap;
 use crate::state::AppState;
 use crate::strategy;
 
@@ -622,7 +623,7 @@ async fn send_message(
         return Err(AppError::Forbidden);
     }
 
-    // Enforce daily token limit (0 = unlimited)
+    // Enforce per-student-per-course daily cap (0 = unlimited)
     if course.daily_token_limit > 0 {
         let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user.id, course_id)
             .await?;
@@ -630,6 +631,11 @@ async fn send_message(
             return Err(AppError::QuotaExceeded);
         }
     }
+
+    // Enforce the course owner's aggregate daily cap (sum across every
+    // course they own). Acts as a sanity ceiling on a single teacher's
+    // total AI spend regardless of per-course settings.
+    enforce_owner_cap(&state, course.owner_id).await?;
 
     // Save user message
     let user_msg_id = Uuid::new_v4();

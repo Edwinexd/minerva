@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(SUM(u.prompt_tokens + u.completion_tokens), 0)::bigint AS \"total!\"\n           FROM usage_daily u\n           JOIN courses c ON c.id = u.course_id\n           WHERE c.owner_id = $1 AND u.date = CURRENT_DATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2232432556dbe9f6160c2d48f67b38b1bb036a2cb7e79c798e36074d4afe12fa"
+}

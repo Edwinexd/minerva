@@ -4,6 +4,7 @@ mod error;
 mod ext_obfuscate;
 pub mod lti;
 mod routes;
+mod rules;
 mod state;
 mod strategy;
 mod worker;

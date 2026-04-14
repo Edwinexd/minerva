@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO role_rule_conditions (id, rule_id, attribute, operator, value)\n         VALUES ($1, $2, $3, $4, $5)\n         RETURNING id, rule_id, attribute, operator, value, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "rule_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "attribute",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "operator",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "value",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a87ac0667ff5a6f6b863cd4993731bc88385545f3e8624e7d5b959d200e6f0e6"
+}

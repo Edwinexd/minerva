@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, eppn, display_name, role, suspended, created_at, updated_at FROM users WHERE eppn = $1",
+  "query": "INSERT INTO role_rules (id, name, target_role, enabled)\n         VALUES ($1, $2, $3, $4)\n         RETURNING id, name, target_role, enabled, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -10,49 +10,46 @@
       },
       {
         "ordinal": 1,
-        "name": "eppn",
+        "name": "name",
         "type_info": "Text"
       },
       {
         "ordinal": 2,
-        "name": "display_name",
+        "name": "target_role",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "role",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 4,
-        "name": "suspended",
+        "name": "enabled",
         "type_info": "Bool"
       },
       {
-        "ordinal": 5,
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool"
       ]
     },
     "nullable": [
       false,
       false,
-      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "759f63fe80e4f0836e1bf0f7e237721f2eb621a07fbe74222b0372bc23b0b335"
+  "hash": "1151efce8a8f76d20531f508883ba0de2c6c086ec7e4d79f98ea9f9fe0047caa"
 }

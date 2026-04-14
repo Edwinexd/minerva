@@ -26,6 +26,7 @@ pub struct CreateCourse {
     pub name: String,
     pub description: Option<String>,
     pub owner_id: Uuid,
+    pub daily_token_limit: i64,
 }
 
 pub struct UpdateCourse {
@@ -46,13 +47,14 @@ pub struct UpdateCourse {
 pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<CourseRow, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"INSERT INTO courses (id, name, description, owner_id)
-        VALUES ($1, $2, $3, $4)
+        r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at"#,
         id,
         input.name,
         input.description,
         input.owner_id,
+        input.daily_token_limit,
     )
     .fetch_one(db)
     .await

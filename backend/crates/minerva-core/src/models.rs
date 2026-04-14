@@ -43,8 +43,67 @@ pub struct User {
     pub display_name: Option<String>,
     pub role: UserRole,
     pub suspended: bool,
+    pub role_manually_set: bool,
+    pub owner_daily_token_limit: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleOperator {
+    Contains,
+    NotContains,
+    Regex,
+    NotRegex,
+}
+
+impl RuleOperator {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Contains => "contains",
+            Self::NotContains => "not_contains",
+            Self::Regex => "regex",
+            Self::NotRegex => "not_regex",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "contains" => Some(Self::Contains),
+            "not_contains" => Some(Self::NotContains),
+            "regex" => Some(Self::Regex),
+            "not_regex" => Some(Self::NotRegex),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoleRule {
+    pub id: Uuid,
+    pub name: String,
+    pub target_role: UserRole,
+    pub enabled: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoleRuleCondition {
+    pub id: Uuid,
+    pub rule_id: Uuid,
+    pub attribute: String,
+    pub operator: RuleOperator,
+    pub value: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoleRuleWithConditions {
+    #[serde(flatten)]
+    pub rule: RoleRule,
+    pub conditions: Vec<RoleRuleCondition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

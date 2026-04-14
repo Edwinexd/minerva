@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE role_rules SET name = $2, target_role = $3, enabled = $4, updated_at = NOW() WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9e347ac81be6616a23be9e6f2e5618fb718577f6c8dceddfdf9e3c97f19e11ca"
+}

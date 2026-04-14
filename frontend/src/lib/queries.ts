@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -137,4 +137,9 @@ export const adminSystemMetricsQuery = queryOptions({
   queryKey: ["admin", "system"],
   queryFn: () => api.get<SystemMetrics>("/admin/system"),
   refetchInterval: 30_000,
+})
+
+export const adminRoleRulesQuery = queryOptions({
+  queryKey: ["admin", "role-rules"],
+  queryFn: () => api.get<RoleRule[]>("/admin/role-rules"),
 })

@@ -171,6 +171,46 @@ accounts (e.g. external collaborators).
 - `/etc/apache2/secrets/minerva-hmac` must be updated by hand whenever
   `MINERVA_HMAC_SECRET` rotates -- it does not auto-sync from k8s.
 
+## Role Auto-Promotion Rules
+
+Admin-managed rules at `/admin/rules` auto-promote users to a target role
+(`teacher` only -- admins must be in `MINERVA_ADMINS`) at login when ALL
+their conditions match the user's Shibboleth attributes. Backed by
+`role_rules` + `role_rule_conditions` tables; evaluated in
+`auth_middleware::upsert_user` after the admin allowlist check.
+
+- Operators: `contains` / `not_contains` (list-membership against
+  `;`-joined multi-valued headers like `entitlement`/`affiliation`),
+  `regex` / `not_regex` (Rust `regex` crate; validated at save time).
+- Supported attributes: `eppn`, `displayName`, `affiliation`,
+  `entitlement`, `mail`, `cn`, `sn`, `givenName` (mirrored in
+  `rules::SUPPORTED_ATTRIBUTES`).
+- Rules are **additive**: never demote, never override admins.
+- Manual override wins: changing a role via `/admin/users` sets
+  `users.role_manually_set = TRUE`; rules then leave the user alone
+  until an admin clicks **Unlock** (DELETE `/admin/users/:id/role-lock`).
+
+**Apache trust boundary:** the new attribute headers are unset `early`
+in `apache/minerva-app.conf` so a client cannot spoof them. The DSV
+auto-deploy path watcher (`apache/install/`) picks up the change on the
+next push to `master`; no manual server step needed.
+
+## AI Spending Caps
+
+Two layers, both daily:
+
+1. **Per-student-per-course** (`courses.daily_token_limit`, existing).
+   New courses default to `MINERVA_DEFAULT_COURSE_DAILY_TOKEN_LIMIT`
+   (default `100000` tokens/student/day). Teachers can set `0` =
+   unlimited per student.
+2. **Per-owner aggregate** (`users.owner_daily_token_limit`, new). Sums
+   tokens across every course the user owns. New users default to
+   `MINERVA_DEFAULT_OWNER_DAILY_TOKEN_LIMIT` (default `500000`/day).
+   Existing users default to `0` (unlimited) -- admin dials individuals
+   down via `/admin/users`. `0` = unlimited. When breached, chat +
+   embed routes return `429` with a body pointing teachers to
+   `lambda@dsv.su.se` for an increase.
+
 ## TODO
 
 - [ ] Add `snowflake-arctic-embed-m-v2.0` (768 dims, ~311 MB INT8) as a local embedding model once fastembed-rs PR #239 is merged -- multilingual (Swedish+English), replaces English-only models. Track: https://github.com/Anush008/fastembed-rs/pull/239

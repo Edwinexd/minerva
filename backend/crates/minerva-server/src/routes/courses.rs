@@ -93,7 +93,8 @@ async fn list_courses(
     let rows = if user.role.is_admin() {
         minerva_db::queries::courses::list_all(&state.db).await?
     } else if user.role.is_teacher_or_above() {
-        minerva_db::queries::courses::list_by_owner(&state.db, user.id).await?
+        // Teachers see courses they own + courses they teach/TA on
+        minerva_db::queries::courses::list_for_teacher(&state.db, user.id).await?
     } else {
         // Students see courses they're a member of
         minerva_db::queries::courses::list_by_member(&state.db, user.id).await?

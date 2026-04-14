@@ -1,0 +1,118 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.embedding_provider, c.embedding_model, c.daily_token_limit, c.active, c.created_at, c.updated_at\n        FROM courses c\n        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1 OR cm.role IN ('teacher', 'ta'))\n        ORDER BY c.updated_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "context_ratio",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "temperature",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "system_prompt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "max_chunks",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "min_score",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 10,
+        "name": "strategy",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "embedding_provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "embedding_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "daily_token_limit",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 14,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "58b40afb33503099f4eea708dec73c4165e521a37d068f1d27ef3e0e4b143ed7"
+}

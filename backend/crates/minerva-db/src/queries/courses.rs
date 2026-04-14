@@ -92,6 +92,24 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>
     .await
 }
 
+/// Courses where the user is owner OR a teacher/ta member. Used for the
+/// teacher dashboard so co-teachers (added via `/courses/:id/members` with
+/// role=teacher) see the course even though they don't own it.
+pub async fn list_for_teacher(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
+    sqlx::query_as!(
+        CourseRow,
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.embedding_provider, c.embedding_model, c.daily_token_limit, c.active, c.created_at, c.updated_at
+        FROM courses c
+        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
+        WHERE c.active = true
+          AND (c.owner_id = $1 OR cm.role IN ('teacher', 'ta'))
+        ORDER BY c.updated_at DESC"#,
+        user_id,
+    )
+    .fetch_all(db)
+    .await
+}
+
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,

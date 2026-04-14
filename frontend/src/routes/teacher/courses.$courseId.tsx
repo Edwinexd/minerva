@@ -23,6 +23,7 @@ const TABS = [
   { value: "documents", label: "Documents" },
   { value: "invite", label: "Invite Links" },
   { value: "lti", label: "LTI" },
+  { value: "canvas", label: "Canvas" },
   { value: "api-keys", label: "API Keys" },
   { value: "play-designations", label: "Play Designations" },
   { value: "rag", label: "RAG Debug" },
@@ -34,6 +35,7 @@ const TABS = [
 const TA_HIDDEN_TABS = new Set<string>([
   "invite",
   "lti",
+  "canvas",
   "api-keys",
   "play-designations",
 ])

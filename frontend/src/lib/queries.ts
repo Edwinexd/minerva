@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasFileInfo, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -116,6 +116,18 @@ export const ltiRegistrationsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "lti"],
     queryFn: () => api.get<LtiRegistration[]>(`/courses/${courseId}/lti`),
+  })
+
+export const canvasConnectionsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "canvas"],
+    queryFn: () => api.get<CanvasConnection[]>(`/courses/${courseId}/canvas`),
+  })
+
+export const canvasFilesQuery = (courseId: string, connectionId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "canvas", connectionId, "files"],
+    queryFn: () => api.get<CanvasFileInfo[]>(`/courses/${courseId}/canvas/${connectionId}/files`),
   })
 
 export const adminUsersQuery = queryOptions({

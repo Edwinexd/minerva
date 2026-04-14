@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO canvas_connections (id, course_id, name, canvas_base_url, canvas_api_token, canvas_course_id, auto_sync, created_by)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        RETURNING id, course_id, name, canvas_base_url, canvas_api_token, canvas_course_id, auto_sync, created_by, created_at, updated_at, last_synced_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "canvas_base_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "canvas_api_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "canvas_course_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "auto_sync",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "last_synced_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "80983a747582dc2dffc2b9dbfd6523c8d0d13cb20864e9f3c47de8beb72962ab"
+}

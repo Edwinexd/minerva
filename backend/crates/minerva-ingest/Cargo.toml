@@ -19,3 +19,4 @@ sqlx.workspace = true
 qdrant-client.workspace = true
 fastembed.workspace = true
 pdf-extract = "0.10"
+scraper = "0.22"

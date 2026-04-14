@@ -14,6 +14,32 @@ use crate::embedder;
 use crate::fastembed_embedder::FastEmbedder;
 use crate::pdf;
 
+enum TextSource {
+    Plain,
+    Html,
+    Pdf,
+}
+
+fn text_source(path: &Path) -> TextSource {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("txt" | "md" | "rst" | "csv" | "tsv") => TextSource::Plain,
+        Some("html" | "htm") => TextSource::Html,
+        _ => TextSource::Pdf,
+    }
+}
+
+fn html_to_text(html: &str) -> String {
+    let document = scraper::Html::parse_document(html);
+    // Collect all text nodes separated by whitespace, then normalize runs.
+    let raw: String = document
+        .root_element()
+        .text()
+        .flat_map(|t| [t, " "])
+        .collect();
+    // Collapse runs of whitespace into a single space and trim.
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "local"];
 
 pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
@@ -54,20 +80,25 @@ pub async fn process_document(
     embedding_model: &str,
 ) -> Result<ProcessResult, String> {
     // 1. Extract text
-    let is_text_file = file_path.extension().is_some_and(|e| e == "txt");
-
-    let text = if is_text_file {
-        std::fs::read_to_string(file_path).map_err(|e| {
+    let text = match text_source(file_path) {
+        TextSource::Plain => std::fs::read_to_string(file_path).map_err(|e| {
             let msg = format!("failed to read text file: {}", e);
             tracing::error!("{}", msg);
             msg
-        })?
-    } else {
-        pdf::extract_text(file_path).map_err(|e| {
+        })?,
+        TextSource::Html => {
+            let raw = std::fs::read_to_string(file_path).map_err(|e| {
+                let msg = format!("failed to read html file: {}", e);
+                tracing::error!("{}", msg);
+                msg
+            })?;
+            html_to_text(&raw)
+        }
+        TextSource::Pdf => pdf::extract_text(file_path).map_err(|e| {
             let msg = format!("text extraction failed: {}", e);
             tracing::error!("{}", msg);
             msg
-        })?
+        })?,
     };
 
     tracing::info!("extracted {} chars from {}", text.len(), filename);

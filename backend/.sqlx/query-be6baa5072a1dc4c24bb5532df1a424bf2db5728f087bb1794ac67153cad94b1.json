@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE play_designations SET last_synced_at = NOW(), last_error = $1 WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "be6baa5072a1dc4c24bb5532df1a424bf2db5728f087bb1794ac67153cad94b1"
+}

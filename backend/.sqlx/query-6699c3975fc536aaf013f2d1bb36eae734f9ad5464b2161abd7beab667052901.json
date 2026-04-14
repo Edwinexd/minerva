@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 3,
+        "name": "prompt_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "completion_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "embedding_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "request_count",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6699c3975fc536aaf013f2d1bb36eae734f9ad5464b2161abd7beab667052901"
+}

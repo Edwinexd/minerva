@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM play_designations WHERE id = $1 AND course_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "407fbe6583215358e9a9d2c12933b6d7f9831a573938867d33b1c150fd9c6ac1"
+}

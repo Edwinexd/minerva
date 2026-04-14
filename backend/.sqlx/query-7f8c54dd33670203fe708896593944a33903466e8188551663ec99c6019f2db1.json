@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE courses SET active = false, updated_at = NOW() WHERE id = $1 AND active = true",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7f8c54dd33670203fe708896593944a33903466e8188551663ec99c6019f2db1"
+}

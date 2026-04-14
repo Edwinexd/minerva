@@ -1,7 +1,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct UsageDailyRow {
     pub user_id: Uuid,
     pub course_id: Uuid,
@@ -20,7 +20,7 @@ pub async fn record_usage(
     completion_tokens: i64,
     embedding_tokens: i64,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query!(
         r#"INSERT INTO usage_daily (user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count)
         VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, 1)
         ON CONFLICT (user_id, course_id, date)
@@ -29,12 +29,12 @@ pub async fn record_usage(
             completion_tokens = usage_daily.completion_tokens + $4,
             embedding_tokens = usage_daily.embedding_tokens + $5,
             request_count = usage_daily.request_count + 1"#,
+        user_id,
+        course_id,
+        prompt_tokens,
+        completion_tokens,
+        embedding_tokens,
     )
-    .bind(user_id)
-    .bind(course_id)
-    .bind(prompt_tokens)
-    .bind(completion_tokens)
-    .bind(embedding_tokens)
     .execute(db)
     .await?;
     Ok(())
@@ -44,16 +44,18 @@ pub async fn get_course_usage(
     db: &PgPool,
     course_id: Uuid,
 ) -> Result<Vec<UsageDailyRow>, sqlx::Error> {
-    sqlx::query_as::<_, UsageDailyRow>(
+    sqlx::query_as!(
+        UsageDailyRow,
         "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
+        course_id,
     )
-    .bind(course_id)
     .fetch_all(db)
     .await
 }
 
 pub async fn get_all_usage(db: &PgPool) -> Result<Vec<UsageDailyRow>, sqlx::Error> {
-    sqlx::query_as::<_, UsageDailyRow>(
+    sqlx::query_as!(
+        UsageDailyRow,
         "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count FROM usage_daily ORDER BY date DESC",
     )
     .fetch_all(db)
@@ -65,17 +67,17 @@ pub async fn get_user_daily_tokens(
     user_id: Uuid,
     course_id: Uuid,
 ) -> Result<i64, sqlx::Error> {
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT COALESCE(prompt_tokens + completion_tokens, 0) FROM usage_daily WHERE user_id = $1 AND course_id = $2 AND date = CURRENT_DATE",
+    let row = sqlx::query_scalar!(
+        r#"SELECT COALESCE(prompt_tokens + completion_tokens, 0) AS "total!" FROM usage_daily WHERE user_id = $1 AND course_id = $2 AND date = CURRENT_DATE"#,
+        user_id,
+        course_id,
     )
-    .bind(user_id)
-    .bind(course_id)
     .fetch_optional(db)
     .await?;
-    Ok(row.map(|r| r.0).unwrap_or(0))
+    Ok(row.unwrap_or(0))
 }
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct UsageSummaryRow {
     pub course_id: Uuid,
     pub total_prompt_tokens: Option<i64>,
@@ -88,15 +90,16 @@ pub async fn get_course_summary(
     db: &PgPool,
     course_id: Uuid,
 ) -> Result<UsageSummaryRow, sqlx::Error> {
-    sqlx::query_as::<_, UsageSummaryRow>(
+    sqlx::query_as!(
+        UsageSummaryRow,
         r#"SELECT course_id,
-            SUM(prompt_tokens) as total_prompt_tokens,
-            SUM(completion_tokens) as total_completion_tokens,
-            SUM(embedding_tokens) as total_embedding_tokens,
+            SUM(prompt_tokens)::bigint as total_prompt_tokens,
+            SUM(completion_tokens)::bigint as total_completion_tokens,
+            SUM(embedding_tokens)::bigint as total_embedding_tokens,
             SUM(request_count)::bigint as total_requests
         FROM usage_daily WHERE course_id = $1 GROUP BY course_id"#,
+        course_id,
     )
-    .bind(course_id)
     .fetch_optional(db)
     .await
     .map(|opt| {

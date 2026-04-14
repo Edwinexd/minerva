@@ -1,6 +1,6 @@
 use sqlx::PgPool;
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct PlayCourseCatalogRow {
     pub code: String,
     pub name: String,
@@ -8,7 +8,8 @@ pub struct PlayCourseCatalogRow {
 }
 
 pub async fn list_all(db: &PgPool) -> Result<Vec<PlayCourseCatalogRow>, sqlx::Error> {
-    sqlx::query_as::<_, PlayCourseCatalogRow>(
+    sqlx::query_as!(
+        PlayCourseCatalogRow,
         "SELECT code, name, updated_at FROM play_course_catalog ORDER BY code",
     )
     .fetch_all(db)
@@ -23,15 +24,15 @@ pub async fn upsert_many(db: &PgPool, entries: &[(String, String)]) -> Result<u6
     }
     let codes: Vec<&str> = entries.iter().map(|(c, _)| c.as_str()).collect();
     let names: Vec<&str> = entries.iter().map(|(_, n)| n.as_str()).collect();
-    let result = sqlx::query(
+    let result = sqlx::query!(
         r#"INSERT INTO play_course_catalog (code, name)
         SELECT * FROM UNNEST($1::text[], $2::text[])
         ON CONFLICT (code) DO UPDATE
             SET name = EXCLUDED.name,
                 updated_at = NOW()"#,
+        &codes as &[&str],
+        &names as &[&str],
     )
-    .bind(&codes)
-    .bind(&names)
     .execute(db)
     .await?;
     Ok(result.rows_affected())

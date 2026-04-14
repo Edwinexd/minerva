@@ -151,10 +151,10 @@ pub fn start(state: AppState, max_concurrent: usize) {
                                 doc.id,
                                 doc.filename,
                             );
-                            let _ = sqlx::query(
+                            let _ = sqlx::query!(
                                 "UPDATE documents SET status = 'awaiting_transcript' WHERE id = $1",
+                                doc.id,
                             )
-                            .bind(doc.id)
                             .execute(&db)
                             .await;
                         } else {
@@ -163,10 +163,10 @@ pub fn start(state: AppState, max_concurrent: usize) {
                                 doc.id,
                                 doc.filename,
                             );
-                            let _ = sqlx::query(
+                            let _ = sqlx::query!(
                                 "UPDATE documents SET status = 'unsupported' WHERE id = $1",
+                                doc.id,
                             )
-                            .bind(doc.id)
                             .execute(&db)
                             .await;
                         }
@@ -180,10 +180,10 @@ pub fn start(state: AppState, max_concurrent: usize) {
                             doc.id,
                             doc.filename,
                         );
-                        let _ = sqlx::query(
+                        let _ = sqlx::query!(
                             "UPDATE documents SET status = 'unsupported' WHERE id = $1",
+                            doc.id,
                         )
-                        .bind(doc.id)
                         .execute(&db)
                         .await;
                         return;
@@ -244,9 +244,11 @@ pub fn start(state: AppState, max_concurrent: usize) {
 }
 
 async fn set_failed(db: &sqlx::PgPool, doc_id: uuid::Uuid, msg: &str) {
-    let _ = sqlx::query("UPDATE documents SET status = 'failed', error_msg = $1 WHERE id = $2")
-        .bind(msg)
-        .bind(doc_id)
-        .execute(db)
-        .await;
+    let _ = sqlx::query!(
+        "UPDATE documents SET status = 'failed', error_msg = $1 WHERE id = $2",
+        msg,
+        doc_id,
+    )
+    .execute(db)
+    .await;
 }

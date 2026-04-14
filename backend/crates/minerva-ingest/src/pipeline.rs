@@ -280,22 +280,22 @@ pub async fn ensure_document_id_index(qdrant: &Qdrant, collection: &str) {
 }
 
 async fn set_status(db: &PgPool, doc_id: Uuid, status: &str, error_msg: Option<&str>) {
-    let _ = sqlx::query(
-        "UPDATE documents SET status = $1, error_msg = $2, updated_at = NOW() WHERE id = $3",
+    let _ = sqlx::query!(
+        "UPDATE documents SET status = $1, error_msg = $2 WHERE id = $3",
+        status,
+        error_msg,
+        doc_id,
     )
-    .bind(status)
-    .bind(error_msg)
-    .bind(doc_id)
     .execute(db)
     .await;
 }
 
 async fn set_status_ready(db: &PgPool, doc_id: Uuid, chunk_count: i32) {
-    let _ = sqlx::query(
+    let _ = sqlx::query!(
         "UPDATE documents SET status = 'ready', chunk_count = $1, processed_at = NOW() WHERE id = $2",
+        chunk_count,
+        doc_id,
     )
-    .bind(chunk_count)
-    .bind(doc_id)
     .execute(db)
     .await;
 }

@@ -171,11 +171,13 @@ async fn submit_transcript(
         ))
     } else if let Some(error) = &body.error {
         // Mark as failed so we don't retry.
-        let _ = sqlx::query("UPDATE documents SET status = 'failed', error_msg = $1 WHERE id = $2")
-            .bind(error)
-            .bind(doc.id)
-            .execute(&state.db)
-            .await;
+        let _ = sqlx::query!(
+            "UPDATE documents SET status = 'failed', error_msg = $1 WHERE id = $2",
+            error,
+            doc.id,
+        )
+        .execute(&state.db)
+        .await;
 
         tracing::info!("document {} marked as failed: {}", doc.id, error);
 

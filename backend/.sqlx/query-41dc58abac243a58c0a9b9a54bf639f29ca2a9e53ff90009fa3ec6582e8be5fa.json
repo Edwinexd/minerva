@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET filename = $1, mime_type = $2, size_bytes = $3, status = 'pending', error_msg = NULL, chunk_count = NULL, processed_at = NULL WHERE id = $4 AND status = 'awaiting_transcript'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "41dc58abac243a58c0a9b9a54bf639f29ca2a9e53ff90009fa3ec6582e8be5fa"
+}

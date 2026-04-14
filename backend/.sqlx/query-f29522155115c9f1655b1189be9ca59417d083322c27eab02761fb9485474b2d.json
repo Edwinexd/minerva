@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents\n        SET status = 'pending', processing_started_at = NULL\n        WHERE status = 'processing'\n          AND (processing_started_at IS NULL\n               OR processing_started_at < NOW() - make_interval(secs => $1))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f29522155115c9f1655b1189be9ca59417d083322c27eab02761fb9485474b2d"
+}

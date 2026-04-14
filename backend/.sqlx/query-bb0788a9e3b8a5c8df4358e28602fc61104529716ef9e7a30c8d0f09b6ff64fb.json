@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO play_course_catalog (code, name)\n        SELECT * FROM UNNEST($1::text[], $2::text[])\n        ON CONFLICT (code) DO UPDATE\n            SET name = EXCLUDED.name,\n                updated_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bb0788a9e3b8a5c8df4358e28602fc61104529716ef9e7a30c8d0f09b6ff64fb"
+}

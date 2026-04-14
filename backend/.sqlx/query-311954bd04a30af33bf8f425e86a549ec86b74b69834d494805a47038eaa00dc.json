@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, course_id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at FROM lti_registrations WHERE issuer = $1 AND client_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "client_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "deployment_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "auth_login_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "auth_token_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "platform_jwks_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "311954bd04a30af33bf8f425e86a549ec86b74b69834d494805a47038eaa00dc"
+}

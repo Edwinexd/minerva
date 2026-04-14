@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM api_keys WHERE id = $1 AND course_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ee2d4b815b4ca36045a72b134a77ecb6cc8f071b414edbbc99a01521a9a9e981"
+}

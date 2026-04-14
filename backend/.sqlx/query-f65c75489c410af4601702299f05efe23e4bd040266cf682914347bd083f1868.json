@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "conversation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "chunks_used",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "model_used",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "tokens_prompt",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "tokens_completion",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "f65c75489c410af4601702299f05efe23e4bd040266cf682914347bd083f1868"
+}

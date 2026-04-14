@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM lti_launches WHERE state = $1 AND expires_at > NOW() RETURNING id, state, nonce, registration_id, target_link_uri, created_at, expires_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "nonce",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "registration_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "target_link_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "dd60d10f6d90873027eb25927019c965338bd79ab40cd5937ad7aafc5d6bc504"
+}

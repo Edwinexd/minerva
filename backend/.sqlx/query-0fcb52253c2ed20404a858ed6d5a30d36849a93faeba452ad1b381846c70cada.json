@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT course_id,\n            SUM(prompt_tokens)::bigint as total_prompt_tokens,\n            SUM(completion_tokens)::bigint as total_completion_tokens,\n            SUM(embedding_tokens)::bigint as total_embedding_tokens,\n            SUM(request_count)::bigint as total_requests\n        FROM usage_daily WHERE course_id = $1 GROUP BY course_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_prompt_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_completion_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "total_embedding_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "total_requests",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0fcb52253c2ed20404a858ed6d5a30d36849a93faeba452ad1b381846c70cada"
+}

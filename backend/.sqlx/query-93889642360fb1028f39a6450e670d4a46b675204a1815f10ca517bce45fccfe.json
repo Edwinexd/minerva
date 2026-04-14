@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH inserted AS (\n            INSERT INTO teacher_notes (id, conversation_id, message_id, author_id, content)\n            VALUES ($1, $2, $3, $4, $5)\n            RETURNING id, conversation_id, message_id, author_id, content, created_at, updated_at\n        )\n        SELECT i.id AS \"id!\", i.conversation_id AS \"conversation_id!\", i.message_id, i.author_id AS \"author_id!\", i.content AS \"content!\", i.created_at AS \"created_at!\", i.updated_at AS \"updated_at!\", u.display_name AS author_display_name\n        FROM inserted i\n        JOIN users u ON u.id = i.author_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "conversation_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "author_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "content!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "author_display_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "93889642360fb1028f39a6450e670d4a46b675204a1815f10ca517bce45fccfe"
+}

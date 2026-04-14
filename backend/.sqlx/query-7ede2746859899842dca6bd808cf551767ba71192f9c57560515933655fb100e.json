@@ -1,0 +1,61 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO play_designations (id, course_id, designation, added_by)\n        VALUES ($1, $2, $3, $4)\n        RETURNING id, course_id, designation, added_by, created_at, last_synced_at, last_error",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "designation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "added_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_synced_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_error",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "7ede2746859899842dca6bd808cf551767ba71192f9c57560515933655fb100e"
+}

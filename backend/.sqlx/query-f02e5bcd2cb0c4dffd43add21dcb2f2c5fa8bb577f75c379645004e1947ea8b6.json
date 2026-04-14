@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE signed_urls SET use_count = use_count + 1 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f02e5bcd2cb0c4dffd43add21dcb2f2c5fa8bb577f75c379645004e1947ea8b6"
+}

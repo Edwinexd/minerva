@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM lti_launches WHERE expires_at <= NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b9ede265d18377de313b44df72e76ca86dd371437657c73d742cd858341b9cb9"
+}

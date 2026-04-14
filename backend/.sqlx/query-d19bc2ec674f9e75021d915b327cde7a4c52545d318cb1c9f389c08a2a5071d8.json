@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE external_auth_invites SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d19bc2ec674f9e75021d915b327cde7a4c52545d318cb1c9f389c08a2a5071d8"
+}

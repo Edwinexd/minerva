@@ -8,6 +8,24 @@ Deployment pipeline and production access for Minerva.
 - **Moodle test:** `docker compose -f docker-compose.moodle.yml up -d` -- local Moodle instance (port 8088, admin/Admin123!)
 - **Moodle plugin repo:** `Edwinexd/moodle-local_minerva` -- auto-synced from `moodle-plugin/local/minerva/` via `sync-moodle-plugin.yml` workflow (requires `MOODLE_SYNC_TOKEN` secret)
 
+### SQLx offline cache
+
+Backend uses compile-time-checked `sqlx::query!` / `query_as!` macros. CI and the
+prod Dockerfile build with `SQLX_OFFLINE=true`, so they rely on the committed
+`backend/.sqlx/` cache rather than hitting a live DB.
+
+After adding or editing any SQL in `backend/`:
+
+```
+docker compose -f docker-compose.yml up -d postgres     # needs live schema
+cd backend && DATABASE_URL=postgres://minerva:minerva@localhost:5432/minerva \
+    cargo sqlx prepare --workspace
+git add .sqlx/
+```
+
+Pre-commit runs `cargo check`/`clippy` with `SQLX_OFFLINE=true`, so forgetting
+this step fails locally before the commit lands.
+
 ## Container Image
 
 - **Registry:** ghcr.io/edwinexd/minerva (private)

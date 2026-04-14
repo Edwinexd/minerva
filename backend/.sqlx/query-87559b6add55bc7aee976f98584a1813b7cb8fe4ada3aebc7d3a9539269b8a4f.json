@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET status = 'unsupported' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "87559b6add55bc7aee976f98584a1813b7cb8fe4ada3aebc7d3a9539269b8a4f"
+}

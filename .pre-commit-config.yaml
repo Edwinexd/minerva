@@ -38,14 +38,17 @@ repos:
 
       - id: cargo-check
         name: cargo check
-        entry: bash -c 'cd backend && cargo check'
+        # SQLX_OFFLINE forces sqlx macros to use the committed `backend/.sqlx/`
+        # cache, so any new/modified query that hasn't been `cargo sqlx prepare`d
+        # will fail here instead of going unnoticed until CI.
+        entry: bash -c 'cd backend && SQLX_OFFLINE=true cargo check'
         language: system
         pass_filenames: false
         files: \.rs$|Cargo\.toml$
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: bash -c 'cd backend && cargo clippy -- -D warnings'
+        entry: bash -c 'cd backend && SQLX_OFFLINE=true cargo clippy -- -D warnings'
         language: system
         pass_filenames: false
         files: \.rs$|Cargo\.toml$

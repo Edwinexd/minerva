@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.id, f.message_id, f.user_id, f.rating, f.category, f.comment,\n            f.created_at, f.updated_at,\n            u.eppn AS \"user_eppn?\", u.display_name AS user_display_name\n        FROM message_feedback f\n        JOIN messages m ON m.id = f.message_id\n        JOIN users u ON u.id = f.user_id\n        WHERE m.conversation_id = $1\n        ORDER BY f.created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "rating",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "category",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "comment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "user_eppn?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "user_display_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "337eeb36d71d31e9df869ced2d939eb1cda5848ff48c50581c1222e77918f54b"
+}

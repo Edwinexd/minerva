@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT 1 FROM course_members WHERE course_id = $1 AND user_id = $2 AND role IN ('teacher', 'ta')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "?column?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bbf65a3ecc5d5575dd3986ab55aad4aa4d525906946e6b0f8eda5b6f1badd4f9"
+}

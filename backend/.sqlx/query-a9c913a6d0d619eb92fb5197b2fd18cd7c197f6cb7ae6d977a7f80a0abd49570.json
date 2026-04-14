@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET status = 'awaiting_transcript' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9c913a6d0d619eb92fb5197b2fd18cd7c197f6cb7ae6d977a7f80a0abd49570"
+}

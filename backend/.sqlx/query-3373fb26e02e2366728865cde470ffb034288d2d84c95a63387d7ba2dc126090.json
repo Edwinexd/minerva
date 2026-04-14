@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            COUNT(*)::bigint AS \"count!\",\n            COALESCE(SUM(size_bytes), 0)::bigint AS total_bytes,\n            COUNT(*) FILTER (WHERE status IN ('pending', 'processing', 'awaiting_transcript'))::bigint AS \"pending!\",\n            COUNT(*) FILTER (WHERE status = 'failed')::bigint AS \"failed!\"\n        FROM documents",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "pending!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "failed!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "3373fb26e02e2366728865cde470ffb034288d2d84c95a63387d7ba2dc126090"
+}

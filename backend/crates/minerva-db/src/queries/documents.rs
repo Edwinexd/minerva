@@ -1,7 +1,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct DocumentRow {
     pub id: Uuid,
     pub course_id: Uuid,
@@ -20,8 +20,6 @@ pub struct DocumentRow {
     pub source_url: Option<String>,
 }
 
-const DOCUMENT_COLUMNS: &str = "id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url";
-
 #[allow(clippy::too_many_arguments)]
 pub async fn insert(
     db: &PgPool,
@@ -33,38 +31,39 @@ pub async fn insert(
     uploaded_by: Uuid,
     source_url: Option<&str>,
 ) -> Result<DocumentRow, sqlx::Error> {
-    sqlx::query_as::<_, DocumentRow>(
-        &format!(
-            r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING {DOCUMENT_COLUMNS}"#,
-        ),
+    sqlx::query_as!(
+        DocumentRow,
+        r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url"#,
+        id,
+        course_id,
+        filename,
+        mime_type,
+        size_bytes,
+        uploaded_by,
+        source_url,
     )
-    .bind(id)
-    .bind(course_id)
-    .bind(filename)
-    .bind(mime_type)
-    .bind(size_bytes)
-    .bind(uploaded_by)
-    .bind(source_url)
     .fetch_one(db)
     .await
 }
 
 pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<DocumentRow>, sqlx::Error> {
-    sqlx::query_as::<_, DocumentRow>(&format!(
-        "SELECT {DOCUMENT_COLUMNS} FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
-    ))
-    .bind(course_id)
+    sqlx::query_as!(
+        DocumentRow,
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
+        course_id,
+    )
     .fetch_all(db)
     .await
 }
 
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<DocumentRow>, sqlx::Error> {
-    sqlx::query_as::<_, DocumentRow>(&format!(
-        "SELECT {DOCUMENT_COLUMNS} FROM documents WHERE id = $1",
-    ))
-    .bind(id)
+    sqlx::query_as!(
+        DocumentRow,
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url FROM documents WHERE id = $1",
+        id,
+    )
     .fetch_optional(db)
     .await
 }
@@ -76,11 +75,12 @@ pub async fn find_by_course_source_url(
     course_id: Uuid,
     source_url: &str,
 ) -> Result<Option<DocumentRow>, sqlx::Error> {
-    sqlx::query_as::<_, DocumentRow>(&format!(
-        "SELECT {DOCUMENT_COLUMNS} FROM documents WHERE course_id = $1 AND source_url = $2",
-    ))
-    .bind(course_id)
-    .bind(source_url)
+    sqlx::query_as!(
+        DocumentRow,
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url FROM documents WHERE course_id = $1 AND source_url = $2",
+        course_id,
+        source_url,
+    )
     .fetch_optional(db)
     .await
 }
@@ -90,11 +90,13 @@ pub async fn update_displayable(
     id: Uuid,
     displayable: bool,
 ) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query("UPDATE documents SET displayable = $1 WHERE id = $2")
-        .bind(displayable)
-        .bind(id)
-        .execute(db)
-        .await?;
+    let result = sqlx::query!(
+        "UPDATE documents SET displayable = $1 WHERE id = $2",
+        displayable,
+        id,
+    )
+    .execute(db)
+    .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -103,17 +105,17 @@ pub async fn hidden_document_ids(
     db: &PgPool,
     course_id: Uuid,
 ) -> Result<std::collections::HashSet<String>, sqlx::Error> {
-    let rows: Vec<(Uuid,)> =
-        sqlx::query_as("SELECT id FROM documents WHERE course_id = $1 AND displayable = FALSE")
-            .bind(course_id)
-            .fetch_all(db)
-            .await?;
-    Ok(rows.into_iter().map(|(id,)| id.to_string()).collect())
+    let rows = sqlx::query_scalar!(
+        "SELECT id FROM documents WHERE course_id = $1 AND displayable = FALSE",
+        course_id,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|id| id.to_string()).collect())
 }
 
 pub async fn delete(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query("DELETE FROM documents WHERE id = $1")
-        .bind(id)
+    let result = sqlx::query!("DELETE FROM documents WHERE id = $1", id)
         .execute(db)
         .await?;
     Ok(result.rows_affected() > 0)
@@ -122,7 +124,8 @@ pub async fn delete(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
 /// Atomically claim up to `limit` pending documents for processing.
 /// Uses `FOR UPDATE SKIP LOCKED` so multiple workers won't grab the same row.
 pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, sqlx::Error> {
-    sqlx::query_as::<_, DocumentRow>(&format!(
+    sqlx::query_as!(
+        DocumentRow,
         r#"UPDATE documents
         SET status = 'processing', processing_started_at = NOW()
         WHERE id IN (
@@ -132,9 +135,9 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING {DOCUMENT_COLUMNS}"#,
-    ))
-    .bind(limit)
+        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url"#,
+        limit as i64,
+    )
     .fetch_all(db)
     .await
 }
@@ -142,9 +145,10 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
 /// List documents awaiting external transcript processing.
 /// These are play.dsv.su.se URL documents that the worker has triaged.
 pub async fn list_awaiting_transcripts(db: &PgPool) -> Result<Vec<DocumentRow>, sqlx::Error> {
-    sqlx::query_as::<_, DocumentRow>(&format!(
-        "SELECT {DOCUMENT_COLUMNS} FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
-    ))
+    sqlx::query_as!(
+        DocumentRow,
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
+    )
     .fetch_all(db)
     .await
 }
@@ -158,13 +162,13 @@ pub async fn replace_with_transcript(
     mime_type: &str,
     size_bytes: i64,
 ) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "UPDATE documents SET filename = $1, mime_type = $2, size_bytes = $3, status = 'pending', error_msg = NULL, chunk_count = NULL, processed_at = NULL WHERE id = $4 AND status = 'awaiting_transcript'",
+        filename,
+        mime_type,
+        size_bytes,
+        id,
     )
-    .bind(filename)
-    .bind(mime_type)
-    .bind(size_bytes)
-    .bind(id)
     .execute(db)
     .await?;
     Ok(result.rows_affected() > 0)
@@ -174,7 +178,7 @@ pub async fn replace_with_transcript(
 /// Used on startup for crash recovery: any document still marked 'processing'
 /// was interrupted by a server restart.
 pub async fn reset_stale_processing(db: &PgPool) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "UPDATE documents SET status = 'pending', processing_started_at = NULL WHERE status = 'processing'",
     )
     .execute(db)
@@ -193,14 +197,14 @@ pub async fn reset_stale_processing_older_than(
     db: &PgPool,
     min_age_seconds: i64,
 ) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
+    let result = sqlx::query!(
         r#"UPDATE documents
         SET status = 'pending', processing_started_at = NULL
         WHERE status = 'processing'
           AND (processing_started_at IS NULL
                OR processing_started_at < NOW() - make_interval(secs => $1))"#,
+        min_age_seconds as f64,
     )
-    .bind(min_age_seconds as f64)
     .execute(db)
     .await?;
     Ok(result.rows_affected())

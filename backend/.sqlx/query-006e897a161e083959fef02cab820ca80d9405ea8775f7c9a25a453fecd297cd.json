@@ -1,0 +1,130 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE courses SET\n            name = COALESCE($2, name),\n            description = COALESCE($3, description),\n            context_ratio = COALESCE($4, context_ratio),\n            temperature = COALESCE($5, temperature),\n            model = COALESCE($6, model),\n            system_prompt = COALESCE($7, system_prompt),\n            max_chunks = COALESCE($8, max_chunks),\n            strategy = COALESCE($9, strategy),\n            daily_token_limit = COALESCE($10, daily_token_limit),\n            embedding_provider = COALESCE($11, embedding_provider),\n            embedding_model = COALESCE($12, embedding_model),\n            min_score = COALESCE($13, min_score),\n            updated_at = NOW()\n        WHERE id = $1 AND active = true\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "context_ratio",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "temperature",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "system_prompt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "max_chunks",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "min_score",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 10,
+        "name": "strategy",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "embedding_provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "embedding_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "daily_token_limit",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 14,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Float8",
+        "Float8",
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Float4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "006e897a161e083959fef02cab820ca80d9405ea8775f7c9a25a453fecd297cd"
+}

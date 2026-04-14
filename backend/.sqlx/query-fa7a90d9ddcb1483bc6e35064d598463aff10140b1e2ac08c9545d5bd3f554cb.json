@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url FROM documents WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "filename",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "mime_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "size_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "chunk_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "error_msg",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "uploaded_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "displayable",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "processed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "source_url",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "fa7a90d9ddcb1483bc6e35064d598463aff10140b1e2ac08c9545d5bd3f554cb"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT relname::text AS \"name!\", reltuples AS \"rows!\"\n        FROM pg_class\n        WHERE relkind = 'r'\n          AND relnamespace = 'public'::regnamespace\n        ORDER BY relname",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "rows!",
+        "type_info": "Float4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      false
+    ]
+  },
+  "hash": "e0a7127620404a0302771fc37d1efb066bbeb58d7793e17f55cf171a697cd468"
+}

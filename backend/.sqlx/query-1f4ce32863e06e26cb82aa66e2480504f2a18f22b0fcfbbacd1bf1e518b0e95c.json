@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT tn.id, tn.conversation_id, tn.message_id, tn.author_id, tn.content,\n            tn.created_at, tn.updated_at, u.display_name AS author_display_name\n        FROM teacher_notes tn\n        JOIN users u ON u.id = tn.author_id\n        WHERE tn.conversation_id = $1\n        ORDER BY tn.created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "conversation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "author_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "author_display_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "1f4ce32863e06e26cb82aa66e2480504f2a18f22b0fcfbbacd1bf1e518b0e95c"
+}

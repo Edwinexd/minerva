@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 // -- Registration rows (course-scoped LTI connections) --
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct RegistrationRow {
     pub id: Uuid,
     pub course_id: Uuid,
@@ -36,21 +36,22 @@ pub async fn create_registration(
     id: Uuid,
     input: &CreateRegistration<'_>,
 ) -> Result<RegistrationRow, sqlx::Error> {
-    sqlx::query_as::<_, RegistrationRow>(
+    sqlx::query_as!(
+        RegistrationRow,
         r#"INSERT INTO lti_registrations (id, course_id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id, course_id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at"#,
+        id,
+        input.course_id,
+        input.name,
+        input.issuer,
+        input.client_id,
+        input.deployment_id,
+        input.auth_login_url,
+        input.auth_token_url,
+        input.platform_jwks_url,
+        input.created_by,
     )
-    .bind(id)
-    .bind(input.course_id)
-    .bind(input.name)
-    .bind(input.issuer)
-    .bind(input.client_id)
-    .bind(input.deployment_id)
-    .bind(input.auth_login_url)
-    .bind(input.auth_token_url)
-    .bind(input.platform_jwks_url)
-    .bind(input.created_by)
     .fetch_one(db)
     .await
 }
@@ -59,10 +60,11 @@ pub async fn find_registration_by_id(
     db: &PgPool,
     id: Uuid,
 ) -> Result<Option<RegistrationRow>, sqlx::Error> {
-    sqlx::query_as::<_, RegistrationRow>(
+    sqlx::query_as!(
+        RegistrationRow,
         "SELECT id, course_id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at FROM lti_registrations WHERE id = $1",
+        id,
     )
-    .bind(id)
     .fetch_optional(db)
     .await
 }
@@ -72,11 +74,12 @@ pub async fn find_registration_by_issuer(
     issuer: &str,
     client_id: &str,
 ) -> Result<Option<RegistrationRow>, sqlx::Error> {
-    sqlx::query_as::<_, RegistrationRow>(
+    sqlx::query_as!(
+        RegistrationRow,
         "SELECT id, course_id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at FROM lti_registrations WHERE issuer = $1 AND client_id = $2",
+        issuer,
+        client_id,
     )
-    .bind(issuer)
-    .bind(client_id)
     .fetch_optional(db)
     .await
 }
@@ -85,17 +88,17 @@ pub async fn list_registrations_for_course(
     db: &PgPool,
     course_id: Uuid,
 ) -> Result<Vec<RegistrationRow>, sqlx::Error> {
-    sqlx::query_as::<_, RegistrationRow>(
+    sqlx::query_as!(
+        RegistrationRow,
         "SELECT id, course_id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at FROM lti_registrations WHERE course_id = $1 ORDER BY name",
+        course_id,
     )
-    .bind(course_id)
     .fetch_all(db)
     .await
 }
 
 pub async fn delete_registration(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query("DELETE FROM lti_registrations WHERE id = $1")
-        .bind(id)
+    let result = sqlx::query!("DELETE FROM lti_registrations WHERE id = $1", id)
         .execute(db)
         .await?;
     Ok(result.rows_affected() > 0)
@@ -103,7 +106,7 @@ pub async fn delete_registration(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Er
 
 // -- Launch state rows --
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct LaunchRow {
     pub id: Uuid,
     pub state: String,
@@ -122,14 +125,14 @@ pub async fn create_launch(
     registration_id: Uuid,
     target_link_uri: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO lti_launches (id, state, nonce, registration_id, target_link_uri) VALUES ($1, $2, $3, $4, $5)",
+        id,
+        state,
+        nonce,
+        registration_id,
+        target_link_uri,
     )
-    .bind(id)
-    .bind(state)
-    .bind(nonce)
-    .bind(registration_id)
-    .bind(target_link_uri)
     .execute(db)
     .await?;
     Ok(())
@@ -137,17 +140,18 @@ pub async fn create_launch(
 
 /// Find and delete a launch by state (consume it). Returns None if expired or not found.
 pub async fn consume_launch(db: &PgPool, state: &str) -> Result<Option<LaunchRow>, sqlx::Error> {
-    sqlx::query_as::<_, LaunchRow>(
+    sqlx::query_as!(
+        LaunchRow,
         "DELETE FROM lti_launches WHERE state = $1 AND expires_at > NOW() RETURNING id, state, nonce, registration_id, target_link_uri, created_at, expires_at",
+        state,
     )
-    .bind(state)
     .fetch_optional(db)
     .await
 }
 
 /// Remove expired launch records.
 pub async fn cleanup_expired_launches(db: &PgPool) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query("DELETE FROM lti_launches WHERE expires_at <= NOW()")
+    let result = sqlx::query!("DELETE FROM lti_launches WHERE expires_at <= NOW()")
         .execute(db)
         .await?;
     Ok(result.rows_affected())

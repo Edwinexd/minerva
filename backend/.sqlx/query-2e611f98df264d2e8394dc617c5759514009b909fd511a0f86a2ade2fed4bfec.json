@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.conversation_id, m.content\n        FROM messages m\n        JOIN conversations c ON c.id = m.conversation_id\n        WHERE c.course_id = $1 AND m.role = 'user'\n        ORDER BY m.created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conversation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "content",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2e611f98df264d2e8394dc617c5759514009b909fd511a0f86a2ade2fed4bfec"
+}

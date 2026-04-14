@@ -1,7 +1,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct MessageFeedbackRow {
     pub id: Uuid,
     pub message_id: Uuid,
@@ -13,7 +13,7 @@ pub struct MessageFeedbackRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct MessageFeedbackWithUserRow {
     pub id: Uuid,
     pub message_id: Uuid,
@@ -37,7 +37,8 @@ pub async fn upsert(
     category: Option<&str>,
     comment: Option<&str>,
 ) -> Result<MessageFeedbackRow, sqlx::Error> {
-    sqlx::query_as::<_, MessageFeedbackRow>(
+    sqlx::query_as!(
+        MessageFeedbackRow,
         r#"INSERT INTO message_feedback (id, message_id, user_id, rating, category, comment)
         VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (message_id, user_id) DO UPDATE
@@ -46,13 +47,13 @@ pub async fn upsert(
                 comment = EXCLUDED.comment,
                 updated_at = NOW()
         RETURNING id, message_id, user_id, rating, category, comment, created_at, updated_at"#,
+        Uuid::new_v4(),
+        message_id,
+        user_id,
+        rating,
+        category,
+        comment,
     )
-    .bind(Uuid::new_v4())
-    .bind(message_id)
-    .bind(user_id)
-    .bind(rating)
-    .bind(category)
-    .bind(comment)
     .fetch_one(db)
     .await
 }
@@ -62,17 +63,18 @@ pub async fn list_for_conversation(
     db: &PgPool,
     conversation_id: Uuid,
 ) -> Result<Vec<MessageFeedbackWithUserRow>, sqlx::Error> {
-    sqlx::query_as::<_, MessageFeedbackWithUserRow>(
+    sqlx::query_as!(
+        MessageFeedbackWithUserRow,
         r#"SELECT f.id, f.message_id, f.user_id, f.rating, f.category, f.comment,
             f.created_at, f.updated_at,
-            u.eppn AS user_eppn, u.display_name AS user_display_name
+            u.eppn AS "user_eppn?", u.display_name AS user_display_name
         FROM message_feedback f
         JOIN messages m ON m.id = f.message_id
         JOIN users u ON u.id = f.user_id
         WHERE m.conversation_id = $1
         ORDER BY f.created_at ASC"#,
+        conversation_id,
     )
-    .bind(conversation_id)
     .fetch_all(db)
     .await
 }

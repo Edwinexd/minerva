@@ -129,16 +129,18 @@ fn disk_usage(_path: &str) -> Option<DiskInfo> {
 }
 
 async fn database_info(db: &sqlx::PgPool) -> DatabaseInfo {
-    let size_bytes: Option<i64> = sqlx::query_scalar("SELECT pg_database_size(current_database())")
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten();
+    let size_bytes: Option<i64> =
+        sqlx::query_scalar!(r#"SELECT pg_database_size(current_database()) AS "size?""#,)
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
 
     // Fast approximate counts from pg_class.reltuples; accurate enough for an admin dashboard
     // and avoids a full scan on large tables.
-    let table_counts = sqlx::query_as::<_, (String, f32)>(
-        r#"SELECT relname::text, reltuples
+    let table_counts = sqlx::query!(
+        r#"SELECT relname::text AS "name!", reltuples AS "rows!"
         FROM pg_class
         WHERE relkind = 'r'
           AND relnamespace = 'public'::regnamespace
@@ -148,9 +150,9 @@ async fn database_info(db: &sqlx::PgPool) -> DatabaseInfo {
     .await
     .unwrap_or_default()
     .into_iter()
-    .map(|(name, rows)| TableCount {
-        name,
-        rows: rows.max(0.0) as i64,
+    .map(|r| TableCount {
+        name: r.name,
+        rows: r.rows.max(0.0) as i64,
     })
     .collect();
 
@@ -161,12 +163,12 @@ async fn database_info(db: &sqlx::PgPool) -> DatabaseInfo {
 }
 
 async fn documents_info(db: &sqlx::PgPool) -> DocumentsInfo {
-    let row: Option<(i64, Option<i64>, i64, i64)> = sqlx::query_as(
+    let row = sqlx::query!(
         r#"SELECT
-            COUNT(*)::bigint AS count,
+            COUNT(*)::bigint AS "count!",
             COALESCE(SUM(size_bytes), 0)::bigint AS total_bytes,
-            COUNT(*) FILTER (WHERE status IN ('pending', 'processing', 'awaiting_transcript'))::bigint AS pending,
-            COUNT(*) FILTER (WHERE status = 'failed')::bigint AS failed
+            COUNT(*) FILTER (WHERE status IN ('pending', 'processing', 'awaiting_transcript'))::bigint AS "pending!",
+            COUNT(*) FILTER (WHERE status = 'failed')::bigint AS "failed!"
         FROM documents"#,
     )
     .fetch_optional(db)
@@ -175,11 +177,11 @@ async fn documents_info(db: &sqlx::PgPool) -> DocumentsInfo {
     .flatten();
 
     match row {
-        Some((count, total_bytes, pending, failed)) => DocumentsInfo {
-            count,
-            total_bytes: total_bytes.unwrap_or(0),
-            pending,
-            failed,
+        Some(r) => DocumentsInfo {
+            count: r.count,
+            total_bytes: r.total_bytes.unwrap_or(0),
+            pending: r.pending,
+            failed: r.failed,
         },
         None => DocumentsInfo {
             count: 0,

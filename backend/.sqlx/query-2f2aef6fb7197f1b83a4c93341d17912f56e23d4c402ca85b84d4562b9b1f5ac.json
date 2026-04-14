@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id, c.course_id, c.user_id, c.title, c.pinned, c.created_at, c.updated_at,\n            u.eppn AS \"user_eppn?\", u.display_name AS user_display_name,\n            (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count\n        FROM conversations c\n        JOIN users u ON u.id = c.user_id\n        WHERE c.course_id = $1 AND c.pinned = true\n        ORDER BY c.updated_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "pinned",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "user_eppn?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "user_display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "message_count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "2f2aef6fb7197f1b83a4c93341d17912f56e23d4c402ca85b84d4562b9b1f5ac"
+}

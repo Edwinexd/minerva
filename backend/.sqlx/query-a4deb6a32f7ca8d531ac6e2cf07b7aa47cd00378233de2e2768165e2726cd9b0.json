@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET status = 'pending', processing_started_at = NULL WHERE status = 'processing'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "a4deb6a32f7ca8d531ac6e2cf07b7aa47cd00378233de2e2768165e2726cd9b0"
+}

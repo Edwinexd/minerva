@@ -92,7 +92,7 @@ async fn fetch_canvas_files(
             .header("Authorization", format!("Bearer {}", api_token))
             .send()
             .await
-            .map_err(|e| AppError::Internal(format!("Canvas API request failed: {}", e)))?;
+            .map_err(|e| AppError::BadRequest(format!("Canvas API request failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -112,7 +112,7 @@ async fn fetch_canvas_files(
         let files: Vec<CanvasFile> = resp
             .json()
             .await
-            .map_err(|e| AppError::Internal(format!("Canvas API parse error: {}", e)))?;
+            .map_err(|e| AppError::BadRequest(format!("Canvas API parse error: {}", e)))?;
 
         all_files.extend(files);
 
@@ -248,12 +248,7 @@ async fn create_connection(
         body.canvas_api_token.trim(),
         body.canvas_course_id.trim(),
     )
-    .await
-    .map_err(|_| {
-        AppError::BadRequest(
-            "Could not connect to Canvas. Check the URL, API token, and course ID.".into(),
-        )
-    })?;
+    .await?;
 
     let id = Uuid::new_v4();
     let input = minerva_db::queries::canvas::CreateConnection {

@@ -149,6 +149,13 @@ struct UpdateOwnerLimitRequest {
     limit: i64,
 }
 
+/// Sanity ceiling on the per-owner daily cap. Picked to leave 6+ orders of
+/// magnitude of headroom before a sum across all owned courses overflows
+/// BIGINT (i64::MAX is ~9.2e18). 1 trillion tokens/day is also wildly
+/// beyond any realistic spend, so this is purely a footgun guard against
+/// admin typos / fat-finger.
+const OWNER_LIMIT_MAX: i64 = 1_000_000_000_000;
+
 async fn update_owner_daily_token_limit(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -158,6 +165,11 @@ async fn update_owner_daily_token_limit(
     require_admin(&user)?;
     if body.limit < 0 {
         return Err(AppError::BadRequest("limit must be >= 0".into()));
+    }
+    if body.limit > OWNER_LIMIT_MAX {
+        return Err(AppError::BadRequest(format!(
+            "limit must be <= {OWNER_LIMIT_MAX}"
+        )));
     }
     let updated =
         minerva_db::queries::users::update_owner_daily_token_limit(&state.db, id, body.limit)
@@ -269,6 +281,7 @@ async fn create_role_rule(
         body.enabled,
     )
     .await?;
+    state.rules.reload(&state.db).await?;
     Ok(Json(RoleRuleResponse {
         id: row.id,
         name: row.name,
@@ -309,6 +322,7 @@ async fn update_role_rule(
     if !updated {
         return Err(AppError::NotFound);
     }
+    state.rules.reload(&state.db).await?;
     Ok(Json(serde_json::json!({ "updated": true })))
 }
 
@@ -322,6 +336,7 @@ async fn delete_role_rule(
     if !deleted {
         return Err(AppError::NotFound);
     }
+    state.rules.reload(&state.db).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
@@ -362,6 +377,7 @@ async fn create_rule_condition(
         &body.value,
     )
     .await?;
+    state.rules.reload(&state.db).await?;
     Ok(Json(RoleRuleConditionResponse {
         id: row.id,
         rule_id: row.rule_id,
@@ -381,5 +397,6 @@ async fn delete_rule_condition(
     if !deleted {
         return Err(AppError::NotFound);
     }
+    state.rules.reload(&state.db).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
 }

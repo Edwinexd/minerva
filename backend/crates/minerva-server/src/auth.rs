@@ -2,9 +2,7 @@ use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use minerva_core::models::{
-    RoleRule, RoleRuleCondition, RoleRuleWithConditions, RuleOperator, User, UserRole,
-};
+use minerva_core::models::{User, UserRole};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -157,8 +155,9 @@ async fn upsert_user(
 ) -> Result<User, AppError> {
     let is_admin = state.config.is_admin(eppn);
 
-    // Fetch existing row (if any) to honor manual lock + preserve current role
-    // when no rule promotes.
+    // Fetch existing row (if any) to honor manual lock + preserve current
+    // role when no rule promotes. Clamp a stale stored Admin to Teacher
+    // when the user is no longer in MINERVA_ADMINS (see decide_role docs).
     let existing = minerva_db::queries::users::find_by_eppn(&state.db, eppn).await?;
     let existing_role = existing.as_ref().map(|r| UserRole::parse(&r.role));
     let role_locked = existing
@@ -166,24 +165,19 @@ async fn upsert_user(
         .map(|r| r.role_manually_set)
         .unwrap_or(false);
 
-    let role = if is_admin {
-        // Admin allowlist always wins (escape hatch + survives manual lock).
-        UserRole::Admin
-    } else if state.config.dev_mode && eppn.starts_with("teacher") {
-        UserRole::Teacher
-    } else if role_locked {
-        // Admin manually pinned this role -- rules cannot move it.
-        existing_role.unwrap_or(UserRole::Student)
+    let dev_teacher = state.config.dev_mode && eppn.starts_with("teacher");
+    let rule_role = if is_admin || dev_teacher || role_locked {
+        // Skip the rule eval -- the higher-precedence branches in
+        // decide_role will win regardless.
+        None
     } else {
-        let rule_role = load_and_evaluate_rules(state, attrs).await?;
-        match (existing_role, rule_role) {
-            // Additive: take the higher of existing and rule-derived role.
-            (Some(prev), Some(rr)) => max_role(prev, rr),
-            (Some(prev), None) => prev,
-            (None, Some(rr)) => rr,
-            (None, None) => UserRole::Student,
-        }
+        // Cheap Arc snapshot -- read lock dropped before evaluate. Rules
+        // are pre-compiled (regexes included) by RuleCache.
+        let snapshot = state.rules.snapshot().await;
+        rules::evaluate(&snapshot, attrs)
     };
+
+    let role = decide_role(is_admin, dev_teacher, role_locked, existing_role, rule_role);
 
     let row = minerva_db::queries::users::upsert(
         &state.db,
@@ -208,65 +202,136 @@ async fn upsert_user(
     })
 }
 
-async fn load_and_evaluate_rules(
-    state: &AppState,
-    attrs: &HashMap<String, String>,
-) -> Result<Option<UserRole>, AppError> {
-    let rule_rows = minerva_db::queries::role_rules::list_enabled(&state.db).await?;
-    if rule_rows.is_empty() {
-        return Ok(None);
-    }
-    let ids: Vec<Uuid> = rule_rows.iter().map(|r| r.id).collect();
-    let cond_rows =
-        minerva_db::queries::role_rules::list_conditions_for_rules(&state.db, &ids).await?;
+/// Pure role-decision dispatch, separated from `upsert_user` so the
+/// precedence ordering (admin > dev-teacher > manual lock > additive merge
+/// of stored + rule-derived) can be exercised without a DB or HTTP layer.
+///
+/// Ex-admin clamp: when `is_admin` is FALSE we strip Admin from
+/// `existing_role` because MINERVA_ADMINS is the source of truth for admin
+/// status. Otherwise, removing someone from the env would leave them admin
+/// in the DB forever (rules can't fix that since they cap at Teacher).
+fn decide_role(
+    is_admin: bool,
+    dev_teacher: bool,
+    role_locked: bool,
+    existing_role: Option<UserRole>,
+    rule_role: Option<UserRole>,
+) -> UserRole {
+    let existing_role = existing_role.map(|r| if is_admin { r } else { r.clamp_below_admin() });
 
-    let mut by_rule: HashMap<Uuid, Vec<RoleRuleCondition>> = HashMap::new();
-    for c in cond_rows {
-        let Some(op) = RuleOperator::parse(&c.operator) else {
-            continue;
-        };
-        by_rule
-            .entry(c.rule_id)
-            .or_default()
-            .push(RoleRuleCondition {
-                id: c.id,
-                rule_id: c.rule_id,
-                attribute: c.attribute,
-                operator: op,
-                value: c.value,
-                created_at: c.created_at,
-            });
-    }
-
-    let rules: Vec<RoleRuleWithConditions> = rule_rows
-        .into_iter()
-        .map(|r| RoleRuleWithConditions {
-            conditions: by_rule.remove(&r.id).unwrap_or_default(),
-            rule: RoleRule {
-                id: r.id,
-                name: r.name,
-                target_role: UserRole::parse(&r.target_role),
-                enabled: r.enabled,
-                created_at: r.created_at,
-                updated_at: r.updated_at,
-            },
-        })
-        .collect();
-
-    Ok(rules::evaluate(&rules, attrs))
-}
-
-fn max_role(a: UserRole, b: UserRole) -> UserRole {
-    fn rank(r: UserRole) -> u8 {
-        match r {
-            UserRole::Student => 0,
-            UserRole::Teacher => 1,
-            UserRole::Admin => 2,
+    if is_admin {
+        UserRole::Admin
+    } else if dev_teacher {
+        UserRole::Teacher
+    } else if role_locked {
+        existing_role.unwrap_or(UserRole::Student)
+    } else {
+        match (existing_role, rule_role) {
+            (Some(prev), Some(rr)) => UserRole::max(prev, rr),
+            (Some(prev), None) => prev,
+            (None, Some(rr)) => rr,
+            (None, None) => UserRole::Student,
         }
     }
-    if rank(a) >= rank(b) {
-        a
-    } else {
-        b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn admin_allowlist_always_wins() {
+        // Even if the stored role is Student and the user is locked, env
+        // membership in MINERVA_ADMINS overrides everything.
+        assert_eq!(
+            decide_role(true, false, true, Some(UserRole::Student), None),
+            UserRole::Admin,
+        );
+    }
+
+    #[test]
+    fn dev_teacher_shortcut() {
+        assert_eq!(
+            decide_role(false, true, false, None, None),
+            UserRole::Teacher,
+        );
+    }
+
+    #[test]
+    fn manual_lock_preserves_existing_role_over_rules() {
+        // Rule would promote to Teacher, but lock keeps Student.
+        assert_eq!(
+            decide_role(
+                false,
+                false,
+                true,
+                Some(UserRole::Student),
+                Some(UserRole::Teacher)
+            ),
+            UserRole::Student,
+        );
+    }
+
+    #[test]
+    fn additive_merge_takes_higher_of_existing_and_rule() {
+        assert_eq!(
+            decide_role(
+                false,
+                false,
+                false,
+                Some(UserRole::Student),
+                Some(UserRole::Teacher)
+            ),
+            UserRole::Teacher,
+        );
+        assert_eq!(
+            decide_role(false, false, false, Some(UserRole::Teacher), None),
+            UserRole::Teacher,
+        );
+        assert_eq!(
+            decide_role(false, false, false, None, Some(UserRole::Teacher)),
+            UserRole::Teacher,
+        );
+        assert_eq!(
+            decide_role(false, false, false, None, None),
+            UserRole::Student,
+        );
+    }
+
+    #[test]
+    fn ex_admin_clamped_to_teacher_when_removed_from_env() {
+        // User was Admin in DB, env now says they're not. Clamp to Teacher.
+        assert_eq!(
+            decide_role(false, false, false, Some(UserRole::Admin), None),
+            UserRole::Teacher,
+        );
+        // Same applies under the manual-lock branch: a previously-admin
+        // user who was then locked still loses admin via the clamp.
+        assert_eq!(
+            decide_role(false, false, true, Some(UserRole::Admin), None),
+            UserRole::Teacher,
+        );
+        // Active admin (env still has them) keeps Admin via the early
+        // is_admin branch -- the clamp on existing_role is irrelevant.
+        assert_eq!(
+            decide_role(true, false, false, Some(UserRole::Admin), None),
+            UserRole::Admin,
+        );
+    }
+
+    #[test]
+    fn rule_cannot_promote_locked_user() {
+        // Even an Admin-target rule (impossible at the API layer, but
+        // belt-and-braces) can't move a locked Student.
+        assert_eq!(
+            decide_role(
+                false,
+                false,
+                true,
+                Some(UserRole::Student),
+                Some(UserRole::Admin)
+            ),
+            UserRole::Student,
+        );
     }
 }

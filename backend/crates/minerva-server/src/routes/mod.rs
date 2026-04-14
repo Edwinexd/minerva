@@ -28,11 +28,15 @@ use uuid::Uuid;
 
 /// Reject the request if the course owner has hit their aggregate daily
 /// token cap (summed across every course they own). 0 = unlimited.
-/// Called from chat + embed routes before invoking the LLM.
+/// Called from chat + embed routes before invoking the LLM. A missing
+/// owner row is treated as Internal: courses.owner_id has a FK to users,
+/// so this only happens if data has been deleted out from under us, in
+/// which case continuing would silently disable the cap for that course.
 pub(crate) async fn enforce_owner_cap(state: &AppState, owner_id: Uuid) -> Result<(), AppError> {
-    let owner = minerva_db::queries::users::find_by_id(&state.db, owner_id).await?;
-    let Some(owner) = owner else {
-        return Ok(());
+    let Some(owner) = minerva_db::queries::users::find_by_id(&state.db, owner_id).await? else {
+        return Err(AppError::Internal(format!(
+            "course owner {owner_id} not found in users table"
+        )));
     };
     if owner.owner_daily_token_limit <= 0 {
         return Ok(());

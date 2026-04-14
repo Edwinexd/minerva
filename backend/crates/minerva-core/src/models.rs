@@ -34,6 +34,39 @@ impl UserRole {
     pub fn is_admin(&self) -> bool {
         matches!(self, Self::Admin)
     }
+
+    /// Numeric rank: Student=0, Teacher=1, Admin=2. Used by `max` and any
+    /// caller wanting an additive "highest of N roles" without re-deriving
+    /// the ordering. Bumping a role above Admin would require a new rank.
+    pub fn rank(&self) -> u8 {
+        match self {
+            Self::Student => 0,
+            Self::Teacher => 1,
+            Self::Admin => 2,
+        }
+    }
+
+    /// Highest of two roles. Used by the rule engine (additive merge across
+    /// matching rules) and the auth path (additive merge of stored vs
+    /// rule-derived role). Ties return `a`.
+    pub fn max(a: Self, b: Self) -> Self {
+        if a.rank() >= b.rank() {
+            a
+        } else {
+            b
+        }
+    }
+
+    /// Clamp this role to <= Teacher. Used by auth.rs to demote a stored
+    /// Admin row when the eppn is no longer in `MINERVA_ADMINS` -- the env
+    /// is the source of truth for admins, and a stale stored role would
+    /// otherwise outlive the env removal forever.
+    pub fn clamp_below_admin(self) -> Self {
+        match self {
+            Self::Admin => Self::Teacher,
+            other => other,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

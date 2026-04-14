@@ -58,8 +58,11 @@ pub async fn insert(
 /// caller-computed role (admin allowlist + rule evaluation result). For
 /// existing users with `role_manually_set = TRUE` the stored role is
 /// preserved -- the admin's manual choice wins over rule-based promotion.
+/// `display_name` is always refreshed from the IdP via COALESCE (not gated
+/// by the role lock); the lock applies only to `role`. The
 /// `default_owner_daily_token_limit` is applied only on INSERT, never on
-/// update, so admin overrides are sticky.
+/// update, so admin overrides via `update_owner_daily_token_limit` are
+/// sticky.
 pub async fn upsert(
     db: &PgPool,
     id: Uuid,

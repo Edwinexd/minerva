@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::lti::LtiKeyPair;
+use crate::rules::RuleCache;
 use minerva_ingest::fastembed_embedder::FastEmbedder;
 use qdrant_client::Qdrant;
 use sqlx::PgPool;
@@ -14,6 +15,10 @@ pub struct AppState {
     pub lti: Arc<LtiKeyPair>,
     pub http_client: reqwest::Client,
     pub fastembed: Arc<FastEmbedder>,
+    /// In-memory cache of compiled role rules. Reads (every authenticated
+    /// request) take an Arc snapshot; writes (admin CRUD on rules) call
+    /// `reload`. See `crate::rules`.
+    pub rules: Arc<RuleCache>,
 }
 
 impl AppState {
@@ -28,6 +33,8 @@ impl AppState {
 
         let fastembed = Arc::new(FastEmbedder::new());
 
+        let rules = Arc::new(RuleCache::load(&db).await?);
+
         Ok(Self {
             db,
             qdrant: Arc::new(qdrant),
@@ -35,6 +42,7 @@ impl AppState {
             lti: Arc::new(lti),
             http_client: reqwest::Client::new(),
             fastembed,
+            rules,
         })
     }
 }

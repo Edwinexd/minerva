@@ -48,7 +48,15 @@ function RoleRulesPanel() {
             (those users show a "locked" badge -- click Unlock there to
             re-enable rule evaluation). Multi-valued attributes
             (affiliation, entitlement) use list-membership semantics for
-            "contains".
+            "contains" -- substring matches are rejected.
+            <br />
+            <span className="text-xs">
+              Negated operators (<code>not_contains</code>, <code>not_regex</code>)
+              also require the attribute to be present on the user. This
+              prevents external/non-Shib users (who have no affiliation /
+              entitlement / etc. at all) from matching a "not contains X"
+              rule by virtue of having nothing.
+            </span>
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -198,7 +206,7 @@ function RuleCard({ rule }: { rule: RoleRule }) {
       </CardHeader>
       <CardContent className="space-y-2">
         {rule.conditions.map((c) => (
-          <ConditionRow key={c.id} ruleId={rule.id} condition={c} />
+          <ConditionRow key={c.id} condition={c} />
         ))}
         <AddConditionForm ruleId={rule.id} />
       </CardContent>
@@ -207,10 +215,8 @@ function RuleCard({ rule }: { rule: RoleRule }) {
 }
 
 function ConditionRow({
-  ruleId,
   condition,
 }: {
-  ruleId: string
   condition: RoleRule["conditions"][number]
 }) {
   const queryClient = useQueryClient()
@@ -220,10 +226,6 @@ function ConditionRow({
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["admin", "role-rules"] }),
   })
-
-  // ruleId not strictly needed here, but kept to match the create endpoint
-  // shape and to make logs/breadcrumbs less surprising.
-  void ruleId
 
   return (
     <div className="flex items-center gap-2 rounded border bg-muted/30 p-2 text-xs">

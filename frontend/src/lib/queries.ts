@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasFileInfo, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -127,7 +127,8 @@ export const canvasConnectionsQuery = (courseId: string) =>
 export const canvasFilesQuery = (courseId: string, connectionId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "canvas", connectionId, "files"],
-    queryFn: () => api.get<CanvasFileInfo[]>(`/courses/${courseId}/canvas/${connectionId}/files`),
+    queryFn: () =>
+      api.get<CanvasItemsResponse>(`/courses/${courseId}/canvas/${connectionId}/files`),
   })
 
 export const adminUsersQuery = queryOptions({

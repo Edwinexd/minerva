@@ -260,18 +260,31 @@ export interface CanvasConnection {
   last_synced_at: string | null
 }
 
-export interface CanvasFileInfo {
+export type CanvasItemKind = "file" | "page" | "url"
+
+export interface CanvasItemInfo {
   id: string
   filename: string
+  kind: CanvasItemKind
   content_type: string | null
   size: number
+  /** "files_api" and/or "modules" -- which discovery source surfaced the item. */
+  sources: string[]
   already_synced: boolean
+  needs_resync: boolean
+}
+
+export interface CanvasItemsResponse {
+  items: CanvasItemInfo[]
+  warnings: string[]
 }
 
 export interface CanvasSyncResult {
   synced: number
+  resynced: number
   skipped: number
   errors: string[]
+  warnings: string[]
 }
 
 export interface ExternalAuthInvite {

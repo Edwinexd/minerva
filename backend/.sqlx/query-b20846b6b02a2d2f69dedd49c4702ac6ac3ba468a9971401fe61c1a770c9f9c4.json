@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, connection_id, canvas_file_id, filename, content_type, minerva_document_id, synced_at FROM canvas_sync_log WHERE connection_id = $1 ORDER BY synced_at DESC",
+  "query": "SELECT id, connection_id, canvas_file_id, filename, content_type, minerva_document_id, synced_at, canvas_updated_at FROM canvas_sync_log WHERE connection_id = $1 ORDER BY synced_at DESC",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,11 @@
         "ordinal": 6,
         "name": "synced_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "canvas_updated_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -51,8 +56,9 @@
       false,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "06ded7fae1b45def7f70784ad5def8c20af8df70cf5ba3fd0187351f3808e285"
+  "hash": "b20846b6b02a2d2f69dedd49c4702ac6ac3ba468a9971401fe61c1a770c9f9c4"
 }

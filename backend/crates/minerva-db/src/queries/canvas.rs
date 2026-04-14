@@ -93,15 +93,19 @@ pub async fn update_last_synced(db: &PgPool, id: Uuid) -> Result<(), sqlx::Error
 
 // -- Sync log rows --
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SyncLogRow {
     pub id: Uuid,
     pub connection_id: Uuid,
+    /// Canvas-side identity. Prefixed to keep namespaces disjoint across item
+    /// types: `file:{id}` for Canvas Files, `page:{page_id}` for Pages,
+    /// `url:{absolute_url}` for ExternalUrl items.
     pub canvas_file_id: String,
     pub filename: String,
     pub content_type: Option<String>,
     pub minerva_document_id: Option<Uuid>,
     pub synced_at: chrono::DateTime<chrono::Utc>,
+    pub canvas_updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub async fn list_synced_files(
@@ -110,28 +114,34 @@ pub async fn list_synced_files(
 ) -> Result<Vec<SyncLogRow>, sqlx::Error> {
     sqlx::query_as!(
         SyncLogRow,
-        "SELECT id, connection_id, canvas_file_id, filename, content_type, minerva_document_id, synced_at FROM canvas_sync_log WHERE connection_id = $1 ORDER BY synced_at DESC",
+        "SELECT id, connection_id, canvas_file_id, filename, content_type, minerva_document_id, synced_at, canvas_updated_at FROM canvas_sync_log WHERE connection_id = $1 ORDER BY synced_at DESC",
         connection_id,
     )
     .fetch_all(db)
     .await
 }
 
-/// Returns the set of Canvas file IDs already synced for this connection.
-pub async fn synced_file_ids(
+/// Map of existing sync log entries keyed by `canvas_file_id`. Callers use
+/// the stored `canvas_updated_at` to decide whether a re-sync is needed.
+pub async fn synced_log_by_canvas_id(
     db: &PgPool,
     connection_id: Uuid,
-) -> Result<std::collections::HashSet<String>, sqlx::Error> {
-    let rows = sqlx::query!(
-        "SELECT canvas_file_id FROM canvas_sync_log WHERE connection_id = $1",
+) -> Result<std::collections::HashMap<String, SyncLogRow>, sqlx::Error> {
+    let rows = sqlx::query_as!(
+        SyncLogRow,
+        "SELECT id, connection_id, canvas_file_id, filename, content_type, minerva_document_id, synced_at, canvas_updated_at FROM canvas_sync_log WHERE connection_id = $1",
         connection_id,
     )
     .fetch_all(db)
     .await?;
-    Ok(rows.into_iter().map(|r| r.canvas_file_id).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.canvas_file_id.clone(), r))
+        .collect())
 }
 
-pub async fn insert_sync_log(
+#[allow(clippy::too_many_arguments)]
+pub async fn upsert_sync_log(
     db: &PgPool,
     id: Uuid,
     connection_id: Uuid,
@@ -139,19 +149,26 @@ pub async fn insert_sync_log(
     filename: &str,
     content_type: Option<&str>,
     minerva_document_id: Option<Uuid>,
+    canvas_updated_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<SyncLogRow, sqlx::Error> {
     sqlx::query_as!(
         SyncLogRow,
-        r#"INSERT INTO canvas_sync_log (id, connection_id, canvas_file_id, filename, content_type, minerva_document_id)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (connection_id, canvas_file_id) DO UPDATE SET filename = EXCLUDED.filename, minerva_document_id = COALESCE(EXCLUDED.minerva_document_id, canvas_sync_log.minerva_document_id)
-        RETURNING id, connection_id, canvas_file_id, filename, content_type, minerva_document_id, synced_at"#,
+        r#"INSERT INTO canvas_sync_log (id, connection_id, canvas_file_id, filename, content_type, minerva_document_id, canvas_updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (connection_id, canvas_file_id) DO UPDATE SET
+            filename = EXCLUDED.filename,
+            content_type = EXCLUDED.content_type,
+            minerva_document_id = COALESCE(EXCLUDED.minerva_document_id, canvas_sync_log.minerva_document_id),
+            canvas_updated_at = EXCLUDED.canvas_updated_at,
+            synced_at = NOW()
+        RETURNING id, connection_id, canvas_file_id, filename, content_type, minerva_document_id, synced_at, canvas_updated_at"#,
         id,
         connection_id,
         canvas_file_id,
         filename,
         content_type,
         minerva_document_id,
+        canvas_updated_at,
     )
     .fetch_one(db)
     .await

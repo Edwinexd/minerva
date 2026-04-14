@@ -153,6 +153,29 @@ pub async fn list_awaiting_transcripts(db: &PgPool) -> Result<Vec<DocumentRow>, 
     .await
 }
 
+/// Replace a document's bytes-on-disk metadata and reset it to `pending` so
+/// the ingest worker re-chunks it. Caller is responsible for having already
+/// cleared the old Qdrant chunks (otherwise stale vectors will coexist with
+/// the new ones).
+pub async fn reset_for_resync(
+    db: &PgPool,
+    id: Uuid,
+    filename: &str,
+    mime_type: &str,
+    size_bytes: i64,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE documents SET filename = $1, mime_type = $2, size_bytes = $3, status = 'pending', error_msg = NULL, chunk_count = NULL, processed_at = NULL, processing_started_at = NULL WHERE id = $4",
+        filename,
+        mime_type,
+        size_bytes,
+        id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Update a document's filename, mime_type, size, and reset status to 'pending'.
 /// Used when replacing a URL stub with actual transcript content.
 pub async fn replace_with_transcript(

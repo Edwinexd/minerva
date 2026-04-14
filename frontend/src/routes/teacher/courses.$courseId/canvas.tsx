@@ -14,8 +14,17 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useState } from "react"
 import type { CanvasConnection, CanvasSyncResult } from "@/lib/types"
+
+type CanvasCourseInfo = { id: string; name: string; course_code: string | null }
 
 export const Route = createFileRoute("/teacher/courses/$courseId/canvas")({
   component: CanvasPage,
@@ -38,6 +47,9 @@ function CanvasPage() {
   const [canvasCourseId, setCanvasCourseId] = useState("")
   const [selectedConn, setSelectedConn] = useState<string | null>(null)
   const [syncResult, setSyncResult] = useState<CanvasSyncResult | null>(null)
+  const [availableCourses, setAvailableCourses] = useState<CanvasCourseInfo[] | null>(null)
+  const [isLoadingCourses, setIsLoadingCourses] = useState(false)
+  const [coursesError, setCoursesError] = useState<string | null>(null)
 
   const createMutation = useMutation({
     mutationFn: (data: {
@@ -52,11 +64,33 @@ function CanvasPage() {
       setBaseUrl("")
       setApiToken("")
       setCanvasCourseId("")
+      setAvailableCourses(null)
+      setCoursesError(null)
       queryClient.invalidateQueries({
         queryKey: ["courses", courseId, "canvas"],
       })
     },
   })
+
+  const loadCourses = async () => {
+    setIsLoadingCourses(true)
+    setCoursesError(null)
+    try {
+      const courses = await api.post<CanvasCourseInfo[]>(
+        `/courses/${courseId}/canvas/lookup-courses`,
+        { canvas_base_url: baseUrl.trim(), canvas_api_token: apiToken.trim() },
+      )
+      setAvailableCourses(courses)
+      if (courses.length > 0 && !canvasCourseId) {
+        setCanvasCourseId(courses[0].id)
+      }
+    } catch (e) {
+      setCoursesError(e instanceof Error ? e.message : "Failed to load courses")
+      setAvailableCourses(null)
+    } finally {
+      setIsLoadingCourses(false)
+    }
+  }
 
   const deleteMutation = useMutation({
     mutationFn: (connId: string) =>
@@ -119,18 +153,69 @@ function CanvasPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="canvas-url">Canvas URL</Label>
-                <Input id="canvas-url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://canvas.instructure.com" />
+                <Input
+                  id="canvas-url"
+                  value={baseUrl}
+                  onChange={(e) => { setBaseUrl(e.target.value); setAvailableCourses(null); setCoursesError(null) }}
+                  placeholder="https://canvas.instructure.com"
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="canvas-token">API Token</Label>
-                <Input id="canvas-token" type="password" value={apiToken} onChange={(e) => setApiToken(e.target.value)} placeholder="Canvas personal access token" />
+                <Input
+                  id="canvas-token"
+                  type="password"
+                  value={apiToken}
+                  onChange={(e) => { setApiToken(e.target.value); setAvailableCourses(null); setCoursesError(null) }}
+                  placeholder="Canvas personal access token"
+                />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="canvas-course-id">Canvas Course ID</Label>
-                <Input id="canvas-course-id" value={canvasCourseId} onChange={(e) => setCanvasCourseId(e.target.value)} placeholder="e.g. 12345" />
-                <p className="text-xs text-muted-foreground">
-                  Found in the Canvas course URL: canvas.example.com/courses/<strong>12345</strong>
-                </p>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="canvas-course-id">Canvas Course ID</Label>
+                  {baseUrl.trim() && apiToken.trim() && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto py-0 text-xs"
+                      onClick={loadCourses}
+                      disabled={isLoadingCourses || createMutation.isPending}
+                    >
+                      {isLoadingCourses ? "Loading..." : "Load courses"}
+                    </Button>
+                  )}
+                </div>
+                {availableCourses && availableCourses.length > 0 ? (
+                  <Select value={canvasCourseId} onValueChange={(v) => v && setCanvasCourseId(v)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select a Canvas course" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableCourses.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}{c.course_code ? ` (${c.course_code})` : ""} -- {c.id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <>
+                    <Input
+                      id="canvas-course-id"
+                      value={canvasCourseId}
+                      onChange={(e) => setCanvasCourseId(e.target.value)}
+                      placeholder="e.g. 12345"
+                    />
+                    {coursesError ? (
+                      <p className="text-xs text-destructive">{coursesError}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Found in the Canvas course URL: canvas.example.com/courses/<strong>12345</strong>
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
 
               {createMutation.isError && (
@@ -141,7 +226,7 @@ function CanvasPage() {
                 <Button type="submit" disabled={createMutation.isPending || !baseUrl.trim() || !apiToken.trim() || !canvasCourseId.trim()}>
                   {createMutation.isPending ? "Connecting..." : "Save Connection"}
                 </Button>
-                <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+                <Button type="button" variant="outline" onClick={() => { setShowForm(false); setAvailableCourses(null); setCoursesError(null) }}>
                   Cancel
                 </Button>
               </div>
@@ -218,7 +303,17 @@ function CanvasPage() {
 
           {syncResult && (
             <div className="rounded-md border p-3 text-sm space-y-1">
-              <p><strong>Sync complete:</strong> {syncResult.synced} files synced, {syncResult.skipped} skipped</p>
+              <p>
+                <strong>Sync complete:</strong> {syncResult.synced} new, {syncResult.resynced} updated, {syncResult.skipped} unchanged
+              </p>
+              {syncResult.warnings.length > 0 && (
+                <div className="text-amber-600 dark:text-amber-400">
+                  <p>Warnings:</p>
+                  <ul className="list-disc list-inside">
+                    {syncResult.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                  </ul>
+                </div>
+              )}
               {syncResult.errors.length > 0 && (
                 <div className="text-destructive">
                   <p>Errors:</p>
@@ -239,25 +334,50 @@ function CanvasPage() {
   )
 }
 
+function kindLabel(kind: string): string {
+  if (kind === "file") return "File"
+  if (kind === "page") return "Page"
+  if (kind === "url") return "URL"
+  return kind
+}
+
 function CanvasFilesPreview({ courseId, connectionId }: { courseId: string; connectionId: string }) {
-  const { data: files, isLoading } = useQuery(canvasFilesQuery(courseId, connectionId))
+  const { data, isLoading } = useQuery(canvasFilesQuery(courseId, connectionId))
 
   if (isLoading) return <Skeleton className="h-20 w-full" />
-  if (!files || files.length === 0) return <p className="text-xs text-muted-foreground">No files found in this Canvas course.</p>
+  if (!data) return null
+
+  const { items, warnings } = data
 
   return (
-    <div className="rounded border p-2 text-xs max-h-48 overflow-y-auto space-y-1">
-      {files.map((f) => (
-        <div key={f.id} className="flex items-center justify-between gap-2 py-0.5">
-          <span className="truncate flex-1">{f.filename}</span>
-          <span className="text-muted-foreground shrink-0">{formatBytes(f.size)}</span>
-          {f.already_synced ? (
-            <Badge variant="secondary" className="text-xs shrink-0">Synced</Badge>
-          ) : (
-            <Badge variant="outline" className="text-xs shrink-0">New</Badge>
-          )}
+    <div className="space-y-2">
+      {warnings.length > 0 && (
+        <div className="rounded border border-amber-500/40 bg-amber-50 dark:bg-amber-950/30 p-2 text-xs text-amber-700 dark:text-amber-300 space-y-1">
+          {warnings.map((w, i) => <div key={i}>{w}</div>)}
         </div>
-      ))}
+      )}
+      {items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No items found in this Canvas course.</p>
+      ) : (
+        <div className="rounded border p-2 text-xs max-h-48 overflow-y-auto space-y-1">
+          {items.map((f) => (
+            <div key={f.id} className="flex items-center justify-between gap-2 py-0.5">
+              <Badge variant="outline" className="text-[10px] shrink-0">{kindLabel(f.kind)}</Badge>
+              <span className="truncate flex-1">{f.filename}</span>
+              {f.size > 0 && (
+                <span className="text-muted-foreground shrink-0">{formatBytes(f.size)}</span>
+              )}
+              {f.needs_resync ? (
+                <Badge variant="default" className="text-xs shrink-0">Update</Badge>
+              ) : f.already_synced ? (
+                <Badge variant="secondary" className="text-xs shrink-0">Synced</Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs shrink-0">New</Badge>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

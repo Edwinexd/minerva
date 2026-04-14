@@ -74,14 +74,6 @@ function RootLayout() {
             </Link>
           )}
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm min-w-0">
-            {!isEmbed && user && (user.role === "teacher" || user.role === "admin") && (
-              <Link
-                to="/teacher"
-                className="text-muted-foreground hover:text-foreground"
-              >
-                Dashboard
-              </Link>
-            )}
             {!isEmbed && user && user.role === "admin" && (
               <Link
                 to="/admin"

@@ -29,7 +29,14 @@ const TABS = [
   { value: "usage", label: "Usage" },
 ] as const
 
-const VALID_TABS = new Set(TABS.map((t) => t.value))
+// Tabs that TAs cannot see: invite/LTI/API keys/play designations are
+// teacher-only operations enforced server-side; hide them in the UI too.
+const TA_HIDDEN_TABS = new Set<string>([
+  "invite",
+  "lti",
+  "api-keys",
+  "play-designations",
+])
 
 function CourseEditPage() {
   const { courseId } = Route.useParams()
@@ -37,8 +44,13 @@ function CourseEditPage() {
   const navigate = useNavigate()
   const location = useLocation()
 
+  const visibleTabs = course?.my_role === "ta"
+    ? TABS.filter((t) => !TA_HIDDEN_TABS.has(t.value))
+    : TABS
+  const validTabs = new Set<string>(visibleTabs.map((t) => t.value))
+
   const lastSegment = location.pathname.split("/").pop() || ""
-  const activeTab = VALID_TABS.has(lastSegment as typeof TABS[number]["value"]) ? lastSegment : "config"
+  const activeTab = validTabs.has(lastSegment) ? lastSegment : "config"
 
   if (isLoading) return (
     <div className="space-y-6">
@@ -67,11 +79,11 @@ function CourseEditPage() {
         >
           <SelectTrigger className="w-full">
             <SelectValue>
-              {TABS.find((t) => t.value === activeTab)?.label}
+              {visibleTabs.find((t) => t.value === activeTab)?.label}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {TABS.map((tab) => (
+            {visibleTabs.map((tab) => (
               <SelectItem key={tab.value} value={tab.value}>
                 {tab.label}
               </SelectItem>
@@ -88,7 +100,7 @@ function CourseEditPage() {
         className="hidden md:flex"
       >
         <TabsList>
-          {TABS.map((tab) => (
+          {visibleTabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
               {tab.label}
             </TabsTrigger>

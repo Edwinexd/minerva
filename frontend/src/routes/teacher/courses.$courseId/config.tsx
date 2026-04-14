@@ -40,6 +40,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   const queryClient = useQueryClient()
   const { data: modelsData } = useQuery(modelsQuery)
   const { data: benchmarksData } = useQuery(embeddingBenchmarksQuery)
+  const readOnly = course.my_role === "ta"
   const [name, setName] = useState(course.name)
   const [description, setDescription] = useState(course.description || "")
   const [contextRatio, setContextRatio] = useState(course.context_ratio)
@@ -70,6 +71,11 @@ function CourseConfigForm({ course }: { course: Course }) {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {readOnly && (
+          <p className="text-sm text-muted-foreground mb-4">
+            Read-only: TAs can view but not edit course configuration.
+          </p>
+        )}
         <form
           className="space-y-6"
           onSubmit={(e) => {
@@ -288,9 +294,11 @@ function CourseConfigForm({ course }: { course: Course }) {
             />
           </div>
 
-          <Button type="submit" disabled={mutation.isPending}>
-            {mutation.isPending ? "Saving..." : "Save Configuration"}
-          </Button>
+          {!readOnly && (
+            <Button type="submit" disabled={mutation.isPending}>
+              {mutation.isPending ? "Saving..." : "Save Configuration"}
+            </Button>
+          )}
           {mutation.isSuccess && (
             <span className="text-sm text-muted-foreground ml-2">Saved!</span>
           )}

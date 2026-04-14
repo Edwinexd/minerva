@@ -36,7 +36,10 @@ async fn get_course_usage(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if course.owner_id != user.id && !user.role.is_admin() {
+    if course.owner_id != user.id
+        && !user.role.is_admin()
+        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
+    {
         return Err(AppError::Forbidden);
     }
 

@@ -107,8 +107,12 @@ async fn create_invite(
     if local.is_empty() || local.len() > 200 {
         return Err(AppError::BadRequest("eppn must be 1-200 characters".into()));
     }
-    // Don't let admins accidentally double-prefix.
-    let local = local.strip_prefix(EXT_EPPN_PREFIX).unwrap_or(local);
+    // Don't let admins accidentally double-prefix. Lowercase the local part so
+    // the invite matches the normalized eppn produced by auth_middleware.
+    let local = local
+        .strip_prefix(EXT_EPPN_PREFIX)
+        .unwrap_or(local)
+        .to_lowercase();
     let eppn = format!("{}{}", EXT_EPPN_PREFIX, local);
 
     let display_name = body

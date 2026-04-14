@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { courseDocumentsQuery } from "@/lib/queries"
+import { courseDocumentsQuery, courseQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -39,6 +39,8 @@ function formatBytes(bytes: number): string {
 function DocumentsPage() {
   const { courseId } = Route.useParams()
   const { data: documents, isLoading } = useQuery(courseDocumentsQuery(courseId))
+  const { data: course } = useQuery(courseQuery(courseId))
+  const canMutate = course?.my_role !== "ta"
   const queryClient = useQueryClient()
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
@@ -149,32 +151,36 @@ function DocumentsPage() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex gap-2">
-          <Input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) uploadMutation.mutate(file)
-            }}
-            className="flex-1"
-          />
-          {uploadMutation.isPending && (
-            <span className="text-sm text-muted-foreground self-center">
-              Uploading...
-            </span>
-          )}
-        </div>
-        {uploadMutation.isError && (
-          <p className="text-sm text-destructive">
-            {uploadMutation.error.message}
-          </p>
+        {canMutate && (
+          <>
+            <div className="flex gap-2">
+              <Input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) uploadMutation.mutate(file)
+                }}
+                className="flex-1"
+              />
+              {uploadMutation.isPending && (
+                <span className="text-sm text-muted-foreground self-center">
+                  Uploading...
+                </span>
+              )}
+            </div>
+            {uploadMutation.isError && (
+              <p className="text-sm text-destructive">
+                {uploadMutation.error.message}
+              </p>
+            )}
+          </>
         )}
 
         {isLoading && <p className="text-muted-foreground">Loading...</p>}
 
-        {documents && documents.length > 0 && (
+        {canMutate && documents && documents.length > 0 && (
           <div className="flex items-center justify-between py-2 border-b">
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
@@ -216,11 +222,13 @@ function DocumentsPage() {
               className="flex items-center justify-between py-2 border-b last:border-0"
             >
               <div className="flex items-center gap-3 flex-1 min-w-0">
-                <Checkbox
-                  checked={selected.has(doc.id)}
-                  onCheckedChange={() => toggleOne(doc.id)}
-                  aria-label={`Select ${doc.filename}`}
-                />
+                {canMutate && (
+                  <Checkbox
+                    checked={selected.has(doc.id)}
+                    onCheckedChange={() => toggleOne(doc.id)}
+                    aria-label={`Select ${doc.filename}`}
+                  />
+                )}
                 <div className="space-y-1 min-w-0">
                   <span className="font-medium truncate block">{doc.filename}</span>
                   <div className="flex gap-2 text-xs text-muted-foreground">
@@ -238,27 +246,33 @@ function DocumentsPage() {
                     error
                   </span>
                 )}
-                <Button
-                  variant={doc.displayable ? "outline" : "secondary"}
-                  size="sm"
-                  title={doc.displayable ? "Students can see source text" : "Source text hidden from students"}
-                  onClick={() =>
-                    toggleDisplayableMutation.mutate({
-                      docId: doc.id,
-                      displayable: !doc.displayable,
-                    })
-                  }
-                >
-                  {doc.displayable ? "Visible" : "Hidden"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setConfirmSingle(doc)}
-                  disabled={deleteMutation.isPending}
-                >
-                  Delete
-                </Button>
+                {canMutate ? (
+                  <Button
+                    variant={doc.displayable ? "outline" : "secondary"}
+                    size="sm"
+                    title={doc.displayable ? "Students can see source text" : "Source text hidden from students"}
+                    onClick={() =>
+                      toggleDisplayableMutation.mutate({
+                        docId: doc.id,
+                        displayable: !doc.displayable,
+                      })
+                    }
+                  >
+                    {doc.displayable ? "Visible" : "Hidden"}
+                  </Button>
+                ) : (
+                  <Badge variant="outline">{doc.displayable ? "Visible" : "Hidden"}</Badge>
+                )}
+                {canMutate && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmSingle(doc)}
+                    disabled={deleteMutation.isPending}
+                  >
+                    Delete
+                  </Button>
+                )}
               </div>
             </div>
           ))}

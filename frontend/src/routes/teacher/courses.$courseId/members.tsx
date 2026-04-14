@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { courseMembersQuery } from "@/lib/queries"
+import { courseMembersQuery, courseQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -21,9 +21,11 @@ export const Route = createFileRoute("/teacher/courses/$courseId/members")({
 function MembersPage() {
   const { courseId } = Route.useParams()
   const { data: members, isLoading } = useQuery(courseMembersQuery(courseId))
+  const { data: course } = useQuery(courseQuery(courseId))
   const queryClient = useQueryClient()
   const [eppn, setEppn] = useState("")
   const [role, setRole] = useState("student")
+  const canMutate = course?.my_role !== "ta"
 
   const addMutation = useMutation({
     mutationFn: (data: { eppn: string; role: string }) =>
@@ -53,32 +55,34 @@ function MembersPage() {
         <CardDescription>Manage who has access to this course</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <form
-          className="flex flex-wrap gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (eppn) addMutation.mutate({ eppn, role })
-          }}
-        >
-          <Input
-            value={eppn}
-            onChange={(e) => setEppn(e.target.value)}
-            placeholder="username@SU.SE"
-            className="flex-1 min-w-[12rem]"
-          />
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            className="border rounded px-2 py-1 text-sm bg-background"
+        {canMutate && (
+          <form
+            className="flex flex-wrap gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (eppn) addMutation.mutate({ eppn, role })
+            }}
           >
-            <option value="student">Student</option>
-            <option value="ta">TA</option>
-            <option value="teacher">Teacher</option>
-          </select>
-          <Button type="submit" disabled={addMutation.isPending}>
-            Add
-          </Button>
-        </form>
+            <Input
+              value={eppn}
+              onChange={(e) => setEppn(e.target.value)}
+              placeholder="username@su.se"
+              className="flex-1 min-w-[12rem]"
+            />
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              className="border rounded px-2 py-1 text-sm bg-background"
+            >
+              <option value="student">Student</option>
+              <option value="ta">TA</option>
+              <option value="teacher">Teacher</option>
+            </select>
+            <Button type="submit" disabled={addMutation.isPending}>
+              Add
+            </Button>
+          </form>
+        )}
 
         {isLoading && <p className="text-muted-foreground">Loading...</p>}
 
@@ -100,13 +104,15 @@ function MembersPage() {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <Badge variant="outline">{m.role}</Badge>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeMutation.mutate(m.user_id)}
-                >
-                  Remove
-                </Button>
+                {canMutate && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeMutation.mutate(m.user_id)}
+                  >
+                    Remove
+                  </Button>
+                )}
               </div>
             </div>
           ))}

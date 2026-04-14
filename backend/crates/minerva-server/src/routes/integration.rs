@@ -137,7 +137,8 @@ async fn ensure_user(
     // Any valid API key can ensure users exist.
     authenticate(&state, &headers).await?;
 
-    let existing = minerva_db::queries::users::find_by_eppn(&state.db, &body.eppn).await?;
+    let eppn = body.eppn.trim().to_lowercase();
+    let existing = minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await?;
     match existing {
         Some(user) => Ok(Json(UserInfo {
             id: user.id,
@@ -150,14 +151,14 @@ async fn ensure_user(
             minerva_db::queries::users::insert(
                 &state.db,
                 id,
-                &body.eppn,
+                &eppn,
                 body.display_name.as_deref(),
                 "student",
             )
             .await?;
             Ok(Json(UserInfo {
                 id,
-                eppn: body.eppn,
+                eppn,
                 display_name: body.display_name,
                 created: true,
             }))
@@ -185,7 +186,8 @@ async fn add_member(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let user = minerva_db::queries::users::find_by_eppn(&state.db, &body.eppn).await?;
+    let eppn = body.eppn.trim().to_lowercase();
+    let user = minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await?;
     let user_id = match user {
         Some(u) => u.id,
         None => {
@@ -193,7 +195,7 @@ async fn add_member(
             minerva_db::queries::users::insert(
                 &state.db,
                 id,
-                &body.eppn,
+                &eppn,
                 body.display_name.as_deref(),
                 "student",
             )
@@ -218,6 +220,7 @@ async fn remove_member_by_eppn(
 ) -> Result<Json<serde_json::Value>, AppError> {
     authenticate_for_course(&state, &headers, course_id).await?;
 
+    let eppn = eppn.trim().to_lowercase();
     let user = minerva_db::queries::users::find_by_eppn(&state.db, &eppn)
         .await?
         .ok_or(AppError::NotFound)?;
@@ -373,7 +376,8 @@ async fn create_embed_token(
     authenticate_for_course(&state, &headers, course_id).await?;
 
     // Ensure the user exists.
-    let user = minerva_db::queries::users::find_by_eppn(&state.db, &body.eppn).await?;
+    let eppn = body.eppn.trim().to_lowercase();
+    let user = minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await?;
     let user_id = match user {
         Some(u) => u.id,
         None => {
@@ -381,7 +385,7 @@ async fn create_embed_token(
             minerva_db::queries::users::insert(
                 &state.db,
                 id,
-                &body.eppn,
+                &eppn,
                 body.display_name.as_deref(),
                 "student",
             )

@@ -24,6 +24,8 @@ export interface Course {
   active: boolean
   created_at: string
   updated_at: string
+  /** Viewing user's course_member role, if any. Drives UI gating for TAs. */
+  my_role: "student" | "ta" | "teacher" | null
 }
 
 export interface AdminUser {

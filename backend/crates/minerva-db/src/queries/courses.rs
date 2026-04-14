@@ -251,3 +251,35 @@ pub async fn is_course_teacher(
     .await?;
     Ok(row.is_some())
 }
+
+/// Strict teacher check: `role = 'teacher'` only (TAs excluded). Use this for
+/// operations TAs must not perform (LTI, API keys, invites, play designations).
+pub async fn is_course_teacher_strict(
+    db: &PgPool,
+    course_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_scalar!(
+        "SELECT 1 FROM course_members WHERE course_id = $1 AND user_id = $2 AND role = 'teacher'",
+        course_id,
+        user_id,
+    )
+    .fetch_optional(db)
+    .await?;
+    Ok(row.is_some())
+}
+
+/// Returns the viewer's course_member role, or None if not a member.
+pub async fn get_member_role(
+    db: &PgPool,
+    course_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar!(
+        "SELECT role FROM course_members WHERE course_id = $1 AND user_id = $2",
+        course_id,
+        user_id,
+    )
+    .fetch_optional(db)
+    .await
+}

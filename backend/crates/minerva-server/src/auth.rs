@@ -15,18 +15,19 @@ use crate::state::AppState;
 const CLEAR_EXT_COOKIE: &str = "minerva_ext=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
 
 /// Extracts user from Shibboleth headers set by Apache mod_shib (ShibUseHeaders On).
-/// mod_shib sets `eppn` header with the eduPersonPrincipalName (e.g. edsu8469@SU.SE).
+/// mod_shib sets `eppn` header with the eduPersonPrincipalName (e.g. edsu8469@su.se).
+/// EPPN is lowercased before lookup so SU.SE / su.se map to the same user row.
 ///
 /// In dev mode (MINERVA_DEV_MODE=true):
 /// - Reads X-Dev-User header instead of eppn
-/// - Falls back to first admin in MINERVA_ADMINS, or "dev@SU.SE"
+/// - Falls back to first admin in MINERVA_ADMINS, or "dev@su.se"
 pub async fn auth_middleware(
     State(state): State<AppState>,
     headers: HeaderMap,
     mut request: Request,
     next: Next,
 ) -> Result<Response, AppError> {
-    let eppn = if state.config.dev_mode {
+    let raw_eppn = if state.config.dev_mode {
         // Dev mode: X-Dev-User header, or fall back to first admin / default
         headers
             .get("X-Dev-User")
@@ -43,8 +44,8 @@ pub async fn auth_middleware(
                     .config
                     .admin_usernames
                     .first()
-                    .map(|u| format!("{}@SU.SE", u))
-                    .unwrap_or_else(|| "dev@SU.SE".to_string())
+                    .map(|u| format!("{}@su.se", u))
+                    .unwrap_or_else(|| "dev@su.se".to_string())
             })
     } else {
         headers
@@ -52,6 +53,14 @@ pub async fn auth_middleware(
             .and_then(|v| v.to_str().ok())
             .ok_or(AppError::Unauthorized)?
             .to_string()
+    };
+
+    // Normalize to lowercase so `alice@su.se` and `alice@SU.SE` resolve to
+    // the same user row. Preserve the `ext:` prefix casing (it's a literal).
+    let eppn = if let Some(rest) = raw_eppn.strip_prefix("ext:") {
+        format!("ext:{}", rest.to_lowercase())
+    } else {
+        raw_eppn.to_lowercase()
     };
 
     let display_name = headers

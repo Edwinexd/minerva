@@ -65,12 +65,15 @@ async fn list_documents(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<DocumentResponse>>, AppError> {
-    // Verify access
+    // Verify access -- owner, admin, teacher, and TA can read the document list.
     let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if course.owner_id != user.id && !user.role.is_admin() {
+    if course.owner_id != user.id
+        && !user.role.is_admin()
+        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
+    {
         return Err(AppError::Forbidden);
     }
 
@@ -248,7 +251,10 @@ async fn list_chunks(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if course.owner_id != user.id && !user.role.is_admin() {
+    if course.owner_id != user.id
+        && !user.role.is_admin()
+        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
+    {
         return Err(AppError::Forbidden);
     }
 
@@ -315,7 +321,7 @@ struct SearchResult {
     chunk_index: i64,
 }
 
-/// Search chunks by semantic similarity. Teachers can test RAG queries.
+/// Search chunks by semantic similarity. Teachers and TAs can test RAG queries.
 async fn search_chunks(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -326,7 +332,10 @@ async fn search_chunks(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if course.owner_id != user.id && !user.role.is_admin() {
+    if course.owner_id != user.id
+        && !user.role.is_admin()
+        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
+    {
         return Err(AppError::Forbidden);
     }
 

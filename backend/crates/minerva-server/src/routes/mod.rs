@@ -72,13 +72,13 @@ async fn dev_config(State(state): State<AppState>) -> Json<Value> {
     }
 
     let mut dev_users = vec![
-        json!({ "eppn": "student@SU.SE", "label": "Student" }),
-        json!({ "eppn": "teacher@SU.SE", "label": "Teacher" }),
+        json!({ "eppn": "student@su.se", "label": "Student" }),
+        json!({ "eppn": "teacher@su.se", "label": "Teacher" }),
     ];
 
     for admin in &state.config.admin_usernames {
         dev_users.push(json!({
-            "eppn": format!("{}@SU.SE", admin),
+            "eppn": format!("{}@su.se", admin),
             "label": format!("Admin ({})", admin),
         }));
     }

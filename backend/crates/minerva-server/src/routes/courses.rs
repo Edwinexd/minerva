@@ -60,10 +60,13 @@ struct CourseResponse {
     active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
+    /// Viewer's course_member role ("teacher"|"ta"|"student"), or None if
+    /// viewer is admin-only / not a member. Lets the frontend gate UI tabs.
+    my_role: Option<String>,
 }
 
-impl From<minerva_db::queries::courses::CourseRow> for CourseResponse {
-    fn from(row: minerva_db::queries::courses::CourseRow) -> Self {
+impl CourseResponse {
+    fn from_row(row: minerva_db::queries::courses::CourseRow, my_role: Option<String>) -> Self {
         Self {
             id: row.id,
             name: row.name,
@@ -82,6 +85,7 @@ impl From<minerva_db::queries::courses::CourseRow> for CourseResponse {
             active: row.active,
             created_at: row.created_at,
             updated_at: row.updated_at,
+            my_role,
         }
     }
 }
@@ -99,7 +103,14 @@ async fn list_courses(
         // Students see courses they're a member of
         minerva_db::queries::courses::list_by_member(&state.db, user.id).await?
     };
-    Ok(Json(rows.into_iter().map(CourseResponse::from).collect()))
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let my_role =
+            minerva_db::queries::courses::get_member_role(&state.db, row.id, user.id).await?;
+        out.push(CourseResponse::from_row(row, my_role));
+    }
+    Ok(Json(out))
 }
 
 async fn create_course(
@@ -123,7 +134,7 @@ async fn create_course(
     // Auto-add owner as teacher member
     minerva_db::queries::courses::add_member(&state.db, id, user.id, "teacher").await?;
 
-    Ok(Json(CourseResponse::from(row)))
+    Ok(Json(CourseResponse::from_row(row, Some("teacher".into()))))
 }
 
 async fn get_course(
@@ -136,14 +147,12 @@ async fn get_course(
         .ok_or(AppError::NotFound)?;
 
     // Check access: owner, admin, or member
-    if row.owner_id != user.id
-        && !user.role.is_admin()
-        && !minerva_db::queries::courses::is_member(&state.db, id, user.id).await?
-    {
+    let my_role = minerva_db::queries::courses::get_member_role(&state.db, id, user.id).await?;
+    if row.owner_id != user.id && !user.role.is_admin() && my_role.is_none() {
         return Err(AppError::Forbidden);
     }
 
-    Ok(Json(CourseResponse::from(row)))
+    Ok(Json(CourseResponse::from_row(row, my_role)))
 }
 
 async fn update_course(
@@ -236,7 +245,8 @@ async fn update_course(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    Ok(Json(CourseResponse::from(row)))
+    let my_role = minerva_db::queries::courses::get_member_role(&state.db, id, user.id).await?;
+    Ok(Json(CourseResponse::from_row(row, my_role)))
 }
 
 async fn archive_course(
@@ -274,7 +284,11 @@ async fn list_members(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if course.owner_id != user.id && !user.role.is_admin() {
+    // Owner, admin, teacher, and TA can all view the member list (read-only).
+    if course.owner_id != user.id
+        && !user.role.is_admin()
+        && !minerva_db::queries::courses::is_course_teacher(&state.db, id, user.id).await?
+    {
         return Err(AppError::Forbidden);
     }
 
@@ -312,14 +326,15 @@ async fn add_member(
         return Err(AppError::Forbidden);
     }
 
-    // Find or create the user by eppn
-    let target_user = minerva_db::queries::users::find_by_eppn(&state.db, &body.eppn).await?;
+    // Find or create the user by eppn. EPPN is treated case-insensitively
+    // to avoid creating duplicate accounts for `alice@su.se` vs `alice@SU.SE`.
+    let eppn = body.eppn.trim().to_lowercase();
+    let target_user = minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await?;
     let target_id = match target_user {
         Some(u) => u.id,
         None => {
             let new_id = Uuid::new_v4();
-            minerva_db::queries::users::insert(&state.db, new_id, &body.eppn, None, "student")
-                .await?;
+            minerva_db::queries::users::insert(&state.db, new_id, &eppn, None, "student").await?;
             new_id
         }
     };

@@ -224,7 +224,8 @@ async fn handle_launch(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .or_else(|| claims.email.clone())
-        .unwrap_or_else(|| format!("lti_{}_{}", registration.id, claims.sub));
+        .unwrap_or_else(|| format!("lti_{}_{}", registration.id, claims.sub))
+        .to_lowercase();
 
     let display_name = claims.name.as_deref();
 
@@ -529,8 +530,10 @@ async fn require_course_teacher(
         return Ok(());
     }
 
+    // LTI registrations are a teacher-only operation -- TAs are excluded.
     let is_teacher =
-        minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?;
+        minerva_db::queries::courses::is_course_teacher_strict(&state.db, course_id, user.id)
+            .await?;
     if is_teacher {
         return Ok(());
     }

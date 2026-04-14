@@ -206,6 +206,12 @@ def fetch_pending_transcripts(
             transcript = client.get_transcript_text(presentation_id)
         except Exception as e:
             error_msg = str(e)
+            # "has no subtitles" is transient: DSV Play often auto-captions
+            # within a day or two of upload. Leave in awaiting_transcript
+            # so the next hourly run retries.
+            if "has no subtitles" in error_msg:
+                print(f"  [{filename}] No subtitles yet, will retry next run.")
+                continue
             print(f"  [{filename}] Failed: {error_msg}")
             resp = requests.post(
                 f"{api_url}/api/service/documents/{doc_id}/transcript",

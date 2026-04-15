@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   courseQuery,
   conversationsQuery,
@@ -29,34 +29,29 @@ export function ChatRouteComponent({
   return <ChatPage courseId={courseId} conversationId={conversationId} />
 }
 
+export function NewChatRouteComponent({
+  useParams,
+}: {
+  useParams: () => { courseId: string }
+}) {
+  const { courseId } = useParams()
+  return <ChatPage courseId={courseId} conversationId={null} />
+}
+
 function ChatPage({
   courseId,
   conversationId,
 }: {
   courseId: string
-  conversationId: string
+  conversationId: string | null
 }) {
   const navigate = useNavigate()
   const { data: course } = useQuery(courseQuery(courseId))
   const { data: conversations, isLoading: convLoading } = useQuery(conversationsQuery(courseId))
   const { data: pinned, isLoading: pinnedLoading } = useQuery(pinnedConversationsQuery(courseId))
-  const queryClient = useQueryClient()
 
-  const createConversation = useMutation({
-    mutationFn: () =>
-      api.post<Conversation>(`/courses/${courseId}/conversations`, {}),
-    onSuccess: (conv) => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations"],
-      })
-      navigate({
-        to: "/course/$courseId/$conversationId",
-        params: { courseId, conversationId: conv.id },
-      })
-    },
-  })
-
-  const isPinnedView = pinned?.some((p) => p.id === conversationId) &&
+  const isPinnedView = conversationId !== null &&
+    pinned?.some((p) => p.id === conversationId) &&
     !conversations?.some((c) => c.id === conversationId)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -101,8 +96,8 @@ function ChatPage({
         </div>
         <Button
           className="mb-4"
-          onClick={() => createConversation.mutate()}
-          disabled={createConversation.isPending}
+          onClick={() => navigate({ to: "/course/$courseId/new", params: { courseId } })}
+          disabled={conversationId === null}
         >
           New Chat
         </Button>
@@ -178,12 +173,14 @@ function ChatWindow({
   readOnly = false,
 }: {
   courseId: string
-  conversationId: string
+  conversationId: string | null
   readOnly?: boolean
 }) {
-  const { data, isLoading } = useQuery(
-    conversationDetailQuery(courseId, conversationId),
-  )
+  const navigate = useNavigate()
+  const { data, isLoading } = useQuery({
+    ...conversationDetailQuery(courseId, conversationId ?? ""),
+    enabled: conversationId !== null,
+  })
   const messages = data?.messages
   const notes = data?.notes || []
   const feedback = data?.feedback || []
@@ -243,7 +240,7 @@ function ChatWindow({
     setInput("")
   }, [conversationId])
 
-  const sendMessage = async (content: string) => {
+  const sendMessage = async (content: string, targetConvId: string): Promise<boolean> => {
     setError(null)
     setStreaming(true)
     setStreamedTokens("")
@@ -253,9 +250,10 @@ function ChatWindow({
     const headers: Record<string, string> = { "Content-Type": "application/json" }
     if (devUser) headers["X-Dev-User"] = devUser
 
+    let success = true
     try {
       const response = await fetch(
-        `/api/courses/${courseId}/conversations/${conversationId}/message`,
+        `/api/courses/${courseId}/conversations/${targetConvId}/message`,
         { method: "POST", headers, body: JSON.stringify({ content }) },
       )
 
@@ -287,6 +285,7 @@ function ChatWindow({
                   setLastDoneData(data)
                 } else if (data.type === "error") {
                   setError(data.error)
+                  success = false
                 }
               } catch {
                 // skip malformed json
@@ -297,17 +296,19 @@ function ChatWindow({
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error")
+      success = false
     } finally {
       setStreaming(false)
       setStreamedTokens("")
       setPendingUserMsg(null)
       queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations", conversationId],
+        queryKey: ["courses", courseId, "conversations", targetConvId],
       })
       queryClient.invalidateQueries({
         queryKey: ["courses", courseId, "conversations"],
       })
     }
+    return success
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -315,7 +316,28 @@ function ChatWindow({
     if (!input.trim() || streaming) return
     const msg = input
     setInput("")
-    sendMessage(msg)
+
+    if (conversationId === null) {
+      ;(async () => {
+        setPendingUserMsg(msg)
+        try {
+          const conv = await api.post<Conversation>(`/courses/${courseId}/conversations`, {})
+          const ok = await sendMessage(msg, conv.id)
+          if (ok) {
+            navigate({
+              to: "/course/$courseId/$conversationId",
+              params: { courseId, conversationId: conv.id },
+              replace: true,
+            })
+          }
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Unknown error")
+          setPendingUserMsg(null)
+        }
+      })()
+    } else {
+      sendMessage(msg, conversationId)
+    }
   }
 
   return (
@@ -339,7 +361,7 @@ function ChatWindow({
               <ChatBubble
                 message={msg}
                 courseId={courseId}
-                conversationId={conversationId}
+                conversationId={conversationId!}
                 feedback={myFeedbackByMessage.get(msg.id) ?? null}
                 canRate={!readOnly && msg.role === "assistant"}
               />

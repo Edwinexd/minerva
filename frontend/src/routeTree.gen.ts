@@ -24,6 +24,7 @@ import { Route as AdminExternalInvitesRouteImport } from "./routes/admin/externa
 import { Route as AdminCoursesRouteImport } from "./routes/admin/courses"
 import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
 import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
+import { Route as CourseCourseIdNewRouteImport } from "./routes/course/$courseId/new"
 import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
 import { Route as TeacherCoursesCourseIdIndexRouteImport } from "./routes/teacher/courses.$courseId/index"
 import { Route as TeacherCoursesCourseIdUsageRouteImport } from "./routes/teacher/courses.$courseId/usage"
@@ -111,6 +112,11 @@ const CourseCourseIdIndexRoute = CourseCourseIdIndexRouteImport.update({
 const TeacherCoursesCourseIdRoute = TeacherCoursesCourseIdRouteImport.update({
   id: "/teacher/courses/$courseId",
   path: "/teacher/courses/$courseId",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CourseCourseIdNewRoute = CourseCourseIdNewRouteImport.update({
+  id: "/course/$courseId/new",
+  path: "/course/$courseId/new",
   getParentRoute: () => rootRouteImport,
 } as any)
 const CourseCourseIdConversationIdRoute =
@@ -207,6 +213,7 @@ export interface FileRoutesByFullPath {
   "/admin/": typeof AdminIndexRoute
   "/teacher/": typeof TeacherIndexRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
+  "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
@@ -236,6 +243,7 @@ export interface FileRoutesByTo {
   "/admin": typeof AdminIndexRoute
   "/teacher": typeof TeacherIndexRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
+  "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/course/$courseId": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
   "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
@@ -266,6 +274,7 @@ export interface FileRoutesById {
   "/admin/": typeof AdminIndexRoute
   "/teacher/": typeof TeacherIndexRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
+  "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
@@ -298,6 +307,7 @@ export interface FileRouteTypes {
     | "/admin/"
     | "/teacher/"
     | "/course/$courseId/$conversationId"
+    | "/course/$courseId/new"
     | "/teacher/courses/$courseId"
     | "/course/$courseId/"
     | "/teacher/courses/$courseId/api-keys"
@@ -327,6 +337,7 @@ export interface FileRouteTypes {
     | "/admin"
     | "/teacher"
     | "/course/$courseId/$conversationId"
+    | "/course/$courseId/new"
     | "/course/$courseId"
     | "/teacher/courses/$courseId/api-keys"
     | "/teacher/courses/$courseId/canvas"
@@ -356,6 +367,7 @@ export interface FileRouteTypes {
     | "/admin/"
     | "/teacher/"
     | "/course/$courseId/$conversationId"
+    | "/course/$courseId/new"
     | "/teacher/courses/$courseId"
     | "/course/$courseId/"
     | "/teacher/courses/$courseId/api-keys"
@@ -380,6 +392,7 @@ export interface RootRouteChildren {
   JoinTokenRoute: typeof JoinTokenRoute
   TeacherIndexRoute: typeof TeacherIndexRoute
   CourseCourseIdConversationIdRoute: typeof CourseCourseIdConversationIdRoute
+  CourseCourseIdNewRoute: typeof CourseCourseIdNewRoute
   TeacherCoursesCourseIdRoute: typeof TeacherCoursesCourseIdRouteWithChildren
   CourseCourseIdIndexRoute: typeof CourseCourseIdIndexRoute
 }
@@ -489,6 +502,13 @@ declare module "@tanstack/react-router" {
       path: "/teacher/courses/$courseId"
       fullPath: "/teacher/courses/$courseId"
       preLoaderRoute: typeof TeacherCoursesCourseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/course/$courseId/new": {
+      id: "/course/$courseId/new"
+      path: "/course/$courseId/new"
+      fullPath: "/course/$courseId/new"
+      preLoaderRoute: typeof CourseCourseIdNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/course/$courseId/$conversationId": {
@@ -653,6 +673,7 @@ const rootRouteChildren: RootRouteChildren = {
   JoinTokenRoute: JoinTokenRoute,
   TeacherIndexRoute: TeacherIndexRoute,
   CourseCourseIdConversationIdRoute: CourseCourseIdConversationIdRoute,
+  CourseCourseIdNewRoute: CourseCourseIdNewRoute,
   TeacherCoursesCourseIdRoute: TeacherCoursesCourseIdRouteWithChildren,
   CourseCourseIdIndexRoute: CourseCourseIdIndexRoute,
 }

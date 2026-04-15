@@ -59,8 +59,20 @@ function DocumentsPage() {
   }, [documents])
 
   const uploadMutation = useMutation({
-    mutationFn: (file: File) =>
-      api.upload<DocType>(`/courses/${courseId}/documents`, file),
+    mutationFn: async (files: File[]) => {
+      const results = await Promise.allSettled(
+        files.map((file) =>
+          api.upload<DocType>(`/courses/${courseId}/documents`, file),
+        ),
+      )
+      const failed = results.filter((r) => r.status === "rejected")
+      if (failed.length > 0) {
+        const messages = failed
+          .map((r) => (r as PromiseRejectedResult).reason?.message ?? "unknown error")
+          .join(", ")
+        throw new Error(`${failed.length} of ${files.length} uploads failed: ${messages}`)
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["courses", courseId, "documents"],
@@ -158,9 +170,10 @@ function DocumentsPage() {
                 ref={fileInputRef}
                 type="file"
                 accept=".pdf"
+                multiple
                 onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) uploadMutation.mutate(file)
+                  const files = Array.from(e.target.files ?? [])
+                  if (files.length > 0) uploadMutation.mutate(files)
                 }}
                 className="flex-1"
               />

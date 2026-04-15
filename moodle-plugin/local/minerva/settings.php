@@ -41,15 +41,6 @@ if ($hassiteconfig) {
         PARAM_URL
     ));
 
-    // Public URL for the embed iframe (only needed when it differs from the API URL, e.g. local dev).
-    $settings->add(new admin_setting_configtext(
-        'local_minerva/minerva_public_url',
-        get_string('settings_public_url', 'local_minerva'),
-        get_string('settings_public_url_desc', 'local_minerva'),
-        '',
-        PARAM_URL
-    ));
-
     // Auto-sync enrollment on enrol/unenrol events.
     $settings->add(new admin_setting_configcheckbox(
         'local_minerva/autosync_enrolment',

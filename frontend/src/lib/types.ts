@@ -137,6 +137,15 @@ export interface ConversationWithUser extends Conversation {
   user_eppn: string | null
   user_display_name: string | null
   message_count: number | null
+  /** Only present on the /all endpoint (teacher view). */
+  feedback_up?: number
+  feedback_down?: number
+}
+
+export interface CourseFeedbackStats {
+  total_up: number
+  total_down: number
+  categories: { category: string | null; count: number }[]
 }
 
 export interface TeacherNote {

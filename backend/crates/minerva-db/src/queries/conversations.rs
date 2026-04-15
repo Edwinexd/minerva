@@ -95,6 +95,22 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<ConversationRow>
     .await
 }
 
+#[derive(Debug)]
+pub struct ConversationWithFeedbackRow {
+    pub id: Uuid,
+    pub course_id: Uuid,
+    pub user_id: Uuid,
+    pub title: Option<String>,
+    pub pinned: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub user_eppn: Option<String>,
+    pub user_display_name: Option<String>,
+    pub message_count: Option<i64>,
+    pub feedback_up: i64,
+    pub feedback_down: i64,
+}
+
 pub async fn list_all_by_course(
     db: &PgPool,
     course_id: Uuid,
@@ -104,6 +120,35 @@ pub async fn list_all_by_course(
         r#"SELECT c.id, c.course_id, c.user_id, c.title, c.pinned, c.created_at, c.updated_at,
             u.eppn AS "user_eppn?", u.display_name AS user_display_name,
             (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count
+        FROM conversations c
+        JOIN users u ON u.id = c.user_id
+        WHERE c.course_id = $1
+        ORDER BY c.updated_at DESC"#,
+        course_id,
+    )
+    .fetch_all(db)
+    .await
+}
+
+pub async fn list_all_by_course_with_feedback(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<Vec<ConversationWithFeedbackRow>, sqlx::Error> {
+    sqlx::query_as!(
+        ConversationWithFeedbackRow,
+        r#"SELECT c.id, c.course_id, c.user_id, c.title, c.pinned, c.created_at, c.updated_at,
+            u.eppn AS "user_eppn?", u.display_name AS user_display_name,
+            (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
+            COALESCE((
+                SELECT COUNT(*) FROM message_feedback f
+                JOIN messages m ON m.id = f.message_id
+                WHERE m.conversation_id = c.id AND f.rating = 'up'
+            ), 0) AS "feedback_up!: i64",
+            COALESCE((
+                SELECT COUNT(*) FROM message_feedback f
+                JOIN messages m ON m.id = f.message_id
+                WHERE m.conversation_id = c.id AND f.rating = 'down'
+            ), 0) AS "feedback_down!: i64"
         FROM conversations c
         JOIN users u ON u.id = c.user_id
         WHERE c.course_id = $1

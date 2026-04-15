@@ -58,6 +58,18 @@ pub async fn upsert(
     .await
 }
 
+#[derive(Debug)]
+pub struct FeedbackCategoryCountRow {
+    pub category: Option<String>,
+    pub count: i64,
+}
+
+#[derive(Debug)]
+pub struct CourseFeedbackSummaryRow {
+    pub total_up: i64,
+    pub total_down: i64,
+}
+
 /// All feedback rows for messages in a conversation, ordered oldest first.
 pub async fn list_for_conversation(
     db: &PgPool,
@@ -76,5 +88,45 @@ pub async fn list_for_conversation(
         conversation_id,
     )
     .fetch_all(db)
+    .await
+}
+
+/// Per-category thumbs-down counts for all conversations in a course.
+pub async fn category_counts_for_course(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<Vec<FeedbackCategoryCountRow>, sqlx::Error> {
+    sqlx::query_as!(
+        FeedbackCategoryCountRow,
+        r#"SELECT f.category, COUNT(*) AS "count!: i64"
+        FROM message_feedback f
+        JOIN messages m ON m.id = f.message_id
+        JOIN conversations c ON c.id = m.conversation_id
+        WHERE c.course_id = $1 AND f.rating = 'down'
+        GROUP BY f.category
+        ORDER BY COUNT(*) DESC"#,
+        course_id,
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// Total thumbs-up and thumbs-down counts for all conversations in a course.
+pub async fn total_ratings_for_course(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<CourseFeedbackSummaryRow, sqlx::Error> {
+    sqlx::query_as!(
+        CourseFeedbackSummaryRow,
+        r#"SELECT
+            COALESCE(SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END), 0) AS "total_up!: i64",
+            COALESCE(SUM(CASE WHEN f.rating = 'down' THEN 1 ELSE 0 END), 0) AS "total_down!: i64"
+        FROM message_feedback f
+        JOIN messages m ON m.id = f.message_id
+        JOIN conversations c ON c.id = m.conversation_id
+        WHERE c.course_id = $1"#,
+        course_id,
+    )
+    .fetch_one(db)
     .await
 }

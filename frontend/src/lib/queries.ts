@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -80,6 +80,12 @@ export const popularTopicsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", "topics"],
     queryFn: () => api.get<TopicGroup[]>(`/courses/${courseId}/conversations/topics`),
+  })
+
+export const courseFeedbackStatsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "feedback-stats"],
+    queryFn: () => api.get<CourseFeedbackStats>(`/courses/${courseId}/conversations/feedback-stats`),
   })
 
 export const conversationDetailQuery = (courseId: string, conversationId: string) =>

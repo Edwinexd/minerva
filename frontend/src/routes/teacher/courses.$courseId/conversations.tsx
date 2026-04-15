@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { allConversationsQuery, conversationDetailQuery, popularTopicsQuery } from "@/lib/queries"
+import { allConversationsQuery, conversationDetailQuery, courseFeedbackStatsQuery, popularTopicsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,18 +26,26 @@ import {
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import React, { useMemo, useState } from "react"
-import type { ConversationWithUser, TeacherNote } from "@/lib/types"
+import type { ConversationWithUser, MessageFeedback, TeacherNote } from "@/lib/types"
+import { FEEDBACK_CATEGORIES } from "@/lib/types"
 
 export const Route = createFileRoute("/teacher/courses/$courseId/conversations")({
   component: ConversationsPage,
 })
 
+function categoryLabel(value: string | null): string {
+  if (!value) return "Other"
+  return FEEDBACK_CATEGORIES.find((c) => c.value === value)?.label ?? value
+}
+
 function ConversationsPage() {
   const { courseId } = Route.useParams()
   const { data: conversations, isLoading } = useQuery(allConversationsQuery(courseId))
   const { data: topics, isLoading: topicsLoading } = useQuery(popularTopicsQuery(courseId))
+  const { data: feedbackStats } = useQuery(courseFeedbackStatsQuery(courseId))
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<"all" | "flagged">("all")
   const queryClient = useQueryClient()
 
   const pinMutation = useMutation({
@@ -59,9 +67,24 @@ function ConversationsPage() {
     () => activeTopic ? new Set(activeTopic.conversation_ids) : null,
     [activeTopic],
   )
-  const displayConversations = topicConvIds
-    ? (conversations || []).filter((c) => topicConvIds.has(c.id))
-    : (conversations || [])
+
+  const displayConversations = useMemo(() => {
+    let list = topicConvIds
+      ? (conversations || []).filter((c) => topicConvIds.has(c.id))
+      : (conversations || [])
+
+    if (activeTab === "flagged") {
+      list = list
+        .filter((c) => (c.feedback_down ?? 0) > 0)
+        .sort((a, b) => (b.feedback_down ?? 0) - (a.feedback_down ?? 0))
+    }
+    return list
+  }, [conversations, topicConvIds, activeTab])
+
+  const flaggedCount = useMemo(
+    () => (conversations || []).filter((c) => (c.feedback_down ?? 0) > 0).length,
+    [conversations],
+  )
 
   const grouped = new Map<string, { label: string; conversations: ConversationWithUser[] }>()
   for (const conv of displayConversations) {
@@ -77,6 +100,38 @@ function ConversationsPage() {
 
   return (
     <div className="space-y-4">
+      {feedbackStats && (feedbackStats.total_up > 0 || feedbackStats.total_down > 0) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Feedback Overview</CardTitle>
+            <CardDescription>
+              Ratings students have given to AI responses across all conversations
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center gap-4 text-sm">
+              <span className="flex items-center gap-1.5">
+                <span className="text-green-600">&#x1F44D;</span>
+                <span>{feedbackStats.total_up} helpful</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="text-red-500">&#x1F44E;</span>
+                <span>{feedbackStats.total_down} flagged</span>
+              </span>
+            </div>
+            {feedbackStats.categories.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {feedbackStats.categories.map((c) => (
+                  <Badge key={c.category ?? "null"} variant="outline" className="text-xs">
+                    {categoryLabel(c.category)}: {c.count}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {!topicsLoading && topics && topics.length > 0 && (
         <Card>
           <CardHeader>
@@ -145,7 +200,29 @@ function ConversationsPage() {
             View all student conversations. Pin good answers to make them visible to all students.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="flex gap-2">
+            <Button
+              variant={activeTab === "all" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setActiveTab("all")}
+            >
+              All
+            </Button>
+            <Button
+              variant={activeTab === "flagged" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setActiveTab("flagged")}
+            >
+              Needs Review
+              {flaggedCount > 0 && (
+                <Badge variant="destructive" className="ml-1.5 px-1.5 py-0 text-xs">
+                  {flaggedCount}
+                </Badge>
+              )}
+            </Button>
+          </div>
+
           {isLoading && (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
@@ -155,7 +232,11 @@ function ConversationsPage() {
           )}
           {!isLoading && displayConversations.length === 0 && (
             <p className="text-muted-foreground text-sm">
-              {activeTopic ? "No conversations match this topic." : "No conversations yet."}
+              {activeTab === "flagged"
+                ? "No conversations with flagged responses."
+                : activeTopic
+                  ? "No conversations match this topic."
+                  : "No conversations yet."}
             </p>
           )}
           <div className="space-y-6">
@@ -180,6 +261,16 @@ function ConversationsPage() {
                           </span>
                           {conv.pinned && (
                             <Badge variant="secondary" className="shrink-0">Pinned</Badge>
+                          )}
+                          {(conv.feedback_down ?? 0) > 0 && (
+                            <Badge variant="outline" className="shrink-0 border-red-300 text-red-600 dark:border-red-700 dark:text-red-400 text-xs">
+                              {conv.feedback_down} flagged
+                            </Badge>
+                          )}
+                          {(conv.feedback_up ?? 0) > 0 && (conv.feedback_down ?? 0) === 0 && (
+                            <Badge variant="outline" className="shrink-0 border-green-300 text-green-600 dark:border-green-700 dark:text-green-400 text-xs">
+                              {conv.feedback_up} helpful
+                            </Badge>
                           )}
                         </div>
                         <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -213,6 +304,32 @@ function ConversationsPage() {
   )
 }
 
+function FeedbackBadges({ feedback }: { feedback: MessageFeedback[] }) {
+  const down = feedback.filter((f) => f.rating === "down")
+  const up = feedback.filter((f) => f.rating === "up")
+  if (down.length === 0 && up.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-1 mt-1.5">
+      {up.length > 0 && (
+        <Badge variant="outline" className="text-xs border-green-300 text-green-700 dark:border-green-700 dark:text-green-300">
+          {up.length} helpful
+        </Badge>
+      )}
+      {down.map((f) => (
+        <Badge
+          key={f.id}
+          variant="outline"
+          className="text-xs border-red-300 text-red-700 dark:border-red-700 dark:text-red-300"
+          title={f.comment ?? undefined}
+        >
+          {categoryLabel(f.category)}
+          {f.user_display_name ? ` (${f.user_display_name})` : ""}
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
 function ConversationExpanded({ courseId, conversationId }: { courseId: string; conversationId: string }) {
   const { data, isLoading } = useQuery(conversationDetailQuery(courseId, conversationId))
   const queryClient = useQueryClient()
@@ -241,6 +358,14 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
     },
   })
 
+  const openNoteForFeedback = (messageId: string, feedback: MessageFeedback[]) => {
+    const down = feedback.filter((f) => f.rating === "down")
+    const categories = [...new Set(down.map((f) => categoryLabel(f.category)))].join(", ")
+    const prefix = categories ? `Correction (re: ${categories}): ` : "Correction: "
+    setNoteForMessage(messageId)
+    setNoteContent(prefix)
+  }
+
   if (isLoading) {
     return (
       <div className="ml-4 border-l-2 pl-4 py-2 space-y-2">
@@ -252,6 +377,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
 
   const messages = data?.messages || []
   const notes = data?.notes || []
+  const feedback = data?.feedback || []
 
   const notesByMessage = new Map<string, TeacherNote[]>()
   const conversationNotes: TeacherNote[] = []
@@ -263,6 +389,13 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
     } else {
       conversationNotes.push(note)
     }
+  }
+
+  const feedbackByMessage = new Map<string, MessageFeedback[]>()
+  for (const f of feedback) {
+    const existing = feedbackByMessage.get(f.message_id) || []
+    existing.push(f)
+    feedbackByMessage.set(f.message_id, existing)
   }
 
   const handleAddNote = (messageId?: string) => {
@@ -301,64 +434,81 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
         <NoteDisplay key={note.id} note={note} onDelete={() => deleteNoteMutation.mutate(note.id)} />
       ))}
 
-      {messages.map((msg) => (
-        <React.Fragment key={msg.id}>
-          <div
-            className={`rounded px-3 py-2 text-sm ${
-              msg.role === "user" ? "bg-primary/10" : "bg-muted"
-            }`}
-          >
-            <span className="text-xs font-medium text-muted-foreground block mb-1">
-              {msg.role === "user" ? "Student" : "Assistant"}
-            </span>
-            {msg.role === "user" ? (
-              <p className="whitespace-pre-wrap">{msg.content}</p>
-            ) : (
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
-              </div>
-            )}
-            <button
-              className="text-xs text-muted-foreground hover:text-foreground mt-1 underline"
-              onClick={() => setNoteForMessage(noteForMessage === msg.id ? null : msg.id)}
+      {messages.map((msg) => {
+        const msgFeedback = feedbackByMessage.get(msg.id) || []
+        const hasDownFeedback = msgFeedback.some((f) => f.rating === "down")
+        return (
+          <React.Fragment key={msg.id}>
+            <div
+              className={`rounded px-3 py-2 text-sm ${
+                msg.role === "user" ? "bg-primary/10" : "bg-muted"
+              }`}
             >
-              Add note
-            </button>
-          </div>
-
-          {notesByMessage.get(msg.id)?.map((note) => (
-            <NoteDisplay key={note.id} note={note} onDelete={() => deleteNoteMutation.mutate(note.id)} />
-          ))}
-
-          {noteForMessage === msg.id && (
-            <div className="flex gap-2">
-              <Textarea
-                value={noteContent}
-                onChange={(e) => setNoteContent(e.target.value)}
-                placeholder="Add a teacher's note for this message..."
-                rows={2}
-                className="flex-1"
-              />
-              <div className="flex flex-col gap-1">
-                <Button
-                  size="sm"
-                  onClick={() => handleAddNote(msg.id)}
-                  disabled={addNoteMutation.isPending || !noteContent.trim()}
+              <span className="text-xs font-medium text-muted-foreground block mb-1">
+                {msg.role === "user" ? "Student" : "Assistant"}
+              </span>
+              {msg.role === "user" ? (
+                <p className="whitespace-pre-wrap">{msg.content}</p>
+              ) : (
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
+                </div>
+              )}
+              {msg.role === "assistant" && msgFeedback.length > 0 && (
+                <FeedbackBadges feedback={msgFeedback} />
+              )}
+              <div className="flex items-center gap-3 mt-1.5">
+                <button
+                  className="text-xs text-muted-foreground hover:text-foreground underline"
+                  onClick={() => setNoteForMessage(noteForMessage === msg.id ? null : msg.id)}
                 >
-                  Save
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => { setNoteForMessage(null); setNoteContent("") }}
-                >
-                  Cancel
-                </Button>
+                  Add note
+                </button>
+                {msg.role === "assistant" && hasDownFeedback && noteForMessage !== msg.id && (
+                  <button
+                    className="text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200 underline"
+                    onClick={() => openNoteForFeedback(msg.id, msgFeedback)}
+                  >
+                    Add correction note
+                  </button>
+                )}
               </div>
             </div>
-          )}
-        </React.Fragment>
-      ))}
+
+            {notesByMessage.get(msg.id)?.map((note) => (
+              <NoteDisplay key={note.id} note={note} onDelete={() => deleteNoteMutation.mutate(note.id)} />
+            ))}
+
+            {noteForMessage === msg.id && (
+              <div className="flex gap-2">
+                <Textarea
+                  value={noteContent}
+                  onChange={(e) => setNoteContent(e.target.value)}
+                  placeholder="Add a teacher's note for this message..."
+                  rows={2}
+                  className="flex-1"
+                />
+                <div className="flex flex-col gap-1">
+                  <Button
+                    size="sm"
+                    onClick={() => handleAddNote(msg.id)}
+                    disabled={addNoteMutation.isPending || !noteContent.trim()}
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => { setNoteForMessage(null); setNoteContent("") }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </React.Fragment>
+        )
+      })}
     </div>
   )
 }

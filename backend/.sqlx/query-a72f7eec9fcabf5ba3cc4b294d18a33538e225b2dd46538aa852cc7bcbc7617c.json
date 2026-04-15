@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            COALESCE(SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END), 0) AS \"total_up!: i64\",\n            COALESCE(SUM(CASE WHEN f.rating = 'down' THEN 1 ELSE 0 END), 0) AS \"total_down!: i64\"\n        FROM message_feedback f\n        JOIN messages m ON m.id = f.message_id\n        JOIN conversations c ON c.id = m.conversation_id\n        WHERE c.course_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total_up!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_down!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "a72f7eec9fcabf5ba3cc4b294d18a33538e225b2dd46538aa852cc7bcbc7617c"
+}

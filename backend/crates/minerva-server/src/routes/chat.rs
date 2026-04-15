@@ -28,6 +28,10 @@ pub fn router() -> Router<AppState> {
         .route("/conversations/all", get(list_all_conversations))
         .route("/conversations/pinned", get(list_pinned_conversations))
         .route("/conversations/topics", get(popular_topics))
+        .route(
+            "/conversations/feedback-stats",
+            get(get_course_feedback_stats),
+        )
         .route("/conversations/{cid}", get(get_conversation))
         .route("/conversations/{cid}/message", post(send_message))
         .route("/conversations/{cid}/pin", put(set_pin))
@@ -67,6 +71,35 @@ struct ConversationWithUserResponse {
     user_eppn: Option<String>,
     user_display_name: Option<String>,
     message_count: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct ConversationWithFeedbackResponse {
+    id: Uuid,
+    course_id: Uuid,
+    user_id: Uuid,
+    title: Option<String>,
+    pinned: bool,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+    user_eppn: Option<String>,
+    user_display_name: Option<String>,
+    message_count: Option<i64>,
+    feedback_up: i64,
+    feedback_down: i64,
+}
+
+#[derive(Serialize)]
+struct FeedbackCategoryCountItem {
+    category: Option<String>,
+    count: i64,
+}
+
+#[derive(Serialize)]
+struct CourseFeedbackStatsResponse {
+    total_up: i64,
+    total_down: i64,
+    categories: Vec<FeedbackCategoryCountItem>,
 }
 
 #[derive(Serialize)]
@@ -141,15 +174,17 @@ async fn list_conversations(
     ))
 }
 
-/// List all conversations in a course (teacher/admin only)
+/// List all conversations in a course (teacher/admin only), with per-conversation feedback counts.
 async fn list_all_conversations(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
-) -> Result<Json<Vec<ConversationWithUserResponse>>, AppError> {
+) -> Result<Json<Vec<ConversationWithFeedbackResponse>>, AppError> {
     verify_course_teacher_access(&state, course_id, &user).await?;
 
-    let rows = minerva_db::queries::conversations::list_all_by_course(&state.db, course_id).await?;
+    let rows =
+        minerva_db::queries::conversations::list_all_by_course_with_feedback(&state.db, course_id)
+            .await?;
     let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
 
     Ok(Json(
@@ -157,7 +192,7 @@ async fn list_all_conversations(
             .map(|r| {
                 let (user_eppn, user_display_name) =
                     ext_obfuscate::apply(ps.as_ref(), r.user_id, r.user_eppn, r.user_display_name);
-                ConversationWithUserResponse {
+                ConversationWithFeedbackResponse {
                     id: r.id,
                     course_id: r.course_id,
                     user_id: r.user_id,
@@ -168,10 +203,40 @@ async fn list_all_conversations(
                     user_eppn,
                     user_display_name,
                     message_count: r.message_count,
+                    feedback_up: r.feedback_up,
+                    feedback_down: r.feedback_down,
                 }
             })
             .collect(),
     ))
+}
+
+/// Course-level feedback stats (teacher/admin only).
+async fn get_course_feedback_stats(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<CourseFeedbackStatsResponse>, AppError> {
+    verify_course_teacher_access(&state, course_id, &user).await?;
+
+    let summary =
+        minerva_db::queries::message_feedback::total_ratings_for_course(&state.db, course_id)
+            .await?;
+    let categories =
+        minerva_db::queries::message_feedback::category_counts_for_course(&state.db, course_id)
+            .await?;
+
+    Ok(Json(CourseFeedbackStatsResponse {
+        total_up: summary.total_up,
+        total_down: summary.total_down,
+        categories: categories
+            .into_iter()
+            .map(|r| FeedbackCategoryCountItem {
+                category: r.category,
+                count: r.count,
+            })
+            .collect(),
+    }))
 }
 
 /// List pinned conversations (any course member)

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET privacy_acknowledged_at = COALESCE(privacy_acknowledged_at, NOW()), updated_at = NOW() WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9f512cbf5bdf8bb6e0486fe0cb1bc5d646d690c6693db94f0bdfea4ccf51cc9a"
+}

@@ -10,6 +10,7 @@ pub struct UserRow {
     pub suspended: bool,
     pub role_manually_set: bool,
     pub owner_daily_token_limit: i64,
+    pub privacy_acknowledged_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -17,7 +18,7 @@ pub struct UserRow {
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<UserRow>, sqlx::Error> {
     sqlx::query_as!(
         UserRow,
-        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, created_at, updated_at FROM users WHERE id = $1",
+        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at FROM users WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -27,7 +28,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<UserRow>, sqlx::
 pub async fn find_by_eppn(db: &PgPool, eppn: &str) -> Result<Option<UserRow>, sqlx::Error> {
     sqlx::query_as!(
         UserRow,
-        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, created_at, updated_at FROM users WHERE eppn = $1",
+        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at FROM users WHERE eppn = $1",
         eppn,
     )
     .fetch_optional(db)
@@ -79,7 +80,7 @@ pub async fn upsert(
             display_name = COALESCE($3, users.display_name),
             role = CASE WHEN users.role_manually_set THEN users.role ELSE $4 END,
             updated_at = NOW()
-         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, created_at, updated_at",
+         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at",
         id,
         eppn,
         display_name,
@@ -93,7 +94,7 @@ pub async fn upsert(
 pub async fn list_all(db: &PgPool) -> Result<Vec<UserRow>, sqlx::Error> {
     sqlx::query_as!(
         UserRow,
-        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, created_at, updated_at FROM users ORDER BY eppn",
+        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at FROM users ORDER BY eppn",
     )
     .fetch_all(db)
     .await
@@ -131,6 +132,19 @@ pub async fn update_role(db: &PgPool, user_id: Uuid, role: &str) -> Result<bool,
 pub async fn clear_role_lock(db: &PgPool, user_id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         "UPDATE users SET role_manually_set = FALSE, updated_at = NOW() WHERE id = $1",
+        user_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Records the user's acknowledgment of the in-app data-handling disclosure.
+/// Idempotent: later acknowledgments leave the original timestamp in place,
+/// so we preserve the first-ever agreement date.
+pub async fn acknowledge_privacy(db: &PgPool, user_id: Uuid) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE users SET privacy_acknowledged_at = COALESCE(privacy_acknowledged_at, NOW()), updated_at = NOW() WHERE id = $1",
         user_id,
     )
     .execute(db)

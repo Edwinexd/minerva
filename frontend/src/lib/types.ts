@@ -4,6 +4,7 @@ export interface User {
   display_name: string | null
   role: "student" | "teacher" | "admin"
   suspended?: boolean
+  privacy_acknowledged_at: string | null
 }
 
 export interface Course {

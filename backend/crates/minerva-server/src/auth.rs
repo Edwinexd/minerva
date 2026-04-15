@@ -197,6 +197,7 @@ async fn upsert_user(
         suspended: row.suspended,
         role_manually_set: row.role_manually_set,
         owner_daily_token_limit: row.owner_daily_token_limit,
+        privacy_acknowledged_at: row.privacy_acknowledged_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
     })

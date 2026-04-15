@@ -102,6 +102,22 @@ if ($action === 'sync') {
 
 echo $OUTPUT->header();
 
+// Data-handling disclosure shown on every view so teachers re-see it on
+// each visit, not only at initial link time.
+echo html_writer::tag(
+    'div',
+    html_writer::tag('strong', get_string('datahandling_heading', 'local_minerva')) .
+        html_writer::empty_tag('br') .
+        html_writer::tag(
+            'ul',
+            html_writer::tag('li', get_string('datahandling_materials', 'local_minerva')) .
+                html_writer::tag('li', get_string('datahandling_enrolments', 'local_minerva')) .
+                html_writer::tag('li', get_string('datahandling_inference', 'local_minerva')) .
+                html_writer::tag('li', get_string('datahandling_apikey', 'local_minerva'))
+        ),
+    ['class' => 'alert alert-warning']
+);
+
 // Get current link.
 $link = $DB->get_record('local_minerva_links', ['courseid' => $courseid]);
 

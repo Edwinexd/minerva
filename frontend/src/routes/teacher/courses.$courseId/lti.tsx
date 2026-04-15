@@ -70,6 +70,14 @@ function LtiPage() {
 
   return (
     <div className="space-y-4">
+      <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/40">
+        <p className="font-semibold text-amber-900 dark:text-amber-200">What LTI launch passes to Minerva</p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-900/90 dark:text-amber-200/90">
+          <li>Student identifier (username/eppn or a synthetic ID if the platform does not share it) and, when enabled in the platform, display name. Email is not requested.</li>
+          <li>A user row is created in Minerva on first launch; the student is added to this course as a student.</li>
+          <li>Each launch is shown the data-handling disclosure before they can send a first message.</li>
+        </ul>
+      </div>
       <Card>
         <CardHeader>
           <CardTitle>Moodle Configuration</CardTitle>

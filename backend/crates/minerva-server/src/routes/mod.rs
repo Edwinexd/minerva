@@ -17,7 +17,7 @@ mod usage;
 
 use axum::extract::{Extension, State};
 use axum::middleware;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use minerva_core::models::User;
 use serde_json::{json, Value};
@@ -52,6 +52,7 @@ pub(crate) async fn enforce_owner_cap(state: &AppState, owner_id: Uuid) -> Resul
 pub fn api_router(state: AppState) -> Router<AppState> {
     let authed = Router::new()
         .route("/auth/me", get(me))
+        .route("/auth/acknowledge-privacy", post(acknowledge_privacy))
         .nest("/courses", courses::router())
         .nest("/courses/{course_id}/documents", documents::router())
         .nest("/courses/{course_id}", chat::router())
@@ -88,7 +89,16 @@ async fn me(Extension(user): Extension<User>) -> Json<Value> {
         "display_name": user.display_name,
         "role": user.role,
         "suspended": user.suspended,
+        "privacy_acknowledged_at": user.privacy_acknowledged_at,
     }))
+}
+
+async fn acknowledge_privacy(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<Value>, AppError> {
+    minerva_db::queries::users::acknowledge_privacy(&state.db, user.id).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// Returns dev mode config (available dev users). Only responds in dev mode.

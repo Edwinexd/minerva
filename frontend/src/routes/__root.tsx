@@ -107,7 +107,14 @@ function RootLayout() {
             {" "}is licensed under{" "}
             <a href="https://github.com/Edwinexd/minerva?tab=AGPL-3.0-1-ov-file" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">AGPL-3.0</a>
           </span>
-          <a href="mailto:lambda@dsv.su.se" className="hover:text-foreground underline">lambda@dsv.su.se</a>
+          <div className="flex items-center gap-4">
+            {isEmbed ? (
+              <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">Data handling</a>
+            ) : (
+              <Link to="/data-handling" className="hover:text-foreground underline">Data handling</Link>
+            )}
+            <a href="mailto:lambda@dsv.su.se" className="hover:text-foreground underline">lambda@dsv.su.se</a>
+          </div>
         </div>
       </footer>
     </div>

@@ -41,6 +41,10 @@ pub fn router() -> Router<AppState> {
             post(send_message),
         )
         .route("/course/{course_id}/me", get(get_me))
+        .route(
+            "/course/{course_id}/acknowledge-privacy",
+            post(acknowledge_privacy),
+        )
 }
 
 /// All embed endpoints require `?token=...` query param.
@@ -101,6 +105,8 @@ struct MeResponse {
     id: Uuid,
     eppn: String,
     display_name: Option<String>,
+    role: String,
+    privacy_acknowledged_at: Option<chrono::DateTime<chrono::Utc>>,
     lti_client_id: Option<String>,
 }
 
@@ -126,8 +132,20 @@ async fn get_me(
         id: user.id,
         eppn: user.eppn,
         display_name: user.display_name,
+        role: user.role,
+        privacy_acknowledged_at: user.privacy_acknowledged_at,
         lti_client_id,
     }))
+}
+
+async fn acknowledge_privacy(
+    State(state): State<AppState>,
+    Path(course_id): Path<Uuid>,
+    Query(query): Query<TokenQuery>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let (_, user_id) = authenticate(&state, course_id, &query)?;
+    minerva_db::queries::users::acknowledge_privacy(&state.db, user_id).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 async fn get_course(
@@ -255,6 +273,15 @@ async fn send_message(
 
     if conv.user_id != user_id || conv.course_id != course_id {
         return Err(AppError::Forbidden);
+    }
+
+    // Same ack gate as the non-embed route, applied to every user regardless
+    // of role. LTI embed is where most first-time users land.
+    let user_row = minerva_db::queries::users::find_by_id(&state.db, user_id)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+    if user_row.privacy_acknowledged_at.is_none() {
+        return Err(AppError::PrivacyNotAcknowledged);
     }
 
     // Enforce per-student-per-course daily cap (0 = unlimited).

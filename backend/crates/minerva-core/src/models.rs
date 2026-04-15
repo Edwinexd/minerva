@@ -78,6 +78,7 @@ pub struct User {
     pub suspended: bool,
     pub role_manually_set: bool,
     pub owner_daily_token_limit: i64,
+    pub privacy_acknowledged_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

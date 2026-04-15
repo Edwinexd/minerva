@@ -62,6 +62,13 @@ $string['reset_sync_log_confirm'] = 'This clears the record of what has been syn
 $string['sync_log_reset_done'] = 'Cleared {$a->count} sync-log entries. Next sync will re-upload everything.';
 $string['unlink_course_confirm'] = 'This removes the link and clears the sync log. Members already in Minerva stay there. Continue?';
 $string['no_api_configured'] = 'Minerva API credentials are missing or invalid. Please check the API URL and key in the course link settings.';
+
+// Data-handling disclosure shown on the manage page.
+$string['datahandling_heading'] = 'What linking this course to Minerva does';
+$string['datahandling_materials'] = 'Sending "Sync materials" uploads course files, page/book/label HTML, section summaries, and URLs from this course to Minerva, where they are indexed for retrieval.';
+$string['datahandling_enrolments'] = 'Sending "Sync enrolment" shares enrolled students\' usernames (eppn) and display names with Minerva. Teacher/TA role is not shared; all users are added to Minerva as students.';
+$string['datahandling_inference'] = 'When students chat via the Minerva assistant, their messages and relevant course-material excerpts are sent to Cerebras for AI inference.';
+$string['datahandling_apikey'] = 'The Minerva API key configured below grants write access to the linked Minerva course. Treat it as a secret and rotate it in Minerva if it leaks.';
 $string['invalid_api_url'] = 'Invalid Minerva API URL.';
 $string['insecure_api_url'] = 'Minerva API URL must use https (http is only allowed for localhost).';
 $string['no_scoped_course'] = 'The API key is not scoped to any Minerva course. Please check the key in the Minerva teacher dashboard.';

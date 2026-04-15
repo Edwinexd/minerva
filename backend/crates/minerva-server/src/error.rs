@@ -23,6 +23,9 @@ pub enum AppError {
     #[error("course owner has reached their daily AI spending cap; contact lambda@dsv.su.se to request an increase")]
     OwnerQuotaExceeded,
 
+    #[error("privacy acknowledgment required")]
+    PrivacyNotAcknowledged,
+
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
 
@@ -32,18 +35,24 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message) = match &self {
-            AppError::NotFound => (StatusCode::NOT_FOUND, self.to_string()),
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, self.to_string()),
-            AppError::Forbidden => (StatusCode::FORBIDDEN, self.to_string()),
-            AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
-            AppError::QuotaExceeded => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
-            AppError::OwnerQuotaExceeded => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
+        let (status, message, code) = match &self {
+            AppError::NotFound => (StatusCode::NOT_FOUND, self.to_string(), None),
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, self.to_string(), None),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, self.to_string(), None),
+            AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string(), None),
+            AppError::QuotaExceeded => (StatusCode::TOO_MANY_REQUESTS, self.to_string(), None),
+            AppError::OwnerQuotaExceeded => (StatusCode::TOO_MANY_REQUESTS, self.to_string(), None),
+            AppError::PrivacyNotAcknowledged => (
+                StatusCode::FORBIDDEN,
+                self.to_string(),
+                Some("privacy_not_acknowledged"),
+            ),
             AppError::Database(e) => {
                 tracing::error!("database error: {:?}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal error".to_string(),
+                    None,
                 )
             }
             AppError::Internal(msg) => {
@@ -51,11 +60,15 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal error".to_string(),
+                    None,
                 )
             }
         };
 
-        let body = axum::Json(json!({ "error": message }));
+        let body = match code {
+            Some(c) => axum::Json(json!({ "error": message, "code": c })),
+            None => axum::Json(json!({ "error": message })),
+        };
         (status, body).into_response()
     }
 }

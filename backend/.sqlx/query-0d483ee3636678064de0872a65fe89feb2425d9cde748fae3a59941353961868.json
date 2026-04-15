@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, created_at, updated_at FROM users ORDER BY eppn",
+  "query": "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at FROM users ORDER BY eppn",
   "describe": {
     "columns": [
       {
@@ -40,11 +40,16 @@
       },
       {
         "ordinal": 7,
-        "name": "created_at",
+        "name": "privacy_acknowledged_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -60,9 +65,10 @@
       false,
       false,
       false,
+      true,
       false,
       false
     ]
   },
-  "hash": "7e99f839bd7b8da8c5111bcea943cb87e8b542472a20507a5897737a0b14658e"
+  "hash": "0d483ee3636678064de0872a65fe89feb2425d9cde748fae3a59941353961868"
 }

@@ -623,6 +623,12 @@ async fn send_message(
         return Err(AppError::Forbidden);
     }
 
+    // Every user must acknowledge the in-app data-handling disclosure before
+    // sending their first message, regardless of role.
+    if user.privacy_acknowledged_at.is_none() {
+        return Err(AppError::PrivacyNotAcknowledged);
+    }
+
     // Enforce per-student-per-course daily cap (0 = unlimited)
     if course.daily_token_limit > 0 {
         let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user.id, course_id)

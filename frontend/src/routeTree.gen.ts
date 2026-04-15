@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root"
+import { Route as DataHandlingRouteImport } from "./routes/data-handling"
 import { Route as AdminRouteImport } from "./routes/admin"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
@@ -37,6 +38,11 @@ import { Route as TeacherCoursesCourseIdConfigRouteImport } from "./routes/teach
 import { Route as TeacherCoursesCourseIdCanvasRouteImport } from "./routes/teacher/courses.$courseId/canvas"
 import { Route as TeacherCoursesCourseIdApiKeysRouteImport } from "./routes/teacher/courses.$courseId/api-keys"
 
+const DataHandlingRoute = DataHandlingRouteImport.update({
+  id: "/data-handling",
+  path: "/data-handling",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminRoute = AdminRouteImport.update({
   id: "/admin",
   path: "/admin",
@@ -189,6 +195,7 @@ const TeacherCoursesCourseIdApiKeysRoute =
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/admin": typeof AdminRouteWithChildren
+  "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/rules": typeof AdminRulesRoute
@@ -217,6 +224,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/rules": typeof AdminRulesRoute
@@ -246,6 +254,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/admin": typeof AdminRouteWithChildren
+  "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/rules": typeof AdminRulesRoute
@@ -277,6 +286,7 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/admin"
+    | "/data-handling"
     | "/admin/courses"
     | "/admin/external-invites"
     | "/admin/rules"
@@ -305,6 +315,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
+    | "/data-handling"
     | "/admin/courses"
     | "/admin/external-invites"
     | "/admin/rules"
@@ -333,6 +344,7 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/admin"
+    | "/data-handling"
     | "/admin/courses"
     | "/admin/external-invites"
     | "/admin/rules"
@@ -363,6 +375,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
+  DataHandlingRoute: typeof DataHandlingRoute
   EmbedCourseIdRoute: typeof EmbedCourseIdRoute
   JoinTokenRoute: typeof JoinTokenRoute
   TeacherIndexRoute: typeof TeacherIndexRoute
@@ -373,6 +386,13 @@ export interface RootRouteChildren {
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
+    "/data-handling": {
+      id: "/data-handling"
+      path: "/data-handling"
+      fullPath: "/data-handling"
+      preLoaderRoute: typeof DataHandlingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/admin": {
       id: "/admin"
       path: "/admin"
@@ -628,6 +648,7 @@ const TeacherCoursesCourseIdRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
+  DataHandlingRoute: DataHandlingRoute,
   EmbedCourseIdRoute: EmbedCourseIdRoute,
   JoinTokenRoute: JoinTokenRoute,
   TeacherIndexRoute: TeacherIndexRoute,

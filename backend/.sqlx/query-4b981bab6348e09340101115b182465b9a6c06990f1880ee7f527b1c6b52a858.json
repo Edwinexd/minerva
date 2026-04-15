@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO users (id, eppn, display_name, role, owner_daily_token_limit)\n         VALUES ($1, $2, $3, $4, $5)\n         ON CONFLICT (eppn) DO UPDATE SET\n            display_name = COALESCE($3, users.display_name),\n            role = CASE WHEN users.role_manually_set THEN users.role ELSE $4 END,\n            updated_at = NOW()\n         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, created_at, updated_at",
+  "query": "INSERT INTO users (id, eppn, display_name, role, owner_daily_token_limit)\n         VALUES ($1, $2, $3, $4, $5)\n         ON CONFLICT (eppn) DO UPDATE SET\n            display_name = COALESCE($3, users.display_name),\n            role = CASE WHEN users.role_manually_set THEN users.role ELSE $4 END,\n            updated_at = NOW()\n         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -40,11 +40,16 @@
       },
       {
         "ordinal": 7,
-        "name": "created_at",
+        "name": "privacy_acknowledged_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -66,9 +71,10 @@
       false,
       false,
       false,
+      true,
       false,
       false
     ]
   },
-  "hash": "ca0848db2d12817d203d3c3a5544013c41e9f3578a7695a9cd919017e08c0ed0"
+  "hash": "4b981bab6348e09340101115b182465b9a6c06990f1880ee7f527b1c6b52a858"
 }

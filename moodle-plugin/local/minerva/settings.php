@@ -24,6 +24,10 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+// Settings.php is loaded before the class autoloader is fully primed on
+// fresh admin pages, so pull the helper class in explicitly.
+require_once(__DIR__ . '/classes/admin_setting_httpsurl.php');
+
 if ($hassiteconfig) {
     $settings = new admin_settingpage('local_minerva', get_string('pluginname', 'local_minerva'));
 

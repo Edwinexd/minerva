@@ -98,10 +98,11 @@ do
 end
 
 do
-    -- Tamper the signature.
+    -- Tamper the signature (flip the last byte to guarantee a change).
     local tok = mint(SECRET, "x", "ext:eve@example.com", nil, FUTURE)
     local raw = m.b64url_decode(tok)
-    raw = raw:sub(1, -3) .. "ff"
+    local last_byte = tonumber(raw:sub(-2), 16)
+    raw = raw:sub(1, -3) .. string.format("%02x", last_byte ~ 0xff)
     local tampered = b64url_encode(raw)
     local _, err = m.verify_token(SECRET, tampered)
     check("tampered sig -> bad_signature", err == "bad_signature", err)

@@ -14,6 +14,10 @@ pub struct BenchmarkResult {
     pub corpus_size: usize,
 }
 
+/// Maximum number of chunks passed to fastembed in a single ONNX inference call.
+/// Keeps peak tensor memory predictable regardless of document size.
+const EMBED_BATCH_SIZE: usize = 32;
+
 /// Thread-safe wrapper around FastEmbed models.
 /// Models are lazily initialized on first use and cached for reuse.
 #[derive(Default)]
@@ -32,6 +36,7 @@ impl FastEmbedder {
 
     /// Embed texts using the given model name.
     /// The model is loaded on first use (may download weights).
+    /// Texts are processed in batches of `EMBED_BATCH_SIZE` to bound peak memory.
     pub async fn embed(
         &self,
         model_name: &str,
@@ -42,17 +47,25 @@ impl FastEmbedder {
         }
 
         let model = self.get_or_init(model_name).await?;
+        let mut all_embeddings: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
 
-        tokio::task::spawn_blocking(move || {
-            let mut model = model
-                .lock()
-                .map_err(|e| format!("fastembed lock poisoned: {}", e))?;
-            model
-                .embed(texts, None)
-                .map_err(|e| format!("fastembed embed failed: {}", e))
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking failed: {}", e))?
+        for batch in texts.chunks(EMBED_BATCH_SIZE) {
+            let batch = batch.to_vec();
+            let model = Arc::clone(&model);
+            let batch_embeddings = tokio::task::spawn_blocking(move || {
+                let mut model = model
+                    .lock()
+                    .map_err(|e| format!("fastembed lock poisoned: {}", e))?;
+                model
+                    .embed(batch, None)
+                    .map_err(|e| format!("fastembed embed failed: {}", e))
+            })
+            .await
+            .map_err(|e| format!("spawn_blocking failed: {}", e))??;
+            all_embeddings.extend(batch_embeddings);
+        }
+
+        Ok(all_embeddings)
     }
 
     /// Benchmark all supported models and store results.

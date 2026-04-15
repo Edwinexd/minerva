@@ -11,6 +11,7 @@ use crate::error::AppError;
 /// 3. Build prompt with context
 /// 4. Stream from Cerebras
 pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError>>) {
+    let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name = format!("course_{}", ctx.course_id);
 
@@ -69,6 +70,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         prompt_tokens,
         completion_tokens,
         true,
+        started_at.elapsed().as_millis() as i64,
+        1,
     )
     .await;
 }

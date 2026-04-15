@@ -78,6 +78,8 @@ struct MessageResponse {
     model_used: Option<String>,
     tokens_prompt: Option<i32>,
     tokens_completion: Option<i32>,
+    generation_ms: Option<i32>,
+    retrieval_count: Option<i32>,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -578,6 +580,8 @@ async fn get_conversation(
                 model_used: m.model_used,
                 tokens_prompt: m.tokens_prompt,
                 tokens_completion: m.tokens_completion,
+                generation_ms: m.generation_ms,
+                retrieval_count: m.retrieval_count,
                 created_at: m.created_at,
             })
             .collect(),
@@ -651,6 +655,8 @@ async fn send_message(
         cid,
         "user",
         &body.content,
+        None,
+        None,
         None,
         None,
         None,

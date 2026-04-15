@@ -26,6 +26,7 @@ const MAX_FLARE_RESTARTS: usize = 5;
 /// as a retrieval query. If relevant chunks are found, generation restarts
 /// from that point with enriched context.
 pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError>>) {
+    let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name = format!("course_{}", ctx.course_id);
 
@@ -207,6 +208,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         total_prompt_tokens,
         total_completion_tokens,
         !all_chunks.is_empty(),
+        started_at.elapsed().as_millis() as i64,
+        1 + restarts as i32,
     )
     .await;
 }

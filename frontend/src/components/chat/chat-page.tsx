@@ -185,7 +185,6 @@ function ChatWindow({
   const notes = data?.notes || []
   const feedback = data?.feedback || []
   const { data: user } = useQuery(userQuery)
-  const isTeacher = user?.role === "teacher" || user?.role === "admin"
   const needsPrivacyAck = !!user && !user.privacy_acknowledged_at
   const queryClient = useQueryClient()
 
@@ -202,12 +201,6 @@ function ChatWindow({
   const [streamedTokens, setStreamedTokens] = useState("")
   const [pendingUserMsg, setPendingUserMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [lastDoneData, setLastDoneData] = useState<{
-    tokens_prompt: number
-    tokens_completion: number
-    rag_injected: boolean
-    chunks_used: string[] | null
-  } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Index notes by message_id for inline display
@@ -281,8 +274,6 @@ function ChatWindow({
                 const data = JSON.parse(line.slice(6))
                 if (data.type === "token") {
                   setStreamedTokens((prev) => prev + data.token)
-                } else if (data.type === "done") {
-                  setLastDoneData(data)
                 } else if (data.type === "error") {
                   setError(data.error)
                   success = false
@@ -392,17 +383,6 @@ function ChatWindow({
               </div>
             </div>
           )}
-          {!streaming && lastDoneData && isTeacher && (
-            <div className="text-xs text-muted-foreground bg-muted/50 rounded p-3 space-y-1">
-              <div className="flex gap-4">
-                <span>Tokens: {lastDoneData.tokens_prompt + lastDoneData.tokens_completion}</span>
-                <span>RAG: {lastDoneData.rag_injected ? "yes" : "no"}</span>
-                {lastDoneData.chunks_used && (
-                  <span>Chunks: {lastDoneData.chunks_used.length}</span>
-                )}
-              </div>
-            </div>
-          )}
           {error && (
             <p className="text-sm text-destructive text-center">{error}</p>
           )}
@@ -503,18 +483,27 @@ function ChatBubble({
           <MarkdownContent content={message.content} />
         )}
         {!isUser && (
-          <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1 mt-2 text-xs text-muted-foreground flex-wrap">
             {message.tokens_prompt != null && (
-              <span>{message.tokens_prompt + (message.tokens_completion || 0)} tokens</span>
+              <span>
+                {message.tokens_prompt + (message.tokens_completion || 0)} tokens
+                {message.generation_ms != null && ` in ${(message.generation_ms / 1000).toFixed(1)}s`}
+                {chunks && chunks.length > 0 && " using"}
+              </span>
             )}
             {chunks && chunks.length > 0 && (
-              <button
-                className="underline hover:text-foreground"
-                onClick={() => setShowSources(!showSources)}
-              >
-                {chunks.length} source{chunks.length > 1 ? "s" : ""}
-                {showSources ? <ChevronUp className="inline w-3 h-3 ml-0.5" /> : <ChevronDown className="inline w-3 h-3 ml-0.5" />}
-              </button>
+              <>
+                <button
+                  className="underline hover:text-foreground"
+                  onClick={() => setShowSources(!showSources)}
+                >
+                  {chunks.length} source{chunks.length > 1 ? "s" : ""}
+                  {showSources ? <ChevronUp className="inline w-3 h-3 ml-0.5" /> : <ChevronDown className="inline w-3 h-3 ml-0.5" />}
+                </button>
+                {message.retrieval_count != null && message.retrieval_count > 1 && (
+                  <span>(across {message.retrieval_count} retrievals)</span>
+                )}
+              </>
             )}
             {canRate && (
               <FeedbackControls

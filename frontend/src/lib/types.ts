@@ -186,6 +186,8 @@ export interface Message {
   model_used: string | null
   tokens_prompt: number | null
   tokens_completion: number | null
+  generation_ms: number | null
+  retrieval_count: number | null
   created_at: string
 }
 

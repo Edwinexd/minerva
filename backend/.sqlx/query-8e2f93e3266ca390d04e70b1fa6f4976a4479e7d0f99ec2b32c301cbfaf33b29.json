@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
+  "query": "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
   "describe": {
     "columns": [
       {
@@ -45,6 +45,16 @@
       },
       {
         "ordinal": 8,
+        "name": "generation_ms",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "retrieval_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -63,8 +73,10 @@
       true,
       true,
       true,
+      true,
+      true,
       false
     ]
   },
-  "hash": "e49fd088fba3ddab30c8dc8c0881272a77502741a1cbf5a88f7791f4b7aa53cc"
+  "hash": "8e2f93e3266ca390d04e70b1fa6f4976a4479e7d0f99ec2b32c301cbfaf33b29"
 }

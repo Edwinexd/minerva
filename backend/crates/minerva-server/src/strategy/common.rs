@@ -424,6 +424,7 @@ pub async fn stream_cerebras_to_client(
 }
 
 /// Finalize: save message, set title, record usage, send done event.
+#[allow(clippy::too_many_arguments)]
 pub async fn finalize(
     ctx: &super::GenerationContext,
     tx: &mpsc::Sender<Result<Event, AppError>>,
@@ -432,6 +433,8 @@ pub async fn finalize(
     prompt_tokens: i32,
     completion_tokens: i32,
     rag_injected: bool,
+    generation_ms: i64,
+    retrieval_count: i32,
 ) {
     let assistant_msg_id = uuid::Uuid::new_v4();
     let _ = minerva_db::queries::conversations::insert_message(
@@ -444,6 +447,8 @@ pub async fn finalize(
         Some(&ctx.model),
         Some(prompt_tokens),
         Some(completion_tokens),
+        Some(generation_ms as i32),
+        Some(retrieval_count),
     )
     .await;
 
@@ -477,6 +482,8 @@ pub async fn finalize(
                 "tokens_completion": completion_tokens,
                 "rag_injected": rag_injected,
                 "chunks_used": chunks_json,
+                "generation_ms": generation_ms,
+                "retrieval_count": retrieval_count,
             })
             .to_string(),
         )))

@@ -13,6 +13,7 @@ use crate::error::AppError;
 /// 2. In parallel, embed query + search Qdrant
 /// 3. When RAG arrives: abort stream, inject context + partial output, restart to continue
 pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError>>) {
+    let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name = format!("course_{}", ctx.course_id);
 
@@ -165,6 +166,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         total_prompt,
         total_completion,
         rag_injected,
+        started_at.elapsed().as_millis() as i64,
+        if rag_injected { 1 } else { 0 },
     )
     .await;
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, created_at",
+  "query": "INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, created_at",
   "describe": {
     "columns": [
       {
@@ -45,6 +45,16 @@
       },
       {
         "ordinal": 8,
+        "name": "generation_ms",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "retrieval_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -58,6 +68,8 @@
         "Jsonb",
         "Text",
         "Int4",
+        "Int4",
+        "Int4",
         "Int4"
       ]
     },
@@ -70,8 +82,10 @@
       true,
       true,
       true,
+      true,
+      true,
       false
     ]
   },
-  "hash": "f65c75489c410af4601702299f05efe23e4bd040266cf682914347bd083f1868"
+  "hash": "d53c36a20b0f2b1cbf5b2c401664b1ada58d7be3e2c773e37c1f0c00a93a1604"
 }

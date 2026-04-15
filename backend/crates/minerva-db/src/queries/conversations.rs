@@ -48,6 +48,8 @@ pub struct MessageRow {
     pub model_used: Option<String>,
     pub tokens_prompt: Option<i32>,
     pub tokens_completion: Option<i32>,
+    pub generation_ms: Option<i32>,
+    pub retrieval_count: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -242,7 +244,7 @@ pub async fn list_messages(
 ) -> Result<Vec<MessageRow>, sqlx::Error> {
     sqlx::query_as!(
         MessageRow,
-        "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
+        "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
         conversation_id,
     )
     .fetch_all(db)
@@ -260,6 +262,8 @@ pub async fn insert_message(
     model_used: Option<&str>,
     tokens_prompt: Option<i32>,
     tokens_completion: Option<i32>,
+    generation_ms: Option<i32>,
+    retrieval_count: Option<i32>,
 ) -> Result<MessageRow, sqlx::Error> {
     // Also update conversation timestamp
     let _ = sqlx::query!(
@@ -271,9 +275,9 @@ pub async fn insert_message(
 
     sqlx::query_as!(
         MessageRow,
-        r#"INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, created_at"#,
+        r#"INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, created_at"#,
         id,
         conversation_id,
         role,
@@ -282,6 +286,8 @@ pub async fn insert_message(
         model_used,
         tokens_prompt,
         tokens_completion,
+        generation_ms,
+        retrieval_count,
     )
     .fetch_one(db)
     .await

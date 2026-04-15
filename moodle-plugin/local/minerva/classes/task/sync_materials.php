@@ -116,9 +116,27 @@ class sync_materials extends \core\task\scheduled_task {
         global $DB;
 
         $uploaded = 0;
+        $seenhashes = [];
 
         foreach ($items as $item) {
+            // Skip duplicates within this batch (e.g. two labels with the same content):
+            // the sync_log has UNIQUE(courseid, contenthash) and would crash on insert.
+            if (isset($seenhashes[$item->contenthash])) {
+                continue;
+            }
+            $seenhashes[$item->contenthash] = true;
+
             $tmpfile = tempnam(sys_get_temp_dir(), 'minerva_');
+            if ($tmpfile === false) {
+                $msg = "Failed to allocate temp file for {$item->filename}";
+                if ($logger) {
+                    $logger($msg);
+                } else {
+                    debugging($msg, DEBUG_NORMAL);
+                }
+                continue;
+            }
+
             if ($item->file instanceof \stored_file) {
                 $item->file->copy_content_to($tmpfile);
             } else {
@@ -139,7 +157,13 @@ class sync_materials extends \core\task\scheduled_task {
                 $record->filename = $item->filename;
                 $record->minerva_doc_id = $result->id ?? '';
                 $record->timecreated = time();
-                $DB->insert_record('local_minerva_sync_log', $record);
+                try {
+                    $DB->insert_record('local_minerva_sync_log', $record);
+                } catch (\dml_exception $de) {
+                    // Concurrent run inserted the same (courseid, contenthash) row first.
+                    // The upload to Minerva already succeeded; treat as no-op.
+                    debugging("sync_log insert raced for {$item->filename}: " . $de->getMessage(), DEBUG_DEVELOPER);
+                }
 
                 $uploaded++;
             } catch (\Exception $e) {
@@ -421,10 +445,13 @@ class sync_materials extends \core\task\scheduled_task {
             return null;
         }
 
-        // Normalise whatever format Moodle stored into real HTML.
+        // Normalise whatever format Moodle stored into real HTML. Run through
+        // HTML Purifier (noclean=false) to strip scripts and other unsafe markup
+        // before we ship the payload off to Minerva. No Moodle filters --
+        // want the raw authored content, not filter-expanded output.
         $html = format_text($content, $format, [
             'context' => $context,
-            'noclean' => true,
+            'noclean' => false,
             'filter' => false,
             'para' => false,
         ]);
@@ -456,12 +483,15 @@ class sync_materials extends \core\task\scheduled_task {
      * @return string
      */
     private static function safe_slug(string $name): string {
-        $slug = preg_replace('/[^a-zA-Z0-9_\-]+/', '_', $name);
+        // Keep letters (any script) and digits; collapse everything else to '_'.
+        $slug = preg_replace('/[^\p{L}\p{N}_\-]+/u', '_', $name);
         $slug = trim($slug, '_');
-        if ($slug === '') {
+        if ($slug === '' || $slug === null) {
             $slug = 'untitled';
         }
-        if (strlen($slug) > 120) {
+        if (function_exists('mb_strlen') && mb_strlen($slug, 'UTF-8') > 120) {
+            $slug = mb_substr($slug, 0, 120, 'UTF-8');
+        } else if (strlen($slug) > 120) {
             $slug = substr($slug, 0, 120);
         }
         return $slug;

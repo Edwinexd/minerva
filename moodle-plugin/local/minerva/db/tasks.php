@@ -37,7 +37,9 @@ $tasks = [
     [
         'classname' => '\local_minerva\task\sync_materials',
         'blocking' => 0,
-        'minute' => '*/30',
+        // Offset 15 minutes from the enrolment task so the two big API pulls
+        // don't fire in the same tick.
+        'minute' => '15,45',
         'hour' => '*',
         'day' => '*',
         'month' => '*',

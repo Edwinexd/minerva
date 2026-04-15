@@ -72,30 +72,97 @@ class sync_enrolments extends \core\task\scheduled_task {
      * @param object $link
      */
     private function sync_course(api_client $client, object $link): void {
-        global $DB;
-
         $context = \context_course::instance($link->courseid, IGNORE_MISSING);
         if (!$context) {
             mtrace("  Course {$link->courseid} no longer exists, skipping.");
             return;
         }
 
-        // Get all enrolled users in the Moodle course.
-        $enrolledusers = get_enrolled_users($context, '', 0, 'u.id, u.username, u.firstname, u.lastname');
+        $result = self::reconcile_members($client, $link, $context, function (string $msg): void {
+            mtrace('  ' . $msg);
+        });
+
+        mtrace("  Course {$link->courseid} -> Minerva {$link->minerva_course_id}: " .
+            "added {$result->added}, removed {$result->removed}.");
+    }
+
+    /**
+     * Reconcile Minerva student membership against Moodle enrolment for a single course.
+     *
+     * Adds every currently-enrolled Moodle user to Minerva, and removes every
+     * Minerva student whose eppn is not in the Moodle enrolled set. Teachers and
+     * TAs on the Minerva side are never removed (they may have been granted
+     * access out-of-band).
+     *
+     * @param api_client $client
+     * @param object $link
+     * @param \context_course $context
+     * @param callable|null $logger fn(string $msg): void for per-user failures
+     * @return \stdClass {added: int, removed: int}
+     */
+    public static function reconcile_members(
+        api_client $client,
+        object $link,
+        \context_course $context,
+        ?callable $logger = null
+    ): \stdClass {
+        $enrolledusers = get_enrolled_users(
+            $context,
+            '',
+            0,
+            'u.id, u.username, u.firstname, u.lastname'
+        );
+
+        // Build lowercase eppn set from Moodle side.
+        $moodleeppns = [];
+        foreach ($enrolledusers as $user) {
+            $moodleeppns[strtolower(observer::get_eppn($user))] = true;
+        }
 
         $added = 0;
         foreach ($enrolledusers as $user) {
             $eppn = observer::get_eppn($user);
             $displayname = trim($user->firstname . ' ' . $user->lastname);
-
             try {
                 $client->add_member($link->minerva_course_id, $eppn, $displayname);
                 $added++;
             } catch (\Exception $e) {
-                mtrace("  Failed to sync user {$user->username}: " . $e->getMessage());
+                if ($logger) {
+                    $logger("Failed to add {$user->username}: " . $e->getMessage());
+                }
             }
         }
 
-        mtrace("  Course {$link->courseid} -> Minerva {$link->minerva_course_id}: synced {$added} users.");
+        $removed = 0;
+        try {
+            $members = $client->list_members($link->minerva_course_id);
+        } catch (\Exception $e) {
+            if ($logger) {
+                $logger("Failed to list Minerva members: " . $e->getMessage());
+            }
+            return (object)['added' => $added, 'removed' => 0];
+        }
+
+        foreach ($members as $member) {
+            $role = $member->role ?? '';
+            $eppn = isset($member->eppn) ? strtolower((string) $member->eppn) : '';
+            if ($role !== 'student' || $eppn === '') {
+                // Never touch teachers/TAs; skip records without an eppn we can match on.
+                continue;
+            }
+            if (isset($moodleeppns[$eppn])) {
+                continue;
+            }
+            try {
+                $client->remove_member($link->minerva_course_id, $eppn);
+                $removed++;
+            } catch (\Exception $e) {
+                if ($logger) {
+                    $logger("Failed to remove {$eppn}: " . $e->getMessage());
+                }
+            }
+        }
+
+        return (object)['added' => $added, 'removed' => $removed];
     }
 }

@@ -33,4 +33,8 @@ $observers = [
         'eventname' => '\core\event\user_enrolment_deleted',
         'callback' => '\local_minerva\observer::user_unenrolled',
     ],
+    [
+        'eventname' => '\core\event\course_deleted',
+        'callback' => '\local_minerva\observer::course_deleted',
+    ],
 ];

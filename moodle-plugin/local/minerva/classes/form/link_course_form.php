@@ -33,6 +33,14 @@ require_once($CFG->libdir . '/formslib.php');
  */
 class link_course_form extends \moodleform {
     /**
+     * Scoped course resolved from the API key during validation.
+     * Cached so manage.php does not need to re-call list_courses().
+     *
+     * @var object|null
+     */
+    public ?object $resolvedcourse = null;
+
+    /**
      * Define the form elements.
      */
     protected function definition(): void {
@@ -94,7 +102,12 @@ class link_course_form extends \moodleform {
         if (!empty($data['minerva_api_url']) && !empty($data['minerva_api_key'])) {
             try {
                 $client = new \local_minerva\api_client($data['minerva_api_url'], $data['minerva_api_key']);
-                $client->list_courses();
+                $courses = $client->list_courses();
+                if (empty($courses)) {
+                    $errors['minerva_api_key'] = get_string('no_scoped_course', 'local_minerva');
+                } else {
+                    $this->resolvedcourse = reset($courses);
+                }
             } catch (\Exception $e) {
                 $errors['minerva_api_key'] = get_string(
                     'connection_failed',

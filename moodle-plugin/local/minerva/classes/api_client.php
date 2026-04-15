@@ -37,20 +37,37 @@ class api_client {
      *
      * @param string $apiurl Minerva API base URL.
      * @param string $apikey Minerva API key.
-     * @throws \moodle_exception if credentials are empty.
+     * @throws \moodle_exception if credentials are missing or the URL is insecure.
      */
     public function __construct(string $apiurl, string $apikey) {
+        if (trim($apiurl) === '' || trim($apikey) === '') {
+            throw new \moodle_exception('no_api_configured', 'local_minerva');
+        }
+
+        $parts = parse_url($apiurl);
+        if ($parts === false || empty($parts['scheme']) || empty($parts['host'])) {
+            throw new \moodle_exception('invalid_api_url', 'local_minerva');
+        }
+
+        $scheme = strtolower($parts['scheme']);
+        $host = strtolower($parts['host']);
+        // Plain http is only allowed for clearly-local destinations: loopback,
+        // host.docker.internal, or bare single-label hostnames (which can only
+        // resolve inside a container / on the LAN, never the public internet).
+        $islocal = in_array($host, ['localhost', '127.0.0.1', '::1', 'host.docker.internal'], true)
+            || strpos($host, '.') === false;
+        if ($scheme !== 'https' && !($scheme === 'http' && $islocal)) {
+            throw new \moodle_exception('insecure_api_url', 'local_minerva');
+        }
+
         $url = rtrim($apiurl, '/');
         // Accept either instance URL or full API URL.
         if (!str_ends_with($url, '/api')) {
             $url .= '/api';
         }
+
         $this->baseurl = $url;
         $this->apikey = $apikey;
-
-        if (empty($this->baseurl) || empty($this->apikey)) {
-            throw new \moodle_exception('no_api_configured', 'local_minerva');
-        }
     }
 
     /**
@@ -85,6 +102,16 @@ class api_client {
             $body['display_name'] = $displayname;
         }
         return $this->request('POST', '/integration/users/ensure', $body);
+    }
+
+    /**
+     * List members of a Minerva course.
+     *
+     * @param string $minervacid Minerva course UUID.
+     * @return array List of member objects with user_id, eppn, display_name, role.
+     */
+    public function list_members(string $minervacid): array {
+        return $this->request('GET', "/integration/courses/{$minervacid}/members");
     }
 
     /**
@@ -166,11 +193,28 @@ class api_client {
                 'local_minerva',
                 '',
                 null,
-                "HTTP {$httpcode}: {$response}"
+                "HTTP {$httpcode}: " . self::snippet($response)
             );
         }
 
         return json_decode($response);
+    }
+
+    /**
+     * Truncate an API response body for safe inclusion in exception debuginfo.
+     *
+     * @param mixed $response
+     * @return string
+     */
+    private static function snippet($response): string {
+        if (!is_string($response)) {
+            return '';
+        }
+        $max = 300;
+        if (strlen($response) > $max) {
+            return substr($response, 0, $max) . '...';
+        }
+        return $response;
     }
 
     /**
@@ -232,7 +276,7 @@ class api_client {
                 'local_minerva',
                 '',
                 null,
-                "HTTP {$httpcode} on {$method} {$path}: {$response}"
+                "HTTP {$httpcode} on {$method} {$path}: " . self::snippet($response)
             );
         }
 

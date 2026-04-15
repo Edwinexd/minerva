@@ -55,7 +55,26 @@ class observer {
         $courseid = $event->courseid;
         $userid = $event->relateduserid;
 
+        // A user may have multiple enrolment instances (e.g. manual + cohort).
+        // Only remove from Minerva if no active enrolment remains.
+        $context = \context_course::instance($courseid, IGNORE_MISSING);
+        if ($context && is_enrolled($context, $userid, '', false)) {
+            return;
+        }
+
         self::sync_user_to_minerva($courseid, $userid, 'remove');
+    }
+
+    /**
+     * Handle course deleted event: clean up local link + sync log rows.
+     *
+     * @param \core\event\course_deleted $event
+     */
+    public static function course_deleted(\core\event\course_deleted $event): void {
+        global $DB;
+
+        $DB->delete_records('local_minerva_links', ['courseid' => $event->courseid]);
+        $DB->delete_records('local_minerva_sync_log', ['courseid' => $event->courseid]);
     }
 
     /**

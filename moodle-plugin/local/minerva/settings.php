@@ -27,8 +27,9 @@ defined('MOODLE_INTERNAL') || die();
 if ($hassiteconfig) {
     $settings = new admin_settingpage('local_minerva', get_string('pluginname', 'local_minerva'));
 
-    // Minerva instance URL (optional site-wide lock).
-    $settings->add(new admin_setting_configtext(
+    // URL setting that also rejects non-https schemes (except for localhost),
+    // since the API key is sent in the Authorization header.
+    $settings->add(new \local_minerva\admin_setting_httpsurl(
         'local_minerva/minerva_url',
         get_string('settings_apiurl', 'local_minerva'),
         get_string('settings_apiurl_admin_desc', 'local_minerva'),

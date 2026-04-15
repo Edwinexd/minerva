@@ -23,14 +23,21 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/courses", get(list_courses))
         .route("/users/ensure", post(ensure_user))
-        .route("/courses/{course_id}/members", post(add_member))
+        .route(
+            "/courses/{course_id}/members",
+            post(add_member).get(list_members),
+        )
         .route(
             "/courses/{course_id}/members/by-eppn/{eppn}",
             delete(remove_member_by_eppn),
         )
         .route(
             "/courses/{course_id}/documents",
-            post(upload_document).get(list_documents),
+            post(upload_document)
+                .get(list_documents)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    super::documents::MAX_UPLOAD_BYTES as usize,
+                )),
         )
         .route("/courses/{course_id}/embed-token", post(create_embed_token))
 }
@@ -209,6 +216,35 @@ async fn add_member(
 
     Ok(Json(
         serde_json::json!({ "added": true, "user_id": user_id }),
+    ))
+}
+
+#[derive(Serialize)]
+struct MemberInfo {
+    user_id: Uuid,
+    eppn: Option<String>,
+    display_name: Option<String>,
+    role: String,
+}
+
+/// List members of a course (for integration clients that need to diff).
+async fn list_members(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<Vec<MemberInfo>>, AppError> {
+    authenticate_for_course(&state, &headers, course_id).await?;
+
+    let rows = minerva_db::queries::courses::list_members(&state.db, course_id).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| MemberInfo {
+                user_id: r.user_id,
+                eppn: r.eppn,
+                display_name: r.display_name,
+                role: r.role,
+            })
+            .collect(),
     ))
 }
 

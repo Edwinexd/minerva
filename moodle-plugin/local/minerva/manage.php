@@ -42,11 +42,21 @@ $PAGE->set_context($context);
 $PAGE->set_course($course);
 $PAGE->set_title(get_string('manage_link', 'local_minerva'));
 $PAGE->set_heading($course->fullname . ' - ' . get_string('manage_link', 'local_minerva'));
-$PAGE->set_pagelayout('admin');
+$PAGE->set_pagelayout('incourse');
 
-// Handle unlink action.
-if ($action === 'unlink' && confirm_sesskey()) {
+// Mutating actions must be POST + sesskey.
+if ($action !== '') {
+    require_sesskey();
+    if (!in_array($_SERVER['REQUEST_METHOD'] ?? '', ['POST'], true)) {
+        throw new moodle_exception('invalidrequest');
+    }
+}
+
+if ($action === 'unlink') {
     $DB->delete_records('local_minerva_links', ['courseid' => $courseid]);
+    // Drop the per-course sync log too, so re-linking doesn't silently
+    // assume content already lives in Minerva.
+    $DB->delete_records('local_minerva_sync_log', ['courseid' => $courseid]);
     redirect(
         $pageurl,
         get_string('link_removed', 'local_minerva'),
@@ -55,29 +65,26 @@ if ($action === 'unlink' && confirm_sesskey()) {
     );
 }
 
-// Handle sync enrolment action.
-if ($action === 'sync' && confirm_sesskey()) {
+if ($action === 'resetsync') {
+    $count = $DB->count_records('local_minerva_sync_log', ['courseid' => $courseid]);
+    $DB->delete_records('local_minerva_sync_log', ['courseid' => $courseid]);
+    redirect(
+        $pageurl,
+        get_string('sync_log_reset_done', 'local_minerva', (object)['count' => $count]),
+        null,
+        \core\output\notification::NOTIFY_SUCCESS
+    );
+}
+
+if ($action === 'sync') {
     $link = $DB->get_record('local_minerva_links', ['courseid' => $courseid]);
     if ($link) {
         try {
             $client = \local_minerva\api_client::from_link($link);
-            $enrolledusers = get_enrolled_users(
-                $context,
-                '',
-                0,
-                'u.id, u.username, u.firstname, u.lastname'
-            );
-            $added = 0;
-            foreach ($enrolledusers as $user) {
-                $eppn = \local_minerva\observer::get_eppn($user);
-                $displayname = trim($user->firstname . ' ' . $user->lastname);
-                $client->add_member($link->minerva_course_id, $eppn, $displayname);
-                $added++;
-            }
-            $a = (object)['added' => $added, 'removed' => 0];
+            $result = \local_minerva\task\sync_enrolments::reconcile_members($client, $link, $context);
             redirect(
                 $pageurl,
-                get_string('sync_enrolment_done', 'local_minerva', $a),
+                get_string('sync_enrolment_done', 'local_minerva', $result),
                 null,
                 \core\output\notification::NOTIFY_SUCCESS
             );
@@ -90,6 +97,7 @@ if ($action === 'sync' && confirm_sesskey()) {
             );
         }
     }
+    redirect($pageurl);
 }
 
 echo $OUTPUT->header();
@@ -113,17 +121,22 @@ if ($link) {
         ['class' => 'alert alert-info']
     );
 
-    // Unlink button.
-    $unlinkurl = new moodle_url($pageurl, ['action' => 'unlink', 'sesskey' => sesskey()]);
-    echo html_writer::link($unlinkurl, get_string('unlink_course', 'local_minerva'), [
-        'class' => 'btn btn-danger mr-2',
-    ]);
+    // Unlink (destructive: confirm + red).
+    $unlinkbtn = new \core\output\single_button(
+        new moodle_url($pageurl, ['action' => 'unlink']),
+        get_string('unlink_course', 'local_minerva'),
+        'post',
+        \core\output\single_button::BUTTON_DANGER
+    );
+    $unlinkbtn->add_confirm_action(get_string('unlink_course_confirm', 'local_minerva'));
+    echo $OUTPUT->render($unlinkbtn);
 
-    // Sync enrolment button.
-    $syncurl = new moodle_url($pageurl, ['action' => 'sync', 'sesskey' => sesskey()]);
-    echo html_writer::link($syncurl, get_string('sync_enrolment', 'local_minerva'), [
-        'class' => 'btn btn-secondary mr-2',
-    ]);
+    // Sync enrolment (non-destructive).
+    echo $OUTPUT->single_button(
+        new moodle_url($pageurl, ['action' => 'sync']),
+        get_string('sync_enrolment', 'local_minerva'),
+        'post'
+    );
 
     // Sync materials button.
     if (has_capability('local/minerva:syncmaterials', $context)) {
@@ -131,6 +144,15 @@ if ($link) {
         echo html_writer::link($maturl, get_string('sync_materials', 'local_minerva'), [
             'class' => 'btn btn-secondary',
         ]);
+
+        $resetbtn = new \core\output\single_button(
+            new moodle_url($pageurl, ['action' => 'resetsync']),
+            get_string('reset_sync_log', 'local_minerva'),
+            'post',
+            \core\output\single_button::BUTTON_DANGER
+        );
+        $resetbtn->add_confirm_action(get_string('reset_sync_log_confirm', 'local_minerva'));
+        echo $OUTPUT->render($resetbtn);
     }
 } else {
     // Link form: just URL (if not locked) + API key.
@@ -142,10 +164,18 @@ if ($link) {
     }
 
     if ($data = $form->get_data()) {
-        // Resolve the course from the API key.
-        $client = new \local_minerva\api_client($data->minerva_api_url, $data->minerva_api_key);
-        $courses = $client->list_courses();
-        $mc = reset($courses);
+        // Validation has already resolved the scoped course; reuse it instead
+        // of calling the API a second time.
+        $mc = $form->resolvedcourse;
+        if ($mc === null) {
+            // Defensive: should not happen (validation ran), but guard anyway.
+            redirect(
+                $pageurl,
+                get_string('no_scoped_course', 'local_minerva'),
+                null,
+                \core\output\notification::NOTIFY_ERROR
+            );
+        }
 
         $record = new stdClass();
         $record->courseid = $courseid;

@@ -34,8 +34,6 @@ function local_minerva_extend_navigation_course(
     stdClass $course,
     context_course $context
 ): void {
-    global $DB;
-
     if (has_capability('local/minerva:manage', $context)) {
         $url = new moodle_url('/local/minerva/manage.php', ['id' => $course->id]);
         $parentnode->add(

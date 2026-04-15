@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="local/minerva/db" VERSION="2026033000" COMMENT="Minerva plugin tables">
+<XMLDB PATH="local/minerva/db" VERSION="2026041501" COMMENT="Minerva plugin tables">
   <TABLES>
     <TABLE NAME="local_minerva_links" COMMENT="Links between Moodle courses and Minerva courses">
       <FIELDS>

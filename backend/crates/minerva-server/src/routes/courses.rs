@@ -1,5 +1,5 @@
 use axum::extract::{Extension, Path, State};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use minerva_core::models::User;
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,15 @@ pub fn router() -> Router<AppState> {
         )
         .route("/{id}/members", get(list_members).post(add_member))
         .route("/{id}/members/{user_id}", delete(remove_member))
+        .route("/{id}/role-suggestions", get(list_role_suggestions))
+        .route(
+            "/{id}/role-suggestions/{suggestion_id}/approve",
+            post(approve_role_suggestion),
+        )
+        .route(
+            "/{id}/role-suggestions/{suggestion_id}/decline",
+            post(decline_role_suggestion),
+        )
 }
 
 #[derive(Deserialize)]
@@ -376,4 +385,126 @@ async fn remove_member(
 
     let removed = minerva_db::queries::courses::remove_member(&state.db, id, user_id).await?;
     Ok(Json(serde_json::json!({ "removed": removed })))
+}
+
+#[derive(Serialize)]
+struct RoleSuggestionResponse {
+    id: Uuid,
+    user_id: Uuid,
+    eppn: Option<String>,
+    display_name: Option<String>,
+    current_role: Option<String>,
+    suggested_role: String,
+    source: String,
+    source_detail: Option<serde_json::Value>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Anyone who can see the member list (owner, admin, course teacher) can
+/// see pending suggestions, so the UI can show a badge. Approve/decline is
+/// stricter -- only owner or admin.
+async fn list_role_suggestions(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<RoleSuggestionResponse>>, AppError> {
+    let course = minerva_db::queries::courses::find_by_id(&state.db, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if course.owner_id != user.id
+        && !user.role.is_admin()
+        && !minerva_db::queries::courses::is_course_teacher(&state.db, id, user.id).await?
+    {
+        return Err(AppError::Forbidden);
+    }
+
+    let rows =
+        minerva_db::queries::role_suggestions::list_pending_for_course(&state.db, id).await?;
+    let ps = crate::ext_obfuscate::Pseudonymizer::for_viewer(
+        &state.db,
+        &user,
+        &state.config.hmac_secret,
+    )
+    .await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| {
+                let (eppn, display_name) =
+                    crate::ext_obfuscate::apply(ps.as_ref(), r.user_id, r.eppn, r.display_name);
+                RoleSuggestionResponse {
+                    id: r.id,
+                    user_id: r.user_id,
+                    eppn,
+                    display_name,
+                    current_role: r.current_role,
+                    suggested_role: r.suggested_role,
+                    source: r.source,
+                    source_detail: r.source_detail,
+                    created_at: r.created_at,
+                }
+            })
+            .collect(),
+    ))
+}
+
+async fn approve_role_suggestion(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((id, suggestion_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let course = minerva_db::queries::courses::find_by_id(&state.db, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if course.owner_id != user.id && !user.role.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    let suggestion =
+        minerva_db::queries::role_suggestions::find_pending_by_id(&state.db, suggestion_id)
+            .await?
+            .ok_or(AppError::NotFound)?;
+    // Defend against a suggestion id from a different course being POSTed
+    // through this course's URL.
+    if suggestion.course_id != id {
+        return Err(AppError::NotFound);
+    }
+
+    minerva_db::queries::courses::add_member(
+        &state.db,
+        suggestion.course_id,
+        suggestion.user_id,
+        &suggestion.suggested_role,
+    )
+    .await?;
+    minerva_db::queries::role_suggestions::mark_approved(&state.db, suggestion.id, user.id).await?;
+
+    Ok(Json(serde_json::json!({ "approved": true })))
+}
+
+async fn decline_role_suggestion(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((id, suggestion_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let course = minerva_db::queries::courses::find_by_id(&state.db, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if course.owner_id != user.id && !user.role.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    let suggestion =
+        minerva_db::queries::role_suggestions::find_pending_by_id(&state.db, suggestion_id)
+            .await?
+            .ok_or(AppError::NotFound)?;
+    if suggestion.course_id != id {
+        return Err(AppError::NotFound);
+    }
+
+    minerva_db::queries::role_suggestions::mark_declined(&state.db, suggestion.id, user.id).await?;
+
+    Ok(Json(serde_json::json!({ "declined": true })))
 }

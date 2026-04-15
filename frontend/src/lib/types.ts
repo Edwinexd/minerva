@@ -110,6 +110,18 @@ export interface CourseMember {
   added_at: string
 }
 
+export interface RoleSuggestion {
+  id: string
+  user_id: string
+  eppn: string | null
+  display_name: string | null
+  current_role: string | null
+  suggested_role: string
+  source: string
+  source_detail: { lti_roles?: string[] } | null
+  created_at: string
+}
+
 export interface Conversation {
   id: string
   course_id: string

@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, Course, CourseMember, Document, ExternalAuthInvite, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -22,6 +22,13 @@ export const courseMembersQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "members"],
     queryFn: () => api.get<CourseMember[]>(`/courses/${courseId}/members`),
+  })
+
+export const courseRoleSuggestionsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "role-suggestions"],
+    queryFn: () =>
+      api.get<RoleSuggestion[]>(`/courses/${courseId}/role-suggestions`),
   })
 
 export const courseDocumentsQuery = (courseId: string) =>

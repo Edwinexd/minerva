@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT 1 FROM course_member_role_suggestions\n           WHERE course_id = $1 AND user_id = $2 AND suggested_role = $3\n             AND resolution IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "?column?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "586fbbd4aef6f99256477232403b4172c227037694a7ad8922011d245fa90b19"
+}

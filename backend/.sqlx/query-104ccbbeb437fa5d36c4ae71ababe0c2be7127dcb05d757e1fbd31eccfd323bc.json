@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE course_member_role_suggestions\n           SET resolution = 'approved', resolved_at = NOW(), resolved_by = $2\n           WHERE id = $1 AND resolution IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "104ccbbeb437fa5d36c4ae71ababe0c2be7127dcb05d757e1fbd31eccfd323bc"
+}

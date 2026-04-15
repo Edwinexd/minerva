@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.id, s.course_id, s.user_id,\n                  u.eppn, u.display_name,\n                  cm.role AS current_role,\n                  s.suggested_role, s.source, s.source_detail,\n                  s.created_at\n           FROM course_member_role_suggestions s\n           JOIN users u ON u.id = s.user_id\n           LEFT JOIN course_members cm\n             ON cm.course_id = s.course_id AND cm.user_id = s.user_id\n           WHERE s.course_id = $1 AND s.resolution IS NULL\n           ORDER BY s.created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "eppn",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "current_role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "suggested_role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_detail",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "413300c2a07fd92e4957e1a5d39011daac76aec36313e25cc44dcbe80ee14ecf"
+}

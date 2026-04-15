@@ -246,11 +246,37 @@ async fn handle_launch(
     };
 
     // 8. Add course membership if not already a member.
-    //    Never downgrade an existing member's role -- only add if they're not already in the course.
-    let course_role = lti::lti_roles_to_course_role(&claims.roles);
-    if !minerva_db::queries::courses::is_member(&state.db, course_id, user.id).await? {
-        minerva_db::queries::courses::add_member(&state.db, course_id, user.id, course_role)
-            .await?;
+    //    New LTI arrivals always land as `student` regardless of what the
+    //    remote LMS claims -- trusting cross-system role claims lets any
+    //    Moodle site admin become a Minerva teacher on any linked course
+    //    (Moodle admins have implicit access to every course they didn't
+    //    enrol in, so "they couldn't get here without being a teacher
+    //    already" doesn't hold). If the claim maps to `teacher`, we file
+    //    a pending suggestion instead, which an existing course
+    //    teacher/owner approves on the members tab. Declines are sticky
+    //    per (user, role) via the unique index on the suggestions table.
+    let claimed_role = lti::lti_roles_to_course_role(&claims.roles);
+    let existing_role =
+        minerva_db::queries::courses::get_member_role(&state.db, course_id, user.id).await?;
+    if existing_role.is_none() {
+        minerva_db::queries::courses::add_member(&state.db, course_id, user.id, "student").await?;
+    }
+    // Suggest elevation when the LTI claim is `teacher` and the current
+    // membership (after the insert above) isn't already teacher. A prior
+    // decline for the same (user, teacher) tuple silently suppresses the
+    // suggestion via ON CONFLICT DO NOTHING in upsert_pending.
+    if claimed_role == "teacher" && existing_role.as_deref() != Some("teacher") {
+        let detail = serde_json::json!({ "lti_roles": claims.roles });
+        let _ = minerva_db::queries::role_suggestions::upsert_pending(
+            &state.db,
+            Uuid::new_v4(),
+            course_id,
+            user.id,
+            "teacher",
+            "lti",
+            Some(&detail),
+        )
+        .await?;
     }
 
     // 9. Generate an embed token (reuses the existing HMAC mechanism).

@@ -19,6 +19,13 @@ const SIMILARITY_THRESHOLD: f32 = 0.35;
 /// Maximum number of retrieval-triggered restarts to prevent infinite loops.
 const MAX_FLARE_RESTARTS: usize = 5;
 
+/// Max completion tokens per FLARE generation window.
+/// Bounding each call ensures streams always terminate naturally so Cerebras
+/// returns usage stats in the final [DONE] chunk. Token counts are then exact
+/// additions across windows rather than estimates from dropped connections.
+/// Formula: (1024 / 4) * 3
+const FLARE_MAX_TOKENS_PER_CHUNK: i32 = 768;
+
 /// FLARE strategy: Forward-Looking Active REtrieval augmented generation.
 ///
 /// Uses Cerebras logprobs to detect low-confidence tokens. When the model
@@ -106,83 +113,77 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         total_prompt_tokens += outcome.prompt_tokens;
         total_completion_tokens += outcome.completion_tokens;
 
-        if let StreamOutcome::LowConfidenceSentence { sentence } = &outcome.kind {
-            if restarts >= MAX_FLARE_RESTARTS {
-                tracing::info!(
-                    "flare: max restarts ({}) reached, finishing",
-                    MAX_FLARE_RESTARTS
+        match outcome.kind {
+            StreamOutcome::Completed => break,
+            StreamOutcome::HitLimit {
+                low_confidence_sentence: None,
+            } => {
+                // Hit the token window but all sentences were confident; keep generating.
+                tracing::debug!(
+                    "flare: hit token limit with no low-confidence sentence, continuing"
                 );
-                // Let the stream finish naturally on the next iteration
-                // by running one more time without checking confidence
-                let final_result = common::stream_cerebras_to_client(
-                    &http_client,
-                    &ctx.cerebras_api_key,
-                    &ctx.model,
-                    ctx.temperature,
-                    &messages,
-                    &tx,
-                    &mut full_text,
-                )
-                .await;
-                if let Ok((pt, ct)) = final_result {
-                    total_prompt_tokens += pt;
-                    total_completion_tokens += ct;
-                }
-                break;
+                continue;
             }
-
-            tracing::info!(
-                "flare: low-confidence sentence detected, retrieving (restart {}/{})",
-                restarts + 1,
-                MAX_FLARE_RESTARTS
-            );
-
-            // Use the low-confidence sentence as a retrieval query
-            // Mid-stream FLARE retrieval keeps its own paper-derived floor
-            // (SIMILARITY_THRESHOLD) but tightens to the course's configured
-            // min_score when the teacher has set a stricter value.
-            let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
-            let new_chunks = flare_retrieve(
-                &http_client,
-                &ctx.openai_api_key,
-                &ctx.fastembed,
-                &ctx.qdrant,
-                &collection_name,
-                sentence,
-                ctx.max_chunks,
-                flare_threshold,
-                &ctx.embedding_provider,
-                &ctx.embedding_model,
-            )
-            .await;
-
-            let mut added = false;
-            for chunk in &new_chunks {
-                if all_chunks.len() >= ctx.max_chunks as usize {
+            StreamOutcome::HitLimit {
+                low_confidence_sentence: Some(ref sentence),
+            } => {
+                if restarts >= MAX_FLARE_RESTARTS {
+                    tracing::info!(
+                        "flare: max restarts ({}) reached, stopping",
+                        MAX_FLARE_RESTARTS
+                    );
                     break;
                 }
-                if !all_chunks.contains(chunk) {
-                    all_chunks.push(chunk.clone());
-                    added = true;
-                }
-            }
 
-            if added {
-                restarts += 1;
                 tracing::info!(
-                    "flare: added new chunks, total now {}. Restarting from {} chars.",
-                    all_chunks.len(),
-                    full_text.len()
+                    "flare: low-confidence sentence detected, retrieving (restart {}/{})",
+                    restarts + 1,
+                    MAX_FLARE_RESTARTS
                 );
-                continue; // Restart generation with new context
+
+                // Use the low-confidence sentence as a retrieval query.
+                // Mid-stream FLARE retrieval keeps its own paper-derived floor
+                // (SIMILARITY_THRESHOLD) but tightens to the course's configured
+                // min_score when the teacher has set a stricter value.
+                let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
+                let new_chunks = flare_retrieve(
+                    &http_client,
+                    &ctx.openai_api_key,
+                    &ctx.fastembed,
+                    &ctx.qdrant,
+                    &collection_name,
+                    sentence,
+                    ctx.max_chunks,
+                    flare_threshold,
+                    &ctx.embedding_provider,
+                    &ctx.embedding_model,
+                )
+                .await;
+
+                let mut added = false;
+                for chunk in &new_chunks {
+                    if all_chunks.len() >= ctx.max_chunks as usize {
+                        break;
+                    }
+                    if !all_chunks.contains(chunk) {
+                        all_chunks.push(chunk.clone());
+                        added = true;
+                    }
+                }
+
+                if added {
+                    restarts += 1;
+                    tracing::info!(
+                        "flare: added new chunks, total now {}. Restarting from {} chars.",
+                        all_chunks.len(),
+                        full_text.len()
+                    );
+                } else {
+                    tracing::debug!("flare: no new chunks found, continuing without restart");
+                }
+                continue;
             }
-
-            tracing::debug!("flare: no new chunks found, continuing without restart");
-            continue; // Keep generating - just no new context to add
         }
-
-        // StreamOutcome::Completed - model finished naturally
-        break;
     }
 
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
@@ -194,11 +195,6 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         let client_chunks = common::chunks_for_client(&all_chunks, &hidden);
         serde_json::to_value(&client_chunks).ok()
     };
-
-    // Estimate tokens for interrupted streams
-    if total_prompt_tokens == 0 && !full_text.is_empty() {
-        total_completion_tokens = (full_text.len() / 4) as i32;
-    }
 
     common::finalize(
         &ctx,
@@ -221,16 +217,22 @@ struct StreamWithLogprobsResult {
 }
 
 enum StreamOutcome {
-    /// Model finished generating naturally
+    /// Model finished naturally (finish_reason: stop)
     Completed,
-    /// A sentence with low-confidence tokens was detected
-    LowConfidenceSentence { sentence: String },
+    /// Stream hit the FLARE_MAX_TOKENS_PER_CHUNK window limit.
+    /// Contains the first low-confidence sentence seen during the window, if any.
+    HitLimit {
+        low_confidence_sentence: Option<String>,
+    },
 }
 
-/// Stream from Cerebras with logprobs enabled.
-/// Buffers tokens into sentences. When a sentence boundary is hit, checks
-/// if any token in that sentence had logprob below the threshold.
-/// If so, returns the sentence for retrieval. Otherwise keeps streaming.
+/// Stream from Cerebras with logprobs enabled, bounded by FLARE_MAX_TOKENS_PER_CHUNK.
+///
+/// The token cap ensures every call terminates naturally so Cerebras always
+/// returns usage stats in the [DONE] chunk. The caller adds them up directly.
+///
+/// Buffers tokens into sentences and records the first low-confidence sentence
+/// (if any) for use as a retrieval query by the caller.
 async fn stream_with_logprobs(
     client: &reqwest::Client,
     api_key: &str,
@@ -247,6 +249,7 @@ async fn stream_with_logprobs(
         "stream": true,
         "logprobs": true,
         "top_logprobs": 1,
+        "max_tokens": FLARE_MAX_TOKENS_PER_CHUNK,
         "stream_options": { "include_usage": true },
     });
 
@@ -256,6 +259,8 @@ async fn stream_with_logprobs(
     let mut sse_buffer = String::new();
     let mut sentence_buffer = String::new();
     let mut sentence_has_low_confidence = false;
+    let mut first_low_confidence_sentence: Option<String> = None;
+    let mut finish_reason: Option<String> = None; // secondary hint; token count is primary
     let mut prompt_tokens = 0i32;
     let mut completion_tokens = 0i32;
 
@@ -271,10 +276,21 @@ async fn stream_with_logprobs(
             sse_buffer = sse_buffer[line_end + 1..].to_string();
 
             if line == "data: [DONE]" {
+                // Detect window exhaustion by token count: more reliable than
+                // parsing finish_reason strings which vary across API versions.
+                let hit_limit = completion_tokens >= FLARE_MAX_TOKENS_PER_CHUNK
+                    || finish_reason.as_deref() == Some("length");
+                let kind = if hit_limit {
+                    StreamOutcome::HitLimit {
+                        low_confidence_sentence: first_low_confidence_sentence,
+                    }
+                } else {
+                    StreamOutcome::Completed
+                };
                 return Ok(StreamWithLogprobsResult {
                     prompt_tokens,
                     completion_tokens,
-                    kind: StreamOutcome::Completed,
+                    kind,
                 });
             }
 
@@ -288,8 +304,12 @@ async fn stream_with_logprobs(
                         return Err(msg);
                     }
 
-                    // Extract token content and logprob
                     if let Some(choice) = parsed["choices"].get(0) {
+                        // Track finish_reason from the final data chunk
+                        if let Some(fr) = choice["finish_reason"].as_str() {
+                            finish_reason = Some(fr.to_string());
+                        }
+
                         if let Some(delta_content) = choice["delta"]["content"].as_str() {
                             full_text.push_str(delta_content);
                             sentence_buffer.push_str(delta_content);
@@ -321,20 +341,15 @@ async fn stream_with_logprobs(
 
                             // Check for sentence boundary
                             if is_sentence_boundary(&sentence_buffer) {
-                                if sentence_has_low_confidence {
+                                if sentence_has_low_confidence
+                                    && first_low_confidence_sentence.is_none()
+                                {
                                     tracing::debug!(
                                         "flare: low-confidence sentence: {:?}",
                                         truncate_for_log(&sentence_buffer, 80)
                                     );
-                                    return Ok(StreamWithLogprobsResult {
-                                        prompt_tokens,
-                                        completion_tokens,
-                                        kind: StreamOutcome::LowConfidenceSentence {
-                                            sentence: sentence_buffer,
-                                        },
-                                    });
+                                    first_low_confidence_sentence = Some(sentence_buffer.clone());
                                 }
-                                // Sentence was confident, reset buffer for next sentence
                                 sentence_buffer.clear();
                                 sentence_has_low_confidence = false;
                             }

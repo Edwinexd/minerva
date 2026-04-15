@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { RelativeTime } from "@/components/relative-time"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { externalAuthInvitesQuery } from "@/lib/queries"
@@ -187,7 +188,7 @@ function CreatedInviteCallout({
       </div>
       <p className="mb-2 text-xs text-muted-foreground">
         Share this link privately. It is shown only once and grants login until{" "}
-        {new Date(invite.expires_at).toLocaleString()}.
+        <RelativeTime date={invite.expires_at} />.
       </p>
       <div className="flex gap-2">
         <input
@@ -219,8 +220,8 @@ function InviteRow({ invite }: { invite: ExternalAuthInvite }) {
     <tr className="border-b">
       <td className="py-2 pr-4 font-mono text-xs">{invite.eppn}</td>
       <td className="py-2 pr-4">{invite.display_name ?? "-"}</td>
-      <td className="py-2 pr-4 text-xs">{new Date(invite.created_at).toLocaleString()}</td>
-      <td className="py-2 pr-4 text-xs">{new Date(invite.expires_at).toLocaleString()}</td>
+      <td className="py-2 pr-4 text-xs"><RelativeTime date={invite.created_at} /></td>
+      <td className="py-2 pr-4 text-xs"><RelativeTime date={invite.expires_at} /></td>
       <td className="py-2 pr-4">
         {status === "active" && <Badge variant="secondary">active</Badge>}
         {status === "expired" && <Badge variant="outline">expired</Badge>}

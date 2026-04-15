@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { canvasConnectionsQuery, canvasFilesQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
@@ -274,7 +275,7 @@ function CanvasPage() {
                     <div className="text-xs text-muted-foreground break-all">{conn.canvas_base_url}</div>
                     {conn.last_synced_at && (
                       <div className="text-xs text-muted-foreground">
-                        Last synced: {new Date(conn.last_synced_at).toLocaleString()}
+                        Last synced: <RelativeTime date={conn.last_synced_at} />
                       </div>
                     )}
                     <label className="flex items-center gap-2 text-xs text-muted-foreground pt-1 cursor-pointer select-none">

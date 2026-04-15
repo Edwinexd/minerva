@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
+import { RelativeTime } from "@/components/relative-time"
 import { useQuery } from "@tanstack/react-query"
 import { adminUsersQuery, coursesQuery } from "@/lib/queries"
 import {
@@ -98,7 +99,7 @@ function CourseManagementPanel() {
                         : course.daily_token_limit.toLocaleString()}
                     </td>
                     <td className="py-2 pr-4 text-muted-foreground">
-                      {new Date(course.created_at).toLocaleDateString()}
+                      <RelativeTime date={course.created_at} />
                     </td>
                     <td className="py-2">
                       <Link

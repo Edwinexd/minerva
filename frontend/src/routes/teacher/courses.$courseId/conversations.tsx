@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { allConversationsQuery, conversationDetailQuery, popularTopicsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
@@ -183,7 +184,7 @@ function ConversationsPage() {
                         </div>
                         <div className="flex items-center gap-2 shrink-0 ml-2">
                           <span className="text-xs text-muted-foreground">
-                            {new Date(conv.updated_at).toLocaleDateString()}
+                            <RelativeTime date={conv.updated_at} />
                           </span>
                           <Button
                             variant={conv.pinned ? "default" : "outline"}

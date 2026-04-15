@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { playCourseCatalogQuery, playDesignationsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
@@ -132,13 +133,11 @@ function PlayDesignationsPage() {
                 </div>
                 <div className="flex gap-3 text-xs text-muted-foreground">
                   <span>
-                    Added: {new Date(d.created_at).toLocaleDateString()}
+                    Added: <RelativeTime date={d.created_at} />
                   </span>
                   <span>
                     Last sync:{" "}
-                    {d.last_synced_at
-                      ? new Date(d.last_synced_at).toLocaleString()
-                      : "never"}
+                    {d.last_synced_at ? <RelativeTime date={d.last_synced_at} /> : "never"}
                   </span>
                 </div>
                 {d.last_error && (

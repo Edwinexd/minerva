@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -122,7 +123,7 @@ function InvitePage() {
                   {window.location.origin}/join/{link.token}
                 </code>
                 <div className="flex gap-3 text-xs text-muted-foreground">
-                  <span>Expires: {new Date(link.expires_at).toLocaleDateString()}</span>
+                  <span>Expires: <RelativeTime date={link.expires_at} /></span>
                   <span>Used: {link.use_count}{link.max_uses ? `/${link.max_uses}` : ""}</span>
                 </div>
               </div>

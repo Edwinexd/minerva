@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiKeysQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
@@ -135,9 +136,9 @@ function ApiKeysPage() {
                   </code>
                 </div>
                 <div className="flex gap-3 text-xs text-muted-foreground">
-                  <span>Created: {new Date(k.created_at).toLocaleDateString()}</span>
+                  <span>Created: <RelativeTime date={k.created_at} /></span>
                   {k.last_used_at && (
-                    <span>Last used: {new Date(k.last_used_at).toLocaleDateString()}</span>
+                    <span>Last used: <RelativeTime date={k.last_used_at} /></span>
                   )}
                 </div>
               </div>

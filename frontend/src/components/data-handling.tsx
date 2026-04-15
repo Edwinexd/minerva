@@ -63,7 +63,7 @@ export function DataHandlingContent() {
         <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
           <li>
             <strong>Canvas:</strong> Minerva pulls course files and page
-            content only -- no submissions, rosters, or grades. Your Canvas
+            content only (no submissions, rosters, or grades). Your Canvas
             API token is stored in the Minerva database in plaintext; revoke
             it in Minerva or Canvas to disconnect.
           </li>

@@ -45,10 +45,10 @@ function RoleRulesPanel() {
             match the user's Shibboleth attributes at login. Rules never
             demote, never override admins (MINERVA_ADMINS env), and never
             touch users whose role was set manually in User Management
-            (those users show a "locked" badge -- click Unlock there to
+            (those users show a "locked" badge; click Unlock there to
             re-enable rule evaluation). Multi-valued attributes
             (affiliation, entitlement) use list-membership semantics for
-            "contains" -- substring matches are rejected.
+            "contains"; substring matches are rejected.
             <br />
             <span className="text-xs">
               Negated operators (<code>not_contains</code>, <code>not_regex</code>)

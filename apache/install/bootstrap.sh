@@ -7,11 +7,11 @@
 #   1. `apache-deploy` group; ci user is added to it.
 #   2. The two managed apache files are chgrped + chmoded so members of
 #      the group can edit them in place. We do NOT make the directories
-#      group-writable -- ci can update existing files but cannot create
+#      group-writable; ci can update existing files but cannot create
 #      sibling files in /etc/apache2/.
 #   3. systemd path unit that watches the two files and triggers a
 #      validate-then-reload when either changes. ci never needs to call
-#      systemctl or sudo -- editing the file is enough.
+#      systemctl or sudo; editing the file is enough.
 #   4. Secret directory exists with right perms (file content is still
 #      installed by hand by an admin who has the secret).
 

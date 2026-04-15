@@ -67,7 +67,7 @@ docker compose up
 
 This starts the backend (port 3000), frontend dev server (port 5173), PostgreSQL, and Qdrant.
 
-In dev mode (`MINERVA_DEV_MODE=true`, set by default in `docker-compose.yml`) Shibboleth is not required -- the backend reads the `X-Dev-User` header (or falls back to the first admin in `MINERVA_ADMINS`).
+In dev mode (`MINERVA_DEV_MODE=true`, set by default in `docker-compose.yml`) Shibboleth is not required; the backend reads the `X-Dev-User` header (or falls back to the first admin in `MINERVA_ADMINS`).
 
 ### Production
 
@@ -133,7 +133,7 @@ The main application runs behind Apache `mod_shib`. See [apache/README.md](apach
 | `/api/service/*` | Global service API key (Bearer token) | Automated pipelines (transcript fetcher, etc.) |
 | `/api/embed/*` | HMAC-signed embed token | Iframe chat API |
 | `/embed/*` | Embed token (query param) | Iframe frontend route |
-| `/lti/*` | LTI 1.3 (OIDC + signed JWT) | LTI login, launch, JWKS -- called by the LMS |
+| `/lti/*` | LTI 1.3 (OIDC + signed JWT) | LTI login, launch, JWKS (called by the LMS) |
 | `/api/external-auth/*` | HMAC-signed invite token | External-auth invite callback |
 
 Everything else requires a valid Shibboleth session.

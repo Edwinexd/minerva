@@ -143,6 +143,6 @@ jobs:
       - name: Check for emdashes
         run: |
           if grep -rn $'\xe2\x80\x94' --include='*.rs' --include='*.ts' --include='*.tsx' --include='*.toml' --include='*.yml' --include='*.yaml' --include='*.md' --include='*.sql' --include='*.php' .; then
-            echo "::error::Emdashes found! Use -- or a hyphen instead."
+            echo "::error::Emdashes found! Use a semicolon, colon, or rephrase the sentence instead."
             exit 1
           fi

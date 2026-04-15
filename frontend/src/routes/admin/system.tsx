@@ -66,7 +66,7 @@ function SystemPanel() {
           <CardTitle>Storage</CardTitle>
           <CardDescription>
             Filesystem backing{" "}
-            <code className="text-xs">{disk?.path ?? "-"}</code> -- the host
+            <code className="text-xs">{disk?.path ?? "-"}</code>; the host
             volume holds postgres, qdrant, documents and backups. Contact DSV
             helpdesk to expand when free space runs low.
           </CardDescription>
@@ -91,8 +91,8 @@ function SystemPanel() {
               {diskPct >= 75 && (
                 <p className="text-sm text-amber-700 dark:text-amber-400">
                   {diskPct >= 90
-                    ? "Disk is nearly full -- request expansion from helpdesk soon."
-                    : "Disk is filling up -- consider requesting expansion."}
+                    ? "Disk is nearly full. Request expansion from helpdesk soon."
+                    : "Disk is filling up. Consider requesting expansion."}
                 </p>
               )}
             </div>

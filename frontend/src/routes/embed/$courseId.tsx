@@ -431,7 +431,7 @@ function EmbedChatWindow({
           </Button>
         </form>
         <p className="text-xs text-muted-foreground text-center">
-          Messages and relevant course-material excerpts are sent to Cerebras for AI inference. Responses may be inaccurate -- verify with course materials. See{" "}
+          Messages and relevant course-material excerpts are sent to Cerebras for AI inference. Responses may be inaccurate; verify with course materials. See{" "}
           <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">how Minerva handles your data</a>.
         </p>
       </div>

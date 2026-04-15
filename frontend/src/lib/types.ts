@@ -281,7 +281,7 @@ export interface CanvasItemInfo {
   kind: CanvasItemKind
   content_type: string | null
   size: number
-  /** "files_api" and/or "modules" -- which discovery source surfaced the item. */
+  /** "files_api" and/or "modules": which discovery source surfaced the item. */
   sources: string[]
   already_synced: boolean
   needs_resync: boolean
@@ -312,7 +312,7 @@ export interface ExternalAuthInvite {
 
 export interface ExternalAuthInviteCreated extends ExternalAuthInvite {
   /// Single-use callback URL. Only returned at creation; the raw token cannot
-  /// be retrieved later -- if the admin loses it, revoke and re-mint.
+  /// be retrieved later; if the admin loses it, revoke and re-mint.
   url: string
 }
 

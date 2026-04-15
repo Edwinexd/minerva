@@ -6,8 +6,8 @@ Local plugin that connects Moodle to a [Minerva](https://github.com/Edwinexd/min
 
 - **Course linking**: teachers link a Moodle course to a Minerva course by pasting a per-course API key. The scoped course is resolved automatically from the key.
 - **Site-wide Minerva URL**: admins can lock the Minerva URL so teachers only need to enter the API key. Non-https URLs are rejected (with a carve-out for loopback, `host.docker.internal`, and bare single-label hostnames used inside container networks).
-- **Enrolment sync (event-driven)**: enrols / unenrols students in Minerva as Moodle enrolments change. Multi-instance enrolments are handled correctly -- a user is only removed from Minerva when no active enrolment remains.
-- **Enrolment sync (scheduled + manual)**: every 30 minutes (and on demand from the course manage page) the plugin reconciles both directions -- missing users are added, and Minerva students who are no longer enrolled in Moodle are removed. Teachers and TAs on the Minerva side are never touched.
+- **Enrolment sync (event-driven)**: enrols / unenrols students in Minerva as Moodle enrolments change. Multi-instance enrolments are handled correctly: a user is only removed from Minerva when no active enrolment remains.
+- **Enrolment sync (scheduled + manual)**: every 30 minutes (and on demand from the course manage page) the plugin reconciles both directions: missing users are added, and Minerva students who are no longer enrolled in Moodle are removed. Teachers and TAs on the Minerva side are never touched.
 - **Material sync**: uploads course content (stored files, mod_url targets, mod_page, mod_book chapters, mod_label intros, mod_resource intros, and section summaries) to Minerva for RAG processing. Runs on demand and on a 30-minute schedule (offset 15 minutes from enrolment sync).
 - **Housekeeping**:
   - Unlinking a course also clears the per-course sync log so a re-link does a full re-upload.
@@ -41,9 +41,9 @@ Both tasks respect the `autosync_enrolment` / `autosync_materials` admin toggles
 
 ## Capabilities
 
-- `local/minerva:manage` -- configure the Minerva link for a course (default: editing teacher, manager).
-- `local/minerva:view` -- see the AI assistant in a course (default: student, teacher, editing teacher, manager).
-- `local/minerva:syncmaterials` -- trigger a material sync or reset the sync log (default: editing teacher, manager).
+- `local/minerva:manage`: configure the Minerva link for a course (default: editing teacher, manager).
+- `local/minerva:view`: see the AI assistant in a course (default: student, teacher, editing teacher, manager).
+- `local/minerva:syncmaterials`: trigger a material sync or reset the sync log (default: editing teacher, manager).
 
 ## Related plugin
 

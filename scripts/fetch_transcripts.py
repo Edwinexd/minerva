@@ -253,7 +253,7 @@ def main() -> None:
 
     with PlayClient(username=su_username, password=su_password) as client:
         # Phase 0: refresh Minerva's catalog of known designations (for
-        # teacher-facing autocomplete). Best-effort -- failure doesn't abort.
+        # teacher-facing autocomplete). Best-effort; failure doesn't abort.
         try:
             push_catalog(client, api_url, headers)
         except Exception as e:

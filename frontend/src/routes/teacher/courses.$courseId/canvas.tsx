@@ -136,7 +136,7 @@ function CanvasPage() {
       <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/40">
         <p className="font-semibold text-amber-900 dark:text-amber-200">What Canvas sync does</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-900/90 dark:text-amber-200/90">
-          <li>Pulls course files and page content only -- no submissions, rosters, or grades.</li>
+          <li>Pulls course files and page content only (no submissions, rosters, or grades).</li>
           <li>Your Canvas API token is stored in the Minerva database in plaintext. Revoke it in Minerva or Canvas to disconnect.</li>
           <li>Document content is indexed locally in Minerva and excerpts are sent to Cerebras when students ask related questions.</li>
         </ul>
@@ -217,7 +217,7 @@ function CanvasPage() {
                     <SelectContent>
                       {availableCourses.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
-                          {c.name}{c.course_code ? ` (${c.course_code})` : ""} -- {c.id}
+                          {c.name}{c.course_code ? ` (${c.course_code})` : ""} ({c.id})
                         </SelectItem>
                       ))}
                     </SelectContent>

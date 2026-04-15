@@ -25,7 +25,7 @@ to `/var/log/minerva-apache-reload.stamp` so the deploy step can confirm
 the reload happened.
 
 If `apache2ctl configtest` fails, apache stays on its previous in-memory
-config. The bad file remains on disk for inspection -- look at
+config. The bad file remains on disk for inspection; look at
 `journalctl -u minerva-apache-reload`.
 
 ## First-time bootstrap (human admin, once)
@@ -91,7 +91,7 @@ vhost in a Debian runner with mod_lua + mod_shib installed.
   against RFC 4231 vectors.
 - The `/__ext_proxy__/` URL prefix is internal-only; mod_rewrite is the
   only way to reach it. The prefix is a vehicle for attaching different
-  auth directives to otherwise-identical paths -- using `<If>` inside
+  auth directives to otherwise-identical paths; using `<If>` inside
   `<Location />` was tried and broken because it short-circuits the
   carve-outs for `/api/health`, `/lti`, etc.
 - `RequestHeader unset eppn early` strips client-supplied identity

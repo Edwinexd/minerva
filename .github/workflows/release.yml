@@ -45,7 +45,7 @@ jobs:
           and is also attached as a zip below. Extract into Moodle `local/` directory and run
           the Moodle upgrade.
 
-          Chat integration uses LTI 1.3 -- no activity module plugin required.
+          Chat integration uses LTI 1.3; no activity module plugin required.
 
           ## Setup
 

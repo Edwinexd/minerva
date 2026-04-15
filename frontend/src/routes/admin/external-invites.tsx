@@ -39,7 +39,7 @@ function ExternalInvitesPanel() {
             Generate a time-limited login link for someone without a Stockholm University
             account. Links bypass Shibboleth and grant student-level access; promote to
             teacher in User Management after they first log in. The full link is shown only
-            once -- if lost, revoke and re-mint.
+            once; if lost, revoke and re-mint.
           </CardDescription>
         </CardHeader>
         <CardContent>

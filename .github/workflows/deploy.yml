@@ -93,7 +93,7 @@ jobs:
       - name: Deploy Apache config + Lua
         # Apache vhost / Lua hook on the prod host, deployed via the same
         # SSH session. ci can write the two files directly (see
-        # apache/install/bootstrap.sh -- group `apache-deploy` + chmod 0664)
+        # apache/install/bootstrap.sh (group `apache-deploy` + chmod 0664)
         # and a systemd path unit (minerva-apache-reload.path) watches the
         # files, runs configtest, and reloads apache. ci never needs sudo.
         run: |
@@ -120,7 +120,7 @@ jobs:
           done
 
           if [[ "$AFTER" == "$BEFORE" ]]; then
-            echo "::notice::stamp unchanged -- either files were identical or the reload service didn't fire (check journalctl -u minerva-apache-reload)"
+            echo "::notice::stamp unchanged; either files were identical or the reload service didn't fire (check journalctl -u minerva-apache-reload)"
           else
             echo "stamp after:  $AFTER"
           fi

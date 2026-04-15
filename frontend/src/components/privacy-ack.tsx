@@ -46,10 +46,18 @@ export function PrivacyAckBanner({
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           role="dialog"
           aria-modal="true"
+          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false) }}
         >
           <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground ring-1 ring-foreground/10 shadow-lg">
-            <div className="border-b px-6 py-4">
+            <div className="flex items-center justify-between border-b px-6 py-4">
               <h2 className="text-lg font-semibold">How Minerva handles your data</h2>
+              <button
+                onClick={() => setOpen(false)}
+                className="rounded p-1 text-muted-foreground hover:text-foreground"
+                aria-label="Close"
+              >
+                ✕
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-4">
               <DataHandlingContent />
@@ -58,6 +66,9 @@ export function PrivacyAckBanner({
               {error && (
                 <p className="mr-auto self-center text-sm text-destructive">{error}</p>
               )}
+              <Button variant="outline" onClick={() => setOpen(false)} disabled={submitting}>
+                Close
+              </Button>
               <Button onClick={handleAgree} disabled={submitting}>
                 {submitting ? "Saving..." : "I understand and agree"}
               </Button>

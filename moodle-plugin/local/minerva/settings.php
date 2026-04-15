@@ -57,14 +57,5 @@ if ($hassiteconfig) {
         1
     ));
 
-    // EPPN suffix (e.g. @SU.SE) appended to Moodle usernames.
-    $settings->add(new admin_setting_configtext(
-        'local_minerva/eppn_suffix',
-        get_string('settings_eppn_suffix', 'local_minerva'),
-        get_string('settings_eppn_suffix_desc', 'local_minerva'),
-        '@SU.SE',
-        PARAM_TEXT
-    ));
-
     $ADMIN->add('localplugins', $settings);
 }

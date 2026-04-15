@@ -35,8 +35,6 @@ $string['settings_autosync'] = 'Auto-sync enrolment';
 $string['settings_autosync_desc'] = 'Automatically enrol/unenrol students in the linked Minerva course when they are enrolled/unenrolled in Moodle.';
 $string['settings_autosync_materials'] = 'Auto-sync materials';
 $string['settings_autosync_materials_desc'] = 'Automatically upload new resources from linked courses to Minerva every 30 minutes.';
-$string['settings_eppn_suffix'] = 'EPPN suffix';
-$string['settings_eppn_suffix_desc'] = 'Suffix appended to Moodle usernames to form the Shibboleth eppn (e.g. @SU.SE).';
 
 // Capabilities.
 $string['minerva:manage'] = 'Manage Minerva course link';

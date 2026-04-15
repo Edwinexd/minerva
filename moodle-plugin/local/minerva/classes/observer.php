@@ -115,20 +115,15 @@ class observer {
     }
 
     /**
-     * Build the eppn for a Moodle user.
+     * Return the eppn for a Moodle user.
+     *
+     * Moodle usernames at SU are the Shibboleth eppn (e.g. abcd1234@su.se),
+     * so we just pass it through.
      *
      * @param object $user Moodle user record.
-     * @return string The eppn (e.g. user1234@SU.SE).
+     * @return string
      */
     public static function get_eppn(object $user): string {
-        $suffix = get_config('local_minerva', 'eppn_suffix') ?: '@SU.SE';
-        $username = $user->username;
-
-        // If the username already contains @, use it as-is.
-        if (strpos($username, '@') !== false) {
-            return $username;
-        }
-
-        return $username . $suffix;
+        return $user->username;
     }
 }

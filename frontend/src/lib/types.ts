@@ -140,6 +140,8 @@ export interface ConversationWithUser extends Conversation {
   /** Only present on the /all endpoint (teacher view). */
   feedback_up?: number
   feedback_down?: number
+  /** Thumbs-down messages with no teacher note yet. Drives "Needs Review". */
+  unaddressed_down?: number
 }
 
 export interface CourseFeedbackStats {

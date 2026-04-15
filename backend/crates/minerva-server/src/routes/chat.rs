@@ -87,6 +87,7 @@ struct ConversationWithFeedbackResponse {
     message_count: Option<i64>,
     feedback_up: i64,
     feedback_down: i64,
+    unaddressed_down: i64,
 }
 
 #[derive(Serialize)]
@@ -205,6 +206,7 @@ async fn list_all_conversations(
                     message_count: r.message_count,
                     feedback_up: r.feedback_up,
                     feedback_down: r.feedback_down,
+                    unaddressed_down: r.unaddressed_down,
                 }
             })
             .collect(),

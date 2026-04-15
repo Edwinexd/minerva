@@ -75,14 +75,14 @@ function ConversationsPage() {
 
     if (activeTab === "flagged") {
       list = list
-        .filter((c) => (c.feedback_down ?? 0) > 0)
-        .sort((a, b) => (b.feedback_down ?? 0) - (a.feedback_down ?? 0))
+        .filter((c) => (c.unaddressed_down ?? 0) > 0)
+        .sort((a, b) => (b.unaddressed_down ?? 0) - (a.unaddressed_down ?? 0))
     }
     return list
   }, [conversations, topicConvIds, activeTab])
 
   const flaggedCount = useMemo(
-    () => (conversations || []).filter((c) => (c.feedback_down ?? 0) > 0).length,
+    () => (conversations || []).filter((c) => (c.unaddressed_down ?? 0) > 0).length,
     [conversations],
   )
 
@@ -103,27 +103,24 @@ function ConversationsPage() {
       {feedbackStats && (feedbackStats.total_up > 0 || feedbackStats.total_down > 0) && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Feedback Overview</CardTitle>
-            <CardDescription>
-              Ratings students have given to AI responses across all conversations
-            </CardDescription>
+            <CardTitle className="text-base">Student Feedback</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-center gap-4 text-sm">
-              <span className="flex items-center gap-1.5">
-                <span className="text-green-600">&#x1F44D;</span>
-                <span>{feedbackStats.total_up} helpful</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="text-red-500">&#x1F44E;</span>
-                <span>{feedbackStats.total_down} flagged</span>
-              </span>
+            <div className="flex items-center gap-6 text-sm">
+              <div>
+                <span className="text-2xl font-semibold">{feedbackStats.total_up}</span>
+                <span className="ml-1.5 text-muted-foreground">helpful</span>
+              </div>
+              <div>
+                <span className="text-2xl font-semibold">{feedbackStats.total_down}</span>
+                <span className="ml-1.5 text-muted-foreground">flagged</span>
+              </div>
             </div>
             {feedbackStats.categories.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {feedbackStats.categories.map((c) => (
-                  <Badge key={c.category ?? "null"} variant="outline" className="text-xs">
-                    {categoryLabel(c.category)}: {c.count}
+                  <Badge key={c.category ?? "null"} variant="secondary" className="text-xs font-normal">
+                    {categoryLabel(c.category)} &middot; {c.count}
                   </Badge>
                 ))}
               </div>

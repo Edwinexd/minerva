@@ -109,6 +109,7 @@ pub struct ConversationWithFeedbackRow {
     pub message_count: Option<i64>,
     pub feedback_up: i64,
     pub feedback_down: i64,
+    pub unaddressed_down: i64,
 }
 
 pub async fn list_all_by_course(
@@ -148,7 +149,15 @@ pub async fn list_all_by_course_with_feedback(
                 SELECT COUNT(*) FROM message_feedback f
                 JOIN messages m ON m.id = f.message_id
                 WHERE m.conversation_id = c.id AND f.rating = 'down'
-            ), 0) AS "feedback_down!: i64"
+            ), 0) AS "feedback_down!: i64",
+            COALESCE((
+                SELECT COUNT(*) FROM message_feedback f
+                JOIN messages m ON m.id = f.message_id
+                WHERE m.conversation_id = c.id AND f.rating = 'down'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM teacher_notes tn WHERE tn.message_id = f.message_id
+                  )
+            ), 0) AS "unaddressed_down!: i64"
         FROM conversations c
         JOIN users u ON u.id = c.user_id
         WHERE c.course_id = $1

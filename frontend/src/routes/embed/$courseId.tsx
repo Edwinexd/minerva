@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ChevronDown, ChevronUp } from "lucide-react"
+import { ChevronDown, ChevronUp, Menu, X } from "lucide-react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { PrivacyAckBanner } from "@/components/privacy-ack"
@@ -100,6 +100,11 @@ function EmbedPage() {
   const [me, setMe] = useState<EmbedMe | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [activeConvId])
 
   // Load course, user, and conversations on mount.
   useEffect(() => {
@@ -190,9 +195,39 @@ function EmbedPage() {
   }
 
   return (
-    <div className="flex h-full bg-background text-foreground">
-      {/* Sidebar */}
-      <div className="w-56 border-r flex flex-col p-3">
+    <div className="relative flex h-full bg-background text-foreground">
+      <Button
+        variant="outline"
+        size="sm"
+        className="md:hidden absolute top-2 left-2 z-20"
+        onClick={() => setSidebarOpen(true)}
+        aria-label={t("embed.openConversations")}
+      >
+        <Menu className="w-4 h-4" />
+      </Button>
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-30 bg-background/60"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <div
+        className={`${
+          sidebarOpen
+            ? "fixed inset-y-0 left-0 z-40 w-64 bg-background border-r flex flex-col p-3 md:static md:inset-auto md:w-56"
+            : "hidden md:flex md:w-56 border-r flex-col p-3"
+        }`}
+      >
+        <div className="md:hidden flex justify-end mb-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSidebarOpen(false)}
+            aria-label={t("embed.closeConversations")}
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
         <Button size="sm" className="mb-3" onClick={createConversation}>
           {t("embed.newChat")}
         </Button>
@@ -218,8 +253,7 @@ function EmbedPage() {
         )}
       </div>
 
-      {/* Chat area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0 pl-12 md:pl-0">
         {activeConvId ? (
           <EmbedChatWindow
             courseId={courseId}

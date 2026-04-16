@@ -1,0 +1,96 @@
+{
+  "not_found": "Not found.",
+  "unauthorized": "You need to sign in to do that.",
+  "forbidden": "You don't have permission to do that.",
+  "internal": "Something went wrong on our end. Please try again.",
+  "quota": {
+    "student_exceeded": "You've reached your daily token quota for this course.",
+    "owner_exceeded": "The course owner has reached their daily AI spending cap. Contact lambda@dsv.su.se to request an increase."
+  },
+  "privacy": {
+    "not_acknowledged": "You must acknowledge the privacy notice before using chat."
+  },
+  "doc": {
+    "no_file": "No file provided.",
+    "multipart_error": "Upload failed: {{detail}}",
+    "read_failed": "Couldn't read the uploaded file: {{detail}}",
+    "file_too_large": "File is too large ({{size_bytes}} bytes, max {{max_mb}} MB)."
+  },
+  "service": {
+    "wrong_status": "Document status is '{{status}}', expected 'awaiting_transcript'.",
+    "transcript_empty": "Transcript text is empty.",
+    "status_changed_concurrently": "The document's status changed while we were processing it. Please try again.",
+    "missing_text_or_error": "Provide either 'text' or 'error'.",
+    "filename_empty": "Filename is empty.",
+    "url_invalid_length": "URL must be between 1 and 2048 characters."
+  },
+  "external_auth": {
+    "eppn_invalid_length": "EPPN must be between 1 and 200 characters."
+  },
+  "api_keys": {
+    "name_invalid_length": "Name must be between 1 and 100 characters."
+  },
+  "admin": {
+    "role_invalid": "Role must be 'teacher' or 'student'.",
+    "cannot_suspend_self": "You can't suspend your own account.",
+    "limit_negative": "Limit must be 0 or greater.",
+    "limit_too_large": "Limit must be {{max}} or less.",
+    "target_role_invalid": "Target role must be 'teacher' or 'student'.",
+    "rule_name_required": "Name is required.",
+    "condition_attribute_unsupported": "Unsupported attribute '{{attribute}}'. Supported: {{supported}}.",
+    "condition_operator_invalid": "Operator must be one of contains, not_contains, regex, not_regex.",
+    "condition_regex_invalid": "Invalid regex: {{detail}}"
+  },
+  "chat": {
+    "rating_invalid": "Rating must be 'up' or 'down'.",
+    "feedback_only_assistant": "Feedback can only be left on assistant messages."
+  },
+  "signed_url": {
+    "expired": "This invite link has expired.",
+    "max_uses_reached": "This invite link has reached its maximum number of uses."
+  },
+  "canvas": {
+    "api_request_failed": "Couldn't reach Canvas: {{detail}}",
+    "api_error": "Canvas returned an error ({{status}}): {{body}}",
+    "api_parse_failed": "Couldn't parse Canvas's response: {{detail}}",
+    "base_url_and_token_required": "Canvas base URL and API token are required.",
+    "name_required": "Name is required.",
+    "base_url_required": "Canvas base URL is required.",
+    "api_token_required": "Canvas API token is required.",
+    "course_id_required": "Canvas course ID is required.",
+    "unreachable": "Couldn't reach Canvas. Check your base URL and API token.",
+    "fetch_file_metadata_failed": "Couldn't fetch file metadata from Canvas: {{detail}}",
+    "file_too_large": "Canvas file is too large to import ({{size_bytes}} bytes).",
+    "page_too_large": "Canvas page is too large to import ({{size_bytes}} bytes).",
+    "warning": {
+      "files_unavailable": "Files API unavailable ({{detail}}). Falling back to Modules for file discovery.",
+      "modules_unavailable": "Modules API unavailable ({{detail}}). Only top-level Files will be synced."
+    },
+    "sync": {
+      "item_failed": "{{item}}: {{detail}}"
+    }
+  },
+  "lti": {
+    "client_id_required": "client_id is required in the login initiation request.",
+    "no_registration": "No LTI registration found for issuer={{issuer}}, client_id={{client_id}}.",
+    "invalid_or_expired_state": "Invalid or expired LTI launch state.",
+    "deployment_id_mismatch": "LTI deployment_id mismatch: expected {{expected}}, got {{actual}}.",
+    "deployment_id_missing": "JWT is missing the deployment_id claim.",
+    "registration_duplicate": "An LTI registration with this issuer and client_id already exists.",
+    "jwt_header_invalid": "Invalid JWT header: {{detail}}",
+    "no_jwks_key": "No matching key in the platform's JWKS.",
+    "jwt_validation_failed": "JWT validation failed: {{detail}}",
+    "nonce_mismatch": "LTI nonce mismatch.",
+    "message_type_unsupported": "Unsupported LTI message type: {{type}}"
+  },
+  "course": {
+    "min_score_out_of_range": "min_score must be between 0.0 and 1.0.",
+    "embedding_provider_invalid": "Invalid embedding provider: {{provider}}",
+    "local_embedding_model_invalid": "Invalid local embedding model: {{model}}"
+  },
+  "play": {
+    "designation_invalid_length": "Designation must be between 1 and 64 characters.",
+    "designation_invalid_chars": "Designation must not contain whitespace or slashes.",
+    "designation_duplicate": "That designation is already attached to this course."
+  }
+}

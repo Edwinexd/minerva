@@ -111,9 +111,7 @@ async fn create_play_designation(
 
     let designation = body.designation.trim().to_string();
     if designation.is_empty() || designation.len() > 64 {
-        return Err(AppError::BadRequest(
-            "designation must be 1-64 characters".into(),
-        ));
+        return Err(AppError::bad_request("play.designation_invalid_length"));
     }
     // Designation codes are short ASCII (letters/digits/dash/underscore). Keep it
     // permissive but reject anything with whitespace or slashes.
@@ -121,9 +119,7 @@ async fn create_play_designation(
         .chars()
         .any(|c| c.is_whitespace() || c == '/' || c == '\\')
     {
-        return Err(AppError::BadRequest(
-            "designation must not contain whitespace or slashes".into(),
-        ));
+        return Err(AppError::bad_request("play.designation_invalid_chars"));
     }
 
     let id = Uuid::new_v4();
@@ -138,9 +134,7 @@ async fn create_play_designation(
     {
         Ok(row) => row,
         Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
-            return Err(AppError::BadRequest(
-                "designation already exists for this course".into(),
-            ));
+            return Err(AppError::bad_request("play.designation_duplicate"));
         }
         Err(e) => return Err(AppError::Database(e)),
     };

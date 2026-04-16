@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { canvasConnectionsQuery, canvasFilesQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { useApiErrorMessage, useLocalizedMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -41,6 +43,10 @@ function formatBytes(bytes: number): string {
 function CanvasPage() {
   const { courseId } = Route.useParams()
   const queryClient = useQueryClient()
+  const { t } = useTranslation("teacher")
+  const { t: tCommon } = useTranslation("common")
+  const formatError = useApiErrorMessage()
+  const fmtMsg = useLocalizedMessage()
   const { data: connections, isLoading } = useQuery(canvasConnectionsQuery(courseId))
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState("")
@@ -87,7 +93,7 @@ function CanvasPage() {
         setCanvasCourseId(courses[0].id)
       }
     } catch (e) {
-      setCoursesError(e instanceof Error ? e.message : "Failed to load courses")
+      setCoursesError(e instanceof Error ? formatError(e) : t("canvas.loadCoursesFailed"))
       setAvailableCourses(null)
     } finally {
       setIsLoadingCourses(false)
@@ -134,24 +140,23 @@ function CanvasPage() {
   return (
     <div className="space-y-4">
       <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/40">
-        <p className="font-semibold text-amber-900 dark:text-amber-200">What Canvas sync does</p>
+        <p className="font-semibold text-amber-900 dark:text-amber-200">{t("canvas.noticeTitle")}</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-900/90 dark:text-amber-200/90">
-          <li>Pulls course files and page content only (no submissions, rosters, or grades).</li>
-          <li>Your Canvas API token is stored in the Minerva database in plaintext. Revoke it in Minerva or Canvas to disconnect.</li>
-          <li>Document content is indexed locally in Minerva and excerpts are sent to Cerebras when students ask related questions.</li>
+          <li>{t("canvas.noticeBullet1")}</li>
+          <li>{t("canvas.noticeBullet2")}</li>
+          <li>{t("canvas.noticeBullet3")}</li>
         </ul>
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>Canvas Connections</CardTitle>
+          <CardTitle>{t("canvas.connectionsTitle")}</CardTitle>
           <CardDescription>
-            Connect a Canvas LMS course to sync its files into Minerva as documents.
-            You'll need a Canvas personal access token with course file access.
+            {t("canvas.connectionsDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {!showForm && (
-            <Button onClick={() => setShowForm(true)}>Add Canvas Connection</Button>
+            <Button onClick={() => setShowForm(true)}>{t("canvas.addConnection")}</Button>
           )}
 
           {showForm && (
@@ -168,34 +173,34 @@ function CanvasPage() {
               }}
             >
               <p className="text-sm text-muted-foreground">
-                In Canvas, go to Account -&gt; Settings -&gt; New Access Token to generate an API token.
+                {t("canvas.formTokenHint")}
               </p>
               <div className="space-y-2">
-                <Label htmlFor="canvas-name">Connection Name</Label>
-                <Input id="canvas-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. IK1203 HT2025" />
+                <Label htmlFor="canvas-name">{t("canvas.connectionNameLabel")}</Label>
+                <Input id="canvas-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("canvas.connectionNamePlaceholder")} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="canvas-url">Canvas URL</Label>
+                <Label htmlFor="canvas-url">{t("canvas.baseUrlLabel")}</Label>
                 <Input
                   id="canvas-url"
                   value={baseUrl}
                   onChange={(e) => { setBaseUrl(e.target.value); setAvailableCourses(null); setCoursesError(null) }}
-                  placeholder="https://canvas.instructure.com"
+                  placeholder={t("canvas.baseUrlPlaceholder")}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="canvas-token">API Token</Label>
+                <Label htmlFor="canvas-token">{t("canvas.tokenLabel")}</Label>
                 <Input
                   id="canvas-token"
                   type="password"
                   value={apiToken}
                   onChange={(e) => { setApiToken(e.target.value); setAvailableCourses(null); setCoursesError(null) }}
-                  placeholder="Canvas personal access token"
+                  placeholder={t("canvas.tokenPlaceholder")}
                 />
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="canvas-course-id">Canvas Course ID</Label>
+                  <Label htmlFor="canvas-course-id">{t("canvas.courseIdLabel")}</Label>
                   {baseUrl.trim() && apiToken.trim() && (
                     <Button
                       type="button"
@@ -205,14 +210,14 @@ function CanvasPage() {
                       onClick={loadCourses}
                       disabled={isLoadingCourses || createMutation.isPending}
                     >
-                      {isLoadingCourses ? "Loading..." : "Load courses"}
+                      {isLoadingCourses ? t("canvas.loadingCourses") : t("canvas.loadCourses")}
                     </Button>
                   )}
                 </div>
                 {availableCourses && availableCourses.length > 0 ? (
                   <Select value={canvasCourseId} onValueChange={(v) => v && setCanvasCourseId(v)}>
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select a Canvas course" />
+                      <SelectValue placeholder={t("canvas.selectCoursePlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
                       {availableCourses.map((c) => (
@@ -228,13 +233,13 @@ function CanvasPage() {
                       id="canvas-course-id"
                       value={canvasCourseId}
                       onChange={(e) => setCanvasCourseId(e.target.value)}
-                      placeholder="e.g. 12345"
+                      placeholder={t("canvas.courseIdPlaceholder")}
                     />
                     {coursesError ? (
                       <p className="text-xs text-destructive">{coursesError}</p>
                     ) : (
                       <p className="text-xs text-muted-foreground">
-                        Found in the Canvas course URL: canvas.example.com/courses/<strong>12345</strong>
+                        {t("canvas.courseIdHelpPrefix")}<strong>{t("canvas.courseIdHelpSample")}</strong>
                       </p>
                     )}
                   </>
@@ -242,15 +247,15 @@ function CanvasPage() {
               </div>
 
               {createMutation.isError && (
-                <p className="text-sm text-destructive">{createMutation.error.message}</p>
+                <p className="text-sm text-destructive">{formatError(createMutation.error)}</p>
               )}
 
               <div className="flex gap-2">
                 <Button type="submit" disabled={createMutation.isPending || !baseUrl.trim() || !apiToken.trim() || !canvasCourseId.trim()}>
-                  {createMutation.isPending ? "Connecting..." : "Save Connection"}
+                  {createMutation.isPending ? t("canvas.connectingButton") : t("canvas.saveConnection")}
                 </Button>
                 <Button type="button" variant="outline" onClick={() => { setShowForm(false); setAvailableCourses(null); setCoursesError(null) }}>
-                  Cancel
+                  {tCommon("actions.cancel")}
                 </Button>
               </div>
             </form>
@@ -264,7 +269,7 @@ function CanvasPage() {
 
           {connections && connections.length === 0 && !showForm && (
             <p className="text-sm text-muted-foreground py-4 text-center">
-              No Canvas connections yet. Add one to start syncing course files.
+              {t("canvas.noConnections")}
             </p>
           )}
 
@@ -278,12 +283,12 @@ function CanvasPage() {
                   <div className="space-y-1 min-w-0 sm:flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-sm">{conn.name}</span>
-                      <Badge variant="secondary">Course {conn.canvas_course_id}</Badge>
+                      <Badge variant="secondary">{t("canvas.courseBadge", { id: conn.canvas_course_id })}</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground break-all">{conn.canvas_base_url}</div>
                     {conn.last_synced_at && (
                       <div className="text-xs text-muted-foreground">
-                        Last synced: <RelativeTime date={conn.last_synced_at} />
+                        {t("canvas.lastSynced")} <RelativeTime date={conn.last_synced_at} />
                       </div>
                     )}
                     <label className="flex items-center gap-2 text-xs text-muted-foreground pt-1 cursor-pointer select-none">
@@ -297,7 +302,7 @@ function CanvasPage() {
                         }
                         disabled={autoSyncMutation.isPending}
                       />
-                      <span>Auto-sync daily</span>
+                      <span>{t("canvas.autoSync")}</span>
                     </label>
                   </div>
                   <div className="flex flex-wrap gap-2 sm:shrink-0">
@@ -306,7 +311,7 @@ function CanvasPage() {
                       size="sm"
                       onClick={() => setSelectedConn(selectedConn === conn.id ? null : conn.id)}
                     >
-                      Files
+                      {t("canvas.filesButton")}
                     </Button>
                     <Button
                       variant="default"
@@ -317,7 +322,7 @@ function CanvasPage() {
                       }}
                       disabled={syncMutation.isPending}
                     >
-                      {syncMutation.isPending ? "Syncing..." : "Sync Now"}
+                      {syncMutation.isPending ? t("canvas.syncingButton") : t("canvas.syncNow")}
                     </Button>
                     <Button
                       variant="destructive"
@@ -325,7 +330,7 @@ function CanvasPage() {
                       onClick={() => deleteMutation.mutate(conn.id)}
                       disabled={deleteMutation.isPending}
                     >
-                      Remove
+                      {t("canvas.remove")}
                     </Button>
                   </div>
                 </div>
@@ -340,21 +345,21 @@ function CanvasPage() {
           {syncResult && (
             <div className="rounded-md border p-3 text-sm space-y-1">
               <p>
-                <strong>Sync complete:</strong> {syncResult.synced} new, {syncResult.resynced} updated, {syncResult.skipped} unchanged
+                <strong>{t("canvas.syncComplete")}</strong> {t("canvas.syncCounts", { synced: syncResult.synced, resynced: syncResult.resynced, skipped: syncResult.skipped })}
               </p>
               {syncResult.warnings.length > 0 && (
                 <div className="text-amber-600 dark:text-amber-400">
-                  <p>Warnings:</p>
+                  <p>{t("canvas.warningsLabel")}</p>
                   <ul className="list-disc list-inside">
-                    {syncResult.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                    {syncResult.warnings.map((w, i) => <li key={i}>{fmtMsg(w)}</li>)}
                   </ul>
                 </div>
               )}
               {syncResult.errors.length > 0 && (
                 <div className="text-destructive">
-                  <p>Errors:</p>
+                  <p>{t("canvas.errorsLabel")}</p>
                   <ul className="list-disc list-inside">
-                    {syncResult.errors.map((err, i) => <li key={i}>{err}</li>)}
+                    {syncResult.errors.map((err, i) => <li key={i}>{fmtMsg(err)}</li>)}
                   </ul>
                 </div>
               )}
@@ -362,7 +367,7 @@ function CanvasPage() {
           )}
 
           {syncMutation.isError && (
-            <p className="text-sm text-destructive">{syncMutation.error.message}</p>
+            <p className="text-sm text-destructive">{formatError(syncMutation.error)}</p>
           )}
         </CardContent>
       </Card>
@@ -370,15 +375,17 @@ function CanvasPage() {
   )
 }
 
-function kindLabel(kind: string): string {
-  if (kind === "file") return "File"
-  if (kind === "page") return "Page"
-  if (kind === "url") return "URL"
-  return kind
-}
-
 function CanvasFilesPreview({ courseId, connectionId }: { courseId: string; connectionId: string }) {
   const { data, isLoading } = useQuery(canvasFilesQuery(courseId, connectionId))
+  const { t } = useTranslation("teacher")
+  const fmtMsg = useLocalizedMessage()
+
+  const kindLabel = (kind: string): string => {
+    if (kind === "file") return t("canvas.kindFile")
+    if (kind === "page") return t("canvas.kindPage")
+    if (kind === "url") return t("canvas.kindUrl")
+    return kind
+  }
 
   if (isLoading) return <Skeleton className="h-20 w-full" />
   if (!data) return null
@@ -389,11 +396,11 @@ function CanvasFilesPreview({ courseId, connectionId }: { courseId: string; conn
     <div className="space-y-2">
       {warnings.length > 0 && (
         <div className="rounded border border-amber-500/40 bg-amber-50 dark:bg-amber-950/30 p-2 text-xs text-amber-700 dark:text-amber-300 space-y-1">
-          {warnings.map((w, i) => <div key={i}>{w}</div>)}
+          {warnings.map((w, i) => <div key={i}>{fmtMsg(w)}</div>)}
         </div>
       )}
       {items.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No items found in this Canvas course.</p>
+        <p className="text-xs text-muted-foreground">{t("canvas.filesNoItems")}</p>
       ) : (
         <div className="rounded border p-2 text-xs max-h-48 overflow-y-auto space-y-1">
           {items.map((f) => (
@@ -404,11 +411,11 @@ function CanvasFilesPreview({ courseId, connectionId }: { courseId: string; conn
                 <span className="text-muted-foreground shrink-0">{formatBytes(f.size)}</span>
               )}
               {f.needs_resync ? (
-                <Badge variant="default" className="text-xs shrink-0">Update</Badge>
+                <Badge variant="default" className="text-xs shrink-0">{t("canvas.statusUpdate")}</Badge>
               ) : f.already_synced ? (
-                <Badge variant="secondary" className="text-xs shrink-0">Synced</Badge>
+                <Badge variant="secondary" className="text-xs shrink-0">{t("canvas.statusSynced")}</Badge>
               ) : (
-                <Badge variant="outline" className="text-xs shrink-0">New</Badge>
+                <Badge variant="outline" className="text-xs shrink-0">{t("canvas.statusNew")}</Badge>
               )}
             </div>
           ))}

@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { playCourseCatalogQuery, playDesignationsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -25,6 +27,8 @@ export const Route = createFileRoute(
 function PlayDesignationsPage() {
   const { courseId } = Route.useParams()
   const queryClient = useQueryClient()
+  const { t } = useTranslation("teacher")
+  const formatError = useApiErrorMessage()
   const [designation, setDesignation] = useState("")
   const { data: designations, isLoading } = useQuery(
     playDesignationsQuery(courseId),
@@ -58,12 +62,10 @@ function PlayDesignationsPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Play Designations</CardTitle>
+        <CardTitle>{t("playDesignations.title")}</CardTitle>
         <CardDescription>
-          Watch course designations on play.dsv.su.se (e.g. <code>PROG1</code>,{" "}
-          <code>IDSV</code>). The hourly transcript pipeline will discover any
-          new presentations under each designation and auto-index their
-          transcripts into this course.
+          {t("playDesignations.descriptionPrefix")}<code>PROG1</code>{t("playDesignations.descriptionMid")}
+          <code>IDSV</code>{t("playDesignations.descriptionSuffix")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -80,7 +82,7 @@ function PlayDesignationsPage() {
           <Input
             value={designation}
             onChange={(e) => setDesignation(e.target.value)}
-            placeholder="Designation code (e.g. PROG1)"
+            placeholder={t("playDesignations.placeholder")}
             className="flex-1"
             list="play-course-catalog"
             autoCapitalize="characters"
@@ -96,13 +98,13 @@ function PlayDesignationsPage() {
             type="submit"
             disabled={createMutation.isPending || !designation.trim()}
           >
-            {createMutation.isPending ? "Adding..." : "Add"}
+            {createMutation.isPending ? t("playDesignations.adding") : t("playDesignations.add")}
           </Button>
         </form>
 
         {createMutation.isError && (
           <p className="text-sm text-destructive">
-            {createMutation.error.message}
+            {formatError(createMutation.error)}
           </p>
         )}
 
@@ -115,7 +117,7 @@ function PlayDesignationsPage() {
 
         {designations && designations.length === 0 && (
           <p className="text-sm text-muted-foreground py-4 text-center">
-            No designations watched yet. Add one to auto-index presentations.
+            {t("playDesignations.empty")}
           </p>
         )}
 
@@ -133,16 +135,16 @@ function PlayDesignationsPage() {
                 </div>
                 <div className="flex gap-3 text-xs text-muted-foreground">
                   <span>
-                    Added: <RelativeTime date={d.created_at} />
+                    {t("playDesignations.added")} <RelativeTime date={d.created_at} />
                   </span>
                   <span>
-                    Last sync:{" "}
-                    {d.last_synced_at ? <RelativeTime date={d.last_synced_at} /> : "never"}
+                    {t("playDesignations.lastSync")}{" "}
+                    {d.last_synced_at ? <RelativeTime date={d.last_synced_at} /> : t("playDesignations.never")}
                   </span>
                 </div>
                 {d.last_error && (
                   <p className="text-xs text-destructive">
-                    Last error: {d.last_error}
+                    {t("playDesignations.lastError", { message: d.last_error })}
                   </p>
                 )}
               </div>
@@ -152,7 +154,7 @@ function PlayDesignationsPage() {
                 onClick={() => deleteMutation.mutate(d.id)}
                 disabled={deleteMutation.isPending}
               >
-                Remove
+                {t("playDesignations.remove")}
               </Button>
             </div>
           ))}

@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { apiKeysQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -23,6 +25,9 @@ export const Route = createFileRoute("/teacher/courses/$courseId/api-keys")({
 function ApiKeysPage() {
   const { courseId } = Route.useParams()
   const queryClient = useQueryClient()
+  const { t } = useTranslation("teacher")
+  const { t: tCommon } = useTranslation("common")
+  const formatError = useApiErrorMessage()
   const [keyName, setKeyName] = useState("")
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null)
   const [copied, setCopied] = useState(false)
@@ -53,10 +58,9 @@ function ApiKeysPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>API Keys</CardTitle>
+        <CardTitle>{t("apiKeys.title")}</CardTitle>
         <CardDescription>
-          Create API keys for external integrations (e.g. Moodle plugin).
-          Keys are scoped to this course only.
+          {t("apiKeys.description")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -73,22 +77,22 @@ function ApiKeysPage() {
           <Input
             value={keyName}
             onChange={(e) => setKeyName(e.target.value)}
-            placeholder="Key name (e.g. Moodle integration)"
+            placeholder={t("apiKeys.namePlaceholder")}
             className="flex-1"
           />
           <Button type="submit" disabled={createMutation.isPending || !keyName.trim()}>
-            {createMutation.isPending ? "Creating..." : "Create Key"}
+            {createMutation.isPending ? t("apiKeys.creatingButton") : t("apiKeys.createButton")}
           </Button>
         </form>
 
         {createMutation.isError && (
-          <p className="text-sm text-destructive">{createMutation.error.message}</p>
+          <p className="text-sm text-destructive">{formatError(createMutation.error)}</p>
         )}
 
         {newKey && (
           <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-4 space-y-2">
             <p className="text-sm font-medium">
-              API key created! Copy it now - it won't be shown again.
+              {t("apiKeys.createdBanner")}
             </p>
             <div className="flex gap-2 items-center">
               <code className="text-sm bg-muted px-3 py-2 rounded flex-1 font-mono break-all">
@@ -103,7 +107,7 @@ function ApiKeysPage() {
                   setTimeout(() => setCopied(false), 2000)
                 }}
               >
-                {copied ? "Copied!" : "Copy"}
+                {copied ? t("apiKeys.copied") : tCommon("actions.copy")}
               </Button>
             </div>
           </div>
@@ -118,7 +122,7 @@ function ApiKeysPage() {
 
         {keys && keys.length === 0 && !newKey && (
           <p className="text-sm text-muted-foreground py-4 text-center">
-            No API keys yet. Create one to integrate with external services.
+            {t("apiKeys.empty")}
           </p>
         )}
 
@@ -136,9 +140,9 @@ function ApiKeysPage() {
                   </code>
                 </div>
                 <div className="flex gap-3 text-xs text-muted-foreground">
-                  <span>Created: <RelativeTime date={k.created_at} /></span>
+                  <span>{t("apiKeys.created")} <RelativeTime date={k.created_at} /></span>
                   {k.last_used_at && (
-                    <span>Last used: <RelativeTime date={k.last_used_at} /></span>
+                    <span>{t("apiKeys.lastUsed")} <RelativeTime date={k.last_used_at} /></span>
                   )}
                 </div>
               </div>
@@ -148,7 +152,7 @@ function ApiKeysPage() {
                 onClick={() => deleteMutation.mutate(k.id)}
                 disabled={deleteMutation.isPending}
               >
-                Revoke
+                {t("apiKeys.revoke")}
               </Button>
             </div>
           ))}

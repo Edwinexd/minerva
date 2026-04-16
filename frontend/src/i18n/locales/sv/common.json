@@ -1,0 +1,102 @@
+{
+  "nav": {
+    "admin": "Admin",
+    "dataHandling": "Datahantering",
+    "openInNewTab": "Öppna i ny flik"
+  },
+  "footer": {
+    "licenseLead": "är licensierad under"
+  },
+  "actions": {
+    "save": "Spara",
+    "saving": "Sparar…",
+    "cancel": "Avbryt",
+    "create": "Skapa",
+    "creating": "Skapar…",
+    "delete": "Ta bort",
+    "deleting": "Tar bort…",
+    "remove": "Ta bort",
+    "edit": "Redigera",
+    "close": "Stäng",
+    "confirm": "Bekräfta",
+    "back": "Tillbaka",
+    "retry": "Försök igen",
+    "submit": "Skicka",
+    "submitting": "Skickar…",
+    "loading": "Laddar…",
+    "copy": "Kopiera",
+    "copied": "Kopierat",
+    "search": "Sök"
+  },
+  "status": {
+    "loading": "Laddar…",
+    "error": "Något gick fel.",
+    "empty": "Inget att visa än."
+  },
+  "dev": {
+    "label": "DEV"
+  },
+  "language": {
+    "label": "Språk",
+    "english": "English",
+    "swedish": "Svenska"
+  },
+  "home": {
+    "welcome": "Välkommen, {{name}}",
+    "appName": "Minerva",
+    "yourCourses": "Dina kurser",
+    "yourCourse": "Din kurs",
+    "newCourse": "Ny kurs",
+    "loadFailed": "Kunde inte läsa in kurser: {{error}}",
+    "teacherSection": "Kurser du undervisar i",
+    "studentSection": "Kurser du är anmäld till",
+    "emptyTeacher": "Inga kurser än. Skapa din första kurs för att komma igång.",
+    "emptyStudent": "Du har inte lagts till i någon kurs än. Be din lärare om en inbjudningslänk.",
+    "clickToChat": "Klicka för att börja chatta",
+    "ragBadge": "{{percent}} % RAG",
+    "temperatureBadge": "T={{value}}",
+    "create": {
+      "title": "Skapa kurs",
+      "nameLabel": "Kursnamn",
+      "namePlaceholder": "t.ex. Prog2 VT 2026",
+      "descriptionLabel": "Beskrivning",
+      "descriptionPlaceholder": "Valfri beskrivning",
+      "submit": "Skapa",
+      "submitting": "Skapar…"
+    }
+  },
+  "dataHandling": {
+    "title": "Så hanterar Minerva dina uppgifter",
+    "whatWeStore": {
+      "heading": "Vad vi lagrar",
+      "identity": "Din identitet från Shibboleth eller LTI: ditt SU-användarnamn (eppn) och visningsnamn. Användare med extern inbjudan ser pseudonymiserade namn på andra i kursen.",
+      "conversations": "Dina konversationer, meddelanden och eventuell återkoppling du lämnar på AI-svar.",
+      "materials": "Kursmaterial som lärare laddat upp eller synkat från Canvas/Moodle."
+    },
+    "staffAccess": {
+      "heading": "Kurspersonal kan läsa dina konversationer",
+      "body": "Lärare och assistenter i din kurs kan se alla konversationer du har där. Andra studenter kan inte det, om inte en lärare uttryckligen delar en konversation med klassen."
+    },
+    "whereMessagesGo": {
+      "heading": "Vart dina meddelanden går",
+      "cerebras": "Chattmeddelanden och relevanta utdrag ur kursmaterialet skickas till <strong>Cerebras</strong> för AI-inferens.",
+      "openai": "Om din kurs lärare har aktiverat OpenAI-embeddings skickas dina frågor dessutom till <strong>OpenAI</strong> för att beräkna en sökvektor. Annars körs embeddings lokalt på Minerva-servern.",
+      "nothingElse": "Inget annat lämnar Minerva-servern."
+    },
+    "retention": {
+      "heading": "Hur länge vi sparar det",
+      "body": "Konversationer och meddelanden sparas så länge kursen finns kvar."
+    },
+    "integrations": {
+      "heading": "Integrationer med Canvas/Moodle/Play (lärare)",
+      "canvas": "<strong>Canvas:</strong> Minerva hämtar endast kursfiler och sidinnehåll (inga inlämningar, deltagarlistor eller betyg). Din Canvas API-token lagras i klartext i Minerva-databasen; återkalla den i Minerva eller Canvas för att koppla bort.",
+      "moodle": "<strong>Moodle-plugin:</strong> skickar kursmaterial (filer, HTML för sidor/böcker/etiketter, URL:er) och en lista över anmälda studenter (eppn + visningsnamn) till Minerva.",
+      "lti": "<strong>LTI-starter:</strong> när Moodle eller Canvas startar Minerva i en iframe skickar plattformen studentens identifierare och (om konfigurerat) visningsnamn till Minerva. En användarrad skapas vid första starten.",
+      "play": "<strong>Play (play.dsv.su.se):</strong> när ett `.url`-dokument pekar på Play hämtas VTT-transkriptet och lagras som sökbar text i kursen."
+    },
+    "contact": {
+      "heading": "Kontakt",
+      "questions": "Frågor:"
+    }
+  }
+}

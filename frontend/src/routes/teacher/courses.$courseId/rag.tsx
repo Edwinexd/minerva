@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { courseDocumentsQuery, courseQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -41,6 +42,7 @@ function RagDebugPanel({
   course?: Course
 }) {
   const queryClient = useQueryClient()
+  const { t } = useTranslation("teacher")
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<
     { score: number; text: string; filename: string; chunk_index: number }[]
@@ -86,10 +88,9 @@ function RagDebugPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>RAG Search</CardTitle>
+        <CardTitle>{t("rag.searchTitle")}</CardTitle>
         <CardDescription>
-          Test semantic search against your course documents. Drag the
-          threshold to preview which chunks would be sent to the model.
+          {t("rag.searchDescription")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -103,11 +104,11 @@ function RagDebugPanel({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Enter a test query..."
+            placeholder={t("rag.queryPlaceholder")}
             className="flex-1"
           />
           <Button type="submit" disabled={searching || !query.trim()}>
-            {searching ? "Searching..." : "Search"}
+            {searching ? t("rag.searching") : t("rag.search")}
           </Button>
         </form>
 
@@ -115,17 +116,17 @@ function RagDebugPanel({
           <div className="space-y-2 rounded border p-3 bg-muted/30">
             <div className="flex items-center justify-between gap-3">
               <Label className="text-sm">
-                Min similarity threshold:{" "}
+                {t("rag.thresholdLabel")}{" "}
                 <span className="font-mono">{effectiveThreshold.toFixed(2)}</span>
                 {dirty && (
                   <span className="ml-2 text-xs text-muted-foreground">
-                    (preview, saved value is {course.min_score.toFixed(2)})
+                    {t("rag.thresholdPreview", { value: course.min_score.toFixed(2) })}
                   </span>
                 )}
               </Label>
               {results.length > 0 && (
                 <span className="text-xs text-muted-foreground">
-                  {includedCount} of {results.length} chunks would be included
+                  {t("rag.includedCount", { included: includedCount, total: results.length })}
                 </span>
               )}
             </div>
@@ -147,7 +148,7 @@ function RagDebugPanel({
                   if (previewThreshold != null) saveMutation.mutate(previewThreshold)
                 }}
               >
-                {saveMutation.isPending ? "Saving..." : "Save threshold"}
+                {saveMutation.isPending ? t("rag.saving") : t("rag.saveThreshold")}
               </Button>
               {dirty && (
                 <Button
@@ -157,7 +158,7 @@ function RagDebugPanel({
                   onClick={() => setPreviewThreshold(null)}
                   disabled={saveMutation.isPending}
                 >
-                  Reset
+                  {t("rag.reset")}
                 </Button>
               )}
             </div>
@@ -190,12 +191,12 @@ function RagDebugPanel({
                         {r.score.toFixed(3)}
                       </Badge>
                       <Badge variant={included ? "default" : "outline"}>
-                        {included ? "included" : "excluded"}
+                        {included ? t("rag.included") : t("rag.excluded")}
                       </Badge>
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Chunk #{r.chunk_index}
+                    {t("rag.chunkIndex", { index: r.chunk_index })}
                   </p>
                   <p className="text-sm whitespace-pre-wrap line-clamp-4">{r.text}</p>
                 </div>
@@ -209,6 +210,7 @@ function RagDebugPanel({
 }
 
 function ChunkBrowser({ courseId }: { courseId: string }) {
+  const { t } = useTranslation("teacher")
   const { data: documents } = useQuery(courseDocumentsQuery(courseId))
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null)
   const { data: chunks, isLoading: chunksLoading } = useQuery({
@@ -225,15 +227,15 @@ function ChunkBrowser({ courseId }: { courseId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Chunk Browser</CardTitle>
+        <CardTitle>{t("rag.browserTitle")}</CardTitle>
         <CardDescription>
-          Browse the chunks extracted from your documents
+          {t("rag.browserDescription")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {readyDocs.length === 0 ? (
           <p className="text-muted-foreground text-sm">
-            No processed documents yet.
+            {t("rag.noProcessed")}
           </p>
         ) : (
           <div className="flex gap-2 flex-wrap">
@@ -244,7 +246,7 @@ function ChunkBrowser({ courseId }: { courseId: string }) {
                 size="sm"
                 onClick={() => setSelectedDoc(doc.id)}
               >
-                {doc.filename} ({doc.chunk_count || 0} chunks)
+                {t("rag.docButton", { filename: doc.filename, count: doc.chunk_count || 0 })}
               </Button>
             ))}
           </div>
@@ -265,7 +267,7 @@ function ChunkBrowser({ courseId }: { courseId: string }) {
                 className="border rounded p-3 text-sm"
               >
                 <div className="text-xs text-muted-foreground mb-1">
-                  Chunk #{chunk.chunk_index}
+                  {t("rag.chunkIndex", { index: chunk.chunk_index })}
                 </div>
                 <p className="whitespace-pre-wrap">{chunk.text}</p>
               </div>

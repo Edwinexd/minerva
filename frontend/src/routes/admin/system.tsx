@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { adminSystemMetricsQuery } from "@/lib/queries"
+import { useApiErrorMessage } from "@/lib/use-api-error"
 import {
   Card,
   CardContent,
@@ -27,6 +29,8 @@ function formatBytes(bytes: number | null | undefined): string {
 }
 
 function SystemPanel() {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
   const { data, isLoading, error } = useQuery(adminSystemMetricsQuery)
 
   if (isLoading) {
@@ -43,10 +47,8 @@ function SystemPanel() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>System metrics unavailable</CardTitle>
-          <CardDescription>
-            {error instanceof Error ? error.message : "Unknown error"}
-          </CardDescription>
+          <CardTitle>{t("system.unavailableTitle")}</CardTitle>
+          <CardDescription>{formatError(error)}</CardDescription>
         </CardHeader>
       </Card>
     )
@@ -63,12 +65,11 @@ function SystemPanel() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Storage</CardTitle>
+          <CardTitle>{t("system.storage.title")}</CardTitle>
           <CardDescription>
-            Filesystem backing{" "}
-            <code className="text-xs">{disk?.path ?? "-"}</code>; the host
-            volume holds postgres, qdrant, documents and backups. Contact DSV
-            helpdesk to expand when free space runs low.
+            {t("system.storage.descriptionLead")}
+            <code className="text-xs">{disk?.path ?? "-"}</code>
+            {t("system.storage.descriptionTail")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -76,10 +77,16 @@ function SystemPanel() {
             <div className="space-y-3">
               <div className="flex items-baseline justify-between text-sm">
                 <span className="font-medium">
-                  {formatBytes(disk.used_bytes)} / {formatBytes(disk.total_bytes)} used
+                  {t("system.storage.usedOfTotal", {
+                    used: formatBytes(disk.used_bytes),
+                    total: formatBytes(disk.total_bytes),
+                  })}
                 </span>
                 <span className="text-muted-foreground">
-                  {formatBytes(disk.free_bytes)} free ({(100 - diskPct).toFixed(1)}%)
+                  {t("system.storage.freePercent", {
+                    free: formatBytes(disk.free_bytes),
+                    percent: (100 - diskPct).toFixed(1),
+                  })}
                 </span>
               </div>
               <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
@@ -91,14 +98,14 @@ function SystemPanel() {
               {diskPct >= 75 && (
                 <p className="text-sm text-amber-700 dark:text-amber-400">
                   {diskPct >= 90
-                    ? "Disk is nearly full. Request expansion from helpdesk soon."
-                    : "Disk is filling up. Consider requesting expansion."}
+                    ? t("system.storage.nearlyFull")
+                    : t("system.storage.fillingUp")}
                 </p>
               )}
             </div>
           ) : (
             <p className="text-muted-foreground">
-              Disk stats unavailable on this platform.
+              {t("system.storage.statsUnavailable")}
             </p>
           )}
         </CardContent>
@@ -107,7 +114,7 @@ function SystemPanel() {
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>PostgreSQL database size</CardDescription>
+            <CardDescription>{t("system.databaseSize")}</CardDescription>
             <CardTitle className="text-2xl">
               {formatBytes(data.database.size_bytes)}
             </CardTitle>
@@ -115,21 +122,21 @@ function SystemPanel() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Documents on disk</CardDescription>
+            <CardDescription>{t("system.documentsOnDisk")}</CardDescription>
             <CardTitle className="text-2xl">
               {formatBytes(data.documents.total_bytes)}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            {data.documents.count.toLocaleString()} total
+            {t("system.documentsTotal", { value: data.documents.count.toLocaleString() })}
             {data.documents.pending > 0 && (
-              <> · {data.documents.pending.toLocaleString()} pending</>
+              <> · {t("system.documentsPending", { value: data.documents.pending.toLocaleString() })}</>
             )}
             {data.documents.failed > 0 && (
               <>
                 {" · "}
                 <span className="text-red-600 dark:text-red-400">
-                  {data.documents.failed.toLocaleString()} failed
+                  {t("system.documentsFailed", { value: data.documents.failed.toLocaleString() })}
                 </span>
               </>
             )}
@@ -140,31 +147,31 @@ function SystemPanel() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            Qdrant
+            {t("system.qdrant.title")}
             <Badge variant={data.qdrant.reachable ? "default" : "destructive"}>
-              {data.qdrant.reachable ? "reachable" : "unreachable"}
+              {data.qdrant.reachable ? t("system.qdrant.reachable") : t("system.qdrant.unreachable")}
             </Badge>
           </CardTitle>
-          <CardDescription>Vector collections</CardDescription>
+          <CardDescription>{t("system.qdrant.description")}</CardDescription>
         </CardHeader>
         <CardContent>
           {data.qdrant.collections.length === 0 ? (
             <p className="text-muted-foreground">
               {data.qdrant.reachable
-                ? "No collections yet."
-                : "Could not connect to Qdrant."}
+                ? t("system.qdrant.noCollections")
+                : t("system.qdrant.notConnected")}
             </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="py-2 pr-4 font-medium">Collection</th>
-                    <th className="py-2 pr-4 font-medium text-right">Points</th>
+                    <th className="py-2 pr-4 font-medium">{t("system.qdrant.columns.collection")}</th>
+                    <th className="py-2 pr-4 font-medium text-right">{t("system.qdrant.columns.points")}</th>
                     <th className="py-2 pr-4 font-medium text-right">
-                      Indexed vectors
+                      {t("system.qdrant.columns.indexedVectors")}
                     </th>
-                    <th className="py-2 font-medium text-right">Segments</th>
+                    <th className="py-2 font-medium text-right">{t("system.qdrant.columns.segments")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -191,33 +198,33 @@ function SystemPanel() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Database tables</CardTitle>
+          <CardTitle>{t("system.databaseTables.title")}</CardTitle>
           <CardDescription>
-            Approximate row counts from{" "}
-            <code className="text-xs">pg_class.reltuples</code> (updated by
-            ANALYZE, not exact).
+            {t("system.databaseTables.descriptionLead")}
+            <code className="text-xs">pg_class.reltuples</code>
+            {t("system.databaseTables.descriptionTail")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {data.database.table_counts.length === 0 ? (
-            <p className="text-muted-foreground">No tables found.</p>
+            <p className="text-muted-foreground">{t("system.databaseTables.empty")}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="py-2 pr-4 font-medium">Table</th>
-                    <th className="py-2 font-medium text-right">Rows (approx)</th>
+                    <th className="py-2 pr-4 font-medium">{t("system.databaseTables.columns.table")}</th>
+                    <th className="py-2 font-medium text-right">{t("system.databaseTables.columns.rowsApprox")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {[...data.database.table_counts]
                     .sort((a, b) => b.rows - a.rows)
-                    .map((t) => (
-                      <tr key={t.name} className="border-b">
-                        <td className="py-2 pr-4 font-mono text-xs">{t.name}</td>
+                    .map((row) => (
+                      <tr key={row.name} className="border-b">
+                        <td className="py-2 pr-4 font-mono text-xs">{row.name}</td>
                         <td className="py-2 text-right font-mono">
-                          {t.rows.toLocaleString()}
+                          {row.rows.toLocaleString()}
                         </td>
                       </tr>
                     ))}

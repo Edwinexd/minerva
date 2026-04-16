@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Trans, useTranslation } from "react-i18next"
 import { useState } from "react"
 import { adminRoleRulesQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { useApiErrorMessage } from "@/lib/use-api-error"
 import {
   ROLE_RULE_ATTRIBUTES,
   ROLE_RULE_OPERATORS,
@@ -33,29 +35,23 @@ export const Route = createFileRoute("/admin/rules")({
 })
 
 function RoleRulesPanel() {
+  const { t } = useTranslation("admin")
   const { data: rules, isLoading } = useQuery(adminRoleRulesQuery)
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Role Auto-Promotion Rules</CardTitle>
+          <CardTitle>{t("rules.title")}</CardTitle>
           <CardDescription>
-            Each rule promotes a user to its target role when ALL conditions
-            match the user's Shibboleth attributes at login. Rules never
-            demote, never override admins (MINERVA_ADMINS env), and never
-            touch users whose role was set manually in User Management
-            (those users show a "locked" badge; click Unlock there to
-            re-enable rule evaluation). Multi-valued attributes
-            (affiliation, entitlement) use list-membership semantics for
-            "contains"; substring matches are rejected.
+            {t("rules.description")}
             <br />
             <span className="text-xs">
-              Negated operators (<code>not_contains</code>, <code>not_regex</code>)
-              also require the attribute to be present on the user. This
-              prevents external/non-Shib users (who have no affiliation /
-              entitlement / etc. at all) from matching a "not contains X"
-              rule by virtue of having nothing.
+              <Trans
+                i18nKey="rules.negatedNote"
+                ns="admin"
+                components={[<code key="c1" />, <code key="c2" />]}
+              />
             </span>
           </CardDescription>
         </CardHeader>
@@ -70,7 +66,7 @@ function RoleRulesPanel() {
           )}
           {!isLoading && rules && rules.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              No rules yet. Create one above to start auto-promoting users.
+              {t("rules.empty")}
             </p>
           )}
           {rules?.map((rule) => <RuleCard key={rule.id} rule={rule} />)}
@@ -81,6 +77,8 @@ function RoleRulesPanel() {
 }
 
 function CreateRuleForm() {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
   const [targetRole, setTargetRole] = useState<"teacher" | "student">("teacher")
@@ -108,23 +106,23 @@ function CreateRuleForm() {
       }}
     >
       <div className="space-y-1">
-        <label className="text-xs font-medium">Rule name</label>
+        <label className="text-xs font-medium">{t("rules.form.ruleName")}</label>
         <input
           className="block h-8 w-64 rounded border bg-background px-2 text-sm"
-          placeholder="DSV staff -> teacher"
+          placeholder={t("rules.form.ruleNamePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
       </div>
       <div className="space-y-1">
-        <label className="text-xs font-medium">Target role</label>
+        <label className="text-xs font-medium">{t("rules.form.targetRole")}</label>
         <Select value={targetRole} onValueChange={(v) => v && setTargetRole(v as typeof targetRole)}>
           <SelectTrigger className="h-8 w-32 text-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="teacher">teacher</SelectItem>
-            <SelectItem value="student">student</SelectItem>
+            <SelectItem value="teacher">{t("rules.form.teacher")}</SelectItem>
+            <SelectItem value="student">{t("rules.form.student")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -133,11 +131,11 @@ function CreateRuleForm() {
         size="sm"
         disabled={!name.trim() || mutation.isPending}
       >
-        Create rule
+        {t("rules.form.createRule")}
       </Button>
       {mutation.isError && (
         <span className="text-xs text-destructive">
-          {mutation.error.message}
+          {formatError(mutation.error)}
         </span>
       )}
     </form>
@@ -145,6 +143,7 @@ function CreateRuleForm() {
 }
 
 function RuleCard({ rule }: { rule: RoleRule }) {
+  const { t } = useTranslation("admin")
   const queryClient = useQueryClient()
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["admin", "role-rules"] })
@@ -167,14 +166,14 @@ function RuleCard({ rule }: { rule: RoleRule }) {
           <CardTitle className="flex items-center gap-2 text-base">
             {rule.name}
             <Badge variant={rule.enabled ? "default" : "secondary"}>
-              {rule.enabled ? "enabled" : "disabled"}
+              {rule.enabled ? t("rules.card.enabled") : t("rules.card.disabled")}
             </Badge>
             <Badge variant="outline">→ {rule.target_role}</Badge>
           </CardTitle>
           <CardDescription>
             {rule.conditions.length === 0
-              ? "Add at least one condition for this rule to ever match."
-              : `Matches when ALL ${rule.conditions.length} condition${rule.conditions.length === 1 ? "" : "s"} hold.`}
+              ? t("rules.card.noConditions")
+              : t("rules.card.matchesWhen", { count: rule.conditions.length })}
           </CardDescription>
         </div>
         <div className="flex gap-2">
@@ -190,17 +189,17 @@ function RuleCard({ rule }: { rule: RoleRule }) {
             }
             disabled={updateMutation.isPending}
           >
-            {rule.enabled ? "Disable" : "Enable"}
+            {rule.enabled ? t("rules.card.disable") : t("rules.card.enable")}
           </Button>
           <Button
             size="sm"
             variant="destructive"
             onClick={() => {
-              if (confirm(`Delete rule "${rule.name}"?`)) deleteMutation.mutate()
+              if (confirm(t("rules.card.confirmDelete", { name: rule.name }))) deleteMutation.mutate()
             }}
             disabled={deleteMutation.isPending}
           >
-            Delete
+            {t("rules.card.delete")}
           </Button>
         </div>
       </CardHeader>
@@ -219,6 +218,7 @@ function ConditionRow({
 }: {
   condition: RoleRule["conditions"][number]
 }) {
+  const { t } = useTranslation("admin")
   const queryClient = useQueryClient()
 
   const deleteMutation = useMutation({
@@ -238,6 +238,7 @@ function ConditionRow({
         size="sm"
         variant="ghost"
         className="h-6 text-xs"
+        aria-label={t("rules.condition.removeLabel")}
         onClick={() => deleteMutation.mutate()}
         disabled={deleteMutation.isPending}
       >
@@ -248,6 +249,8 @@ function ConditionRow({
 }
 
 function AddConditionForm({ ruleId }: { ruleId: string }) {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [attribute, setAttribute] = useState<RoleRuleAttribute>("entitlement")
   const [operator, setOperator] = useState<RoleRuleOperator>("contains")
@@ -300,7 +303,7 @@ function AddConditionForm({ ruleId }: { ruleId: string }) {
       </Select>
       <input
         className="h-7 flex-1 min-w-[14rem] rounded border bg-background px-2 font-mono text-xs"
-        placeholder="urn:mace:swami.se:gmai:dsv-user:staff"
+        placeholder={t("rules.condition.valuePlaceholder")}
         value={value}
         onChange={(e) => setValue(e.target.value)}
       />
@@ -310,10 +313,10 @@ function AddConditionForm({ ruleId }: { ruleId: string }) {
         className="h-7 text-xs"
         disabled={!value.trim() || mutation.isPending}
       >
-        Add
+        {t("rules.condition.add")}
       </Button>
       {mutation.isError && (
-        <span className="text-destructive">{mutation.error.message}</span>
+        <span className="text-destructive">{formatError(mutation.error)}</span>
       )}
     </form>
   )

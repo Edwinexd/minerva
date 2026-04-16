@@ -1,0 +1,96 @@
+{
+  "not_found": "Hittades inte.",
+  "unauthorized": "Du måste logga in för att göra det.",
+  "forbidden": "Du har inte behörighet att göra det.",
+  "internal": "Något gick fel på vår sida. Försök igen.",
+  "quota": {
+    "student_exceeded": "Du har nått din dagliga tokenkvot för den här kursen.",
+    "owner_exceeded": "Kursägaren har nått sitt dagliga AI-tak. Kontakta lambda@dsv.su.se för att begära en höjning."
+  },
+  "privacy": {
+    "not_acknowledged": "Du måste godkänna integritetsmeddelandet innan du kan använda chatten."
+  },
+  "doc": {
+    "no_file": "Ingen fil bifogad.",
+    "multipart_error": "Uppladdningen misslyckades: {{detail}}",
+    "read_failed": "Kunde inte läsa den uppladdade filen: {{detail}}",
+    "file_too_large": "Filen är för stor ({{size_bytes}} byte, max {{max_mb}} MB)."
+  },
+  "service": {
+    "wrong_status": "Dokumentets status är '{{status}}', förväntade 'awaiting_transcript'.",
+    "transcript_empty": "Transkriptionstexten är tom.",
+    "status_changed_concurrently": "Dokumentets status ändrades medan vi bearbetade det. Försök igen.",
+    "missing_text_or_error": "Ange antingen 'text' eller 'error'.",
+    "filename_empty": "Filnamnet är tomt.",
+    "url_invalid_length": "URL:en måste vara mellan 1 och 2048 tecken."
+  },
+  "external_auth": {
+    "eppn_invalid_length": "EPPN måste vara mellan 1 och 200 tecken."
+  },
+  "api_keys": {
+    "name_invalid_length": "Namnet måste vara mellan 1 och 100 tecken."
+  },
+  "admin": {
+    "role_invalid": "Rollen måste vara 'teacher' eller 'student'.",
+    "cannot_suspend_self": "Du kan inte stänga av ditt eget konto.",
+    "limit_negative": "Gränsen måste vara 0 eller större.",
+    "limit_too_large": "Gränsen får vara högst {{max}}.",
+    "target_role_invalid": "Målrollen måste vara 'teacher' eller 'student'.",
+    "rule_name_required": "Namn krävs.",
+    "condition_attribute_unsupported": "Attributet '{{attribute}}' stöds inte. Stöds: {{supported}}.",
+    "condition_operator_invalid": "Operatorn måste vara en av contains, not_contains, regex, not_regex.",
+    "condition_regex_invalid": "Ogiltigt regex: {{detail}}"
+  },
+  "chat": {
+    "rating_invalid": "Betyget måste vara 'up' eller 'down'.",
+    "feedback_only_assistant": "Feedback kan bara lämnas på assistentens meddelanden."
+  },
+  "signed_url": {
+    "expired": "Den här inbjudningslänken har gått ut.",
+    "max_uses_reached": "Den här inbjudningslänken har använts maximalt antal gånger."
+  },
+  "canvas": {
+    "api_request_failed": "Kunde inte nå Canvas: {{detail}}",
+    "api_error": "Canvas svarade med fel ({{status}}): {{body}}",
+    "api_parse_failed": "Kunde inte tolka Canvas svar: {{detail}}",
+    "base_url_and_token_required": "Canvas-bas-URL och API-token krävs.",
+    "name_required": "Namn krävs.",
+    "base_url_required": "Canvas-bas-URL krävs.",
+    "api_token_required": "Canvas API-token krävs.",
+    "course_id_required": "Canvas-kurs-ID krävs.",
+    "unreachable": "Kunde inte nå Canvas. Kontrollera bas-URL och API-token.",
+    "fetch_file_metadata_failed": "Kunde inte hämta filmetadata från Canvas: {{detail}}",
+    "file_too_large": "Canvas-filen är för stor för att importeras ({{size_bytes}} byte).",
+    "page_too_large": "Canvas-sidan är för stor för att importeras ({{size_bytes}} byte).",
+    "warning": {
+      "files_unavailable": "Files-API:et är otillgängligt ({{detail}}). Återgår till Modules för filupptäckt.",
+      "modules_unavailable": "Modules-API:et är otillgängligt ({{detail}}). Endast toppnivåfiler synkas."
+    },
+    "sync": {
+      "item_failed": "{{item}}: {{detail}}"
+    }
+  },
+  "lti": {
+    "client_id_required": "client_id krävs i login-initieringen.",
+    "no_registration": "Ingen LTI-registrering hittades för issuer={{issuer}}, client_id={{client_id}}.",
+    "invalid_or_expired_state": "Ogiltigt eller utgånget LTI-launchläge.",
+    "deployment_id_mismatch": "LTI deployment_id stämmer inte: förväntade {{expected}}, fick {{actual}}.",
+    "deployment_id_missing": "JWT saknar deployment_id-claim.",
+    "registration_duplicate": "En LTI-registrering med denna issuer och client_id finns redan.",
+    "jwt_header_invalid": "Ogiltigt JWT-huvud: {{detail}}",
+    "no_jwks_key": "Ingen matchande nyckel i plattformens JWKS.",
+    "jwt_validation_failed": "JWT-validering misslyckades: {{detail}}",
+    "nonce_mismatch": "LTI nonce stämmer inte.",
+    "message_type_unsupported": "LTI-meddelandetypen stöds inte: {{type}}"
+  },
+  "course": {
+    "min_score_out_of_range": "min_score måste vara mellan 0,0 och 1,0.",
+    "embedding_provider_invalid": "Ogiltig embedding-leverantör: {{provider}}",
+    "local_embedding_model_invalid": "Ogiltig lokal embedding-modell: {{model}}"
+  },
+  "play": {
+    "designation_invalid_length": "Beteckningen måste vara mellan 1 och 64 tecken.",
+    "designation_invalid_chars": "Beteckningen får inte innehålla blanksteg eller snedstreck.",
+    "designation_duplicate": "Den beteckningen är redan kopplad till den här kursen."
+  }
+}

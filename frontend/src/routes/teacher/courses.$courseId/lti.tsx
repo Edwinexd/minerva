@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { ltiSetupQuery, ltiRegistrationsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -25,6 +27,9 @@ export const Route = createFileRoute("/teacher/courses/$courseId/lti")({
 function LtiPage() {
   const { courseId } = Route.useParams()
   const queryClient = useQueryClient()
+  const { t } = useTranslation("teacher")
+  const { t: tCommon } = useTranslation("common")
+  const formatError = useApiErrorMessage()
   const { data: setup } = useQuery(ltiSetupQuery(courseId))
   const { data: registrations, isLoading } = useQuery(ltiRegistrationsQuery(courseId))
   const [showForm, setShowForm] = useState(false)
@@ -71,32 +76,32 @@ function LtiPage() {
   return (
     <div className="space-y-4">
       <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/40">
-        <p className="font-semibold text-amber-900 dark:text-amber-200">What LTI launch passes to Minerva</p>
+        <p className="font-semibold text-amber-900 dark:text-amber-200">{t("lti.noticeTitle")}</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-900/90 dark:text-amber-200/90">
-          <li>Student identifier (username/eppn or a synthetic ID if the platform does not share it) and, when enabled in the platform, display name. Email is not requested.</li>
-          <li>A user row is created in Minerva on first launch; the student is added to this course as a student.</li>
-          <li>Each launch is shown the data-handling disclosure before they can send a first message.</li>
+          <li>{t("lti.noticeBullet1")}</li>
+          <li>{t("lti.noticeBullet2")}</li>
+          <li>{t("lti.noticeBullet3")}</li>
         </ul>
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>Moodle Configuration</CardTitle>
+          <CardTitle>{t("lti.moodleConfigTitle")}</CardTitle>
           <CardDescription>
-            Enter these values in Moodle when adding an LTI External Tool to your course.
+            {t("lti.moodleConfigDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {config ? (
             <>
               {[
-                { label: "Tool URL", value: config.tool_url, key: "tool_url" },
-                { label: "LTI version", value: config.lti_version, key: "lti_version" },
-                { label: "Public key type", value: config.public_key_type, key: "public_key_type" },
-                { label: "Public keyset URL", value: config.public_keyset_url, key: "keyset" },
-                { label: "Initiate login URL", value: config.initiate_login_url, key: "login" },
-                { label: "Redirection URI(s)", value: config.redirection_uris, key: "redirect" },
-                { label: "Custom parameters", value: config.custom_parameters, key: "custom" },
-                { label: "Icon URL (under 'Show more...')", value: config.icon_url, key: "icon" },
+                { label: t("lti.toolUrl"), value: config.tool_url, key: "tool_url" },
+                { label: t("lti.ltiVersion"), value: config.lti_version, key: "lti_version" },
+                { label: t("lti.publicKeyType"), value: config.public_key_type, key: "public_key_type" },
+                { label: t("lti.publicKeysetUrl"), value: config.public_keyset_url, key: "keyset" },
+                { label: t("lti.initiateLoginUrl"), value: config.initiate_login_url, key: "login" },
+                { label: t("lti.redirectionUris"), value: config.redirection_uris, key: "redirect" },
+                { label: t("lti.customParameters"), value: config.custom_parameters, key: "custom" },
+                { label: t("lti.iconUrl"), value: config.icon_url, key: "icon" },
               ].map(({ label, value, key }) => (
                 <div key={key} className="flex items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">
@@ -109,14 +114,14 @@ function LtiPage() {
                     className="shrink-0"
                     onClick={() => copyToClipboard(value, key)}
                   >
-                    {copiedField === key ? "Copied!" : "Copy"}
+                    {copiedField === key ? t("lti.copied") : tCommon("actions.copy")}
                   </Button>
                 </div>
               ))}
               <Separator />
               <div className="text-sm text-muted-foreground space-y-1">
-                <p>The <strong>custom parameter</strong> <code>user_eppn=$User.username</code> links Moodle users to their Minerva identity. Without it, students launched from Moodle will appear as separate users.</p>
-                <p>Under <strong>Privacy</strong>, "Share launcher's name" is optional (populates display names).</p>
+                <p>{t("lti.customParamExplainPrefix")}<strong>{t("lti.customParamExplainBoldCustom")}</strong>{t("lti.customParamExplainMid")}<code>user_eppn=$User.username</code>{t("lti.customParamExplainSuffix")}</p>
+                <p>{t("lti.privacyNotePrefix")}<strong>{t("lti.privacyNoteBold")}</strong>{t("lti.privacyNoteSuffix")}</p>
               </div>
             </>
           ) : (
@@ -131,14 +136,14 @@ function LtiPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>LTI Registrations</CardTitle>
+          <CardTitle>{t("lti.registrationsTitle")}</CardTitle>
           <CardDescription>
-            After configuring the tool in Moodle, copy Moodle's platform details here to complete the connection.
+            {t("lti.registrationsDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {!showForm && (
-            <Button onClick={() => setShowForm(true)}>Add Moodle Connection</Button>
+            <Button onClick={() => setShowForm(true)}>{t("lti.addMoodleConnection")}</Button>
           )}
 
           {showForm && (
@@ -154,31 +159,31 @@ function LtiPage() {
               }}
             >
               <p className="text-sm text-muted-foreground">
-                Copy these values from Moodle's tool registration details.
+                {t("lti.copyValuesHint")}
               </p>
               <div className="space-y-2">
-                <Label htmlFor="lti-name">Name</Label>
-                <Input id="lti-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Moodle HT2025" />
+                <Label htmlFor="lti-name">{t("lti.nameLabel")}</Label>
+                <Input id="lti-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("lti.namePlaceholder")} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="lti-issuer">Platform ID (issuer)</Label>
-                <Input id="lti-issuer" value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://moodle.example.com" />
+                <Label htmlFor="lti-issuer">{t("lti.issuerLabel")}</Label>
+                <Input id="lti-issuer" value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder={t("lti.issuerPlaceholder")} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="lti-client-id">Client ID</Label>
+                <Label htmlFor="lti-client-id">{t("lti.clientIdLabel")}</Label>
                 <Input id="lti-client-id" value={clientId} onChange={(e) => setClientId(e.target.value)} />
               </div>
 
               {createMutation.isError && (
-                <p className="text-sm text-destructive">{createMutation.error.message}</p>
+                <p className="text-sm text-destructive">{formatError(createMutation.error)}</p>
               )}
 
               <div className="flex gap-2">
                 <Button type="submit" disabled={createMutation.isPending || !issuer.trim() || !clientId.trim()}>
-                  {createMutation.isPending ? "Saving..." : "Save Registration"}
+                  {createMutation.isPending ? t("lti.saving") : t("lti.saveRegistration")}
                 </Button>
                 <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
-                  Cancel
+                  {tCommon("actions.cancel")}
                 </Button>
               </div>
             </form>
@@ -192,7 +197,7 @@ function LtiPage() {
 
           {registrations && registrations.length === 0 && !showForm && (
             <p className="text-sm text-muted-foreground py-4 text-center">
-              No LTI connections yet. Configure the tool in Moodle first using the values above, then add the connection here.
+              {t("lti.emptyRegistrations")}
             </p>
           )}
 
@@ -215,7 +220,7 @@ function LtiPage() {
                   onClick={() => deleteMutation.mutate(reg.id)}
                   disabled={deleteMutation.isPending}
                 >
-                  Remove
+                  {t("lti.remove")}
                 </Button>
               </div>
             ))}

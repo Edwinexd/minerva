@@ -1,0 +1,64 @@
+{
+  "sidebar": {
+    "newChat": "New chat",
+    "openConversations": "Open conversations",
+    "closeConversations": "Close conversations",
+    "pinned": "Pinned",
+    "newConversation": "New conversation",
+    "conversation": "Conversation",
+    "pinnedByTeacher": "Pinned by teacher",
+    "studentFallback": "Student"
+  },
+  "chat": {
+    "inputPlaceholder": "Ask about the course materials…",
+    "send": "Send",
+    "disclaimerBefore": "Messages and relevant course-material excerpts are sent to Cerebras for AI inference. Responses may be inaccurate; verify with course materials. See ",
+    "dataHandlingLink": "how Minerva handles your data",
+    "disclaimerAfter": ".",
+    "unknownError": "Unknown error"
+  },
+  "message": {
+    "tokensUsed_one": "{{count}} token",
+    "tokensUsed_other": "{{count}} tokens",
+    "generationTime": " in {{seconds}}s",
+    "usingSuffix": " using",
+    "source_one": "{{count}} source",
+    "source_other": "{{count}} sources",
+    "acrossRetrievals": "(across {{count}} retrievals)",
+    "unknownSource": "Unknown",
+    "sourceUnavailable": "Source content not available for viewing",
+    "teacherNote": "Teacher note"
+  },
+  "feedback": {
+    "thumbsUpTitle": "Good response",
+    "thumbsUpActiveTitle": "You rated this good",
+    "thumbsDownTitle": "Bad response",
+    "thumbsDownActiveTitle": "Edit feedback",
+    "dialogTitle": "What was wrong with this response?",
+    "dialogDescription": "Pick the option that fits best. Your comment is optional but helps your teacher understand the issue.",
+    "categoryLabel": "Category",
+    "required": "*",
+    "categoryPlaceholder": "Select a category…",
+    "commentLabel": "Comment (optional)",
+    "commentPlaceholder": "Add more detail…",
+    "submit": "Submit",
+    "submitting": "Saving…",
+    "categories": {
+      "incorrect": "Incorrect or misleading",
+      "off-topic": "Off-topic / not about the course",
+      "incomplete": "Incomplete answer",
+      "unclear": "Hard to understand",
+      "harmful": "Harmful or inappropriate",
+      "other": "Other"
+    }
+  },
+  "privacy": {
+    "bannerText": "Before sending messages, please review how Minerva handles your data.",
+    "reviewButton": "Review & agree",
+    "dialogTitle": "How Minerva handles your data",
+    "closeLabel": "Close",
+    "agreeButton": "I understand and agree",
+    "savingButton": "Saving…",
+    "acknowledgeFailed": "Failed to record acknowledgment"
+  }
+}

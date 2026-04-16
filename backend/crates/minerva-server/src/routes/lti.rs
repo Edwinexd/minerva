@@ -92,16 +92,19 @@ async fn do_login_initiation(
     let client_id = params
         .client_id
         .as_deref()
-        .ok_or_else(|| AppError::BadRequest("client_id is required in login initiation".into()))?;
+        .ok_or_else(|| AppError::bad_request("lti.client_id_required"))?;
 
     let registration =
         minerva_db::queries::lti::find_registration_by_issuer(&state.db, &params.iss, client_id)
             .await?
             .ok_or_else(|| {
-                AppError::BadRequest(format!(
-                    "no LTI registration for issuer={} client_id={}",
-                    params.iss, client_id
-                ))
+                AppError::bad_request_with(
+                    "lti.no_registration",
+                    [
+                        ("issuer", params.iss.clone()),
+                        ("client_id", client_id.to_string()),
+                    ],
+                )
             })?;
 
     // Generate cryptographic state and nonce.
@@ -171,7 +174,7 @@ async fn handle_launch(
     // 1. Consume the OIDC state (validates it exists and hasn't expired).
     let launch = minerva_db::queries::lti::consume_launch(&state.db, &form.state)
         .await?
-        .ok_or_else(|| AppError::BadRequest("invalid or expired state".into()))?;
+        .ok_or_else(|| AppError::bad_request("lti.invalid_or_expired_state"))?;
 
     // 2. Fetch the registration -- this tells us which Minerva course.
     let registration =
@@ -195,15 +198,16 @@ async fn handle_launch(
         match claims.deployment_id.as_deref() {
             Some(actual) if actual == expected.as_str() => {}
             Some(actual) => {
-                return Err(AppError::BadRequest(format!(
-                    "deployment_id mismatch: expected {}, got {}",
-                    expected, actual
-                )));
+                return Err(AppError::bad_request_with(
+                    "lti.deployment_id_mismatch",
+                    [
+                        ("expected", expected.to_string()),
+                        ("actual", actual.to_string()),
+                    ],
+                ));
             }
             None => {
-                return Err(AppError::BadRequest(
-                    "JWT missing deployment_id claim".into(),
-                ));
+                return Err(AppError::bad_request("lti.deployment_id_missing"));
             }
         }
     }
@@ -508,7 +512,7 @@ async fn create_registration(
     .await
     .map_err(|e| {
         if e.to_string().contains("duplicate key") {
-            AppError::BadRequest("a registration with this issuer/client_id already exists".into())
+            AppError::bad_request("lti.registration_duplicate")
         } else {
             AppError::Database(e)
         }

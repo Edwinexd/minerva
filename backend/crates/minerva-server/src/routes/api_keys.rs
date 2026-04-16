@@ -81,7 +81,7 @@ async fn create_api_key(
 
     let name = body.name.trim().to_string();
     if name.is_empty() || name.len() > 100 {
-        return Err(AppError::BadRequest("name must be 1-100 characters".into()));
+        return Err(AppError::bad_request("api_keys.name_invalid_length"));
     }
 
     let id = Uuid::new_v4();

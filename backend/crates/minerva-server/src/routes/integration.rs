@@ -317,8 +317,10 @@ async fn upload_document(
     let field = multipart
         .next_field()
         .await
-        .map_err(|e| AppError::BadRequest(format!("multipart error: {}", e)))?
-        .ok_or_else(|| AppError::BadRequest("no file provided".to_string()))?;
+        .map_err(|e| {
+            AppError::bad_request_with("doc.multipart_error", [("detail", e.to_string())])
+        })?
+        .ok_or_else(|| AppError::bad_request("doc.no_file"))?;
 
     let filename = field.file_name().unwrap_or("document").to_string();
     let content_type = field
@@ -328,15 +330,20 @@ async fn upload_document(
     let data = field
         .bytes()
         .await
-        .map_err(|e| AppError::BadRequest(format!("failed to read file: {}", e)))?;
+        .map_err(|e| AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())]))?;
 
     let size_bytes = data.len() as i64;
     if size_bytes > super::documents::MAX_UPLOAD_BYTES {
-        return Err(AppError::BadRequest(format!(
-            "file too large: {} bytes (max {} MB)",
-            size_bytes,
-            super::documents::MAX_UPLOAD_BYTES / 1_000_000
-        )));
+        return Err(AppError::bad_request_with(
+            "doc.file_too_large",
+            [
+                ("size_bytes", size_bytes.to_string()),
+                (
+                    "max_mb",
+                    (super::documents::MAX_UPLOAD_BYTES / 1_000_000).to_string(),
+                ),
+            ],
+        ));
     }
 
     let doc_id = Uuid::new_v4();

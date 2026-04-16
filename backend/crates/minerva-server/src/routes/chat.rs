@@ -961,7 +961,7 @@ async fn set_feedback(
     }
 
     if body.rating != "up" && body.rating != "down" {
-        return Err(AppError::BadRequest("rating must be 'up' or 'down'".into()));
+        return Err(AppError::bad_request("chat.rating_invalid"));
     }
 
     // Ensure message belongs to this conversation and is an assistant message.
@@ -971,9 +971,7 @@ async fn set_feedback(
         .find(|m| m.id == message_id)
         .ok_or(AppError::NotFound)?;
     if msg.role != "assistant" {
-        return Err(AppError::BadRequest(
-            "feedback only applies to assistant messages".into(),
-        ));
+        return Err(AppError::bad_request("chat.feedback_only_assistant"));
     }
 
     let category = body.category.as_deref().filter(|s| !s.is_empty());

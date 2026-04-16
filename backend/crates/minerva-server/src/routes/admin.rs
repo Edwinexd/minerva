@@ -90,9 +90,7 @@ async fn update_user_role(
 
     // Only allow setting to teacher or student (not admin)
     if body.role != "teacher" && body.role != "student" {
-        return Err(AppError::BadRequest(
-            "role must be 'teacher' or 'student'".to_string(),
-        ));
+        return Err(AppError::bad_request("admin.role_invalid"));
     }
 
     // Sets role_manually_set=true so subsequent rule evaluations leave the
@@ -133,7 +131,7 @@ async fn update_user_suspended(
 
     // Prevent admins from suspending themselves
     if id == user.id {
-        return Err(AppError::BadRequest("cannot suspend yourself".to_string()));
+        return Err(AppError::bad_request("admin.cannot_suspend_self"));
     }
 
     let updated = minerva_db::queries::users::set_suspended(&state.db, id, body.suspended).await?;
@@ -164,12 +162,13 @@ async fn update_owner_daily_token_limit(
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_admin(&user)?;
     if body.limit < 0 {
-        return Err(AppError::BadRequest("limit must be >= 0".into()));
+        return Err(AppError::bad_request("admin.limit_negative"));
     }
     if body.limit > OWNER_LIMIT_MAX {
-        return Err(AppError::BadRequest(format!(
-            "limit must be <= {OWNER_LIMIT_MAX}"
-        )));
+        return Err(AppError::bad_request_with(
+            "admin.limit_too_large",
+            [("max", OWNER_LIMIT_MAX.to_string())],
+        ));
     }
     let updated =
         minerva_db::queries::users::update_owner_daily_token_limit(&state.db, id, body.limit)
@@ -256,9 +255,7 @@ fn validate_target_role(role: &str) -> Result<(), AppError> {
     // Admin promotion via rules is intentionally disallowed -- admins must
     // be in MINERVA_ADMINS so the env stays the source of truth.
     if role != "teacher" && role != "student" {
-        return Err(AppError::BadRequest(
-            "target_role must be 'teacher' or 'student'".into(),
-        ));
+        return Err(AppError::bad_request("admin.target_role_invalid"));
     }
     Ok(())
 }
@@ -271,7 +268,7 @@ async fn create_role_rule(
     require_admin(&user)?;
     validate_target_role(&body.target_role)?;
     if body.name.trim().is_empty() {
-        return Err(AppError::BadRequest("name is required".into()));
+        return Err(AppError::bad_request("admin.rule_name_required"));
     }
     let row = minerva_db::queries::role_rules::create_rule(
         &state.db,
@@ -309,7 +306,7 @@ async fn update_role_rule(
     require_admin(&user)?;
     validate_target_role(&body.target_role)?;
     if body.name.trim().is_empty() {
-        return Err(AppError::BadRequest("name is required".into()));
+        return Err(AppError::bad_request("admin.rule_name_required"));
     }
     let updated = minerva_db::queries::role_rules::update_rule(
         &state.db,
@@ -355,18 +352,20 @@ async fn create_rule_condition(
 ) -> Result<Json<RoleRuleConditionResponse>, AppError> {
     require_admin(&user)?;
     if !SUPPORTED_ATTRIBUTES.contains(&body.attribute.as_str()) {
-        return Err(AppError::BadRequest(format!(
-            "unsupported attribute '{}'; supported: {}",
-            body.attribute,
-            SUPPORTED_ATTRIBUTES.join(", "),
-        )));
+        return Err(AppError::bad_request_with(
+            "admin.condition_attribute_unsupported",
+            [
+                ("attribute", body.attribute.clone()),
+                ("supported", SUPPORTED_ATTRIBUTES.join(", ")),
+            ],
+        ));
     }
-    let op = RuleOperator::parse(&body.operator).ok_or_else(|| {
-        AppError::BadRequest("operator must be contains|not_contains|regex|not_regex".into())
-    })?;
+    let op = RuleOperator::parse(&body.operator)
+        .ok_or_else(|| AppError::bad_request("admin.condition_operator_invalid"))?;
     if matches!(op, RuleOperator::Regex | RuleOperator::NotRegex) {
-        validate_regex(&body.value)
-            .map_err(|e| AppError::BadRequest(format!("invalid regex: {e}")))?;
+        validate_regex(&body.value).map_err(|e| {
+            AppError::bad_request_with("admin.condition_regex_invalid", [("detail", e.to_string())])
+        })?;
     }
     let row = minerva_db::queries::role_rules::create_condition(
         &state.db,

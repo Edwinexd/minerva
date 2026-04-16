@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { allConversationsQuery, conversationDetailQuery, courseFeedbackStatsQuery, popularTopicsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -33,13 +34,18 @@ export const Route = createFileRoute("/teacher/courses/$courseId/conversations")
   component: ConversationsPage,
 })
 
-function categoryLabel(value: string | null): string {
-  if (!value) return "Other"
-  return FEEDBACK_CATEGORIES.find((c) => c.value === value)?.label ?? value
+function useCategoryLabel() {
+  const { t } = useTranslation("teacher")
+  return (value: string | null): string => {
+    if (!value) return t("conversations.otherCategory")
+    return FEEDBACK_CATEGORIES.find((c) => c.value === value)?.label ?? value
+  }
 }
 
 function ConversationsPage() {
   const { courseId } = Route.useParams()
+  const { t } = useTranslation("teacher")
+  const categoryLabel = useCategoryLabel()
   const { data: conversations, isLoading } = useQuery(allConversationsQuery(courseId))
   const { data: topics, isLoading: topicsLoading } = useQuery(popularTopicsQuery(courseId))
   const { data: feedbackStats } = useQuery(courseFeedbackStatsQuery(courseId))
@@ -91,7 +97,7 @@ function ConversationsPage() {
     const key = conv.user_id
     if (!grouped.has(key)) {
       grouped.set(key, {
-        label: conv.user_display_name || conv.user_eppn || "Unknown",
+        label: conv.user_display_name || conv.user_eppn || t("shared.unknownUser"),
         conversations: [],
       })
     }
@@ -103,17 +109,17 @@ function ConversationsPage() {
       {feedbackStats && (feedbackStats.total_up > 0 || feedbackStats.total_down > 0) && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Student Feedback</CardTitle>
+            <CardTitle className="text-base">{t("conversations.feedbackTitle")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-6 text-sm">
               <div>
                 <span className="text-2xl font-semibold">{feedbackStats.total_up}</span>
-                <span className="ml-1.5 text-muted-foreground">helpful</span>
+                <span className="ml-1.5 text-muted-foreground">{t("conversations.helpful")}</span>
               </div>
               <div>
                 <span className="text-2xl font-semibold">{feedbackStats.total_down}</span>
-                <span className="ml-1.5 text-muted-foreground">flagged</span>
+                <span className="ml-1.5 text-muted-foreground">{t("conversations.flagged")}</span>
               </div>
             </div>
             {feedbackStats.categories.length > 0 && (
@@ -132,9 +138,9 @@ function ConversationsPage() {
       {!topicsLoading && topics && topics.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Popular Topics</CardTitle>
+            <CardTitle className="text-base">{t("conversations.popularTopicsTitle")}</CardTitle>
             <CardDescription>
-              Common themes extracted from student messages across all conversations
+              {t("conversations.popularTopicsDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -144,12 +150,12 @@ function ConversationsPage() {
                 onValueChange={(v) => setSelectedTopic(v || null)}
               >
                 <SelectTrigger className="w-full sm:w-72">
-                  <SelectValue placeholder="Filter by topic..." />
+                  <SelectValue placeholder={t("conversations.topicPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {topics.map((t) => (
-                    <SelectItem key={t.topic} value={t.topic}>
-                      {t.topic} ({t.conversation_count} convos, {t.unique_users} students)
+                  {topics.map((topic) => (
+                    <SelectItem key={topic.topic} value={topic.topic}>
+                      {t("conversations.topicOption", { topic: topic.topic, convos: topic.conversation_count, users: topic.unique_users })}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -160,13 +166,13 @@ function ConversationsPage() {
                   size="sm"
                   onClick={() => setSelectedTopic(null)}
                 >
-                  Clear filter
+                  {t("conversations.clearFilter")}
                 </Button>
               )}
             </div>
             {activeTopic && (
               <div className="text-sm text-muted-foreground">
-                {activeTopic.conversation_count} conversations, {activeTopic.unique_users} students, {activeTopic.total_messages} total messages
+                {t("conversations.topicStats", { convos: activeTopic.conversation_count, users: activeTopic.unique_users, messages: activeTopic.total_messages })}
               </div>
             )}
           </CardContent>
@@ -186,15 +192,15 @@ function ConversationsPage() {
       <Card>
         <CardHeader>
           <CardTitle>
-            Student Conversations
+            {t("conversations.studentConversations")}
             {activeTopic && (
               <Badge variant="secondary" className="ml-2 font-normal">
-                Filtered: {activeTopic.topic}
+                {t("conversations.filteredPrefix", { topic: activeTopic.topic })}
               </Badge>
             )}
           </CardTitle>
           <CardDescription>
-            View all student conversations. Pin good answers to make them visible to all students.
+            {t("conversations.conversationsDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -204,14 +210,14 @@ function ConversationsPage() {
               size="sm"
               onClick={() => setActiveTab("all")}
             >
-              All
+              {t("conversations.tabAll")}
             </Button>
             <Button
               variant={activeTab === "flagged" ? "default" : "outline"}
               size="sm"
               onClick={() => setActiveTab("flagged")}
             >
-              Needs Review
+              {t("conversations.tabFlagged")}
               {flaggedCount > 0 && (
                 <Badge variant="destructive" className="ml-1.5 px-1.5 py-0 text-xs">
                   {flaggedCount}
@@ -230,10 +236,10 @@ function ConversationsPage() {
           {!isLoading && displayConversations.length === 0 && (
             <p className="text-muted-foreground text-sm">
               {activeTab === "flagged"
-                ? "No conversations with flagged responses."
+                ? t("conversations.emptyFlagged")
                 : activeTopic
-                  ? "No conversations match this topic."
-                  : "No conversations yet."}
+                  ? t("conversations.emptyTopic")
+                  : t("conversations.emptyAll")}
             </p>
           )}
           <div className="space-y-6">
@@ -251,22 +257,22 @@ function ConversationsPage() {
                       >
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                           <span className="text-sm truncate">
-                            {conv.title || "Untitled conversation"}
+                            {conv.title || t("conversations.untitled")}
                           </span>
                           <span className="text-xs text-muted-foreground shrink-0">
-                            {conv.message_count || 0} msgs
+                            {t("conversations.msgsSuffix", { count: conv.message_count || 0 })}
                           </span>
                           {conv.pinned && (
-                            <Badge variant="secondary" className="shrink-0">Pinned</Badge>
+                            <Badge variant="secondary" className="shrink-0">{t("conversations.pinned")}</Badge>
                           )}
                           {(conv.feedback_down ?? 0) > 0 && (
                             <Badge variant="outline" className="shrink-0 border-red-300 text-red-600 dark:border-red-700 dark:text-red-400 text-xs">
-                              {conv.feedback_down} flagged
+                              {t("conversations.flaggedBadge", { count: conv.feedback_down })}
                             </Badge>
                           )}
                           {(conv.feedback_up ?? 0) > 0 && (conv.feedback_down ?? 0) === 0 && (
                             <Badge variant="outline" className="shrink-0 border-green-300 text-green-600 dark:border-green-700 dark:text-green-400 text-xs">
-                              {conv.feedback_up} helpful
+                              {t("conversations.helpfulBadge", { count: conv.feedback_up })}
                             </Badge>
                           )}
                         </div>
@@ -282,7 +288,7 @@ function ConversationsPage() {
                               pinMutation.mutate({ cid: conv.id, pinned: !conv.pinned })
                             }}
                           >
-                            {conv.pinned ? "Unpin" : "Pin"}
+                            {conv.pinned ? t("conversations.unpin") : t("conversations.pin")}
                           </Button>
                         </div>
                       </div>
@@ -302,6 +308,8 @@ function ConversationsPage() {
 }
 
 function FeedbackBadges({ feedback }: { feedback: MessageFeedback[] }) {
+  const { t } = useTranslation("teacher")
+  const categoryLabel = useCategoryLabel()
   const down = feedback.filter((f) => f.rating === "down")
   const up = feedback.filter((f) => f.rating === "up")
   if (down.length === 0 && up.length === 0) return null
@@ -309,7 +317,7 @@ function FeedbackBadges({ feedback }: { feedback: MessageFeedback[] }) {
     <div className="flex flex-wrap gap-1 mt-1.5">
       {up.length > 0 && (
         <Badge variant="outline" className="text-xs border-green-300 text-green-700 dark:border-green-700 dark:text-green-300">
-          {up.length} helpful
+          {t("conversations.helpfulBadge", { count: up.length })}
         </Badge>
       )}
       {down.map((f) => (
@@ -329,6 +337,9 @@ function FeedbackBadges({ feedback }: { feedback: MessageFeedback[] }) {
 
 function ConversationExpanded({ courseId, conversationId }: { courseId: string; conversationId: string }) {
   const { data, isLoading } = useQuery(conversationDetailQuery(courseId, conversationId))
+  const { t } = useTranslation("teacher")
+  const { t: tCommon } = useTranslation("common")
+  const categoryLabel = useCategoryLabel()
   const queryClient = useQueryClient()
   const [noteContent, setNoteContent] = useState("")
   const [noteForMessage, setNoteForMessage] = useState<string | null>(null)
@@ -358,7 +369,9 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
   const openNoteForFeedback = (messageId: string, feedback: MessageFeedback[]) => {
     const down = feedback.filter((f) => f.rating === "down")
     const categories = [...new Set(down.map((f) => categoryLabel(f.category)))].join(", ")
-    const prefix = categories ? `Correction (re: ${categories}): ` : "Correction: "
+    const prefix = categories
+      ? t("conversations.correctionPrefixWithCategories", { categories })
+      : t("conversations.correctionPrefix")
     setNoteForMessage(messageId)
     setNoteContent(prefix)
   }
@@ -406,12 +419,12 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
   return (
     <div className="ml-4 border-l-2 pl-4 py-2 space-y-3 max-h-[600px] overflow-y-auto">
       <div className="space-y-2">
-        <Label className="text-xs">Add a general note to this conversation</Label>
+        <Label className="text-xs">{t("conversations.generalNoteLabel")}</Label>
         <div className="flex gap-2">
           <Textarea
             value={noteForMessage === null ? noteContent : ""}
             onChange={(e) => { setNoteForMessage(null); setNoteContent(e.target.value) }}
-            placeholder="Teacher's note visible to all students when pinned..."
+            placeholder={t("conversations.generalNotePlaceholder")}
             rows={2}
             className="flex-1"
           />
@@ -421,7 +434,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
             onClick={() => handleAddNote()}
             disabled={addNoteMutation.isPending || !noteContent.trim() || noteForMessage !== null}
           >
-            Add Note
+            {t("conversations.addNoteButton")}
           </Button>
         </div>
       </div>
@@ -442,7 +455,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
               }`}
             >
               <span className="text-xs font-medium text-muted-foreground block mb-1">
-                {msg.role === "user" ? "Student" : "Assistant"}
+                {msg.role === "user" ? t("conversations.roleStudent") : t("conversations.roleAssistant")}
               </span>
               {msg.role === "user" ? (
                 <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -459,14 +472,14 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
                   className="text-xs text-muted-foreground hover:text-foreground underline"
                   onClick={() => setNoteForMessage(noteForMessage === msg.id ? null : msg.id)}
                 >
-                  Add note
+                  {t("conversations.addNoteLink")}
                 </button>
                 {msg.role === "assistant" && hasDownFeedback && noteForMessage !== msg.id && (
                   <button
                     className="text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200 underline"
                     onClick={() => openNoteForFeedback(msg.id, msgFeedback)}
                   >
-                    Add correction note
+                    {t("conversations.addCorrectionLink")}
                   </button>
                 )}
               </div>
@@ -481,7 +494,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
                 <Textarea
                   value={noteContent}
                   onChange={(e) => setNoteContent(e.target.value)}
-                  placeholder="Add a teacher's note for this message..."
+                  placeholder={t("conversations.messageNotePlaceholder")}
                   rows={2}
                   className="flex-1"
                 />
@@ -491,14 +504,14 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
                     onClick={() => handleAddNote(msg.id)}
                     disabled={addNoteMutation.isPending || !noteContent.trim()}
                   >
-                    Save
+                    {tCommon("actions.save")}
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
                     onClick={() => { setNoteForMessage(null); setNoteContent("") }}
                   >
-                    Cancel
+                    {tCommon("actions.cancel")}
                   </Button>
                 </div>
               </div>
@@ -511,19 +524,21 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
 }
 
 function NoteDisplay({ note, onDelete }: { note: TeacherNote; onDelete: () => void }) {
+  const { t } = useTranslation("teacher")
+  const { t: tCommon } = useTranslation("common")
   return (
     <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-xs border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300">
-            Teacher note
+            {t("conversations.teacherNote")}
           </Badge>
           {note.author_display_name && (
             <span className="text-xs text-muted-foreground">{note.author_display_name}</span>
           )}
         </div>
         <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={onDelete}>
-          Delete
+          {tCommon("actions.delete")}
         </Button>
       </div>
       <div className="prose prose-sm dark:prose-invert max-w-none">

@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import {
   courseMembersQuery,
   courseQuery,
@@ -24,6 +25,8 @@ export const Route = createFileRoute("/teacher/courses/$courseId/members")({
 
 function MembersPage() {
   const { courseId } = Route.useParams()
+  const { t } = useTranslation("teacher")
+  const { t: tCommon } = useTranslation("common")
   const { data: members, isLoading } = useQuery(courseMembersQuery(courseId))
   const { data: course } = useQuery(courseQuery(courseId))
   const { data: suggestions } = useQuery(courseRoleSuggestionsQuery(courseId))
@@ -84,15 +87,13 @@ function MembersPage() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Pending role suggestions
+              {t("members.suggestionsTitle")}
               <Badge variant="secondary" className="ml-2">
                 {suggestions.length}
               </Badge>
             </CardTitle>
             <CardDescription>
-              An external system (e.g. Moodle via LTI) indicated these users
-              should have a higher role. Approve to promote them, or decline
-              to suppress future suggestions for the same role.
+              {t("members.suggestionsDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -124,7 +125,7 @@ function MembersPage() {
                     ) : (
                       <Badge variant="default">{s.suggested_role}</Badge>
                     )}
-                    <span className="ml-2">via {s.source}</span>
+                    <span className="ml-2">{t("members.via", { source: s.source })}</span>
                     {s.source_detail?.lti_roles &&
                       s.source_detail.lti_roles.length > 0 && (
                         <span className="ml-2 break-all">
@@ -144,7 +145,7 @@ function MembersPage() {
                       onClick={() => approveMutation.mutate(s.id)}
                       disabled={approveMutation.isPending}
                     >
-                      Approve
+                      {t("members.approve")}
                     </Button>
                     <Button
                       size="sm"
@@ -152,7 +153,7 @@ function MembersPage() {
                       onClick={() => declineMutation.mutate(s.id)}
                       disabled={declineMutation.isPending}
                     >
-                      Decline
+                      {t("members.decline")}
                     </Button>
                   </div>
                 )}
@@ -164,9 +165,9 @@ function MembersPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Members</CardTitle>
+          <CardTitle>{t("members.title")}</CardTitle>
           <CardDescription>
-            Manage who has access to this course
+            {t("members.description")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -181,7 +182,7 @@ function MembersPage() {
               <Input
                 value={eppn}
                 onChange={(e) => setEppn(e.target.value)}
-                placeholder="username@su.se"
+                placeholder={t("members.eppnPlaceholder")}
                 className="flex-1 min-w-[12rem]"
               />
               <select
@@ -189,17 +190,17 @@ function MembersPage() {
                 onChange={(e) => setRole(e.target.value)}
                 className="border rounded px-2 py-1 text-sm bg-background"
               >
-                <option value="student">Student</option>
-                <option value="ta">TA</option>
-                <option value="teacher">Teacher</option>
+                <option value="student">{t("members.roleStudent")}</option>
+                <option value="ta">{t("members.roleTA")}</option>
+                <option value="teacher">{t("members.roleTeacher")}</option>
               </select>
               <Button type="submit" disabled={addMutation.isPending}>
-                Add
+                {t("members.add")}
               </Button>
             </form>
           )}
 
-          {isLoading && <p className="text-muted-foreground">Loading...</p>}
+          {isLoading && <p className="text-muted-foreground">{tCommon("status.loading")}</p>}
 
           <div className="space-y-2">
             {members?.map((m) => (
@@ -225,7 +226,7 @@ function MembersPage() {
                       size="sm"
                       onClick={() => removeMutation.mutate(m.user_id)}
                     >
-                      Remove
+                      {t("members.remove")}
                     </Button>
                   )}
                 </div>

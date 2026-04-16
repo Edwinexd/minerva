@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import React, { useState, useRef, useEffect, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -90,6 +91,7 @@ async function embedPost<T>(path: string, token: string, body?: unknown): Promis
 // -- Main page --
 
 function EmbedPage() {
+  const { t } = useTranslation("auth")
   const { courseId } = Route.useParams()
   const token = useToken()
   const [course, setCourse] = useState<EmbedCourse | null>(null)
@@ -102,7 +104,7 @@ function EmbedPage() {
   // Load course, user, and conversations on mount.
   useEffect(() => {
     if (!token) {
-      setError("Missing authentication token.")
+      setError(t("embed.missingToken"))
       setLoading(false)
       return
     }
@@ -122,13 +124,13 @@ function EmbedPage() {
           setActiveConvId(convs[0].id)
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load")
+        if (!cancelled) setError(e instanceof Error ? e.message : t("embed.failedToLoad"))
       } finally {
         if (!cancelled) setLoading(false)
       }
     })()
     return () => { cancelled = true }
-  }, [courseId, token])
+  }, [courseId, token, t])
 
   const acknowledgePrivacy = async () => {
     if (!token) return
@@ -145,7 +147,7 @@ function EmbedPage() {
       setConversations((prev) => [conv, ...prev])
       setActiveConvId(conv.id)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create conversation")
+      setError(e instanceof Error ? e.message : t("embed.failedToCreateConversation"))
     }
   }
 
@@ -162,7 +164,7 @@ function EmbedPage() {
   if (!token) {
     return (
       <div className="flex items-center justify-center h-full bg-background text-foreground">
-        <p className="text-destructive">Missing authentication token.</p>
+        <p className="text-destructive">{t("embed.missingToken")}</p>
       </div>
     )
   }
@@ -192,7 +194,7 @@ function EmbedPage() {
       {/* Sidebar */}
       <div className="w-56 border-r flex flex-col p-3">
         <Button size="sm" className="mb-3" onClick={createConversation}>
-          New Chat
+          {t("embed.newChat")}
         </Button>
         <div className="space-y-1 overflow-y-auto flex-1">
           {conversations.map((conv) => (
@@ -205,7 +207,7 @@ function EmbedPage() {
                   : "hover:bg-muted"
               }`}
             >
-              {conv.title || "New conversation"}
+              {conv.title || t("embed.untitledConversation")}
             </button>
           ))}
         </div>
@@ -229,7 +231,7 @@ function EmbedPage() {
           />
         ) : (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
-            <p>Create a new conversation to get started.</p>
+            <p>{t("embed.emptyState")}</p>
           </div>
         )}
       </div>
@@ -254,6 +256,7 @@ function EmbedChatWindow({
   needsPrivacyAck: boolean
   onAcknowledgePrivacy: () => Promise<void>
 }) {
+  const { t } = useTranslation("auth")
   const [messages, setMessages] = useState<EmbedMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [input, setInput] = useState("")
@@ -282,13 +285,13 @@ function EmbedChatWindow({
       })
       .catch((e) => {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to load messages")
+          setError(e instanceof Error ? e.message : t("embed.failedToLoadMessages"))
           setLoading(false)
         }
       })
 
     return () => { cancelled = true }
-  }, [courseId, conversationId, token])
+  }, [courseId, conversationId, token, t])
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -349,7 +352,7 @@ function EmbedChatWindow({
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error")
+      setError(e instanceof Error ? e.message : t("embed.unknownError"))
     } finally {
       setStreaming(false)
       setStreamedTokens("")
@@ -422,17 +425,18 @@ function EmbedChatWindow({
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about the course materials..."
+            placeholder={t("embed.inputPlaceholder")}
             disabled={streaming || needsPrivacyAck}
             className="flex-1"
           />
           <Button type="submit" disabled={streaming || !input.trim() || needsPrivacyAck}>
-            Send
+            {t("embed.send")}
           </Button>
         </form>
         <p className="text-xs text-muted-foreground text-center">
-          Messages and relevant course-material excerpts are sent to Cerebras for AI inference. Responses may be inaccurate; verify with course materials. See{" "}
-          <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">how Minerva handles your data</a>.
+          {t("embed.disclosurePrefix")}
+          <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">{t("embed.disclosureLink")}</a>
+          {t("embed.disclosureSuffix")}
         </p>
       </div>
     </>
@@ -450,6 +454,7 @@ function MarkdownContent({ content }: { content: string }) {
 }
 
 function EmbedChatBubble({ message }: { message: EmbedMessage }) {
+  const { t } = useTranslation("auth")
   const isUser = message.role === "user"
   const [showSources, setShowSources] = useState(false)
   const chunks: string[] | null = message.chunks_used as string[] | null
@@ -472,7 +477,7 @@ function EmbedChatBubble({ message }: { message: EmbedMessage }) {
               className="underline hover:text-foreground"
               onClick={() => setShowSources(!showSources)}
             >
-              {chunks.length} source{chunks.length > 1 ? "s" : ""}
+              {t("embed.sources", { count: chunks.length })}
               {showSources ? (
                 <ChevronUp className="inline w-3 h-3 ml-0.5" />
               ) : (
@@ -485,7 +490,7 @@ function EmbedChatBubble({ message }: { message: EmbedMessage }) {
           <div className="mt-2 space-y-2 border-t pt-2">
             {chunks.map((chunk, i) => {
               const sourceMatch = chunk.match(/^\[Source: (.+?)\](\n|$)/)
-              const source = sourceMatch ? sourceMatch[1] : "Unknown"
+              const source = sourceMatch ? sourceMatch[1] : t("embed.unknownSource")
               const hasText = sourceMatch ? chunk.length > sourceMatch[0].length : true
               const text = hasText
                 ? sourceMatch
@@ -499,7 +504,7 @@ function EmbedChatBubble({ message }: { message: EmbedMessage }) {
                     <p className="text-muted-foreground/80 mt-0.5 line-clamp-3">{text}</p>
                   ) : (
                     <p className="text-muted-foreground/60 mt-0.5 italic">
-                      Source content not available for viewing
+                      {t("embed.sourceUnavailable")}
                     </p>
                   )}
                 </div>

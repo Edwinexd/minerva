@@ -1,7 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { coursesQuery, userQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -23,6 +25,8 @@ export const Route = createFileRoute("/")({
 })
 
 function Home() {
+  const { t } = useTranslation("common")
+  const formatError = useApiErrorMessage()
   const { data: user } = useQuery(userQuery)
   const { data: courses, isLoading, error } = useQuery(coursesQuery)
   const [showCreate, setShowCreate] = useState(false)
@@ -40,13 +44,17 @@ function Home() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">
-            {user ? `Welcome, ${user.display_name || user.eppn}` : "Minerva"}
+            {user
+              ? t("home.welcome", { name: user.display_name || user.eppn })
+              : t("home.appName")}
           </h2>
-          <p className="text-muted-foreground mt-1">Your courses</p>
+          <p className="text-muted-foreground mt-1">
+            {user?.role === "student" ? t("home.yourCourse") : t("home.yourCourses")}
+          </p>
         </div>
         {canCreate && (
           <Button onClick={() => setShowCreate(!showCreate)}>
-            {showCreate ? "Cancel" : "New Course"}
+            {showCreate ? t("actions.cancel") : t("home.newCourse")}
           </Button>
         )}
       </div>
@@ -54,7 +62,9 @@ function Home() {
       {showCreate && <CreateCourseForm onCreated={() => setShowCreate(false)} />}
 
       {error && (
-        <p className="text-destructive">Failed to load courses: {error.message}</p>
+        <p className="text-destructive">
+          {t("home.loadFailed", { error: formatError(error) })}
+        </p>
       )}
 
       {isLoading && (
@@ -75,7 +85,7 @@ function Home() {
 
       {!isLoading && teacherCourses.length > 0 && (
         <CourseSection
-          title={hasBoth ? "Courses you teach" : null}
+          title={hasBoth ? t("home.teacherSection") : null}
           courses={teacherCourses}
           variant="teacher"
         />
@@ -83,7 +93,7 @@ function Home() {
 
       {!isLoading && studentCourses.length > 0 && (
         <CourseSection
-          title={hasBoth ? "Courses you're enrolled in" : null}
+          title={hasBoth ? t("home.studentSection") : null}
           courses={studentCourses}
           variant="student"
         />
@@ -91,9 +101,7 @@ function Home() {
 
       {!isLoading && courses?.length === 0 && !showCreate && (
         <p className="text-muted-foreground">
-          {canCreate
-            ? "No courses yet. Create your first course to get started."
-            : "You haven't been added to any courses yet. Ask your teacher for an invite link."}
+          {canCreate ? t("home.emptyTeacher") : t("home.emptyStudent")}
         </p>
       )}
     </div>
@@ -130,6 +138,7 @@ function CourseSection({
 }
 
 function TeacherCourseCard({ course }: { course: Course }) {
+  const { t } = useTranslation("common")
   return (
     <Link to="/teacher/courses/$courseId" params={{ courseId: course.id }}>
       <Card className="hover:border-foreground/20 transition-colors cursor-pointer h-full">
@@ -154,9 +163,13 @@ function TeacherCourseCard({ course }: { course: Course }) {
             </Badge>
             <div className="flex flex-wrap gap-2">
               <Badge variant="outline">{course.strategy}</Badge>
-              <Badge variant="outline">T={course.temperature}</Badge>
               <Badge variant="outline">
-                {Math.round(course.context_ratio * 100)}% RAG
+                {t("home.temperatureBadge", { value: course.temperature })}
+              </Badge>
+              <Badge variant="outline">
+                {t("home.ragBadge", {
+                  percent: Math.round(course.context_ratio * 100),
+                })}
               </Badge>
             </div>
           </div>
@@ -167,6 +180,7 @@ function TeacherCourseCard({ course }: { course: Course }) {
 }
 
 function StudentCourseCard({ course }: { course: Course }) {
+  const { t } = useTranslation("common")
   return (
     <Link to="/course/$courseId" params={{ courseId: course.id }}>
       <Card className="hover:border-foreground/20 transition-colors cursor-pointer h-full">
@@ -177,7 +191,7 @@ function StudentCourseCard({ course }: { course: Course }) {
           )}
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">Click to start chatting</p>
+          <p className="text-sm text-muted-foreground">{t("home.clickToChat")}</p>
         </CardContent>
       </Card>
     </Link>
@@ -185,6 +199,8 @@ function StudentCourseCard({ course }: { course: Course }) {
 }
 
 function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useTranslation("common")
+  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -201,7 +217,7 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Create Course</CardTitle>
+        <CardTitle>{t("home.create.title")}</CardTitle>
       </CardHeader>
       <CardContent>
         <form
@@ -215,29 +231,33 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
           }}
         >
           <div className="space-y-2">
-            <Label htmlFor="name">Course Name</Label>
+            <Label htmlFor="name">{t("home.create.nameLabel")}</Label>
             <Input
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Prog2 Spring 2026"
+              placeholder={t("home.create.namePlaceholder")}
               required
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
+            <Label htmlFor="description">{t("home.create.descriptionLabel")}</Label>
             <Textarea
               id="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional description"
+              placeholder={t("home.create.descriptionPlaceholder")}
             />
           </div>
           <Button type="submit" disabled={mutation.isPending || !name}>
-            {mutation.isPending ? "Creating..." : "Create"}
+            {mutation.isPending
+              ? t("home.create.submitting")
+              : t("home.create.submit")}
           </Button>
           {mutation.isError && (
-            <p className="text-sm text-destructive">{mutation.error.message}</p>
+            <p className="text-sm text-destructive">
+              {formatError(mutation.error)}
+            </p>
           )}
         </form>
       </CardContent>

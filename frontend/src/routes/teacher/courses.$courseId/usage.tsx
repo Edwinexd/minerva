@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { courseMembersQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import {
@@ -34,6 +35,7 @@ function formatTokens(n: number): string {
 
 function UsagePage() {
   const { courseId } = Route.useParams()
+  const { t } = useTranslation("teacher")
   const { data: usage, isLoading } = useQuery({
     queryKey: ["courses", courseId, "usage"],
     queryFn: () => api.get<UsageRow[]>(`/courses/${courseId}/usage`),
@@ -69,9 +71,9 @@ function UsagePage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Token Usage</CardTitle>
+        <CardTitle>{t("usage.title")}</CardTitle>
         <CardDescription>
-          Track token consumption per student for billing and monitoring
+          {t("usage.description")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -83,7 +85,7 @@ function UsagePage() {
         )}
 
         {!isLoading && byUser.size === 0 && (
-          <p className="text-muted-foreground text-sm">No usage data yet.</p>
+          <p className="text-muted-foreground text-sm">{t("usage.empty")}</p>
         )}
 
         {byUser.size > 0 && (
@@ -91,19 +93,19 @@ function UsagePage() {
             <div className="grid grid-cols-4 gap-4 text-center">
               <div>
                 <p className="text-2xl font-bold">{formatTokens(totalPrompt + totalCompletion)}</p>
-                <p className="text-xs text-muted-foreground">Total tokens</p>
+                <p className="text-xs text-muted-foreground">{t("usage.totalTokens")}</p>
               </div>
               <div>
                 <p className="text-2xl font-bold">{totalRequests}</p>
-                <p className="text-xs text-muted-foreground">Requests</p>
+                <p className="text-xs text-muted-foreground">{t("usage.requests")}</p>
               </div>
               <div>
                 <p className="text-2xl font-bold">{formatTokens(totalPrompt)}</p>
-                <p className="text-xs text-muted-foreground">Prompt tokens</p>
+                <p className="text-xs text-muted-foreground">{t("usage.promptTokens")}</p>
               </div>
               <div>
                 <p className="text-2xl font-bold">{formatTokens(totalCompletion)}</p>
-                <p className="text-xs text-muted-foreground">Completion tokens</p>
+                <p className="text-xs text-muted-foreground">{t("usage.completionTokens")}</p>
               </div>
             </div>
 
@@ -111,11 +113,11 @@ function UsagePage() {
 
             <div className="space-y-1">
               <div className="grid grid-cols-5 gap-2 text-xs font-medium text-muted-foreground px-2 pb-1">
-                <span>User</span>
-                <span className="text-right">Prompt</span>
-                <span className="text-right">Completion</span>
-                <span className="text-right">Total</span>
-                <span className="text-right">Requests</span>
+                <span>{t("usage.colUser")}</span>
+                <span className="text-right">{t("usage.colPrompt")}</span>
+                <span className="text-right">{t("usage.colCompletion")}</span>
+                <span className="text-right">{t("usage.colTotal")}</span>
+                <span className="text-right">{t("usage.colRequests")}</span>
               </div>
               {Array.from(byUser.entries())
                 .sort((a, b) => (b[1].prompt + b[1].completion) - (a[1].prompt + a[1].completion))
@@ -136,14 +138,14 @@ function UsagePage() {
           <>
             <Separator />
             <div>
-              <h4 className="text-sm font-medium mb-2">Daily breakdown</h4>
+              <h4 className="text-sm font-medium mb-2">{t("usage.dailyBreakdown")}</h4>
               <div className="space-y-1 max-h-64 overflow-y-auto">
                 <div className="grid grid-cols-5 gap-2 text-xs font-medium text-muted-foreground px-2 pb-1">
-                  <span>Date</span>
-                  <span>User</span>
-                  <span className="text-right">Prompt</span>
-                  <span className="text-right">Completion</span>
-                  <span className="text-right">Requests</span>
+                  <span>{t("usage.colDate")}</span>
+                  <span>{t("usage.colUser")}</span>
+                  <span className="text-right">{t("usage.colPrompt")}</span>
+                  <span className="text-right">{t("usage.colCompletion")}</span>
+                  <span className="text-right">{t("usage.colRequests")}</span>
                 </div>
                 {usage.map((row, i) => (
                   <div key={i} className="grid grid-cols-5 gap-2 text-xs px-2 py-1 border-b last:border-0">

@@ -5,6 +5,8 @@ import { userQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { ExternalLink } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
+import { useTranslation } from "react-i18next"
+import { LanguageSwitcher } from "@/components/language-switcher"
 
 interface RouterContext {
   queryClient: QueryClient
@@ -27,6 +29,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 })
 
 function RootLayout() {
+  const { t } = useTranslation()
   const isEmbed = window.location.pathname.startsWith("/embed/")
 
   const embedParams = useMemo(() => {
@@ -79,7 +82,7 @@ function RootLayout() {
                 to="/admin"
                 className="text-muted-foreground hover:text-foreground"
               >
-                Admin
+                {t("nav.admin")}
               </Link>
             )}
             {!isEmbed && devConfig?.dev_mode && devConfig.users ? (
@@ -94,6 +97,7 @@ function RootLayout() {
                 {embedMe.eppn}{embedMe.lti_client_id && ` via LTI (${embedMe.lti_client_id})`}
               </span>
             )}
+            <LanguageSwitcher />
           </nav>
         </div>
       </header>
@@ -104,14 +108,14 @@ function RootLayout() {
         <div className="flex flex-wrap items-center justify-between gap-2 max-w-7xl mx-auto text-xs text-muted-foreground">
           <span>
             <a href="https://github.com/Edwinexd/minerva" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">Minerva</a>
-            {" "}is licensed under{" "}
+            {" "}{t("footer.licenseLead")}{" "}
             <a href="https://github.com/Edwinexd/minerva?tab=AGPL-3.0-1-ov-file" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">AGPL-3.0</a>
           </span>
           <div className="flex items-center gap-4">
             {isEmbed ? (
-              <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">Data handling</a>
+              <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">{t("nav.dataHandling")}</a>
             ) : (
-              <Link to="/data-handling" className="hover:text-foreground underline">Data handling</Link>
+              <Link to="/data-handling" className="hover:text-foreground underline">{t("nav.dataHandling")}</Link>
             )}
             <a href="mailto:lambda@dsv.su.se" className="hover:text-foreground underline">lambda@dsv.su.se</a>
           </div>
@@ -126,6 +130,7 @@ function DevUserSwitcher({
 }: {
   users: { eppn: string; label: string }[]
 }) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [selected, setSelected] = useState(() => {
     return localStorage.getItem("minerva-dev-user") || users[0]?.eppn || ""
@@ -140,7 +145,7 @@ function DevUserSwitcher({
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">DEV</span>
+      <span className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">{t("dev.label")}</span>
       <select
         value={selected}
         onChange={(e) => setSelected(e.target.value)}

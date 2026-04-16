@@ -1,0 +1,193 @@
+{
+  "layout": {
+    "title": "Platform Admin",
+    "tabs": {
+      "usage": "Platform Usage",
+      "users": "User Management",
+      "courses": "Course Management",
+      "rules": "Role Rules",
+      "externalInvites": "External Invites",
+      "system": "System"
+    }
+  },
+  "usage": {
+    "totalTokens": "Total Tokens",
+    "totalRequests": "Total Requests",
+    "activeCourses": "Active Courses",
+    "byCourseTitle": "Usage by Course",
+    "byCourseEmpty": "No usage data yet.",
+    "topUsersTitle": "Top Users by Token Usage",
+    "topUsersEmpty": "No usage data yet.",
+    "columns": {
+      "course": "Course",
+      "tokens": "Tokens",
+      "requests": "Requests",
+      "limit": "Limit",
+      "user": "User"
+    },
+    "limit": {
+      "perDay": "{{value}}/day",
+      "unlimited": "unlimited"
+    }
+  },
+  "users": {
+    "title": "Users ({{total}})",
+    "description": "Manage user roles, daily AI spending limits, and account status. Setting a role manually locks it from auto-promotion rules.",
+    "filterPlaceholder": "Filter by name or eppn...",
+    "columns": {
+      "user": "User",
+      "eppn": "eppn",
+      "role": "Role",
+      "ownerCap": "Owner cap (tok/day)",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "roles": {
+      "admin": "admin",
+      "student": "student",
+      "teacher": "teacher"
+    },
+    "locked": "locked",
+    "lockedTitle": "Locked from rule auto-promotion",
+    "status": {
+      "suspended": "suspended",
+      "active": "active"
+    },
+    "actionsLabel": "User actions",
+    "unlockRole": "Unlock role",
+    "suspend": "Suspend",
+    "unsuspend": "Unsuspend",
+    "ownerLimit": {
+      "unlimited": "unlimited"
+    }
+  },
+  "courses": {
+    "title": "Courses ({{total}})",
+    "description": "All courses on the platform. Click the settings link to open a course's configuration.",
+    "filterPlaceholder": "Filter by name or owner...",
+    "columns": {
+      "course": "Course",
+      "owner": "Owner",
+      "status": "Status",
+      "tokenLimit": "Token limit/student/day",
+      "created": "Created",
+      "settings": "Settings"
+    },
+    "status": {
+      "active": "active",
+      "archived": "archived"
+    },
+    "tokenLimitUnlimited": "unlimited",
+    "settingsLink": "Settings",
+    "empty": "No courses match the filter."
+  },
+  "rules": {
+    "title": "Role Auto-Promotion Rules",
+    "description": "Each rule promotes a user to its target role when ALL conditions match the user's Shibboleth attributes at login. Rules never demote, never override admins (MINERVA_ADMINS env), and never touch users whose role was set manually in User Management (those users show a \"locked\" badge; click Unlock there to re-enable rule evaluation). Multi-valued attributes (affiliation, entitlement) use list-membership semantics for \"contains\"; substring matches are rejected.",
+    "negatedNote": "Negated operators (<0>not_contains</0>, <1>not_regex</1>) also require the attribute to be present on the user. This prevents external/non-Shib users (who have no affiliation / entitlement / etc. at all) from matching a \"not contains X\" rule by virtue of having nothing.",
+    "empty": "No rules yet. Create one above to start auto-promoting users.",
+    "form": {
+      "ruleName": "Rule name",
+      "ruleNamePlaceholder": "DSV staff -> teacher",
+      "targetRole": "Target role",
+      "teacher": "teacher",
+      "student": "student",
+      "createRule": "Create rule"
+    },
+    "card": {
+      "enabled": "enabled",
+      "disabled": "disabled",
+      "noConditions": "Add at least one condition for this rule to ever match.",
+      "matchesWhen_one": "Matches when ALL {{count}} condition holds.",
+      "matchesWhen_other": "Matches when ALL {{count}} conditions hold.",
+      "enable": "Enable",
+      "disable": "Disable",
+      "delete": "Delete",
+      "confirmDelete": "Delete rule \"{{name}}\"?"
+    },
+    "condition": {
+      "valuePlaceholder": "urn:mace:swami.se:gmai:dsv-user:staff",
+      "add": "Add",
+      "removeLabel": "Remove condition"
+    }
+  },
+  "externalInvites": {
+    "createTitle": "Create External Invite",
+    "createDescription": "Generate a time-limited login link for someone without a Stockholm University account. Links bypass Shibboleth and grant student-level access; promote to teacher in User Management after they first log in. The full link is shown only once; if lost, revoke and re-mint.",
+    "existingTitle": "Existing Invites ({{total}})",
+    "existingDescription": "Active, expired, and revoked invites.",
+    "empty": "No invites yet.",
+    "form": {
+      "identifier": "Identifier (e.g. email)",
+      "identifierPlaceholder": "alice@example.com",
+      "displayName": "Display name (optional)",
+      "displayNamePlaceholder": "Alice Example",
+      "days": "Days",
+      "create": "Create invite",
+      "creating": "Creating..."
+    },
+    "callout": {
+      "title": "Invite link for {{eppn}}",
+      "dismiss": "dismiss",
+      "note": "Share this link privately. It is shown only once and grants login until ",
+      "copy": "Copy",
+      "copied": "Copied"
+    },
+    "columns": {
+      "eppn": "Eppn",
+      "displayName": "Display name",
+      "created": "Created",
+      "expires": "Expires",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "active",
+      "expired": "expired",
+      "revoked": "revoked"
+    },
+    "revoke": "Revoke"
+  },
+  "system": {
+    "unavailableTitle": "System metrics unavailable",
+    "storage": {
+      "title": "Storage",
+      "descriptionLead": "Filesystem backing ",
+      "descriptionTail": "; the host volume holds postgres, qdrant, documents and backups. Contact DSV helpdesk to expand when free space runs low.",
+      "usedOfTotal": "{{used}} / {{total}} used",
+      "freePercent": "{{free}} free ({{percent}}%)",
+      "nearlyFull": "Disk is nearly full. Request expansion from helpdesk soon.",
+      "fillingUp": "Disk is filling up. Consider requesting expansion.",
+      "statsUnavailable": "Disk stats unavailable on this platform."
+    },
+    "databaseSize": "PostgreSQL database size",
+    "documentsOnDisk": "Documents on disk",
+    "documentsTotal": "{{value}} total",
+    "documentsPending": "{{value}} pending",
+    "documentsFailed": "{{value}} failed",
+    "qdrant": {
+      "title": "Qdrant",
+      "description": "Vector collections",
+      "reachable": "reachable",
+      "unreachable": "unreachable",
+      "noCollections": "No collections yet.",
+      "notConnected": "Could not connect to Qdrant.",
+      "columns": {
+        "collection": "Collection",
+        "points": "Points",
+        "indexedVectors": "Indexed vectors",
+        "segments": "Segments"
+      }
+    },
+    "databaseTables": {
+      "title": "Database tables",
+      "descriptionLead": "Approximate row counts from ",
+      "descriptionTail": " (updated by ANALYZE, not exact).",
+      "empty": "No tables found.",
+      "columns": {
+        "table": "Table",
+        "rowsApprox": "Rows (approx)"
+      }
+    }
+  }
+}

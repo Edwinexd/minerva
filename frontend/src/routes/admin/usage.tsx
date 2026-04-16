@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { adminUsersQuery, adminUsageQuery, coursesQuery } from "@/lib/queries"
 import {
   Card,
@@ -15,6 +16,7 @@ export const Route = createFileRoute("/admin/usage")({
 })
 
 function PlatformUsagePanel() {
+  const { t } = useTranslation("admin")
   const { data: usage, isLoading: usageLoading } = useQuery(adminUsageQuery)
   const { data: courses, isLoading: coursesLoading } = useQuery(coursesQuery)
   const { data: users } = useQuery(adminUsersQuery)
@@ -65,19 +67,19 @@ function PlatformUsagePanel() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Total Tokens</CardDescription>
+            <CardDescription>{t("usage.totalTokens")}</CardDescription>
             <CardTitle className="text-2xl">{totalTokens.toLocaleString()}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Total Requests</CardDescription>
+            <CardDescription>{t("usage.totalRequests")}</CardDescription>
             <CardTitle className="text-2xl">{totalRequests.toLocaleString()}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Active Courses</CardDescription>
+            <CardDescription>{t("usage.activeCourses")}</CardDescription>
             <CardTitle className="text-2xl">{courses.length}</CardTitle>
           </CardHeader>
         </Card>
@@ -85,20 +87,20 @@ function PlatformUsagePanel() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Usage by Course</CardTitle>
+          <CardTitle>{t("usage.byCourseTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
           {byCourse.size === 0 ? (
-            <p className="text-muted-foreground">No usage data yet.</p>
+            <p className="text-muted-foreground">{t("usage.byCourseEmpty")}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="py-2 pr-4 font-medium">Course</th>
-                    <th className="py-2 pr-4 font-medium text-right">Tokens</th>
-                    <th className="py-2 pr-4 font-medium text-right">Requests</th>
-                    <th className="py-2 font-medium text-right">Limit</th>
+                    <th className="py-2 pr-4 font-medium">{t("usage.columns.course")}</th>
+                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.tokens")}</th>
+                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.requests")}</th>
+                    <th className="py-2 font-medium text-right">{t("usage.columns.limit")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -119,8 +121,10 @@ function PlatformUsagePanel() {
                           </td>
                           <td className="py-2 text-right font-mono">
                             {course?.daily_token_limit
-                              ? `${course.daily_token_limit.toLocaleString()}/day`
-                              : "unlimited"}
+                              ? t("usage.limit.perDay", {
+                                  value: course.daily_token_limit.toLocaleString(),
+                                })
+                              : t("usage.limit.unlimited")}
                           </td>
                         </tr>
                       )
@@ -134,19 +138,19 @@ function PlatformUsagePanel() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Top Users by Token Usage</CardTitle>
+          <CardTitle>{t("usage.topUsersTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
           {sortedUsers.length === 0 ? (
-            <p className="text-muted-foreground">No usage data yet.</p>
+            <p className="text-muted-foreground">{t("usage.topUsersEmpty")}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="py-2 pr-4 font-medium">User</th>
-                    <th className="py-2 pr-4 font-medium text-right">Tokens</th>
-                    <th className="py-2 font-medium text-right">Requests</th>
+                    <th className="py-2 pr-4 font-medium">{t("usage.columns.user")}</th>
+                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.tokens")}</th>
+                    <th className="py-2 font-medium text-right">{t("usage.columns.requests")}</th>
                   </tr>
                 </thead>
                 <tbody>

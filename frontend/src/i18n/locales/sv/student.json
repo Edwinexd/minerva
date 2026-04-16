@@ -1,0 +1,64 @@
+{
+  "sidebar": {
+    "newChat": "Ny chatt",
+    "openConversations": "Öppna konversationer",
+    "closeConversations": "Stäng konversationer",
+    "pinned": "Fäst",
+    "newConversation": "Ny konversation",
+    "conversation": "Konversation",
+    "pinnedByTeacher": "Fäst av lärare",
+    "studentFallback": "Student"
+  },
+  "chat": {
+    "inputPlaceholder": "Fråga om kursmaterialet…",
+    "send": "Skicka",
+    "disclaimerBefore": "Meddelanden och relevanta utdrag ur kursmaterialet skickas till Cerebras för AI-inferens. Svaren kan vara felaktiga; verifiera mot kursmaterialet. Läs ",
+    "dataHandlingLink": "hur Minerva hanterar dina uppgifter",
+    "disclaimerAfter": ".",
+    "unknownError": "Okänt fel"
+  },
+  "message": {
+    "tokensUsed_one": "{{count}} token",
+    "tokensUsed_other": "{{count}} tokens",
+    "generationTime": " på {{seconds}} s",
+    "usingSuffix": " med",
+    "source_one": "{{count}} källa",
+    "source_other": "{{count}} källor",
+    "acrossRetrievals": "(över {{count}} hämtningar)",
+    "unknownSource": "Okänd",
+    "sourceUnavailable": "Källinnehållet är inte tillgängligt för visning",
+    "teacherNote": "Lärarkommentar"
+  },
+  "feedback": {
+    "thumbsUpTitle": "Bra svar",
+    "thumbsUpActiveTitle": "Du tyckte att detta var bra",
+    "thumbsDownTitle": "Dåligt svar",
+    "thumbsDownActiveTitle": "Redigera feedback",
+    "dialogTitle": "Vad var fel med det här svaret?",
+    "dialogDescription": "Välj alternativet som passar bäst. Din kommentar är valfri men hjälper din lärare att förstå problemet.",
+    "categoryLabel": "Kategori",
+    "required": "*",
+    "categoryPlaceholder": "Välj en kategori…",
+    "commentLabel": "Kommentar (valfritt)",
+    "commentPlaceholder": "Lägg till mer detaljer…",
+    "submit": "Skicka",
+    "submitting": "Sparar…",
+    "categories": {
+      "incorrect": "Felaktigt eller missvisande",
+      "off-topic": "Utanför ämnet / inte om kursen",
+      "incomplete": "Ofullständigt svar",
+      "unclear": "Svårt att förstå",
+      "harmful": "Skadligt eller olämpligt",
+      "other": "Annat"
+    }
+  },
+  "privacy": {
+    "bannerText": "Innan du skickar meddelanden, läs hur Minerva hanterar dina data.",
+    "reviewButton": "Läs & godkänn",
+    "dialogTitle": "Hur Minerva hanterar dina data",
+    "closeLabel": "Stäng",
+    "agreeButton": "Jag förstår och godkänner",
+    "savingButton": "Sparar…",
+    "acknowledgeFailed": "Kunde inte registrera godkännandet"
+  }
+}

@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { courseQuery, modelsQuery, embeddingBenchmarksQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -38,6 +40,9 @@ function ConfigPage() {
 
 function CourseConfigForm({ course }: { course: Course }) {
   const queryClient = useQueryClient()
+  const { t } = useTranslation("teacher")
+  const { t: tCommon } = useTranslation("common")
+  const formatError = useApiErrorMessage()
   const { data: modelsData } = useQuery(modelsQuery)
   const { data: benchmarksData } = useQuery(embeddingBenchmarksQuery)
   const readOnly = course.my_role === "ta"
@@ -65,15 +70,15 @@ function CourseConfigForm({ course }: { course: Course }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Course Configuration</CardTitle>
+        <CardTitle>{t("config.title")}</CardTitle>
         <CardDescription>
-          Configure how RAG works for this course
+          {t("config.description")}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {readOnly && (
           <p className="text-sm text-muted-foreground mb-4">
-            Read-only: TAs can view but not edit course configuration.
+            {t("config.readOnly")}
           </p>
         )}
         <form
@@ -97,7 +102,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           }}
         >
           <div className="space-y-2">
-            <Label htmlFor="name">Course Name</Label>
+            <Label htmlFor="name">{t("config.nameLabel")}</Label>
             <Input
               id="name"
               value={name}
@@ -106,7 +111,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
+            <Label htmlFor="description">{t("config.descriptionLabel")}</Label>
             <Textarea
               id="description"
               value={description}
@@ -118,7 +123,7 @@ function CourseConfigForm({ course }: { course: Course }) {
 
           <div className="space-y-2">
             <Label>
-              RAG Context Ratio: {Math.round(contextRatio * 100)}%
+              {t("config.contextRatioLabel", { percent: Math.round(contextRatio * 100) })}
             </Label>
             <Slider
               value={[contextRatio]}
@@ -128,13 +133,12 @@ function CourseConfigForm({ course }: { course: Course }) {
               step={0.05}
             />
             <p className="text-xs text-muted-foreground">
-              How much of the context window is used for RAG chunks vs
-              conversation history
+              {t("config.contextRatioHelp")}
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label>Temperature: {temperature.toFixed(2)}</Label>
+            <Label>{t("config.temperatureLabel", { value: temperature.toFixed(2) })}</Label>
             <Slider
               value={[temperature]}
               onValueChange={(v) => setTemperature(Array.isArray(v) ? v[0] : v)}
@@ -145,10 +149,10 @@ function CourseConfigForm({ course }: { course: Course }) {
           </div>
 
           <div className="space-y-2">
-            <Label>Model</Label>
+            <Label>{t("config.modelLabel")}</Label>
             <Select value={model} onValueChange={(v) => v && setModel(v)}>
               <SelectTrigger className="w-full truncate">
-                <SelectValue placeholder="Select a model" />
+                <SelectValue placeholder={t("config.modelPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
                 {modelsData?.models.map((m) => (
@@ -161,89 +165,86 @@ function CourseConfigForm({ course }: { course: Course }) {
           </div>
 
           <div className="space-y-2">
-            <Label>Generation Strategy</Label>
+            <Label>{t("config.strategyLabel")}</Label>
             <Select value={strategy} onValueChange={(v) => v && setStrategy(v)}>
               <SelectTrigger className="w-full truncate">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="parallel">
-                  Parallel (fast first token, inject RAG mid-stream)
+                  {t("config.strategyParallel")}
                 </SelectItem>
                 <SelectItem value="simple">
-                  Simple (retrieve first, then generate)
+                  {t("config.strategySimple")}
                 </SelectItem>
                 <SelectItem value="flare">
-                  FLARE (sentence-level active retrieval)
+                  {t("config.strategyFlare")}
                 </SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              Parallel starts streaming instantly and injects RAG context when ready.
-              Simple waits for RAG before generating. FLARE retrieves after each sentence
-              using the generated text as the query.
+              {t("config.strategyHelp")}
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label>Embedding Provider</Label>
+            <Label>{t("config.embeddingProviderLabel")}</Label>
             <Select value={embeddingProvider} onValueChange={(v) => v && setEmbeddingProvider(v)}>
               <SelectTrigger className="w-full truncate">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="local">
-                  Local (FastEmbedding)
+                  {t("config.embeddingProviderLocal")}
                 </SelectItem>
                 <SelectItem value="openai">
-                  OpenAI (text-embedding-3-small)
+                  {t("config.embeddingProviderOpenAI")}
                 </SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              Local runs on this server with zero latency and no API cost.
-              OpenAI requires an API key. Changing provider requires re-uploading documents.
+              {t("config.embeddingProviderHelp")}
             </p>
             {embeddingProvider === "openai" && (
               <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                With OpenAI embeddings enabled, every student question in this course is sent to OpenAI to compute a search vector, in addition to the Cerebras call for the answer. Course materials are embedded once on upload; questions are embedded on every send.
+                {t("config.openaiWarning")}
               </div>
             )}
           </div>
 
           {embeddingProvider === "local" && (
             <div className="space-y-2">
-              <Label>Embedding Model</Label>
+              <Label>{t("config.embeddingModelLabel")}</Label>
               <Select value={embeddingModel} onValueChange={(v) => v && setEmbeddingModel(v)}>
                 <SelectTrigger className="w-full truncate">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {[
-                    { id: "sentence-transformers/all-MiniLM-L6-v2", name: "all-MiniLM-L6-v2", dims: 384, desc: "fast, good quality" },
-                    { id: "BAAI/bge-small-en-v1.5", name: "BGE Small EN v1.5", dims: 384, desc: "optimized for retrieval" },
-                    { id: "BAAI/bge-base-en-v1.5", name: "BGE Base EN v1.5", dims: 768, desc: "higher quality" },
-                    { id: "nomic-ai/nomic-embed-text-v1.5", name: "Nomic Embed Text v1.5", dims: 768, desc: "long context" },
+                    { id: "sentence-transformers/all-MiniLM-L6-v2", name: "all-MiniLM-L6-v2", dims: 384, descKey: "config.embeddingModels.miniLmDesc" },
+                    { id: "BAAI/bge-small-en-v1.5", name: "BGE Small EN v1.5", dims: 384, descKey: "config.embeddingModels.bgeSmallDesc" },
+                    { id: "BAAI/bge-base-en-v1.5", name: "BGE Base EN v1.5", dims: 768, descKey: "config.embeddingModels.bgeBaseDesc" },
+                    { id: "nomic-ai/nomic-embed-text-v1.5", name: "Nomic Embed Text v1.5", dims: 768, descKey: "config.embeddingModels.nomicDesc" },
                   ].map((m) => {
                     const bench = benchmarksData?.benchmarks.find((b) => b.model === m.id)
-                    const speed = bench ? ` - ${Math.round(bench.embeddings_per_second)} emb/s` : ""
+                    const speed = bench ? t("config.embeddingSpeedSuffix", { value: Math.round(bench.embeddings_per_second) }) : ""
                     return (
                       <SelectItem key={m.id} value={m.id}>
-                        {m.name} ({m.dims}d, {m.desc}{speed})
+                        {t("config.embeddingModelItem", { name: m.name, dims: m.dims, desc: t(m.descKey), speed })}
                       </SelectItem>
                     )
                   })}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Changing model requires re-uploading documents.
-                {benchmarksData?.benchmarks.length ? " Speed measured on this server at startup." : ""}
+                {t("config.embeddingModelHelp")}
+                {benchmarksData?.benchmarks.length ? t("config.embeddingModelHelpSpeed") : ""}
               </p>
             </div>
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="maxChunks">Max Retrieved Chunks</Label>
+            <Label htmlFor="maxChunks">{t("config.maxChunksLabel")}</Label>
             <Input
               id="maxChunks"
               type="number"
@@ -255,7 +256,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           </div>
 
           <div className="space-y-2">
-            <Label>Minimum Similarity Score: {minScore.toFixed(2)}</Label>
+            <Label>{t("config.minScoreLabel", { value: minScore.toFixed(2) })}</Label>
             <Slider
               value={[minScore]}
               onValueChange={(v) => setMinScore(Array.isArray(v) ? v[0] : v)}
@@ -264,16 +265,14 @@ function CourseConfigForm({ course }: { course: Course }) {
               step={0.01}
             />
             <p className="text-xs text-muted-foreground">
-              Chunks scoring below this threshold are dropped before being sent
-              to the model. 0 disables the filter (top-K only). Use the RAG tab
-              to preview which chunks pass for a sample question.
+              {t("config.minScoreHelp")}
             </p>
           </div>
 
           <Separator />
 
           <div className="space-y-2">
-            <Label htmlFor="dailyTokenLimit">Daily Token Limit per Student</Label>
+            <Label htmlFor="dailyTokenLimit">{t("config.dailyTokenLimitLabel")}</Label>
             <Input
               id="dailyTokenLimit"
               type="number"
@@ -282,33 +281,33 @@ function CourseConfigForm({ course }: { course: Course }) {
               min={0}
             />
             <p className="text-xs text-muted-foreground">
-              Maximum tokens a student can use per day in this course. Set to 0 for unlimited.
+              {t("config.dailyTokenLimitHelp")}
             </p>
           </div>
 
           <Separator />
 
           <div className="space-y-2">
-            <Label htmlFor="systemPrompt">Custom System Prompt</Label>
+            <Label htmlFor="systemPrompt">{t("config.systemPromptLabel")}</Label>
             <Textarea
               id="systemPrompt"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="Optional custom instructions for the AI assistant"
+              placeholder={t("config.systemPromptPlaceholder")}
               rows={4}
             />
           </div>
 
           {!readOnly && (
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? "Saving..." : "Save Configuration"}
+              {mutation.isPending ? tCommon("actions.saving") : t("config.saveButton")}
             </Button>
           )}
           {mutation.isSuccess && (
-            <span className="text-sm text-muted-foreground ml-2">Saved!</span>
+            <span className="text-sm text-muted-foreground ml-2">{t("config.savedToast")}</span>
           )}
           {mutation.isError && (
-            <p className="text-sm text-destructive">{mutation.error.message}</p>
+            <p className="text-sm text-destructive">{formatError(mutation.error)}</p>
           )}
         </form>
       </CardContent>

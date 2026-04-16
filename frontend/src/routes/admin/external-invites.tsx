@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { RelativeTime } from "@/components/relative-time"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { useState } from "react"
 import { externalAuthInvitesQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { useApiErrorMessage } from "@/lib/use-api-error"
 import type { ExternalAuthInvite, ExternalAuthInviteCreated } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,6 +29,7 @@ function statusOf(invite: ExternalAuthInvite): "active" | "revoked" | "expired" 
 }
 
 function ExternalInvitesPanel() {
+  const { t } = useTranslation("admin")
   const { data: invites, isLoading } = useQuery(externalAuthInvitesQuery)
   const [lastCreated, setLastCreated] = useState<ExternalAuthInviteCreated | null>(null)
 
@@ -34,13 +37,8 @@ function ExternalInvitesPanel() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Create External Invite</CardTitle>
-          <CardDescription>
-            Generate a time-limited login link for someone without a Stockholm University
-            account. Links bypass Shibboleth and grant student-level access; promote to
-            teacher in User Management after they first log in. The full link is shown only
-            once; if lost, revoke and re-mint.
-          </CardDescription>
+          <CardTitle>{t("externalInvites.createTitle")}</CardTitle>
+          <CardDescription>{t("externalInvites.createDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <CreateInviteForm onCreated={setLastCreated} />
@@ -50,8 +48,8 @@ function ExternalInvitesPanel() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Existing Invites ({invites?.length ?? 0})</CardTitle>
-          <CardDescription>Active, expired, and revoked invites.</CardDescription>
+          <CardTitle>{t("externalInvites.existingTitle", { total: invites?.length ?? 0 })}</CardTitle>
+          <CardDescription>{t("externalInvites.existingDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -61,18 +59,18 @@ function ExternalInvitesPanel() {
               ))}
             </div>
           ) : !invites || invites.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No invites yet.</p>
+            <p className="text-sm text-muted-foreground">{t("externalInvites.empty")}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="py-2 pr-4 font-medium">Eppn</th>
-                    <th className="py-2 pr-4 font-medium">Display name</th>
-                    <th className="py-2 pr-4 font-medium">Created</th>
-                    <th className="py-2 pr-4 font-medium">Expires</th>
-                    <th className="py-2 pr-4 font-medium">Status</th>
-                    <th className="py-2 font-medium">Actions</th>
+                    <th className="py-2 pr-4 font-medium">{t("externalInvites.columns.eppn")}</th>
+                    <th className="py-2 pr-4 font-medium">{t("externalInvites.columns.displayName")}</th>
+                    <th className="py-2 pr-4 font-medium">{t("externalInvites.columns.created")}</th>
+                    <th className="py-2 pr-4 font-medium">{t("externalInvites.columns.expires")}</th>
+                    <th className="py-2 pr-4 font-medium">{t("externalInvites.columns.status")}</th>
+                    <th className="py-2 font-medium">{t("externalInvites.columns.actions")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -90,6 +88,8 @@ function ExternalInvitesPanel() {
 }
 
 function CreateInviteForm({ onCreated }: { onCreated: (inv: ExternalAuthInviteCreated) => void }) {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [eppn, setEppn] = useState("")
   const [displayName, setDisplayName] = useState("")
@@ -120,26 +120,26 @@ function CreateInviteForm({ onCreated }: { onCreated: (inv: ExternalAuthInviteCr
   return (
     <form onSubmit={submit} className="grid gap-3 sm:grid-cols-[2fr,2fr,1fr,auto] sm:items-end">
       <label className="block">
-        <span className="mb-1 block text-xs font-medium">Identifier (e.g. email)</span>
+        <span className="mb-1 block text-xs font-medium">{t("externalInvites.form.identifier")}</span>
         <input
           required
           className="w-full rounded border bg-background px-3 py-1.5 text-sm"
-          placeholder="alice@example.com"
+          placeholder={t("externalInvites.form.identifierPlaceholder")}
           value={eppn}
           onChange={(e) => setEppn(e.target.value)}
         />
       </label>
       <label className="block">
-        <span className="mb-1 block text-xs font-medium">Display name (optional)</span>
+        <span className="mb-1 block text-xs font-medium">{t("externalInvites.form.displayName")}</span>
         <input
           className="w-full rounded border bg-background px-3 py-1.5 text-sm"
-          placeholder="Alice Example"
+          placeholder={t("externalInvites.form.displayNamePlaceholder")}
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
         />
       </label>
       <label className="block">
-        <span className="mb-1 block text-xs font-medium">Days</span>
+        <span className="mb-1 block text-xs font-medium">{t("externalInvites.form.days")}</span>
         <input
           type="number"
           min={1}
@@ -150,10 +150,10 @@ function CreateInviteForm({ onCreated }: { onCreated: (inv: ExternalAuthInviteCr
         />
       </label>
       <Button type="submit" disabled={mutation.isPending || !eppn.trim()}>
-        {mutation.isPending ? "Creating..." : "Create invite"}
+        {mutation.isPending ? t("externalInvites.form.creating") : t("externalInvites.form.create")}
       </Button>
       {mutation.isError && (
-        <p className="sm:col-span-4 text-xs text-destructive">{mutation.error.message}</p>
+        <p className="sm:col-span-4 text-xs text-destructive">{formatError(mutation.error)}</p>
       )}
     </form>
   )
@@ -166,6 +166,7 @@ function CreatedInviteCallout({
   invite: ExternalAuthInviteCreated
   onDismiss: () => void
 }) {
+  const { t } = useTranslation("admin")
   const [copied, setCopied] = useState(false)
 
   const copy = async () => {
@@ -177,17 +178,17 @@ function CreatedInviteCallout({
   return (
     <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950/40">
       <div className="mb-2 flex items-center justify-between">
-        <strong>Invite link for {invite.eppn}</strong>
+        <strong>{t("externalInvites.callout.title", { eppn: invite.eppn })}</strong>
         <button
           type="button"
           className="text-xs text-muted-foreground hover:underline"
           onClick={onDismiss}
         >
-          dismiss
+          {t("externalInvites.callout.dismiss")}
         </button>
       </div>
       <p className="mb-2 text-xs text-muted-foreground">
-        Share this link privately. It is shown only once and grants login until{" "}
+        {t("externalInvites.callout.note")}
         <RelativeTime date={invite.expires_at} />.
       </p>
       <div className="flex gap-2">
@@ -198,7 +199,7 @@ function CreatedInviteCallout({
           onFocus={(e) => e.currentTarget.select()}
         />
         <Button type="button" size="sm" variant="outline" onClick={copy}>
-          {copied ? "Copied" : "Copy"}
+          {copied ? t("externalInvites.callout.copied") : t("externalInvites.callout.copy")}
         </Button>
       </div>
     </div>
@@ -206,6 +207,7 @@ function CreatedInviteCallout({
 }
 
 function InviteRow({ invite }: { invite: ExternalAuthInvite }) {
+  const { t } = useTranslation("admin")
   const queryClient = useQueryClient()
   const status = statusOf(invite)
 
@@ -223,9 +225,9 @@ function InviteRow({ invite }: { invite: ExternalAuthInvite }) {
       <td className="py-2 pr-4 text-xs"><RelativeTime date={invite.created_at} /></td>
       <td className="py-2 pr-4 text-xs"><RelativeTime date={invite.expires_at} /></td>
       <td className="py-2 pr-4">
-        {status === "active" && <Badge variant="secondary">active</Badge>}
-        {status === "expired" && <Badge variant="outline">expired</Badge>}
-        {status === "revoked" && <Badge variant="destructive">revoked</Badge>}
+        {status === "active" && <Badge variant="secondary">{t("externalInvites.status.active")}</Badge>}
+        {status === "expired" && <Badge variant="outline">{t("externalInvites.status.expired")}</Badge>}
+        {status === "revoked" && <Badge variant="destructive">{t("externalInvites.status.revoked")}</Badge>}
       </td>
       <td className="py-2">
         {status === "active" && (
@@ -236,7 +238,7 @@ function InviteRow({ invite }: { invite: ExternalAuthInvite }) {
             onClick={() => revokeMutation.mutate()}
             disabled={revokeMutation.isPending}
           >
-            Revoke
+            {t("externalInvites.revoke")}
           </Button>
         )}
       </td>

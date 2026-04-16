@@ -186,19 +186,17 @@ async fn update_course(
     // value would never match. Reject it before it hits the CHECK constraint.
     if let Some(score) = body.min_score {
         if !(0.0..=1.0).contains(&score) || score.is_nan() {
-            return Err(AppError::BadRequest(
-                "min_score must be between 0.0 and 1.0".into(),
-            ));
+            return Err(AppError::bad_request("course.min_score_out_of_range"));
         }
     }
 
     // Validate embedding_provider
     if let Some(ref provider) = body.embedding_provider {
         if !minerva_ingest::pipeline::VALID_EMBEDDING_PROVIDERS.contains(&provider.as_str()) {
-            return Err(AppError::BadRequest(format!(
-                "invalid embedding_provider: {}",
-                provider
-            )));
+            return Err(AppError::bad_request_with(
+                "course.embedding_provider_invalid",
+                [("provider", provider.clone())],
+            ));
         }
     }
 
@@ -214,10 +212,10 @@ async fn update_course(
                 .iter()
                 .any(|(name, _)| *name == model.as_str());
             if !valid {
-                return Err(AppError::BadRequest(format!(
-                    "invalid local embedding_model: {}",
-                    model
-                )));
+                return Err(AppError::bad_request_with(
+                    "course.local_embedding_model_invalid",
+                    [("model", model.clone())],
+                ));
             }
         }
     }

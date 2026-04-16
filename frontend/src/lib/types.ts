@@ -1,3 +1,5 @@
+import type { LocalizedMessage } from "./use-api-error"
+
 export interface User {
   id: string
   eppn: string
@@ -302,15 +304,15 @@ export interface CanvasItemInfo {
 
 export interface CanvasItemsResponse {
   items: CanvasItemInfo[]
-  warnings: string[]
+  warnings: LocalizedMessage[]
 }
 
 export interface CanvasSyncResult {
   synced: number
   resynced: number
   skipped: number
-  errors: string[]
-  warnings: string[]
+  errors: LocalizedMessage[]
+  warnings: LocalizedMessage[]
 }
 
 export interface ExternalAuthInvite {

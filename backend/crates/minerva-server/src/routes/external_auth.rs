@@ -105,7 +105,7 @@ async fn create_invite(
 
     let local = body.eppn.trim();
     if local.is_empty() || local.len() > 200 {
-        return Err(AppError::BadRequest("eppn must be 1-200 characters".into()));
+        return Err(AppError::bad_request("external_auth.eppn_invalid_length"));
     }
     // Don't let admins accidentally double-prefix. Lowercase the local part so
     // the invite matches the normalized eppn produced by auth_middleware.

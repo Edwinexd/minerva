@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,6 +23,8 @@ export const Route = createFileRoute("/teacher/courses/$courseId/invite")({
 function InvitePage() {
   const { courseId } = Route.useParams()
   const queryClient = useQueryClient()
+  const { t } = useTranslation("teacher")
+  const { t: tCommon } = useTranslation("common")
   const [expiresHours, setExpiresHours] = useState(168)
   const [maxUses, setMaxUses] = useState("")
   const { data: links, isLoading } = useQuery({
@@ -62,34 +65,34 @@ function InvitePage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Invite Links</CardTitle>
+        <CardTitle>{t("invite.title")}</CardTitle>
         <CardDescription>
-          Generate signed URLs for students to join this course
+          {t("invite.description")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex gap-2 items-end">
           <div className="space-y-1">
-            <Label className="text-xs">Duration</Label>
+            <Label className="text-xs">{t("invite.durationLabel")}</Label>
             <select
               value={expiresHours}
               onChange={(e) => setExpiresHours(Number(e.target.value))}
               className="border rounded px-2 py-1.5 text-sm bg-background"
             >
-              <option value={1}>1 hour</option>
-              <option value={24}>1 day</option>
-              <option value={168}>7 days</option>
-              <option value={720}>30 days</option>
-              <option value={8760}>1 year</option>
+              <option value={1}>{t("invite.duration1h")}</option>
+              <option value={24}>{t("invite.duration1d")}</option>
+              <option value={168}>{t("invite.duration7d")}</option>
+              <option value={720}>{t("invite.duration30d")}</option>
+              <option value={8760}>{t("invite.duration1y")}</option>
             </select>
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Max uses (optional)</Label>
+            <Label className="text-xs">{t("invite.maxUsesLabel")}</Label>
             <Input
               type="number"
               value={maxUses}
               onChange={(e) => setMaxUses(e.target.value)}
-              placeholder="unlimited"
+              placeholder={t("invite.maxUsesPlaceholder")}
               className="w-28"
               min={1}
             />
@@ -101,7 +104,7 @@ function InvitePage() {
             })}
             disabled={createMutation.isPending}
           >
-            {createMutation.isPending ? "Generating..." : "Generate Link"}
+            {createMutation.isPending ? t("invite.generating") : t("invite.generate")}
           </Button>
         </div>
 
@@ -123,8 +126,12 @@ function InvitePage() {
                   {window.location.origin}/join/{link.token}
                 </code>
                 <div className="flex gap-3 text-xs text-muted-foreground">
-                  <span>Expires: <RelativeTime date={link.expires_at} /></span>
-                  <span>Used: {link.use_count}{link.max_uses ? `/${link.max_uses}` : ""}</span>
+                  <span>{t("invite.expires")} <RelativeTime date={link.expires_at} /></span>
+                  <span>
+                    {link.max_uses
+                      ? t("invite.usedWithMax", { count: link.use_count, max: link.max_uses })
+                      : t("invite.used", { count: link.use_count })}
+                  </span>
                 </div>
               </div>
               <div className="flex gap-2 ml-2">
@@ -137,14 +144,14 @@ function InvitePage() {
                     )
                   }}
                 >
-                  Copy
+                  {tCommon("actions.copy")}
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => deleteMutation.mutate(link.id)}
                 >
-                  Revoke
+                  {t("invite.revoke")}
                 </Button>
               </div>
             </div>

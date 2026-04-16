@@ -149,15 +149,13 @@ async fn join_via_token(
     // Check expiry
     let now = chrono::Utc::now();
     if now > signed_url.expires_at {
-        return Err(AppError::BadRequest("signed URL has expired".to_string()));
+        return Err(AppError::bad_request("signed_url.expired"));
     }
 
     // Check max uses
     if let Some(max) = signed_url.max_uses {
         if signed_url.use_count >= max {
-            return Err(AppError::BadRequest(
-                "signed URL has reached max uses".to_string(),
-            ));
+            return Err(AppError::bad_request("signed_url.max_uses_reached"));
         }
     }
 

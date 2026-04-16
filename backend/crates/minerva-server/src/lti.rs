@@ -180,8 +180,9 @@ pub async fn validate_launch_jwt(
     http_client: &reqwest::Client,
 ) -> Result<LtiLaunchClaims, AppError> {
     // 1. Decode JWT header to get kid.
-    let header = decode_header(id_token)
-        .map_err(|e| AppError::BadRequest(format!("invalid JWT header: {}", e)))?;
+    let header = decode_header(id_token).map_err(|e| {
+        AppError::bad_request_with("lti.jwt_header_invalid", [("detail", e.to_string())])
+    })?;
     let kid = header.kid.as_deref();
 
     // 2. Fetch platform JWKS.
@@ -205,7 +206,7 @@ pub async fn validate_launch_jwt(
                 k.get("kty").and_then(|v| v.as_str()) == Some("RSA")
             }
         })
-        .ok_or_else(|| AppError::BadRequest("no matching key in platform JWKS".into()))?;
+        .ok_or_else(|| AppError::bad_request("lti.no_jwks_key"))?;
 
     let jwk: jsonwebtoken::jwk::Jwk = serde_json::from_value(jwk_value.clone())
         .map_err(|e| AppError::Internal(format!("failed to parse JWK: {}", e)))?;
@@ -219,23 +220,25 @@ pub async fn validate_launch_jwt(
     validation.set_audience(&[&registration.client_id]);
     validation.validate_exp = true;
 
-    let token_data = decode::<LtiLaunchClaims>(id_token, &decoding_key, &validation)
-        .map_err(|e| AppError::BadRequest(format!("JWT validation failed: {}", e)))?;
+    let token_data =
+        decode::<LtiLaunchClaims>(id_token, &decoding_key, &validation).map_err(|e| {
+            AppError::bad_request_with("lti.jwt_validation_failed", [("detail", e.to_string())])
+        })?;
 
     let claims = token_data.claims;
 
     // 5. Verify nonce.
     if claims.nonce != expected_nonce {
-        return Err(AppError::BadRequest("nonce mismatch".into()));
+        return Err(AppError::bad_request("lti.nonce_mismatch"));
     }
 
     // 6. Verify message type.
     if let Some(ref msg_type) = claims.message_type {
         if msg_type != "LtiResourceLinkRequest" {
-            return Err(AppError::BadRequest(format!(
-                "unsupported LTI message type: {}",
-                msg_type
-            )));
+            return Err(AppError::bad_request_with(
+                "lti.message_type_unsupported",
+                [("type", msg_type.clone())],
+            ));
         }
     }
 

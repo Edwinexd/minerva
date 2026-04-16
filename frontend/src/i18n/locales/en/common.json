@@ -1,0 +1,102 @@
+{
+  "nav": {
+    "admin": "Admin",
+    "dataHandling": "Data handling",
+    "openInNewTab": "Open in new tab"
+  },
+  "footer": {
+    "licenseLead": "is licensed under"
+  },
+  "actions": {
+    "save": "Save",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "create": "Create",
+    "creating": "Creating…",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "remove": "Remove",
+    "edit": "Edit",
+    "close": "Close",
+    "confirm": "Confirm",
+    "back": "Back",
+    "retry": "Retry",
+    "submit": "Submit",
+    "submitting": "Submitting…",
+    "loading": "Loading…",
+    "copy": "Copy",
+    "copied": "Copied",
+    "search": "Search"
+  },
+  "status": {
+    "loading": "Loading…",
+    "error": "Something went wrong.",
+    "empty": "Nothing to show yet."
+  },
+  "dev": {
+    "label": "DEV"
+  },
+  "language": {
+    "label": "Language",
+    "english": "English",
+    "swedish": "Svenska"
+  },
+  "home": {
+    "welcome": "Welcome, {{name}}",
+    "appName": "Minerva",
+    "yourCourses": "Your courses",
+    "yourCourse": "Your course",
+    "newCourse": "New Course",
+    "loadFailed": "Failed to load courses: {{error}}",
+    "teacherSection": "Courses you teach",
+    "studentSection": "Courses you're enrolled in",
+    "emptyTeacher": "No courses yet. Create your first course to get started.",
+    "emptyStudent": "You haven't been added to a course yet. Ask your teacher for an invite link.",
+    "clickToChat": "Click to start chatting",
+    "ragBadge": "{{percent}}% RAG",
+    "temperatureBadge": "T={{value}}",
+    "create": {
+      "title": "Create Course",
+      "nameLabel": "Course Name",
+      "namePlaceholder": "e.g. Prog2 Spring 2026",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "Optional description",
+      "submit": "Create",
+      "submitting": "Creating…"
+    }
+  },
+  "dataHandling": {
+    "title": "How Minerva handles your data",
+    "whatWeStore": {
+      "heading": "What we store",
+      "identity": "Your identity from Shibboleth or LTI: your SU username (eppn) and display name. External-invite users see pseudonymized names of others in the course.",
+      "conversations": "Your conversations, messages, and any feedback you submit on AI answers.",
+      "materials": "Course materials uploaded by teachers or synced from Canvas / Moodle."
+    },
+    "staffAccess": {
+      "heading": "Course staff can read your conversations",
+      "body": "Teachers and TAs in your course can see every conversation you have there. Other students can't, unless a teacher explicitly shares one with the class."
+    },
+    "whereMessagesGo": {
+      "heading": "Where your messages go",
+      "cerebras": "Chat messages and relevant course-material excerpts are sent to <strong>Cerebras</strong> for AI inference.",
+      "openai": "If your course's teacher has enabled OpenAI embeddings, your questions are additionally sent to <strong>OpenAI</strong> to compute a search vector. Otherwise embeddings run locally on the Minerva server.",
+      "nothingElse": "Nothing else leaves the Minerva server."
+    },
+    "retention": {
+      "heading": "How long we keep it",
+      "body": "Conversations and messages are retained for as long as the course exists."
+    },
+    "integrations": {
+      "heading": "Canvas / Moodle / Play integrations (teachers)",
+      "canvas": "<strong>Canvas:</strong> Minerva pulls course files and page content only (no submissions, rosters, or grades). Your Canvas API token is stored in the Minerva database in plaintext; revoke it in Minerva or Canvas to disconnect.",
+      "moodle": "<strong>Moodle plugin:</strong> pushes course materials (files, page/book/label HTML, URLs) and a list of enrolled students (eppn + display name) to Minerva.",
+      "lti": "<strong>LTI launches:</strong> when Moodle or Canvas launches Minerva in an iframe, the platform passes the student's identifier and (if configured) display name to Minerva. A user row is created on first launch.",
+      "play": "<strong>Play (play.dsv.su.se):</strong> when a `.url` document points at Play, the VTT transcript is fetched and stored as searchable text inside the course."
+    },
+    "contact": {
+      "heading": "Contact",
+      "questions": "Questions:"
+    }
+  }
+}

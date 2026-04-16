@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use uuid::Uuid;
 
-use crate::error::AppError;
+use crate::error::{AppError, LocalizedMessage};
 use crate::state::AppState;
 use minerva_core::models::User;
 
@@ -134,15 +134,17 @@ async fn canvas_get_json<T: serde::de::DeserializeOwned>(
         .header("Authorization", format!("Bearer {}", api_token))
         .send()
         .await
-        .map_err(|e| AppError::BadRequest(format!("Canvas API request failed: {}", e)))?;
+        .map_err(|e| {
+            AppError::bad_request_with("canvas.api_request_failed", [("detail", e.to_string())])
+        })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(AppError::BadRequest(format!(
-            "Canvas API error ({}): {}",
-            status, body
-        )));
+        return Err(AppError::bad_request_with(
+            "canvas.api_error",
+            [("status", status.to_string()), ("body", body)],
+        ));
     }
 
     let link_header = resp
@@ -151,10 +153,9 @@ async fn canvas_get_json<T: serde::de::DeserializeOwned>(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let parsed: T = resp
-        .json()
-        .await
-        .map_err(|e| AppError::BadRequest(format!("Canvas API parse error: {}", e)))?;
+    let parsed: T = resp.json().await.map_err(|e| {
+        AppError::bad_request_with("canvas.api_parse_failed", [("detail", e.to_string())])
+    })?;
 
     Ok((parsed, next_page_url(&link_header)))
 }
@@ -305,7 +306,7 @@ struct DiscoveredItem {
 
 struct Discovery {
     items: Vec<DiscoveredItem>,
-    warnings: Vec<String>,
+    warnings: Vec<LocalizedMessage>,
 }
 
 /// Query both sources concurrently; per-source failures become warnings.
@@ -350,9 +351,9 @@ async fn discover_items(
             }
         }
         Err(e) => {
-            warnings.push(format!(
-                "Files API unavailable ({}). Falling back to Modules for file discovery.",
-                friendly_error(&e)
+            warnings.push(LocalizedMessage::with(
+                "canvas.warning.files_unavailable",
+                [("detail", e.to_string())],
             ));
         }
     }
@@ -435,9 +436,9 @@ async fn discover_items(
             }
         }
         Err(e) => {
-            warnings.push(format!(
-                "Modules API unavailable ({}). Only top-level Files will be synced.",
-                friendly_error(&e)
+            warnings.push(LocalizedMessage::with(
+                "canvas.warning.modules_unavailable",
+                [("detail", e.to_string())],
             ));
         }
     }
@@ -454,13 +455,6 @@ async fn discover_items(
     });
 
     Discovery { items, warnings }
-}
-
-fn friendly_error(e: &AppError) -> String {
-    match e {
-        AppError::BadRequest(msg) => msg.clone(),
-        other => other.to_string(),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -541,9 +535,7 @@ async fn lookup_courses(
     let token = body.canvas_api_token.trim();
 
     if base.is_empty() || token.is_empty() {
-        return Err(AppError::BadRequest(
-            "canvas_base_url and canvas_api_token are required".into(),
-        ));
+        return Err(AppError::bad_request("canvas.base_url_and_token_required"));
     }
 
     let url = format!("{}/api/v1/courses?per_page=100", base);
@@ -580,16 +572,16 @@ async fn create_connection(
     require_course_teacher(&state, course_id, &user).await?;
 
     if body.name.trim().is_empty() {
-        return Err(AppError::BadRequest("name is required".into()));
+        return Err(AppError::bad_request("canvas.name_required"));
     }
     if body.canvas_base_url.trim().is_empty() {
-        return Err(AppError::BadRequest("canvas_base_url is required".into()));
+        return Err(AppError::bad_request("canvas.base_url_required"));
     }
     if body.canvas_api_token.trim().is_empty() {
-        return Err(AppError::BadRequest("canvas_api_token is required".into()));
+        return Err(AppError::bad_request("canvas.api_token_required"));
     }
     if body.canvas_course_id.trim().is_empty() {
-        return Err(AppError::BadRequest("canvas_course_id is required".into()));
+        return Err(AppError::bad_request("canvas.course_id_required"));
     }
 
     let base_url = body.canvas_base_url.trim().trim_end_matches('/');
@@ -606,10 +598,7 @@ async fn create_connection(
     .await;
 
     if disc.warnings.len() == 2 {
-        return Err(AppError::BadRequest(format!(
-            "Could not reach Canvas. {}",
-            disc.warnings.join(" ")
-        )));
+        return Err(AppError::bad_request("canvas.unreachable"));
     }
 
     let id = Uuid::new_v4();
@@ -665,7 +654,7 @@ struct CanvasItemInfo {
 #[derive(Serialize)]
 struct CanvasItemsResponse {
     items: Vec<CanvasItemInfo>,
-    warnings: Vec<String>,
+    warnings: Vec<LocalizedMessage>,
 }
 
 async fn list_canvas_items(
@@ -734,8 +723,8 @@ pub struct SyncResult {
     pub synced: usize,
     pub resynced: usize,
     pub skipped: usize,
-    pub errors: Vec<String>,
-    pub warnings: Vec<String>,
+    pub errors: Vec<LocalizedMessage>,
+    pub warnings: Vec<LocalizedMessage>,
 }
 
 async fn trigger_sync(
@@ -801,9 +790,13 @@ pub async fn run_sync(
             Ok(Outcome::Created) => result.synced += 1,
             Ok(Outcome::Resynced) => result.resynced += 1,
             Ok(Outcome::Skipped) => result.skipped += 1,
-            Err(e) => result
-                .errors
-                .push(format!("{}: {}", item.display_name, friendly_error(&e))),
+            Err(e) => result.errors.push(LocalizedMessage::with(
+                "canvas.sync.item_failed",
+                [
+                    ("item", item.display_name.clone()),
+                    ("detail", e.to_string()),
+                ],
+            )),
         }
     }
 
@@ -913,10 +906,10 @@ async fn sync_file(
         )
         .await
         .map_err(|e| {
-            AppError::BadRequest(format!(
-                "fetch file metadata failed: {}",
-                friendly_error(&e)
-            ))
+            AppError::bad_request_with(
+                "canvas.fetch_file_metadata_failed",
+                [("detail", e.to_string())],
+            )
         })?,
     };
 
@@ -936,10 +929,10 @@ async fn sync_file(
         download_canvas_file(&state.http_client, &conn.canvas_api_token, download_url).await?;
     let size_bytes = data.len() as i64;
     if size_bytes > super::documents::MAX_UPLOAD_BYTES {
-        return Err(AppError::BadRequest(format!(
-            "file too large ({} bytes)",
-            size_bytes
-        )));
+        return Err(AppError::bad_request_with(
+            "canvas.file_too_large",
+            [("size_bytes", size_bytes.to_string())],
+        ));
     }
 
     let content_type = file
@@ -1073,10 +1066,10 @@ async fn sync_page(
     let data = html.into_bytes();
     let size_bytes = data.len() as i64;
     if size_bytes > super::documents::MAX_UPLOAD_BYTES {
-        return Err(AppError::BadRequest(format!(
-            "page too large ({} bytes)",
-            size_bytes
-        )));
+        return Err(AppError::bad_request_with(
+            "canvas.page_too_large",
+            [("size_bytes", size_bytes.to_string())],
+        ));
     }
 
     let filename = format!("{}.html", safe_filename(&page.title));

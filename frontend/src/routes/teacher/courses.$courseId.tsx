@@ -1,5 +1,6 @@
 import { createFileRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { courseQuery } from "@/lib/queries"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -16,19 +17,33 @@ export const Route = createFileRoute("/teacher/courses/$courseId")({
   component: CourseEditPage,
 })
 
-const TABS = [
-  { value: "config", label: "Configuration" },
-  { value: "members", label: "Members" },
-  { value: "conversations", label: "Conversations" },
-  { value: "documents", label: "Documents" },
-  { value: "invite", label: "Invite Links" },
-  { value: "lti", label: "LTI" },
-  { value: "canvas", label: "Canvas" },
-  { value: "api-keys", label: "API Keys" },
-  { value: "play-designations", label: "Play Designations" },
-  { value: "rag", label: "RAG Debug" },
-  { value: "usage", label: "Usage" },
+const TAB_VALUES = [
+  "config",
+  "members",
+  "conversations",
+  "documents",
+  "invite",
+  "lti",
+  "canvas",
+  "api-keys",
+  "play-designations",
+  "rag",
+  "usage",
 ] as const
+
+const TAB_LABEL_KEYS: Record<(typeof TAB_VALUES)[number], string> = {
+  "config": "layout.tabs.config",
+  "members": "layout.tabs.members",
+  "conversations": "layout.tabs.conversations",
+  "documents": "layout.tabs.documents",
+  "invite": "layout.tabs.invite",
+  "lti": "layout.tabs.lti",
+  "canvas": "layout.tabs.canvas",
+  "api-keys": "layout.tabs.apiKeys",
+  "play-designations": "layout.tabs.playDesignations",
+  "rag": "layout.tabs.rag",
+  "usage": "layout.tabs.usage",
+}
 
 // Tabs that TAs cannot see: invite/LTI/API keys/play designations are
 // teacher-only operations enforced server-side; hide them in the UI too.
@@ -45,11 +60,12 @@ function CourseEditPage() {
   const { data: course, isLoading } = useQuery(courseQuery(courseId))
   const navigate = useNavigate()
   const location = useLocation()
+  const { t } = useTranslation("teacher")
 
-  const visibleTabs = course?.my_role === "ta"
-    ? TABS.filter((t) => !TA_HIDDEN_TABS.has(t.value))
-    : TABS
-  const validTabs = new Set<string>(visibleTabs.map((t) => t.value))
+  const visibleTabValues = course?.my_role === "ta"
+    ? TAB_VALUES.filter((v) => !TA_HIDDEN_TABS.has(v))
+    : TAB_VALUES
+  const validTabs = new Set<string>(visibleTabValues)
 
   const lastSegment = location.pathname.split("/").pop() || ""
   const activeTab = validTabs.has(lastSegment) ? lastSegment : "config"
@@ -61,14 +77,14 @@ function CourseEditPage() {
       <Skeleton className="h-64 w-full" />
     </div>
   )
-  if (!course) return <p className="text-muted-foreground">Course not found</p>
+  if (!course) return <p className="text-muted-foreground">{t("layout.courseNotFound")}</p>
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold tracking-tight">{course.name}</h2>
         <Link to="/course/$courseId" params={{ courseId }}>
-          <Button variant="outline">Try Chat</Button>
+          <Button variant="outline">{t("layout.tryChat")}</Button>
         </Link>
       </div>
 
@@ -81,13 +97,15 @@ function CourseEditPage() {
         >
           <SelectTrigger className="w-full">
             <SelectValue>
-              {visibleTabs.find((t) => t.value === activeTab)?.label}
+              {visibleTabValues.includes(activeTab as (typeof TAB_VALUES)[number])
+                ? t(TAB_LABEL_KEYS[activeTab as (typeof TAB_VALUES)[number]])
+                : null}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {visibleTabs.map((tab) => (
-              <SelectItem key={tab.value} value={tab.value}>
-                {tab.label}
+            {visibleTabValues.map((tab) => (
+              <SelectItem key={tab} value={tab}>
+                {t(TAB_LABEL_KEYS[tab])}
               </SelectItem>
             ))}
           </SelectContent>
@@ -102,9 +120,9 @@ function CourseEditPage() {
         className="hidden md:flex"
       >
         <TabsList>
-          {visibleTabs.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value}>
-              {tab.label}
+          {visibleTabValues.map((tab) => (
+            <TabsTrigger key={tab} value={tab}>
+              {t(TAB_LABEL_KEYS[tab])}
             </TabsTrigger>
           ))}
         </TabsList>

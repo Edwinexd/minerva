@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { Menu } from "@base-ui/react/menu"
 import { MoreHorizontalIcon } from "lucide-react"
 import { adminUsersQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -29,6 +31,7 @@ export const Route = createFileRoute("/admin/users")({
 })
 
 function UserManagementPanel() {
+  const { t } = useTranslation("admin")
   const { data: users, isLoading } = useQuery(adminUsersQuery)
   const [filter, setFilter] = useState("")
 
@@ -55,14 +58,11 @@ function UserManagementPanel() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Users ({users.length})</CardTitle>
-        <CardDescription>
-          Manage user roles, daily AI spending limits, and account status.
-          Setting a role manually locks it from auto-promotion rules.
-        </CardDescription>
+        <CardTitle>{t("users.title", { total: users.length })}</CardTitle>
+        <CardDescription>{t("users.description")}</CardDescription>
         <input
           className="mt-2 w-full max-w-sm rounded border bg-background px-3 py-1.5 text-sm"
-          placeholder="Filter by name or eppn..."
+          placeholder={t("users.filterPlaceholder")}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
@@ -72,12 +72,12 @@ function UserManagementPanel() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left">
-                <th className="py-2 pr-4 font-medium">User</th>
-                <th className="py-2 pr-4 font-medium">eppn</th>
-                <th className="py-2 pr-4 font-medium">Role</th>
-                <th className="py-2 pr-4 font-medium">Owner cap (tok/day)</th>
-                <th className="py-2 pr-4 font-medium">Status</th>
-                <th className="py-2 font-medium">Actions</th>
+                <th className="py-2 pr-4 font-medium">{t("users.columns.user")}</th>
+                <th className="py-2 pr-4 font-medium">{t("users.columns.eppn")}</th>
+                <th className="py-2 pr-4 font-medium">{t("users.columns.role")}</th>
+                <th className="py-2 pr-4 font-medium">{t("users.columns.ownerCap")}</th>
+                <th className="py-2 pr-4 font-medium">{t("users.columns.status")}</th>
+                <th className="py-2 font-medium">{t("users.columns.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -93,6 +93,8 @@ function UserManagementPanel() {
 }
 
 function UserRow({ user }: { user: AdminUser }) {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["admin", "users"] })
@@ -120,7 +122,7 @@ function UserRow({ user }: { user: AdminUser }) {
       <td className="py-2 pr-4 font-mono text-xs">{user.eppn}</td>
       <td className="py-2 pr-4">
         {user.role === "admin" ? (
-          <Badge>admin</Badge>
+          <Badge>{t("users.roles.admin")}</Badge>
         ) : (
           <div className="flex items-center gap-2">
             <Select
@@ -132,17 +134,17 @@ function UserRow({ user }: { user: AdminUser }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="student">student</SelectItem>
-                <SelectItem value="teacher">teacher</SelectItem>
+                <SelectItem value="student">{t("users.roles.student")}</SelectItem>
+                <SelectItem value="teacher">{t("users.roles.teacher")}</SelectItem>
               </SelectContent>
             </Select>
             {user.role_manually_set && (
               <Badge
                 variant="outline"
                 className="h-6 px-2.5"
-                title="Locked from rule auto-promotion"
+                title={t("users.lockedTitle")}
               >
-                locked
+                {t("users.locked")}
               </Badge>
             )}
           </div>
@@ -153,9 +155,9 @@ function UserRow({ user }: { user: AdminUser }) {
       </td>
       <td className="py-2 pr-4">
         {user.suspended ? (
-          <Badge variant="destructive">suspended</Badge>
+          <Badge variant="destructive">{t("users.status.suspended")}</Badge>
         ) : (
-          <Badge variant="secondary">active</Badge>
+          <Badge variant="secondary">{t("users.status.active")}</Badge>
         )}
       </td>
       <td className="py-2">
@@ -168,7 +170,7 @@ function UserRow({ user }: { user: AdminUser }) {
                     variant="ghost"
                     size="sm"
                     className="h-7 w-7 p-0"
-                    aria-label="User actions"
+                    aria-label={t("users.actionsLabel")}
                   >
                     <MoreHorizontalIcon className="size-4" />
                   </Button>
@@ -188,7 +190,7 @@ function UserRow({ user }: { user: AdminUser }) {
                         disabled={unlockMutation.isPending}
                         onClick={() => unlockMutation.mutate()}
                       >
-                        Unlock role
+                        {t("users.unlockRole")}
                       </Menu.Item>
                     )}
                     <Menu.Item
@@ -197,7 +199,7 @@ function UserRow({ user }: { user: AdminUser }) {
                       disabled={suspendMutation.isPending}
                       onClick={() => suspendMutation.mutate(!user.suspended)}
                     >
-                      {user.suspended ? "Unsuspend" : "Suspend"}
+                      {user.suspended ? t("users.unsuspend") : t("users.suspend")}
                     </Menu.Item>
                   </Menu.Popup>
                 </Menu.Positioner>
@@ -205,7 +207,7 @@ function UserRow({ user }: { user: AdminUser }) {
             </Menu.Root>
             {suspendMutation.isError && (
               <span className="text-xs text-destructive">
-                {suspendMutation.error.message}
+                {formatError(suspendMutation.error)}
               </span>
             )}
           </div>
@@ -216,6 +218,8 @@ function UserRow({ user }: { user: AdminUser }) {
 }
 
 function OwnerLimitInput({ user }: { user: AdminUser }) {
+  const { t } = useTranslation("admin")
+  const { t: tCommon } = useTranslation("common")
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState(String(user.owner_daily_token_limit))
 
@@ -247,11 +251,11 @@ function OwnerLimitInput({ user }: { user: AdminUser }) {
           }}
           disabled={mutation.isPending}
         >
-          Save
+          {tCommon("actions.save")}
         </Button>
       )}
       {user.owner_daily_token_limit === 0 && !dirty && (
-        <span className="text-xs text-muted-foreground">unlimited</span>
+        <span className="text-xs text-muted-foreground">{t("users.ownerLimit.unlimited")}</span>
       )}
     </div>
   )

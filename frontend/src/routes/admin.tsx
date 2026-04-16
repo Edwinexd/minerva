@@ -1,4 +1,5 @@
 import { createFileRoute, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
+import { useTranslation } from "react-i18next"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Select,
@@ -12,27 +13,41 @@ export const Route = createFileRoute("/admin")({
   component: AdminLayout,
 })
 
-const TABS = [
-  { value: "usage", label: "Platform Usage" },
-  { value: "users", label: "User Management" },
-  { value: "courses", label: "Course Management" },
-  { value: "rules", label: "Role Rules" },
-  { value: "external-invites", label: "External Invites" },
-  { value: "system", label: "System" },
+const TAB_VALUES = [
+  "usage",
+  "users",
+  "courses",
+  "rules",
+  "external-invites",
+  "system",
 ] as const
 
-const VALID_TABS = new Set(TABS.map((t) => t.value))
+type TabValue = (typeof TAB_VALUES)[number]
+
+const VALID_TABS = new Set<TabValue>(TAB_VALUES)
+
+const TAB_LABEL_KEYS: Record<TabValue, string> = {
+  usage: "layout.tabs.usage",
+  users: "layout.tabs.users",
+  courses: "layout.tabs.courses",
+  rules: "layout.tabs.rules",
+  "external-invites": "layout.tabs.externalInvites",
+  system: "layout.tabs.system",
+}
 
 function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { t } = useTranslation("admin")
 
   const lastSegment = location.pathname.split("/").pop() || ""
-  const activeTab = VALID_TABS.has(lastSegment as typeof TABS[number]["value"]) ? lastSegment : "usage"
+  const activeTab: TabValue = VALID_TABS.has(lastSegment as TabValue)
+    ? (lastSegment as TabValue)
+    : "usage"
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold tracking-tight">Platform Admin</h2>
+      <h2 className="text-2xl font-bold tracking-tight">{t("layout.title")}</h2>
 
       <div className="md:hidden">
         <Select
@@ -42,14 +57,12 @@ function AdminLayout() {
           }}
         >
           <SelectTrigger className="w-full">
-            <SelectValue>
-              {TABS.find((t) => t.value === activeTab)?.label}
-            </SelectValue>
+            <SelectValue>{t(TAB_LABEL_KEYS[activeTab])}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {TABS.map((tab) => (
-              <SelectItem key={tab.value} value={tab.value}>
-                {tab.label}
+            {TAB_VALUES.map((value) => (
+              <SelectItem key={value} value={value}>
+                {t(TAB_LABEL_KEYS[value])}
               </SelectItem>
             ))}
           </SelectContent>
@@ -64,9 +77,9 @@ function AdminLayout() {
         className="hidden md:flex"
       >
         <TabsList>
-          {TABS.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value}>
-              {tab.label}
+          {TAB_VALUES.map((value) => (
+            <TabsTrigger key={value} value={value}>
+              {t(TAB_LABEL_KEYS[value])}
             </TabsTrigger>
           ))}
         </TabsList>

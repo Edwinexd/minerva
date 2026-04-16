@@ -1,0 +1,193 @@
+{
+  "layout": {
+    "title": "Plattformsadmin",
+    "tabs": {
+      "usage": "Plattformsanvändning",
+      "users": "Användarhantering",
+      "courses": "Kurshantering",
+      "rules": "Rollregler",
+      "externalInvites": "Externa inbjudningar",
+      "system": "System"
+    }
+  },
+  "usage": {
+    "totalTokens": "Totalt antal tokens",
+    "totalRequests": "Totalt antal förfrågningar",
+    "activeCourses": "Aktiva kurser",
+    "byCourseTitle": "Användning per kurs",
+    "byCourseEmpty": "Ingen användningsdata än.",
+    "topUsersTitle": "Toppanvändare efter tokenanvändning",
+    "topUsersEmpty": "Ingen användningsdata än.",
+    "columns": {
+      "course": "Kurs",
+      "tokens": "Tokens",
+      "requests": "Förfrågningar",
+      "limit": "Gräns",
+      "user": "Användare"
+    },
+    "limit": {
+      "perDay": "{{value}}/dag",
+      "unlimited": "obegränsat"
+    }
+  },
+  "users": {
+    "title": "Användare ({{total}})",
+    "description": "Hantera användarroller, dagliga AI-kostnadsgränser och kontostatus. Att manuellt ändra en roll låser den från automatiska befordringsregler.",
+    "filterPlaceholder": "Filtrera på namn eller eppn...",
+    "columns": {
+      "user": "Användare",
+      "eppn": "eppn",
+      "role": "Roll",
+      "ownerCap": "Ägartak (tok/dag)",
+      "status": "Status",
+      "actions": "Åtgärder"
+    },
+    "roles": {
+      "admin": "admin",
+      "student": "student",
+      "teacher": "lärare"
+    },
+    "locked": "låst",
+    "lockedTitle": "Låst från automatisk befordran via regler",
+    "status": {
+      "suspended": "avstängd",
+      "active": "aktiv"
+    },
+    "actionsLabel": "Användaråtgärder",
+    "unlockRole": "Lås upp roll",
+    "suspend": "Stäng av",
+    "unsuspend": "Aktivera igen",
+    "ownerLimit": {
+      "unlimited": "obegränsat"
+    }
+  },
+  "courses": {
+    "title": "Kurser ({{total}})",
+    "description": "Alla kurser på plattformen. Klicka på inställningslänken för att öppna en kurs konfiguration.",
+    "filterPlaceholder": "Filtrera på namn eller ägare...",
+    "columns": {
+      "course": "Kurs",
+      "owner": "Ägare",
+      "status": "Status",
+      "tokenLimit": "Tokengräns/student/dag",
+      "created": "Skapad",
+      "settings": "Inställningar"
+    },
+    "status": {
+      "active": "aktiv",
+      "archived": "arkiverad"
+    },
+    "tokenLimitUnlimited": "obegränsat",
+    "settingsLink": "Inställningar",
+    "empty": "Inga kurser matchar filtret."
+  },
+  "rules": {
+    "title": "Regler för automatisk rollbefordran",
+    "description": "Varje regel befordrar en användare till sin målroll när ALLA villkor matchar användarens Shibboleth-attribut vid inloggning. Regler degraderar aldrig, åsidosätter aldrig admins (MINERVA_ADMINS env) och rör aldrig användare vars roll satts manuellt i Användarhantering (dessa användare visar en \"låst\"-markering; klicka på Lås upp där för att återaktivera regelutvärdering). Flervärdesattribut (affiliation, entitlement) använder listmedlemskapssemantik för \"contains\"; delsträngsmatchningar avvisas.",
+    "negatedNote": "Negerade operatorer (<0>not_contains</0>, <1>not_regex</1>) kräver också att attributet finns på användaren. Detta hindrar externa/icke-Shib-användare (som inte har någon affiliation / entitlement / etc. alls) från att matcha en \"not contains X\"-regel bara genom att sakna värde.",
+    "empty": "Inga regler än. Skapa en ovan för att börja befordra användare automatiskt.",
+    "form": {
+      "ruleName": "Regelnamn",
+      "ruleNamePlaceholder": "DSV-personal -> lärare",
+      "targetRole": "Målroll",
+      "teacher": "lärare",
+      "student": "student",
+      "createRule": "Skapa regel"
+    },
+    "card": {
+      "enabled": "aktiverad",
+      "disabled": "inaktiverad",
+      "noConditions": "Lägg till minst ett villkor för att regeln ska kunna matcha.",
+      "matchesWhen_one": "Matchar när ALLA {{count}} villkor gäller.",
+      "matchesWhen_other": "Matchar när ALLA {{count}} villkor gäller.",
+      "enable": "Aktivera",
+      "disable": "Inaktivera",
+      "delete": "Ta bort",
+      "confirmDelete": "Ta bort regeln \"{{name}}\"?"
+    },
+    "condition": {
+      "valuePlaceholder": "urn:mace:swami.se:gmai:dsv-user:staff",
+      "add": "Lägg till",
+      "removeLabel": "Ta bort villkor"
+    }
+  },
+  "externalInvites": {
+    "createTitle": "Skapa extern inbjudan",
+    "createDescription": "Generera en tidsbegränsad inloggningslänk för någon utan Stockholms universitetskonto. Länkar förbigår Shibboleth och ger studenträttigheter; befordra till lärare i Användarhantering efter att de loggat in första gången. Hela länken visas endast en gång; om den tappas bort, återkalla och skapa en ny.",
+    "existingTitle": "Befintliga inbjudningar ({{total}})",
+    "existingDescription": "Aktiva, utgångna och återkallade inbjudningar.",
+    "empty": "Inga inbjudningar än.",
+    "form": {
+      "identifier": "Identifierare (t.ex. e-post)",
+      "identifierPlaceholder": "alice@example.com",
+      "displayName": "Visningsnamn (valfritt)",
+      "displayNamePlaceholder": "Alice Example",
+      "days": "Dagar",
+      "create": "Skapa inbjudan",
+      "creating": "Skapar..."
+    },
+    "callout": {
+      "title": "Inbjudningslänk för {{eppn}}",
+      "dismiss": "stäng",
+      "note": "Dela länken privat. Den visas endast en gång och ger inloggning till ",
+      "copy": "Kopiera",
+      "copied": "Kopierat"
+    },
+    "columns": {
+      "eppn": "Eppn",
+      "displayName": "Visningsnamn",
+      "created": "Skapad",
+      "expires": "Går ut",
+      "status": "Status",
+      "actions": "Åtgärder"
+    },
+    "status": {
+      "active": "aktiv",
+      "expired": "utgången",
+      "revoked": "återkallad"
+    },
+    "revoke": "Återkalla"
+  },
+  "system": {
+    "unavailableTitle": "Systemmätvärden ej tillgängliga",
+    "storage": {
+      "title": "Lagring",
+      "descriptionLead": "Filsystemet bakom ",
+      "descriptionTail": "; värdvolymen lagrar postgres, qdrant, dokument och säkerhetskopior. Kontakta DSV helpdesk för utökning när det fria utrymmet blir lågt.",
+      "usedOfTotal": "{{used}} / {{total}} använt",
+      "freePercent": "{{free}} ledigt ({{percent}}%)",
+      "nearlyFull": "Disken är nästan full. Begär utökning från helpdesk snart.",
+      "fillingUp": "Disken fylls upp. Överväg att begära utökning.",
+      "statsUnavailable": "Diskstatistik ej tillgänglig på denna plattform."
+    },
+    "databaseSize": "PostgreSQL-databasens storlek",
+    "documentsOnDisk": "Dokument på disk",
+    "documentsTotal": "{{value}} totalt",
+    "documentsPending": "{{value}} väntande",
+    "documentsFailed": "{{value}} misslyckade",
+    "qdrant": {
+      "title": "Qdrant",
+      "description": "Vektor-samlingar",
+      "reachable": "nåbar",
+      "unreachable": "onåbar",
+      "noCollections": "Inga samlingar än.",
+      "notConnected": "Kunde inte ansluta till Qdrant.",
+      "columns": {
+        "collection": "Samling",
+        "points": "Punkter",
+        "indexedVectors": "Indexerade vektorer",
+        "segments": "Segment"
+      }
+    },
+    "databaseTables": {
+      "title": "Databastabeller",
+      "descriptionLead": "Ungefärligt antal rader från ",
+      "descriptionTail": " (uppdaterat av ANALYZE, inte exakt).",
+      "empty": "Inga tabeller hittades.",
+      "columns": {
+        "table": "Tabell",
+        "rowsApprox": "Rader (ungefär)"
+      }
+    }
+  }
+}

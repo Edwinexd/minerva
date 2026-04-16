@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import {
   courseQuery,
   conversationsQuery,
@@ -46,6 +47,7 @@ function ChatPage({
   conversationId: string | null
 }) {
   const navigate = useNavigate()
+  const { t } = useTranslation("student")
   const { data: course } = useQuery(courseQuery(courseId))
   const { data: conversations, isLoading: convLoading } = useQuery(conversationsQuery(courseId))
   const { data: pinned, isLoading: pinnedLoading } = useQuery(pinnedConversationsQuery(courseId))
@@ -67,7 +69,7 @@ function ChatPage({
         size="sm"
         className="md:hidden absolute top-0 left-0 z-20"
         onClick={() => setSidebarOpen(true)}
-        aria-label="Open conversations"
+        aria-label={t("sidebar.openConversations")}
       >
         <Menu className="w-4 h-4" />
       </Button>
@@ -89,7 +91,7 @@ function ChatPage({
             variant="ghost"
             size="sm"
             onClick={() => setSidebarOpen(false)}
-            aria-label="Close conversations"
+            aria-label={t("sidebar.closeConversations")}
           >
             <X className="w-4 h-4" />
           </Button>
@@ -99,7 +101,7 @@ function ChatPage({
           onClick={() => navigate({ to: "/course/$courseId/new", params: { courseId } })}
           disabled={conversationId === null}
         >
-          New Chat
+          {t("sidebar.newChat")}
         </Button>
         <div className="space-y-1 overflow-y-auto flex-1">
           {convLoading && Array.from({ length: 3 }).map((_, i) => (
@@ -116,15 +118,15 @@ function ChatPage({
                   : "hover:bg-muted"
               }`}
             >
-              {conv.pinned && <span className="mr-1" title="Pinned">*</span>}
-              {conv.title || "New conversation"}
+              {conv.pinned && <span className="mr-1" title={t("sidebar.pinned")}>*</span>}
+              {conv.title || t("sidebar.newConversation")}
             </Link>
           ))}
 
           {pinned && pinned.length > 0 && (
             <>
               <div className="text-xs font-medium text-muted-foreground pt-3 pb-1 border-t mt-2">
-                Pinned by teacher
+                {t("sidebar.pinnedByTeacher")}
               </div>
               {pinnedLoading && <Skeleton className="h-9 w-full mb-1" />}
               {pinned
@@ -141,9 +143,9 @@ function ChatPage({
                     }`}
                   >
                     <span className="text-muted-foreground text-xs">
-                      {conv.user_display_name || conv.user_eppn || "Student"}
+                      {conv.user_display_name || conv.user_eppn || t("sidebar.studentFallback")}
                     </span>
-                    <span className="block">{conv.title || "Conversation"}</span>
+                    <span className="block">{conv.title || t("sidebar.conversation")}</span>
                   </Link>
                 ))}
             </>
@@ -177,6 +179,7 @@ function ChatWindow({
   readOnly?: boolean
 }) {
   const navigate = useNavigate()
+  const { t } = useTranslation("student")
   const { data, isLoading } = useQuery({
     ...conversationDetailQuery(courseId, conversationId ?? ""),
     enabled: conversationId !== null,
@@ -286,7 +289,7 @@ function ChatWindow({
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error")
+      setError(e instanceof Error ? e.message : t("chat.unknownError"))
       success = false
     } finally {
       setStreaming(false)
@@ -322,7 +325,7 @@ function ChatWindow({
             })
           }
         } catch (e) {
-          setError(e instanceof Error ? e.message : "Unknown error")
+          setError(e instanceof Error ? e.message : t("chat.unknownError"))
           setPendingUserMsg(null)
         }
       })()
@@ -404,7 +407,7 @@ function ChatWindow({
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about the course materials..."
+              placeholder={t("chat.inputPlaceholder")}
               disabled={streaming || needsPrivacyAck}
               className="flex-1"
             />
@@ -412,12 +415,13 @@ function ChatWindow({
               type="submit"
               disabled={streaming || !input.trim() || needsPrivacyAck}
             >
-              Send
+              {t("chat.send")}
             </Button>
           </form>
           <p className="text-xs text-muted-foreground text-center">
-            Messages and relevant course-material excerpts are sent to Cerebras for AI inference. Responses may be inaccurate; verify with course materials. See{" "}
-            <Link to="/data-handling" className="underline hover:text-foreground">how Minerva handles your data</Link>.
+            {t("chat.disclaimerBefore")}
+            <Link to="/data-handling" className="underline hover:text-foreground">{t("chat.dataHandlingLink")}</Link>
+            {t("chat.disclaimerAfter")}
           </p>
         </div>
       )}
@@ -426,12 +430,13 @@ function ChatWindow({
 }
 
 function TeacherNoteInline({ note }: { note: TeacherNote }) {
+  const { t } = useTranslation("student")
   return (
     <div className="flex justify-center">
       <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-2 max-w-[80%]">
         <div className="flex items-center gap-2 mb-1">
           <Badge variant="outline" className="text-xs border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300">
-            Teacher note
+            {t("message.teacherNote")}
           </Badge>
           {note.author_display_name && (
             <span className="text-xs text-muted-foreground">{note.author_display_name}</span>
@@ -466,6 +471,7 @@ function ChatBubble({
   feedback: MessageFeedback | null
   canRate: boolean
 }) {
+  const { t } = useTranslation("student")
   const isUser = message.role === "user"
   const [showSources, setShowSources] = useState(false)
   const chunks: string[] | null = message.chunks_used as string[] | null
@@ -486,9 +492,14 @@ function ChatBubble({
           <div className="flex items-center gap-1 mt-2 text-xs text-muted-foreground flex-wrap">
             {message.tokens_prompt != null && (
               <span>
-                {message.tokens_prompt + (message.tokens_completion || 0)} tokens
-                {message.generation_ms != null && ` in ${(message.generation_ms / 1000).toFixed(1)}s`}
-                {chunks && chunks.length > 0 && " using"}
+                {t("message.tokensUsed", {
+                  count: message.tokens_prompt + (message.tokens_completion || 0),
+                })}
+                {message.generation_ms != null &&
+                  t("message.generationTime", {
+                    seconds: (message.generation_ms / 1000).toFixed(1),
+                  })}
+                {chunks && chunks.length > 0 && t("message.usingSuffix")}
               </span>
             )}
             {chunks && chunks.length > 0 && (
@@ -497,11 +508,11 @@ function ChatBubble({
                   className="underline hover:text-foreground"
                   onClick={() => setShowSources(!showSources)}
                 >
-                  {chunks.length} source{chunks.length > 1 ? "s" : ""}
+                  {t("message.source", { count: chunks.length })}
                   {showSources ? <ChevronUp className="inline w-3 h-3 ml-0.5" /> : <ChevronDown className="inline w-3 h-3 ml-0.5" />}
                 </button>
                 {message.retrieval_count != null && message.retrieval_count > 1 && (
-                  <span>(across {message.retrieval_count} retrievals)</span>
+                  <span>{t("message.acrossRetrievals", { count: message.retrieval_count })}</span>
                 )}
               </>
             )}
@@ -519,7 +530,7 @@ function ChatBubble({
           <div className="mt-2 space-y-2 border-t pt-2">
             {chunks.map((chunk, i) => {
               const sourceMatch = chunk.match(/^\[Source: (.+?)\](\n|$)/)
-              const source = sourceMatch ? sourceMatch[1] : "Unknown"
+              const source = sourceMatch ? sourceMatch[1] : t("message.unknownSource")
               const hasText = sourceMatch ? chunk.length > sourceMatch[0].length : true
               const text = hasText
                 ? (sourceMatch ? chunk.slice(sourceMatch[0].length) : chunk)
@@ -530,7 +541,7 @@ function ChatBubble({
                   {text ? (
                     <p className="text-muted-foreground/80 mt-0.5 line-clamp-3">{text}</p>
                   ) : (
-                    <p className="text-muted-foreground/60 mt-0.5 italic">Source content not available for viewing</p>
+                    <p className="text-muted-foreground/60 mt-0.5 italic">{t("message.sourceUnavailable")}</p>
                   )}
                 </div>
               )

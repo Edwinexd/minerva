@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { ThumbsDown, ThumbsUp } from "lucide-react"
 
 import {
@@ -37,6 +38,8 @@ export function FeedbackControls({
   messageId,
   current,
 }: Props) {
+  const { t } = useTranslation("student")
+  const { t: tCommon } = useTranslation("common")
   const queryClient = useQueryClient()
   const [downOpen, setDownOpen] = useState(false)
   const [category, setCategory] = useState<string>("")
@@ -92,7 +95,7 @@ export function FeedbackControls({
           type="button"
           onClick={handleUp}
           disabled={busy}
-          title={upActive ? "You rated this good" : "Good response"}
+          title={upActive ? t("feedback.thumbsUpActiveTitle") : t("feedback.thumbsUpTitle")}
           className={`p-1 rounded hover:bg-foreground/10 disabled:opacity-50 ${
             upActive ? "text-green-600 dark:text-green-400" : ""
           }`}
@@ -103,7 +106,7 @@ export function FeedbackControls({
           type="button"
           onClick={handleDown}
           disabled={busy}
-          title={downActive ? "Edit feedback" : "Bad response"}
+          title={downActive ? t("feedback.thumbsDownActiveTitle") : t("feedback.thumbsDownTitle")}
           className={`p-1 rounded hover:bg-foreground/10 disabled:opacity-50 ${
             downActive ? "text-red-600 dark:text-red-400" : ""
           }`}
@@ -115,26 +118,25 @@ export function FeedbackControls({
       <AlertDialog open={downOpen} onOpenChange={setDownOpen}>
         <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle>What was wrong with this response?</AlertDialogTitle>
+            <AlertDialogTitle>{t("feedback.dialogTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Pick the option that fits best. Your comment is optional but helps
-              your teacher understand the issue.
+              {t("feedback.dialogDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="feedback-category">
-                Category <span className="text-destructive">*</span>
+                {t("feedback.categoryLabel")} <span className="text-destructive">{t("feedback.required")}</span>
               </Label>
               <Select value={category} onValueChange={(v) => v && setCategory(v)}>
                 <SelectTrigger id="feedback-category" className="w-full">
-                  <SelectValue placeholder="Select a category..." />
+                  <SelectValue placeholder={t("feedback.categoryPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   {FEEDBACK_CATEGORIES.map((c) => (
                     <SelectItem key={c.value} value={c.value}>
-                      {c.label}
+                      {t(`feedback.categories.${c.value}`, { defaultValue: c.label })}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -142,19 +144,19 @@ export function FeedbackControls({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="feedback-comment">Comment (optional)</Label>
+              <Label htmlFor="feedback-comment">{t("feedback.commentLabel")}</Label>
               <Textarea
                 id="feedback-comment"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder="Add more detail..."
+                placeholder={t("feedback.commentPlaceholder")}
                 rows={4}
               />
             </div>
           </div>
 
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={busy}>{tCommon("actions.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 // Keep the dialog open if validation fails or the request is
@@ -164,7 +166,7 @@ export function FeedbackControls({
               }}
               disabled={busy || !category}
             >
-              {setMutation.isPending ? "Saving..." : "Submit"}
+              {setMutation.isPending ? t("feedback.submitting") : t("feedback.submit")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { courseDocumentsQuery, courseQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -38,6 +40,9 @@ function formatBytes(bytes: number): string {
 
 function DocumentsPage() {
   const { courseId } = Route.useParams()
+  const { t } = useTranslation("teacher")
+  const { t: tCommon } = useTranslation("common")
+  const formatError = useApiErrorMessage()
   const { data: documents, isLoading } = useQuery(courseDocumentsQuery(courseId))
   const { data: course } = useQuery(courseQuery(courseId))
   const canMutate = course?.my_role !== "ta"
@@ -68,9 +73,12 @@ function DocumentsPage() {
       const failed = results.filter((r) => r.status === "rejected")
       if (failed.length > 0) {
         const messages = failed
-          .map((r) => (r as PromiseRejectedResult).reason?.message ?? "unknown error")
+          .map((r) => {
+            const reason = (r as PromiseRejectedResult).reason
+            return reason ? formatError(reason) : t("documents.unknownError")
+          })
           .join(", ")
-        throw new Error(`${failed.length} of ${files.length} uploads failed: ${messages}`)
+        throw new Error(t("documents.uploadFailed", { failed: failed.length, total: files.length, messages }))
       }
     },
     onSuccess: () => {
@@ -101,7 +109,7 @@ function DocumentsPage() {
       )
       const failed = results.filter((r) => r.status === "rejected").length
       if (failed > 0) {
-        throw new Error(`${failed} of ${docIds.length} deletes failed`)
+        throw new Error(t("documents.bulkDeleteFailed", { failed, total: docIds.length }))
       }
       return { deleted: docIds.length }
     },
@@ -157,9 +165,9 @@ function DocumentsPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Documents</CardTitle>
+        <CardTitle>{t("documents.title")}</CardTitle>
         <CardDescription>
-          Upload PDFs and other documents for RAG
+          {t("documents.description")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -179,19 +187,19 @@ function DocumentsPage() {
               />
               {uploadMutation.isPending && (
                 <span className="text-sm text-muted-foreground self-center">
-                  Uploading...
+                  {t("documents.uploading")}
                 </span>
               )}
             </div>
             {uploadMutation.isError && (
               <p className="text-sm text-destructive">
-                {uploadMutation.error.message}
+                {formatError(uploadMutation.error)}
               </p>
             )}
           </>
         )}
 
-        {isLoading && <p className="text-muted-foreground">Loading...</p>}
+        {isLoading && <p className="text-muted-foreground">{tCommon("status.loading")}</p>}
 
         {canMutate && documents && documents.length > 0 && (
           <div className="flex items-center justify-between py-2 border-b">
@@ -203,8 +211,8 @@ function DocumentsPage() {
               />
               <span className="text-muted-foreground">
                 {selected.size > 0
-                  ? `${selected.size} selected`
-                  : `Select all (${documents.length})`}
+                  ? t("documents.selectedCount", { count: selected.size })
+                  : t("documents.selectAll", { count: documents.length })}
               </span>
             </label>
             {selected.size > 0 && (
@@ -215,8 +223,8 @@ function DocumentsPage() {
                 disabled={bulkDeleteMutation.isPending}
               >
                 {bulkDeleteMutation.isPending
-                  ? "Deleting..."
-                  : `Delete ${selected.size}`}
+                  ? t("documents.deletingCount")
+                  : t("documents.deleteCount", { count: selected.size })}
               </Button>
             )}
           </div>
@@ -224,7 +232,7 @@ function DocumentsPage() {
 
         {bulkDeleteMutation.isError && (
           <p className="text-sm text-destructive">
-            {bulkDeleteMutation.error.message}
+            {formatError(bulkDeleteMutation.error)}
           </p>
         )}
 
@@ -239,7 +247,7 @@ function DocumentsPage() {
                   <Checkbox
                     checked={selected.has(doc.id)}
                     onCheckedChange={() => toggleOne(doc.id)}
-                    aria-label={`Select ${doc.filename}`}
+                    aria-label={t("documents.selectDocAria", { filename: doc.filename })}
                   />
                 )}
                 <div className="space-y-1 min-w-0">
@@ -247,7 +255,7 @@ function DocumentsPage() {
                   <div className="flex gap-2 text-xs text-muted-foreground">
                     <span>{formatBytes(doc.size_bytes)}</span>
                     {doc.chunk_count != null && doc.chunk_count > 0 && (
-                      <span>{doc.chunk_count} chunks</span>
+                      <span>{t("documents.chunksSuffix", { count: doc.chunk_count })}</span>
                     )}
                   </div>
                 </div>
@@ -256,14 +264,14 @@ function DocumentsPage() {
                 <Badge variant={statusColor(doc.status)}>{doc.status}</Badge>
                 {doc.error_msg && (
                   <span className="text-xs text-destructive" title={doc.error_msg}>
-                    error
+                    {t("documents.errorLabel")}
                   </span>
                 )}
                 {canMutate ? (
                   <Button
                     variant={doc.displayable ? "outline" : "secondary"}
                     size="sm"
-                    title={doc.displayable ? "Students can see source text" : "Source text hidden from students"}
+                    title={doc.displayable ? t("documents.visibleTitle") : t("documents.hiddenTitle")}
                     onClick={() =>
                       toggleDisplayableMutation.mutate({
                         docId: doc.id,
@@ -271,10 +279,10 @@ function DocumentsPage() {
                       })
                     }
                   >
-                    {doc.displayable ? "Visible" : "Hidden"}
+                    {doc.displayable ? t("documents.visible") : t("documents.hidden")}
                   </Button>
                 ) : (
-                  <Badge variant="outline">{doc.displayable ? "Visible" : "Hidden"}</Badge>
+                  <Badge variant="outline">{doc.displayable ? t("documents.visible") : t("documents.hidden")}</Badge>
                 )}
                 {canMutate && (
                   <Button
@@ -283,7 +291,7 @@ function DocumentsPage() {
                     onClick={() => setConfirmSingle(doc)}
                     disabled={deleteMutation.isPending}
                   >
-                    Delete
+                    {t("documents.deleteOne")}
                   </Button>
                 )}
               </div>
@@ -299,17 +307,17 @@ function DocumentsPage() {
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete document?</AlertDialogTitle>
+              <AlertDialogTitle>{t("documents.confirmSingleTitle")}</AlertDialogTitle>
               <AlertDialogDescription>
-                This will permanently delete{" "}
+                {t("documents.confirmSingleBody1")}{" "}
                 <span className="font-medium text-foreground">
                   {confirmSingle?.filename}
                 </span>{" "}
-                and remove its chunks from the vector index. This cannot be undone.
+                {t("documents.confirmSingleBody2")}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{tCommon("actions.cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 variant="destructive"
                 disabled={deleteMutation.isPending}
@@ -317,7 +325,7 @@ function DocumentsPage() {
                   if (confirmSingle) deleteMutation.mutate(confirmSingle.id)
                 }}
               >
-                {deleteMutation.isPending ? "Deleting..." : "Delete"}
+                {deleteMutation.isPending ? t("documents.deleting") : tCommon("actions.delete")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -327,24 +335,22 @@ function DocumentsPage() {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Delete {selected.size} document{selected.size === 1 ? "" : "s"}?
+                {t("documents.confirmBulkTitle", { count: selected.size })}
               </AlertDialogTitle>
               <AlertDialogDescription>
-                This will permanently delete {selected.size} document
-                {selected.size === 1 ? "" : "s"} and remove their chunks from the
-                vector index. This cannot be undone.
+                {t("documents.confirmBulkBody", { count: selected.size })}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{tCommon("actions.cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 variant="destructive"
                 disabled={bulkDeleteMutation.isPending}
                 onClick={() => bulkDeleteMutation.mutate(Array.from(selected))}
               >
                 {bulkDeleteMutation.isPending
-                  ? "Deleting..."
-                  : `Delete ${selected.size}`}
+                  ? t("documents.deletingCount")
+                  : t("documents.deleteCount", { count: selected.size })}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

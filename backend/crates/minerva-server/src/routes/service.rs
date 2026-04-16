@@ -118,15 +118,15 @@ async fn submit_transcript(
         .ok_or(AppError::NotFound)?;
 
     if doc.status != "awaiting_transcript" {
-        return Err(AppError::BadRequest(format!(
-            "document status is '{}', expected 'awaiting_transcript'",
-            doc.status,
-        )));
+        return Err(AppError::bad_request_with(
+            "service.wrong_status",
+            [("status", doc.status.clone())],
+        ));
     }
 
     if let Some(text) = &body.text {
         if text.is_empty() {
-            return Err(AppError::BadRequest("transcript text is empty".to_string()));
+            return Err(AppError::bad_request("service.transcript_empty"));
         }
 
         // Save transcript as .txt file.
@@ -155,9 +155,7 @@ async fn submit_transcript(
         .await?;
 
         if !updated {
-            return Err(AppError::BadRequest(
-                "document status changed concurrently".to_string(),
-            ));
+            return Err(AppError::bad_request("service.status_changed_concurrently"));
         }
 
         tracing::info!(
@@ -185,9 +183,7 @@ async fn submit_transcript(
             serde_json::json!({ "status": "failed", "error": error }),
         ))
     } else {
-        Err(AppError::BadRequest(
-            "provide either 'text' or 'error'".to_string(),
-        ))
+        Err(AppError::bad_request("service.missing_text_or_error"))
     }
 }
 
@@ -278,7 +274,7 @@ fn sanitize_url_filename(raw: &str) -> Result<String, AppError> {
         .to_string();
 
     if name.is_empty() || name == "." || name == ".." {
-        return Err(AppError::BadRequest("filename is empty".into()));
+        return Err(AppError::bad_request("service.filename_empty"));
     }
 
     // Cap at 200 chars before the .url suffix.
@@ -312,7 +308,7 @@ async fn create_url_document(
 
     let url = body.url.trim().to_string();
     if url.is_empty() || url.len() > 2048 {
-        return Err(AppError::BadRequest("url must be 1-2048 characters".into()));
+        return Err(AppError::bad_request("service.url_invalid_length"));
     }
 
     let filename = sanitize_url_filename(&body.filename)?;

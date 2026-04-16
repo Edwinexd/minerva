@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { adminUsersQuery, coursesQuery } from "@/lib/queries"
 import {
   Card,
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/admin/courses")({
 })
 
 function CourseManagementPanel() {
+  const { t } = useTranslation("admin")
   const { data: courses, isLoading: coursesLoading } = useQuery(coursesQuery)
   const { data: users } = useQuery(adminUsersQuery)
   const [filter, setFilter] = useState("")
@@ -50,14 +52,11 @@ function CourseManagementPanel() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Courses ({courses.length})</CardTitle>
-        <CardDescription>
-          All courses on the platform. Click the settings link to open a
-          course's configuration.
-        </CardDescription>
+        <CardTitle>{t("courses.title", { total: courses.length })}</CardTitle>
+        <CardDescription>{t("courses.description")}</CardDescription>
         <input
           className="mt-2 w-full max-w-sm rounded border bg-background px-3 py-1.5 text-sm"
-          placeholder="Filter by name or owner..."
+          placeholder={t("courses.filterPlaceholder")}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
@@ -67,12 +66,12 @@ function CourseManagementPanel() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left">
-                <th className="py-2 pr-4 font-medium">Course</th>
-                <th className="py-2 pr-4 font-medium">Owner</th>
-                <th className="py-2 pr-4 font-medium">Status</th>
-                <th className="py-2 pr-4 font-medium">Token limit/student/day</th>
-                <th className="py-2 pr-4 font-medium">Created</th>
-                <th className="py-2 font-medium">Settings</th>
+                <th className="py-2 pr-4 font-medium">{t("courses.columns.course")}</th>
+                <th className="py-2 pr-4 font-medium">{t("courses.columns.owner")}</th>
+                <th className="py-2 pr-4 font-medium">{t("courses.columns.status")}</th>
+                <th className="py-2 pr-4 font-medium">{t("courses.columns.tokenLimit")}</th>
+                <th className="py-2 pr-4 font-medium">{t("courses.columns.created")}</th>
+                <th className="py-2 font-medium">{t("courses.columns.settings")}</th>
               </tr>
             </thead>
             <tbody>
@@ -88,14 +87,14 @@ function CourseManagementPanel() {
                     </td>
                     <td className="py-2 pr-4">
                       {course.active ? (
-                        <Badge variant="secondary">active</Badge>
+                        <Badge variant="secondary">{t("courses.status.active")}</Badge>
                       ) : (
-                        <Badge variant="outline">archived</Badge>
+                        <Badge variant="outline">{t("courses.status.archived")}</Badge>
                       )}
                     </td>
                     <td className="py-2 pr-4 font-mono">
                       {course.daily_token_limit === 0
-                        ? "unlimited"
+                        ? t("courses.tokenLimitUnlimited")
                         : course.daily_token_limit.toLocaleString()}
                     </td>
                     <td className="py-2 pr-4 text-muted-foreground">
@@ -107,7 +106,7 @@ function CourseManagementPanel() {
                         params={{ courseId: course.id }}
                         className="text-primary underline-offset-4 hover:underline"
                       >
-                        Settings
+                        {t("courses.settingsLink")}
                       </Link>
                     </td>
                   </tr>
@@ -117,7 +116,7 @@ function CourseManagementPanel() {
           </table>
           {filtered.length === 0 && (
             <p className="py-4 text-center text-sm text-muted-foreground">
-              No courses match the filter.
+              {t("courses.empty")}
             </p>
           )}
         </div>

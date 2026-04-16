@@ -1,16 +1,23 @@
 use axum::extract::{Extension, Multipart, Path, Query, State};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use futures::StreamExt;
 use minerva_core::models::User;
 use qdrant_client::qdrant::{DeletePointsBuilder, ScrollPointsBuilder};
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::state::AppState;
 
-/// Maximum upload size: 50 MB.
+/// Maximum upload size for a single document: 50 MB.
 pub const MAX_UPLOAD_BYTES: i64 = 50 * 1_000_000;
+
+/// Maximum upload size for a Moodle .mbz backup: 1 GB. Whole-course backups
+/// routinely clear 50 MB once video/slide decks are attached, so the regular
+/// per-file cap is not a useful ceiling here.
+pub const MAX_MBZ_UPLOAD_BYTES: i64 = 1_000_000_000;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -21,6 +28,12 @@ pub fn router() -> Router<AppState> {
                 .layer(axum::extract::DefaultBodyLimit::max(
                     MAX_UPLOAD_BYTES as usize,
                 )),
+        )
+        .route(
+            "/mbz",
+            post(upload_mbz).layer(axum::extract::DefaultBodyLimit::max(
+                MAX_MBZ_UPLOAD_BYTES as usize,
+            )),
         )
         .route("/{doc_id}", delete(delete_document).patch(patch_document))
         .route("/{doc_id}/chunks", get(list_chunks))
@@ -155,6 +168,139 @@ async fn upload_document(
     .await?;
 
     Ok(Json(DocumentResponse::from(row)))
+}
+
+#[derive(Serialize)]
+struct MbzImportResponse {
+    imported: usize,
+    skipped_hidden: usize,
+}
+
+/// Accept a Moodle course backup (.mbz) and ingest every piece of visible
+/// course material as an individual document. Mirrors what the
+/// `local_minerva` Moodle plugin would upload over its sync API, but for
+/// teachers whose Moodle has no plugin installed.
+async fn upload_mbz(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> Result<Json<MbzImportResponse>, AppError> {
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if course.owner_id != user.id && !user.role.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    let field = multipart
+        .next_field()
+        .await
+        .map_err(|e| {
+            AppError::bad_request_with("doc.multipart_error", [("detail", e.to_string())])
+        })?
+        .ok_or_else(|| AppError::bad_request("doc.no_file"))?;
+
+    // Stream the upload straight to disk. Pulling 1 GB into memory via
+    // Field::bytes() would crush the pod's RAM; chunked copy keeps usage
+    // bounded by the chunk size hyper picked.
+    let upload_tmp = tempfile::Builder::new()
+        .prefix("minerva-mbz-upload-")
+        .suffix(".mbz")
+        .tempfile()
+        .map_err(|e| AppError::Internal(format!("mbz tempfile alloc failed: {e}")))?;
+    let upload_path = upload_tmp.path().to_path_buf();
+
+    let mut out = tokio::fs::File::create(&upload_path)
+        .await
+        .map_err(|e| AppError::Internal(format!("mbz tempfile open failed: {e}")))?;
+    let mut total: i64 = 0;
+    let mut stream = field;
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk.map_err(|e| {
+            AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())])
+        })?;
+        total += bytes.len() as i64;
+        if total > MAX_MBZ_UPLOAD_BYTES {
+            return Err(AppError::bad_request_with(
+                "doc.file_too_large",
+                [
+                    ("size_bytes", total.to_string()),
+                    ("max_mb", (MAX_MBZ_UPLOAD_BYTES / 1_000_000).to_string()),
+                ],
+            ));
+        }
+        out.write_all(&bytes)
+            .await
+            .map_err(|e| AppError::Internal(format!("mbz tempfile write failed: {e}")))?;
+    }
+    out.flush()
+        .await
+        .map_err(|e| AppError::Internal(format!("mbz tempfile flush failed: {e}")))?;
+    drop(out);
+
+    // Parse off the blocking thread pool: archive extraction is CPU+fs bound
+    // and would otherwise stall the async reactor.
+    let parse_path = upload_path.clone();
+    let import =
+        tokio::task::spawn_blocking(move || minerva_ingest::moodle::import_mbz(&parse_path))
+            .await
+            .map_err(|e| AppError::Internal(format!("mbz parse task panicked: {e}")))?
+            .map_err(|e| {
+                AppError::bad_request_with("doc.mbz_parse_failed", [("detail", e.to_string())])
+            })?;
+
+    let docs_path = &state.config.docs_path;
+    let dir = format!("{}/{}", docs_path, course_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
+
+    let mut imported: usize = 0;
+    for item in &import.items {
+        let doc_id = Uuid::new_v4();
+        let ext = extension_from_filename(&item.filename);
+        let file_path = format!("{}/{}.{}", dir, doc_id, ext);
+
+        let size_bytes: i64 = match &item.body {
+            minerva_ingest::moodle::ItemBody::Inline(bytes) => {
+                tokio::fs::write(&file_path, bytes).await.map_err(|e| {
+                    AppError::Internal(format!("failed to write {}: {}", item.filename, e))
+                })?;
+                bytes.len() as i64
+            }
+            minerva_ingest::moodle::ItemBody::File(src) => {
+                tokio::fs::copy(src, &file_path).await.map_err(|e| {
+                    AppError::Internal(format!("failed to copy {}: {}", item.filename, e))
+                })? as i64
+            }
+        };
+
+        minerva_db::queries::documents::insert(
+            &state.db,
+            doc_id,
+            course_id,
+            &item.filename,
+            &item.mime,
+            size_bytes,
+            user.id,
+            None,
+        )
+        .await?;
+        imported += 1;
+    }
+
+    // upload_tmp drops here, removing the source .mbz. The parser's own
+    // extraction tempdir is owned by `import` and cleaned up when it drops
+    // at function return, which is fine because every File item has already
+    // been copied above.
+    drop(upload_tmp);
+
+    Ok(Json(MbzImportResponse {
+        imported,
+        skipped_hidden: import.skipped_hidden,
+    }))
 }
 
 #[derive(Deserialize)]

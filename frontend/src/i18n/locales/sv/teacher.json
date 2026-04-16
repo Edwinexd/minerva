@@ -189,7 +189,11 @@
     "confirmBulkTitle_one": "Ta bort {{count}} dokument?",
     "confirmBulkTitle_other": "Ta bort {{count}} dokument?",
     "confirmBulkBody_one": "Detta tar permanent bort {{count}} dokument och raderar dess stycken från vektorindexet. Det går inte att ångra.",
-    "confirmBulkBody_other": "Detta tar permanent bort {{count}} dokument och raderar deras stycken från vektorindexet. Det går inte att ångra."
+    "confirmBulkBody_other": "Detta tar permanent bort {{count}} dokument och raderar deras stycken från vektorindexet. Det går inte att ångra.",
+    "mbzTitle": "Importera från Moodle-säkerhetskopia (.mbz)",
+    "mbzDescription": "Ladda upp en säkerhetskopia av kursen. Endast material som just nu är synligt för studenter importeras. Dolda aktiviteter, dolda avsnitt och material som kräver grupp, genomförande, betyg eller profilvillkor hoppas över. Datumlåst material importeras när dagens datum ligger inom det tillåtna fönstret.",
+    "mbzImporting": "Importerar...",
+    "mbzResult": "Importerade {{imported}} resurs(er), hoppade över {{skipped}} dolda."
   },
   "invite": {
     "title": "Inbjudningslänkar",

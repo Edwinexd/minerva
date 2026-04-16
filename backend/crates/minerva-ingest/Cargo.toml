@@ -20,3 +20,8 @@ qdrant-client.workspace = true
 fastembed.workspace = true
 pdf-extract = "0.10"
 scraper = "0.22"
+
+tar.workspace = true
+flate2.workspace = true
+quick-xml.workspace = true
+tempfile.workspace = true

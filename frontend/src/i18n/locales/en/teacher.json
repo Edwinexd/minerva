@@ -189,7 +189,11 @@
     "confirmBulkTitle_one": "Delete {{count}} document?",
     "confirmBulkTitle_other": "Delete {{count}} documents?",
     "confirmBulkBody_one": "This will permanently delete {{count}} document and remove their chunks from the vector index. This cannot be undone.",
-    "confirmBulkBody_other": "This will permanently delete {{count}} documents and remove their chunks from the vector index. This cannot be undone."
+    "confirmBulkBody_other": "This will permanently delete {{count}} documents and remove their chunks from the vector index. This cannot be undone.",
+    "mbzTitle": "Import from Moodle backup (.mbz)",
+    "mbzDescription": "Upload a course backup file. Only material that is currently visible to students is imported. Hidden activities, hidden sections, and items gated by group, completion, grade, or profile conditions are skipped. Date-gated items are imported when today is inside the allowed window.",
+    "mbzImporting": "Importing...",
+    "mbzResult": "Imported {{imported}} item(s); skipped {{skipped}} hidden."
   },
   "invite": {
     "title": "Invite Links",

@@ -41,6 +41,7 @@ urlencoding.workspace = true
 tokio-stream = "0.1"
 base64 = "0.22"
 anyhow = "1"
+tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

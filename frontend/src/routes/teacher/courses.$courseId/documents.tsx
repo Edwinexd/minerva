@@ -48,6 +48,11 @@ function DocumentsPage() {
   const canMutate = course?.my_role !== "ta"
   const queryClient = useQueryClient()
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const mbzInputRef = React.useRef<HTMLInputElement>(null)
+  const [mbzResult, setMbzResult] = React.useState<{
+    imported: number
+    skippedHidden: number
+  } | null>(null)
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [confirmSingle, setConfirmSingle] = React.useState<DocType | null>(null)
   const [confirmBulk, setConfirmBulk] = React.useState(false)
@@ -86,6 +91,21 @@ function DocumentsPage() {
         queryKey: ["courses", courseId, "documents"],
       })
       if (fileInputRef.current) fileInputRef.current.value = ""
+    },
+  })
+
+  const mbzMutation = useMutation({
+    mutationFn: (file: File) =>
+      api.upload<{ imported: number; skipped_hidden: number }>(
+        `/courses/${courseId}/documents/mbz`,
+        file,
+      ),
+    onSuccess: (res) => {
+      setMbzResult({ imported: res.imported, skippedHidden: res.skipped_hidden })
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "documents"],
+      })
+      if (mbzInputRef.current) mbzInputRef.current.value = ""
     },
   })
 
@@ -196,6 +216,49 @@ function DocumentsPage() {
                 {formatError(uploadMutation.error)}
               </p>
             )}
+
+            <div className="space-y-1">
+              <p className="text-sm font-medium">
+                {t("documents.mbzTitle")}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("documents.mbzDescription")}
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  ref={mbzInputRef}
+                  type="file"
+                  accept=".mbz"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      setMbzResult(null)
+                      mbzMutation.mutate(file)
+                    }
+                  }}
+                  className="flex-1"
+                  disabled={mbzMutation.isPending}
+                />
+                {mbzMutation.isPending && (
+                  <span className="text-sm text-muted-foreground self-center">
+                    {t("documents.mbzImporting")}
+                  </span>
+                )}
+              </div>
+              {mbzMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {formatError(mbzMutation.error)}
+                </p>
+              )}
+              {mbzResult && (
+                <p className="text-sm text-muted-foreground">
+                  {t("documents.mbzResult", {
+                    imported: mbzResult.imported,
+                    skipped: mbzResult.skippedHidden,
+                  })}
+                </p>
+              )}
+            </div>
           </>
         )}
 

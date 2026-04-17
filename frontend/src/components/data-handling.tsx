@@ -1,5 +1,17 @@
 import { Trans, useTranslation } from "react-i18next"
 
+export function DataHandlingPage() {
+  const { t } = useTranslation("common")
+  return (
+    <div className="max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold tracking-tight mb-6">
+        {t("dataHandling.title")}
+      </h1>
+      <DataHandlingContent />
+    </div>
+  )
+}
+
 /**
  * Shared disclosure copy rendered both on the standalone `/data-handling`
  * page and inside the student first-use modal. Factored into a component so

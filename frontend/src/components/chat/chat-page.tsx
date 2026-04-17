@@ -57,10 +57,15 @@ function ChatPage({
     !conversations?.some((c) => c.id === conversationId)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [prevConversationId, setPrevConversationId] = useState(conversationId)
 
-  useEffect(() => {
+  // Close the sidebar whenever the active conversation changes.
+  // Done during render (not in an effect) so React can batch it with the
+  // parent render instead of triggering an extra cascade.
+  if (prevConversationId !== conversationId) {
+    setPrevConversationId(conversationId)
     setSidebarOpen(false)
-  }, [conversationId])
+  }
 
   return (
     <div className="relative flex h-[calc(100vh-120px)] gap-4">

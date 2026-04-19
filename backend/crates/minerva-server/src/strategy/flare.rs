@@ -1,6 +1,9 @@
 use axum::response::sse::Event;
 use futures::StreamExt;
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 use super::common;
@@ -32,8 +35,20 @@ const MAX_FLARE_ITERATIONS: usize = 8;
 /// Bounding each call ensures streams always terminate naturally so Cerebras
 /// returns usage stats in the final [DONE] chunk. Token counts are then exact
 /// additions across windows rather than estimates from dropped connections.
-/// Formula: (1024 / 4) * 3
-const FLARE_MAX_TOKENS_PER_CHUNK: i32 = 768;
+/// 1536 = 1024 + 512; wide enough that a structured answer (table + explanation)
+/// usually finishes in one window, reducing continuation overhead.
+const FLARE_MAX_TOKENS_PER_CHUNK: i32 = 1536;
+
+/// Defence-in-depth cap on accumulated response size. Nominal ceiling with
+/// MAX_FLARE_ITERATIONS * FLARE_MAX_TOKENS_PER_CHUNK * ~4 bytes/token is
+/// ~49 KB; this leaves 2x headroom and prevents runaway memory growth if
+/// constants are retuned or a model produces unusually byte-dense output.
+const MAX_FLARE_FULL_TEXT_BYTES: usize = 100_000;
+
+/// Idle timeout between consecutive SSE frames from Cerebras. Protects
+/// against a silently-stalled TCP connection that never delivers [DONE].
+/// Applied per `stream.next().await`, not as a total-request deadline.
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// FLARE strategy: Forward-Looking Active REtrieval augmented generation.
 ///
@@ -62,6 +77,9 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     .await;
 
     let mut all_chunks: Vec<RagChunk> = initial_chunks;
+    // Parallel hash set for O(1) dedup when merging mid-stream retrievals.
+    // Cheaper than `Vec::contains` which does full-text equality on every chunk.
+    let mut chunk_hashes: HashSet<u64> = all_chunks.iter().map(chunk_identity_hash).collect();
     let mut full_text = String::new();
     let mut total_prompt_tokens = 0i32;
     let mut total_completion_tokens = 0i32;
@@ -81,6 +99,15 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 MAX_FLARE_ITERATIONS,
                 restarts,
                 full_text.len()
+            );
+            break;
+        }
+        if full_text.len() > MAX_FLARE_FULL_TEXT_BYTES {
+            tracing::warn!(
+                "flare: full_text exceeded byte cap ({} > {}), stopping (iteration={})",
+                full_text.len(),
+                MAX_FLARE_FULL_TEXT_BYTES,
+                iterations
             );
             break;
         }
@@ -186,7 +213,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                     if all_chunks.len() >= ctx.max_chunks as usize {
                         break;
                     }
-                    if !all_chunks.contains(chunk) {
+                    if chunk_hashes.insert(chunk_identity_hash(chunk)) {
                         all_chunks.push(chunk.clone());
                         added = true;
                     }
@@ -277,6 +304,9 @@ async fn stream_with_logprobs(
     let response = common::cerebras_request_with_retry(client, api_key, &body).await?;
 
     let mut stream = response.bytes_stream();
+    // Raw TCP frames may split multi-byte UTF-8 codepoints; accumulate bytes
+    // and only promote validated prefixes to the line buffer.
+    let mut byte_carry: Vec<u8> = Vec::new();
     let mut sse_buffer = String::new();
     let mut sentence_buffer = String::new();
     let mut sentence_has_low_confidence = false;
@@ -285,16 +315,37 @@ async fn stream_with_logprobs(
     let mut prompt_tokens = 0i32;
     let mut completion_tokens = 0i32;
 
-    while let Some(chunk) = stream.next().await {
-        let chunk = match chunk {
-            Ok(c) => c,
-            Err(e) => return Err(format!("Stream error: {}", e)),
+    loop {
+        let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
+            Ok(n) => n,
+            Err(_) => {
+                return Err(format!(
+                    "Cerebras stream idle timeout ({}s)",
+                    STREAM_IDLE_TIMEOUT.as_secs()
+                ));
+            }
         };
-        sse_buffer.push_str(&String::from_utf8_lossy(&chunk));
+        let chunk = match next {
+            Some(Ok(c)) => c,
+            Some(Err(e)) => return Err(format!("Stream error: {}", e)),
+            None => break, // stream closed without [DONE]
+        };
+        byte_carry.extend_from_slice(&chunk);
+        let valid_up_to = match std::str::from_utf8(&byte_carry) {
+            Ok(_) => byte_carry.len(),
+            Err(e) => e.valid_up_to(),
+        };
+        if valid_up_to > 0 {
+            // Safe: validated above.
+            let valid_str = std::str::from_utf8(&byte_carry[..valid_up_to])
+                .expect("prefix was UTF-8 validated");
+            sse_buffer.push_str(valid_str);
+            byte_carry.drain(..valid_up_to);
+        }
 
         while let Some(line_end) = sse_buffer.find('\n') {
             let line = sse_buffer[..line_end].trim().to_string();
-            sse_buffer = sse_buffer[line_end + 1..].to_string();
+            sse_buffer.drain(..=line_end);
 
             if line == "data: [DONE]" {
                 // Detect window exhaustion by token count: more reliable than
@@ -302,8 +353,20 @@ async fn stream_with_logprobs(
                 let hit_limit = completion_tokens >= FLARE_MAX_TOKENS_PER_CHUNK
                     || finish_reason.as_deref() == Some("length");
                 let kind = if hit_limit {
+                    // Window-end flush: if no sentence boundary fired during this
+                    // window (e.g. unclosed code fence, long markdown table) but
+                    // the trailing unclosed sentence was low-confidence, still
+                    // use it as a retrieval query. Otherwise the iteration is
+                    // wasted on "hit limit, no query, continue" with no progress.
+                    let sentence = first_low_confidence_sentence.or_else(|| {
+                        if sentence_has_low_confidence && !sentence_buffer.is_empty() {
+                            Some(sentence_buffer.clone())
+                        } else {
+                            None
+                        }
+                    });
                     StreamOutcome::HitLimit {
-                        low_confidence_sentence: first_low_confidence_sentence,
+                        low_confidence_sentence: sentence,
                     }
                 } else {
                     StreamOutcome::Completed
@@ -502,4 +565,15 @@ fn truncate_for_log(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len])
     }
+}
+
+/// Compute a stable identity hash for a chunk so we can dedupe across
+/// mid-stream retrievals in O(1) instead of `Vec::contains` (O(n) with full
+/// text equality). (document_id, text) uniquely identifies a chunk within
+/// a course since the same document is split into non-overlapping texts.
+fn chunk_identity_hash(c: &RagChunk) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    c.document_id.hash(&mut h);
+    c.text.hash(&mut h);
+    h.finish()
 }

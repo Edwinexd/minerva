@@ -15,6 +15,11 @@ const MAX_RETRIES: u32 = 3;
 /// Initial backoff delay between retries.
 const INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// Idle timeout between consecutive SSE frames from Cerebras. Protects every
+/// streaming strategy against a silently-stalled TCP connection that never
+/// delivers [DONE]. Applied per `stream.next().await`, not a total deadline.
+const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// A chunk returned by RAG lookup, carrying metadata for display filtering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RagChunk {
@@ -363,23 +368,46 @@ pub async fn stream_cerebras_to_client(
     let response = cerebras_request_with_retry(client, api_key, &body).await?;
 
     let mut stream = response.bytes_stream();
+    // Raw TCP frames may split multi-byte UTF-8 codepoints across chunks;
+    // accumulate bytes and promote only validated prefixes to the line buffer.
+    let mut byte_carry: Vec<u8> = Vec::new();
     let mut buffer = String::new();
     let mut prompt_tokens = 0i32;
     let mut completion_tokens = 0i32;
 
-    'outer: while let Some(chunk) = stream.next().await {
-        let chunk = match chunk {
-            Ok(c) => c,
-            Err(e) => {
+    'outer: loop {
+        let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
+            Ok(n) => n,
+            Err(_) => {
+                return Err(format!(
+                    "Cerebras stream idle timeout ({}s)",
+                    STREAM_IDLE_TIMEOUT.as_secs()
+                ));
+            }
+        };
+        let chunk = match next {
+            Some(Ok(c)) => c,
+            Some(Err(e)) => {
                 tracing::error!("cerebras stream error: {}", e);
                 return Err(format!("Stream interrupted: {}", e));
             }
+            None => break, // stream closed without [DONE]
         };
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        byte_carry.extend_from_slice(&chunk);
+        let valid_up_to = match std::str::from_utf8(&byte_carry) {
+            Ok(_) => byte_carry.len(),
+            Err(e) => e.valid_up_to(),
+        };
+        if valid_up_to > 0 {
+            let valid_str = std::str::from_utf8(&byte_carry[..valid_up_to])
+                .expect("prefix was UTF-8 validated");
+            buffer.push_str(valid_str);
+            byte_carry.drain(..valid_up_to);
+        }
 
         while let Some(line_end) = buffer.find('\n') {
             let line = buffer[..line_end].trim().to_string();
-            buffer = buffer[line_end + 1..].to_string();
+            buffer.drain(..=line_end);
 
             if line == "data: [DONE]" {
                 break 'outer;

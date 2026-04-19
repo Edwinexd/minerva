@@ -19,6 +19,15 @@ const SIMILARITY_THRESHOLD: f32 = 0.35;
 /// Maximum number of retrieval-triggered restarts to prevent infinite loops.
 const MAX_FLARE_RESTARTS: usize = 5;
 
+/// Hard cap on outer-loop iterations, independent of whether retrieval added
+/// new chunks. Guards against pathological cases where the model gets stuck
+/// regenerating the same high-confidence content across continuation windows
+/// (no low-confidence sentence ever fires, so MAX_FLARE_RESTARTS never trips).
+/// At FLARE_MAX_TOKENS_PER_CHUNK tokens per iteration this bounds a single
+/// FLARE response to at most MAX_FLARE_ITERATIONS * FLARE_MAX_TOKENS_PER_CHUNK
+/// completion tokens.
+const MAX_FLARE_ITERATIONS: usize = 8;
+
 /// Max completion tokens per FLARE generation window.
 /// Bounding each call ensures streams always terminate naturally so Cerebras
 /// returns usage stats in the final [DONE] chunk. Token counts are then exact
@@ -57,6 +66,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let mut total_prompt_tokens = 0i32;
     let mut total_completion_tokens = 0i32;
     let mut restarts = 0usize;
+    let mut iterations = 0usize;
 
     tracing::info!(
         "flare: starting with {} initial chunks for conversation {}",
@@ -65,6 +75,17 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     );
 
     loop {
+        if iterations >= MAX_FLARE_ITERATIONS {
+            tracing::warn!(
+                "flare: hit hard iteration cap ({}), stopping (restarts={}, full_text_len={})",
+                MAX_FLARE_ITERATIONS,
+                restarts,
+                full_text.len()
+            );
+            break;
+        }
+        iterations += 1;
+
         let system = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &all_chunks);
         let mut messages = common::build_chat_messages(&system, &ctx.history);
 

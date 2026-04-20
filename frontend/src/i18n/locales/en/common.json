@@ -2,6 +2,7 @@
   "nav": {
     "admin": "Admin",
     "dataHandling": "Data handling",
+    "acknowledgements": "Acknowledgements",
     "openInNewTab": "Open in new tab"
   },
   "footer": {
@@ -97,6 +98,14 @@
     "contact": {
       "heading": "Contact",
       "questions": "Questions:"
+    }
+  },
+  "acknowledgements": {
+    "title": "Acknowledgements",
+    "intro": "Minerva is made possible by contributions from people beyond the core dev team. Thank you.",
+    "contributorsHeading": "Contributors",
+    "roles": {
+      "logoDesign": "Logo design"
     }
   }
 }

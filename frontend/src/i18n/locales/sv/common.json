@@ -2,6 +2,7 @@
   "nav": {
     "admin": "Admin",
     "dataHandling": "Datahantering",
+    "acknowledgements": "Tack till",
     "openInNewTab": "Öppna i ny flik"
   },
   "footer": {
@@ -97,6 +98,14 @@
     "contact": {
       "heading": "Kontakt",
       "questions": "Frågor:"
+    }
+  },
+  "acknowledgements": {
+    "title": "Tack till",
+    "intro": "Minerva blir till tack vare bidrag från personer utanför kärnutvecklingsteamet. Tack!",
+    "contributorsHeading": "Bidragsgivare",
+    "roles": {
+      "logoDesign": "Logotypdesign"
     }
   }
 }

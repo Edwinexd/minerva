@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as DataHandlingRouteImport } from "./routes/data-handling"
+import { Route as AcknowledgementsRouteImport } from "./routes/acknowledgements"
 import { Route as AdminRouteImport } from "./routes/admin"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
@@ -42,6 +43,11 @@ import { Route as TeacherCoursesCourseIdApiKeysRouteImport } from "./routes/teac
 const DataHandlingRoute = DataHandlingRouteImport.update({
   id: "/data-handling",
   path: "/data-handling",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AcknowledgementsRoute = AcknowledgementsRouteImport.update({
+  id: "/acknowledgements",
+  path: "/acknowledgements",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -200,6 +206,7 @@ const TeacherCoursesCourseIdApiKeysRoute =
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
+  "/acknowledgements": typeof AcknowledgementsRoute
   "/admin": typeof AdminRouteWithChildren
   "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
@@ -231,6 +238,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/acknowledgements": typeof AcknowledgementsRoute
   "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
@@ -261,6 +269,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
+  "/acknowledgements": typeof AcknowledgementsRoute
   "/admin": typeof AdminRouteWithChildren
   "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
@@ -294,6 +303,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | "/"
+    | "/acknowledgements"
     | "/admin"
     | "/data-handling"
     | "/admin/courses"
@@ -325,6 +335,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
+    | "/acknowledgements"
     | "/data-handling"
     | "/admin/courses"
     | "/admin/external-invites"
@@ -354,6 +365,7 @@ export interface FileRouteTypes {
   id:
     | "__root__"
     | "/"
+    | "/acknowledgements"
     | "/admin"
     | "/data-handling"
     | "/admin/courses"
@@ -386,6 +398,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AcknowledgementsRoute: typeof AcknowledgementsRoute
   AdminRoute: typeof AdminRouteWithChildren
   DataHandlingRoute: typeof DataHandlingRoute
   EmbedCourseIdRoute: typeof EmbedCourseIdRoute
@@ -404,6 +417,13 @@ declare module "@tanstack/react-router" {
       path: "/data-handling"
       fullPath: "/data-handling"
       preLoaderRoute: typeof DataHandlingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/acknowledgements": {
+      id: "/acknowledgements"
+      path: "/acknowledgements"
+      fullPath: "/acknowledgements"
+      preLoaderRoute: typeof AcknowledgementsRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/admin": {
@@ -667,6 +687,7 @@ const TeacherCoursesCourseIdRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AcknowledgementsRoute: AcknowledgementsRoute,
   AdminRoute: AdminRouteWithChildren,
   DataHandlingRoute: DataHandlingRoute,
   EmbedCourseIdRoute: EmbedCourseIdRoute,

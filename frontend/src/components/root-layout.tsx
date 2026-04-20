@@ -108,6 +108,11 @@ export function RootLayout() {
             ) : (
               <Link to="/data-handling" className="hover:text-foreground underline">{t("nav.dataHandling")}</Link>
             )}
+            {isEmbed ? (
+              <a href="/acknowledgements" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">{t("nav.acknowledgements")}</a>
+            ) : (
+              <Link to="/acknowledgements" className="hover:text-foreground underline">{t("nav.acknowledgements")}</Link>
+            )}
             <a href="mailto:lambda@dsv.su.se" className="hover:text-foreground underline">lambda@dsv.su.se</a>
           </div>
         </div>

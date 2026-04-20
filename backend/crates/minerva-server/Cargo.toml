@@ -45,3 +45,9 @@ tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+# Spins up a real HTTP server in-process so strategy tests can exercise the
+# full FLARE state machine (streaming SSE, retrieval-triggered restarts,
+# repeat detection, token caps) against a scripted Cerebras response.
+wiremock = "0.6"

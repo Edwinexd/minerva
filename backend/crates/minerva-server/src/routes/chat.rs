@@ -749,6 +749,7 @@ async fn send_message(
         conversation_id: cid,
         user_id: conv.user_id,
         cerebras_api_key: state.config.cerebras_api_key.clone(),
+        cerebras_base_url: strategy::common::CEREBRAS_CHAT_COMPLETIONS_URL.to_string(),
         openai_api_key: state.config.openai_api_key.clone(),
         embedding_provider: course.embedding_provider,
         embedding_model: course.embedding_model,

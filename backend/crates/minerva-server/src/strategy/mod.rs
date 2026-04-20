@@ -21,6 +21,10 @@ pub struct GenerationContext {
     pub conversation_id: Uuid,
     pub user_id: Uuid,
     pub cerebras_api_key: String,
+    /// Base URL for the Cerebras chat-completions endpoint. Production
+    /// routes default this to `common::CEREBRAS_CHAT_COMPLETIONS_URL`;
+    /// integration tests override it to point at a wiremock server.
+    pub cerebras_base_url: String,
     pub openai_api_key: String,
     pub embedding_provider: String,
     pub embedding_model: String,

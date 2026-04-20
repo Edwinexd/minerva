@@ -138,10 +138,27 @@ pub async fn embedding_search(
 
 // ── Cerebras helpers ───────────────────────────────────────────────
 
+/// Production Cerebras chat-completions endpoint. Tests override this via
+/// `cerebras_request_with_retry_to` to hit an in-process wiremock server.
+pub const CEREBRAS_CHAT_COMPLETIONS_URL: &str = "https://api.cerebras.ai/v1/chat/completions";
+
 /// Send a request to the Cerebras API with retry on 5XX / network errors.
 /// Returns the successful response or the last error as a formatted string.
 pub async fn cerebras_request_with_retry(
     client: &reqwest::Client,
+    api_key: &str,
+    body: &serde_json::Value,
+) -> Result<Response, String> {
+    cerebras_request_with_retry_to(client, CEREBRAS_CHAT_COMPLETIONS_URL, api_key, body).await
+}
+
+/// Same as `cerebras_request_with_retry` but posts to `url` instead of the
+/// production endpoint. Exists so integration tests can point FLARE at a
+/// mock server without exposing URL-override plumbing throughout the rest
+/// of the codebase.
+pub async fn cerebras_request_with_retry_to(
+    client: &reqwest::Client,
+    url: &str,
     api_key: &str,
     body: &serde_json::Value,
 ) -> Result<Response, String> {
@@ -160,7 +177,7 @@ pub async fn cerebras_request_with_retry(
         }
 
         let result = client
-            .post("https://api.cerebras.ai/v1/chat/completions")
+            .post(url)
             .header("Authorization", format!("Bearer {}", api_key))
             .json(body)
             .send()

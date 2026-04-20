@@ -101,6 +101,149 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     )
     .await;
 
+    // Everything below is in a separate function so integration tests can
+    // drive the outer loop with scripted Cerebras responses + a mocked
+    // retrieval callback, without having to bring up a real Postgres,
+    // Qdrant, or FastEmbed stack.
+    let loop_cfg = RunLoopConfig {
+        course_name: &ctx.course_name,
+        custom_prompt: &ctx.custom_prompt,
+        model: &ctx.model,
+        temperature: ctx.temperature,
+        history: &ctx.history,
+        cerebras_base_url: &ctx.cerebras_base_url,
+        cerebras_api_key: &ctx.cerebras_api_key,
+        max_chunks: ctx.max_chunks,
+        daily_token_limit: ctx.daily_token_limit,
+    };
+    let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
+    let output = run_loop(&http_client, &loop_cfg, initial_chunks, &tx, |sentence| {
+        let http_client = http_client.clone();
+        let openai_key = ctx.openai_api_key.clone();
+        let fastembed = ctx.fastembed.clone();
+        let qdrant = ctx.qdrant.clone();
+        let collection_name = collection_name.clone();
+        let embedding_provider = ctx.embedding_provider.clone();
+        let embedding_model = ctx.embedding_model.clone();
+        async move {
+            flare_retrieve(
+                &http_client,
+                &openai_key,
+                &fastembed,
+                &qdrant,
+                &collection_name,
+                &sentence,
+                ctx.max_chunks,
+                flare_threshold,
+                &embedding_provider,
+                &embedding_model,
+            )
+            .await
+        }
+    })
+    .await;
+
+    tracing::info!(
+        "flare: loop finished for conversation {}: iterations={}, stop_reason={:?}, completion_tokens={}",
+        ctx.conversation_id,
+        output.iterations,
+        output.stop_reason,
+        output.total_completion_tokens,
+    );
+
+    let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
+        .await
+        .unwrap_or_default();
+    let chunks_json = if output.all_chunks.is_empty() {
+        None
+    } else {
+        let client_chunks = common::chunks_for_client(&output.all_chunks, &hidden);
+        serde_json::to_value(&client_chunks).ok()
+    };
+
+    common::finalize(
+        &ctx,
+        &tx,
+        &output.full_text,
+        chunks_json.as_ref(),
+        output.total_prompt_tokens,
+        output.total_completion_tokens,
+        !output.all_chunks.is_empty(),
+        started_at.elapsed().as_millis() as i64,
+        1 + output.restarts as i32,
+    )
+    .await;
+}
+
+/// Inputs the outer loop needs beyond the initial chunks / retrieval
+/// callback. Extracted from `GenerationContext` so tests can construct one
+/// without a real db/qdrant/fastembed.
+struct RunLoopConfig<'a> {
+    course_name: &'a str,
+    custom_prompt: &'a Option<String>,
+    model: &'a str,
+    temperature: f64,
+    history: &'a [minerva_db::queries::conversations::MessageRow],
+    cerebras_base_url: &'a str,
+    cerebras_api_key: &'a str,
+    max_chunks: i32,
+    daily_token_limit: i64,
+}
+
+/// Final state of a FLARE run. Returned by `run_loop` so the caller can
+/// persist it (production path: `common::finalize`) or assert on it (tests).
+#[derive(Debug)]
+struct RunLoopOutput {
+    full_text: String,
+    all_chunks: Vec<RagChunk>,
+    total_prompt_tokens: i32,
+    total_completion_tokens: i32,
+    restarts: usize,
+    iterations: usize,
+    stop_reason: StopReason,
+}
+
+/// Why the outer loop stopped. Useful for metrics and test assertions; not
+/// currently surfaced to clients.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum StopReason {
+    /// Model finished naturally (stream returned Completed).
+    Completed,
+    /// Streaming-time literal-text repeat detector fired.
+    RepeatDetected,
+    /// Post-iteration exact-heading repeat detector fired.
+    HeadingRepeat,
+    /// Hit MAX_FLARE_RESTARTS retrieval-triggered restarts.
+    MaxRestartsReached,
+    /// Hit MAX_FLARE_ITERATIONS outer-loop iterations.
+    MaxIterationsReached,
+    /// Per-response token cap (2x daily limit) reached.
+    TokenCapReached,
+    /// `full_text` exceeded MAX_FLARE_FULL_TEXT_BYTES.
+    FullTextByteCap,
+    /// Upstream Cerebras stream errored.
+    StreamError,
+}
+
+/// Core FLARE outer loop. Parameterised on the mid-stream retrieval
+/// callback so tests can inject scripted chunks without a Qdrant stack.
+///
+/// `retrieve_more` is called with a low-confidence sentence and is
+/// expected to return additional chunks relevant to that query. Returning
+/// an empty Vec signals "no new context"; the loop will continue without
+/// incrementing the restart counter (which counts only successful
+/// retrievals that added new chunks).
+async fn run_loop<F, Fut>(
+    http_client: &reqwest::Client,
+    cfg: &RunLoopConfig<'_>,
+    initial_chunks: Vec<RagChunk>,
+    tx: &mpsc::Sender<Result<Event, AppError>>,
+    mut retrieve_more: F,
+) -> RunLoopOutput
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Vec<RagChunk>>,
+{
     let mut all_chunks: Vec<RagChunk> = initial_chunks;
     // Parallel hash set for O(1) dedup when merging mid-stream retrievals.
     // Cheaper than `Vec::contains` which does full-text equality on every chunk.
@@ -110,23 +253,26 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let mut total_completion_tokens = 0i32;
     let mut restarts = 0usize;
     let mut iterations = 0usize;
+    // Default to Completed; the `Completed => break` branch relies on this
+    // (does not re-assign) so we don't trip the unused-assignment lint.
+    // Every other exit path overwrites it explicitly.
+    let mut stop_reason = StopReason::Completed;
 
     // Per-response token fail-safe. If the course has `daily_token_limit = 0`
     // (unlimited), fall back to `UNLIMITED_COURSE_RESPONSE_CAP`; otherwise cap
     // at DAILY_LIMIT_RESPONSE_MULTIPLIER * course limit. A single answer
     // cannot burn more than this many total tokens (prompt + completion
     // across all FLARE iterations).
-    let per_response_token_cap: i64 = if ctx.daily_token_limit > 0 {
-        ctx.daily_token_limit
+    let per_response_token_cap: i64 = if cfg.daily_token_limit > 0 {
+        cfg.daily_token_limit
             .saturating_mul(DAILY_LIMIT_RESPONSE_MULTIPLIER)
     } else {
         UNLIMITED_COURSE_RESPONSE_CAP
     };
 
     tracing::info!(
-        "flare: starting with {} initial chunks for conversation {} (per_response_cap={})",
+        "flare: starting with {} initial chunks (per_response_cap={})",
         all_chunks.len(),
-        ctx.conversation_id,
         per_response_token_cap,
     );
 
@@ -138,9 +284,10 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 "flare: per-response token cap hit ({} >= {}, daily_limit={}), stopping at iteration {}",
                 tokens_so_far,
                 per_response_token_cap,
-                ctx.daily_token_limit,
+                cfg.daily_token_limit,
                 iterations
             );
+            stop_reason = StopReason::TokenCapReached;
             break;
         }
         if iterations >= MAX_FLARE_ITERATIONS {
@@ -150,6 +297,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 restarts,
                 full_text.len()
             );
+            stop_reason = StopReason::MaxIterationsReached;
             break;
         }
         if full_text.len() > MAX_FLARE_FULL_TEXT_BYTES {
@@ -159,13 +307,14 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 MAX_FLARE_FULL_TEXT_BYTES,
                 iterations
             );
+            stop_reason = StopReason::FullTextByteCap;
             break;
         }
         iterations += 1;
         let iteration_start_text_len = full_text.len();
 
-        let system = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &all_chunks);
-        let mut messages = common::build_chat_messages(&system, &ctx.history);
+        let system = common::build_system_prompt(cfg.course_name, cfg.custom_prompt, &all_chunks);
+        let mut messages = common::build_chat_messages(&system, cfg.history);
 
         if !full_text.is_empty() {
             // Continuation framing. Context-supply is the hard problem here:
@@ -225,12 +374,13 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
         // Stream with logprobs, checking confidence per sentence
         let result = stream_with_logprobs(
-            &http_client,
-            &ctx.cerebras_api_key,
-            &ctx.model,
-            ctx.temperature,
+            http_client,
+            cfg.cerebras_base_url,
+            cfg.cerebras_api_key,
+            cfg.model,
+            cfg.temperature,
             &messages,
-            &tx,
+            tx,
             &mut full_text,
         )
         .await;
@@ -244,6 +394,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                         serde_json::json!({"type": "error", "error": e}).to_string(),
                     )))
                     .await;
+                stop_reason = StopReason::StreamError;
                 break;
             }
         };
@@ -268,17 +419,22 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                     iterations,
                     truncate_for_log(&collision, 80)
                 );
+                stop_reason = StopReason::HeadingRepeat;
                 break;
             }
         }
 
         match outcome.kind {
-            StreamOutcome::Completed => break,
+            StreamOutcome::Completed => {
+                // stop_reason already StopReason::Completed
+                break;
+            }
             StreamOutcome::RepeatDetected => {
                 tracing::warn!(
                     "flare: aborting outer loop due to detected content repeat (iteration {})",
                     iterations
                 );
+                stop_reason = StopReason::RepeatDetected;
                 break;
             }
             StreamOutcome::HitLimit {
@@ -298,6 +454,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                         "flare: max restarts ({}) reached, stopping",
                         MAX_FLARE_RESTARTS
                     );
+                    stop_reason = StopReason::MaxRestartsReached;
                     break;
                 }
 
@@ -307,28 +464,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                     MAX_FLARE_RESTARTS
                 );
 
-                // Use the low-confidence sentence as a retrieval query.
-                // Mid-stream FLARE retrieval keeps its own paper-derived floor
-                // (SIMILARITY_THRESHOLD) but tightens to the course's configured
-                // min_score when the teacher has set a stricter value.
-                let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
-                let new_chunks = flare_retrieve(
-                    &http_client,
-                    &ctx.openai_api_key,
-                    &ctx.fastembed,
-                    &ctx.qdrant,
-                    &collection_name,
-                    sentence,
-                    ctx.max_chunks,
-                    flare_threshold,
-                    &ctx.embedding_provider,
-                    &ctx.embedding_model,
-                )
-                .await;
+                let new_chunks = retrieve_more(sentence.clone()).await;
 
                 let mut added = false;
                 for chunk in &new_chunks {
-                    if all_chunks.len() >= ctx.max_chunks as usize {
+                    if all_chunks.len() >= cfg.max_chunks as usize {
                         break;
                     }
                     if chunk_hashes.insert(chunk_identity_hash(chunk)) {
@@ -352,36 +492,25 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         }
     }
 
-    let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
-        .await
-        .unwrap_or_default();
-    let chunks_json = if all_chunks.is_empty() {
-        None
-    } else {
-        let client_chunks = common::chunks_for_client(&all_chunks, &hidden);
-        serde_json::to_value(&client_chunks).ok()
-    };
-
-    common::finalize(
-        &ctx,
-        &tx,
-        &full_text,
-        chunks_json.as_ref(),
+    RunLoopOutput {
+        full_text,
+        all_chunks,
         total_prompt_tokens,
         total_completion_tokens,
-        !all_chunks.is_empty(),
-        started_at.elapsed().as_millis() as i64,
-        1 + restarts as i32,
-    )
-    .await;
+        restarts,
+        iterations,
+        stop_reason,
+    }
 }
 
+#[derive(Debug)]
 struct StreamWithLogprobsResult {
     prompt_tokens: i32,
     completion_tokens: i32,
     kind: StreamOutcome,
 }
 
+#[derive(Debug)]
 enum StreamOutcome {
     /// Model finished naturally (finish_reason: stop)
     Completed,
@@ -403,8 +532,14 @@ enum StreamOutcome {
 ///
 /// Buffers tokens into sentences and records the first low-confidence sentence
 /// (if any) for use as a retrieval query by the caller.
+///
+/// `base_url` is the Cerebras chat-completions endpoint; production code
+/// passes `common::CEREBRAS_CHAT_COMPLETIONS_URL` via `ctx.cerebras_base_url`,
+/// integration tests pass a wiremock server URL.
+#[allow(clippy::too_many_arguments)]
 async fn stream_with_logprobs(
     client: &reqwest::Client,
+    base_url: &str,
     api_key: &str,
     model: &str,
     temperature: f64,
@@ -423,7 +558,7 @@ async fn stream_with_logprobs(
         "stream_options": { "include_usage": true },
     });
 
-    let response = common::cerebras_request_with_retry(client, api_key, &body).await?;
+    let response = common::cerebras_request_with_retry_to(client, base_url, api_key, &body).await?;
 
     let mut stream = response.bytes_stream();
     // Raw TCP frames may split multi-byte UTF-8 codepoints; accumulate bytes
@@ -1207,5 +1342,1288 @@ mod tests {
         // borrows and clones into Value::String). This is the property the
         // outer loop depends on.
         assert!(!full_text.is_empty());
+    }
+}
+
+// ── Integration tests against a mock Cerebras server ────────────────
+//
+// These exercise the full `stream_with_logprobs` state machine against a
+// real HTTP server (wiremock) speaking scripted SSE. This is where the
+// 300k-token regression lived, so it's the layer that most needs coverage.
+//
+// `run()` itself (the outer loop) also takes a `GenerationContext` that
+// carries a real sqlx::PgPool, Arc<Qdrant>, and Arc<FastEmbedder>; wiring
+// mocks for those is a bigger refactor. The streaming function is where
+// every repeat-detection / UTF-8 / timeout bug would manifest, so it's the
+// highest-value test surface to cover right now.
+
+#[cfg(test)]
+mod stream_integration_tests {
+    use super::*;
+    use tokio::sync::mpsc;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Build one SSE data chunk containing a single content delta.
+    fn sse_token(content: &str, logprob: Option<f64>) -> String {
+        let logprobs = logprob.map(|lp| {
+            serde_json::json!({
+                "content": [{
+                    "token": content,
+                    "logprob": lp,
+                }]
+            })
+        });
+        let delta = serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "delta": { "content": content },
+                "logprobs": logprobs,
+                "finish_reason": null,
+            }]
+        });
+        format!("data: {}\n\n", delta)
+    }
+
+    /// Build the final SSE usage chunk that closes a stream.
+    fn sse_usage(prompt_tokens: i64, completion_tokens: i64, finish: &str) -> String {
+        let frame = serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": finish,
+            }],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            }
+        });
+        format!("data: {}\n\ndata: [DONE]\n\n", frame)
+    }
+
+    /// Standard test wiring: make a mock server, a reqwest client, and an
+    /// mpsc channel to drain tokens into a Vec. Returns the server (callers
+    /// register mocks on it), the client, the tx half (pass into SUT), and
+    /// the rx drained into `collect_tokens`.
+    async fn wiring() -> (
+        MockServer,
+        reqwest::Client,
+        mpsc::Sender<Result<Event, AppError>>,
+        mpsc::Receiver<Result<Event, AppError>>,
+    ) {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let (tx, rx) = mpsc::channel(1024);
+        (server, client, tx, rx)
+    }
+
+    /// Drain all SSE events the function sent to the client into a single
+    /// reconstructed string of the delta content values.
+    async fn collect_tokens(mut rx: mpsc::Receiver<Result<Event, AppError>>) -> String {
+        let mut out = String::new();
+        while let Ok(ev) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
+            match ev {
+                Some(Ok(_event)) => {
+                    // axum::Event doesn't expose its data, but we can serialize it
+                    // via its Display impl which yields "data: <json>\n\n". We
+                    // parse the json back out for the content field.
+                    // Simpler: the SUT uses `Event::default().data(...)`, and the
+                    // data is a JSON string `{"type":"token","token":"<content>"}`.
+                    // We can't easily inspect the Event body here, so we rely on
+                    // `full_text` in the SUT as the source of truth instead and
+                    // just count events.
+                    out.push('.');
+                }
+                Some(Err(_)) | None => break,
+            }
+        }
+        out
+    }
+
+    // ── Happy path ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn stream_completes_populates_full_text_and_token_counts() {
+        let (server, client, tx, rx) = wiring().await;
+
+        let mut body = String::new();
+        body.push_str(&sse_token("Hello ", Some(-0.1)));
+        body.push_str(&sse_token("world.", Some(-0.2)));
+        body.push_str(&sse_usage(50, 2, "stop"));
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let mut full_text = String::new();
+        let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
+        let result = stream_with_logprobs(
+            &client,
+            &url,
+            "test-key",
+            "test-model",
+            0.7,
+            &messages,
+            &tx,
+            &mut full_text,
+        )
+        .await
+        .expect("stream should succeed");
+
+        drop(tx);
+        let events = collect_tokens(rx).await;
+
+        assert_eq!(full_text, "Hello world.");
+        assert_eq!(result.prompt_tokens, 50);
+        assert_eq!(result.completion_tokens, 2);
+        assert!(matches!(result.kind, StreamOutcome::Completed));
+        assert_eq!(
+            events.len(),
+            2,
+            "expected 2 token events streamed to client"
+        );
+    }
+
+    // ── Hit token window limit ────────────────────────────────
+
+    #[tokio::test]
+    async fn stream_returns_hit_limit_when_usage_exceeds_budget() {
+        let (server, client, tx, rx) = wiring().await;
+
+        // Simulate a response where Cerebras reports completion_tokens at or
+        // above FLARE_MAX_TOKENS_PER_CHUNK. The SUT should classify the
+        // outcome as HitLimit regardless of finish_reason.
+        let mut body = String::new();
+        body.push_str(&sse_token("chunk1 ", Some(-0.1)));
+        body.push_str(&sse_token("chunk2", Some(-0.2)));
+        body.push_str(&sse_usage(10, FLARE_MAX_TOKENS_PER_CHUNK as i64, "length"));
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let mut full_text = String::new();
+        let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
+        let result = stream_with_logprobs(
+            &client,
+            &url,
+            "test-key",
+            "test-model",
+            0.7,
+            &messages,
+            &tx,
+            &mut full_text,
+        )
+        .await
+        .expect("stream should succeed");
+
+        drop(tx);
+        let _ = collect_tokens(rx).await;
+
+        assert_eq!(result.completion_tokens, FLARE_MAX_TOKENS_PER_CHUNK);
+        assert!(
+            matches!(result.kind, StreamOutcome::HitLimit { .. }),
+            "expected HitLimit, got {:?}",
+            std::mem::discriminant(&result.kind)
+        );
+    }
+
+    // ── Low-confidence sentence captured on HitLimit ──────────
+
+    #[tokio::test]
+    async fn stream_captures_low_confidence_sentence_at_window_end() {
+        let (server, client, tx, rx) = wiring().await;
+
+        // Build enough tokens to trip the >300-char sentence-boundary
+        // heuristic, with LOGPROB_THRESHOLD-breaking logprobs sprinkled in.
+        // After a period boundary, the sentence buffer resets; we ensure the
+        // sentence containing low-confidence tokens is finalized as "first
+        // low-confidence sentence".
+        let mut body = String::new();
+        // Fill ~350 chars of confident prose, ending at a sentence boundary.
+        let filler = "This is confident filler text that occupies bytes. ".repeat(8);
+        body.push_str(&sse_token(&filler, Some(-0.1)));
+        // Then an uncertain sentence of similar length.
+        let uncertain =
+            "Uncertain claim containing low-probability tokens which should be flagged. ".repeat(5);
+        body.push_str(&sse_token(&uncertain, Some(-5.0))); // well below threshold
+        body.push_str(&sse_usage(20, FLARE_MAX_TOKENS_PER_CHUNK as i64, "length"));
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let mut full_text = String::new();
+        let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
+        let result = stream_with_logprobs(
+            &client,
+            &url,
+            "test-key",
+            "test-model",
+            0.7,
+            &messages,
+            &tx,
+            &mut full_text,
+        )
+        .await
+        .expect("stream should succeed");
+
+        drop(tx);
+        let _ = collect_tokens(rx).await;
+
+        match result.kind {
+            StreamOutcome::HitLimit {
+                low_confidence_sentence,
+            } => {
+                assert!(
+                    low_confidence_sentence.is_some(),
+                    "expected a low-confidence sentence to be captured"
+                );
+            }
+            other => panic!(
+                "expected HitLimit, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        }
+    }
+
+    // ── Streaming-time repeat detection ───────────────────────
+
+    #[tokio::test]
+    async fn stream_aborts_on_repeated_tail_content() {
+        let (server, client, tx, rx) = wiring().await;
+
+        // Prior content the model is supposed to continue from.
+        let prior = "Introduction. The course uses a single two-module Maven project as the practical work for the whole term, which is unusual for introductory programming classes but reinforces module-system concepts concretely. End intro. ";
+        // Model "continues" by regenerating the same 150+-char sentence.
+        let repeated = "The course uses a single two-module Maven project as the practical work for the whole term, which is unusual for introductory programming classes but reinforces module-system concepts concretely.";
+        assert!(repeated.len() > REPEAT_FINGERPRINT_LEN);
+
+        let mut body = String::new();
+        // Stream the repeated text character-by-character to force the
+        // streaming-time detector to fire rather than a single mega-chunk.
+        // Split into ~20-char pieces so each SSE delta is small and we cross
+        // REPEAT_CHECK_INTERVAL multiple times.
+        let mut remaining = repeated;
+        while !remaining.is_empty() {
+            let split_at = remaining.len().min(20);
+            let mut real_split = split_at;
+            while real_split > 0 && !remaining.is_char_boundary(real_split) {
+                real_split -= 1;
+            }
+            if real_split == 0 {
+                real_split = remaining.len().min(20);
+                while real_split < remaining.len() && !remaining.is_char_boundary(real_split) {
+                    real_split += 1;
+                }
+            }
+            let (chunk, rest) = remaining.split_at(real_split);
+            body.push_str(&sse_token(chunk, Some(-0.1)));
+            remaining = rest;
+        }
+        body.push_str(&sse_usage(20, 50, "stop"));
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let mut full_text = String::from(prior);
+        let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
+        let result = stream_with_logprobs(
+            &client,
+            &url,
+            "test-key",
+            "test-model",
+            0.7,
+            &messages,
+            &tx,
+            &mut full_text,
+        )
+        .await
+        .expect("stream should succeed");
+
+        drop(tx);
+        let _ = collect_tokens(rx).await;
+
+        assert!(
+            matches!(result.kind, StreamOutcome::RepeatDetected),
+            "expected RepeatDetected to fire on duplicate tail content"
+        );
+        // Invariant: every token sent to client is in full_text. Since we
+        // bail mid-stream, full_text == prior + portion of repeated content
+        // sent so far.
+        assert!(
+            full_text.starts_with(prior),
+            "prior content must remain intact after repeat abort"
+        );
+        assert!(
+            full_text.len() > prior.len(),
+            "at least some new content was streamed before detection"
+        );
+    }
+
+    // ── UTF-8 multi-byte safety ────────────────────────────────
+
+    #[tokio::test]
+    async fn stream_handles_multibyte_utf8_content() {
+        let (server, client, tx, rx) = wiring().await;
+
+        // Swedish text exercises 2-byte codepoints (å/ä/ö).
+        let content = "Kursen använder ett tvåmodulers projekt för övning.";
+        let mut body = String::new();
+        body.push_str(&sse_token(content, Some(-0.1)));
+        body.push_str(&sse_usage(10, 15, "stop"));
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let mut full_text = String::new();
+        let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
+        let result = stream_with_logprobs(
+            &client,
+            &url,
+            "test-key",
+            "test-model",
+            0.7,
+            &messages,
+            &tx,
+            &mut full_text,
+        )
+        .await
+        .expect("stream should succeed");
+
+        drop(tx);
+        let _ = collect_tokens(rx).await;
+
+        assert_eq!(full_text, content);
+        assert!(matches!(result.kind, StreamOutcome::Completed));
+    }
+
+    // ── Client disconnect ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn stream_reports_client_disconnect() {
+        let (server, client, tx, rx) = wiring().await;
+
+        // Drop the receiver immediately so the first tx.send fails.
+        drop(rx);
+
+        let mut body = String::new();
+        body.push_str(&sse_token("hi", Some(-0.1)));
+        body.push_str(&sse_usage(5, 1, "stop"));
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let mut full_text = String::new();
+        let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
+        let err = stream_with_logprobs(
+            &client,
+            &url,
+            "test-key",
+            "test-model",
+            0.7,
+            &messages,
+            &tx,
+            &mut full_text,
+        )
+        .await
+        .expect_err("should error on client disconnect");
+
+        assert!(err.contains("client disconnected"), "got: {}", err);
+        // Invariant: even on disconnect, any token we ATTEMPTED to send is
+        // already in full_text (push_str runs before tx.send).
+        assert_eq!(full_text, "hi");
+    }
+
+    // ── 5XX retry / error propagation ─────────────────────────
+
+    #[tokio::test]
+    async fn stream_propagates_4xx_without_retry() {
+        let (server, client, tx, rx) = wiring().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(401).set_body_string("{\"error\":\"unauthorized\"}"),
+            )
+            .expect(1) // not retried
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let mut full_text = String::new();
+        let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
+        let err = stream_with_logprobs(
+            &client,
+            &url,
+            "test-key",
+            "test-model",
+            0.7,
+            &messages,
+            &tx,
+            &mut full_text,
+        )
+        .await
+        .expect_err("4xx should propagate as Err");
+        assert!(err.contains("401"), "got: {}", err);
+        drop(tx);
+        let _ = collect_tokens(rx).await;
+    }
+
+    // ── SSE error frame ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn stream_propagates_sse_error_frame() {
+        let (server, client, tx, rx) = wiring().await;
+
+        let body = "data: {\"error\": {\"message\": \"model overloaded\"}}\n\ndata: [DONE]\n\n";
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let mut full_text = String::new();
+        let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
+        let err = stream_with_logprobs(
+            &client,
+            &url,
+            "test-key",
+            "test-model",
+            0.7,
+            &messages,
+            &tx,
+            &mut full_text,
+        )
+        .await
+        .expect_err("error frame should surface as Err");
+        assert!(err.contains("model overloaded"), "got: {}", err);
+        drop(tx);
+        let _ = collect_tokens(rx).await;
+    }
+}
+
+// ── Outer-loop regression tests ─────────────────────────────────────
+//
+// These drive `run_loop` directly so we can script Cerebras responses AND
+// mid-stream retrieval without bringing up a Postgres/Qdrant/FastEmbed
+// stack. This is where the 300k-token bug lived -- a state-machine error
+// in how HitLimit outcomes chain across iterations -- so it's the highest
+// value test surface.
+//
+// Each scenario is a sequence of scripted Cerebras responses. We wire them
+// up behind a single MockServer by serving one response per iteration in
+// order, using wiremock's `up_to_n_times` + `respond_with` composition.
+
+#[cfg(test)]
+mod loop_regression_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc as StdArc;
+    use tokio::sync::mpsc;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn sse_token(content: &str) -> String {
+        let delta = serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "delta": { "content": content },
+                "logprobs": { "content": [{ "token": content, "logprob": -0.1 }] },
+                "finish_reason": null,
+            }]
+        });
+        format!("data: {}\n\n", delta)
+    }
+
+    fn sse_low_conf_token(content: &str) -> String {
+        let delta = serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "delta": { "content": content },
+                "logprobs": { "content": [{ "token": content, "logprob": -5.0 }] },
+                "finish_reason": null,
+            }]
+        });
+        format!("data: {}\n\n", delta)
+    }
+
+    fn sse_close(prompt_tokens: i64, completion_tokens: i64, finish: &str) -> String {
+        let frame = serde_json::json!({
+            "choices": [{ "index": 0, "delta": {}, "finish_reason": finish }],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            }
+        });
+        format!("data: {}\n\ndata: [DONE]\n\n", frame)
+    }
+
+    /// Build a `RunLoopConfig` with sane defaults. Callers override just
+    /// the fields they care about via the returned owned strings.
+    fn base_cfg(
+        url: &str,
+    ) -> (
+        String,                                              // course_name
+        Option<String>,                                      // custom_prompt
+        String,                                              // model
+        Vec<minerva_db::queries::conversations::MessageRow>, // history
+        String,                                              // cerebras_base_url
+        String,                                              // cerebras_api_key
+    ) {
+        (
+            "Test Course".to_string(),
+            None,
+            "test-model".to_string(),
+            Vec::new(),
+            url.to_string(),
+            "test-key".to_string(),
+        )
+    }
+
+    async fn drain_client_events(mut rx: mpsc::Receiver<Result<Event, AppError>>) -> usize {
+        let mut count = 0;
+        while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
+            count += 1;
+        }
+        count
+    }
+
+    /// Build a HitLimit-without-low-conf response body unique to `seed` so
+    /// that the streaming repeat detector does NOT fire between iterations
+    /// in a multi-iteration test. Content is confident prose with a per-seed
+    /// discriminator string that never appears elsewhere.
+    fn distinct_hitlimit_body(seed: usize, completion_tokens: i64) -> String {
+        let mut body = String::new();
+        // Four ~100-char sentences, each tagged with the seed so no two
+        // iterations produce the same 150-char substring.
+        for i in 0..4 {
+            body.push_str(&sse_token(&format!(
+                "Iteration {} sentence {} unique-marker-{:x} about build systems and deployment. ",
+                seed,
+                i,
+                (seed * 37 + i * 11) ^ 0xabcd,
+            )));
+        }
+        body.push_str(&sse_close(10, completion_tokens, "length"));
+        body
+    }
+
+    /// Build a HitLimit-with-low-conf response body unique to `seed`. The
+    /// low-confidence sentence is also seeded, so the retrieval callback
+    /// sees a different query per iteration (mirroring reality where each
+    /// uncertain sentence in a real response is distinct).
+    fn distinct_hitlimit_with_lowconf_body(seed: usize, completion_tokens: i64) -> String {
+        let mut body = String::new();
+        for i in 0..3 {
+            body.push_str(&sse_token(&format!(
+                "Confident intro {} sub {} nonce-{:x} about the course material today. ",
+                seed,
+                i,
+                (seed * 97 + i * 13) ^ 0xdead,
+            )));
+        }
+        body.push_str(&sse_low_conf_token(&format!(
+            "Uncertain speculative claim about unique-topic-{:x} that the model is not sure about right now and may be wrong at present time.",
+            seed,
+        )));
+        body.push_str(&sse_close(20, completion_tokens, "length"));
+        body
+    }
+
+    /// Mount a sequence of responses in order. Each is consumed exactly
+    /// once; the (N+1)-th request would 404. That's deliberate: if the SUT
+    /// makes more than `bodies.len()` calls the test fails, which is
+    /// exactly the invariant we want to catch.
+    async fn mount_sequenced(server: &MockServer, bodies: Vec<String>) {
+        for body in bodies {
+            Mock::given(method("POST"))
+                .and(path("/chat/completions"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "text/event-stream")
+                        .set_body_string(body),
+                )
+                .up_to_n_times(1)
+                .mount(server)
+                .await;
+        }
+    }
+
+    // ── The original bug: infinite HitLimit-no-low-conf loop ──
+
+    /// REGRESSION: in the pre-fix code, if Cerebras returned HitLimit with
+    /// no low-confidence sentence on every iteration, the outer loop
+    /// `continue`d forever with no counter increment, burning ~300k tokens
+    /// before the user cancelled. The fix was `MAX_FLARE_ITERATIONS`; this
+    /// test asserts the hard cap stops it at the 8th iteration.
+    #[tokio::test]
+    async fn regression_unbounded_hitlimit_no_lowconf_stops_at_iteration_cap() {
+        let server = MockServer::start().await;
+
+        // Provide MAX_FLARE_ITERATIONS + 2 distinct responses so repeat
+        // detection cannot fire (each iteration produces different text).
+        // If the iteration cap regresses, we'd exhaust these and the test
+        // would either hang or 404; either way the test fails loudly.
+        let bodies: Vec<String> = (0..MAX_FLARE_ITERATIONS + 2)
+            .map(|i| distinct_hitlimit_body(i, FLARE_MAX_TOKENS_PER_CHUNK as i64))
+            .collect();
+        mount_sequenced(&server, bodies).await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+            base_cfg(&url);
+        let cfg = RunLoopConfig {
+            course_name: &course_name,
+            custom_prompt: &custom_prompt,
+            model: &model,
+            temperature: 0.7,
+            history: &history,
+            cerebras_base_url: &cerebras_base_url,
+            cerebras_api_key: &cerebras_api_key,
+            max_chunks: 8,
+            daily_token_limit: 0, // unlimited, so we don't short-circuit on token cap
+        };
+
+        let http = reqwest::Client::new();
+        let (tx, rx) = mpsc::channel(1024);
+        let retrieve = |_sentence: String| async { Vec::<RagChunk>::new() };
+
+        let out = tokio::time::timeout(
+            Duration::from_secs(15),
+            run_loop(&http, &cfg, vec![], &tx, retrieve),
+        )
+        .await
+        .expect(
+            "run_loop must terminate (if this hangs, the loop is unbounded -- the exact 300k bug)",
+        );
+
+        drop(tx);
+        let _ = drain_client_events(rx).await;
+
+        assert_eq!(
+            out.stop_reason,
+            StopReason::MaxIterationsReached,
+            "expected MAX_FLARE_ITERATIONS to terminate the loop, got {:?}",
+            out.stop_reason
+        );
+        assert_eq!(out.iterations, MAX_FLARE_ITERATIONS);
+        assert_eq!(out.restarts, 0, "no retrieval should have been triggered");
+        // Total completion_tokens is bounded by iterations * FLARE_MAX_TOKENS_PER_CHUNK.
+        assert!(
+            out.total_completion_tokens as i64
+                <= (MAX_FLARE_ITERATIONS as i64) * (FLARE_MAX_TOKENS_PER_CHUNK as i64),
+            "completion tokens {} exceed the nominal ceiling",
+            out.total_completion_tokens
+        );
+    }
+
+    /// Stronger regression guard: a single response must not consume more
+    /// than 2x the student's per-course daily allowance. Set daily limit
+    /// very low so the per-response cap trips before the iteration cap.
+    #[tokio::test]
+    async fn regression_per_response_token_cap_trips_before_iterations() {
+        let server = MockServer::start().await;
+
+        let bodies: Vec<String> = (0..3)
+            .map(|i| distinct_hitlimit_body(i, FLARE_MAX_TOKENS_PER_CHUNK as i64))
+            .collect();
+        mount_sequenced(&server, bodies).await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+            base_cfg(&url);
+        // daily_limit = 500; 2x cap = 1000 tokens; first iteration will
+        // already exceed it (1536 completion tokens), so we must stop after
+        // one iteration at most.
+        let cfg = RunLoopConfig {
+            course_name: &course_name,
+            custom_prompt: &custom_prompt,
+            model: &model,
+            temperature: 0.7,
+            history: &history,
+            cerebras_base_url: &cerebras_base_url,
+            cerebras_api_key: &cerebras_api_key,
+            max_chunks: 8,
+            daily_token_limit: 500,
+        };
+
+        let http = reqwest::Client::new();
+        let (tx, rx) = mpsc::channel(1024);
+        let retrieve = |_s: String| async { Vec::<RagChunk>::new() };
+
+        let out = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_loop(&http, &cfg, vec![], &tx, retrieve),
+        )
+        .await
+        .expect("run_loop must terminate");
+
+        drop(tx);
+        let _ = drain_client_events(rx).await;
+
+        assert_eq!(out.stop_reason, StopReason::TokenCapReached);
+        assert!(
+            out.iterations <= 2,
+            "per-response cap should fire after at most 2 iterations (got {})",
+            out.iterations
+        );
+        assert!(
+            (out.total_prompt_tokens + out.total_completion_tokens) as i64
+                <= cfg.daily_token_limit * DAILY_LIMIT_RESPONSE_MULTIPLIER
+                    + FLARE_MAX_TOKENS_PER_CHUNK as i64,
+            "tokens exceeded 2x daily limit + one iteration slack"
+        );
+    }
+
+    // ── Happy paths ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn run_loop_stops_immediately_on_completed() {
+        let server = MockServer::start().await;
+
+        let mut body = String::new();
+        body.push_str(&sse_token("All done."));
+        body.push_str(&sse_close(10, 3, "stop"));
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+            base_cfg(&url);
+        let cfg = RunLoopConfig {
+            course_name: &course_name,
+            custom_prompt: &custom_prompt,
+            model: &model,
+            temperature: 0.7,
+            history: &history,
+            cerebras_base_url: &cerebras_base_url,
+            cerebras_api_key: &cerebras_api_key,
+            max_chunks: 8,
+            daily_token_limit: 0,
+        };
+
+        let http = reqwest::Client::new();
+        let (tx, rx) = mpsc::channel(1024);
+        let retrieve = |_s: String| async { Vec::<RagChunk>::new() };
+
+        let out = run_loop(&http, &cfg, vec![], &tx, retrieve).await;
+
+        drop(tx);
+        let _ = drain_client_events(rx).await;
+
+        assert_eq!(out.stop_reason, StopReason::Completed);
+        assert_eq!(out.iterations, 1);
+        assert_eq!(out.full_text, "All done.");
+        assert_eq!(out.total_completion_tokens, 3);
+    }
+
+    // ── HitLimit with low-confidence sentence → retrieval path ──
+
+    /// End-to-end of the core FLARE mechanic: HitLimit with a low-confidence
+    /// sentence triggers `retrieve_more`; new chunks cause a restart; next
+    /// iteration's Cerebras response completes.
+    #[tokio::test]
+    async fn run_loop_retrieves_on_low_confidence_then_completes() {
+        let server = MockServer::start().await;
+
+        // First response: hits the 1536-token window with a low-confidence
+        // sentence in the middle. Second response: short and completes.
+        let mut first = String::new();
+        // Confident intro.
+        for _ in 0..3 {
+            first.push_str(&sse_token(
+                "Confident introduction sentence that fills some tokens here. ",
+            ));
+        }
+        // Low-confidence sentence: >100 chars ending with a period so the
+        // sentence-boundary heuristic fires.
+        first.push_str(&sse_low_conf_token(
+            "However the speculative detail about ISO build flags is uncertain and the model is guessing here right now.",
+        ));
+        first.push_str(&sse_close(20, FLARE_MAX_TOKENS_PER_CHUNK as i64, "length"));
+
+        let mut second = String::new();
+        second.push_str(&sse_token(" Clarification added."));
+        second.push_str(&sse_close(100, 5, "stop"));
+
+        // Serve `first` once, then `second` once.
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(first),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(second),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+            base_cfg(&url);
+        let cfg = RunLoopConfig {
+            course_name: &course_name,
+            custom_prompt: &custom_prompt,
+            model: &model,
+            temperature: 0.7,
+            history: &history,
+            cerebras_base_url: &cerebras_base_url,
+            cerebras_api_key: &cerebras_api_key,
+            max_chunks: 8,
+            daily_token_limit: 0,
+        };
+
+        let retrieve_count = StdArc::new(AtomicUsize::new(0));
+        let rc_clone = retrieve_count.clone();
+        let retrieve = move |sentence: String| {
+            let rc = rc_clone.clone();
+            async move {
+                rc.fetch_add(1, Ordering::SeqCst);
+                // Sanity: the sentence we were handed should include the
+                // low-conf "speculative detail" phrase.
+                assert!(
+                    sentence.contains("speculative detail") || sentence.contains("uncertain"),
+                    "unexpected retrieval sentence: {:?}",
+                    sentence
+                );
+                vec![RagChunk {
+                    document_id: "added".to_string(),
+                    filename: "new.pdf".to_string(),
+                    text: "Freshly retrieved context for the low-confidence sentence.".to_string(),
+                }]
+            }
+        };
+
+        let http = reqwest::Client::new();
+        let (tx, rx) = mpsc::channel(1024);
+
+        let out = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_loop(&http, &cfg, vec![], &tx, retrieve),
+        )
+        .await
+        .expect("run_loop must terminate");
+
+        drop(tx);
+        let _ = drain_client_events(rx).await;
+
+        assert_eq!(
+            retrieve_count.load(Ordering::SeqCst),
+            1,
+            "retrieve_more should fire exactly once"
+        );
+        assert_eq!(out.restarts, 1);
+        assert_eq!(out.iterations, 2);
+        assert_eq!(out.stop_reason, StopReason::Completed);
+        assert_eq!(out.all_chunks.len(), 1);
+        assert!(out.full_text.ends_with("Clarification added."));
+    }
+
+    /// HitLimit + low-conf sentence, but retrieval returns NO new chunks.
+    /// Must not bump the restart counter (that protects the restart-cap
+    /// from being immune to fruitless retrievals), and must eventually
+    /// stop via the iteration cap rather than looping forever.
+    #[tokio::test]
+    async fn run_loop_empty_retrieval_does_not_increment_restart_counter() {
+        let server = MockServer::start().await;
+
+        let bodies: Vec<String> = (0..MAX_FLARE_ITERATIONS + 2)
+            .map(|i| distinct_hitlimit_with_lowconf_body(i, FLARE_MAX_TOKENS_PER_CHUNK as i64))
+            .collect();
+        mount_sequenced(&server, bodies).await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+            base_cfg(&url);
+        let cfg = RunLoopConfig {
+            course_name: &course_name,
+            custom_prompt: &custom_prompt,
+            model: &model,
+            temperature: 0.7,
+            history: &history,
+            cerebras_base_url: &cerebras_base_url,
+            cerebras_api_key: &cerebras_api_key,
+            max_chunks: 8,
+            daily_token_limit: 0,
+        };
+
+        let retrieve_count = StdArc::new(AtomicUsize::new(0));
+        let rc = retrieve_count.clone();
+        let retrieve = move |_s: String| {
+            let rc = rc.clone();
+            async move {
+                rc.fetch_add(1, Ordering::SeqCst);
+                Vec::<RagChunk>::new() // always empty
+            }
+        };
+
+        let http = reqwest::Client::new();
+        let (tx, rx) = mpsc::channel(1024);
+
+        let out = tokio::time::timeout(
+            Duration::from_secs(15),
+            run_loop(&http, &cfg, vec![], &tx, retrieve),
+        )
+        .await
+        .expect("run_loop must terminate");
+
+        drop(tx);
+        let _ = drain_client_events(rx).await;
+
+        assert_eq!(
+            out.stop_reason,
+            StopReason::MaxIterationsReached,
+            "loop must stop via iteration cap when retrieval is fruitless"
+        );
+        assert_eq!(out.iterations, MAX_FLARE_ITERATIONS);
+        assert_eq!(
+            out.restarts, 0,
+            "no new chunks => restarts stays 0 (design)"
+        );
+        // Retrieval was called on every iteration where a low-conf sentence
+        // was produced. That should be equal to iterations (minus possibly
+        // the first iteration where prior text is empty -- still called).
+        assert_eq!(
+            retrieve_count.load(Ordering::SeqCst),
+            MAX_FLARE_ITERATIONS,
+            "retrieve_more should be called once per iteration (all low-conf)"
+        );
+    }
+
+    /// If retrieval keeps adding NEW chunks on every iteration, the restart
+    /// counter maxes out at MAX_FLARE_RESTARTS and we stop. Defence against
+    /// a runaway retrieve-and-restart loop where new chunks keep changing
+    /// the model's output.
+    #[tokio::test]
+    async fn run_loop_stops_at_max_restarts_when_retrieval_keeps_finding_new_chunks() {
+        let server = MockServer::start().await;
+
+        let bodies: Vec<String> = (0..MAX_FLARE_ITERATIONS + 2)
+            .map(|i| distinct_hitlimit_with_lowconf_body(i, FLARE_MAX_TOKENS_PER_CHUNK as i64))
+            .collect();
+        mount_sequenced(&server, bodies).await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+            base_cfg(&url);
+        let cfg = RunLoopConfig {
+            course_name: &course_name,
+            custom_prompt: &custom_prompt,
+            model: &model,
+            temperature: 0.7,
+            history: &history,
+            cerebras_base_url: &cerebras_base_url,
+            cerebras_api_key: &cerebras_api_key,
+            max_chunks: 100, // plenty of room
+            daily_token_limit: 0,
+        };
+
+        let call = StdArc::new(AtomicUsize::new(0));
+        let call_c = call.clone();
+        let retrieve = move |_s: String| {
+            let c = call_c.clone();
+            async move {
+                let n = c.fetch_add(1, Ordering::SeqCst);
+                vec![RagChunk {
+                    document_id: format!("doc{}", n),
+                    filename: format!("f{}.pdf", n),
+                    text: format!("Unique retrieved text window number {}", n),
+                }]
+            }
+        };
+
+        let http = reqwest::Client::new();
+        let (tx, rx) = mpsc::channel(1024);
+        let out = tokio::time::timeout(
+            Duration::from_secs(15),
+            run_loop(&http, &cfg, vec![], &tx, retrieve),
+        )
+        .await
+        .expect("run_loop must terminate");
+
+        drop(tx);
+        let _ = drain_client_events(rx).await;
+
+        // Two possible legitimate stop reasons depending on ordering of the
+        // internal checks. Either way, bounded; and critically no infinite
+        // loop.
+        assert!(
+            matches!(
+                out.stop_reason,
+                StopReason::MaxRestartsReached | StopReason::MaxIterationsReached
+            ),
+            "expected bounded stop, got {:?}",
+            out.stop_reason
+        );
+        assert!(out.restarts <= MAX_FLARE_RESTARTS);
+        assert!(out.iterations <= MAX_FLARE_ITERATIONS);
+    }
+
+    // ── Repeat detection integration ────────────────────────────
+
+    /// Simulates the original user-visible bug: model keeps restarting the
+    /// response with the same intro paragraph. After enough content arrives
+    /// to trigger the streaming-time literal repeat detector, the loop
+    /// should break immediately without running all MAX_FLARE_ITERATIONS.
+    #[tokio::test]
+    async fn run_loop_breaks_on_streaming_repeat_before_iteration_cap() {
+        let server = MockServer::start().await;
+
+        let intro = "The PROG2 VT26 course uses a single two-module Maven project as the practical work for the whole term, which is unusual for introductory classes but cements the ecosystem early.";
+        assert!(
+            intro.len() > REPEAT_FINGERPRINT_LEN,
+            "intro too short: {}",
+            intro.len()
+        );
+
+        // First iteration: generate `intro` then hit the token window with
+        // no low-conf sentence (so the outer loop continues).
+        let mut first = String::new();
+        first.push_str(&sse_token(intro));
+        first.push_str(&sse_token(
+            " Additional filler content after the intro text. ",
+        ));
+        first.push_str(&sse_close(10, FLARE_MAX_TOKENS_PER_CHUNK as i64, "length"));
+
+        // Second iteration: regenerate `intro` verbatim -- the streaming
+        // repeat detector should fire almost immediately.
+        let mut second = String::new();
+        // Split the repeat into small chunks so streaming-time checks run.
+        let mut remaining = intro;
+        while !remaining.is_empty() {
+            let split_at = remaining.len().min(15);
+            let mut real = split_at;
+            while real > 0 && !remaining.is_char_boundary(real) {
+                real -= 1;
+            }
+            if real == 0 {
+                real = remaining.len().min(15);
+                while real < remaining.len() && !remaining.is_char_boundary(real) {
+                    real += 1;
+                }
+            }
+            let (chunk, rest) = remaining.split_at(real);
+            second.push_str(&sse_token(chunk));
+            remaining = rest;
+        }
+        second.push_str(&sse_close(100, 50, "stop"));
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(first),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(second),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+            base_cfg(&url);
+        let cfg = RunLoopConfig {
+            course_name: &course_name,
+            custom_prompt: &custom_prompt,
+            model: &model,
+            temperature: 0.7,
+            history: &history,
+            cerebras_base_url: &cerebras_base_url,
+            cerebras_api_key: &cerebras_api_key,
+            max_chunks: 8,
+            daily_token_limit: 0,
+        };
+
+        let http = reqwest::Client::new();
+        let (tx, rx) = mpsc::channel(1024);
+        let retrieve = |_s: String| async { Vec::<RagChunk>::new() };
+        let out = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_loop(&http, &cfg, vec![], &tx, retrieve),
+        )
+        .await
+        .expect("run_loop must terminate");
+
+        drop(tx);
+        let _ = drain_client_events(rx).await;
+
+        assert_eq!(
+            out.stop_reason,
+            StopReason::RepeatDetected,
+            "streaming repeat detector should stop the loop, got {:?}",
+            out.stop_reason
+        );
+        assert_eq!(out.iterations, 2);
+    }
+
+    /// If the model produces the SAME heading in a continuation, the
+    /// post-iteration exact-heading detector should fire.
+    #[tokio::test]
+    async fn run_loop_breaks_on_exact_heading_repeat_between_iterations() {
+        let server = MockServer::start().await;
+
+        // First iteration produces a heading, then hits the limit with no
+        // low-conf sentence, so the outer loop continues.
+        let mut first = String::new();
+        first.push_str(&sse_token(
+            "## Project Structure Overview\n\nThe course covers Maven modules and build setup. ",
+        ));
+        // Pad with confident filler to reach window limit.
+        for _ in 0..3 {
+            first.push_str(&sse_token(
+                "Additional confident paragraph of course-related content here. ",
+            ));
+        }
+        first.push_str(&sse_close(10, FLARE_MAX_TOKENS_PER_CHUNK as i64, "length"));
+
+        // Second iteration restarts with the same heading -- post-iteration
+        // detector must fire.
+        let mut second = String::new();
+        second.push_str(&sse_token(
+            "## Project Structure Overview\n\nRestating what was already said. ",
+        ));
+        second.push_str(&sse_close(100, 20, "stop"));
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(first),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(second),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/chat/completions", server.uri());
+        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+            base_cfg(&url);
+        let cfg = RunLoopConfig {
+            course_name: &course_name,
+            custom_prompt: &custom_prompt,
+            model: &model,
+            temperature: 0.7,
+            history: &history,
+            cerebras_base_url: &cerebras_base_url,
+            cerebras_api_key: &cerebras_api_key,
+            max_chunks: 8,
+            daily_token_limit: 0,
+        };
+
+        let http = reqwest::Client::new();
+        let (tx, rx) = mpsc::channel(1024);
+        let retrieve = |_s: String| async { Vec::<RagChunk>::new() };
+        let out = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_loop(&http, &cfg, vec![], &tx, retrieve),
+        )
+        .await
+        .expect("run_loop must terminate");
+
+        drop(tx);
+        let _ = drain_client_events(rx).await;
+
+        // Either the streaming literal detector OR the exact-heading
+        // detector should break the loop. The exact-heading detector runs
+        // post-iteration. Which fires first depends on how the chunks land.
+        // Both outcomes are correct; assert the loop stops cleanly.
+        assert!(
+            matches!(
+                out.stop_reason,
+                StopReason::HeadingRepeat | StopReason::RepeatDetected
+            ),
+            "expected repeat detection to stop the loop, got {:?}",
+            out.stop_reason
+        );
+        assert!(out.iterations <= 3);
     }
 }

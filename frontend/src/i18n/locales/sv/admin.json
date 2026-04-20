@@ -55,6 +55,7 @@
     },
     "actionsLabel": "Användaråtgärder",
     "unlockRole": "Lås upp roll",
+    "resetDailyUsage": "Nollställ dagens förbrukning",
     "suspend": "Stäng av",
     "unsuspend": "Aktivera igen",
     "ownerLimit": {

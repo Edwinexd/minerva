@@ -111,6 +111,17 @@ function UserRow({ user }: { user: AdminUser }) {
     onSuccess: invalidate,
   })
 
+  // Deletes today's usage_daily rows for this user so both per-course and
+  // owner-aggregate quotas reset immediately, without waiting for UTC
+  // midnight. Also invalidates the admin usage tab so numbers refresh.
+  const resetUsageMutation = useMutation({
+    mutationFn: () => api.delete(`/admin/users/${user.id}/daily-usage`),
+    onSuccess: () => {
+      invalidate()
+      queryClient.invalidateQueries({ queryKey: ["admin", "usage"] })
+    },
+  })
+
   return (
     <tr className="border-b">
       <td className="py-2 pr-4">{user.display_name ?? "-"}</td>
@@ -189,6 +200,13 @@ function UserRow({ user }: { user: AdminUser }) {
                       </Menu.Item>
                     )}
                     <Menu.Item
+                      className="relative flex cursor-default items-center rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50"
+                      disabled={resetUsageMutation.isPending}
+                      onClick={() => resetUsageMutation.mutate()}
+                    >
+                      {t("users.resetDailyUsage")}
+                    </Menu.Item>
+                    <Menu.Item
                       className="relative flex cursor-default items-center rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 data-[variant=destructive]:text-destructive data-[variant=destructive]:data-highlighted:bg-destructive/10"
                       data-variant={user.suspended ? undefined : "destructive"}
                       disabled={suspendMutation.isPending}
@@ -203,6 +221,11 @@ function UserRow({ user }: { user: AdminUser }) {
             {suspendMutation.isError && (
               <span className="text-xs text-destructive">
                 {formatError(suspendMutation.error)}
+              </span>
+            )}
+            {resetUsageMutation.isError && (
+              <span className="text-xs text-destructive">
+                {formatError(resetUsageMutation.error)}
               </span>
             )}
           </div>

@@ -77,6 +77,25 @@ pub async fn get_user_daily_tokens(
     Ok(row.unwrap_or(0))
 }
 
+/// Deletes today's `usage_daily` rows for a user across every course,
+/// effectively zeroing out both the per-student-per-course cap and the
+/// contribution to any owner's aggregate cap for the rest of UTC today.
+///
+/// Destructive: today's audit trail for this user is lost. That is the
+/// point -- we use DELETE rather than a zero-update so the subsequent
+/// `record_usage` upsert starts from a clean row. Historical rows
+/// (`date < CURRENT_DATE`) are untouched. Returns the number of rows
+/// deleted so the caller can surface "no usage today" to the UI.
+pub async fn reset_user_daily_usage(db: &PgPool, user_id: Uuid) -> Result<u64, sqlx::Error> {
+    let res = sqlx::query!(
+        "DELETE FROM usage_daily WHERE user_id = $1 AND date = CURRENT_DATE",
+        user_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(res.rows_affected())
+}
+
 /// Sum of (prompt_tokens + completion_tokens) today across every course
 /// owned by `owner_id`. Used to enforce the per-owner aggregate cap so a
 /// teacher's spend across all their courses stays under one budget.

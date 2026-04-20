@@ -55,6 +55,7 @@
     },
     "actionsLabel": "User actions",
     "unlockRole": "Unlock role",
+    "resetDailyUsage": "Reset daily usage",
     "suspend": "Suspend",
     "unsuspend": "Unsuspend",
     "ownerLimit": {

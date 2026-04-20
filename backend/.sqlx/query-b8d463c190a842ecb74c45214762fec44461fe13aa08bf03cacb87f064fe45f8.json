@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM usage_daily WHERE user_id = $1 AND date = CURRENT_DATE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b8d463c190a842ecb74c45214762fec44461fe13aa08bf03cacb87f064fe45f8"
+}

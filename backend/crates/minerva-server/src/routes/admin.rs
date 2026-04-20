@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
             "/users/{id}/owner-daily-token-limit",
             put(update_owner_daily_token_limit),
         )
+        .route("/users/{id}/daily-usage", delete(reset_user_daily_usage))
         .route("/role-rules", get(list_role_rules).post(create_role_rule))
         .route(
             "/role-rules/{id}",
@@ -177,6 +178,33 @@ async fn update_owner_daily_token_limit(
         return Err(AppError::NotFound);
     }
     Ok(Json(serde_json::json!({ "updated": true })))
+}
+
+/// Zeroes out today's token usage for a user so both their per-course
+/// student cap and their contribution to any owner aggregate cap reset
+/// immediately, without waiting for UTC midnight. Implemented as a DELETE
+/// of today's `usage_daily` rows -- `record_usage` upserts, so the next
+/// request just re-creates the row from zero.
+async fn reset_user_daily_usage(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+
+    // 404 if the user doesn't exist -- otherwise we'd silently return
+    // `rows_deleted: 0` for a bad UUID, which hides typos.
+    if minerva_db::queries::users::find_by_id(&state.db, id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::NotFound);
+    }
+
+    let deleted = minerva_db::queries::usage::reset_user_daily_usage(&state.db, id).await?;
+    Ok(Json(
+        serde_json::json!({ "reset": true, "rows_deleted": deleted }),
+    ))
 }
 
 // ------------------------- Role rules -------------------------

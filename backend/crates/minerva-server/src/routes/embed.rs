@@ -336,6 +336,7 @@ async fn send_message(
         history,
         user_content: body.content,
         is_first_message,
+        daily_token_limit: course.daily_token_limit,
         db: state.db.clone(),
         qdrant: Arc::clone(&state.qdrant),
         fastembed: Arc::clone(&state.fastembed),

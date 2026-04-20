@@ -50,6 +50,31 @@ const MAX_FLARE_FULL_TEXT_BYTES: usize = 100_000;
 /// Applied per `stream.next().await`, not as a total-request deadline.
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Length (in chars) of a literal-text window that, if it appears verbatim in
+/// already-generated content, signals the model has looped back and is
+/// regenerating prior output. 150 chars of exact overlap is essentially
+/// impossible by chance and tolerates short legitimate back-references
+/// ("as mentioned above...") which are always much shorter.
+const REPEAT_FINGERPRINT_LEN: usize = 150;
+
+/// How often (in chars of new content) to run the streaming repeat check.
+/// Trade-off: smaller = catches repeats sooner (less visible duplication to
+/// the user) at cost of more `str::contains` scans against `full_text`.
+/// 60 chars ≈ every ~15 tokens.
+const REPEAT_CHECK_INTERVAL: usize = 60;
+
+/// Fallback single-response token cap when a course has `daily_token_limit = 0`
+/// (unlimited per student). Even "unlimited" courses shouldn't allow one
+/// answer to burn six-figure token counts; this is a backstop.
+const UNLIMITED_COURSE_RESPONSE_CAP: i64 = 200_000;
+
+/// Multiplier applied to `courses.daily_token_limit` to derive the per-response
+/// fail-safe cap. At 2x a student cannot burn more than two days of their
+/// daily allowance in a single answer, even if daily-limit enforcement hasn't
+/// kicked in yet (that check runs at request start; intra-response drift is
+/// what this cap guards).
+const DAILY_LIMIT_RESPONSE_MULTIPLIER: i64 = 2;
+
 /// FLARE strategy: Forward-Looking Active REtrieval augmented generation.
 ///
 /// Uses Cerebras logprobs to detect low-confidence tokens. When the model
@@ -86,13 +111,38 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let mut restarts = 0usize;
     let mut iterations = 0usize;
 
+    // Per-response token fail-safe. If the course has `daily_token_limit = 0`
+    // (unlimited), fall back to `UNLIMITED_COURSE_RESPONSE_CAP`; otherwise cap
+    // at DAILY_LIMIT_RESPONSE_MULTIPLIER * course limit. A single answer
+    // cannot burn more than this many total tokens (prompt + completion
+    // across all FLARE iterations).
+    let per_response_token_cap: i64 = if ctx.daily_token_limit > 0 {
+        ctx.daily_token_limit
+            .saturating_mul(DAILY_LIMIT_RESPONSE_MULTIPLIER)
+    } else {
+        UNLIMITED_COURSE_RESPONSE_CAP
+    };
+
     tracing::info!(
-        "flare: starting with {} initial chunks for conversation {}",
+        "flare: starting with {} initial chunks for conversation {} (per_response_cap={})",
         all_chunks.len(),
-        ctx.conversation_id
+        ctx.conversation_id,
+        per_response_token_cap,
     );
 
     loop {
+        let tokens_so_far =
+            (total_prompt_tokens as i64).saturating_add(total_completion_tokens as i64);
+        if tokens_so_far >= per_response_token_cap {
+            tracing::warn!(
+                "flare: per-response token cap hit ({} >= {}, daily_limit={}), stopping at iteration {}",
+                tokens_so_far,
+                per_response_token_cap,
+                ctx.daily_token_limit,
+                iterations
+            );
+            break;
+        }
         if iterations >= MAX_FLARE_ITERATIONS {
             tracing::warn!(
                 "flare: hit hard iteration cap ({}), stopping (restarts={}, full_text_len={})",
@@ -112,16 +162,43 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             break;
         }
         iterations += 1;
+        let iteration_start_text_len = full_text.len();
 
         let system = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &all_chunks);
         let mut messages = common::build_chat_messages(&system, &ctx.history);
 
         if !full_text.is_empty() {
-            // Continuation: inject instruction in system prompt, partial text as assistant msg
+            // Continuation framing. Context-supply is the hard problem here:
+            // Cerebras doesn't expose OpenAI's `prefix: true` field (see
+            // commit e17781b), so a bare trailing assistant message is
+            // ambiguous. Empirically the model sometimes treats it as a
+            // completed turn and generates a fresh response (visible to the
+            // user as repeating headings / section restarts). To
+            // disambiguate, we follow the partial with an explicit user-role
+            // directive that says "continue the assistant turn above". This
+            // gives the model an unambiguous "your turn is to continue what
+            // I already see", rather than inferring intent from a trailing
+            // assistant message alone.
             if let Some(sys_msg) = messages.first_mut() {
                 if let Some(content) = sys_msg.get("content").and_then(|c| c.as_str()) {
                     let new_content = format!(
-                        "{}\n\nYou are continuing a response. Additional relevant context has been retrieved. Continue seamlessly from where the response left off. Do not repeat anything already written.",
+                        "{}\n\n## Continuation mode\n\
+                        You previously began writing a response and were interrupted \
+                        mid-output so additional course materials could be retrieved. \
+                        Those materials now appear above. The next message labelled \
+                        `assistant` contains your partial response verbatim. Your task \
+                        is to RESUME that exact response from the character after its \
+                        final character, as if the interruption never happened. \
+                        Rules:\n\
+                        - Do NOT restart, summarise, or repeat any heading, list item, \
+                        table, code block, or sentence that already appears in the \
+                        partial response.\n\
+                        - Do NOT acknowledge the interruption or the retrieval; the \
+                        student will not see that machinery.\n\
+                        - Pick up inside whatever construct was in progress (mid-list, \
+                        mid-table, mid-paragraph). If the partial ended inside an \
+                        unclosed code fence or table row, close it properly before \
+                        adding new content.",
                         content,
                     );
                     sys_msg["content"] = serde_json::Value::String(new_content);
@@ -130,6 +207,19 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             messages.push(serde_json::json!({
                 "role": "assistant",
                 "content": full_text,
+            }));
+            // Explicit user directive disambiguates the trailing assistant
+            // message for providers (like Cerebras) that lack a native
+            // prefill/prefix flag. Empirically, without this the model
+            // restarts the response and we see duplicated headings.
+            messages.push(serde_json::json!({
+                "role": "user",
+                "content":
+                    "Continue the assistant response above from exactly where it was \
+                    cut off. Do NOT start with a new heading; do NOT repeat content \
+                    already written; do NOT summarise what came before. Your very \
+                    next token should be whatever naturally follows the last \
+                    character of the assistant message.",
             }));
         }
 
@@ -161,8 +251,36 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         total_prompt_tokens += outcome.prompt_tokens;
         total_completion_tokens += outcome.completion_tokens;
 
+        // Post-iteration exact-heading repeat check. Cheap and very
+        // precise: if the same heading (after whitespace/punctuation
+        // normalization) appears in both the prior content and this
+        // iteration's output, the model restarted a section. This is a
+        // complement to streaming-time literal detection which catches
+        // 150-char prose overlaps. No fuzzy matching -- paraphrased
+        // headings are NOT flagged here; the primary defence against
+        // paraphrased restarts is the revised continuation prompt.
+        if iteration_start_text_len > 0 && full_text.len() > iteration_start_text_len {
+            let prior = &full_text[..iteration_start_text_len];
+            let new_content = &full_text[iteration_start_text_len..];
+            if let Some(collision) = detect_exact_heading_repeat(prior, new_content) {
+                tracing::warn!(
+                    "flare: exact heading repeat detected (iteration {}): {:?}",
+                    iterations,
+                    truncate_for_log(&collision, 80)
+                );
+                break;
+            }
+        }
+
         match outcome.kind {
             StreamOutcome::Completed => break,
+            StreamOutcome::RepeatDetected => {
+                tracing::warn!(
+                    "flare: aborting outer loop due to detected content repeat (iteration {})",
+                    iterations
+                );
+                break;
+            }
             StreamOutcome::HitLimit {
                 low_confidence_sentence: None,
             } => {
@@ -272,6 +390,10 @@ enum StreamOutcome {
     HitLimit {
         low_confidence_sentence: Option<String>,
     },
+    /// Detected that the model is regenerating content that already appears
+    /// earlier in `full_text`. Streaming was stopped early; the caller should
+    /// break the outer loop rather than try to continue.
+    RepeatDetected,
 }
 
 /// Stream from Cerebras with logprobs enabled, bounded by FLARE_MAX_TOKENS_PER_CHUNK.
@@ -314,6 +436,15 @@ async fn stream_with_logprobs(
     let mut finish_reason: Option<String> = None; // secondary hint; token count is primary
     let mut prompt_tokens = 0i32;
     let mut completion_tokens = 0i32;
+
+    // Streaming-time repeat detection state. `iteration_start_len` is the byte
+    // offset in `full_text` at which this stream began; anything at that
+    // offset or beyond is this iteration's output. We periodically check
+    // whether new output contains a long literal substring that also appears
+    // in the prior content (anything before `iteration_start_len`); if so the
+    // model is regenerating and we abort early.
+    let iteration_start_len = full_text.len();
+    let mut chars_since_last_check: usize = 0;
 
     loop {
         let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
@@ -397,6 +528,7 @@ async fn stream_with_logprobs(
                         if let Some(delta_content) = choice["delta"]["content"].as_str() {
                             full_text.push_str(delta_content);
                             sentence_buffer.push_str(delta_content);
+                            chars_since_last_check += delta_content.len();
 
                             // Stream to client immediately
                             if tx
@@ -408,6 +540,30 @@ async fn stream_with_logprobs(
                                 .is_err()
                             {
                                 return Err("client disconnected".to_string());
+                            }
+
+                            // Periodic repeat check: if recent new content
+                            // duplicates text that was in full_text before
+                            // this iteration started, the model has looped
+                            // back and is regenerating. Abort immediately.
+                            if chars_since_last_check >= REPEAT_CHECK_INTERVAL
+                                && iteration_start_len > 0
+                                && full_text.len() > iteration_start_len + REPEAT_FINGERPRINT_LEN
+                            {
+                                chars_since_last_check = 0;
+                                let prior = &full_text[..iteration_start_len];
+                                let new_content = &full_text[iteration_start_len..];
+                                if detect_content_repeat(prior, new_content).is_some() {
+                                    tracing::warn!(
+                                        "flare: repeat detected during stream (new_content_len={}), aborting",
+                                        new_content.len()
+                                    );
+                                    return Ok(StreamWithLogprobsResult {
+                                        prompt_tokens,
+                                        completion_tokens,
+                                        kind: StreamOutcome::RepeatDetected,
+                                    });
+                                }
                             }
 
                             // Check logprob for this token
@@ -576,4 +732,480 @@ fn chunk_identity_hash(c: &RagChunk) -> u64 {
     c.document_id.hash(&mut h);
     c.text.hash(&mut h);
     h.finish()
+}
+
+/// Extract markdown headings from `text`, normalized for comparison.
+/// Returned strings are lowercased, punctuation-stripped, and whitespace-
+/// collapsed. Lines that look like headings (leading `#`, or bold-wrapped
+/// standalone lines like `**Title**`) are included.
+fn extract_normalized_headings(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let title = if let Some(stripped) = trimmed.strip_prefix('#') {
+                // Strip any further # chars and whitespace
+                stripped.trim_start_matches('#').trim().to_string()
+            } else if trimmed.starts_with("**") && trimmed.ends_with("**") && trimmed.len() > 4 {
+                // Bold-wrapped standalone line, often used as pseudo-heading
+                trimmed[2..trimmed.len() - 2].trim().to_string()
+            } else {
+                return None;
+            };
+            if title.is_empty() {
+                return None;
+            }
+            let normalized: String = title
+                .to_lowercase()
+                .chars()
+                .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+                .collect::<String>()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            if normalized.is_empty() {
+                None
+            } else {
+                Some(normalized)
+            }
+        })
+        .collect()
+}
+
+/// Detect exact (post-normalization) heading repeats between `prior` and
+/// `new_content`. Returns the offending heading if found, else None.
+///
+/// Exact-match only: avoids the false-positive risk of fuzzy/paraphrase
+/// matching, which would otherwise cut off legitimate responses with
+/// similar-but-distinct section titles ("Build Process" vs "Build System").
+/// The primary defence against paraphrased restarts is the revised
+/// continuation prompt, not this detector.
+fn detect_exact_heading_repeat(prior: &str, new_content: &str) -> Option<String> {
+    let prior_headings: HashSet<String> = extract_normalized_headings(prior).into_iter().collect();
+    if prior_headings.is_empty() {
+        return None;
+    }
+    for h in extract_normalized_headings(new_content) {
+        // Require at least 2 words so trivial "Summary" / "Overview" / "Notes"
+        // pseudo-headings don't falsely trigger.
+        if h.split_whitespace().count() < 2 {
+            continue;
+        }
+        if prior_headings.contains(&h) {
+            return Some(h);
+        }
+    }
+    None
+}
+
+/// Detect whether the tail of `new_content` substantially duplicates text
+/// that already appears in `prior`.
+///
+/// Checks the last `REPEAT_FINGERPRINT_LEN` bytes of `new_content` against
+/// `prior` using `str::contains`. Since the streaming loop calls this every
+/// `REPEAT_CHECK_INTERVAL` characters of new content, any 150-char repeat
+/// will naturally appear in the tail window at one of those checks. The
+/// post-iteration caller sees the completed stream; if an early-iteration
+/// repeat slipped past the streaming check, the paired
+/// `detect_exact_heading_repeat` catches section restarts.
+///
+/// At 150 chars of exact overlap false positives are negligible: legitimate
+/// back-references ("as mentioned above") are far shorter, and the model
+/// would have to coincidentally regenerate a 150-char sequence byte-for-byte.
+fn detect_content_repeat(prior: &str, new_content: &str) -> Option<usize> {
+    if prior.is_empty() || new_content.len() < REPEAT_FINGERPRINT_LEN {
+        return None;
+    }
+    // Tail window: last REPEAT_FINGERPRINT_LEN bytes, rolled back to a char
+    // boundary so we never slice into a multi-byte codepoint.
+    let mut start = new_content.len() - REPEAT_FINGERPRINT_LEN;
+    while start > 0 && !new_content.is_char_boundary(start) {
+        start -= 1;
+    }
+    let fp = &new_content[start..];
+    let trimmed = fp.trim();
+    // Reject windows that are mostly whitespace / markdown syntax ("###",
+    // "---", "|---|") to avoid trivially matching prior boilerplate.
+    if trimmed.len() < REPEAT_FINGERPRINT_LEN / 2 {
+        return None;
+    }
+    if prior.contains(trimmed) {
+        Some(start)
+    } else {
+        None
+    }
+}
+
+// ── Unit tests ─────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mk_chunk(doc: &str, name: &str, text: &str) -> RagChunk {
+        RagChunk {
+            document_id: doc.to_string(),
+            filename: name.to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    // ── chunk_identity_hash ────────────────────────────────────
+
+    #[test]
+    fn chunk_hash_same_content_same_hash() {
+        let a = mk_chunk("doc1", "foo.pdf", "Hello world");
+        let b = mk_chunk("doc1", "foo.pdf", "Hello world");
+        assert_eq!(chunk_identity_hash(&a), chunk_identity_hash(&b));
+    }
+
+    #[test]
+    fn chunk_hash_different_doc_different_hash() {
+        let a = mk_chunk("doc1", "foo.pdf", "Hello world");
+        let b = mk_chunk("doc2", "foo.pdf", "Hello world");
+        assert_ne!(chunk_identity_hash(&a), chunk_identity_hash(&b));
+    }
+
+    #[test]
+    fn chunk_hash_different_text_different_hash() {
+        let a = mk_chunk("doc1", "foo.pdf", "Hello world");
+        let b = mk_chunk("doc1", "foo.pdf", "Hello earth");
+        assert_ne!(chunk_identity_hash(&a), chunk_identity_hash(&b));
+    }
+
+    #[test]
+    fn chunk_hash_filename_does_not_matter() {
+        // Filename is metadata only; identity is (doc_id, text).
+        let a = mk_chunk("doc1", "foo.pdf", "Hello world");
+        let b = mk_chunk("doc1", "renamed.pdf", "Hello world");
+        assert_eq!(chunk_identity_hash(&a), chunk_identity_hash(&b));
+    }
+
+    // ── detect_content_repeat ──────────────────────────────────
+
+    #[test]
+    fn content_repeat_empty_prior_none() {
+        let r = detect_content_repeat("", &"abc".repeat(100));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn content_repeat_too_short_none() {
+        // new_content shorter than REPEAT_FINGERPRINT_LEN
+        let prior = "The course uses a single, two-module Maven project for practical work.";
+        assert!(detect_content_repeat(prior, "short new").is_none());
+    }
+
+    #[test]
+    fn content_repeat_exact_match_detected() {
+        // The detector checks only the TAIL of new_content, because the
+        // streaming loop calls it every REPEAT_CHECK_INTERVAL chars, so a
+        // repeat will be in the tail window at some point. We simulate that
+        // by making the new_content END with the repeated phrase.
+        let phrase = "The course uses a single, two-module Maven project as the practical work for the whole term, which is unusual for introductory programming classes but makes module-system concepts concrete early.";
+        assert!(
+            phrase.len() > REPEAT_FINGERPRINT_LEN,
+            "test phrase too short: {} <= {}",
+            phrase.len(),
+            REPEAT_FINGERPRINT_LEN
+        );
+        let prior = format!("Introduction section here. {} End of intro.", phrase);
+        let new = format!("Continuing from earlier... {}", phrase);
+        assert!(detect_content_repeat(&prior, &new).is_some());
+    }
+
+    #[test]
+    fn content_repeat_head_only_not_detected_until_reaches_tail() {
+        // If the repeat is at the HEAD of new_content but the content has
+        // kept growing past it, the tail no longer contains the repeat and
+        // we return None. This is expected: the streaming loop would have
+        // caught this at an earlier check when the repeat WAS the tail.
+        let repeat = "The course uses a single, two-module Maven project as the practical work for the whole term, which is unusual for introductory programming classes but reinforces module-system concepts concretely.";
+        assert!(
+            repeat.len() > REPEAT_FINGERPRINT_LEN,
+            "repeat len {}",
+            repeat.len()
+        );
+        let prior = format!("Intro. {}", repeat);
+        // new_content has the repeat at the head, then ~800 chars of fresh
+        // distinct text. The tail 150-byte window doesn't overlap the repeat.
+        let fresh_tail: String = "fresh unrelated sentence number one hundred. ".repeat(20);
+        let new = format!("{} {}", repeat, fresh_tail);
+        assert!(detect_content_repeat(&prior, &new).is_none());
+    }
+
+    #[test]
+    fn content_repeat_catches_growth_that_becomes_tail() {
+        // Simulate the streaming pattern: we start a fresh stream, at each
+        // check the detector sees a slightly longer `new_content`. The
+        // detector should fire the moment the duplicate is in the tail.
+        let repeat = "The course uses a single, two-module Maven project as the practical work for the whole term, which is unusual for introductory programming classes but reinforces module-system concepts concretely.";
+        assert!(
+            repeat.len() > REPEAT_FINGERPRINT_LEN,
+            "repeat len {}",
+            repeat.len()
+        );
+        let prior = format!("Intro. {}", repeat);
+        // At the point where `new_content` ends with the repeat phrase,
+        // the tail contains it, so detection should fire.
+        let new = format!("some garbage text prefix here {}", repeat);
+        assert!(detect_content_repeat(&prior, &new).is_some());
+    }
+
+    #[test]
+    fn content_repeat_handles_multibyte_tail_boundary() {
+        // Ensure that when the tail byte offset falls inside a multi-byte
+        // codepoint, we roll back to a char boundary without panicking.
+        // Swedish characters å/ä/ö are 2 bytes each in UTF-8.
+        let phrase = "Kursen använder ett enda, tvåmodulers Maven-projekt som praktiskt arbete under terminen, vilket är ovanligt för grundkurser men gör modulsystem-begreppen konkreta.";
+        assert!(phrase.len() > REPEAT_FINGERPRINT_LEN);
+        let prior = format!("Inledning. {} Slut.", phrase);
+        let new = format!("Fortsätter... {}", phrase);
+        // Must not panic even though boundaries are awkward in UTF-8.
+        let _ = detect_content_repeat(&prior, &new);
+    }
+
+    #[test]
+    fn content_repeat_no_false_positive_on_distinct_prose() {
+        let prior = "Rust is a systems programming language designed around memory safety without runtime garbage collection, performance that rivals C and C++, and strong guarantees about concurrency via its ownership and borrow system.";
+        let new = "Python is a dynamically typed general-purpose language prized for its readability, broad standard library, and deep scientific-computing ecosystem including NumPy, SciPy, and the Jupyter notebook environment.";
+        assert!(prior.len() > REPEAT_FINGERPRINT_LEN, "test prior too short");
+        assert!(new.len() > REPEAT_FINGERPRINT_LEN, "test new too short");
+        assert!(detect_content_repeat(prior, new).is_none());
+    }
+
+    #[test]
+    fn content_repeat_whitespace_window_rejected() {
+        // A window made up mostly of whitespace shouldn't count as a match,
+        // even if the equivalent whitespace appears in prior.
+        let prior = "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n";
+        let new = prior;
+        assert!(detect_content_repeat(prior, new).is_none());
+    }
+
+    // ── extract_normalized_headings ────────────────────────────
+
+    #[test]
+    fn extract_headings_recognizes_hash_levels() {
+        let text = "# H1 Title\n\n## H2 Title\n\n### H3 Title\n\nPlain paragraph.";
+        let out = extract_normalized_headings(text);
+        assert_eq!(out, vec!["h1 title", "h2 title", "h3 title"]);
+    }
+
+    #[test]
+    fn extract_headings_recognizes_bold_pseudo_heading() {
+        let text = "**PROG2 VT26 – Semester project**\n\nBody content.";
+        let out = extract_normalized_headings(text);
+        // The en-dash is punctuation, collapsed to space.
+        assert_eq!(out, vec!["prog2 vt26 semester project"]);
+    }
+
+    #[test]
+    fn extract_headings_ignores_inline_bold() {
+        // Bold inside a paragraph is not a heading.
+        let text = "This sentence has **bold text** mid-paragraph.";
+        assert!(extract_normalized_headings(text).is_empty());
+    }
+
+    #[test]
+    fn extract_headings_strips_punctuation_and_lowercases() {
+        let text = "## 1. High-Level Goal!";
+        let out = extract_normalized_headings(text);
+        assert_eq!(out, vec!["1 high level goal"]);
+    }
+
+    // ── detect_exact_heading_repeat ────────────────────────────
+
+    #[test]
+    fn heading_repeat_no_prior_headings_none() {
+        assert!(
+            detect_exact_heading_repeat("plain paragraph, no headings", "## New Heading Here")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn heading_repeat_exact_match_detected() {
+        let prior = "## Project Overview\n\nSome content.";
+        let new = "## Project Overview\n\nContent again.";
+        assert!(detect_exact_heading_repeat(prior, new).is_some());
+    }
+
+    #[test]
+    fn heading_repeat_case_and_punctuation_insensitive() {
+        let prior = "## Project: Overview!\n\nFoo.";
+        let new = "## project overview\n\nBar.";
+        assert!(detect_exact_heading_repeat(prior, new).is_some());
+    }
+
+    #[test]
+    fn heading_repeat_paraphrase_not_flagged() {
+        // Exact-match-only detector: paraphrased variants are NOT flagged,
+        // by design. This keeps the false-positive rate near zero -- the
+        // continuation prompt is the primary defence against paraphrased
+        // restarts, not this detector.
+        let prior = "### 1. Project structure you will receive\n\nFoo.";
+        let new = "### Project structure you will receive shortly\n\nBar.";
+        assert!(detect_exact_heading_repeat(prior, new).is_none());
+    }
+
+    #[test]
+    fn heading_repeat_weakly_related_not_flagged() {
+        let prior = "## Common Pitfalls\n\nFoo.";
+        let new = "## Build System\n\nBar.";
+        assert!(detect_exact_heading_repeat(prior, new).is_none());
+    }
+
+    #[test]
+    fn heading_repeat_single_word_generic_heading_not_flagged() {
+        // Even if "Summary" appears twice verbatim, single-word generic
+        // headings are ignored to avoid chopping off responses with multiple
+        // legitimate "## Summary" sections.
+        let prior = "## Summary\n\nFoo.";
+        let new = "## Summary\n\nBar.";
+        assert!(detect_exact_heading_repeat(prior, new).is_none());
+    }
+
+    #[test]
+    fn heading_repeat_bold_pseudo_heading_exact_match() {
+        let prior = "**PROG2 VT26 – Semester project**\n\nBody.";
+        let new = "Some continuation...\n\n**PROG2 VT26 – Semester project**\n\nMore body.";
+        assert!(detect_exact_heading_repeat(prior, new).is_some());
+    }
+
+    // ── is_sentence_boundary ──────────────────────────────────
+
+    #[test]
+    fn sentence_boundary_short_text_false() {
+        assert!(!is_sentence_boundary("Short."));
+    }
+
+    #[test]
+    fn sentence_boundary_paragraph_break_true() {
+        let t = "A".repeat(120) + "\n\n";
+        assert!(is_sentence_boundary(&t));
+    }
+
+    #[test]
+    fn sentence_boundary_inside_code_fence_false() {
+        // Unclosed fence (odd count of ```) ⇒ inside code.
+        let t = "Some prose here. ```rust\nlet x = 1;\nlet y = 2;\n".to_string()
+            + &"more content ".repeat(30);
+        assert!(!is_sentence_boundary(&t));
+    }
+
+    #[test]
+    fn sentence_boundary_inside_table_false() {
+        // Long text ending on a table row -- should not fire.
+        let t = "Intro paragraph here. ".to_string() + &"| col1 | col2 |\n".repeat(30) + "| next |";
+        assert!(!is_sentence_boundary(&t));
+    }
+
+    #[test]
+    fn sentence_boundary_after_period_true() {
+        let mut t = "The quick brown fox jumps over the lazy dog. ".repeat(8);
+        t.push_str("Another sentence ends here.");
+        assert!(t.len() > 300);
+        assert!(is_sentence_boundary(&t));
+    }
+
+    #[test]
+    fn sentence_boundary_inside_list_false() {
+        let mut t = String::from("Paragraph here that is long enough to pass the first gate. ");
+        t.push_str(&"Filler text ".repeat(30));
+        t.push_str("\n- list item that does not end with terminal punct");
+        assert!(!is_sentence_boundary(&t));
+    }
+
+    // ── Per-response token cap math ────────────────────────────
+
+    #[test]
+    fn response_cap_uses_2x_course_limit_when_set() {
+        // Simulate the exact computation used by the outer loop.
+        let daily: i64 = 100_000;
+        let cap = if daily > 0 {
+            daily.saturating_mul(DAILY_LIMIT_RESPONSE_MULTIPLIER)
+        } else {
+            UNLIMITED_COURSE_RESPONSE_CAP
+        };
+        assert_eq!(cap, 200_000);
+    }
+
+    #[test]
+    fn response_cap_falls_back_for_unlimited_course() {
+        let daily: i64 = 0;
+        let cap = if daily > 0 {
+            daily.saturating_mul(DAILY_LIMIT_RESPONSE_MULTIPLIER)
+        } else {
+            UNLIMITED_COURSE_RESPONSE_CAP
+        };
+        assert_eq!(cap, UNLIMITED_COURSE_RESPONSE_CAP);
+    }
+
+    #[test]
+    fn response_cap_saturates_on_huge_daily_limit() {
+        // Pathological config: admin sets daily_token_limit to i64::MAX. We
+        // must not overflow when multiplying by the response multiplier.
+        let daily = i64::MAX;
+        let cap = daily.saturating_mul(DAILY_LIMIT_RESPONSE_MULTIPLIER);
+        assert_eq!(cap, i64::MAX);
+    }
+
+    // ── Streamed-token / full_text invariant ───────────────────
+    //
+    // The user asked: "make sure any token we send to the client as
+    // 'complete' is actually in the next round(s) of requests to cerebras".
+    // The implementation guarantee is that `full_text.push_str(delta)` runs
+    // BEFORE `tx.send(delta)` in stream_with_logprobs, so every delta sent
+    // to the client is already in full_text at that moment. `full_text` is
+    // then serialized as the assistant message on the next Cerebras request.
+    // We cannot directly unit test the real HTTP flow without a mock server,
+    // but we can assert the state-ordering contract with a small harness.
+
+    /// Simulate one delta arrival exactly as the streaming loop does: append
+    /// to `full_text` first, then "send" (record) to the client channel.
+    fn simulate_delta_arrival(full_text: &mut String, sent: &mut Vec<String>, delta: &str) {
+        // Mirrors the sequence in stream_with_logprobs:
+        full_text.push_str(delta);
+        // Simulated tx.send -- runs AFTER push_str.
+        sent.push(delta.to_string());
+    }
+
+    #[test]
+    fn invariant_every_streamed_token_is_in_full_text() {
+        let deltas = ["Hello ", "world. ", "This is FLARE. ", "åäö multibyte."];
+        let mut full_text = String::new();
+        let mut sent: Vec<String> = Vec::new();
+        for d in deltas {
+            simulate_delta_arrival(&mut full_text, &mut sent, d);
+            // At every step, the client-facing sequence must be a prefix of
+            // full_text. If it ever weren't, we'd have sent tokens we can't
+            // also supply on the next round.
+            let reassembled = sent.concat();
+            assert!(
+                full_text.starts_with(&reassembled),
+                "streamed-to-client prefix must be present in full_text at every step"
+            );
+        }
+        // End state: all streamed tokens exactly equal full_text.
+        assert_eq!(sent.concat(), full_text);
+    }
+
+    #[test]
+    fn invariant_full_text_round_trips_as_assistant_message() {
+        // The exact pattern used in the outer loop when building the
+        // continuation request. We check full_text survives serialization
+        // into the JSON body without mutation, so Cerebras on the next
+        // request sees exactly what the client saw.
+        let full_text = String::from("Hello, this is FLARE. åäö -- a complete assistant partial.");
+        let msg = serde_json::json!({
+            "role": "assistant",
+            "content": full_text,
+        });
+        assert_eq!(msg["role"], "assistant");
+        assert_eq!(msg["content"].as_str(), Some(full_text.as_str()));
+        // Critically: full_text is still owned and usable (the json! macro
+        // borrows and clones into Value::String). This is the property the
+        // outer loop depends on.
+        assert!(!full_text.is_empty());
+    }
 }

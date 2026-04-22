@@ -119,6 +119,9 @@ pub struct PlatformRow {
     pub created_by: Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// NULL or empty = no eppn restriction. See the migration comment for
+    /// matching rules (mirrors `site_integration_keys.allowed_eppn_domains`).
+    pub allowed_eppn_domains: Option<Vec<String>>,
 }
 
 pub struct CreatePlatform<'a> {
@@ -130,6 +133,7 @@ pub struct CreatePlatform<'a> {
     pub auth_token_url: &'a str,
     pub platform_jwks_url: &'a str,
     pub created_by: Uuid,
+    pub allowed_eppn_domains: Option<&'a [String]>,
 }
 
 pub async fn create_platform(
@@ -139,9 +143,9 @@ pub async fn create_platform(
 ) -> Result<PlatformRow, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        r#"INSERT INTO lti_platforms (id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at"#,
+        r#"INSERT INTO lti_platforms (id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, allowed_eppn_domains)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains"#,
         id,
         input.name,
         input.issuer,
@@ -151,6 +155,7 @@ pub async fn create_platform(
         input.auth_token_url,
         input.platform_jwks_url,
         input.created_by,
+        input.allowed_eppn_domains,
     )
     .fetch_one(db)
     .await
@@ -162,7 +167,7 @@ pub async fn find_platform_by_id(
 ) -> Result<Option<PlatformRow>, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at FROM lti_platforms WHERE id = $1",
+        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains FROM lti_platforms WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -176,7 +181,7 @@ pub async fn find_platform_by_issuer(
 ) -> Result<Option<PlatformRow>, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at FROM lti_platforms WHERE issuer = $1 AND client_id = $2",
+        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains FROM lti_platforms WHERE issuer = $1 AND client_id = $2",
         issuer,
         client_id,
     )
@@ -187,7 +192,7 @@ pub async fn find_platform_by_issuer(
 pub async fn list_platforms(db: &PgPool) -> Result<Vec<PlatformRow>, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at FROM lti_platforms ORDER BY name",
+        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains FROM lti_platforms ORDER BY name",
     )
     .fetch_all(db)
     .await

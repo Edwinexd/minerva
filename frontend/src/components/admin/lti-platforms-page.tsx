@@ -36,6 +36,10 @@ export function LtiPlatformsPanel() {
   const [issuer, setIssuer] = useState("")
   const [clientId, setClientId] = useState("")
   const [deploymentId, setDeploymentId] = useState("")
+  // Free-form domain input; parsed to a string[] at submit time. Mirrors
+  // the site-integration-keys picker so admins don't see two different
+  // syntaxes for the same concept.
+  const [domainsRaw, setDomainsRaw] = useState("")
   const [copiedField, setCopiedField] = useState<string | null>(null)
 
   const createMutation = useMutation({
@@ -44,6 +48,7 @@ export function LtiPlatformsPanel() {
       issuer: string
       client_id: string
       deployment_id: string | null
+      allowed_eppn_domains: string[]
     }) => api.post<LtiPlatform>("/admin/lti/platforms", data),
     onSuccess: () => {
       setShowForm(false)
@@ -51,6 +56,7 @@ export function LtiPlatformsPanel() {
       setIssuer("")
       setClientId("")
       setDeploymentId("")
+      setDomainsRaw("")
       queryClient.invalidateQueries({ queryKey: ["admin", "lti", "platforms"] })
     },
   })
@@ -142,6 +148,7 @@ export function LtiPlatformsPanel() {
                   issuer: issuer.trim(),
                   client_id: clientId.trim(),
                   deployment_id: deploymentId.trim() || null,
+                  allowed_eppn_domains: parseDomains(domainsRaw),
                 })
               }}
             >
@@ -184,6 +191,20 @@ export function LtiPlatformsPanel() {
                   onChange={(e) => setDeploymentId(e.target.value)}
                   placeholder={t("ltiPlatforms.deploymentIdPlaceholder")}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lti-platform-domains">
+                  {t("ltiPlatforms.domainsLabel")}
+                </Label>
+                <Input
+                  id="lti-platform-domains"
+                  value={domainsRaw}
+                  onChange={(e) => setDomainsRaw(e.target.value)}
+                  placeholder={t("ltiPlatforms.domainsPlaceholder")}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t("ltiPlatforms.domainsHelp")}
+                </p>
               </div>
 
               {createMutation.isError && (
@@ -260,12 +281,28 @@ function PlatformRow({
   return (
     <div className="rounded-md border">
       <div className="flex items-center justify-between gap-4 p-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <span className="font-medium text-sm">{platform.name}</span>
             <Badge variant="secondary">{platform.client_id}</Badge>
           </div>
           <div className="text-xs text-muted-foreground truncate">{platform.issuer}</div>
+          <div className="flex flex-wrap items-center gap-1 text-xs">
+            <span className="text-muted-foreground">
+              {t("ltiPlatforms.scopeLabel")}:
+            </span>
+            {platform.allowed_eppn_domains.length === 0 ? (
+              <span className="text-amber-600 dark:text-amber-400">
+                {t("ltiPlatforms.scopeAny")}
+              </span>
+            ) : (
+              platform.allowed_eppn_domains.map((d) => (
+                <Badge key={d} variant="outline" className="font-mono">
+                  @{d}
+                </Badge>
+              ))
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 gap-2">
           <Button variant="outline" size="sm" onClick={() => setOpen((o) => !o)}>
@@ -314,4 +351,13 @@ function PlatformRow({
       )}
     </div>
   )
+}
+
+/// Split free-form input (comma / whitespace / newline separated) into a
+/// clean string[]. Server normalises further (strips `@`, lowercases, etc).
+function parseDomains(raw: string): string[] {
+  return raw
+    .split(/[\s,]+/)
+    .map((d) => d.trim())
+    .filter((d) => d.length > 0)
 }

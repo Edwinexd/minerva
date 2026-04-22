@@ -315,13 +315,27 @@ async fn handle_launch(
     //    a) Custom param "user_eppn" (Moodle can substitute $User.username)
     //    b) email claim
     //    c) Synthetic eppn from LTI sub + source id
-    let eppn = claims
+    let claimed_eppn_explicit = claims
         .custom
         .as_ref()
         .and_then(|c| c.get("user_eppn"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .or_else(|| claims.email.clone())
+        .or_else(|| claims.email.clone());
+
+    // A platform's eppn scope applies to the JWT's claimed identity (the
+    // user_eppn custom param or email claim); the fallback synthetic form
+    // is tagged with the source id and therefore trivially distinguishable
+    // from any real eppn, so it needs no scope check. Enforced BEFORE the
+    // user find/create so a rogue platform admin can't pre-create victim
+    // accounts or log in as an existing victim with a forged claim.
+    if let ResolvedSource::Platform(p) = &source {
+        if let Some(ref claimed) = claimed_eppn_explicit {
+            enforce_platform_eppn_domain(p, &claimed.to_lowercase())?;
+        }
+    }
+
+    let eppn = claimed_eppn_explicit
         .unwrap_or_else(|| format!("lti_{}_{}", source.identifier(), claims.sub))
         .to_lowercase();
 
@@ -1126,6 +1140,10 @@ struct PlatformResponse {
     platform_jwks_url: String,
     created_at: chrono::DateTime<chrono::Utc>,
     moodle_config: MoodleToolConfig,
+    /// Empty list means the platform can mint launches for any claimed
+    /// eppn (the legacy behaviour). Non-empty means a JWT-claimed eppn
+    /// must end with `@<d>` for some `d` in this list.
+    allowed_eppn_domains: Vec<String>,
 }
 
 fn platform_to_response(
@@ -1143,6 +1161,7 @@ fn platform_to_response(
         platform_jwks_url: p.platform_jwks_url,
         created_at: p.created_at,
         moodle_config: build_moodle_config(base_url),
+        allowed_eppn_domains: p.allowed_eppn_domains.unwrap_or_default(),
     }
 }
 
@@ -1168,6 +1187,12 @@ struct CreatePlatformRequest {
     auth_login_url: Option<String>,
     auth_token_url: Option<String>,
     platform_jwks_url: Option<String>,
+    /// Optional eppn domain allowlist. Empty/absent = unrestricted (matches
+    /// legacy behaviour). Normalised admin-side: leading `@`, case, and
+    /// whitespace forgiven; entries without a dot rejected up front so
+    /// typos surface here instead of as silent 403s on every launch.
+    #[serde(default)]
+    allowed_eppn_domains: Vec<String>,
 }
 
 async fn create_platform(
@@ -1200,6 +1225,13 @@ async fn create_platform(
         return Err(AppError::bad_request("lti.registration_already_exists"));
     }
 
+    let domains = normalize_eppn_domains(&body.allowed_eppn_domains)?;
+    let domains_for_db = if domains.is_empty() {
+        None
+    } else {
+        Some(domains.as_slice())
+    };
+
     let id = Uuid::new_v4();
     let row = minerva_db::queries::lti::create_platform(
         &state.db,
@@ -1213,6 +1245,7 @@ async fn create_platform(
             auth_token_url: &auth_token_url,
             platform_jwks_url: &platform_jwks_url,
             created_by: user.id,
+            allowed_eppn_domains: domains_for_db,
         },
     )
     .await
@@ -1225,6 +1258,55 @@ async fn create_platform(
     })?;
 
     Ok(Json(platform_to_response(row, &state.config.base_url)))
+}
+
+/// Shared eppn-domain normaliser + validator used by LTI platform create and
+/// site integration key create. Strips whitespace + leading `@`, lowercases,
+/// dedupes, rejects entries without a dot or with slashes/spaces to catch
+/// obvious admin typos at mint time.
+fn normalize_eppn_domains(raw: &[String]) -> Result<Vec<String>, AppError> {
+    let mut out = Vec::with_capacity(raw.len());
+    for entry in raw {
+        let cleaned = entry.trim().trim_start_matches('@').to_lowercase();
+        if cleaned.is_empty() {
+            continue;
+        }
+        if !cleaned.contains('.') || cleaned.contains('/') || cleaned.contains(' ') {
+            return Err(AppError::bad_request_with(
+                "site_integration.invalid_domain",
+                [("domain", cleaned)],
+            ));
+        }
+        if !out.contains(&cleaned) {
+            out.push(cleaned);
+        }
+    }
+    Ok(out)
+}
+
+/// Reject a platform launch when the JWT-claimed eppn sits outside the
+/// platform's allowlist. Helper lives next to `CreatePlatformRequest` so
+/// it stays visually close to the admin ingestion path that sets the
+/// allowlist; matching helper for site integration keys is in
+/// `routes/integration.rs::enforce_eppn_domain`.
+fn enforce_platform_eppn_domain(
+    platform: &minerva_db::queries::lti::PlatformRow,
+    eppn: &str,
+) -> Result<(), AppError> {
+    let Some(domains) = platform.allowed_eppn_domains.as_ref() else {
+        return Ok(());
+    };
+    if domains.is_empty() {
+        return Ok(());
+    }
+    // `@<domain>` suffix, not substring: see enforce_eppn_domain doc.
+    let matches = domains
+        .iter()
+        .any(|d| eppn.ends_with(&format!("@{}", d.to_lowercase())));
+    if !matches {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
 }
 
 async fn delete_platform(

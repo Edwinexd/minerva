@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at FROM lti_platforms ORDER BY name",
+  "query": "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains FROM lti_platforms WHERE issuer = $1 AND client_id = $2",
   "describe": {
     "columns": [
       {
@@ -57,10 +57,18 @@
         "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "allowed_eppn_domains",
+        "type_info": "TextArray"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Text",
+        "Text"
+      ]
     },
     "nullable": [
       false,
@@ -73,8 +81,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "282467076ca0450ce2156eb4d6fdec2167a4b48112c94a16db8e7fc8775ff2cf"
+  "hash": "92196b8aff418c74b533d30e4934582b509e4c720685e108ba15eacda070d905"
 }

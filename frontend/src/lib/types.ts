@@ -287,6 +287,9 @@ export interface LtiPlatform {
   platform_jwks_url: string
   created_at: string
   moodle_config: MoodleToolConfig
+  /// Empty array = platform can launch for any claimed eppn. See backend
+  /// `enforce_platform_eppn_domain` for matching rules.
+  allowed_eppn_domains: string[]
 }
 
 export interface LtiPlatformBinding {

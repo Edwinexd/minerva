@@ -193,12 +193,24 @@ if ($link) {
             );
         }
 
+        // Site-integration mode: the form already provisioned a per-course
+        // key; fall back to the teacher-pasted key when running in legacy mode.
+        $apikey = $form->provisionedkey ?? ($data->minerva_api_key ?? null);
+        if (empty($apikey)) {
+            redirect(
+                $pageurl,
+                get_string('no_api_configured', 'local_minerva'),
+                null,
+                \core\output\notification::NOTIFY_ERROR
+            );
+        }
+
         $record = new stdClass();
         $record->courseid = $courseid;
         $record->minerva_course_id = $mc->id;
         $record->minerva_course_name = $mc->name;
         $record->minerva_api_url = rtrim($data->minerva_api_url, '/');
-        $record->minerva_api_key = $data->minerva_api_key;
+        $record->minerva_api_key = $apikey;
         $record->timecreated = time();
         $record->timemodified = time();
         $DB->insert_record('local_minerva_links', $record);

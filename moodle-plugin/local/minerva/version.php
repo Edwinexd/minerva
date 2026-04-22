@@ -25,7 +25,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'local_minerva';
-$plugin->version   = 2026041504;
+$plugin->version   = 2026042201;
 $plugin->requires  = 2022112800; // Moodle 4.1+.
 $plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = '0.6.1';
+$plugin->release   = '0.7.0';

@@ -40,6 +40,12 @@ pub fn router() -> Router<AppState> {
                 )),
         )
         .route("/courses/{course_id}/embed-token", post(create_embed_token))
+        // Site-level provisioning: authenticated with a site integration key
+        // (see site_integration_keys table / admin UI). Lets the LMS plugin
+        // present a course picker and mint a regular per-course api_key
+        // without the teacher having to visit Minerva first.
+        .route("/site/courses-for-user", post(site_courses_for_user))
+        .route("/site/provision", post(site_provision_course_key))
 }
 
 /// Extract and validate the API key from the Authorization header.
@@ -501,4 +507,200 @@ fn base64_url_decode(input: &str) -> Result<String, Box<dyn std::error::Error>> 
     use base64::Engine;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(input)?;
     Ok(String::from_utf8(bytes)?)
+}
+
+// ---------------------------------------------------------------------------
+// Site-level provisioning
+// ---------------------------------------------------------------------------
+
+/// Authenticate a request as holding a valid site integration key.
+/// Touches `last_used_at` in the background, same pattern as course keys.
+async fn authenticate_site(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(AppError::Unauthorized)?;
+
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(AppError::Unauthorized)?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    let key_hash = hex::encode(hasher.finalize());
+
+    let row = minerva_db::queries::site_integration_keys::find_by_hash(&state.db, &key_hash)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    let db = state.db.clone();
+    let key_id = row.id;
+    tokio::spawn(async move {
+        let _ = minerva_db::queries::site_integration_keys::touch_last_used(&db, key_id).await;
+    });
+
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct SiteCoursesForUserRequest {
+    /// Caller-supplied eppn (e.g. the Moodle user's username). Lowercased
+    /// before lookup -- matches the rest of the codebase.
+    eppn: String,
+}
+
+#[derive(Serialize)]
+struct SiteCourseInfo {
+    id: Uuid,
+    name: String,
+    description: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SiteCoursesForUserResponse {
+    /// Whether the eppn resolves to an existing Minerva user. When false,
+    /// the plugin should tell the teacher to log into Minerva at least once
+    /// first (otherwise there's no owner/teacher membership to enumerate).
+    user_exists: bool,
+    courses: Vec<SiteCourseInfo>,
+}
+
+/// List courses the given user can mint an api_key for -- i.e. courses they
+/// own or teach. Strict (not ta) so the provisioning surface matches
+/// `/courses/{id}/api-keys` (owner/admin only in the UI).
+async fn site_courses_for_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<SiteCoursesForUserRequest>,
+) -> Result<Json<SiteCoursesForUserResponse>, AppError> {
+    authenticate_site(&state, &headers).await?;
+
+    let eppn = body.eppn.trim().to_lowercase();
+    let user = match minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await? {
+        Some(u) => u,
+        None => {
+            return Ok(Json(SiteCoursesForUserResponse {
+                user_exists: false,
+                courses: Vec::new(),
+            }));
+        }
+    };
+
+    // Admins see everything; otherwise restrict to courses they own or
+    // have the teacher role on.
+    let rows = if user.role == "admin" {
+        minerva_db::queries::courses::list_all(&state.db).await?
+    } else {
+        minerva_db::queries::courses::list_for_teacher_strict(&state.db, user.id).await?
+    };
+
+    Ok(Json(SiteCoursesForUserResponse {
+        user_exists: true,
+        courses: rows
+            .into_iter()
+            .map(|c| SiteCourseInfo {
+                id: c.id,
+                name: c.name,
+                description: c.description,
+            })
+            .collect(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct SiteProvisionRequest {
+    /// Acting user's eppn. The minted key is attributed to this user for
+    /// audit purposes, and authorization is checked against their Minerva
+    /// membership on the course.
+    eppn: String,
+    /// Human-readable name for the generated key (shows up in the teacher's
+    /// api-keys list). Typically the Moodle course fullname.
+    name: String,
+    /// Minerva course the key should be scoped to. Caller should have picked
+    /// this from `site_courses_for_user` -- we re-verify ownership anyway.
+    minerva_course_id: Uuid,
+}
+
+#[derive(Serialize)]
+struct SiteProvisionResponse {
+    /// Full raw key, returned once; caller must persist it. Subsequent calls
+    /// cannot retrieve the plaintext (only the hash is stored).
+    key: String,
+    key_id: Uuid,
+    key_prefix: String,
+    course: SiteCourseInfo,
+}
+
+/// Mint a course-scoped api_key for `eppn` on `minerva_course_id`, provided
+/// the user is owner / admin / teacher on that course. The returned key
+/// behaves exactly like one created via the course api-keys UI.
+async fn site_provision_course_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<SiteProvisionRequest>,
+) -> Result<Json<SiteProvisionResponse>, AppError> {
+    authenticate_site(&state, &headers).await?;
+
+    let eppn = body.eppn.trim().to_lowercase();
+    let name = body.name.trim();
+    if name.is_empty() || name.len() > 100 {
+        return Err(AppError::bad_request("api_keys.name_invalid_length"));
+    }
+
+    let user = minerva_db::queries::users::find_by_eppn(&state.db, &eppn)
+        .await?
+        .ok_or_else(|| {
+            AppError::bad_request_with("site_integration.user_not_found", [("eppn", eppn.clone())])
+        })?;
+
+    let course = minerva_db::queries::courses::find_by_id(&state.db, body.minerva_course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    // Admin, owner, or strict-teacher can provision. Mirrors the
+    // /courses/{id}/api-keys POST rules (owner/admin) but also lets a
+    // co-teacher provision for a course they teach -- they already have
+    // teacher-level trust on that course.
+    let is_admin = user.role == "admin";
+    let is_owner = course.owner_id == user.id;
+    let authorized = is_admin
+        || is_owner
+        || minerva_db::queries::courses::is_course_teacher_strict(&state.db, course.id, user.id)
+            .await?;
+    if !authorized {
+        return Err(AppError::Forbidden);
+    }
+
+    // Mint the key exactly like the course UI does (same prefix, same
+    // random bytes, same hash).
+    let id = Uuid::new_v4();
+    let random_bytes: [u8; 16] = rand::random();
+    let raw_key = format!("mnrv_{}", hex::encode(random_bytes));
+    let key_prefix = format!("mnrv_{}...", &hex::encode(random_bytes)[..8]);
+
+    let mut hasher = Sha256::new();
+    hasher.update(raw_key.as_bytes());
+    let key_hash = hex::encode(hasher.finalize());
+
+    let row = minerva_db::queries::api_keys::insert(
+        &state.db,
+        id,
+        course.id,
+        user.id,
+        name,
+        &key_hash,
+        &key_prefix,
+    )
+    .await?;
+
+    Ok(Json(SiteProvisionResponse {
+        key: raw_key,
+        key_id: row.id,
+        key_prefix: row.key_prefix,
+        course: SiteCourseInfo {
+            id: course.id,
+            name: course.name,
+            description: course.description,
+        },
+    }))
 }

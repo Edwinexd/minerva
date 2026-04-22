@@ -8,6 +8,7 @@ pub mod embed;
 mod external_auth;
 mod health;
 pub mod integration;
+mod integration_admin;
 pub mod lti;
 mod play_designations;
 pub mod service;
@@ -66,6 +67,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/admin", admin::router())
         .nest("/admin", external_auth::admin_router())
         .nest("/admin", lti::admin_router())
+        .nest("/admin", integration_admin::router())
         .nest("/admin", system::router())
         .merge(usage::admin_router())
         .merge(signed_urls::join_router())

@@ -112,6 +112,28 @@ pub async fn list_for_teacher(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRo
     .await
 }
 
+/// Stricter variant of `list_for_teacher` that excludes TA memberships.
+/// Used by the site-integration provisioning flow: only course owners and
+/// full teachers should be able to mint an API key, matching the
+/// course-settings UI which restricts key creation to owners/admins.
+pub async fn list_for_teacher_strict(
+    db: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<CourseRow>, sqlx::Error> {
+    sqlx::query_as!(
+        CourseRow,
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.embedding_provider, c.embedding_model, c.daily_token_limit, c.active, c.created_at, c.updated_at
+        FROM courses c
+        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
+        WHERE c.active = true
+          AND (c.owner_id = $1 OR cm.role = 'teacher')
+        ORDER BY c.updated_at DESC"#,
+        user_id,
+    )
+    .fetch_all(db)
+    .await
+}
+
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,

@@ -11,5 +11,6 @@ pub mod play_designations;
 pub mod role_rules;
 pub mod role_suggestions;
 pub mod signed_urls;
+pub mod site_integration_keys;
 pub mod usage;
 pub mod users;

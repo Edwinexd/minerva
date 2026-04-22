@@ -8,7 +8,36 @@
       "rules": "Rollregler",
       "externalInvites": "Externa inbjudningar",
       "lti": "LTI",
+      "integrations": "Plugin-integrationer",
       "system": "System"
+    }
+  },
+  "integrationKeys": {
+    "createTitle": "Skapa en integrationsnyckel på webbplatsnivå",
+    "createDescription": "Utfärda en bearer-token på webbplatsnivå för Moodle- / Canvas-pluginet. Pluginet använder den för att skapa per-kurs-API-nycklar åt lärare; den ger inte åtkomst till själva kursdata. En nyckel per LMS-instans räcker i regel.",
+    "form": {
+      "name": "Namn",
+      "namePlaceholder": "t.ex. Moodle DSV prod",
+      "create": "Skapa nyckel",
+      "creating": "Skapar..."
+    },
+    "callout": {
+      "title": "Nyckel skapad för {{name}}",
+      "note": "Kopiera den nu; Minerva sparar bara hash-värdet. Klistra in den i pluginets webbplatsinställningar.",
+      "copy": "Kopiera",
+      "copied": "Kopierat"
+    },
+    "listTitle": "Befintliga nycklar ({{total}})",
+    "listDescription": "Att återkalla en nyckel spärrar den omedelbart. Kursnycklar som pluginet redan skapat via den här nyckeln fortsätter fungera (de är vanliga kursnycklar).",
+    "empty": "Inga integrationsnycklar på webbplatsnivå än.",
+    "neverUsed": "aldrig",
+    "revoke": "Återkalla",
+    "columns": {
+      "name": "Namn",
+      "prefix": "Prefix",
+      "created": "Skapad",
+      "lastUsed": "Senast använd",
+      "actions": "Åtgärder"
     }
   },
   "ltiPlatforms": {

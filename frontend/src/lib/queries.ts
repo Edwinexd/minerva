@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -179,6 +179,11 @@ export const adminLtiSetupQuery = queryOptions({
 export const adminLtiPlatformsQuery = queryOptions({
   queryKey: ["admin", "lti", "platforms"],
   queryFn: () => api.get<LtiPlatform[]>("/admin/lti/platforms"),
+})
+
+export const adminIntegrationKeysQuery = queryOptions({
+  queryKey: ["admin", "integration-keys"],
+  queryFn: () => api.get<SiteIntegrationKey[]>("/admin/integration-keys"),
 })
 
 export const adminLtiPlatformBindingsQuery = (platformId: string) =>

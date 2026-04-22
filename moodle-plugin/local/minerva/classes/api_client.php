@@ -81,6 +81,77 @@ class api_client {
     }
 
     /**
+     * Create a client from the global site-level settings (URL + site API key).
+     *
+     * The site key authorises only the /api/integration/site/* endpoints
+     * (course-listing and provisioning); using it against course-scoped
+     * integration endpoints will 401. Throws `moodle_exception` if either
+     * the URL or site key is missing.
+     *
+     * @return self
+     */
+    public static function from_site_config(): self {
+        $url = get_config('local_minerva', 'minerva_url');
+        $key = get_config('local_minerva', 'site_api_key');
+        if (empty($url) || empty($key)) {
+            throw new \moodle_exception('site_integration_not_configured', 'local_minerva');
+        }
+        return new self($url, $key);
+    }
+
+    /**
+     * Check whether the admin has configured a site-level provisioning key.
+     *
+     * When true, the link-course flow can auto-mint per-course api_keys
+     * instead of asking teachers to paste one.
+     *
+     * @return bool
+     */
+    public static function site_integration_available(): bool {
+        $url = get_config('local_minerva', 'minerva_url');
+        $key = get_config('local_minerva', 'site_api_key');
+        return !empty($url) && !empty($key);
+    }
+
+    /**
+     * List Minerva courses the given eppn can mint an api_key for.
+     *
+     * Requires a site-level API key (this instance must have been built via
+     * `from_site_config()`). Returns the raw response: `user_exists` + an
+     * array of `{id, name, description}` rows.
+     *
+     * @param string $eppn
+     * @return object
+     */
+    public function site_courses_for_user(string $eppn): object {
+        $resp = $this->request('POST', '/integration/site/courses-for-user', [
+            'eppn' => $eppn,
+        ]);
+        return is_object($resp) ? $resp : (object) $resp;
+    }
+
+    /**
+     * Mint a per-course api_key on behalf of `$eppn` for `$minervacid`.
+     *
+     * The returned key is a regular course-scoped key; the plugin stores it
+     * in `local_minerva_links` and uses it like any other per-course key
+     * from then on. The site key is only used once, at provisioning time.
+     *
+     * @param string $eppn
+     * @param string $name Human-readable key name; shown in the Minerva UI.
+     * @param string $minervacid Target Minerva course UUID.
+     * @return object
+     */
+    public function site_provision_course_key(string $eppn, string $name, string $minervacid): object {
+        $resp = $this->request('POST', '/integration/site/provision', [
+            'eppn' => $eppn,
+            'name' => $name,
+            'minerva_course_id' => $minervacid,
+        ]);
+        return is_object($resp) ? $resp : (object) $resp;
+    }
+
+    /**
      * List all active Minerva courses.
      *
      * @return array List of course objects with id, name, description.

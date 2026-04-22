@@ -35,6 +35,13 @@ $string['settings_autosync'] = 'Auto-sync enrolment';
 $string['settings_autosync_desc'] = 'Automatically enrol/unenrol students in the linked Minerva course when they are enrolled/unenrolled in Moodle.';
 $string['settings_autosync_materials'] = 'Auto-sync materials';
 $string['settings_autosync_materials_desc'] = 'Automatically upload new resources from linked courses to Minerva every 30 minutes.';
+$string['settings_site_api_key'] = 'Site integration key';
+$string['settings_site_api_key_desc'] = 'Optional. If set, teachers link courses by picking from a dropdown of Minerva courses they can manage instead of pasting an API key. Mint the key in the Minerva admin area (Plugin Integrations).';
+$string['site_integration_not_configured'] = 'Site integration key is not configured. Set it in the plugin settings or leave the site URL and key blank to use the legacy per-course key flow.';
+$string['site_user_not_found'] = 'Minerva has no record of your account yet. Log into Minerva once in a new tab, then reload this page.';
+$string['site_no_teachable_courses'] = 'You are not listed as owner or teacher on any Minerva course yet. Ask a course owner to add you as a teacher, or create a course from the Minerva teacher dashboard first.';
+$string['site_course_not_selectable'] = 'Please pick one of the available Minerva courses.';
+$string['site_provision_empty_key'] = 'Minerva returned an empty API key. Please try again or contact an admin.';
 
 // Capabilities.
 $string['minerva:manage'] = 'Manage Minerva course link';

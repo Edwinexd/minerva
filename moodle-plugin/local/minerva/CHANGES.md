@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.0 (2026-04-22)
+
+- New optional site-level integration key (`Site integration key` in the plugin settings). When set, teachers link courses by picking from a dropdown of Minerva courses they own or teach instead of pasting an API key; the plugin mints a per-course key on their behalf via `/api/integration/site/provision`.
+- Legacy per-course paste flow still works when the site key is unset.
+
 ## v0.6.1 (2026-04-15)
 
 - Clear `local_minerva_sync_log` rows when a course is unlinked (previously re-linking silently skipped everything)

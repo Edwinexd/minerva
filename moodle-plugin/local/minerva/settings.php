@@ -41,6 +41,19 @@ if ($hassiteconfig) {
         PARAM_URL
     ));
 
+    // Optional site-level integration key: when set, teachers no longer need
+    // to visit Minerva to create an API key before linking a course -- the
+    // plugin calls /api/integration/site/provision on their behalf and
+    // stores the resulting per-course key. Admins mint this in the Minerva
+    // "Plugin Integrations" admin page. Leave blank to keep the legacy
+    // per-course paste flow.
+    $settings->add(new admin_setting_configpasswordunmask(
+        'local_minerva/site_api_key',
+        get_string('settings_site_api_key', 'local_minerva'),
+        get_string('settings_site_api_key_desc', 'local_minerva'),
+        ''
+    ));
+
     // Auto-sync enrollment on enrol/unenrol events.
     $settings->add(new admin_setting_configcheckbox(
         'local_minerva/autosync_enrolment',

@@ -8,7 +8,36 @@
       "rules": "Role Rules",
       "externalInvites": "External Invites",
       "lti": "LTI",
+      "integrations": "Plugin Integrations",
       "system": "System"
+    }
+  },
+  "integrationKeys": {
+    "createTitle": "Mint a site integration key",
+    "createDescription": "Issue a site-level bearer token for the Moodle / Canvas plugin. The plugin uses it to provision per-course API keys on behalf of teachers -- it cannot access course data itself. One key per LMS instance is usually enough.",
+    "form": {
+      "name": "Name",
+      "namePlaceholder": "e.g. Moodle DSV prod",
+      "create": "Mint key",
+      "creating": "Minting..."
+    },
+    "callout": {
+      "title": "Key minted for {{name}}",
+      "note": "Copy this now; Minerva only stores the hash. Paste it into the Moodle plugin's site settings.",
+      "copy": "Copy",
+      "copied": "Copied"
+    },
+    "listTitle": "Existing keys ({{total}})",
+    "listDescription": "Revoking a key invalidates it immediately. Any api_keys the plugin already provisioned via this site key continue to work (they're ordinary course keys).",
+    "empty": "No site integration keys minted yet.",
+    "neverUsed": "never",
+    "revoke": "Revoke",
+    "columns": {
+      "name": "Name",
+      "prefix": "Prefix",
+      "created": "Created",
+      "lastUsed": "Last used",
+      "actions": "Actions"
     }
   },
   "ltiPlatforms": {

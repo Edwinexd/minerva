@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.1 (2026-04-22)
+
+- Target Moodle 4.5 LTS explicitly (`requires` 4.5, `supported = [405, 405]`). Older Moodles are no longer supported since DSV runs only 4.5 LTS.
+
 ## v0.7.0 (2026-04-22)
 
 - New optional site-level integration key (`Site integration key` in the plugin settings). When set, teachers link courses by picking from a dropdown of Minerva courses they own or teach instead of pasting an API key; the plugin mints a per-course key on their behalf via `/api/integration/site/provision`.

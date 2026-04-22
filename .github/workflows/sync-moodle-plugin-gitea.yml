@@ -1,0 +1,34 @@
+name: Sync Moodle Plugin to Gitea
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "moodle-plugin/local/minerva/**"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Sync to gitea.dsv.su.se/edsu8469/moodle-local_minerva
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.GITEA_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan gitea.dsv.su.se >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Split subtree and push to Gitea
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          SUBTREE_SHA=$(git subtree split --prefix=moodle-plugin/local/minerva HEAD)
+          echo "Subtree HEAD: $SUBTREE_SHA"
+
+          git push --force git@gitea.dsv.su.se:edsu8469/moodle-local_minerva.git "$SUBTREE_SHA:refs/heads/master"

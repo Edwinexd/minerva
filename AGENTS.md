@@ -6,7 +6,8 @@ Deployment pipeline and production access for Minerva.
 
 - **Dev stack:** `docker compose -f docker-compose.yml up -d` (backend, frontend, postgres, qdrant)
 - **Moodle test:** `docker compose -f docker-compose.moodle.yml up -d` (local Moodle instance, port 8088, admin/Admin123!)
-- **Moodle plugin repo:** `Edwinexd/moodle-local_minerva`, auto-synced from `moodle-plugin/local/minerva/` via `sync-moodle-plugin.yml` workflow (requires `MOODLE_SYNC_TOKEN` secret)
+- **Moodle plugin repo:** `Edwinexd/moodle-local_minerva`, auto-synced from `moodle-plugin/local/minerva/` via `sync-moodle-plugin.yml` workflow (requires `MOODLE_SYNC_TOKEN` secret). That mirror is a single squashed commit per sync.
+- **Gitea mirror:** `gitea.dsv.su.se/edsu8469/moodle-local_minerva`, auto-synced from the same subdirectory via `sync-moodle-plugin-gitea.yml`. Uses `git subtree split` to preserve per-commit history (force-push because split SHAs are derived from source history); requires `GITEA_SSH_KEY` secret with push access.
 
 ### SQLx offline cache
 

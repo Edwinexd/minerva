@@ -18,6 +18,9 @@
     "form": {
       "name": "Namn",
       "namePlaceholder": "t.ex. Moodle DSV prod",
+      "domains": "Tillåtna eppn-domäner",
+      "domainsPlaceholder": "dsv.su.se, su.se",
+      "domainsHelp": "Valfritt. Om satt kan nyckeln bara agera för användare vars eppn slutar på någon av domänerna. Lämna tomt för att tillåta vilken eppn som helst.",
       "create": "Skapa nyckel",
       "creating": "Skapar..."
     },
@@ -28,13 +31,17 @@
       "copied": "Kopierat"
     },
     "listTitle": "Befintliga nycklar ({{total}})",
-    "listDescription": "Att återkalla en nyckel spärrar den omedelbart. Kursnycklar som pluginet redan skapat via den här nyckeln fortsätter fungera (de är vanliga kursnycklar).",
+    "listDescription": "Att återkalla en nyckel spärrar den omedelbart. Kursnycklar som pluginet redan skapat via den här nyckeln fortsätter fungera (de är vanliga kursnycklar). Eppn-scopet är fast; rotera nyckeln för att ändra det.",
     "empty": "Inga integrationsnycklar på webbplatsnivå än.",
     "neverUsed": "aldrig",
     "revoke": "Återkalla",
+    "scope": {
+      "any": "valfri eppn"
+    },
     "columns": {
       "name": "Namn",
       "prefix": "Prefix",
+      "scope": "Eppn-scope",
       "created": "Skapad",
       "lastUsed": "Senast använd",
       "actions": "Åtgärder"

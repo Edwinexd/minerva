@@ -10,6 +10,10 @@ pub struct SiteIntegrationKeyRow {
     pub created_by: Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// NULL or empty = no eppn restriction. Non-empty = acting eppn must
+    /// end with `@<d>` for some `d` in this list (case-insensitive).
+    /// Domains are stored lowercased.
+    pub allowed_eppn_domains: Option<Vec<String>>,
 }
 
 pub async fn insert(
@@ -19,17 +23,19 @@ pub async fn insert(
     key_hash: &str,
     key_prefix: &str,
     created_by: Uuid,
+    allowed_eppn_domains: Option<&[String]>,
 ) -> Result<SiteIntegrationKeyRow, sqlx::Error> {
     sqlx::query_as!(
         SiteIntegrationKeyRow,
-        r#"INSERT INTO site_integration_keys (id, name, key_hash, key_prefix, created_by)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, name, key_hash, key_prefix, created_by, created_at, last_used_at"#,
+        r#"INSERT INTO site_integration_keys (id, name, key_hash, key_prefix, created_by, allowed_eppn_domains)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, name, key_hash, key_prefix, created_by, created_at, last_used_at, allowed_eppn_domains"#,
         id,
         name,
         key_hash,
         key_prefix,
         created_by,
+        allowed_eppn_domains,
     )
     .fetch_one(db)
     .await
@@ -38,7 +44,7 @@ pub async fn insert(
 pub async fn list_all(db: &PgPool) -> Result<Vec<SiteIntegrationKeyRow>, sqlx::Error> {
     sqlx::query_as!(
         SiteIntegrationKeyRow,
-        r#"SELECT id, name, key_hash, key_prefix, created_by, created_at, last_used_at
+        r#"SELECT id, name, key_hash, key_prefix, created_by, created_at, last_used_at, allowed_eppn_domains
         FROM site_integration_keys ORDER BY created_at DESC"#,
     )
     .fetch_all(db)
@@ -51,7 +57,7 @@ pub async fn find_by_hash(
 ) -> Result<Option<SiteIntegrationKeyRow>, sqlx::Error> {
     sqlx::query_as!(
         SiteIntegrationKeyRow,
-        r#"SELECT id, name, key_hash, key_prefix, created_by, created_at, last_used_at
+        r#"SELECT id, name, key_hash, key_prefix, created_by, created_at, last_used_at, allowed_eppn_domains
         FROM site_integration_keys WHERE key_hash = $1"#,
         key_hash,
     )

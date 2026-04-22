@@ -309,6 +309,8 @@ export interface SiteIntegrationKey {
   key_prefix: string
   created_at: string
   last_used_at: string | null
+  /// Empty array means the key can act for any eppn.
+  allowed_eppn_domains: string[]
 }
 
 export interface SiteIntegrationKeyCreated {
@@ -317,6 +319,7 @@ export interface SiteIntegrationKeyCreated {
   key: string
   key_prefix: string
   created_at: string
+  allowed_eppn_domains: string[]
 }
 
 export interface LtiBindInfo {

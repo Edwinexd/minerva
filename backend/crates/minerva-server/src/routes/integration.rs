@@ -514,8 +514,13 @@ fn base64_url_decode(input: &str) -> Result<String, Box<dyn std::error::Error>> 
 // ---------------------------------------------------------------------------
 
 /// Authenticate a request as holding a valid site integration key.
-/// Touches `last_used_at` in the background, same pattern as course keys.
-async fn authenticate_site(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+/// Returns the key row so callers can enforce per-key policy
+/// (notably `allowed_eppn_domains`). Touches `last_used_at` in the
+/// background, same pattern as course keys.
+async fn authenticate_site(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<minerva_db::queries::site_integration_keys::SiteIntegrationKeyRow, AppError> {
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -539,6 +544,33 @@ async fn authenticate_site(state: &AppState, headers: &HeaderMap) -> Result<(), 
         let _ = minerva_db::queries::site_integration_keys::touch_last_used(&db, key_id).await;
     });
 
+    Ok(row)
+}
+
+/// Reject acting eppns that fall outside a site key's domain allowlist.
+/// No allowlist (None or empty) means "any". Otherwise the eppn must end
+/// with `@<domain>` for at least one listed domain, comparing lowercase.
+/// Eppn is assumed already lowercased by the caller (matches the rest of
+/// the codebase, including `auth_middleware::upsert_user`).
+fn enforce_eppn_domain(
+    key: &minerva_db::queries::site_integration_keys::SiteIntegrationKeyRow,
+    eppn: &str,
+) -> Result<(), AppError> {
+    let Some(domains) = key.allowed_eppn_domains.as_ref() else {
+        return Ok(());
+    };
+    if domains.is_empty() {
+        // Treat an empty array as "no restriction" -- see migration comment.
+        return Ok(());
+    }
+    // `@domain` suffix, not `domain` substring, so `@evil-dsv.su.se` doesn't
+    // silently match an allowlist of `dsv.su.se`.
+    let matches = domains
+        .iter()
+        .any(|d| eppn.ends_with(&format!("@{}", d.to_lowercase())));
+    if !matches {
+        return Err(AppError::Forbidden);
+    }
     Ok(())
 }
 
@@ -573,9 +605,14 @@ async fn site_courses_for_user(
     headers: HeaderMap,
     Json(body): Json<SiteCoursesForUserRequest>,
 ) -> Result<Json<SiteCoursesForUserResponse>, AppError> {
-    authenticate_site(&state, &headers).await?;
+    let key = authenticate_site(&state, &headers).await?;
 
     let eppn = body.eppn.trim().to_lowercase();
+    // Domain scoping: reject before any DB lookup so we don't leak whether
+    // out-of-scope users exist. Return 403 rather than pretending they
+    // don't exist, so a misconfigured plugin fails loudly.
+    enforce_eppn_domain(&key, &eppn)?;
+
     let user = match minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await? {
         Some(u) => u,
         None => {
@@ -639,9 +676,10 @@ async fn site_provision_course_key(
     headers: HeaderMap,
     Json(body): Json<SiteProvisionRequest>,
 ) -> Result<Json<SiteProvisionResponse>, AppError> {
-    authenticate_site(&state, &headers).await?;
+    let key = authenticate_site(&state, &headers).await?;
 
     let eppn = body.eppn.trim().to_lowercase();
+    enforce_eppn_domain(&key, &eppn)?;
     let name = body.name.trim();
     if name.is_empty() || name.len() > 100 {
         return Err(AppError::bad_request("api_keys.name_invalid_length"));

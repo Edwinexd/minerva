@@ -92,5 +92,9 @@
     "designation_invalid_length": "Designation must be between 1 and 64 characters.",
     "designation_invalid_chars": "Designation must not contain whitespace or slashes.",
     "designation_duplicate": "That designation is already attached to this course."
+  },
+  "site_integration": {
+    "invalid_domain": "\"{{domain}}\" is not a valid eppn domain. Use bare hostnames like dsv.su.se.",
+    "user_not_found": "No Minerva user with eppn \"{{eppn}}\" -- they must log into Minerva at least once before being linked."
   }
 }

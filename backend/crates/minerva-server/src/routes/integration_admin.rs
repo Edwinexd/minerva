@@ -45,6 +45,9 @@ struct SiteKeyResponse {
     key_prefix: String,
     created_at: chrono::DateTime<chrono::Utc>,
     last_used_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Empty list if unrestricted. See `allowed_eppn_domains` in the
+    /// migration for matching rules.
+    allowed_eppn_domains: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -55,11 +58,18 @@ struct SiteKeyCreatedResponse {
     key: String,
     key_prefix: String,
     created_at: chrono::DateTime<chrono::Utc>,
+    allowed_eppn_domains: Vec<String>,
 }
 
 #[derive(Deserialize)]
 struct CreateSiteKeyRequest {
     name: String,
+    /// Optional eppn domain allowlist for the key. Each entry should be a
+    /// bare domain (no leading `@`, no trailing dot). Case is normalised.
+    /// Empty/absent = any eppn is allowed (matches the legacy behaviour
+    /// so upgrading doesn't silently break anything).
+    #[serde(default)]
+    allowed_eppn_domains: Vec<String>,
 }
 
 async fn list_site_integration_keys(
@@ -76,9 +86,35 @@ async fn list_site_integration_keys(
                 key_prefix: r.key_prefix,
                 created_at: r.created_at,
                 last_used_at: r.last_used_at,
+                allowed_eppn_domains: r.allowed_eppn_domains.unwrap_or_default(),
             })
             .collect(),
     ))
+}
+
+/// Normalise an admin-supplied eppn domain list. Strips whitespace, a
+/// leading `@` (admins often paste `@dsv.su.se`), and lowercases. Empty
+/// entries are dropped, and the whole thing is rejected if any entry is
+/// obviously not a domain (no dot) so typos surface at mint time rather
+/// than as silent auth failures later.
+fn normalize_domains(raw: &[String]) -> Result<Vec<String>, AppError> {
+    let mut out = Vec::with_capacity(raw.len());
+    for entry in raw {
+        let cleaned = entry.trim().trim_start_matches('@').to_lowercase();
+        if cleaned.is_empty() {
+            continue;
+        }
+        if !cleaned.contains('.') || cleaned.contains('/') || cleaned.contains(' ') {
+            return Err(AppError::bad_request_with(
+                "site_integration.invalid_domain",
+                [("domain", cleaned)],
+            ));
+        }
+        if !out.contains(&cleaned) {
+            out.push(cleaned);
+        }
+    }
+    Ok(out)
 }
 
 async fn create_site_integration_key(
@@ -93,6 +129,8 @@ async fn create_site_integration_key(
         return Err(AppError::bad_request("api_keys.name_invalid_length"));
     }
 
+    let domains = normalize_domains(&body.allowed_eppn_domains)?;
+
     // Same prefix as course-scoped keys (`mnrv_`) -- no point inventing a
     // separate scheme. The lookup path is different so there's no ambiguity.
     let id = Uuid::new_v4();
@@ -104,6 +142,16 @@ async fn create_site_integration_key(
     hasher.update(raw_key.as_bytes());
     let key_hash = hex::encode(hasher.finalize());
 
+    // Pass None when the admin left the list empty so we store SQL NULL;
+    // that matches the "no restriction" semantics spelled out in the
+    // migration comment instead of a confusing empty-array-means-same-thing
+    // encoding.
+    let domains_for_db = if domains.is_empty() {
+        None
+    } else {
+        Some(domains.as_slice())
+    };
+
     let row = minerva_db::queries::site_integration_keys::insert(
         &state.db,
         id,
@@ -111,6 +159,7 @@ async fn create_site_integration_key(
         &key_hash,
         &key_prefix,
         user.id,
+        domains_for_db,
     )
     .await?;
 
@@ -120,6 +169,7 @@ async fn create_site_integration_key(
         key: raw_key,
         key_prefix: row.key_prefix,
         created_at: row.created_at,
+        allowed_eppn_domains: row.allowed_eppn_domains.unwrap_or_default(),
     }))
 }
 

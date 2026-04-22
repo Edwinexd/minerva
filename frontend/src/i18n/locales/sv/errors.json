@@ -92,5 +92,9 @@
     "designation_invalid_length": "Beteckningen måste vara mellan 1 och 64 tecken.",
     "designation_invalid_chars": "Beteckningen får inte innehålla blanksteg eller snedstreck.",
     "designation_duplicate": "Den beteckningen är redan kopplad till den här kursen."
+  },
+  "site_integration": {
+    "invalid_domain": "\"{{domain}}\" är inte en giltig eppn-domän. Använd bara värdnamn som dsv.su.se.",
+    "user_not_found": "Ingen Minerva-användare med eppn \"{{eppn}}\"; personen måste logga in i Minerva minst en gång först."
   }
 }

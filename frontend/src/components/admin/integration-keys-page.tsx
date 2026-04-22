@@ -76,6 +76,9 @@ export function IntegrationKeysPanel() {
                       {t("integrationKeys.columns.prefix")}
                     </th>
                     <th className="py-2 pr-4 font-medium">
+                      {t("integrationKeys.columns.scope")}
+                    </th>
+                    <th className="py-2 pr-4 font-medium">
                       {t("integrationKeys.columns.created")}
                     </th>
                     <th className="py-2 pr-4 font-medium">
@@ -109,15 +112,21 @@ function CreateKeyForm({
   const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
+  // Free-form comma/space/newline separated list; parsed on submit. Admins
+  // paste things like `@dsv.su.se, @su.se` or `dsv.su.se su.se` and we
+  // sort it out server-side (trim + strip leading @ + lowercase).
+  const [domainsRaw, setDomainsRaw] = useState("")
 
   const mutation = useMutation({
     mutationFn: () =>
       api.post<SiteIntegrationKeyCreated>("/admin/integration-keys", {
         name: name.trim(),
+        allowed_eppn_domains: parseDomains(domainsRaw),
       }),
     onSuccess: (created) => {
       onCreated(created)
       setName("")
+      setDomainsRaw("")
       queryClient.invalidateQueries({ queryKey: ["admin", "integration-keys"] })
     },
   })
@@ -129,30 +138,55 @@ function CreateKeyForm({
         if (!name.trim()) return
         mutation.mutate()
       }}
-      className="grid gap-3 sm:grid-cols-[3fr,auto] sm:items-end"
+      className="space-y-3"
     >
-      <div className="space-y-1">
-        <Label htmlFor="site-key-name" className="text-xs font-medium">
-          {t("integrationKeys.form.name")}
-        </Label>
-        <Input
-          id="site-key-name"
-          required
-          placeholder={t("integrationKeys.form.namePlaceholder")}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
+      <div className="grid gap-3 sm:grid-cols-[3fr,2fr]">
+        <div className="space-y-1">
+          <Label htmlFor="site-key-name" className="text-xs font-medium">
+            {t("integrationKeys.form.name")}
+          </Label>
+          <Input
+            id="site-key-name"
+            required
+            placeholder={t("integrationKeys.form.namePlaceholder")}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="site-key-domains" className="text-xs font-medium">
+            {t("integrationKeys.form.domains")}
+          </Label>
+          <Input
+            id="site-key-domains"
+            placeholder={t("integrationKeys.form.domainsPlaceholder")}
+            value={domainsRaw}
+            onChange={(e) => setDomainsRaw(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("integrationKeys.form.domainsHelp")}
+          </p>
+        </div>
       </div>
       <Button type="submit" disabled={mutation.isPending || !name.trim()}>
         {mutation.isPending ? t("integrationKeys.form.creating") : t("integrationKeys.form.create")}
       </Button>
       {mutation.isError && (
-        <p className="sm:col-span-2 text-xs text-destructive">
-          {formatError(mutation.error)}
-        </p>
+        <p className="text-xs text-destructive">{formatError(mutation.error)}</p>
       )}
     </form>
   )
+}
+
+/// Parse the free-form domain entry box. Splits on commas / whitespace /
+/// newlines so admins can paste in any reasonable style. Server does
+/// additional normalisation + validation, so we just need to get a
+/// non-empty list over the wire.
+function parseDomains(raw: string): string[] {
+  return raw
+    .split(/[\s,]+/)
+    .map((d) => d.trim())
+    .filter((d) => d.length > 0)
 }
 
 function CreatedKeyCallout({
@@ -215,6 +249,21 @@ function KeyRow({ k }: { k: SiteIntegrationKey }) {
       <td className="py-2 pr-4">{k.name}</td>
       <td className="py-2 pr-4 font-mono text-xs">
         <Badge variant="secondary">{k.key_prefix}</Badge>
+      </td>
+      <td className="py-2 pr-4 text-xs">
+        {k.allowed_eppn_domains.length === 0 ? (
+          <span className="text-amber-600 dark:text-amber-400">
+            {t("integrationKeys.scope.any")}
+          </span>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {k.allowed_eppn_domains.map((d) => (
+              <Badge key={d} variant="outline" className="font-mono">
+                @{d}
+              </Badge>
+            ))}
+          </div>
+        )}
       </td>
       <td className="py-2 pr-4 text-xs">
         <RelativeTime date={k.created_at} />

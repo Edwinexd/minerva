@@ -18,6 +18,9 @@
     "form": {
       "name": "Name",
       "namePlaceholder": "e.g. Moodle DSV prod",
+      "domains": "Allowed eppn domains",
+      "domainsPlaceholder": "dsv.su.se, su.se",
+      "domainsHelp": "Optional. If set, the key can only act on behalf of users whose eppn ends with one of these domains. Leave empty to allow any eppn.",
       "create": "Mint key",
       "creating": "Minting..."
     },
@@ -28,13 +31,17 @@
       "copied": "Copied"
     },
     "listTitle": "Existing keys ({{total}})",
-    "listDescription": "Revoking a key invalidates it immediately. Any api_keys the plugin already provisioned via this site key continue to work (they're ordinary course keys).",
+    "listDescription": "Revoking a key invalidates it immediately. Any api_keys the plugin already provisioned via this site key continue to work (they're ordinary course keys). The eppn scope is immutable; rotate the key to change it.",
     "empty": "No site integration keys minted yet.",
     "neverUsed": "never",
     "revoke": "Revoke",
+    "scope": {
+      "any": "any eppn"
+    },
     "columns": {
       "name": "Name",
       "prefix": "Prefix",
+      "scope": "Eppn scope",
       "created": "Created",
       "lastUsed": "Last used",
       "actions": "Actions"

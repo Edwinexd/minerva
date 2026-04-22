@@ -14,7 +14,11 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": process.env.VITE_API_URL || "http://localhost:3000",
-      "/lti": process.env.VITE_API_URL || "http://localhost:3000",
+      // Only the LMS-facing LTI endpoints live on the backend. /lti/bind is an
+      // SPA route; a bare "/lti" prefix would send it to the backend, which
+      // would proxy it right back to Vite -> loop -> 502.
+      "^/lti/(login|launch|jwks|icon\\.(svg|png))$":
+        process.env.VITE_API_URL || "http://localhost:3000",
     },
   },
 })

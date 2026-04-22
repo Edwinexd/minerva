@@ -25,7 +25,7 @@ export function RootLayout() {
   // The LTI bind picker runs outside Shib: users arrive from an LMS launch
   // carrying only an HMAC bind token. Fetching /auth/me here would 401 and
   // trigger the Shib redirect loop, so treat it like embed pages.
-  const isLtiBind = window.location.pathname.startsWith("/lti-bind")
+  const isLtiBind = window.location.pathname.startsWith("/lti/bind")
 
   const embedParams = useMemo(() => {
     if (!isEmbed) return null

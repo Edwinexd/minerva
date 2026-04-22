@@ -509,9 +509,12 @@ fn bind_redirect_response(
     };
 
     let token = sign_bind_token(&state.config.hmac_secret, &body)?;
-    // /lti-bind is a frontend SPA route (not under the backend's /lti/* LMS
-    // namespace). The SPA XHRs the decision through /api/lti/bind.
-    let redirect = format!("/lti-bind?token={}", urlencoding::encode(&token));
+    // /lti/bind is a frontend SPA route; the backend's /lti/* axum router
+    // does not define it, so in prod it falls through to the SPA's index.html
+    // and in dev to the Vite proxy (which excludes /lti/bind from the
+    // backend-bound prefix, see vite.config.ts). The SPA then XHRs the
+    // decision through /api/lti/bind.
+    let redirect = format!("/lti/bind?token={}", urlencoding::encode(&token));
     let escaped = redirect.replace('\"', "&quot;").replace('<', "&lt;");
 
     Ok(Html(format!(

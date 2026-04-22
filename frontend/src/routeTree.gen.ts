@@ -8,416 +8,416 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from "./routes/__root"
-import { Route as LtiBindRouteImport } from "./routes/lti-bind"
-import { Route as DataHandlingRouteImport } from "./routes/data-handling"
-import { Route as AdminRouteImport } from "./routes/admin"
-import { Route as AcknowledgementsRouteImport } from "./routes/acknowledgements"
-import { Route as IndexRouteImport } from "./routes/index"
-import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
-import { Route as AdminIndexRouteImport } from "./routes/admin/index"
-import { Route as JoinTokenRouteImport } from "./routes/join/$token"
-import { Route as EmbedCourseIdRouteImport } from "./routes/embed/$courseId"
-import { Route as AdminUsersRouteImport } from "./routes/admin/users"
-import { Route as AdminUsageRouteImport } from "./routes/admin/usage"
-import { Route as AdminSystemRouteImport } from "./routes/admin/system"
-import { Route as AdminRulesRouteImport } from "./routes/admin/rules"
-import { Route as AdminLtiRouteImport } from "./routes/admin/lti"
-import { Route as AdminExternalInvitesRouteImport } from "./routes/admin/external-invites"
-import { Route as AdminCoursesRouteImport } from "./routes/admin/courses"
-import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
-import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
-import { Route as CourseCourseIdNewRouteImport } from "./routes/course/$courseId/new"
-import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
-import { Route as TeacherCoursesCourseIdIndexRouteImport } from "./routes/teacher/courses.$courseId/index"
-import { Route as TeacherCoursesCourseIdUsageRouteImport } from "./routes/teacher/courses.$courseId/usage"
-import { Route as TeacherCoursesCourseIdRagRouteImport } from "./routes/teacher/courses.$courseId/rag"
-import { Route as TeacherCoursesCourseIdPlayDesignationsRouteImport } from "./routes/teacher/courses.$courseId/play-designations"
-import { Route as TeacherCoursesCourseIdMembersRouteImport } from "./routes/teacher/courses.$courseId/members"
-import { Route as TeacherCoursesCourseIdLtiRouteImport } from "./routes/teacher/courses.$courseId/lti"
-import { Route as TeacherCoursesCourseIdInviteRouteImport } from "./routes/teacher/courses.$courseId/invite"
-import { Route as TeacherCoursesCourseIdDocumentsRouteImport } from "./routes/teacher/courses.$courseId/documents"
-import { Route as TeacherCoursesCourseIdConversationsRouteImport } from "./routes/teacher/courses.$courseId/conversations"
-import { Route as TeacherCoursesCourseIdConfigRouteImport } from "./routes/teacher/courses.$courseId/config"
-import { Route as TeacherCoursesCourseIdCanvasRouteImport } from "./routes/teacher/courses.$courseId/canvas"
-import { Route as TeacherCoursesCourseIdApiKeysRouteImport } from "./routes/teacher/courses.$courseId/api-keys"
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as DataHandlingRouteImport } from './routes/data-handling'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AcknowledgementsRouteImport } from './routes/acknowledgements'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as TeacherIndexRouteImport } from './routes/teacher/index'
+import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as LtiBindRouteImport } from './routes/lti/bind'
+import { Route as JoinTokenRouteImport } from './routes/join/$token'
+import { Route as EmbedCourseIdRouteImport } from './routes/embed/$courseId'
+import { Route as AdminUsersRouteImport } from './routes/admin/users'
+import { Route as AdminUsageRouteImport } from './routes/admin/usage'
+import { Route as AdminSystemRouteImport } from './routes/admin/system'
+import { Route as AdminRulesRouteImport } from './routes/admin/rules'
+import { Route as AdminLtiRouteImport } from './routes/admin/lti'
+import { Route as AdminExternalInvitesRouteImport } from './routes/admin/external-invites'
+import { Route as AdminCoursesRouteImport } from './routes/admin/courses'
+import { Route as CourseCourseIdIndexRouteImport } from './routes/course/$courseId/index'
+import { Route as TeacherCoursesCourseIdRouteImport } from './routes/teacher/courses.$courseId'
+import { Route as CourseCourseIdNewRouteImport } from './routes/course/$courseId/new'
+import { Route as CourseCourseIdConversationIdRouteImport } from './routes/course/$courseId/$conversationId'
+import { Route as TeacherCoursesCourseIdIndexRouteImport } from './routes/teacher/courses.$courseId/index'
+import { Route as TeacherCoursesCourseIdUsageRouteImport } from './routes/teacher/courses.$courseId/usage'
+import { Route as TeacherCoursesCourseIdRagRouteImport } from './routes/teacher/courses.$courseId/rag'
+import { Route as TeacherCoursesCourseIdPlayDesignationsRouteImport } from './routes/teacher/courses.$courseId/play-designations'
+import { Route as TeacherCoursesCourseIdMembersRouteImport } from './routes/teacher/courses.$courseId/members'
+import { Route as TeacherCoursesCourseIdLtiRouteImport } from './routes/teacher/courses.$courseId/lti'
+import { Route as TeacherCoursesCourseIdInviteRouteImport } from './routes/teacher/courses.$courseId/invite'
+import { Route as TeacherCoursesCourseIdDocumentsRouteImport } from './routes/teacher/courses.$courseId/documents'
+import { Route as TeacherCoursesCourseIdConversationsRouteImport } from './routes/teacher/courses.$courseId/conversations'
+import { Route as TeacherCoursesCourseIdConfigRouteImport } from './routes/teacher/courses.$courseId/config'
+import { Route as TeacherCoursesCourseIdCanvasRouteImport } from './routes/teacher/courses.$courseId/canvas'
+import { Route as TeacherCoursesCourseIdApiKeysRouteImport } from './routes/teacher/courses.$courseId/api-keys'
 
-const LtiBindRoute = LtiBindRouteImport.update({
-  id: "/lti-bind",
-  path: "/lti-bind",
-  getParentRoute: () => rootRouteImport,
-} as any)
 const DataHandlingRoute = DataHandlingRouteImport.update({
-  id: "/data-handling",
-  path: "/data-handling",
+  id: '/data-handling',
+  path: '/data-handling',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
-  id: "/admin",
-  path: "/admin",
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AcknowledgementsRoute = AcknowledgementsRouteImport.update({
-  id: "/acknowledgements",
-  path: "/acknowledgements",
+  id: '/acknowledgements',
+  path: '/acknowledgements',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TeacherIndexRoute = TeacherIndexRouteImport.update({
-  id: "/teacher/",
-  path: "/teacher/",
+  id: '/teacher/',
+  path: '/teacher/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => AdminRoute,
 } as any)
+const LtiBindRoute = LtiBindRouteImport.update({
+  id: '/lti/bind',
+  path: '/lti/bind',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const JoinTokenRoute = JoinTokenRouteImport.update({
-  id: "/join/$token",
-  path: "/join/$token",
+  id: '/join/$token',
+  path: '/join/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EmbedCourseIdRoute = EmbedCourseIdRouteImport.update({
-  id: "/embed/$courseId",
-  path: "/embed/$courseId",
+  id: '/embed/$courseId',
+  path: '/embed/$courseId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminUsersRoute = AdminUsersRouteImport.update({
-  id: "/users",
-  path: "/users",
+  id: '/users',
+  path: '/users',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminUsageRoute = AdminUsageRouteImport.update({
-  id: "/usage",
-  path: "/usage",
+  id: '/usage',
+  path: '/usage',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminSystemRoute = AdminSystemRouteImport.update({
-  id: "/system",
-  path: "/system",
+  id: '/system',
+  path: '/system',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminRulesRoute = AdminRulesRouteImport.update({
-  id: "/rules",
-  path: "/rules",
+  id: '/rules',
+  path: '/rules',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminLtiRoute = AdminLtiRouteImport.update({
-  id: "/lti",
-  path: "/lti",
+  id: '/lti',
+  path: '/lti',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminExternalInvitesRoute = AdminExternalInvitesRouteImport.update({
-  id: "/external-invites",
-  path: "/external-invites",
+  id: '/external-invites',
+  path: '/external-invites',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminCoursesRoute = AdminCoursesRouteImport.update({
-  id: "/courses",
-  path: "/courses",
+  id: '/courses',
+  path: '/courses',
   getParentRoute: () => AdminRoute,
 } as any)
 const CourseCourseIdIndexRoute = CourseCourseIdIndexRouteImport.update({
-  id: "/course/$courseId/",
-  path: "/course/$courseId/",
+  id: '/course/$courseId/',
+  path: '/course/$courseId/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TeacherCoursesCourseIdRoute = TeacherCoursesCourseIdRouteImport.update({
-  id: "/teacher/courses/$courseId",
-  path: "/teacher/courses/$courseId",
+  id: '/teacher/courses/$courseId',
+  path: '/teacher/courses/$courseId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CourseCourseIdNewRoute = CourseCourseIdNewRouteImport.update({
-  id: "/course/$courseId/new",
-  path: "/course/$courseId/new",
+  id: '/course/$courseId/new',
+  path: '/course/$courseId/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CourseCourseIdConversationIdRoute =
   CourseCourseIdConversationIdRouteImport.update({
-    id: "/course/$courseId/$conversationId",
-    path: "/course/$courseId/$conversationId",
+    id: '/course/$courseId/$conversationId',
+    path: '/course/$courseId/$conversationId',
     getParentRoute: () => rootRouteImport,
   } as any)
 const TeacherCoursesCourseIdIndexRoute =
   TeacherCoursesCourseIdIndexRouteImport.update({
-    id: "/",
-    path: "/",
+    id: '/',
+    path: '/',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdUsageRoute =
   TeacherCoursesCourseIdUsageRouteImport.update({
-    id: "/usage",
-    path: "/usage",
+    id: '/usage',
+    path: '/usage',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdRagRoute =
   TeacherCoursesCourseIdRagRouteImport.update({
-    id: "/rag",
-    path: "/rag",
+    id: '/rag',
+    path: '/rag',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdPlayDesignationsRoute =
   TeacherCoursesCourseIdPlayDesignationsRouteImport.update({
-    id: "/play-designations",
-    path: "/play-designations",
+    id: '/play-designations',
+    path: '/play-designations',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdMembersRoute =
   TeacherCoursesCourseIdMembersRouteImport.update({
-    id: "/members",
-    path: "/members",
+    id: '/members',
+    path: '/members',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdLtiRoute =
   TeacherCoursesCourseIdLtiRouteImport.update({
-    id: "/lti",
-    path: "/lti",
+    id: '/lti',
+    path: '/lti',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdInviteRoute =
   TeacherCoursesCourseIdInviteRouteImport.update({
-    id: "/invite",
-    path: "/invite",
+    id: '/invite',
+    path: '/invite',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdDocumentsRoute =
   TeacherCoursesCourseIdDocumentsRouteImport.update({
-    id: "/documents",
-    path: "/documents",
+    id: '/documents',
+    path: '/documents',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdConversationsRoute =
   TeacherCoursesCourseIdConversationsRouteImport.update({
-    id: "/conversations",
-    path: "/conversations",
+    id: '/conversations',
+    path: '/conversations',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdConfigRoute =
   TeacherCoursesCourseIdConfigRouteImport.update({
-    id: "/config",
-    path: "/config",
+    id: '/config',
+    path: '/config',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdCanvasRoute =
   TeacherCoursesCourseIdCanvasRouteImport.update({
-    id: "/canvas",
-    path: "/canvas",
+    id: '/canvas',
+    path: '/canvas',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdApiKeysRoute =
   TeacherCoursesCourseIdApiKeysRouteImport.update({
-    id: "/api-keys",
-    path: "/api-keys",
+    id: '/api-keys',
+    path: '/api-keys',
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
-  "/": typeof IndexRoute
-  "/acknowledgements": typeof AcknowledgementsRoute
-  "/admin": typeof AdminRouteWithChildren
-  "/data-handling": typeof DataHandlingRoute
-  "/lti-bind": typeof LtiBindRoute
-  "/admin/courses": typeof AdminCoursesRoute
-  "/admin/external-invites": typeof AdminExternalInvitesRoute
-  "/admin/lti": typeof AdminLtiRoute
-  "/admin/rules": typeof AdminRulesRoute
-  "/admin/system": typeof AdminSystemRoute
-  "/admin/usage": typeof AdminUsageRoute
-  "/admin/users": typeof AdminUsersRoute
-  "/embed/$courseId": typeof EmbedCourseIdRoute
-  "/join/$token": typeof JoinTokenRoute
-  "/admin/": typeof AdminIndexRoute
-  "/teacher/": typeof TeacherIndexRoute
-  "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
-  "/course/$courseId/new": typeof CourseCourseIdNewRoute
-  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
-  "/course/$courseId/": typeof CourseCourseIdIndexRoute
-  "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
-  "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
-  "/teacher/courses/$courseId/config": typeof TeacherCoursesCourseIdConfigRoute
-  "/teacher/courses/$courseId/conversations": typeof TeacherCoursesCourseIdConversationsRoute
-  "/teacher/courses/$courseId/documents": typeof TeacherCoursesCourseIdDocumentsRoute
-  "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
-  "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
-  "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
-  "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
-  "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
-  "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
-  "/teacher/courses/$courseId/": typeof TeacherCoursesCourseIdIndexRoute
+  '/': typeof IndexRoute
+  '/acknowledgements': typeof AcknowledgementsRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/data-handling': typeof DataHandlingRoute
+  '/admin/courses': typeof AdminCoursesRoute
+  '/admin/external-invites': typeof AdminExternalInvitesRoute
+  '/admin/lti': typeof AdminLtiRoute
+  '/admin/rules': typeof AdminRulesRoute
+  '/admin/system': typeof AdminSystemRoute
+  '/admin/usage': typeof AdminUsageRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/embed/$courseId': typeof EmbedCourseIdRoute
+  '/join/$token': typeof JoinTokenRoute
+  '/lti/bind': typeof LtiBindRoute
+  '/admin/': typeof AdminIndexRoute
+  '/teacher/': typeof TeacherIndexRoute
+  '/course/$courseId/$conversationId': typeof CourseCourseIdConversationIdRoute
+  '/course/$courseId/new': typeof CourseCourseIdNewRoute
+  '/teacher/courses/$courseId': typeof TeacherCoursesCourseIdRouteWithChildren
+  '/course/$courseId/': typeof CourseCourseIdIndexRoute
+  '/teacher/courses/$courseId/api-keys': typeof TeacherCoursesCourseIdApiKeysRoute
+  '/teacher/courses/$courseId/canvas': typeof TeacherCoursesCourseIdCanvasRoute
+  '/teacher/courses/$courseId/config': typeof TeacherCoursesCourseIdConfigRoute
+  '/teacher/courses/$courseId/conversations': typeof TeacherCoursesCourseIdConversationsRoute
+  '/teacher/courses/$courseId/documents': typeof TeacherCoursesCourseIdDocumentsRoute
+  '/teacher/courses/$courseId/invite': typeof TeacherCoursesCourseIdInviteRoute
+  '/teacher/courses/$courseId/lti': typeof TeacherCoursesCourseIdLtiRoute
+  '/teacher/courses/$courseId/members': typeof TeacherCoursesCourseIdMembersRoute
+  '/teacher/courses/$courseId/play-designations': typeof TeacherCoursesCourseIdPlayDesignationsRoute
+  '/teacher/courses/$courseId/rag': typeof TeacherCoursesCourseIdRagRoute
+  '/teacher/courses/$courseId/usage': typeof TeacherCoursesCourseIdUsageRoute
+  '/teacher/courses/$courseId/': typeof TeacherCoursesCourseIdIndexRoute
 }
 export interface FileRoutesByTo {
-  "/": typeof IndexRoute
-  "/acknowledgements": typeof AcknowledgementsRoute
-  "/data-handling": typeof DataHandlingRoute
-  "/lti-bind": typeof LtiBindRoute
-  "/admin/courses": typeof AdminCoursesRoute
-  "/admin/external-invites": typeof AdminExternalInvitesRoute
-  "/admin/lti": typeof AdminLtiRoute
-  "/admin/rules": typeof AdminRulesRoute
-  "/admin/system": typeof AdminSystemRoute
-  "/admin/usage": typeof AdminUsageRoute
-  "/admin/users": typeof AdminUsersRoute
-  "/embed/$courseId": typeof EmbedCourseIdRoute
-  "/join/$token": typeof JoinTokenRoute
-  "/admin": typeof AdminIndexRoute
-  "/teacher": typeof TeacherIndexRoute
-  "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
-  "/course/$courseId/new": typeof CourseCourseIdNewRoute
-  "/course/$courseId": typeof CourseCourseIdIndexRoute
-  "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
-  "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
-  "/teacher/courses/$courseId/config": typeof TeacherCoursesCourseIdConfigRoute
-  "/teacher/courses/$courseId/conversations": typeof TeacherCoursesCourseIdConversationsRoute
-  "/teacher/courses/$courseId/documents": typeof TeacherCoursesCourseIdDocumentsRoute
-  "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
-  "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
-  "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
-  "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
-  "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
-  "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
-  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdIndexRoute
+  '/': typeof IndexRoute
+  '/acknowledgements': typeof AcknowledgementsRoute
+  '/data-handling': typeof DataHandlingRoute
+  '/admin/courses': typeof AdminCoursesRoute
+  '/admin/external-invites': typeof AdminExternalInvitesRoute
+  '/admin/lti': typeof AdminLtiRoute
+  '/admin/rules': typeof AdminRulesRoute
+  '/admin/system': typeof AdminSystemRoute
+  '/admin/usage': typeof AdminUsageRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/embed/$courseId': typeof EmbedCourseIdRoute
+  '/join/$token': typeof JoinTokenRoute
+  '/lti/bind': typeof LtiBindRoute
+  '/admin': typeof AdminIndexRoute
+  '/teacher': typeof TeacherIndexRoute
+  '/course/$courseId/$conversationId': typeof CourseCourseIdConversationIdRoute
+  '/course/$courseId/new': typeof CourseCourseIdNewRoute
+  '/course/$courseId': typeof CourseCourseIdIndexRoute
+  '/teacher/courses/$courseId/api-keys': typeof TeacherCoursesCourseIdApiKeysRoute
+  '/teacher/courses/$courseId/canvas': typeof TeacherCoursesCourseIdCanvasRoute
+  '/teacher/courses/$courseId/config': typeof TeacherCoursesCourseIdConfigRoute
+  '/teacher/courses/$courseId/conversations': typeof TeacherCoursesCourseIdConversationsRoute
+  '/teacher/courses/$courseId/documents': typeof TeacherCoursesCourseIdDocumentsRoute
+  '/teacher/courses/$courseId/invite': typeof TeacherCoursesCourseIdInviteRoute
+  '/teacher/courses/$courseId/lti': typeof TeacherCoursesCourseIdLtiRoute
+  '/teacher/courses/$courseId/members': typeof TeacherCoursesCourseIdMembersRoute
+  '/teacher/courses/$courseId/play-designations': typeof TeacherCoursesCourseIdPlayDesignationsRoute
+  '/teacher/courses/$courseId/rag': typeof TeacherCoursesCourseIdRagRoute
+  '/teacher/courses/$courseId/usage': typeof TeacherCoursesCourseIdUsageRoute
+  '/teacher/courses/$courseId': typeof TeacherCoursesCourseIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  "/": typeof IndexRoute
-  "/acknowledgements": typeof AcknowledgementsRoute
-  "/admin": typeof AdminRouteWithChildren
-  "/data-handling": typeof DataHandlingRoute
-  "/lti-bind": typeof LtiBindRoute
-  "/admin/courses": typeof AdminCoursesRoute
-  "/admin/external-invites": typeof AdminExternalInvitesRoute
-  "/admin/lti": typeof AdminLtiRoute
-  "/admin/rules": typeof AdminRulesRoute
-  "/admin/system": typeof AdminSystemRoute
-  "/admin/usage": typeof AdminUsageRoute
-  "/admin/users": typeof AdminUsersRoute
-  "/embed/$courseId": typeof EmbedCourseIdRoute
-  "/join/$token": typeof JoinTokenRoute
-  "/admin/": typeof AdminIndexRoute
-  "/teacher/": typeof TeacherIndexRoute
-  "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
-  "/course/$courseId/new": typeof CourseCourseIdNewRoute
-  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
-  "/course/$courseId/": typeof CourseCourseIdIndexRoute
-  "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
-  "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
-  "/teacher/courses/$courseId/config": typeof TeacherCoursesCourseIdConfigRoute
-  "/teacher/courses/$courseId/conversations": typeof TeacherCoursesCourseIdConversationsRoute
-  "/teacher/courses/$courseId/documents": typeof TeacherCoursesCourseIdDocumentsRoute
-  "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
-  "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
-  "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
-  "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
-  "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
-  "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
-  "/teacher/courses/$courseId/": typeof TeacherCoursesCourseIdIndexRoute
+  '/': typeof IndexRoute
+  '/acknowledgements': typeof AcknowledgementsRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/data-handling': typeof DataHandlingRoute
+  '/admin/courses': typeof AdminCoursesRoute
+  '/admin/external-invites': typeof AdminExternalInvitesRoute
+  '/admin/lti': typeof AdminLtiRoute
+  '/admin/rules': typeof AdminRulesRoute
+  '/admin/system': typeof AdminSystemRoute
+  '/admin/usage': typeof AdminUsageRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/embed/$courseId': typeof EmbedCourseIdRoute
+  '/join/$token': typeof JoinTokenRoute
+  '/lti/bind': typeof LtiBindRoute
+  '/admin/': typeof AdminIndexRoute
+  '/teacher/': typeof TeacherIndexRoute
+  '/course/$courseId/$conversationId': typeof CourseCourseIdConversationIdRoute
+  '/course/$courseId/new': typeof CourseCourseIdNewRoute
+  '/teacher/courses/$courseId': typeof TeacherCoursesCourseIdRouteWithChildren
+  '/course/$courseId/': typeof CourseCourseIdIndexRoute
+  '/teacher/courses/$courseId/api-keys': typeof TeacherCoursesCourseIdApiKeysRoute
+  '/teacher/courses/$courseId/canvas': typeof TeacherCoursesCourseIdCanvasRoute
+  '/teacher/courses/$courseId/config': typeof TeacherCoursesCourseIdConfigRoute
+  '/teacher/courses/$courseId/conversations': typeof TeacherCoursesCourseIdConversationsRoute
+  '/teacher/courses/$courseId/documents': typeof TeacherCoursesCourseIdDocumentsRoute
+  '/teacher/courses/$courseId/invite': typeof TeacherCoursesCourseIdInviteRoute
+  '/teacher/courses/$courseId/lti': typeof TeacherCoursesCourseIdLtiRoute
+  '/teacher/courses/$courseId/members': typeof TeacherCoursesCourseIdMembersRoute
+  '/teacher/courses/$courseId/play-designations': typeof TeacherCoursesCourseIdPlayDesignationsRoute
+  '/teacher/courses/$courseId/rag': typeof TeacherCoursesCourseIdRagRoute
+  '/teacher/courses/$courseId/usage': typeof TeacherCoursesCourseIdUsageRoute
+  '/teacher/courses/$courseId/': typeof TeacherCoursesCourseIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | "/"
-    | "/acknowledgements"
-    | "/admin"
-    | "/data-handling"
-    | "/lti-bind"
-    | "/admin/courses"
-    | "/admin/external-invites"
-    | "/admin/lti"
-    | "/admin/rules"
-    | "/admin/system"
-    | "/admin/usage"
-    | "/admin/users"
-    | "/embed/$courseId"
-    | "/join/$token"
-    | "/admin/"
-    | "/teacher/"
-    | "/course/$courseId/$conversationId"
-    | "/course/$courseId/new"
-    | "/teacher/courses/$courseId"
-    | "/course/$courseId/"
-    | "/teacher/courses/$courseId/api-keys"
-    | "/teacher/courses/$courseId/canvas"
-    | "/teacher/courses/$courseId/config"
-    | "/teacher/courses/$courseId/conversations"
-    | "/teacher/courses/$courseId/documents"
-    | "/teacher/courses/$courseId/invite"
-    | "/teacher/courses/$courseId/lti"
-    | "/teacher/courses/$courseId/members"
-    | "/teacher/courses/$courseId/play-designations"
-    | "/teacher/courses/$courseId/rag"
-    | "/teacher/courses/$courseId/usage"
-    | "/teacher/courses/$courseId/"
+    | '/'
+    | '/acknowledgements'
+    | '/admin'
+    | '/data-handling'
+    | '/admin/courses'
+    | '/admin/external-invites'
+    | '/admin/lti'
+    | '/admin/rules'
+    | '/admin/system'
+    | '/admin/usage'
+    | '/admin/users'
+    | '/embed/$courseId'
+    | '/join/$token'
+    | '/lti/bind'
+    | '/admin/'
+    | '/teacher/'
+    | '/course/$courseId/$conversationId'
+    | '/course/$courseId/new'
+    | '/teacher/courses/$courseId'
+    | '/course/$courseId/'
+    | '/teacher/courses/$courseId/api-keys'
+    | '/teacher/courses/$courseId/canvas'
+    | '/teacher/courses/$courseId/config'
+    | '/teacher/courses/$courseId/conversations'
+    | '/teacher/courses/$courseId/documents'
+    | '/teacher/courses/$courseId/invite'
+    | '/teacher/courses/$courseId/lti'
+    | '/teacher/courses/$courseId/members'
+    | '/teacher/courses/$courseId/play-designations'
+    | '/teacher/courses/$courseId/rag'
+    | '/teacher/courses/$courseId/usage'
+    | '/teacher/courses/$courseId/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | "/"
-    | "/acknowledgements"
-    | "/data-handling"
-    | "/lti-bind"
-    | "/admin/courses"
-    | "/admin/external-invites"
-    | "/admin/lti"
-    | "/admin/rules"
-    | "/admin/system"
-    | "/admin/usage"
-    | "/admin/users"
-    | "/embed/$courseId"
-    | "/join/$token"
-    | "/admin"
-    | "/teacher"
-    | "/course/$courseId/$conversationId"
-    | "/course/$courseId/new"
-    | "/course/$courseId"
-    | "/teacher/courses/$courseId/api-keys"
-    | "/teacher/courses/$courseId/canvas"
-    | "/teacher/courses/$courseId/config"
-    | "/teacher/courses/$courseId/conversations"
-    | "/teacher/courses/$courseId/documents"
-    | "/teacher/courses/$courseId/invite"
-    | "/teacher/courses/$courseId/lti"
-    | "/teacher/courses/$courseId/members"
-    | "/teacher/courses/$courseId/play-designations"
-    | "/teacher/courses/$courseId/rag"
-    | "/teacher/courses/$courseId/usage"
-    | "/teacher/courses/$courseId"
+    | '/'
+    | '/acknowledgements'
+    | '/data-handling'
+    | '/admin/courses'
+    | '/admin/external-invites'
+    | '/admin/lti'
+    | '/admin/rules'
+    | '/admin/system'
+    | '/admin/usage'
+    | '/admin/users'
+    | '/embed/$courseId'
+    | '/join/$token'
+    | '/lti/bind'
+    | '/admin'
+    | '/teacher'
+    | '/course/$courseId/$conversationId'
+    | '/course/$courseId/new'
+    | '/course/$courseId'
+    | '/teacher/courses/$courseId/api-keys'
+    | '/teacher/courses/$courseId/canvas'
+    | '/teacher/courses/$courseId/config'
+    | '/teacher/courses/$courseId/conversations'
+    | '/teacher/courses/$courseId/documents'
+    | '/teacher/courses/$courseId/invite'
+    | '/teacher/courses/$courseId/lti'
+    | '/teacher/courses/$courseId/members'
+    | '/teacher/courses/$courseId/play-designations'
+    | '/teacher/courses/$courseId/rag'
+    | '/teacher/courses/$courseId/usage'
+    | '/teacher/courses/$courseId'
   id:
-    | "__root__"
-    | "/"
-    | "/acknowledgements"
-    | "/admin"
-    | "/data-handling"
-    | "/lti-bind"
-    | "/admin/courses"
-    | "/admin/external-invites"
-    | "/admin/lti"
-    | "/admin/rules"
-    | "/admin/system"
-    | "/admin/usage"
-    | "/admin/users"
-    | "/embed/$courseId"
-    | "/join/$token"
-    | "/admin/"
-    | "/teacher/"
-    | "/course/$courseId/$conversationId"
-    | "/course/$courseId/new"
-    | "/teacher/courses/$courseId"
-    | "/course/$courseId/"
-    | "/teacher/courses/$courseId/api-keys"
-    | "/teacher/courses/$courseId/canvas"
-    | "/teacher/courses/$courseId/config"
-    | "/teacher/courses/$courseId/conversations"
-    | "/teacher/courses/$courseId/documents"
-    | "/teacher/courses/$courseId/invite"
-    | "/teacher/courses/$courseId/lti"
-    | "/teacher/courses/$courseId/members"
-    | "/teacher/courses/$courseId/play-designations"
-    | "/teacher/courses/$courseId/rag"
-    | "/teacher/courses/$courseId/usage"
-    | "/teacher/courses/$courseId/"
+    | '__root__'
+    | '/'
+    | '/acknowledgements'
+    | '/admin'
+    | '/data-handling'
+    | '/admin/courses'
+    | '/admin/external-invites'
+    | '/admin/lti'
+    | '/admin/rules'
+    | '/admin/system'
+    | '/admin/usage'
+    | '/admin/users'
+    | '/embed/$courseId'
+    | '/join/$token'
+    | '/lti/bind'
+    | '/admin/'
+    | '/teacher/'
+    | '/course/$courseId/$conversationId'
+    | '/course/$courseId/new'
+    | '/teacher/courses/$courseId'
+    | '/course/$courseId/'
+    | '/teacher/courses/$courseId/api-keys'
+    | '/teacher/courses/$courseId/canvas'
+    | '/teacher/courses/$courseId/config'
+    | '/teacher/courses/$courseId/conversations'
+    | '/teacher/courses/$courseId/documents'
+    | '/teacher/courses/$courseId/invite'
+    | '/teacher/courses/$courseId/lti'
+    | '/teacher/courses/$courseId/members'
+    | '/teacher/courses/$courseId/play-designations'
+    | '/teacher/courses/$courseId/rag'
+    | '/teacher/courses/$courseId/usage'
+    | '/teacher/courses/$courseId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -425,9 +425,9 @@ export interface RootRouteChildren {
   AcknowledgementsRoute: typeof AcknowledgementsRoute
   AdminRoute: typeof AdminRouteWithChildren
   DataHandlingRoute: typeof DataHandlingRoute
-  LtiBindRoute: typeof LtiBindRoute
   EmbedCourseIdRoute: typeof EmbedCourseIdRoute
   JoinTokenRoute: typeof JoinTokenRoute
+  LtiBindRoute: typeof LtiBindRoute
   TeacherIndexRoute: typeof TeacherIndexRoute
   CourseCourseIdConversationIdRoute: typeof CourseCourseIdConversationIdRoute
   CourseCourseIdNewRoute: typeof CourseCourseIdNewRoute
@@ -435,229 +435,229 @@ export interface RootRouteChildren {
   CourseCourseIdIndexRoute: typeof CourseCourseIdIndexRoute
 }
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    "/lti-bind": {
-      id: "/lti-bind"
-      path: "/lti-bind"
-      fullPath: "/lti-bind"
-      preLoaderRoute: typeof LtiBindRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/data-handling": {
-      id: "/data-handling"
-      path: "/data-handling"
-      fullPath: "/data-handling"
+    '/data-handling': {
+      id: '/data-handling'
+      path: '/data-handling'
+      fullPath: '/data-handling'
       preLoaderRoute: typeof DataHandlingRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/admin": {
-      id: "/admin"
-      path: "/admin"
-      fullPath: "/admin"
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/acknowledgements": {
-      id: "/acknowledgements"
-      path: "/acknowledgements"
-      fullPath: "/acknowledgements"
+    '/acknowledgements': {
+      id: '/acknowledgements'
+      path: '/acknowledgements'
+      fullPath: '/acknowledgements'
       preLoaderRoute: typeof AcknowledgementsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/": {
-      id: "/"
-      path: "/"
-      fullPath: "/"
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/teacher/": {
-      id: "/teacher/"
-      path: "/teacher"
-      fullPath: "/teacher/"
+    '/teacher/': {
+      id: '/teacher/'
+      path: '/teacher'
+      fullPath: '/teacher/'
       preLoaderRoute: typeof TeacherIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/admin/": {
-      id: "/admin/"
-      path: "/"
-      fullPath: "/admin/"
+    '/admin/': {
+      id: '/admin/'
+      path: '/'
+      fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/join/$token": {
-      id: "/join/$token"
-      path: "/join/$token"
-      fullPath: "/join/$token"
+    '/lti/bind': {
+      id: '/lti/bind'
+      path: '/lti/bind'
+      fullPath: '/lti/bind'
+      preLoaderRoute: typeof LtiBindRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/join/$token': {
+      id: '/join/$token'
+      path: '/join/$token'
+      fullPath: '/join/$token'
       preLoaderRoute: typeof JoinTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/embed/$courseId": {
-      id: "/embed/$courseId"
-      path: "/embed/$courseId"
-      fullPath: "/embed/$courseId"
+    '/embed/$courseId': {
+      id: '/embed/$courseId'
+      path: '/embed/$courseId'
+      fullPath: '/embed/$courseId'
       preLoaderRoute: typeof EmbedCourseIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/admin/users": {
-      id: "/admin/users"
-      path: "/users"
-      fullPath: "/admin/users"
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/users'
+      fullPath: '/admin/users'
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/admin/usage": {
-      id: "/admin/usage"
-      path: "/usage"
-      fullPath: "/admin/usage"
+    '/admin/usage': {
+      id: '/admin/usage'
+      path: '/usage'
+      fullPath: '/admin/usage'
       preLoaderRoute: typeof AdminUsageRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/admin/system": {
-      id: "/admin/system"
-      path: "/system"
-      fullPath: "/admin/system"
+    '/admin/system': {
+      id: '/admin/system'
+      path: '/system'
+      fullPath: '/admin/system'
       preLoaderRoute: typeof AdminSystemRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/admin/rules": {
-      id: "/admin/rules"
-      path: "/rules"
-      fullPath: "/admin/rules"
+    '/admin/rules': {
+      id: '/admin/rules'
+      path: '/rules'
+      fullPath: '/admin/rules'
       preLoaderRoute: typeof AdminRulesRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/admin/lti": {
-      id: "/admin/lti"
-      path: "/lti"
-      fullPath: "/admin/lti"
+    '/admin/lti': {
+      id: '/admin/lti'
+      path: '/lti'
+      fullPath: '/admin/lti'
       preLoaderRoute: typeof AdminLtiRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/admin/external-invites": {
-      id: "/admin/external-invites"
-      path: "/external-invites"
-      fullPath: "/admin/external-invites"
+    '/admin/external-invites': {
+      id: '/admin/external-invites'
+      path: '/external-invites'
+      fullPath: '/admin/external-invites'
       preLoaderRoute: typeof AdminExternalInvitesRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/admin/courses": {
-      id: "/admin/courses"
-      path: "/courses"
-      fullPath: "/admin/courses"
+    '/admin/courses': {
+      id: '/admin/courses'
+      path: '/courses'
+      fullPath: '/admin/courses'
       preLoaderRoute: typeof AdminCoursesRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/course/$courseId/": {
-      id: "/course/$courseId/"
-      path: "/course/$courseId"
-      fullPath: "/course/$courseId/"
+    '/course/$courseId/': {
+      id: '/course/$courseId/'
+      path: '/course/$courseId'
+      fullPath: '/course/$courseId/'
       preLoaderRoute: typeof CourseCourseIdIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/teacher/courses/$courseId": {
-      id: "/teacher/courses/$courseId"
-      path: "/teacher/courses/$courseId"
-      fullPath: "/teacher/courses/$courseId"
+    '/teacher/courses/$courseId': {
+      id: '/teacher/courses/$courseId'
+      path: '/teacher/courses/$courseId'
+      fullPath: '/teacher/courses/$courseId'
       preLoaderRoute: typeof TeacherCoursesCourseIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/course/$courseId/new": {
-      id: "/course/$courseId/new"
-      path: "/course/$courseId/new"
-      fullPath: "/course/$courseId/new"
+    '/course/$courseId/new': {
+      id: '/course/$courseId/new'
+      path: '/course/$courseId/new'
+      fullPath: '/course/$courseId/new'
       preLoaderRoute: typeof CourseCourseIdNewRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/course/$courseId/$conversationId": {
-      id: "/course/$courseId/$conversationId"
-      path: "/course/$courseId/$conversationId"
-      fullPath: "/course/$courseId/$conversationId"
+    '/course/$courseId/$conversationId': {
+      id: '/course/$courseId/$conversationId'
+      path: '/course/$courseId/$conversationId'
+      fullPath: '/course/$courseId/$conversationId'
       preLoaderRoute: typeof CourseCourseIdConversationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/teacher/courses/$courseId/": {
-      id: "/teacher/courses/$courseId/"
-      path: "/"
-      fullPath: "/teacher/courses/$courseId/"
+    '/teacher/courses/$courseId/': {
+      id: '/teacher/courses/$courseId/'
+      path: '/'
+      fullPath: '/teacher/courses/$courseId/'
       preLoaderRoute: typeof TeacherCoursesCourseIdIndexRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/usage": {
-      id: "/teacher/courses/$courseId/usage"
-      path: "/usage"
-      fullPath: "/teacher/courses/$courseId/usage"
+    '/teacher/courses/$courseId/usage': {
+      id: '/teacher/courses/$courseId/usage'
+      path: '/usage'
+      fullPath: '/teacher/courses/$courseId/usage'
       preLoaderRoute: typeof TeacherCoursesCourseIdUsageRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/rag": {
-      id: "/teacher/courses/$courseId/rag"
-      path: "/rag"
-      fullPath: "/teacher/courses/$courseId/rag"
+    '/teacher/courses/$courseId/rag': {
+      id: '/teacher/courses/$courseId/rag'
+      path: '/rag'
+      fullPath: '/teacher/courses/$courseId/rag'
       preLoaderRoute: typeof TeacherCoursesCourseIdRagRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/play-designations": {
-      id: "/teacher/courses/$courseId/play-designations"
-      path: "/play-designations"
-      fullPath: "/teacher/courses/$courseId/play-designations"
+    '/teacher/courses/$courseId/play-designations': {
+      id: '/teacher/courses/$courseId/play-designations'
+      path: '/play-designations'
+      fullPath: '/teacher/courses/$courseId/play-designations'
       preLoaderRoute: typeof TeacherCoursesCourseIdPlayDesignationsRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/members": {
-      id: "/teacher/courses/$courseId/members"
-      path: "/members"
-      fullPath: "/teacher/courses/$courseId/members"
+    '/teacher/courses/$courseId/members': {
+      id: '/teacher/courses/$courseId/members'
+      path: '/members'
+      fullPath: '/teacher/courses/$courseId/members'
       preLoaderRoute: typeof TeacherCoursesCourseIdMembersRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/lti": {
-      id: "/teacher/courses/$courseId/lti"
-      path: "/lti"
-      fullPath: "/teacher/courses/$courseId/lti"
+    '/teacher/courses/$courseId/lti': {
+      id: '/teacher/courses/$courseId/lti'
+      path: '/lti'
+      fullPath: '/teacher/courses/$courseId/lti'
       preLoaderRoute: typeof TeacherCoursesCourseIdLtiRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/invite": {
-      id: "/teacher/courses/$courseId/invite"
-      path: "/invite"
-      fullPath: "/teacher/courses/$courseId/invite"
+    '/teacher/courses/$courseId/invite': {
+      id: '/teacher/courses/$courseId/invite'
+      path: '/invite'
+      fullPath: '/teacher/courses/$courseId/invite'
       preLoaderRoute: typeof TeacherCoursesCourseIdInviteRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/documents": {
-      id: "/teacher/courses/$courseId/documents"
-      path: "/documents"
-      fullPath: "/teacher/courses/$courseId/documents"
+    '/teacher/courses/$courseId/documents': {
+      id: '/teacher/courses/$courseId/documents'
+      path: '/documents'
+      fullPath: '/teacher/courses/$courseId/documents'
       preLoaderRoute: typeof TeacherCoursesCourseIdDocumentsRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/conversations": {
-      id: "/teacher/courses/$courseId/conversations"
-      path: "/conversations"
-      fullPath: "/teacher/courses/$courseId/conversations"
+    '/teacher/courses/$courseId/conversations': {
+      id: '/teacher/courses/$courseId/conversations'
+      path: '/conversations'
+      fullPath: '/teacher/courses/$courseId/conversations'
       preLoaderRoute: typeof TeacherCoursesCourseIdConversationsRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/config": {
-      id: "/teacher/courses/$courseId/config"
-      path: "/config"
-      fullPath: "/teacher/courses/$courseId/config"
+    '/teacher/courses/$courseId/config': {
+      id: '/teacher/courses/$courseId/config'
+      path: '/config'
+      fullPath: '/teacher/courses/$courseId/config'
       preLoaderRoute: typeof TeacherCoursesCourseIdConfigRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/canvas": {
-      id: "/teacher/courses/$courseId/canvas"
-      path: "/canvas"
-      fullPath: "/teacher/courses/$courseId/canvas"
+    '/teacher/courses/$courseId/canvas': {
+      id: '/teacher/courses/$courseId/canvas'
+      path: '/canvas'
+      fullPath: '/teacher/courses/$courseId/canvas'
       preLoaderRoute: typeof TeacherCoursesCourseIdCanvasRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/api-keys": {
-      id: "/teacher/courses/$courseId/api-keys"
-      path: "/api-keys"
-      fullPath: "/teacher/courses/$courseId/api-keys"
+    '/teacher/courses/$courseId/api-keys': {
+      id: '/teacher/courses/$courseId/api-keys'
+      path: '/api-keys'
+      fullPath: '/teacher/courses/$courseId/api-keys'
       preLoaderRoute: typeof TeacherCoursesCourseIdApiKeysRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
@@ -731,9 +731,9 @@ const rootRouteChildren: RootRouteChildren = {
   AcknowledgementsRoute: AcknowledgementsRoute,
   AdminRoute: AdminRouteWithChildren,
   DataHandlingRoute: DataHandlingRoute,
-  LtiBindRoute: LtiBindRoute,
   EmbedCourseIdRoute: EmbedCourseIdRoute,
   JoinTokenRoute: JoinTokenRoute,
+  LtiBindRoute: LtiBindRoute,
   TeacherIndexRoute: TeacherIndexRoute,
   CourseCourseIdConversationIdRoute: CourseCourseIdConversationIdRoute,
   CourseCourseIdNewRoute: CourseCourseIdNewRoute,

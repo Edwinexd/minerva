@@ -276,6 +276,39 @@ export interface LtiRegistration {
   moodle_config: MoodleToolConfig
 }
 
+export interface LtiPlatform {
+  id: string
+  name: string
+  issuer: string
+  client_id: string
+  deployment_id: string | null
+  auth_login_url: string
+  auth_token_url: string
+  platform_jwks_url: string
+  created_at: string
+  moodle_config: MoodleToolConfig
+}
+
+export interface LtiPlatformBinding {
+  id: string
+  platform_id: string
+  context_id: string
+  context_label: string | null
+  context_title: string | null
+  course_id: string
+  course_name: string | null
+  created_at: string
+}
+
+export interface LtiBindInfo {
+  platform_name: string
+  context_id: string
+  context_label: string | null
+  context_title: string | null
+  is_teacher_role: boolean
+  courses: { id: string; name: string }[]
+}
+
 export interface CanvasConnection {
   id: string
   course_id: string

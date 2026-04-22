@@ -172,9 +172,39 @@ struct JwksResponse {
     keys: Vec<serde_json::Value>,
 }
 
-/// Validate an LTI 1.3 launch id_token JWT against a course registration.
+/// The subset of platform metadata validate_launch_jwt actually needs.
+/// Implemented for both `RegistrationRow` (per-course setup) and `PlatformRow`
+/// (site-level setup) so the launch handler doesn't care which it's running.
+pub struct PlatformConfig<'a> {
+    pub issuer: &'a str,
+    pub client_id: &'a str,
+    pub platform_jwks_url: &'a str,
+}
+
+impl<'a> From<&'a minerva_db::queries::lti::RegistrationRow> for PlatformConfig<'a> {
+    fn from(r: &'a minerva_db::queries::lti::RegistrationRow) -> Self {
+        Self {
+            issuer: &r.issuer,
+            client_id: &r.client_id,
+            platform_jwks_url: &r.platform_jwks_url,
+        }
+    }
+}
+
+impl<'a> From<&'a minerva_db::queries::lti::PlatformRow> for PlatformConfig<'a> {
+    fn from(p: &'a minerva_db::queries::lti::PlatformRow) -> Self {
+        Self {
+            issuer: &p.issuer,
+            client_id: &p.client_id,
+            platform_jwks_url: &p.platform_jwks_url,
+        }
+    }
+}
+
+/// Validate an LTI 1.3 launch id_token JWT against a platform's config
+/// (either a per-course registration or a site-level platform).
 pub async fn validate_launch_jwt(
-    registration: &minerva_db::queries::lti::RegistrationRow,
+    platform: PlatformConfig<'_>,
     id_token: &str,
     expected_nonce: &str,
     http_client: &reqwest::Client,
@@ -187,7 +217,7 @@ pub async fn validate_launch_jwt(
 
     // 2. Fetch platform JWKS.
     let jwks_resp: JwksResponse = http_client
-        .get(&registration.platform_jwks_url)
+        .get(platform.platform_jwks_url)
         .send()
         .await
         .map_err(|e| AppError::Internal(format!("failed to fetch platform JWKS: {}", e)))?
@@ -216,8 +246,8 @@ pub async fn validate_launch_jwt(
 
     // 4. Validate signature, issuer, audience, expiry.
     let mut validation = Validation::new(Algorithm::RS256);
-    validation.set_issuer(&[&registration.issuer]);
-    validation.set_audience(&[&registration.client_id]);
+    validation.set_issuer(&[platform.issuer]);
+    validation.set_audience(&[platform.client_id]);
     validation.validate_exp = true;
 
     let token_data =

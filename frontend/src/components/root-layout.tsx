@@ -22,6 +22,10 @@ interface EmbedMe {
 export function RootLayout() {
   const { t } = useTranslation()
   const isEmbed = window.location.pathname.startsWith("/embed/")
+  // The LTI bind picker runs outside Shib: users arrive from an LMS launch
+  // carrying only an HMAC bind token. Fetching /auth/me here would 401 and
+  // trigger the Shib redirect loop, so treat it like embed pages.
+  const isLtiBind = window.location.pathname.startsWith("/lti-bind")
 
   const embedParams = useMemo(() => {
     if (!isEmbed) return null
@@ -33,12 +37,12 @@ export function RootLayout() {
     }
   }, [isEmbed])
 
-  const { data: user } = useQuery({ ...userQuery, enabled: !isEmbed })
+  const { data: user } = useQuery({ ...userQuery, enabled: !isEmbed && !isLtiBind })
   const { data: devConfig } = useQuery({
     queryKey: ["dev", "config"],
     queryFn: () => api.get<DevConfig>("/dev/config"),
     staleTime: Infinity,
-    enabled: !isEmbed,
+    enabled: !isEmbed && !isLtiBind,
   })
 
   const { data: embedMe } = useQuery({

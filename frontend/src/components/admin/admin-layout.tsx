@@ -15,6 +15,7 @@ const TAB_VALUES = [
   "courses",
   "rules",
   "external-invites",
+  "lti",
   "system",
 ] as const
 
@@ -28,6 +29,7 @@ const TAB_ROUTES = {
   courses: "/admin/courses",
   rules: "/admin/rules",
   "external-invites": "/admin/external-invites",
+  lti: "/admin/lti",
   system: "/admin/system",
 } as const satisfies Record<TabValue, string>
 
@@ -37,6 +39,7 @@ const TAB_LABEL_KEYS: Record<TabValue, string> = {
   courses: "layout.tabs.courses",
   rules: "layout.tabs.rules",
   "external-invites": "layout.tabs.externalInvites",
+  lti: "layout.tabs.lti",
   system: "layout.tabs.system",
 }
 

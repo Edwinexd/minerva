@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, platform_id, context_id, context_label, context_title, course_id, created_by, created_at FROM lti_course_bindings WHERE platform_id = $1 AND context_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "context_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "context_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "context_title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5c8253f813a3ad2759f64aa31b62de96195019c64b557cf4dcd2550d73dcdff1"
+}

@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lti_course_bindings (id, platform_id, context_id, context_label, context_title, course_id, created_by)\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        RETURNING id, platform_id, context_id, context_label, context_title, course_id, created_by, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "context_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "context_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "context_title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4104d3352019467e878731cb2be150c95a8bacd1dc2b7b1953eb03c1eeaf3335"
+}

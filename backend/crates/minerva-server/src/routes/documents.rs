@@ -322,6 +322,16 @@ async fn patch_document(
         return Err(AppError::Forbidden);
     }
 
+    // Scope doc_id to this course: the DB helper filters by id only, so
+    // without this check a course owner could modify documents in other
+    // courses by putting a foreign doc_id in the path.
+    let doc = minerva_db::queries::documents::find_by_id(&state.db, doc_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if doc.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+
     if let Some(displayable) = body.displayable {
         minerva_db::queries::documents::update_displayable(&state.db, doc_id, displayable).await?;
     }
@@ -340,6 +350,16 @@ async fn delete_document(
 
     if course.owner_id != user.id && !user.role.is_admin() {
         return Err(AppError::Forbidden);
+    }
+
+    // Scope doc_id to this course: the DB delete filters by id only, so
+    // without this check a course owner could delete documents in other
+    // courses by putting a foreign doc_id in the path.
+    let doc = minerva_db::queries::documents::find_by_id(&state.db, doc_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if doc.course_id != course_id {
+        return Err(AppError::NotFound);
     }
 
     // Delete vectors from Qdrant first -- if this fails we can retry safely

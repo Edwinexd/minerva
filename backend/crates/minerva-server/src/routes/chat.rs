@@ -596,6 +596,12 @@ async fn get_conversation(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    // Scope the conversation to the URL's course so a teacher/admin of one
+    // course cannot read conversations in another course by guessing cids.
+    if conv.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+
     // Owner, admin, course teacher, or pinned conversation
     let is_teacher = is_course_teacher_or_admin(&state, course_id, &user).await?;
     if conv.user_id != user.id && !is_teacher && !conv.pinned {
@@ -831,6 +837,12 @@ async fn list_notes(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    // Scope the conversation to the URL's course so a teacher/admin of one
+    // course cannot list notes from conversations in another course.
+    if conv.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+
     // Anyone can see notes on pinned conversations, or own conversations, or teachers
     let is_teacher = is_course_teacher_or_admin(&state, course_id, &user).await?;
     if conv.user_id != user.id && !is_teacher && !conv.pinned {
@@ -903,10 +915,27 @@ async fn create_note(
 async fn update_note(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, _cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((course_id, cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
     Json(body): Json<UpdateNoteRequest>,
 ) -> Result<Json<TeacherNoteResponse>, AppError> {
     verify_course_teacher_access(&state, course_id, &user).await?;
+
+    // Verify the note lives in the conversation from the URL, and the
+    // conversation lives in the URL's course. Without this, a teacher of
+    // course A could overwrite a note in course B by putting B's note_id in
+    // the path.
+    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if conv.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+    let existing = minerva_db::queries::conversations::find_note_by_id(&state.db, note_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if existing.conversation_id != cid {
+        return Err(AppError::NotFound);
+    }
 
     let note = minerva_db::queries::conversations::update_note(&state.db, note_id, &body.content)
         .await?
@@ -930,9 +959,26 @@ async fn update_note(
 async fn delete_note(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, _cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((course_id, cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     verify_course_teacher_access(&state, course_id, &user).await?;
+
+    // Verify the note lives in the conversation from the URL, and the
+    // conversation lives in the URL's course. Without this, a teacher of
+    // course A could delete a note in course B by putting B's note_id in
+    // the path.
+    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if conv.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+    let existing = minerva_db::queries::conversations::find_note_by_id(&state.db, note_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if existing.conversation_id != cid {
+        return Err(AppError::NotFound);
+    }
 
     let deleted = minerva_db::queries::conversations::delete_note(&state.db, note_id).await?;
     Ok(Json(serde_json::json!({ "deleted": deleted })))

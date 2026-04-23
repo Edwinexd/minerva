@@ -242,56 +242,64 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
               <div key={userId}>
                 <h4 className="font-medium text-sm mb-2">{group.label}</h4>
                 <div className="space-y-1">
-                  {group.conversations.map((conv) => (
-                    <div key={conv.id}>
-                      <div
-                        className={`flex items-center justify-between py-2 px-3 rounded cursor-pointer ${
-                          expandedId === conv.id ? "bg-secondary" : "hover:bg-muted"
-                        }`}
-                        onClick={() => setExpandedId(expandedId === conv.id ? null : conv.id)}
-                      >
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <span className="text-sm truncate">
-                            {conv.title || t("conversations.untitled")}
-                          </span>
-                          <span className="text-xs text-muted-foreground shrink-0">
-                            {t("conversations.msgsSuffix", { count: conv.message_count || 0 })}
-                          </span>
-                          {conv.pinned && (
-                            <Badge variant="secondary" className="shrink-0">{t("conversations.pinned")}</Badge>
-                          )}
-                          {(conv.feedback_down ?? 0) > 0 && (
-                            <Badge variant="outline" className="shrink-0 border-red-300 text-red-600 dark:border-red-700 dark:text-red-400 text-xs">
-                              {t("conversations.flaggedBadge", { count: conv.feedback_down })}
-                            </Badge>
-                          )}
-                          {(conv.feedback_up ?? 0) > 0 && (conv.feedback_down ?? 0) === 0 && (
-                            <Badge variant="outline" className="shrink-0 border-green-300 text-green-600 dark:border-green-700 dark:text-green-400 text-xs">
-                              {t("conversations.helpfulBadge", { count: conv.feedback_up })}
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0 ml-2">
-                          <span className="text-xs text-muted-foreground">
-                            <RelativeTime date={conv.updated_at} />
-                          </span>
-                          <Button
-                            variant={conv.pinned ? "default" : "outline"}
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              pinMutation.mutate({ cid: conv.id, pinned: !conv.pinned })
-                            }}
+                  {group.conversations.map((conv) => {
+                    const expanded = expandedId === conv.id
+                    const panelId = `conv-panel-${conv.id}`
+                    return (
+                      <div key={conv.id}>
+                        <div
+                          className={`flex items-center justify-between py-2 px-3 rounded ${
+                            expanded ? "bg-secondary" : "hover:bg-muted"
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setExpandedId(expanded ? null : conv.id)}
+                            aria-expanded={expanded}
+                            aria-controls={panelId}
+                            className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 rounded"
                           >
-                            {conv.pinned ? t("conversations.unpin") : t("conversations.pin")}
-                          </Button>
+                            <span className="text-sm truncate">
+                              {conv.title || t("conversations.untitled")}
+                            </span>
+                            <span className="text-xs text-muted-foreground shrink-0">
+                              {t("conversations.msgsSuffix", { count: conv.message_count || 0 })}
+                            </span>
+                            {conv.pinned && (
+                              <Badge variant="secondary" className="shrink-0">{t("conversations.pinned")}</Badge>
+                            )}
+                            {(conv.feedback_down ?? 0) > 0 && (
+                              <Badge variant="outline" className="shrink-0 border-red-300 text-red-600 dark:border-red-700 dark:text-red-400 text-xs">
+                                {t("conversations.flaggedBadge", { count: conv.feedback_down })}
+                              </Badge>
+                            )}
+                            {(conv.feedback_up ?? 0) > 0 && (conv.feedback_down ?? 0) === 0 && (
+                              <Badge variant="outline" className="shrink-0 border-green-300 text-green-600 dark:border-green-700 dark:text-green-400 text-xs">
+                                {t("conversations.helpfulBadge", { count: conv.feedback_up })}
+                              </Badge>
+                            )}
+                          </button>
+                          <div className="flex items-center gap-2 shrink-0 ml-2">
+                            <span className="text-xs text-muted-foreground">
+                              <RelativeTime date={conv.updated_at} />
+                            </span>
+                            <Button
+                              variant={conv.pinned ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => pinMutation.mutate({ cid: conv.id, pinned: !conv.pinned })}
+                            >
+                              {conv.pinned ? t("conversations.unpin") : t("conversations.pin")}
+                            </Button>
+                          </div>
                         </div>
+                        {expanded && (
+                          <div id={panelId}>
+                            <ConversationExpanded courseId={courseId} conversationId={conv.id} />
+                          </div>
+                        )}
                       </div>
-                      {expandedId === conv.id && (
-                        <ConversationExpanded courseId={courseId} conversationId={conv.id} />
-                      )}
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             ))}

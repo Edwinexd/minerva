@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { DataHandlingContent } from "@/components/data-handling"
@@ -21,6 +21,11 @@ export function PrivacyAckBanner({
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<unknown>(null)
+  const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+
+  const handleClose = useCallback(() => setOpen(false), [])
 
   const handleAgree = async () => {
     setSubmitting(true)
@@ -34,6 +39,60 @@ export function PrivacyAckBanner({
       setSubmitting(false)
     }
   }
+
+  // Focus management + Escape + Tab trap while the dialog is open.
+  useEffect(() => {
+    if (!open) return
+
+    previousFocusRef.current = document.activeElement as HTMLElement | null
+
+    const getFocusable = () => {
+      const root = dialogRef.current
+      if (!root) return [] as HTMLElement[]
+      return Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => !el.hasAttribute("aria-hidden"))
+    }
+
+    // Focus the first interactive element so keyboard users land inside.
+    const focusables = getFocusable()
+    focusables[0]?.focus()
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !submitting) {
+        e.stopPropagation()
+        handleClose()
+        return
+      }
+      if (e.key === "Tab") {
+        const nodes = getFocusable()
+        if (nodes.length === 0) return
+        const first = nodes[0]
+        const last = nodes[nodes.length - 1]
+        const active = document.activeElement as HTMLElement | null
+        if (e.shiftKey) {
+          if (active === first || !dialogRef.current?.contains(active)) {
+            e.preventDefault()
+            last.focus()
+          }
+        } else {
+          if (active === last) {
+            e.preventDefault()
+            first.focus()
+          }
+        }
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      // Restore focus to the trigger when the dialog closes.
+      previousFocusRef.current?.focus()
+    }
+  }, [open, submitting, handleClose])
 
   return (
     <>
@@ -49,16 +108,21 @@ export function PrivacyAckBanner({
       {open && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false) }}
+          onClick={(e) => { if (e.target === e.currentTarget && !submitting) setOpen(false) }}
         >
-          <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground ring-1 ring-foreground/10 shadow-lg">
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground ring-1 ring-foreground/10 shadow-lg"
+          >
             <div className="flex items-center justify-between border-b px-6 py-4">
-              <h2 className="text-lg font-semibold">{t("privacy.dialogTitle")}</h2>
+              <h2 id={titleId} className="text-lg font-semibold">{t("privacy.dialogTitle")}</h2>
               <button
-                onClick={() => setOpen(false)}
-                className="rounded p-1 text-muted-foreground hover:text-foreground"
+                onClick={handleClose}
+                disabled={submitting}
+                className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-50"
                 aria-label={t("privacy.closeLabel")}
               >
                 ✕
@@ -69,9 +133,9 @@ export function PrivacyAckBanner({
             </div>
             <div className="flex flex-col-reverse gap-2 border-t bg-muted/50 px-6 py-3 sm:flex-row sm:justify-end">
               {error !== null && (
-                <p className="mr-auto self-center text-sm text-destructive">{formatError(error)}</p>
+                <p role="alert" className="mr-auto self-center text-sm text-destructive">{formatError(error)}</p>
               )}
-              <Button variant="outline" onClick={() => setOpen(false)} disabled={submitting}>
+              <Button variant="outline" onClick={handleClose} disabled={submitting}>
                 {tCommon("actions.close")}
               </Button>
               <Button onClick={handleAgree} disabled={submitting}>

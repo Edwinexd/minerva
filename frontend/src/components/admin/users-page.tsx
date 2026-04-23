@@ -58,6 +58,7 @@ export function UserManagementPanel() {
         <input
           className="mt-2 w-full max-w-sm rounded border bg-background px-3 py-1.5 text-sm"
           placeholder={t("users.filterPlaceholder")}
+          aria-label={t("users.filterPlaceholder")}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />

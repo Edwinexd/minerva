@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
+import { useDocumentTitle } from "@/lib/use-document-title"
 import type { LtiBindInfo } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,6 +28,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 /// the user here to pick one.
 export function LtiBindPage() {
   const { t } = useTranslation("auth")
+  const { t: tCommon } = useTranslation("common")
+  useDocumentTitle(tCommon("pageTitles.ltiBind"))
   const formatError = useApiErrorMessage()
 
   const token = useMemo(() => {

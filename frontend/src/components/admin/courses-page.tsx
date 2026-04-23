@@ -53,6 +53,7 @@ export function CourseManagementPanel() {
         <input
           className="mt-2 w-full max-w-sm rounded border bg-background px-3 py-1.5 text-sm"
           placeholder={t("courses.filterPlaceholder")}
+          aria-label={t("courses.filterPlaceholder")}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />

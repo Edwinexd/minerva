@@ -58,6 +58,14 @@ export function RootLayout() {
 
   return (
     <div className={`${isEmbed ? "h-dvh" : "min-h-screen"} bg-background text-foreground flex flex-col`}>
+      {!isEmbed && (
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-primary focus:text-primary-foreground focus:px-3 focus:py-2 focus:shadow-md focus:outline focus:outline-2 focus:outline-ring"
+        >
+          {t("nav.skipToContent")}
+        </a>
+      )}
       <header className="border-b px-4 sm:px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 max-w-7xl mx-auto min-w-0">
           {isEmbed ? (
@@ -96,7 +104,7 @@ export function RootLayout() {
           </nav>
         </div>
       </header>
-      <main className={`${isEmbed ? "flex-1 min-h-0" : "max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full min-w-0"}`}>
+      <main id="main-content" tabIndex={-1} className={`${isEmbed ? "flex-1 min-h-0" : "max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full min-w-0"}`}>
         <Outlet />
       </main>
       <footer className="border-t px-4 sm:px-6 py-4 mt-auto">

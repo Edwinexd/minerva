@@ -7,6 +7,7 @@ import { ChevronDown, ChevronUp, Menu, X } from "lucide-react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { PrivacyAckBanner } from "@/components/privacy-ack"
+import { useDocumentTitle } from "@/lib/use-document-title"
 
 // -- Types for embed API responses --
 
@@ -85,6 +86,7 @@ async function embedPost<T>(path: string, token: string, body?: unknown): Promis
 
 export function EmbedPage({ useParams }: { useParams: () => { courseId: string } }) {
   const { t } = useTranslation("auth")
+  const { t: tCommon } = useTranslation("common")
   const { courseId } = useParams()
   const token = useToken()
   const [course, setCourse] = useState<EmbedCourse | null>(null)
@@ -98,6 +100,8 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   useEffect(() => {
     setSidebarOpen(false)
   }, [activeConvId])
+
+  useDocumentTitle(course ? tCommon("pageTitles.embed", { course: course.name }) : null)
 
   // Load course, user, and conversations on mount.
   useEffect(() => {
@@ -428,11 +432,16 @@ function EmbedChatWindow({
           )}
           {streaming && (
             <div className="flex justify-start">
-              <div className="bg-muted rounded-lg px-4 py-2 max-w-[80%]">
+              <div
+                className="bg-muted rounded-lg px-4 py-2 max-w-[80%]"
+                aria-live="polite"
+                aria-atomic="false"
+                aria-label={t("embed.assistantResponseLabel")}
+              >
                 {streamedTokens ? (
                   <MarkdownContent content={streamedTokens} />
                 ) : (
-                  <div className="flex gap-1">
+                  <div className="flex gap-1" aria-hidden="true">
                     <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
                     <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
                     <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:300ms]" />
@@ -441,7 +450,7 @@ function EmbedChatWindow({
               </div>
             </div>
           )}
-          {error && <p className="text-sm text-destructive text-center">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive text-center">{error}</p>}
           <div ref={messagesEndRef} />
         </div>
       </div>

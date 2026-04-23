@@ -95,23 +95,25 @@ export function FeedbackControls({
           type="button"
           onClick={handleUp}
           disabled={busy}
-          title={upActive ? t("feedback.thumbsUpActiveTitle") : t("feedback.thumbsUpTitle")}
+          aria-label={upActive ? t("feedback.thumbsUpActiveTitle") : t("feedback.thumbsUpTitle")}
+          aria-pressed={upActive}
           className={`p-1 rounded hover:bg-foreground/10 disabled:opacity-50 ${
             upActive ? "text-green-600 dark:text-green-400" : ""
           }`}
         >
-          <ThumbsUp className="w-3.5 h-3.5" />
+          <ThumbsUp className="w-3.5 h-3.5" aria-hidden="true" />
         </button>
         <button
           type="button"
           onClick={handleDown}
           disabled={busy}
-          title={downActive ? t("feedback.thumbsDownActiveTitle") : t("feedback.thumbsDownTitle")}
+          aria-label={downActive ? t("feedback.thumbsDownActiveTitle") : t("feedback.thumbsDownTitle")}
+          aria-pressed={downActive}
           className={`p-1 rounded hover:bg-foreground/10 disabled:opacity-50 ${
             downActive ? "text-red-600 dark:text-red-400" : ""
           }`}
         >
-          <ThumbsDown className="w-3.5 h-3.5" />
+          <ThumbsDown className="w-3.5 h-3.5" aria-hidden="true" />
         </button>
       </div>
 

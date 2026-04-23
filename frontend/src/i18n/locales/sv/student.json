@@ -15,7 +15,8 @@
     "disclaimerBefore": "Meddelanden och relevanta utdrag ur kursmaterialet skickas till Cerebras för AI-inferens. Svaren kan vara felaktiga; verifiera mot kursmaterialet. Läs ",
     "dataHandlingLink": "hur Minerva hanterar dina uppgifter",
     "disclaimerAfter": ".",
-    "unknownError": "Okänt fel"
+    "unknownError": "Okänt fel",
+    "assistantResponseLabel": "Assistentens svar"
   },
   "message": {
     "tokensUsed_one": "{{count}} token",

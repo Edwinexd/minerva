@@ -68,8 +68,9 @@ export function InvitePage({ useParams }: { useParams: () => { courseId: string 
       <CardContent className="space-y-4">
         <div className="flex gap-2 items-end">
           <div className="space-y-1">
-            <Label className="text-xs">{t("invite.durationLabel")}</Label>
+            <Label htmlFor="invite-duration" className="text-xs">{t("invite.durationLabel")}</Label>
             <select
+              id="invite-duration"
               value={expiresHours}
               onChange={(e) => setExpiresHours(Number(e.target.value))}
               className="border rounded px-2 py-1.5 text-sm bg-background"
@@ -82,8 +83,9 @@ export function InvitePage({ useParams }: { useParams: () => { courseId: string 
             </select>
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">{t("invite.maxUsesLabel")}</Label>
+            <Label htmlFor="invite-max-uses" className="text-xs">{t("invite.maxUsesLabel")}</Label>
             <Input
+              id="invite-max-uses"
               type="number"
               value={maxUses}
               onChange={(e) => setMaxUses(e.target.value)}

@@ -1,5 +1,6 @@
 import { Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
+import { useDocumentTitle } from "@/lib/use-document-title"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Select,
@@ -46,15 +47,31 @@ const TAB_LABEL_KEYS: Record<TabValue, string> = {
   system: "layout.tabs.system",
 }
 
+const TAB_TITLE_KEYS: Record<TabValue, string> = {
+  usage: "pageTitles.adminTab.usage",
+  users: "pageTitles.adminTab.users",
+  courses: "pageTitles.adminTab.courses",
+  rules: "pageTitles.adminTab.rules",
+  "external-invites": "pageTitles.adminTab.externalInvites",
+  lti: "pageTitles.adminTab.lti",
+  integrations: "pageTitles.adminTab.integrations",
+  system: "pageTitles.adminTab.system",
+}
+
 export function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { t } = useTranslation("admin")
+  const { t: tCommon } = useTranslation("common")
 
   const lastSegment = location.pathname.split("/").pop() || ""
   const activeTab: TabValue = VALID_TABS.has(lastSegment as TabValue)
     ? (lastSegment as TabValue)
     : "usage"
+
+  useDocumentTitle(
+    `${tCommon("pageTitles.admin")} – ${tCommon(TAB_TITLE_KEYS[activeTab])}`,
+  )
 
   return (
     <div className="space-y-6">

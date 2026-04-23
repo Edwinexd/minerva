@@ -1,7 +1,9 @@
 import { Trans, useTranslation } from "react-i18next"
+import { useDocumentTitle } from "@/lib/use-document-title"
 
 export function DataHandlingPage() {
   const { t } = useTranslation("common")
+  useDocumentTitle(t("pageTitles.dataHandling"))
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold tracking-tight mb-6">

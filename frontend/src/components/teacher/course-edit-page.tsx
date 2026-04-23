@@ -2,6 +2,7 @@ import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { courseQuery } from "@/lib/queries"
+import { useDocumentTitle } from "@/lib/use-document-title"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -73,6 +74,9 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
   const navigate = useNavigate()
   const location = useLocation()
   const { t } = useTranslation("teacher")
+  const { t: tCommon } = useTranslation("common")
+
+  useDocumentTitle(course ? tCommon("pageTitles.teacherCourse", { course: course.name }) : null)
 
   const visibleTabValues = course?.my_role === "ta"
     ? TAB_VALUES.filter((v) => !TA_HIDDEN_TABS.has(v))

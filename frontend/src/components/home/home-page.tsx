@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { coursesQuery, userQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
+import { useDocumentTitle } from "@/lib/use-document-title"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -22,6 +23,7 @@ import type { Course } from "@/lib/types"
 
 export function Home() {
   const { t } = useTranslation("common")
+  useDocumentTitle(t("pageTitles.home"))
   const formatError = useApiErrorMessage()
   const { data: user } = useQuery(userQuery)
   const { data: courses, isLoading, error } = useQuery(coursesQuery)

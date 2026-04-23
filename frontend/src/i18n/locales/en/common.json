@@ -3,7 +3,29 @@
     "admin": "Admin",
     "dataHandling": "Data handling",
     "acknowledgements": "Acknowledgements",
-    "openInNewTab": "Open in new tab"
+    "openInNewTab": "Open in new tab",
+    "skipToContent": "Skip to content"
+  },
+  "pageTitles": {
+    "home": "Home",
+    "admin": "Admin",
+    "adminTab": {
+      "usage": "Usage",
+      "users": "Users",
+      "courses": "Courses",
+      "rules": "Role rules",
+      "externalInvites": "External invites",
+      "lti": "LTI",
+      "integrations": "Integrations",
+      "system": "System"
+    },
+    "teacherCourse": "Teacher: {{course}}",
+    "course": "{{course}}",
+    "embed": "{{course}}",
+    "dataHandling": "Data handling",
+    "acknowledgements": "Acknowledgements",
+    "join": "Join course",
+    "ltiBind": "Link course"
   },
   "footer": {
     "licenseLead": "is licensed under"

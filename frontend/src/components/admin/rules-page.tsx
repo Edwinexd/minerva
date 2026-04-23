@@ -101,18 +101,21 @@ function CreateRuleForm() {
       }}
     >
       <div className="space-y-1">
-        <label className="text-xs font-medium">{t("rules.form.ruleName")}</label>
+        <label htmlFor="rule-name" className="text-xs font-medium">{t("rules.form.ruleName")}</label>
         <input
+          id="rule-name"
           className="block h-8 w-64 rounded border bg-background px-2 text-sm"
           placeholder={t("rules.form.ruleNamePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
+          aria-invalid={mutation.isError || undefined}
+          aria-describedby={mutation.isError ? "rule-name-error" : undefined}
         />
       </div>
       <div className="space-y-1">
         <label className="text-xs font-medium">{t("rules.form.targetRole")}</label>
         <Select value={targetRole} onValueChange={(v) => v && setTargetRole(v as typeof targetRole)}>
-          <SelectTrigger className="h-8 w-32 text-sm">
+          <SelectTrigger className="h-8 w-32 text-sm" aria-label={t("rules.form.targetRole")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -129,7 +132,7 @@ function CreateRuleForm() {
         {t("rules.form.createRule")}
       </Button>
       {mutation.isError && (
-        <span className="text-xs text-destructive">
+        <span id="rule-name-error" role="alert" className="text-xs text-destructive">
           {formatError(mutation.error)}
         </span>
       )}
@@ -273,7 +276,7 @@ function AddConditionForm({ ruleId }: { ruleId: string }) {
       }}
     >
       <Select value={attribute} onValueChange={(v) => v && setAttribute(v as RoleRuleAttribute)}>
-        <SelectTrigger className="h-7 w-32 text-xs">
+        <SelectTrigger className="h-7 w-32 text-xs" aria-label={t("rules.condition.attributeLabel")}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -285,7 +288,7 @@ function AddConditionForm({ ruleId }: { ruleId: string }) {
         </SelectContent>
       </Select>
       <Select value={operator} onValueChange={(v) => v && setOperator(v as RoleRuleOperator)}>
-        <SelectTrigger className="h-7 w-32 text-xs">
+        <SelectTrigger className="h-7 w-32 text-xs" aria-label={t("rules.condition.operatorLabel")}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -299,6 +302,7 @@ function AddConditionForm({ ruleId }: { ruleId: string }) {
       <input
         className="h-7 flex-1 min-w-[14rem] rounded border bg-background px-2 font-mono text-xs"
         placeholder={t("rules.condition.valuePlaceholder")}
+        aria-label={t("rules.condition.valuePlaceholder")}
         value={value}
         onChange={(e) => setValue(e.target.value)}
       />

@@ -20,6 +20,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react"
 import type { Conversation, Message, MessageFeedback, TeacherNote } from "@/lib/types"
 import { FeedbackControls } from "@/components/message-feedback"
 import { PrivacyAckBanner } from "@/components/privacy-ack"
+import { useDocumentTitle } from "@/lib/use-document-title"
 
 export function ChatRouteComponent({
   useParams,
@@ -48,9 +49,12 @@ function ChatPage({
 }) {
   const navigate = useNavigate()
   const { t } = useTranslation("student")
+  const { t: tCommon } = useTranslation("common")
   const { data: course } = useQuery(courseQuery(courseId))
   const { data: conversations, isLoading: convLoading } = useQuery(conversationsQuery(courseId))
   const { data: pinned, isLoading: pinnedLoading } = useQuery(pinnedConversationsQuery(courseId))
+
+  useDocumentTitle(course ? tCommon("pageTitles.course", { course: course.name }) : null)
 
   const isPinnedView = conversationId !== null &&
     pinned?.some((p) => p.id === conversationId) &&
@@ -378,11 +382,16 @@ function ChatWindow({
           )}
           {streaming && (
             <div className="flex justify-start">
-              <div className="bg-muted rounded-lg px-4 py-2 max-w-[80%]">
+              <div
+                className="bg-muted rounded-lg px-4 py-2 max-w-[80%]"
+                aria-live="polite"
+                aria-atomic="false"
+                aria-label={t("chat.assistantResponseLabel")}
+              >
                 {streamedTokens ? (
                   <MarkdownContent content={streamedTokens} />
                 ) : (
-                  <div className="flex gap-1">
+                  <div className="flex gap-1" aria-hidden="true">
                     <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
                     <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
                     <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:300ms]" />
@@ -392,7 +401,7 @@ function ChatWindow({
             </div>
           )}
           {error && (
-            <p className="text-sm text-destructive text-center">{error}</p>
+            <p role="alert" className="text-sm text-destructive text-center">{error}</p>
           )}
           <div ref={messagesEndRef} />
         </div>

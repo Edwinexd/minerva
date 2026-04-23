@@ -189,7 +189,9 @@
     "condition": {
       "valuePlaceholder": "urn:mace:swami.se:gmai:dsv-user:staff",
       "add": "Lägg till",
-      "removeLabel": "Ta bort villkor"
+      "removeLabel": "Ta bort villkor",
+      "attributeLabel": "Attribut",
+      "operatorLabel": "Operator"
     }
   },
   "externalInvites": {

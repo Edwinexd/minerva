@@ -4,9 +4,12 @@ import { useTranslation } from "react-i18next"
 import { api } from "@/lib/api"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useApiErrorMessage } from "@/lib/use-api-error"
+import { useDocumentTitle } from "@/lib/use-document-title"
 
 export function JoinPage({ useParams }: { useParams: () => { token: string } }) {
   const { t } = useTranslation("auth")
+  const { t: tCommon } = useTranslation("common")
+  useDocumentTitle(tCommon("pageTitles.join"))
   const { token } = useParams()
   const navigate = useNavigate()
   const formatError = useApiErrorMessage()

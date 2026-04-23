@@ -122,6 +122,8 @@ function CreateInviteForm({ onCreated }: { onCreated: (inv: ExternalAuthInviteCr
           placeholder={t("externalInvites.form.identifierPlaceholder")}
           value={eppn}
           onChange={(e) => setEppn(e.target.value)}
+          aria-invalid={mutation.isError || undefined}
+          aria-describedby={mutation.isError ? "external-invite-error" : undefined}
         />
       </label>
       <label className="block">
@@ -148,7 +150,7 @@ function CreateInviteForm({ onCreated }: { onCreated: (inv: ExternalAuthInviteCr
         {mutation.isPending ? t("externalInvites.form.creating") : t("externalInvites.form.create")}
       </Button>
       {mutation.isError && (
-        <p className="sm:col-span-4 text-xs text-destructive">{formatError(mutation.error)}</p>
+        <p id="external-invite-error" role="alert" className="sm:col-span-4 text-xs text-destructive">{formatError(mutation.error)}</p>
       )}
     </form>
   )
@@ -178,6 +180,7 @@ function CreatedInviteCallout({
           type="button"
           className="text-xs text-muted-foreground hover:underline"
           onClick={onDismiss}
+          aria-label={t("externalInvites.callout.dismiss")}
         >
           {t("externalInvites.callout.dismiss")}
         </button>

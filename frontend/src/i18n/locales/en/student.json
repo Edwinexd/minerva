@@ -15,7 +15,8 @@
     "disclaimerBefore": "Messages and relevant course-material excerpts are sent to Cerebras for AI inference. Responses may be inaccurate; verify with course materials. See ",
     "dataHandlingLink": "how Minerva handles your data",
     "disclaimerAfter": ".",
-    "unknownError": "Unknown error"
+    "unknownError": "Unknown error",
+    "assistantResponseLabel": "Assistant response"
   },
   "message": {
     "tokensUsed_one": "{{count}} token",

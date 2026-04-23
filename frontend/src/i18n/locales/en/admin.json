@@ -189,7 +189,9 @@
     "condition": {
       "valuePlaceholder": "urn:mace:swami.se:gmai:dsv-user:staff",
       "add": "Add",
-      "removeLabel": "Remove condition"
+      "removeLabel": "Remove condition",
+      "attributeLabel": "Attribute",
+      "operatorLabel": "Operator"
     }
   },
   "externalInvites": {

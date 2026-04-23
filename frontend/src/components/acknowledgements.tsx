@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next"
+import { useDocumentTitle } from "@/lib/use-document-title"
 
 interface Credit {
   name: string
@@ -20,6 +21,7 @@ const CREDITS: Credit[] = [
 
 export function AcknowledgementsPage() {
   const { t } = useTranslation("common")
+  useDocumentTitle(t("pageTitles.acknowledgements"))
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold tracking-tight mb-6">

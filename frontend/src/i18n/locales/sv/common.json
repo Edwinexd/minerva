@@ -3,7 +3,29 @@
     "admin": "Admin",
     "dataHandling": "Datahantering",
     "acknowledgements": "Tack till",
-    "openInNewTab": "Öppna i ny flik"
+    "openInNewTab": "Öppna i ny flik",
+    "skipToContent": "Hoppa till innehåll"
+  },
+  "pageTitles": {
+    "home": "Start",
+    "admin": "Admin",
+    "adminTab": {
+      "usage": "Användning",
+      "users": "Användare",
+      "courses": "Kurser",
+      "rules": "Rollregler",
+      "externalInvites": "Externa inbjudningar",
+      "lti": "LTI",
+      "integrations": "Integrationer",
+      "system": "System"
+    },
+    "teacherCourse": "Lärare: {{course}}",
+    "course": "{{course}}",
+    "embed": "{{course}}",
+    "dataHandling": "Datahantering",
+    "acknowledgements": "Tack till",
+    "join": "Gå med i kurs",
+    "ltiBind": "Länka kurs"
   },
   "footer": {
     "licenseLead": "är licensierad under"

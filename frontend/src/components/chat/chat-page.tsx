@@ -245,7 +245,11 @@ function ChatWindow({
     setInput("")
   }, [conversationId])
 
-  const sendMessage = async (content: string, targetConvId: string): Promise<boolean> => {
+  // Returns the conversation id this send landed in (the existing one for
+  // an append, or the server-assigned one for a brand-new conv signaled
+  // via the first SSE event), or null if the send failed before any conv
+  // was created.
+  const sendMessage = async (content: string, existingConvId: string | null): Promise<string | null> => {
     setError(null)
     setStreaming(true)
     setStreamedTokens("")
@@ -255,12 +259,21 @@ function ChatWindow({
     const headers: Record<string, string> = { "Content-Type": "application/json" }
     if (devUser) headers["X-Dev-User"] = devUser
 
+    // Existing conv -> append endpoint. New conv -> the course-level
+    // create-with-message endpoint, which generates the id server-side and
+    // returns it as the first SSE event.
+    const url = existingConvId
+      ? `/api/courses/${courseId}/conversations/${existingConvId}/message`
+      : `/api/courses/${courseId}/conversations`
+
+    let landedConvId: string | null = existingConvId
     let success = true
     try {
-      const response = await fetch(
-        `/api/courses/${courseId}/conversations/${targetConvId}/message`,
-        { method: "POST", headers, body: JSON.stringify({ content }) },
-      )
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ content }),
+      })
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({ error: response.statusText }))
@@ -286,6 +299,8 @@ function ChatWindow({
                 const data = JSON.parse(line.slice(6))
                 if (data.type === "token") {
                   setStreamedTokens((prev) => prev + data.token)
+                } else if (data.type === "conversation_created") {
+                  landedConvId = data.id
                 } else if (data.type === "error") {
                   setError(data.error)
                   success = false
@@ -304,14 +319,16 @@ function ChatWindow({
       setStreaming(false)
       setStreamedTokens("")
       setPendingUserMsg(null)
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations", targetConvId],
-      })
+      if (landedConvId) {
+        queryClient.invalidateQueries({
+          queryKey: ["courses", courseId, "conversations", landedConvId],
+        })
+      }
       queryClient.invalidateQueries({
         queryKey: ["courses", courseId, "conversations"],
       })
     }
-    return success
+    return success ? landedConvId : null
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -320,25 +337,16 @@ function ChatWindow({
     const msg = input
     setInput("")
 
-    if (conversationId === null) {
-      // Lazy-create: client picks the conv id and posts the first message
-      // directly. The backend creates the conversation row only after its
-      // gate checks (privacy ack, per-course cap, owner cap) pass, so a
-      // rejected first message never leaves an "Untitled, 0 msgs" behind.
-      const newId = crypto.randomUUID()
-      ;(async () => {
-        const ok = await sendMessage(msg, newId)
-        if (ok) {
-          navigate({
-            to: "/course/$courseId/$conversationId",
-            params: { courseId, conversationId: newId },
-            replace: true,
-          })
-        }
-      })()
-    } else {
-      sendMessage(msg, conversationId)
-    }
+    ;(async () => {
+      const landedConvId = await sendMessage(msg, conversationId)
+      if (landedConvId && conversationId === null) {
+        navigate({
+          to: "/course/$courseId/$conversationId",
+          params: { courseId, conversationId: landedConvId },
+          replace: true,
+        })
+      }
+    })()
   }
 
   return (

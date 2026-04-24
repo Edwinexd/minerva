@@ -14,23 +14,18 @@ use axum::{Json, Router};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::routes::enforce_owner_cap;
 use crate::routes::integration::verify_embed_token;
 use crate::state::AppState;
-use crate::strategy;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/course/{course_id}", get(get_course))
         .route(
             "/course/{course_id}/conversations",
-            get(list_conversations).post(create_conversation),
+            get(list_conversations).post(start_conversation),
         )
         .route(
             "/course/{course_id}/conversations/{cid}",
@@ -190,26 +185,6 @@ async fn list_conversations(
     ))
 }
 
-async fn create_conversation(
-    State(state): State<AppState>,
-    Path(course_id): Path<Uuid>,
-    Query(query): Query<TokenQuery>,
-) -> Result<Json<ConversationResponse>, AppError> {
-    let (_, user_id) = authenticate(&state, course_id, &query)?;
-
-    let id = Uuid::new_v4();
-    let row = minerva_db::queries::conversations::find_or_create(&state.db, id, course_id, user_id)
-        .await?;
-
-    Ok(Json(ConversationResponse {
-        id: row.id,
-        course_id: row.course_id,
-        title: row.title,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-    }))
-}
-
 async fn get_conversation(
     State(state): State<AppState>,
     Path((course_id, cid)): Path<(Uuid, Uuid)>,
@@ -253,101 +228,63 @@ async fn send_message(
     Path((course_id, cid)): Path<(Uuid, Uuid)>,
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
-    // Token is in the JSON body for SSE (can't use query params with EventSource POST).
-    let (_, user_id) = verify_embed_token(&state.config.hmac_secret, &body.token)
-        .map_err(|_| AppError::Unauthorized)?;
+    let (course, user_id, privacy_acked_at) =
+        authenticate_for_message(&state, course_id, &body.token).await?;
+    crate::routes::chat::run_chat_message(
+        &state,
+        course,
+        user_id,
+        privacy_acked_at,
+        Some(cid),
+        body.content,
+    )
+    .await
+}
 
-    if verify_embed_token(&state.config.hmac_secret, &body.token)
-        .map(|(cid, _)| cid != course_id)
-        .unwrap_or(true)
-    {
+async fn start_conversation(
+    State(state): State<AppState>,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<SendMessageRequest>,
+) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
+    let (course, user_id, privacy_acked_at) =
+        authenticate_for_message(&state, course_id, &body.token).await?;
+    crate::routes::chat::run_chat_message(
+        &state,
+        course,
+        user_id,
+        privacy_acked_at,
+        None,
+        body.content,
+    )
+    .await
+}
+
+/// Token-auth path used by both message-streaming endpoints. Token lives
+/// in the JSON body because EventSource POSTs can't carry query params.
+async fn authenticate_for_message(
+    state: &AppState,
+    path_course_id: Uuid,
+    token: &str,
+) -> Result<
+    (
+        minerva_db::queries::courses::CourseRow,
+        Uuid,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ),
+    AppError,
+> {
+    let (token_course_id, user_id) =
+        verify_embed_token(&state.config.hmac_secret, token).map_err(|_| AppError::Unauthorized)?;
+    if token_course_id != path_course_id {
         return Err(AppError::Forbidden);
     }
 
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::courses::find_by_id(&state.db, path_course_id)
         .await?
         .ok_or(AppError::NotFound)?;
-
-    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if conv.user_id != user_id || conv.course_id != course_id {
-        return Err(AppError::Forbidden);
-    }
-
-    // Same ack gate as the non-embed route, applied to every user regardless
-    // of role. LTI embed is where most first-time users land.
-    let user_row = minerva_db::queries::users::find_by_id(&state.db, user_id)
+    let user = minerva_db::queries::users::find_by_id(&state.db, user_id)
         .await?
         .ok_or(AppError::Unauthorized)?;
-    if user_row.privacy_acknowledged_at.is_none() {
-        return Err(AppError::PrivacyNotAcknowledged);
-    }
 
-    // Enforce per-student-per-course daily cap (0 = unlimited).
-    if course.daily_token_limit > 0 {
-        let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user_id, course_id)
-            .await?;
-        if used >= course.daily_token_limit {
-            return Err(AppError::QuotaExceeded);
-        }
-    }
-    // Enforce the course owner's aggregate cap across all owned courses.
-    enforce_owner_cap(&state, course.owner_id).await?;
-
-    // Save user message.
-    let user_msg_id = Uuid::new_v4();
-    minerva_db::queries::conversations::insert_message(
-        &state.db,
-        user_msg_id,
-        cid,
-        "user",
-        &body.content,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
-    .await?;
-
-    let history = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
-    let is_first_message = history.len() <= 1;
-
-    let (tx, rx) = mpsc::channel::<Result<Event, AppError>>(32);
-
-    let strategy_name = course.strategy.clone();
-
-    let ctx = strategy::GenerationContext {
-        course_name: course.name,
-        custom_prompt: course.system_prompt,
-        model: course.model,
-        temperature: course.temperature,
-        max_chunks: course.max_chunks,
-        min_score: course.min_score,
-        course_id,
-        conversation_id: cid,
-        user_id: conv.user_id,
-        cerebras_api_key: state.config.cerebras_api_key.clone(),
-        cerebras_base_url: strategy::common::CEREBRAS_CHAT_COMPLETIONS_URL.to_string(),
-        openai_api_key: state.config.openai_api_key.clone(),
-        embedding_provider: course.embedding_provider,
-        embedding_model: course.embedding_model,
-        history,
-        user_content: body.content,
-        is_first_message,
-        daily_token_limit: course.daily_token_limit,
-        db: state.db.clone(),
-        qdrant: Arc::clone(&state.qdrant),
-        fastembed: Arc::clone(&state.fastembed),
-    };
-
-    tokio::spawn(async move {
-        strategy::run_strategy(&strategy_name, ctx, tx).await;
-    });
-
-    let stream = ReceiverStream::new(rx);
-    Ok(Sse::new(Box::pin(stream)))
+    Ok((course, user_id, user.privacy_acknowledged_at))
 }

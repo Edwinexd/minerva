@@ -142,15 +142,12 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
 
   const needsPrivacyAck = !!me && !me.privacy_acknowledged_at
 
-  const createConversation = async () => {
-    if (!token) return
-    try {
-      const conv = await embedPost<EmbedConversation>(`/course/${courseId}/conversations`, token)
-      setConversations((prev) => [conv, ...prev])
-      setActiveConvId(conv.id)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("embed.failedToCreateConversation"))
-    }
+  // "New chat" is a UI-only action: it just clears the active conversation
+  // so EmbedChatWindow renders a blank state with the input ready. The
+  // actual conversation row is created lazily when the user submits their
+  // first message (see EmbedChatWindow.handleSubmit).
+  const startNewConversation = () => {
+    setActiveConvId(null)
   }
 
   const refreshConversations = async () => {
@@ -225,7 +222,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
             <X className="w-4 h-4" />
           </Button>
         </div>
-        <Button size="sm" className="mb-3" onClick={createConversation}>
+        <Button size="sm" className="mb-3" onClick={startNewConversation}>
           {t("embed.newChat")}
         </Button>
         <div className="space-y-1 overflow-y-auto flex-1">
@@ -251,20 +248,15 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
       </div>
 
       <div className="flex-1 flex flex-col min-w-0 pl-12 md:pl-0">
-        {activeConvId ? (
-          <EmbedChatWindow
-            courseId={courseId}
-            conversationId={activeConvId}
-            token={token}
-            onMessageSent={refreshConversations}
-            needsPrivacyAck={needsPrivacyAck}
-            onAcknowledgePrivacy={acknowledgePrivacy}
-          />
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground">
-            <p>{t("embed.emptyState")}</p>
-          </div>
-        )}
+        <EmbedChatWindow
+          courseId={courseId}
+          conversationId={activeConvId}
+          token={token}
+          onMessageSent={refreshConversations}
+          onConversationCreated={setActiveConvId}
+          needsPrivacyAck={needsPrivacyAck}
+          onAcknowledgePrivacy={acknowledgePrivacy}
+        />
       </div>
     </div>
   )
@@ -277,13 +269,15 @@ function EmbedChatWindow({
   conversationId,
   token,
   onMessageSent,
+  onConversationCreated,
   needsPrivacyAck,
   onAcknowledgePrivacy,
 }: {
   courseId: string
-  conversationId: string
+  conversationId: string | null
   token: string
   onMessageSent: () => void
+  onConversationCreated: (id: string) => void
   needsPrivacyAck: boolean
   onAcknowledgePrivacy: () => Promise<void>
 }) {
@@ -297,16 +291,24 @@ function EmbedChatWindow({
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Load messages when conversation changes.
+  // Load messages when conversation changes. When conversationId is null,
+  // the user clicked "New chat" and no conv row exists yet; render an
+  // empty thread with the input ready (lazy creation happens on first send).
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
     setStreaming(false)
     setStreamedTokens("")
     setPendingUserMsg(null)
     setError(null)
     setInput("")
 
+    if (conversationId === null) {
+      setMessages([])
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
     embedGet<EmbedConversationDetail>(`/course/${courseId}/conversations/${conversationId}`, token)
       .then((data) => {
         if (!cancelled) {
@@ -332,21 +334,31 @@ function EmbedChatWindow({
     scrollToBottom()
   }, [messages, streamedTokens, scrollToBottom])
 
-  const sendMessage = async (content: string) => {
+  // Returns the conversation id this send landed in (the existing one for
+  // an append, or the server-assigned one for a brand-new conv signaled
+  // via the first SSE event), or null if the send failed before any conv
+  // was created.
+  const sendMessage = async (content: string, existingConvId: string | null): Promise<string | null> => {
     setError(null)
     setStreaming(true)
     setStreamedTokens("")
     setPendingUserMsg(content)
 
+    // Existing conv -> append endpoint. New conv -> the course-level
+    // create-with-message endpoint, which generates the id server-side and
+    // returns it as the first SSE event.
+    const url = existingConvId
+      ? `/api/embed/course/${courseId}/conversations/${existingConvId}/message`
+      : `/api/embed/course/${courseId}/conversations`
+
+    let landedConvId: string | null = existingConvId
+    let success = true
     try {
-      const response = await fetch(
-        `/api/embed/course/${courseId}/conversations/${conversationId}/message`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, token }),
-        },
-      )
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, token }),
+      })
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({ error: response.statusText }))
@@ -372,8 +384,11 @@ function EmbedChatWindow({
                 const data = JSON.parse(line.slice(6))
                 if (data.type === "token") {
                   setStreamedTokens((prev) => prev + data.token)
+                } else if (data.type === "conversation_created") {
+                  landedConvId = data.id
                 } else if (data.type === "error") {
                   setError(data.error)
+                  success = false
                 }
               } catch {
                 // skip malformed json
@@ -384,22 +399,25 @@ function EmbedChatWindow({
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : t("embed.unknownError"))
+      success = false
     } finally {
       setStreaming(false)
       setStreamedTokens("")
       setPendingUserMsg(null)
-      // Reload messages
-      try {
-        const data = await embedGet<EmbedConversationDetail>(
-          `/course/${courseId}/conversations/${conversationId}`,
-          token,
-        )
-        setMessages(data.messages)
-      } catch {
-        // Silent
+      if (success && landedConvId) {
+        try {
+          const data = await embedGet<EmbedConversationDetail>(
+            `/course/${courseId}/conversations/${landedConvId}`,
+            token,
+          )
+          setMessages(data.messages)
+        } catch {
+          // Silent
+        }
+        onMessageSent()
       }
-      onMessageSent()
     }
+    return success ? landedConvId : null
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -407,7 +425,13 @@ function EmbedChatWindow({
     if (!input.trim() || streaming) return
     const msg = input
     setInput("")
-    sendMessage(msg)
+
+    ;(async () => {
+      const landedConvId = await sendMessage(msg, conversationId)
+      if (landedConvId && conversationId === null) {
+        onConversationCreated(landedConvId)
+      }
+    })()
   }
 
   return (

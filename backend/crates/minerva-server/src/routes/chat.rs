@@ -21,7 +21,10 @@ use crate::strategy;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/conversations", get(list_conversations))
+        .route(
+            "/conversations",
+            get(list_conversations).post(start_conversation),
+        )
         .route("/conversations/all", get(list_all_conversations))
         .route("/conversations/pinned", get(list_pinned_conversations))
         .route("/conversations/topics", get(popular_topics))
@@ -668,70 +671,112 @@ async fn send_message(
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course = verify_course_access(&state, course_id, user.id).await?;
+    run_chat_message(
+        &state,
+        course,
+        user.id,
+        user.privacy_acknowledged_at,
+        Some(cid),
+        body.content,
+    )
+    .await
+}
 
-    // If the conversation already exists, scope-check it up front (mirrors
-    // the IDOR fix in get_conversation): cross-course id -> NotFound,
-    // same-course but other-user -> Forbidden. A non-existent id is left
-    // unresolved here and lazily created after the gates pass, so a
-    // rejected first message never leaves an orphan "Untitled, 0 msgs".
-    let existing = minerva_db::queries::conversations::find_by_id(&state.db, cid).await?;
-    if let Some(ref c) = existing {
-        if c.course_id != course_id {
+async fn start_conversation(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<SendMessageRequest>,
+) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
+    let course = verify_course_access(&state, course_id, user.id).await?;
+    run_chat_message(
+        &state,
+        course,
+        user.id,
+        user.privacy_acknowledged_at,
+        None,
+        body.content,
+    )
+    .await
+}
+
+/// Shared post-auth message pipeline used by both the Shibboleth and embed
+/// routes. Caller is responsible for proving the user has access to
+/// `course`; this helper trusts that and only enforces conv scoping,
+/// privacy ack, daily caps, and message persistence.
+///
+/// `cid = Some(_)` appends to that conversation; `None` lazily creates a
+/// new one *after* all gates pass and signals the freshly-minted id to
+/// the client as the stream's first SSE event:
+/// `data: {"type":"conversation_created","id":"<uuid>"}`. Server-side id
+/// generation keeps clients out of the trust boundary for resource
+/// identifiers and means a rejected first message leaves no orphan
+/// "Untitled, 0 msgs" row.
+pub(super) async fn run_chat_message(
+    state: &AppState,
+    course: minerva_db::queries::courses::CourseRow,
+    user_id: Uuid,
+    user_privacy_acknowledged_at: Option<chrono::DateTime<chrono::Utc>>,
+    cid: Option<Uuid>,
+    user_content: String,
+) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
+    let course_id = course.id;
+
+    // For an existing-conv send, scope-check up front (mirrors the IDOR
+    // fix in get_conversation): cross-course id -> NotFound, same-course
+    // but other-user -> Forbidden. The new-conv path skips this since the
+    // id doesn't exist yet.
+    let existing = if let Some(cid) = cid {
+        let row = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if row.course_id != course_id {
             return Err(AppError::NotFound);
         }
-        if c.user_id != user.id {
+        if row.user_id != user_id {
             return Err(AppError::Forbidden);
         }
-    }
+        Some(row)
+    } else {
+        None
+    };
 
-    // Every user must acknowledge the in-app data-handling disclosure before
-    // sending their first message, regardless of role.
-    if user.privacy_acknowledged_at.is_none() {
+    if user_privacy_acknowledged_at.is_none() {
         return Err(AppError::PrivacyNotAcknowledged);
     }
 
-    // Enforce per-student-per-course daily cap (0 = unlimited)
     if course.daily_token_limit > 0 {
-        let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user.id, course_id)
+        let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user_id, course_id)
             .await?;
         if used >= course.daily_token_limit {
             return Err(AppError::QuotaExceeded);
         }
     }
 
-    // Enforce the course owner's aggregate daily cap (sum across every
-    // course they own). Acts as a sanity ceiling on a single teacher's
-    // total AI spend regardless of per-course settings.
-    enforce_owner_cap(&state, course.owner_id).await?;
+    enforce_owner_cap(state, course.owner_id).await?;
 
-    let conv = match existing {
-        Some(c) => c,
+    // Existing conv: reuse the row already loaded. New conv: server picks
+    // the id and inserts. Either way, by this point the conv definitely
+    // exists in the DB before we save the user message.
+    let (conv, was_created) = match existing {
+        Some(c) => (c, false),
         None => {
-            let row = minerva_db::queries::conversations::find_or_create(
-                &state.db, cid, course_id, user.id,
-            )
-            .await?;
-            // Race re-check: another request could have created this id
-            // between our find_by_id and find_or_create. Vanishingly
-            // unlikely with random v4 UUIDs, but cheap to enforce.
-            if row.course_id != course_id {
-                return Err(AppError::NotFound);
-            }
-            if row.user_id != user.id {
-                return Err(AppError::Forbidden);
-            }
-            row
+            let new_id = Uuid::new_v4();
+            let row =
+                minerva_db::queries::conversations::create(&state.db, new_id, course_id, user_id)
+                    .await?;
+            (row, true)
         }
     };
+    let conv_id = conv.id;
 
-    // Save user message
     let user_msg_id = Uuid::new_v4();
     minerva_db::queries::conversations::insert_message(
         &state.db,
         user_msg_id,
-        cid,
+        conv_id,
         "user",
-        &body.content,
+        &user_content,
         None,
         None,
         None,
@@ -741,10 +786,23 @@ async fn send_message(
     )
     .await?;
 
-    let history = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
+    let history = minerva_db::queries::conversations::list_messages(&state.db, conv_id).await?;
     let is_first_message = history.len() <= 1;
 
     let (tx, rx) = mpsc::channel::<Result<Event, AppError>>(32);
+
+    // Front-load the new-conv id so the client learns it before any tokens
+    // arrive. The 32-slot channel buffer fits this without blocking the
+    // strategy spawn.
+    if was_created {
+        let payload = serde_json::json!({
+            "type": "conversation_created",
+            "id": conv_id,
+        });
+        let _ = tx
+            .send(Ok(Event::default().data(payload.to_string())))
+            .await;
+    }
 
     let strategy_name = course.strategy.clone();
 
@@ -756,7 +814,7 @@ async fn send_message(
         max_chunks: course.max_chunks,
         min_score: course.min_score,
         course_id,
-        conversation_id: cid,
+        conversation_id: conv_id,
         user_id: conv.user_id,
         cerebras_api_key: state.config.cerebras_api_key.clone(),
         cerebras_base_url: strategy::common::CEREBRAS_CHAT_COMPLETIONS_URL.to_string(),
@@ -764,7 +822,7 @@ async fn send_message(
         embedding_provider: course.embedding_provider,
         embedding_model: course.embedding_model,
         history,
-        user_content: body.content,
+        user_content,
         is_first_message,
         daily_token_limit: course.daily_token_limit,
         db: state.db.clone(),

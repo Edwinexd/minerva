@@ -53,21 +53,36 @@ pub struct MessageRow {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-pub async fn create(
+/// Insert a conversation if no row with this id exists, otherwise return
+/// the existing row untouched. Race-safe via `ON CONFLICT (id) DO NOTHING
+/// RETURNING ...` with a follow-up `find_by_id` if a concurrent insert
+/// won. Lets `send_message` defer conv creation until after gate checks
+/// pass, so a rejected first message leaves no orphan "Untitled, 0 msgs".
+/// Callers that supply the id must verify the returned row's course_id
+/// and user_id, since on a race the existing row may not match.
+pub async fn find_or_create(
     db: &PgPool,
     id: Uuid,
     course_id: Uuid,
     user_id: Uuid,
 ) -> Result<ConversationRow, sqlx::Error> {
-    sqlx::query_as!(
+    let inserted = sqlx::query_as!(
         ConversationRow,
-        "INSERT INTO conversations (id, course_id, user_id) VALUES ($1, $2, $3) RETURNING id, course_id, user_id, title, pinned, created_at, updated_at",
+        "INSERT INTO conversations (id, course_id, user_id) VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO NOTHING
+         RETURNING id, course_id, user_id, title, pinned, created_at, updated_at",
         id,
         course_id,
         user_id,
     )
-    .fetch_one(db)
-    .await
+    .fetch_optional(db)
+    .await?;
+
+    if let Some(row) = inserted {
+        return Ok(row);
+    }
+
+    find_by_id(db, id).await?.ok_or(sqlx::Error::RowNotFound)
 }
 
 pub async fn list_by_course_user(

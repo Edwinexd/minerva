@@ -21,10 +21,7 @@ use crate::strategy;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/conversations",
-            get(list_conversations).post(create_conversation),
-        )
+        .route("/conversations", get(list_conversations))
         .route("/conversations/all", get(list_all_conversations))
         .route("/conversations/pinned", get(list_pinned_conversations))
         .route("/conversations/topics", get(popular_topics))
@@ -565,26 +562,6 @@ async fn popular_topics(
     Ok(Json(topics))
 }
 
-async fn create_conversation(
-    State(state): State<AppState>,
-    Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
-) -> Result<Json<ConversationResponse>, AppError> {
-    verify_course_access(&state, course_id, user.id).await?;
-
-    let id = Uuid::new_v4();
-    let row = minerva_db::queries::conversations::create(&state.db, id, course_id, user.id).await?;
-
-    Ok(Json(ConversationResponse {
-        id: row.id,
-        course_id: row.course_id,
-        title: row.title,
-        pinned: row.pinned,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-    }))
-}
-
 async fn get_conversation(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -692,12 +669,19 @@ async fn send_message(
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course = verify_course_access(&state, course_id, user.id).await?;
 
-    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if conv.user_id != user.id {
-        return Err(AppError::Forbidden);
+    // If the conversation already exists, scope-check it up front (mirrors
+    // the IDOR fix in get_conversation): cross-course id -> NotFound,
+    // same-course but other-user -> Forbidden. A non-existent id is left
+    // unresolved here and lazily created after the gates pass, so a
+    // rejected first message never leaves an orphan "Untitled, 0 msgs".
+    let existing = minerva_db::queries::conversations::find_by_id(&state.db, cid).await?;
+    if let Some(ref c) = existing {
+        if c.course_id != course_id {
+            return Err(AppError::NotFound);
+        }
+        if c.user_id != user.id {
+            return Err(AppError::Forbidden);
+        }
     }
 
     // Every user must acknowledge the in-app data-handling disclosure before
@@ -719,6 +703,26 @@ async fn send_message(
     // course they own). Acts as a sanity ceiling on a single teacher's
     // total AI spend regardless of per-course settings.
     enforce_owner_cap(&state, course.owner_id).await?;
+
+    let conv = match existing {
+        Some(c) => c,
+        None => {
+            let row = minerva_db::queries::conversations::find_or_create(
+                &state.db, cid, course_id, user.id,
+            )
+            .await?;
+            // Race re-check: another request could have created this id
+            // between our find_by_id and find_or_create. Vanishingly
+            // unlikely with random v4 UUIDs, but cheap to enforce.
+            if row.course_id != course_id {
+                return Err(AppError::NotFound);
+            }
+            if row.user_id != user.id {
+                return Err(AppError::Forbidden);
+            }
+            row
+        }
+    };
 
     // Save user message
     let user_msg_id = Uuid::new_v4();

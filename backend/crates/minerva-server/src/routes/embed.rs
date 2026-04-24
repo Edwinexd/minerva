@@ -198,7 +198,8 @@ async fn create_conversation(
     let (_, user_id) = authenticate(&state, course_id, &query)?;
 
     let id = Uuid::new_v4();
-    let row = minerva_db::queries::conversations::create(&state.db, id, course_id, user_id).await?;
+    let row = minerva_db::queries::conversations::find_or_create(&state.db, id, course_id, user_id)
+        .await?;
 
     Ok(Json(ConversationResponse {
         id: row.id,

@@ -17,7 +17,7 @@ import { ChevronDown, ChevronUp, Menu, X } from "lucide-react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import React, { useState, useRef, useEffect, useCallback } from "react"
-import type { Conversation, Message, MessageFeedback, TeacherNote } from "@/lib/types"
+import type { Message, MessageFeedback, TeacherNote } from "@/lib/types"
 import { FeedbackControls } from "@/components/message-feedback"
 import { PrivacyAckBanner } from "@/components/privacy-ack"
 import { useDocumentTitle } from "@/lib/use-document-title"
@@ -321,21 +321,19 @@ function ChatWindow({
     setInput("")
 
     if (conversationId === null) {
+      // Lazy-create: client picks the conv id and posts the first message
+      // directly. The backend creates the conversation row only after its
+      // gate checks (privacy ack, per-course cap, owner cap) pass, so a
+      // rejected first message never leaves an "Untitled, 0 msgs" behind.
+      const newId = crypto.randomUUID()
       ;(async () => {
-        setPendingUserMsg(msg)
-        try {
-          const conv = await api.post<Conversation>(`/courses/${courseId}/conversations`, {})
-          const ok = await sendMessage(msg, conv.id)
-          if (ok) {
-            navigate({
-              to: "/course/$courseId/$conversationId",
-              params: { courseId, conversationId: conv.id },
-              replace: true,
-            })
-          }
-        } catch (e) {
-          setError(e instanceof Error ? e.message : t("chat.unknownError"))
-          setPendingUserMsg(null)
+        const ok = await sendMessage(msg, newId)
+        if (ok) {
+          navigate({
+            to: "/course/$courseId/$conversationId",
+            params: { courseId, conversationId: newId },
+            replace: true,
+          })
         }
       })()
     } else {

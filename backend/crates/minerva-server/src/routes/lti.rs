@@ -344,17 +344,14 @@ async fn handle_launch(
     // 6. Find or create the user.
     //    Reuses an existing Shib user's record if present; does NOT modify
     //    their role or display name -- LTI should not alter existing accounts.
-    let user = match minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await? {
-        Some(u) => u,
-        None => {
-            let id = Uuid::new_v4();
-            minerva_db::queries::users::insert(&state.db, id, &eppn, display_name, "student")
-                .await?;
-            minerva_db::queries::users::find_by_id(&state.db, id)
-                .await?
-                .ok_or_else(|| AppError::Internal("user creation failed".into()))?
-        }
-    };
+    let (user, _) = minerva_db::queries::users::find_or_create_by_eppn(
+        &state.db,
+        &eppn,
+        display_name,
+        "student",
+        state.config.default_owner_daily_token_limit,
+    )
+    .await?;
 
     // 7. Resolve target Minerva course. For a per-course registration the
     //    course is baked in. For a site-level platform we look up a binding

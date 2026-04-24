@@ -35,24 +35,42 @@ pub async fn find_by_eppn(db: &PgPool, eppn: &str) -> Result<Option<UserRow>, sq
     .await
 }
 
-pub async fn insert(
+/// Find a user by eppn, or create one with the given defaults if none exists.
+/// Returns `(user, created)` where `created` is true iff this call inserted
+/// the row. Race-safe via `ON CONFLICT (eppn) DO NOTHING RETURNING`: if a
+/// concurrent request wins the insert, we fall through to a follow-up
+/// `find_by_eppn`. The owner cap is applied only on insert, never on the
+/// follow-up fetch, mirroring `upsert`'s grandfathering semantics.
+pub async fn find_or_create_by_eppn(
     db: &PgPool,
-    id: Uuid,
     eppn: &str,
     display_name: Option<&str>,
     role: &str,
-) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "INSERT INTO users (id, eppn, display_name, role) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (eppn) DO NOTHING",
-        id,
+    default_owner_daily_token_limit: i64,
+) -> Result<(UserRow, bool), sqlx::Error> {
+    let inserted = sqlx::query_as!(
+        UserRow,
+        "INSERT INTO users (id, eppn, display_name, role, owner_daily_token_limit)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (eppn) DO NOTHING
+         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at",
+        Uuid::new_v4(),
         eppn,
         display_name,
         role,
+        default_owner_daily_token_limit,
     )
-    .execute(db)
+    .fetch_optional(db)
     .await?;
-    Ok(())
+
+    if let Some(row) = inserted {
+        return Ok((row, true));
+    }
+
+    let existing = find_by_eppn(db, eppn)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    Ok((existing, false))
 }
 
 /// Upsert called on every authenticated request. The role argument is the

@@ -151,32 +151,20 @@ async fn ensure_user(
     authenticate(&state, &headers).await?;
 
     let eppn = body.eppn.trim().to_lowercase();
-    let existing = minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await?;
-    match existing {
-        Some(user) => Ok(Json(UserInfo {
-            id: user.id,
-            eppn: user.eppn,
-            display_name: user.display_name,
-            created: false,
-        })),
-        None => {
-            let id = Uuid::new_v4();
-            minerva_db::queries::users::insert(
-                &state.db,
-                id,
-                &eppn,
-                body.display_name.as_deref(),
-                "student",
-            )
-            .await?;
-            Ok(Json(UserInfo {
-                id,
-                eppn,
-                display_name: body.display_name,
-                created: true,
-            }))
-        }
-    }
+    let (user, created) = minerva_db::queries::users::find_or_create_by_eppn(
+        &state.db,
+        &eppn,
+        body.display_name.as_deref(),
+        "student",
+        state.config.default_owner_daily_token_limit,
+    )
+    .await?;
+    Ok(Json(UserInfo {
+        id: user.id,
+        eppn: user.eppn,
+        display_name: user.display_name,
+        created,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -200,22 +188,15 @@ async fn add_member(
         .ok_or(AppError::NotFound)?;
 
     let eppn = body.eppn.trim().to_lowercase();
-    let user = minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await?;
-    let user_id = match user {
-        Some(u) => u.id,
-        None => {
-            let id = Uuid::new_v4();
-            minerva_db::queries::users::insert(
-                &state.db,
-                id,
-                &eppn,
-                body.display_name.as_deref(),
-                "student",
-            )
-            .await?;
-            id
-        }
-    };
+    let (user, _) = minerva_db::queries::users::find_or_create_by_eppn(
+        &state.db,
+        &eppn,
+        body.display_name.as_deref(),
+        "student",
+        state.config.default_owner_daily_token_limit,
+    )
+    .await?;
+    let user_id = user.id;
 
     let role = body.role.as_deref().unwrap_or("student");
     minerva_db::queries::courses::add_member(&state.db, course_id, user_id, role).await?;
@@ -426,22 +407,15 @@ async fn create_embed_token(
 
     // Ensure the user exists.
     let eppn = body.eppn.trim().to_lowercase();
-    let user = minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await?;
-    let user_id = match user {
-        Some(u) => u.id,
-        None => {
-            let id = Uuid::new_v4();
-            minerva_db::queries::users::insert(
-                &state.db,
-                id,
-                &eppn,
-                body.display_name.as_deref(),
-                "student",
-            )
-            .await?;
-            id
-        }
-    };
+    let (user, _) = minerva_db::queries::users::find_or_create_by_eppn(
+        &state.db,
+        &eppn,
+        body.display_name.as_deref(),
+        "student",
+        state.config.default_owner_daily_token_limit,
+    )
+    .await?;
+    let user_id = user.id;
 
     // Ensure the user is a course member.
     if !minerva_db::queries::courses::is_member(&state.db, course_id, user_id).await? {

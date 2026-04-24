@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users (id, eppn, display_name, role, owner_daily_token_limit)\n         VALUES ($1, $2, $3, $4, $5)\n         ON CONFLICT (eppn) DO NOTHING\n         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "eppn",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "suspended",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "role_manually_set",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "owner_daily_token_limit",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "privacy_acknowledged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "0d9f29cef437c5817602eae992c7abfcd506e579f39bb7cdfa778d2a891b4e14"
+}

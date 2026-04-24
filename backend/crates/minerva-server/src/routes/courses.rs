@@ -350,15 +350,15 @@ async fn add_member(
     // Find or create the user by eppn. EPPN is treated case-insensitively
     // to avoid creating duplicate accounts for `alice@su.se` vs `alice@SU.SE`.
     let eppn = body.eppn.trim().to_lowercase();
-    let target_user = minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await?;
-    let target_id = match target_user {
-        Some(u) => u.id,
-        None => {
-            let new_id = Uuid::new_v4();
-            minerva_db::queries::users::insert(&state.db, new_id, &eppn, None, "student").await?;
-            new_id
-        }
-    };
+    let (target, _) = minerva_db::queries::users::find_or_create_by_eppn(
+        &state.db,
+        &eppn,
+        None,
+        "student",
+        state.config.default_owner_daily_token_limit,
+    )
+    .await?;
+    let target_id = target.id;
 
     let role = body.role.as_deref().unwrap_or("student");
     minerva_db::queries::courses::add_member(&state.db, id, target_id, role).await?;

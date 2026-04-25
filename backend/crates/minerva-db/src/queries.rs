@@ -2,6 +2,7 @@ pub mod api_keys;
 pub mod canvas;
 pub mod conversations;
 pub mod courses;
+pub mod document_relations;
 pub mod documents;
 pub mod external_auth;
 pub mod lti;

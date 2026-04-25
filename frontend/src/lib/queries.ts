@@ -180,6 +180,38 @@ export const adminClassificationStatsQuery = queryOptions({
   refetchInterval: 5_000,
 })
 
+// ── Course knowledge graph ─────────────────────────────────────────
+
+export interface KnowledgeGraphNode {
+  id: string
+  filename: string
+  kind: string | null
+  kind_confidence: number | null
+  kind_locked_by_teacher: boolean
+  chunk_count: number | null
+}
+
+export interface KnowledgeGraphEdge {
+  src_id: string
+  dst_id: string
+  relation: "solution_of" | "part_of_unit"
+  confidence: number
+  rationale: string | null
+}
+
+export interface KnowledgeGraph {
+  nodes: KnowledgeGraphNode[]
+  edges: KnowledgeGraphEdge[]
+  edges_computed: boolean
+}
+
+export const courseKnowledgeGraphQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "knowledge-graph"],
+    queryFn: () =>
+      api.get<KnowledgeGraph>(`/courses/${courseId}/documents/knowledge-graph`),
+  })
+
 export const adminRoleRulesQuery = queryOptions({
   queryKey: ["admin", "role-rules"],
   queryFn: () => api.get<RoleRule[]>("/admin/role-rules"),

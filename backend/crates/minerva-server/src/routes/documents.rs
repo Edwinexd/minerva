@@ -37,13 +37,15 @@ pub fn router() -> Router<AppState> {
         )
         .route("/{doc_id}", delete(delete_document).patch(patch_document))
         .route("/{doc_id}/chunks", get(list_chunks))
-        // Course-knowledge-graph V1 endpoints. Teacher-only (course
+        // Course-knowledge-graph endpoints. Teacher-only (course
         // owner / admin / course teacher); auth is enforced inside each
         // handler with the same pattern as `patch_document`.
         .route("/{doc_id}/reclassify", post(reclassify_document))
         .route("/{doc_id}/kind", axum::routing::patch(set_document_kind))
         .route("/{doc_id}/kind/lock", delete(clear_kind_lock))
         .route("/reclassify-all", post(reclassify_all_in_course))
+        .route("/knowledge-graph", get(get_knowledge_graph))
+        .route("/knowledge-graph/rebuild", post(rebuild_knowledge_graph))
         .route("/search", get(search_chunks))
 }
 
@@ -838,5 +840,176 @@ async fn reclassify_all_in_course(
         );
     });
 
+    let state_relink = state.clone();
+    tokio::spawn(async move {
+        // Run after the spawned classify loop has had a chance to
+        // start; the relink itself fetches the *latest* docs from
+        // the DB so it picks up freshly-classified rows. A short
+        // delay coalesces with the classify loop's own work --
+        // worst case both finish in ~the same window.
+        if queued > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+        if let Err(e) = relink_course(&state_relink, course_id).await {
+            tracing::warn!(
+                "reclassify-all: relink failed for course {}: {:?}",
+                course_id,
+                e
+            );
+        }
+    });
+
     Ok(Json(ReclassifyAllResponse { queued }))
+}
+
+// ── Knowledge graph: cross-doc linking + view ─────────────────────
+
+/// Run the cross-doc linker for a single course and replace its
+/// stored edges with the result. Idempotent: each call wipes the
+/// existing edges and writes fresh ones, so a no-op course (no
+/// confident edges) ends up with an empty graph rather than a stale
+/// one.
+///
+/// Crate-public so the admin backfill task can relink each course it
+/// touched after the per-doc classification finishes.
+pub(crate) async fn relink_course(state: &AppState, course_id: Uuid) -> Result<usize, AppError> {
+    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+
+    let http = reqwest::Client::new();
+    let result =
+        crate::classification::linker::link_course(&http, &state.config.cerebras_api_key, &docs)
+            .await
+            .map_err(AppError::Internal)?;
+
+    // Wipe existing edges first -- we always replace, never merge.
+    // The DB's ON CONFLICT path on upsert would also work, but a
+    // teacher who manually flipped a doc's kind expects stale edges
+    // for that doc to disappear, which a pure upsert wouldn't do.
+    minerva_db::queries::document_relations::delete_by_course(&state.db, course_id).await?;
+
+    let mut written = 0usize;
+    for edge in result.edges {
+        match minerva_db::queries::document_relations::upsert(
+            &state.db,
+            course_id,
+            edge.src_id,
+            edge.dst_id,
+            &edge.relation,
+            edge.confidence,
+            edge.rationale.as_deref(),
+        )
+        .await
+        {
+            Ok(_) => written += 1,
+            Err(e) => {
+                tracing::warn!(
+                    "relink: failed to write edge {:?} -> {:?} ({}): {}",
+                    edge.src_id,
+                    edge.dst_id,
+                    edge.relation,
+                    e,
+                );
+            }
+        }
+    }
+
+    tracing::info!(
+        "relink: course {} considered {} doc(s), wrote {} edge(s)",
+        course_id,
+        result.considered,
+        written
+    );
+
+    Ok(written)
+}
+
+#[derive(Serialize)]
+struct GraphNode {
+    id: Uuid,
+    filename: String,
+    kind: Option<String>,
+    kind_confidence: Option<f32>,
+    kind_locked_by_teacher: bool,
+    chunk_count: Option<i32>,
+}
+
+#[derive(Serialize)]
+struct GraphEdge {
+    src_id: Uuid,
+    dst_id: Uuid,
+    relation: String,
+    confidence: f32,
+    rationale: Option<String>,
+}
+
+#[derive(Serialize)]
+struct GraphResponse {
+    nodes: Vec<GraphNode>,
+    edges: Vec<GraphEdge>,
+    /// Whether at least one edge has been computed for this course.
+    /// The UI uses this to show "Build the graph" call-to-action vs
+    /// rendering the viewer.
+    edges_computed: bool,
+}
+
+/// Knowledge-graph view for a single course: every doc as a node
+/// (typed by `kind`), every linker-asserted edge between them.
+async fn get_knowledge_graph(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<GraphResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+
+    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+    let edges_rows =
+        minerva_db::queries::document_relations::list_by_course(&state.db, course_id).await?;
+
+    let nodes: Vec<GraphNode> = docs
+        .into_iter()
+        .map(|d| GraphNode {
+            id: d.id,
+            filename: d.filename,
+            kind: d.kind,
+            kind_confidence: d.kind_confidence,
+            kind_locked_by_teacher: d.kind_locked_by_teacher,
+            chunk_count: d.chunk_count,
+        })
+        .collect();
+
+    let edges_computed = !edges_rows.is_empty();
+    let edges: Vec<GraphEdge> = edges_rows
+        .into_iter()
+        .map(|e| GraphEdge {
+            src_id: e.src_doc_id,
+            dst_id: e.dst_doc_id,
+            relation: e.relation,
+            confidence: e.confidence,
+            rationale: e.rationale,
+        })
+        .collect();
+
+    Ok(Json(GraphResponse {
+        nodes,
+        edges,
+        edges_computed,
+    }))
+}
+
+#[derive(Serialize)]
+struct RelinkResponse {
+    edges: usize,
+}
+
+/// Manually trigger a re-link of the course's knowledge graph. Useful
+/// after a teacher edits kinds and wants the edges refreshed without
+/// firing a full re-classify.
+async fn rebuild_knowledge_graph(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<RelinkResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    let edges = relink_course(&state, course_id).await?;
+    Ok(Json(RelinkResponse { edges }))
 }

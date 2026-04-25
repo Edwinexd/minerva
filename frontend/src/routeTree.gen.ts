@@ -36,6 +36,7 @@ import { Route as TeacherCoursesCourseIdRagRouteImport } from "./routes/teacher/
 import { Route as TeacherCoursesCourseIdPlayDesignationsRouteImport } from "./routes/teacher/courses.$courseId/play-designations"
 import { Route as TeacherCoursesCourseIdMembersRouteImport } from "./routes/teacher/courses.$courseId/members"
 import { Route as TeacherCoursesCourseIdLtiRouteImport } from "./routes/teacher/courses.$courseId/lti"
+import { Route as TeacherCoursesCourseIdKnowledgeGraphRouteImport } from "./routes/teacher/courses.$courseId/knowledge-graph"
 import { Route as TeacherCoursesCourseIdInviteRouteImport } from "./routes/teacher/courses.$courseId/invite"
 import { Route as TeacherCoursesCourseIdDocumentsRouteImport } from "./routes/teacher/courses.$courseId/documents"
 import { Route as TeacherCoursesCourseIdConversationsRouteImport } from "./routes/teacher/courses.$courseId/conversations"
@@ -185,6 +186,12 @@ const TeacherCoursesCourseIdLtiRoute =
     path: "/lti",
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
+const TeacherCoursesCourseIdKnowledgeGraphRoute =
+  TeacherCoursesCourseIdKnowledgeGraphRouteImport.update({
+    id: "/knowledge-graph",
+    path: "/knowledge-graph",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
 const TeacherCoursesCourseIdInviteRoute =
   TeacherCoursesCourseIdInviteRouteImport.update({
     id: "/invite",
@@ -250,6 +257,7 @@ export interface FileRoutesByFullPath {
   "/teacher/courses/$courseId/conversations": typeof TeacherCoursesCourseIdConversationsRoute
   "/teacher/courses/$courseId/documents": typeof TeacherCoursesCourseIdDocumentsRoute
   "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
+  "/teacher/courses/$courseId/knowledge-graph": typeof TeacherCoursesCourseIdKnowledgeGraphRoute
   "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
   "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
   "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
@@ -283,6 +291,7 @@ export interface FileRoutesByTo {
   "/teacher/courses/$courseId/conversations": typeof TeacherCoursesCourseIdConversationsRoute
   "/teacher/courses/$courseId/documents": typeof TeacherCoursesCourseIdDocumentsRoute
   "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
+  "/teacher/courses/$courseId/knowledge-graph": typeof TeacherCoursesCourseIdKnowledgeGraphRoute
   "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
   "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
   "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
@@ -319,6 +328,7 @@ export interface FileRoutesById {
   "/teacher/courses/$courseId/conversations": typeof TeacherCoursesCourseIdConversationsRoute
   "/teacher/courses/$courseId/documents": typeof TeacherCoursesCourseIdDocumentsRoute
   "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
+  "/teacher/courses/$courseId/knowledge-graph": typeof TeacherCoursesCourseIdKnowledgeGraphRoute
   "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
   "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
   "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
@@ -356,6 +366,7 @@ export interface FileRouteTypes {
     | "/teacher/courses/$courseId/conversations"
     | "/teacher/courses/$courseId/documents"
     | "/teacher/courses/$courseId/invite"
+    | "/teacher/courses/$courseId/knowledge-graph"
     | "/teacher/courses/$courseId/lti"
     | "/teacher/courses/$courseId/members"
     | "/teacher/courses/$courseId/play-designations"
@@ -389,6 +400,7 @@ export interface FileRouteTypes {
     | "/teacher/courses/$courseId/conversations"
     | "/teacher/courses/$courseId/documents"
     | "/teacher/courses/$courseId/invite"
+    | "/teacher/courses/$courseId/knowledge-graph"
     | "/teacher/courses/$courseId/lti"
     | "/teacher/courses/$courseId/members"
     | "/teacher/courses/$courseId/play-designations"
@@ -424,6 +436,7 @@ export interface FileRouteTypes {
     | "/teacher/courses/$courseId/conversations"
     | "/teacher/courses/$courseId/documents"
     | "/teacher/courses/$courseId/invite"
+    | "/teacher/courses/$courseId/knowledge-graph"
     | "/teacher/courses/$courseId/lti"
     | "/teacher/courses/$courseId/members"
     | "/teacher/courses/$courseId/play-designations"
@@ -638,6 +651,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof TeacherCoursesCourseIdLtiRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
+    "/teacher/courses/$courseId/knowledge-graph": {
+      id: "/teacher/courses/$courseId/knowledge-graph"
+      path: "/knowledge-graph"
+      fullPath: "/teacher/courses/$courseId/knowledge-graph"
+      preLoaderRoute: typeof TeacherCoursesCourseIdKnowledgeGraphRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
     "/teacher/courses/$courseId/invite": {
       id: "/teacher/courses/$courseId/invite"
       path: "/invite"
@@ -716,6 +736,7 @@ interface TeacherCoursesCourseIdRouteChildren {
   TeacherCoursesCourseIdConversationsRoute: typeof TeacherCoursesCourseIdConversationsRoute
   TeacherCoursesCourseIdDocumentsRoute: typeof TeacherCoursesCourseIdDocumentsRoute
   TeacherCoursesCourseIdInviteRoute: typeof TeacherCoursesCourseIdInviteRoute
+  TeacherCoursesCourseIdKnowledgeGraphRoute: typeof TeacherCoursesCourseIdKnowledgeGraphRoute
   TeacherCoursesCourseIdLtiRoute: typeof TeacherCoursesCourseIdLtiRoute
   TeacherCoursesCourseIdMembersRoute: typeof TeacherCoursesCourseIdMembersRoute
   TeacherCoursesCourseIdPlayDesignationsRoute: typeof TeacherCoursesCourseIdPlayDesignationsRoute
@@ -733,6 +754,8 @@ const TeacherCoursesCourseIdRouteChildren: TeacherCoursesCourseIdRouteChildren =
       TeacherCoursesCourseIdConversationsRoute,
     TeacherCoursesCourseIdDocumentsRoute: TeacherCoursesCourseIdDocumentsRoute,
     TeacherCoursesCourseIdInviteRoute: TeacherCoursesCourseIdInviteRoute,
+    TeacherCoursesCourseIdKnowledgeGraphRoute:
+      TeacherCoursesCourseIdKnowledgeGraphRoute,
     TeacherCoursesCourseIdLtiRoute: TeacherCoursesCourseIdLtiRoute,
     TeacherCoursesCourseIdMembersRoute: TeacherCoursesCourseIdMembersRoute,
     TeacherCoursesCourseIdPlayDesignationsRoute:

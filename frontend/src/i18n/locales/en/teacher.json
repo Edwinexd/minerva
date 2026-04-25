@@ -7,6 +7,7 @@
       "members": "Members",
       "conversations": "Conversations",
       "documents": "Documents",
+      "knowledgeGraph": "Knowledge Graph",
       "invite": "Invite Links",
       "lti": "LTI",
       "canvas": "Canvas",
@@ -218,6 +219,22 @@
     "reclassifyAll": "Re-classify all",
     "reclassifyingAll": "Re-classifying all...",
     "reclassifyAllTitle": "Re-run the classifier on every unlocked document in this course."
+  },
+  "knowledgeGraph": {
+    "title": "Knowledge Graph",
+    "description": "Documents in this course as a graph: each node is a document colored by its classification, each edge is a typed relationship inferred by the linker (a sample-solution pointing to its assignment, two docs grouped into the same week/unit, etc.). Hover a node to highlight its neighbours; expand the list below for the full set of edges with rationales.",
+    "rebuild": "Rebuild graph",
+    "rebuilding": "Rebuilding...",
+    "rebuildTitle": "Re-run the cross-document linker. Use after editing kinds or uploading new docs.",
+    "noDocuments": "No documents in this course yet.",
+    "notBuiltYet": "No edges have been computed yet. Click 'Rebuild graph' to run the linker.",
+    "noEdges": "The linker found no confident relationships between docs in this course.",
+    "edgeListTitle_one": "{{count}} edge (click to expand)",
+    "edgeListTitle_other": "{{count}} edges (click to expand)",
+    "edgeKind": {
+      "solution_of": "is a solution to",
+      "part_of_unit": "is in the same unit as"
+    }
   },
   "invite": {
     "title": "Invite Links",

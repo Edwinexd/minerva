@@ -19,6 +19,7 @@
 
 pub mod adversarial;
 pub mod document;
+pub mod linker;
 pub mod prompts;
 pub mod types;
 

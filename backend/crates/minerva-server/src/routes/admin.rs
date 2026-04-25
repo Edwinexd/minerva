@@ -501,9 +501,14 @@ async fn backfill_classifications(
     tokio::spawn(async move {
         let mut ok = 0usize;
         let mut errs = 0usize;
+        let mut touched_courses: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
         for doc in candidates {
+            let course_id = doc.course_id;
             match crate::routes::documents::run_classify_one(&state_clone, &doc).await {
-                Ok(Some(_)) => ok += 1,
+                Ok(Some(_)) => {
+                    ok += 1;
+                    touched_courses.insert(course_id);
+                }
                 Ok(None) => {} // race: teacher locked between SELECT and now; skip silently
                 Err(e) => {
                     errs += 1;
@@ -521,6 +526,20 @@ async fn backfill_classifications(
             ok,
             errs,
         );
+
+        // Re-link every course we touched so the knowledge graph
+        // picks up the freshly-classified docs. Sequential so we
+        // don't fire many concurrent linker calls at gpt-oss; the
+        // typical N here is small (one per active course).
+        for course_id in touched_courses {
+            if let Err(e) = crate::routes::documents::relink_course(&state_clone, course_id).await {
+                tracing::warn!(
+                    "admin: backfill relink failed for course {}: {:?}",
+                    course_id,
+                    e
+                );
+            }
+        }
     });
 
     Ok(Json(BackfillResponse { queued }))

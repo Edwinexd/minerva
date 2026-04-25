@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, course_id, src_doc_id, dst_doc_id, relation, confidence, rationale, created_at, updated_at FROM document_relations WHERE course_id = $1 ORDER BY relation, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "src_doc_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "dst_doc_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "relation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "confidence",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 6,
+        "name": "rationale",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "a316fb9362fe0f367d4b1a56d7e3fbe19a2ce4be7e0d7a98e32e00baa370ea29"
+}

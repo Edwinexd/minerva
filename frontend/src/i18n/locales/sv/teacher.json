@@ -3,6 +3,7 @@
     "tryChat": "Prova chatten",
     "courseNotFound": "Kursen hittades inte",
     "tabs": {
+      "knowledgeGraph": "Kunskapsgraf",
       "config": "Konfiguration",
       "members": "Medlemmar",
       "conversations": "Konversationer",
@@ -218,6 +219,22 @@
     "reclassifyAll": "Klassificera om alla",
     "reclassifyingAll": "Klassificerar om alla...",
     "reclassifyAllTitle": "Kör klassificeraren igen på alla olåsta dokument i den här kursen."
+  },
+  "knowledgeGraph": {
+    "title": "Kunskapsgraf",
+    "description": "Dokumenten i den här kursen som en graf: varje nod är ett dokument färgat efter sin klassificering, varje kant är en typad relation som länkaren har inferred (ett lösningsförslag som pekar på sin uppgift, två dokument som hör till samma vecka/modul, osv.). Hovra över en nod för att markera dess grannar; expandera listan nedan för alla kanter med motiveringar.",
+    "rebuild": "Bygg om grafen",
+    "rebuilding": "Bygger om...",
+    "rebuildTitle": "Kör tvärdokuments-länkaren igen. Använd efter att ha redigerat typer eller laddat upp nya dokument.",
+    "noDocuments": "Inga dokument i den här kursen ännu.",
+    "notBuiltYet": "Inga kanter har beräknats än. Klicka på 'Bygg om grafen' för att köra länkaren.",
+    "noEdges": "Länkaren hittade inga säkra relationer mellan dokumenten i den här kursen.",
+    "edgeListTitle_one": "{{count}} kant (klicka för att expandera)",
+    "edgeListTitle_other": "{{count}} kanter (klicka för att expandera)",
+    "edgeKind": {
+      "solution_of": "är ett lösningsförslag till",
+      "part_of_unit": "ligger i samma modul som"
+    }
   },
   "invite": {
     "title": "Inbjudningslänkar",

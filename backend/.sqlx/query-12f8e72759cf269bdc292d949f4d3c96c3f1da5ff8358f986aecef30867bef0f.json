@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM document_relations WHERE course_id = $1 AND confidence < $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "12f8e72759cf269bdc292d949f4d3c96c3f1da5ff8358f986aecef30867bef0f"
+}

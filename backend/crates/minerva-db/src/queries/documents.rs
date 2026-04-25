@@ -30,6 +30,11 @@ pub struct DocumentRow {
     /// must skip these rows.
     pub kind_locked_by_teacher: bool,
     pub classified_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Mean-pooled embedding across the doc's chunks, under the
+    /// course's configured embedding model. Used by the cross-doc
+    /// linker for embedding-based candidate generation. NULL until
+    /// the pipeline (or a lazy backfill in the linker) populates it.
+    pub pooled_embedding: Option<Vec<f32>>,
 }
 
 // Note: sqlx::query_as! macros require literal SQL strings, so the column
@@ -53,7 +58,7 @@ pub async fn insert(
         DocumentRow,
         r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at"#,
+        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding"#,
         id,
         course_id,
         filename,
@@ -69,7 +74,7 @@ pub async fn insert(
 pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
         course_id,
     )
     .fetch_all(db)
@@ -79,7 +84,7 @@ pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<Document
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE id = $1",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -95,7 +100,7 @@ pub async fn find_by_course_source_url(
 ) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE course_id = $1 AND source_url = $2",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE course_id = $1 AND source_url = $2",
         course_id,
         source_url,
     )
@@ -153,7 +158,7 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at"#,
+        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding"#,
         limit as i64,
     )
     .fetch_all(db)
@@ -165,7 +170,7 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
 pub async fn list_awaiting_transcripts(db: &PgPool) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
     )
     .fetch_all(db)
     .await
@@ -362,7 +367,7 @@ pub async fn list_needing_classification(
 ) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE classified_at IS NULL AND kind_locked_by_teacher = FALSE AND status = 'ready' ORDER BY created_at ASC LIMIT $1",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE classified_at IS NULL AND kind_locked_by_teacher = FALSE AND status = 'ready' ORDER BY created_at ASC LIMIT $1",
         limit,
     )
     .fetch_all(db)
@@ -386,6 +391,24 @@ pub struct ClassificationStats {
     pub unclassified: i64,
     /// Docs whose kind was set/locked by a teacher.
     pub locked_by_teacher: i64,
+}
+
+/// Persist a doc's mean-pooled embedding. Called from the pipeline
+/// once all chunk embeddings are known. Idempotent -- the linker may
+/// also lazily fill this in for older docs.
+pub async fn set_pooled_embedding(
+    db: &PgPool,
+    doc_id: Uuid,
+    embedding: &[f32],
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE documents SET pooled_embedding = $2 WHERE id = $1",
+        doc_id,
+        embedding,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn classification_stats(db: &PgPool) -> Result<ClassificationStats, sqlx::Error> {

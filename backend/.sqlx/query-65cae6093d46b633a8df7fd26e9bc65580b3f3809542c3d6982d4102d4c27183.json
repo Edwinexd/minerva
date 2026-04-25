@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
+  "query": "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -92,10 +92,17 @@
         "ordinal": 17,
         "name": "classified_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "pooled_embedding",
+        "type_info": "Float4Array"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid"
+      ]
     },
     "nullable": [
       false,
@@ -115,8 +122,9 @@
       true,
       true,
       false,
+      true,
       true
     ]
   },
-  "hash": "7139ae31fe4a1c0f6dc1af36e2511722553903a3617c744b05486b442df00b2c"
+  "hash": "65cae6093d46b633a8df7fd26e9bc65580b3f3809542c3d6982d4102d4c27183"
 }

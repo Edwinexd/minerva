@@ -878,10 +878,17 @@ pub(crate) async fn relink_course(state: &AppState, course_id: Uuid) -> Result<u
     let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
 
     let http = reqwest::Client::new();
-    let result =
-        crate::classification::linker::link_course(&http, &state.config.cerebras_api_key, &docs)
-            .await
-            .map_err(AppError::Internal)?;
+    let ctx = crate::classification::linker::LinkContext {
+        http: &http,
+        api_key: &state.config.cerebras_api_key,
+        db: &state.db,
+        fastembed: &state.fastembed,
+        openai_api_key: &state.config.openai_api_key,
+        docs_path: &state.config.docs_path,
+    };
+    let result = crate::classification::linker::link_course(&ctx, course_id, &docs)
+        .await
+        .map_err(AppError::Internal)?;
 
     // Wipe existing edges first -- we always replace, never merge.
     // The DB's ON CONFLICT path on upsert would also work, but a

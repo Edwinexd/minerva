@@ -171,19 +171,11 @@ pub async fn process_document(
         }
     };
 
-    // 3. Short-circuit for sample_solution. Never embed; the document
-    // exists in the DB (so teachers can see / delete / reclassify it)
-    // but no chunks land in Qdrant, so retrieval can't surface it.
-    if kind_str == KIND_SAMPLE_SOLUTION {
-        tracing::info!("skipping embedding for {} (kind=sample_solution)", filename);
-        set_status_ready(db, document_id, 0).await;
-        return Ok(ProcessResult {
-            chunk_count: 0,
-            embedding_tokens: 0,
-        });
-    }
-
-    // 4. Chunk
+    // 3. Chunk. We chunk EVEN sample_solution docs (which won't be
+    // indexed in Qdrant) -- we still need their embedding for the
+    // knowledge-graph linker so a sample_solution can find its
+    // assignment partner via embedding similarity, not just
+    // filenames.
     let chunks = chunker::chunk_text(&text, &ChunkerConfig::default());
     if chunks.is_empty() {
         let msg = "no chunks produced from document".to_string();
@@ -193,8 +185,15 @@ pub async fn process_document(
 
     tracing::info!("produced {} chunks from {}", chunks.len(), filename);
 
-    // 5. Embed + Upsert (strategy depends on provider)
+    // 4. Embed + Upsert (strategy depends on provider)
     let collection_name = format!("course_{}", course_id);
+    let is_sample_solution = kind_str == KIND_SAMPLE_SOLUTION;
+    if is_sample_solution {
+        tracing::info!(
+            "embedding {} for KG only (kind=sample_solution; no Qdrant upsert)",
+            filename
+        );
+    }
 
     // Capture-by-clone for the closure so it can be called per-chunk.
     let kind_for_payload = kind_str.clone();
@@ -217,39 +216,50 @@ pub async fn process_document(
         payload
     };
 
-    let embedding_tokens = match embedding_provider {
+    // Compute chunk embeddings under whichever provider this course
+    // uses. We KEEP the embedding vectors in memory after upsert so
+    // we can mean-pool them for the doc-level KG embedding -- one
+    // pass over the data instead of re-fetching from Qdrant later.
+    let (chunk_embeddings, embedding_tokens): (Vec<Vec<f32>>, i64) = match embedding_provider {
         "local" => {
             let dims = local_model_dimensions(embedding_model)
                 .ok_or_else(|| format!("unsupported local embedding model: {}", embedding_model))?;
-            ensure_collection(qdrant, &collection_name, dims).await?;
+            // Only ensure the Qdrant collection exists if we're going
+            // to upsert to it; sample_solution path doesn't.
+            if !is_sample_solution {
+                ensure_collection(qdrant, &collection_name, dims).await?;
+            }
 
             let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
             let embeddings = fastembed.embed(embedding_model, chunk_texts).await?;
 
-            let points: Vec<PointStruct> = chunks
-                .iter()
-                .zip(embeddings.iter())
-                .map(|(chunk, embedding)| {
-                    PointStruct::new(
-                        Uuid::new_v4().to_string(),
-                        embedding.clone(),
-                        build_payload(chunk),
-                    )
-                })
-                .collect();
+            if !is_sample_solution {
+                let points: Vec<PointStruct> = chunks
+                    .iter()
+                    .zip(embeddings.iter())
+                    .map(|(chunk, embedding)| {
+                        PointStruct::new(
+                            Uuid::new_v4().to_string(),
+                            embedding.clone(),
+                            build_payload(chunk),
+                        )
+                    })
+                    .collect();
 
-            upsert_batched(qdrant, &collection_name, points).await?;
+                upsert_batched(qdrant, &collection_name, points).await?;
+                tracing::info!(
+                    "upserted {} chunks via fastembed (model: {})",
+                    chunks.len(),
+                    embedding_model,
+                );
+            }
 
-            tracing::info!(
-                "upserted {} chunks via fastembed (model: {})",
-                chunks.len(),
-                embedding_model,
-            );
-
-            0i64
+            (embeddings, 0i64)
         }
         _ => {
-            ensure_collection(qdrant, &collection_name, OPENAI_EMBEDDING_DIMENSIONS).await?;
+            if !is_sample_solution {
+                ensure_collection(qdrant, &collection_name, OPENAI_EMBEDDING_DIMENSIONS).await?;
+            }
 
             let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
             let embedding_result = embedder::embed_texts(http_client, openai_api_key, &chunk_texts)
@@ -266,39 +276,113 @@ pub async fn process_document(
                 embedding_result.total_tokens,
             );
 
-            let points: Vec<PointStruct> = chunks
-                .iter()
-                .zip(embedding_result.embeddings.iter())
-                .map(|(chunk, embedding)| {
-                    PointStruct::new(
-                        Uuid::new_v4().to_string(),
-                        embedding.clone(),
-                        build_payload(chunk),
-                    )
-                })
-                .collect();
+            if !is_sample_solution {
+                let points: Vec<PointStruct> = chunks
+                    .iter()
+                    .zip(embedding_result.embeddings.iter())
+                    .map(|(chunk, embedding)| {
+                        PointStruct::new(
+                            Uuid::new_v4().to_string(),
+                            embedding.clone(),
+                            build_payload(chunk),
+                        )
+                    })
+                    .collect();
 
-            upsert_batched(qdrant, &collection_name, points).await?;
+                upsert_batched(qdrant, &collection_name, points).await?;
+            }
 
-            embedding_result.total_tokens
+            (embedding_result.embeddings, embedding_result.total_tokens)
         }
     };
 
-    // 5. Update status
-    let chunk_count = chunks.len() as i32;
+    // 5. Mean-pool chunk embeddings into a single doc-level vector,
+    // L2-normalize, and persist. The KG linker uses this for
+    // embedding-based candidate generation: cosine similarity between
+    // two L2-normalized vectors is just their dot product, so the
+    // pre-normalization here saves work in the linker's pairwise loop.
+    if let Some(pooled) = mean_pool_normalized(&chunk_embeddings) {
+        if let Err(e) =
+            minerva_db::queries::documents::set_pooled_embedding(db, document_id, &pooled).await
+        {
+            // Non-fatal: the linker has a Qdrant-fallback path for
+            // docs without a stored pooled embedding, so we still
+            // ingest successfully and just lose this optimisation.
+            tracing::warn!(
+                "failed to persist pooled embedding for {}: {}",
+                document_id,
+                e
+            );
+        }
+    }
+
+    // 6. Update status. sample_solution gets chunk_count=0 since no
+    // chunks landed in Qdrant -- the teacher UI / RAG retrieval keys
+    // off this to know there's nothing searchable.
+    let chunk_count = if is_sample_solution {
+        0
+    } else {
+        chunks.len() as i32
+    };
     set_status_ready(db, document_id, chunk_count).await;
 
     tracing::info!(
-        "document {} processed: {} chunks stored in collection {}",
+        "document {} processed: {} chunks{}",
         document_id,
         chunk_count,
-        collection_name,
+        if is_sample_solution {
+            " (sample_solution; embedded for KG only, not in Qdrant)".to_string()
+        } else {
+            format!(" stored in collection {}", collection_name)
+        },
     );
 
     Ok(ProcessResult {
         chunk_count,
         embedding_tokens,
     })
+}
+
+/// Mean-pool chunk embeddings into a single doc-level vector and
+/// L2-normalize. Returns None if there are no chunks (caller treats
+/// missing pooled embedding as "skip persist"). Pre-normalizing here
+/// means cosine similarity in the linker is a single dot product.
+fn mean_pool_normalized(embeddings: &[Vec<f32>]) -> Option<Vec<f32>> {
+    if embeddings.is_empty() {
+        return None;
+    }
+    let dim = embeddings[0].len();
+    if dim == 0 {
+        return None;
+    }
+    let mut sum = vec![0.0f32; dim];
+    for e in embeddings {
+        if e.len() != dim {
+            // Inconsistent dims would be a serious bug; skip rather
+            // than panic. The linker's fallback path will recompute.
+            tracing::warn!(
+                "mean_pool_normalized: inconsistent dim ({} vs {}); skipping",
+                e.len(),
+                dim
+            );
+            return None;
+        }
+        for (i, v) in e.iter().enumerate() {
+            sum[i] += v;
+        }
+    }
+    let n = embeddings.len() as f32;
+    for v in sum.iter_mut() {
+        *v /= n;
+    }
+    let norm_sq: f32 = sum.iter().map(|v| v * v).sum();
+    let norm = norm_sq.sqrt();
+    if norm > 0.0 {
+        for v in sum.iter_mut() {
+            *v /= norm;
+        }
+    }
+    Some(sum)
 }
 
 pub struct ProcessResult {
@@ -418,4 +502,37 @@ async fn set_status_ready(db: &PgPool, doc_id: Uuid, chunk_count: i32) {
     )
     .execute(db)
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mean_pool_returns_none_for_empty() {
+        assert!(mean_pool_normalized(&[]).is_none());
+    }
+
+    #[test]
+    fn mean_pool_returns_unit_vector() {
+        let v = mean_pool_normalized(&[vec![3.0, 4.0]]).unwrap();
+        // Already a single vector; mean is itself; L2-normalized to
+        // (0.6, 0.8).
+        assert!((v[0] - 0.6).abs() < 1e-6);
+        assert!((v[1] - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mean_pool_averages_then_normalizes() {
+        let v = mean_pool_normalized(&[vec![1.0, 0.0], vec![0.0, 1.0]]).unwrap();
+        let expected = 1.0 / 2f32.sqrt();
+        assert!((v[0] - expected).abs() < 1e-6);
+        assert!((v[1] - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mean_pool_rejects_dim_mismatch() {
+        let v = mean_pool_normalized(&[vec![1.0, 2.0], vec![1.0, 2.0, 3.0]]);
+        assert!(v.is_none());
+    }
 }

@@ -18,9 +18,13 @@
 //! turn we paginate by unit_hint -- but in practice DSV courses are
 //! 20-200 docs, well within budget.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::sync::Arc;
 
 use minerva_db::queries::documents::DocumentRow;
+use minerva_ingest::fastembed_embedder::FastEmbedder;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::strategy::common::cerebras_request_with_retry;
@@ -64,93 +68,126 @@ const UNIT_NUMBER_PREFIXES: &[&str] = &[
     "lab", // already above; harmless duplicate keeps logic order obvious
     "del",
     "avsnitt",
+    // DSV-specific lecture-numbering convention: F01, F02, ... is
+    // "Föreläsning 01" etc. The single letter is too generic on its
+    // own but the extractor requires digits IMMEDIATELY after the
+    // prefix (with optional separators), so "f01" matches but
+    // "first" / "fax" / "fri-day" don't.
+    "f",
 ];
 
 const LINKER_MODEL: &str = "gpt-oss-120b";
 
-/// Drop edges the model emits below this confidence. Tightening the
-/// threshold here (vs. saving everything and filtering at read time)
-/// keeps the relations table sparse, which keeps the graph viewer
-/// readable.
+/// Drop edges the model emits below this confidence.
 const MIN_EDGE_CONFIDENCE: f32 = 0.6;
+
+/// Drop edges between docs whose embedding similarity is below this
+/// threshold. Tuned empirically: lecture+exercise pairs in the same
+/// unit usually score 0.5-0.8; pairs from different units sit
+/// 0.2-0.5. 0.45 gives a generous floor without burning candidates.
+const MIN_EMBEDDING_SIMILARITY: f32 = 0.45;
+
+/// `solution_of` requires a higher similarity floor than
+/// `part_of_unit` because solutions are essentially restatements of
+/// their assignments and so should score very close.
+const MIN_SOLUTION_OF_SIMILARITY: f32 = 0.6;
+
+/// Cosine similarity above which we treat two docs as effectively
+/// identical (duplicate uploads). Such pairs are dropped: they're
+/// not "in the same unit", they're the same document.
+const DUPLICATE_SIMILARITY: f32 = 0.985;
+
+/// Per-doc top-K when generating embedding-similarity candidates.
+/// Bounded so a fully-connected course doesn't explode candidate
+/// count; combined with the symmetric edge dedup this caps total
+/// candidates at roughly N * TOP_K / 2.
+const EMBEDDING_TOP_K: usize = 8;
 
 /// Hard cap on docs sent to the linker in one call. Keeps the prompt
 /// token cost bounded; courses larger than this would need pagination
 /// (not implemented in V1 -- DSV courses are well under the cap).
 const MAX_DOCS_PER_CALL: usize = 300;
 
-const LINKER_SYSTEM_PROMPT: &str = r#"You build the edge set of a small course-document knowledge graph.
+/// Per-doc content excerpt size for the LLM prompt. Head of the
+/// document text -- the linker already has filename + kind +
+/// classification rationale, this is the additional grounding that
+/// stops it inventing relationships from filenames alone.
+const EXCERPT_CHARS: usize = 400;
 
-You will receive a JSON array describing every classified document in a course. Each entry has:
-- "id": opaque identifier (UUID-shaped string)
-- "filename"
-- "kind": one of "lecture", "reading", "assignment_brief", "sample_solution", "lab_brief", "exam", "syllabus", "unknown"
-- "rationale": a short note from the per-document classifier
+const LINKER_SYSTEM_PROMPT: &str = r#"You label edges in a course-document knowledge graph.
 
-You return a JSON object with an "edges" array. Each edge is one object:
+You will receive:
+
+1. A "documents" array. Each document has:
+   - "id": opaque identifier
+   - "filename"
+   - "kind": one of "lecture", "reading", "assignment_brief", "sample_solution", "lab_brief", "exam", "syllabus", "unknown"
+   - "classifier_rationale": short note from the per-document classifier
+   - "excerpt": the first few hundred characters of the document text
+
+2. A "candidates" array of pre-selected pairs that are SEMANTICALLY similar
+   (high embedding similarity) or share filename markers. Each candidate has:
+   - "src_id", "dst_id": the two document ids
+   - "similarity": cosine similarity in [0, 1] of the docs' content embeddings
+   - "shared_filename_marker": optional concrete shared marker like "lab2",
+     "F18", "module-trees" -- present when both filenames carry the same
+     unit token, absent otherwise
+
+For EACH candidate pair, decide whether there is a typed relation between
+the two documents. You may also decide there is NONE (omit it from output).
+
+Possible relations:
+- "solution_of": src is the sample_solution; dst is the assignment_brief /
+  lab_brief / exam it answers. Use when one doc is `kind=sample_solution`
+  AND the OTHER is an assessment kind AND the content/filenames clearly
+  pair them.
+- "part_of_unit": both documents belong to the same week / module /
+  chapter / topic / unit. Use when both excerpts cover the same topic
+  AND there is at least one concrete grounding signal (shared filename
+  marker, identical week/lab/lecture number, the same specific topic
+  phrase in both excerpts, OR the classifier rationales explicitly tie
+  them together). NOTE: two sequential lectures on the same broad
+  subject (F01_Arv_I and F02_Arv_II, week3 and week4) are NOT in the
+  same unit -- they are in adjacent units of a course module. Do not
+  link them. A topic word like "Arv" or "inheritance" appearing in
+  both filenames is NOT sufficient evidence; you need either matching
+  numeric markers, or a clear "this is a summary of that" / "this is
+  the lab for that lecture" relationship visible in the content.
+
+Output format -- JSON, nothing else:
 {
-  "src_id": <id from the input>,
-  "dst_id": <id from the input>,
-  "relation": one of "solution_of" | "part_of_unit",
-  "confidence": float in [0.0, 1.0],
-  "rationale": short specific string explaining the evidence (filename overlap, shared topic word, etc.)
+  "edges": [
+    {
+      "src_id": <id from candidate>,
+      "dst_id": <id from candidate>,
+      "relation": "solution_of" | "part_of_unit",
+      "confidence": float in [0, 1],
+      "rationale": short specific string. CITE concrete evidence visible
+        in the inputs: filename markers, words from both excerpts, the
+        classifier rationale. Do NOT invent shared tokens.
+    }
+  ]
 }
 
-==============================
-Edge semantics and HARD rules
-==============================
-
-"solution_of":
-  src is a sample_solution document; dst is the assignment_brief / lab_brief / exam it answers.
-  Strong signal: dst's filename appears as a stem/prefix inside src's filename
-    (e.g. "lab2.pdf" + "lab2_solution.pdf", "uppgift3.pdf" + "uppgift3_facit.pdf").
-  Emit only when filename signal AND kinds line up. Skip if uncertain.
-
-"part_of_unit":
-  Two documents belong to the same week / module / chapter / topic / unit.
-  ONLY emit when there is a CONCRETE shared marker that ties them to the
-  same unit. Examples of valid markers:
-    * Identical week / lab / chapter / module number tokens
-      ("week3" + "week3", "lab2_brief" + "lab2_solution", "ch04" + "ch04_exercises").
-    * The same explicit unit name in both filenames
-      ("module-trees" + "module-trees-quiz").
-    * A shared topic word that is unambiguous AND specific
-      ("recursion-lecture" + "recursion-exercises", NOT "lecture" + "exercises").
-  HARD CONSTRAINT: if both filenames carry a numeric marker (week3, lab4,
-  uppgift2, chapter-05, etc.) and the numbers DIFFER, the docs are NOT
-  in the same unit -- they are in adjacent units. Do not link them.
-  Example of what NOT to emit:
-    bad: "ovningsuppgift3_vt25.pdf" part_of_unit "ovningsuppgift4_vt25.pdf"
-         (different numbers -> different exercises -> different units)
-    bad: "lab2.pdf" part_of_unit "lab3.pdf" (adjacent labs are NOT same unit)
-    bad: "week5.pdf" part_of_unit "week6.pdf"
-  When unsure, DO NOT emit the edge.
-
-==============================
-Anti-hallucination rules
-==============================
-
-The "rationale" field must describe REAL evidence visible in the inputs.
-Do NOT invent shared tokens, do NOT claim numbers match when they don't,
-do NOT cite cross-references that aren't in the data you were given.
-A vague rationale like "both are exercises" is not sufficient evidence
-for an edge -- skip the edge instead.
-
-==============================
-Other rules
-==============================
-
-- Be conservative. Edges with confidence < 0.6 will be dropped on the
-  application side, but emitting many low-confidence edges still wastes
-  tokens, and the application also runs a deterministic post-filter that
-  drops "part_of_unit" edges between docs with differing numeric markers.
-- Do NOT emit self-loops (src_id == dst_id).
-- Do NOT emit edges that reference an id not present in the input.
-- A single solution can be solution_of multiple things only when the
-  same solution document actually covers multiple assignments; usually
-  it's 1:1.
-- For "part_of_unit", a sparse cover is fine -- you do not need to emit
-  every pair within a unit. One edge per pair of clearly-related docs.
+HARD RULES:
+- ONLY emit edges for pairs in the candidates list. Do NOT propose pairs
+  that are not candidates.
+- AT MOST ONE edge per candidate pair.
+- Do NOT emit self-loops (same src_id and dst_id).
+- DO NOT emit a part_of_unit edge between docs with conflicting numeric
+  markers (e.g. "lab2" vs "lab3", "uppgift3" vs "uppgift4", "F01" vs
+  "F02" with completely different topics). The application post-filter
+  drops these regardless, but emitting them wastes effort.
+- DO NOT emit any edge for pairs whose excerpts are essentially identical
+  (likely duplicate uploads of the same document). These belong nowhere.
+- The "rationale" must be grounded. "Both are exercises" or "both contain
+  the topic word" are NOT sufficient unless you can name the concrete
+  shared word verbatim from the inputs.
+- Confidence < 0.6 will be dropped server-side; aim higher or skip the
+  edge entirely.
+- For solution_of, prefer kind+filename evidence over similarity alone.
+- For part_of_unit, you need both content overlap AND at least one
+  concrete grounding signal.
 
 Reply with the JSON object only. No prose."#;
 
@@ -170,13 +207,45 @@ pub struct LinkerOutput {
     pub considered: usize,
 }
 
+/// Inputs the linker needs that aren't on `DocumentRow` itself: a
+/// way to lazily backfill missing pooled embeddings (Qdrant scroll +
+/// re-pool), and the path to read content excerpts from disk. Bundling
+/// these into a struct keeps `link_course`'s signature manageable.
+pub struct LinkContext<'a> {
+    pub http: &'a reqwest::Client,
+    pub api_key: &'a str,
+    pub db: &'a PgPool,
+    pub fastembed: &'a Arc<FastEmbedder>,
+    pub openai_api_key: &'a str,
+    pub docs_path: &'a str,
+}
+
 /// Run the cross-doc linker over a course's classified documents.
 ///
-/// Empty / single-doc / unclassified-only courses return early with
-/// no edges -- there's nothing useful for the linker to do.
+/// Pipeline (the "proper KG" shape):
+///   1. **Embeddings**: every doc has a pooled embedding from the
+///      ingest pipeline. For docs missing one (older data), lazily
+///      backfill by re-embedding the doc text. Embeddings are
+///      L2-normalised so cosine similarity is just a dot product.
+///   2. **Candidate generation** (blocking): the candidate set is the
+///      union of two channels. (a) Embedding similarity: per doc, top-K
+///      most similar OTHER docs above `MIN_EMBEDDING_SIMILARITY`.
+///      (b) Filename markers: pairs whose filenames share a unit token
+///      with matching numbers ("lab2_brief" + "lab2_solution",
+///      "F18 OO" + "F18_section_summary"). Filename-marker pairs are
+///      kept regardless of embedding similarity -- a shared marker is
+///      strong positive evidence even if surface vocabulary differs.
+///   3. **Content excerpts**: for each doc that appears in any
+///      candidate, read the first EXCERPT_CHARS from disk so the LLM
+///      grounds its decisions in actual content, not just metadata.
+///   4. **LLM labelling** (matching): single Cerebras call labels each
+///      candidate as solution_of / part_of_unit / nothing.
+///   5. **Post-filters**: confidence floor, similarity floors per
+///      relation type, duplicate detection (cosine ~ 1), and the
+///      filename numeric-marker disagreement filter.
 pub async fn link_course(
-    http: &reqwest::Client,
-    api_key: &str,
+    ctx: &LinkContext<'_>,
+    course_id: Uuid,
     docs: &[DocumentRow],
 ) -> Result<LinkerOutput, String> {
     let classified: Vec<&DocumentRow> = docs
@@ -191,7 +260,7 @@ pub async fn link_course(
         });
     }
 
-    if api_key.is_empty() {
+    if ctx.api_key.is_empty() {
         // Dev / test env without CEREBRAS_API_KEY. Skip rather than
         // burn time on a guaranteed-401 call.
         return Ok(LinkerOutput {
@@ -200,30 +269,476 @@ pub async fn link_course(
         });
     }
 
-    let truncated = if classified.len() > MAX_DOCS_PER_CALL {
+    let truncated_owned: Vec<&DocumentRow> = if classified.len() > MAX_DOCS_PER_CALL {
         tracing::warn!(
             "linker: course has {} classified docs, capping linker input at {} (V1 doesn't paginate)",
             classified.len(),
             MAX_DOCS_PER_CALL,
         );
-        &classified[..MAX_DOCS_PER_CALL]
+        classified.into_iter().take(MAX_DOCS_PER_CALL).collect()
     } else {
-        &classified[..]
+        classified
+    };
+    let truncated: &[&DocumentRow] = &truncated_owned;
+
+    // Step 1: gather pooled embeddings, lazily backfilling any that
+    // are missing.
+    let embeddings: HashMap<Uuid, Vec<f32>> = gather_embeddings(ctx, course_id, truncated).await?;
+
+    // Step 2a: embedding-similarity candidates.
+    let mut candidates: HashSet<(Uuid, Uuid)> = HashSet::new();
+    let similarity_by_pair: HashMap<(Uuid, Uuid), f32> = build_similarity_matrix(
+        truncated,
+        &embeddings,
+        EMBEDDING_TOP_K,
+        MIN_EMBEDDING_SIMILARITY,
+        &mut candidates,
+    );
+
+    // Step 2b: filename-marker candidates (matching prefix+number).
+    add_filename_marker_candidates(truncated, &mut candidates);
+
+    // Drop probable-duplicate pairs (cosine ~ 1) before we even
+    // bother sending them to the model -- they're not "in the same
+    // unit", they're the same document re-uploaded.
+    candidates.retain(|pair| {
+        let sim = similarity_by_pair.get(pair).copied().unwrap_or(0.0);
+        if sim >= DUPLICATE_SIMILARITY {
+            tracing::info!(
+                "linker: dropping likely-duplicate candidate {:?}<->{:?} (similarity {:.3})",
+                pair.0,
+                pair.1,
+                sim
+            );
+            return false;
+        }
+        true
+    });
+
+    if candidates.is_empty() {
+        return Ok(LinkerOutput {
+            edges: Vec::new(),
+            considered: truncated.len(),
+        });
+    }
+
+    // Step 3: content excerpts for every doc in any candidate pair.
+    let mut docs_in_candidates: HashSet<Uuid> = HashSet::new();
+    for (a, b) in &candidates {
+        docs_in_candidates.insert(*a);
+        docs_in_candidates.insert(*b);
+    }
+    let excerpts: HashMap<Uuid, String> =
+        load_excerpts(ctx.docs_path, course_id, truncated, &docs_in_candidates).await;
+
+    // Step 4: LLM labels candidates.
+    let edges = call_linker_llm(
+        ctx.http,
+        ctx.api_key,
+        truncated,
+        &candidates,
+        &similarity_by_pair,
+        &excerpts,
+    )
+    .await?;
+
+    // Step 5: post-filters.
+    let filenames_by_id: HashMap<Uuid, &str> = truncated
+        .iter()
+        .map(|d| (d.id, d.filename.as_str()))
+        .collect();
+    let mut kept = Vec::with_capacity(edges.len());
+    let mut dropped_marker = 0usize;
+    let mut dropped_sim = 0usize;
+    for edge in edges {
+        let pair_key = if edge.src_id < edge.dst_id {
+            (edge.src_id, edge.dst_id)
+        } else {
+            (edge.dst_id, edge.src_id)
+        };
+        let sim = similarity_by_pair.get(&pair_key).copied().unwrap_or(0.0);
+
+        // Relation-specific similarity floor.
+        let floor = match edge.relation.as_str() {
+            "solution_of" => MIN_SOLUTION_OF_SIMILARITY,
+            _ => MIN_EMBEDDING_SIMILARITY,
+        };
+        // Allow filename-marker-grounded part_of_unit edges to bypass
+        // the embedding floor: docs in the same unit may have
+        // surface-different content but matching markers are strong
+        // positive evidence ("lab2_brief.pdf" + "lab2_helper.pdf").
+        let a_name = filenames_by_id.get(&edge.src_id).copied().unwrap_or("");
+        let b_name = filenames_by_id.get(&edge.dst_id).copied().unwrap_or("");
+        let has_filename_grounding =
+            edge.relation == "part_of_unit" && shares_matching_marker(a_name, b_name);
+
+        if sim < floor && !has_filename_grounding {
+            tracing::info!(
+                "linker: post-filter dropped {} {:?}<->{:?} (similarity {:.3} below {:.2})",
+                edge.relation,
+                edge.src_id,
+                edge.dst_id,
+                sim,
+                floor,
+            );
+            dropped_sim += 1;
+            continue;
+        }
+
+        // Filename numeric-marker disagreement filter for part_of_unit.
+        if edge.relation == "part_of_unit" && !part_of_unit_passes_filename_check(a_name, b_name) {
+            tracing::info!(
+                "linker: post-filter dropped part_of_unit between {:?} ({}) and {:?} ({}) -- numeric markers disagree",
+                edge.src_id,
+                a_name,
+                edge.dst_id,
+                b_name,
+            );
+            dropped_marker += 1;
+            continue;
+        }
+
+        kept.push(edge);
+    }
+    if dropped_marker > 0 || dropped_sim > 0 {
+        tracing::info!(
+            "linker: post-filter summary -- dropped {} for marker mismatch, {} for similarity floor",
+            dropped_marker,
+            dropped_sim,
+        );
+    }
+
+    Ok(LinkerOutput {
+        edges: kept,
+        considered: truncated.len(),
+    })
+}
+
+/// Pull pooled embeddings from `DocumentRow` where available, fall
+/// back to re-embedding on the fly for older docs whose
+/// pooled_embedding is NULL. Lazy backfill writes the result back to
+/// the DB so subsequent link calls don't repeat the work.
+async fn gather_embeddings(
+    ctx: &LinkContext<'_>,
+    course_id: Uuid,
+    docs: &[&DocumentRow],
+) -> Result<HashMap<Uuid, Vec<f32>>, String> {
+    let mut out: HashMap<Uuid, Vec<f32>> = HashMap::new();
+    for doc in docs {
+        if let Some(emb) = &doc.pooled_embedding {
+            if !emb.is_empty() {
+                out.insert(doc.id, emb.clone());
+                continue;
+            }
+        }
+
+        // Lazy backfill: read text, re-embed, mean-pool, persist.
+        match recompute_pooled_embedding(ctx, course_id, doc).await {
+            Ok(Some(emb)) => {
+                let _ = minerva_db::queries::documents::set_pooled_embedding(ctx.db, doc.id, &emb)
+                    .await;
+                out.insert(doc.id, emb);
+            }
+            Ok(None) => {
+                tracing::debug!(
+                    "linker: no embedding available for doc {} ({}) -- skipping similarity channel for it",
+                    doc.id,
+                    doc.filename
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "linker: failed to backfill embedding for doc {} ({}): {}",
+                    doc.id,
+                    doc.filename,
+                    e
+                );
+            }
+        }
+    }
+    Ok(out)
+}
+
+async fn recompute_pooled_embedding(
+    ctx: &LinkContext<'_>,
+    course_id: Uuid,
+    doc: &DocumentRow,
+) -> Result<Option<Vec<f32>>, String> {
+    let ext = doc
+        .filename
+        .rsplit('.')
+        .next()
+        .filter(|e| *e != doc.filename.as_str())
+        .unwrap_or("bin");
+    let path_buf = format!("{}/{}/{}.{}", ctx.docs_path, course_id, doc.id, ext);
+    let path = Path::new(&path_buf);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = match minerva_ingest::pipeline::extract_document_text(path) {
+        Ok(t) if !t.trim().is_empty() => t,
+        _ => return Ok(None),
     };
 
-    let id_set: std::collections::HashSet<Uuid> = truncated.iter().map(|d| d.id).collect();
+    // Look up the course's embedding config.
+    let course = match minerva_db::queries::courses::find_by_id(ctx.db, course_id).await {
+        Ok(Some(c)) => c,
+        _ => return Ok(None),
+    };
+    // Chunk the text the same way ingest does, embed each chunk,
+    // mean-pool. We don't upsert to Qdrant here -- this is a one-off
+    // computation to populate the doc-level vector.
+    let chunks = minerva_ingest::chunker::chunk_text(
+        &text,
+        &minerva_ingest::chunker::ChunkerConfig::default(),
+    );
+    if chunks.is_empty() {
+        return Ok(None);
+    }
+    let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
+    let embeddings: Vec<Vec<f32>> = match course.embedding_provider.as_str() {
+        "local" => ctx
+            .fastembed
+            .embed(&course.embedding_model, chunk_texts)
+            .await
+            .map_err(|e| format!("fastembed failed: {}", e))?,
+        _ => {
+            let result =
+                minerva_ingest::embedder::embed_texts(ctx.http, ctx.openai_api_key, &chunk_texts)
+                    .await
+                    .map_err(|e| format!("openai embed failed: {}", e))?;
+            result.embeddings
+        }
+    };
+    Ok(mean_pool_normalized(&embeddings))
+}
 
-    let input_docs: Vec<serde_json::Value> = truncated
+/// Mean-pool + L2-normalise. Same shape as the ingest pipeline's
+/// version but pulled into the linker module so backfill doesn't need
+/// to re-export from minerva-ingest.
+fn mean_pool_normalized(embeddings: &[Vec<f32>]) -> Option<Vec<f32>> {
+    if embeddings.is_empty() {
+        return None;
+    }
+    let dim = embeddings[0].len();
+    if dim == 0 {
+        return None;
+    }
+    let mut sum = vec![0.0f32; dim];
+    for e in embeddings {
+        if e.len() != dim {
+            return None;
+        }
+        for (i, v) in e.iter().enumerate() {
+            sum[i] += v;
+        }
+    }
+    let n = embeddings.len() as f32;
+    for v in sum.iter_mut() {
+        *v /= n;
+    }
+    let norm: f32 = sum.iter().map(|v| v * v).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for v in sum.iter_mut() {
+            *v /= norm;
+        }
+    }
+    Some(sum)
+}
+
+/// Cosine similarity for L2-normalised vectors is just the dot
+/// product. Returns 0 if either vector is missing or empty.
+fn cosine_normalised(a: Option<&Vec<f32>>, b: Option<&Vec<f32>>) -> f32 {
+    let (a, b) = match (a, b) {
+        (Some(a), Some(b)) if a.len() == b.len() && !a.is_empty() => (a, b),
+        _ => return 0.0,
+    };
+    let mut dot = 0.0f32;
+    for i in 0..a.len() {
+        dot += a[i] * b[i];
+    }
+    dot.clamp(-1.0, 1.0)
+}
+
+/// Build a (sorted-pair-key, similarity) map and populate the
+/// candidates set with the top-K most-similar OTHER doc per source
+/// doc, gated by `floor`. Returns the full pair-similarity map so the
+/// post-filters can reuse the numbers without recomputing.
+fn build_similarity_matrix(
+    docs: &[&DocumentRow],
+    embeddings: &HashMap<Uuid, Vec<f32>>,
+    top_k: usize,
+    floor: f32,
+    candidates: &mut HashSet<(Uuid, Uuid)>,
+) -> HashMap<(Uuid, Uuid), f32> {
+    let mut sims: HashMap<(Uuid, Uuid), f32> = HashMap::new();
+    for (i, di) in docs.iter().enumerate() {
+        let mut neighbors: Vec<(Uuid, f32)> = Vec::with_capacity(docs.len());
+        for (j, dj) in docs.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let s = cosine_normalised(embeddings.get(&di.id), embeddings.get(&dj.id));
+            // Cache for every pair we compute, regardless of floor.
+            let key = if di.id < dj.id {
+                (di.id, dj.id)
+            } else {
+                (dj.id, di.id)
+            };
+            sims.entry(key).or_insert(s);
+            if s >= floor {
+                neighbors.push((dj.id, s));
+            }
+        }
+        neighbors.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        for (other, _) in neighbors.into_iter().take(top_k) {
+            let pair = if di.id < other {
+                (di.id, other)
+            } else {
+                (other, di.id)
+            };
+            candidates.insert(pair);
+        }
+    }
+    sims
+}
+
+/// Add candidate pairs whose filenames share a unit-prefix marker
+/// with matching numbers ("lab2_brief" + "lab2_solution"). Two docs
+/// with the same prefix+number are nearly always related even if
+/// their content embeddings happen to score below the floor.
+fn add_filename_marker_candidates(docs: &[&DocumentRow], candidates: &mut HashSet<(Uuid, Uuid)>) {
+    for i in 0..docs.len() {
+        for j in (i + 1)..docs.len() {
+            if shares_matching_marker(&docs[i].filename, &docs[j].filename) {
+                let pair = if docs[i].id < docs[j].id {
+                    (docs[i].id, docs[j].id)
+                } else {
+                    (docs[j].id, docs[i].id)
+                };
+                candidates.insert(pair);
+            }
+        }
+    }
+}
+
+/// True iff the two filenames share at least one unit-prefix marker
+/// where the NUMBERS match. ("lab2_brief.pdf" + "lab2_solution.pdf"
+/// -> true; "lab2.pdf" + "lab3.pdf" -> false; "lab2.pdf" +
+/// "intro.pdf" -> false because no shared prefix.)
+fn shares_matching_marker(a: &str, b: &str) -> bool {
+    let ma = extract_unit_markers(a);
+    let mb = extract_unit_markers(b);
+    for (pa, na) in &ma {
+        for (pb, nb) in &mb {
+            if pa == pb && na == nb {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Read the first `EXCERPT_CHARS` of each in-candidate doc's text
+/// from disk. URL/awaiting-transcript/unsupported docs may have no
+/// readable file -- those simply get an empty excerpt.
+async fn load_excerpts(
+    docs_path: &str,
+    course_id: Uuid,
+    docs: &[&DocumentRow],
+    only_for: &HashSet<Uuid>,
+) -> HashMap<Uuid, String> {
+    let mut out: HashMap<Uuid, String> = HashMap::new();
+    for doc in docs {
+        if !only_for.contains(&doc.id) {
+            continue;
+        }
+        let ext = doc
+            .filename
+            .rsplit('.')
+            .next()
+            .filter(|e| *e != doc.filename.as_str())
+            .unwrap_or("bin");
+        let path = format!("{}/{}/{}.{}", docs_path, course_id, doc.id, ext);
+        let path_obj = Path::new(&path);
+        if !path_obj.exists() {
+            out.insert(doc.id, String::new());
+            continue;
+        }
+        match minerva_ingest::pipeline::extract_document_text(path_obj) {
+            Ok(text) => {
+                let normalised: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                let excerpt: String = normalised.chars().take(EXCERPT_CHARS).collect();
+                out.insert(doc.id, excerpt);
+            }
+            Err(e) => {
+                tracing::debug!("linker: excerpt for {} unavailable: {}", doc.filename, e);
+                out.insert(doc.id, String::new());
+            }
+        }
+    }
+    out
+}
+
+/// Build the LLM prompt body and call Cerebras. Returns parsed
+/// edges; empty on no-edges, error on JSON or transport failure.
+async fn call_linker_llm(
+    http: &reqwest::Client,
+    api_key: &str,
+    docs: &[&DocumentRow],
+    candidates: &HashSet<(Uuid, Uuid)>,
+    similarity: &HashMap<(Uuid, Uuid), f32>,
+    excerpts: &HashMap<Uuid, String>,
+) -> Result<Vec<ProposedEdge>, String> {
+    // Documents block: only include docs that appear in some candidate.
+    let mut in_candidates: HashSet<Uuid> = HashSet::new();
+    for (a, b) in candidates {
+        in_candidates.insert(*a);
+        in_candidates.insert(*b);
+    }
+    let docs_array: Vec<serde_json::Value> = docs
         .iter()
+        .filter(|d| in_candidates.contains(&d.id))
         .map(|d| {
             serde_json::json!({
                 "id": d.id.to_string(),
                 "filename": d.filename,
                 "kind": d.kind.as_deref().unwrap_or("unknown"),
-                "rationale": d.kind_rationale.as_deref().unwrap_or(""),
+                "classifier_rationale": d.kind_rationale.as_deref().unwrap_or(""),
+                "excerpt": excerpts.get(&d.id).cloned().unwrap_or_default(),
             })
         })
         .collect();
+
+    // Candidates block: stable sort so prompt-cache hits are more
+    // likely on re-runs of the same course.
+    let filenames_by_id: HashMap<Uuid, &str> =
+        docs.iter().map(|d| (d.id, d.filename.as_str())).collect();
+    let mut sorted_candidates: Vec<(Uuid, Uuid)> = candidates.iter().copied().collect();
+    sorted_candidates.sort();
+    let candidates_array: Vec<serde_json::Value> = sorted_candidates
+        .iter()
+        .map(|(a, b)| {
+            let sim = similarity.get(&(*a, *b)).copied().unwrap_or(0.0);
+            let na = filenames_by_id.get(a).copied().unwrap_or("");
+            let nb = filenames_by_id.get(b).copied().unwrap_or("");
+            let shared = matched_marker_token(na, nb);
+            let mut obj = serde_json::json!({
+                "src_id": a.to_string(),
+                "dst_id": b.to_string(),
+                "similarity": sim,
+            });
+            if let Some(token) = shared {
+                obj["shared_filename_marker"] = serde_json::Value::String(token);
+            }
+            obj
+        })
+        .collect();
+
+    let user_payload = serde_json::json!({
+        "documents": docs_array,
+        "candidates": candidates_array,
+    });
 
     let body = serde_json::json!({
         "model": LINKER_MODEL,
@@ -231,10 +746,7 @@ pub async fn link_course(
         "reasoning_effort": "medium",
         "messages": [
             { "role": "system", "content": LINKER_SYSTEM_PROMPT },
-            {
-                "role": "user",
-                "content": serde_json::Value::Array(input_docs).to_string(),
-            },
+            { "role": "user", "content": user_payload.to_string() },
         ],
         "response_format": {
             "type": "json_schema",
@@ -275,55 +787,40 @@ pub async fn link_course(
         .json()
         .await
         .map_err(|e| format!("linker: response not JSON: {e}"))?;
-
     let raw = payload["choices"][0]["message"]["content"]
         .as_str()
         .ok_or_else(|| format!("linker: missing message content; got: {payload}"))?;
 
+    let id_set: HashSet<Uuid> = docs.iter().map(|d| d.id).collect();
     let edges = parse_edges(raw, &id_set)?;
+    // Ignore any edge the model emitted for a non-candidate pair.
+    Ok(edges
+        .into_iter()
+        .filter(|e| {
+            let key = if e.src_id < e.dst_id {
+                (e.src_id, e.dst_id)
+            } else {
+                (e.dst_id, e.src_id)
+            };
+            candidates.contains(&key)
+        })
+        .collect())
+}
 
-    // Deterministic post-filter for `part_of_unit`. The model
-    // hallucinates rationales (e.g. claiming "both contain the
-    // number 4" when filenames are "exercise3" and "exercise4"); a
-    // pure-Rust filename check is the cheapest way to catch those
-    // misfires. solution_of edges are NOT filtered here -- their
-    // numeric-marker semantics are the OPPOSITE (a matching number
-    // is positive signal).
-    let filenames_by_id: HashMap<Uuid, &str> = truncated
-        .iter()
-        .map(|d| (d.id, d.filename.as_str()))
-        .collect();
-    let mut kept = Vec::with_capacity(edges.len());
-    let mut dropped = 0usize;
-    for edge in edges {
-        if edge.relation == "part_of_unit" {
-            let a = filenames_by_id.get(&edge.src_id).copied().unwrap_or("");
-            let b = filenames_by_id.get(&edge.dst_id).copied().unwrap_or("");
-            if !part_of_unit_passes_filename_check(a, b) {
-                tracing::info!(
-                    "linker: post-filter dropped part_of_unit between {:?} ({}) and {:?} ({}) -- numeric markers disagree",
-                    edge.src_id,
-                    a,
-                    edge.dst_id,
-                    b,
-                );
-                dropped += 1;
-                continue;
+/// First shared (prefix, number) pair as a "lab2"-style token, for
+/// surfacing to the LLM as a `shared_filename_marker` hint. Returns
+/// the lowercased+folded token if any matches, else None.
+fn matched_marker_token(a: &str, b: &str) -> Option<String> {
+    let ma = extract_unit_markers(a);
+    let mb = extract_unit_markers(b);
+    for (pa, na) in &ma {
+        for (pb, nb) in &mb {
+            if pa == pb && na == nb {
+                return Some(format!("{}{}", pa, na));
             }
         }
-        kept.push(edge);
     }
-    if dropped > 0 {
-        tracing::info!(
-            "linker: post-filter dropped {} part_of_unit edge(s) for filename-marker mismatch",
-            dropped
-        );
-    }
-
-    Ok(LinkerOutput {
-        edges: kept,
-        considered: truncated.len(),
-    })
+    None
 }
 
 /// Strip Latin diacritics so "övningsuppgift3" and "ovningsuppgift3"
@@ -772,6 +1269,137 @@ mod tests {
             "intro.pdf",
             "course-overview.pdf"
         ));
+    }
+
+    // ── Embedding similarity / candidate generation ───────────────
+
+    #[test]
+    fn cosine_orthogonal_is_zero() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        assert!(cosine_normalised(Some(&a), Some(&b)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cosine_identical_is_one() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        assert!((cosine_normalised(Some(&a), Some(&b)) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cosine_handles_dim_mismatch_and_missing() {
+        let a = vec![1.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        assert_eq!(cosine_normalised(Some(&a), Some(&b)), 0.0);
+        assert_eq!(cosine_normalised(None, Some(&b)), 0.0);
+        assert_eq!(cosine_normalised(Some(&a), None), 0.0);
+    }
+
+    #[test]
+    fn shares_matching_marker_user_reported_f18_case() {
+        // F18_OO + F18_section_summary -> matching F18 marker -> true.
+        // This is one of the cases the user pointed out the linker
+        // got right; our marker detector should agree.
+        assert!(shares_matching_marker(
+            "F18 OO.pdf",
+            "section-F18_-_Programspraak_objektorientering_section_summary.html"
+        ));
+    }
+
+    #[test]
+    fn shares_matching_marker_handles_f01_f02_disagreement() {
+        // F01_Arv_I and F02_Arv_II have different "F" numbers -- the
+        // marker detector should NOT report them as sharing a marker.
+        // (The model can still propose part_of_unit on content
+        // grounds, but filename markers are NOT positive evidence.)
+        assert!(!shares_matching_marker("F01_Arv_I.pdf", "F02_Arv_II.pdf"));
+    }
+
+    #[test]
+    fn part_of_unit_filter_drops_f01_f02_lecture_pair() {
+        // The user's other reported false-positive: F02_Arv_II linked
+        // to F01_Arv_I "by shared 'Arv'". With the F-prefix in the
+        // unit-marker list, the post-filter now drops these even
+        // though both filenames contain the "Arv" topic word.
+        assert!(!part_of_unit_passes_filename_check(
+            "F01_Arv_I.pdf",
+            "F02_Arv_II.pdf"
+        ));
+    }
+
+    #[test]
+    fn matched_marker_token_returns_lowercased_concat() {
+        let tok = matched_marker_token("Lab2_brief.pdf", "lab2_solution.pdf");
+        assert_eq!(tok.as_deref(), Some("lab2"));
+    }
+
+    #[test]
+    fn build_similarity_matrix_picks_top_k_above_floor() {
+        // Mocked DocumentRow -- we only need id + status + kind to
+        // get past the linker's gating, but build_similarity_matrix
+        // doesn't filter, just iterates docs. So we can pass tiny
+        // shells.
+        fn mk(id: u8) -> DocumentRow {
+            DocumentRow {
+                id: Uuid::from_bytes([id; 16]),
+                course_id: Uuid::nil(),
+                filename: format!("doc{}.pdf", id),
+                mime_type: "application/pdf".into(),
+                size_bytes: 0,
+                status: "ready".into(),
+                chunk_count: Some(1),
+                error_msg: None,
+                uploaded_by: Uuid::nil(),
+                displayable: true,
+                created_at: chrono::Utc::now(),
+                processed_at: None,
+                source_url: None,
+                kind: Some("lecture".into()),
+                kind_confidence: Some(0.9),
+                kind_rationale: None,
+                kind_locked_by_teacher: false,
+                classified_at: None,
+                pooled_embedding: None,
+            }
+        }
+        let docs_owned = [mk(1), mk(2), mk(3), mk(4)];
+        let docs: Vec<&DocumentRow> = docs_owned.iter().collect();
+        let mut embeddings: HashMap<Uuid, Vec<f32>> = HashMap::new();
+        // doc1 and doc2 are almost identical, doc3 is orthogonal to both,
+        // doc4 is identical to doc1 (so doc1<->doc4 sim = 1.0).
+        embeddings.insert(docs[0].id, vec![1.0, 0.0]);
+        embeddings.insert(docs[1].id, vec![0.99, 0.0]);
+        embeddings.insert(docs[2].id, vec![0.0, 1.0]);
+        embeddings.insert(docs[3].id, vec![1.0, 0.0]);
+
+        let mut candidates = HashSet::new();
+        let sims = build_similarity_matrix(&docs, &embeddings, 2, 0.5, &mut candidates);
+
+        // Every pair has a similarity entry.
+        assert_eq!(sims.len(), 6);
+
+        // doc1<->doc2 above 0.5 -> candidate.
+        let key12 = if docs[0].id < docs[1].id {
+            (docs[0].id, docs[1].id)
+        } else {
+            (docs[1].id, docs[0].id)
+        };
+        assert!(candidates.contains(&key12));
+        // doc1<->doc4 above 0.5 -> candidate.
+        let key14 = if docs[0].id < docs[3].id {
+            (docs[0].id, docs[3].id)
+        } else {
+            (docs[3].id, docs[0].id)
+        };
+        assert!(candidates.contains(&key14));
+        // doc1<->doc3 below 0.5 -> NOT a candidate.
+        let key13 = if docs[0].id < docs[2].id {
+            (docs[0].id, docs[2].id)
+        } else {
+            (docs[2].id, docs[0].id)
+        };
+        assert!(!candidates.contains(&key13));
     }
 
     #[test]

@@ -17,6 +17,7 @@
 //! point's `kind` field) plus the DB-side `doc_ids_with_kind` /
 //! `unclassified_doc_ids` filters in `strategy::common`.
 
+pub mod adversarial;
 pub mod document;
 pub mod prompts;
 pub mod types;

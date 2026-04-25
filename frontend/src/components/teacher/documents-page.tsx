@@ -15,6 +15,13 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -25,7 +32,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import React from "react"
-import type { Document as DocType } from "@/lib/types"
+import type { Document as DocType, DocumentKind } from "@/lib/types"
+import { DOCUMENT_KINDS } from "@/lib/types"
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -170,11 +178,69 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
     },
   })
 
+  const setKindMutation = useMutation({
+    mutationFn: ({ docId, kind }: { docId: string; kind: DocumentKind }) =>
+      api.patch(`/courses/${courseId}/documents/${docId}/kind`, { kind }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "documents"],
+      })
+    },
+  })
+
+  const clearLockMutation = useMutation({
+    mutationFn: ({ docId }: { docId: string }) =>
+      api.delete(`/courses/${courseId}/documents/${docId}/kind/lock`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "documents"],
+      })
+    },
+  })
+
+  const reclassifyMutation = useMutation({
+    mutationFn: ({ docId }: { docId: string }) =>
+      api.post(`/courses/${courseId}/documents/${docId}/reclassify`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "documents"],
+      })
+    },
+  })
+
+  const reclassifyAllMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/courses/${courseId}/documents/reclassify-all`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "documents"],
+      })
+    },
+  })
+
   const statusColor = (status: string) => {
     if (status === "ready") return "default" as const
     if (status === "processing") return "secondary" as const
     if (status === "failed") return "destructive" as const
     return "outline" as const
+  }
+
+  // Visual signal: assignment-bearing kinds (which the chat path
+  // refuses to solve from) get a destructive badge so the teacher can
+  // spot them at a glance; sample_solution gets the secondary/muted
+  // look since it's locked out of RAG entirely. Lecture/reading/
+  // syllabus are the "normal" surface.
+  const kindBadgeVariant = (kind: DocumentKind | null) => {
+    if (kind == null) return "outline" as const
+    if (
+      kind === "assignment_brief" ||
+      kind === "lab_brief" ||
+      kind === "exam"
+    ) {
+      return "destructive" as const
+    }
+    if (kind === "sample_solution") return "secondary" as const
+    return "default" as const
   }
 
   return (
@@ -273,18 +339,31 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                   : t("documents.selectAll", { count: documents.length })}
               </span>
             </label>
-            {selected.size > 0 && (
+            <div className="flex items-center gap-2">
               <Button
-                variant="destructive"
+                variant="outline"
                 size="sm"
-                onClick={() => setConfirmBulk(true)}
-                disabled={bulkDeleteMutation.isPending}
+                title={t("documents.reclassifyAllTitle")}
+                onClick={() => reclassifyAllMutation.mutate()}
+                disabled={reclassifyAllMutation.isPending}
               >
-                {bulkDeleteMutation.isPending
-                  ? t("documents.deletingCount")
-                  : t("documents.deleteCount", { count: selected.size })}
+                {reclassifyAllMutation.isPending
+                  ? t("documents.reclassifyingAll")
+                  : t("documents.reclassifyAll")}
               </Button>
-            )}
+              {selected.size > 0 && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setConfirmBulk(true)}
+                  disabled={bulkDeleteMutation.isPending}
+                >
+                  {bulkDeleteMutation.isPending
+                    ? t("documents.deletingCount")
+                    : t("documents.deleteCount", { count: selected.size })}
+                </Button>
+              )}
+            </div>
           </div>
         )}
 
@@ -315,10 +394,90 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                     {doc.chunk_count != null && doc.chunk_count > 0 && (
                       <span>{t("documents.chunksSuffix", { count: doc.chunk_count })}</span>
                     )}
+                    {doc.kind && (
+                      <span title={doc.kind_rationale ?? undefined}>
+                        {doc.kind_locked_by_teacher
+                          ? t("documents.kindLockedSubtext")
+                          : doc.kind_confidence != null
+                            ? t("documents.kindConfidenceSubtext", {
+                                pct: Math.round(doc.kind_confidence * 100),
+                              })
+                            : null}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {doc.kind ? (
+                  <Badge
+                    variant={kindBadgeVariant(doc.kind)}
+                    title={doc.kind_rationale ?? undefined}
+                  >
+                    {t(`documents.kindLabel.${doc.kind}`)}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline">
+                    {t("documents.kindLabel.unclassified")}
+                  </Badge>
+                )}
+                {canMutate && (
+                  <Select
+                    value={doc.kind ?? ""}
+                    onValueChange={(value) => {
+                      if (!value) return
+                      setKindMutation.mutate({
+                        docId: doc.id,
+                        kind: value as DocumentKind,
+                      })
+                    }}
+                    disabled={setKindMutation.isPending}
+                  >
+                    <SelectTrigger
+                      className="h-8 w-[150px]"
+                      title={t("documents.setKindTitle")}
+                      aria-label={t("documents.setKindAria", {
+                        filename: doc.filename,
+                      })}
+                    >
+                      <SelectValue
+                        placeholder={t("documents.setKindPlaceholder")}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DOCUMENT_KINDS.map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {t(`documents.kindLabel.${k}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {canMutate && doc.kind_locked_by_teacher && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title={t("documents.clearLockTitle")}
+                    onClick={() => clearLockMutation.mutate({ docId: doc.id })}
+                    disabled={clearLockMutation.isPending}
+                  >
+                    {t("documents.clearLock")}
+                  </Button>
+                )}
+                {canMutate && !doc.kind_locked_by_teacher && doc.status === "ready" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title={t("documents.reclassifyTitle")}
+                    onClick={() => reclassifyMutation.mutate({ docId: doc.id })}
+                    disabled={reclassifyMutation.isPending}
+                  >
+                    {reclassifyMutation.isPending &&
+                    reclassifyMutation.variables?.docId === doc.id
+                      ? t("documents.reclassifying")
+                      : t("documents.reclassify")}
+                  </Button>
+                )}
                 <Badge variant={statusColor(doc.status)}>{doc.status}</Badge>
                 {doc.error_msg && (
                   <span className="text-xs text-destructive" title={doc.error_msg}>

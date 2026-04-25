@@ -86,8 +86,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let http_client = reqwest::Client::new();
     let collection_name = format!("course_{}", ctx.course_id);
 
-    // Initial retrieval using user's question (per the paper)
-    let initial_chunks = common::rag_lookup(
+    // Initial retrieval using user's question (per the paper).
+    // Adversarial filter runs on the initial chunks before they enter
+    // the loop's accumulator; mid-loop retrievals get the same pass
+    // (see retrieve_more closure below).
+    let initial_chunks_raw = common::rag_lookup(
         &http_client,
         &ctx.openai_api_key,
         &ctx.fastembed,
@@ -98,6 +101,12 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         ctx.min_score,
         &ctx.embedding_provider,
         &ctx.embedding_model,
+    )
+    .await;
+    let initial_chunks = crate::classification::adversarial::filter_solution_chunks(
+        &http_client,
+        &ctx.cerebras_api_key,
+        initial_chunks_raw,
     )
     .await;
 
@@ -125,13 +134,14 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let output = run_loop(&http_client, &loop_cfg, initial_chunks, &tx, |sentence| {
         let http_client = http_client.clone();
         let openai_key = ctx.openai_api_key.clone();
+        let cerebras_key = ctx.cerebras_api_key.clone();
         let fastembed = ctx.fastembed.clone();
         let qdrant = ctx.qdrant.clone();
         let collection_name = collection_name.clone();
         let embedding_provider = ctx.embedding_provider.clone();
         let embedding_model = ctx.embedding_model.clone();
         async move {
-            flare_retrieve(
+            let raw = flare_retrieve(
                 &http_client,
                 &openai_key,
                 &fastembed,
@@ -142,6 +152,12 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 flare_threshold,
                 &embedding_provider,
                 &embedding_model,
+            )
+            .await;
+            crate::classification::adversarial::filter_solution_chunks(
+                &http_client,
+                &cerebras_key,
+                raw,
             )
             .await
         }

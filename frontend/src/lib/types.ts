@@ -414,6 +414,27 @@ export interface SystemMetrics {
   }
 }
 
+export type DocumentKind =
+  | "lecture"
+  | "reading"
+  | "assignment_brief"
+  | "sample_solution"
+  | "lab_brief"
+  | "exam"
+  | "syllabus"
+  | "unknown"
+
+export const DOCUMENT_KINDS: DocumentKind[] = [
+  "lecture",
+  "reading",
+  "assignment_brief",
+  "sample_solution",
+  "lab_brief",
+  "exam",
+  "syllabus",
+  "unknown",
+]
+
 export interface Document {
   id: string
   course_id: string
@@ -427,4 +448,10 @@ export interface Document {
   uploaded_by: string
   created_at: string
   processed_at: string | null
+  // Course knowledge graph V1 -- nullable until classifier runs.
+  kind: DocumentKind | null
+  kind_confidence: number | null
+  kind_rationale: string | null
+  kind_locked_by_teacher: boolean
+  classified_at: string | null
 }

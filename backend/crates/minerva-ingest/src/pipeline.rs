@@ -46,6 +46,24 @@ fn html_to_text(html: &str) -> String {
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Read and extract text from a document file, dispatching to the right
+/// parser by extension. Exposed so the reclassify endpoint can run
+/// classification on demand without re-chunking or re-embedding.
+pub fn extract_document_text(file_path: &Path) -> Result<String, String> {
+    match text_source(file_path) {
+        TextSource::Plain => std::fs::read_to_string(file_path)
+            .map_err(|e| format!("failed to read text file: {}", e)),
+        TextSource::Html => {
+            let raw = std::fs::read_to_string(file_path)
+                .map_err(|e| format!("failed to read html file: {}", e))?;
+            Ok(html_to_text(&raw))
+        }
+        TextSource::Pdf => {
+            pdf::extract_text(file_path).map_err(|e| format!("text extraction failed: {}", e))
+        }
+    }
+}
+
 pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "local"];
 
 pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[

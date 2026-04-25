@@ -37,6 +37,13 @@ pub fn router() -> Router<AppState> {
         )
         .route("/{doc_id}", delete(delete_document).patch(patch_document))
         .route("/{doc_id}/chunks", get(list_chunks))
+        // Course-knowledge-graph V1 endpoints. Teacher-only (course
+        // owner / admin / course teacher); auth is enforced inside each
+        // handler with the same pattern as `patch_document`.
+        .route("/{doc_id}/reclassify", post(reclassify_document))
+        .route("/{doc_id}/kind", axum::routing::patch(set_document_kind))
+        .route("/{doc_id}/kind/lock", delete(clear_kind_lock))
+        .route("/reclassify-all", post(reclassify_all_in_course))
         .route("/search", get(search_chunks))
 }
 
@@ -53,6 +60,14 @@ struct DocumentResponse {
     displayable: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     processed_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Knowledge-graph classification. `None` until the classifier has
+    /// run for this doc; the chat-time RAG filter holds unclassified
+    /// docs out of context (see `partition_chunks`).
+    kind: Option<String>,
+    kind_confidence: Option<f32>,
+    kind_rationale: Option<String>,
+    kind_locked_by_teacher: bool,
+    classified_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
@@ -69,6 +84,11 @@ impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
             displayable: row.displayable,
             created_at: row.created_at,
             processed_at: row.processed_at,
+            kind: row.kind,
+            kind_confidence: row.kind_confidence,
+            kind_rationale: row.kind_rationale,
+            kind_locked_by_teacher: row.kind_locked_by_teacher,
+            classified_at: row.classified_at,
         }
     }
 }
@@ -562,4 +582,258 @@ pub fn extension_from_filename(filename: &str) -> &str {
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("bin")
+}
+
+// ── Course-knowledge-graph V1 endpoints ────────────────────────────
+//
+// Auth: same pattern as `patch_document` -- course owner OR admin OR a
+// teacher of the course. We don't allow students or TAs to flip a
+// document's classification.
+
+/// Shared auth check: caller is course owner, admin, or course teacher.
+async fn require_course_teacher(
+    state: &AppState,
+    course_id: Uuid,
+    user: &User,
+) -> Result<(), AppError> {
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if course.owner_id == user.id || user.role.is_admin() {
+        return Ok(());
+    }
+    if minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await? {
+        return Ok(());
+    }
+    Err(AppError::Forbidden)
+}
+
+/// Resolve a `(course_id, doc_id)` pair, ensuring the document actually
+/// belongs to the course. Same scope-check as `patch_document`.
+async fn load_doc_in_course(
+    state: &AppState,
+    course_id: Uuid,
+    doc_id: Uuid,
+) -> Result<minerva_db::queries::documents::DocumentRow, AppError> {
+    let doc = minerva_db::queries::documents::find_by_id(&state.db, doc_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if doc.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+    Ok(doc)
+}
+
+/// Run the classifier on a single document and persist the result.
+/// Returns the new (kind, confidence, rationale) tuple, or `None` if
+/// the document was locked by a teacher (in which case we leave it
+/// alone and tell the caller).
+async fn run_classify_one(
+    state: &AppState,
+    doc: &minerva_db::queries::documents::DocumentRow,
+) -> Result<Option<(String, f32, Option<String>)>, AppError> {
+    if doc.kind_locked_by_teacher {
+        return Ok(None);
+    }
+
+    let ext = extension_from_filename(&doc.filename);
+    let file_path = format!(
+        "{}/{}/{}.{}",
+        state.config.docs_path, doc.course_id, doc.id, ext
+    );
+    let path = std::path::Path::new(&file_path);
+    let text = minerva_ingest::pipeline::extract_document_text(path)
+        .map_err(|e| AppError::Internal(format!("text extraction failed: {}", e)))?;
+
+    let classifier = crate::classification::CerebrasClassifier::new(
+        reqwest::Client::new(),
+        state.config.cerebras_api_key.clone(),
+    );
+    use minerva_ingest::classifier::Classifier;
+    let result = classifier
+        .classify(&doc.filename, &doc.mime_type, &text)
+        .await
+        .map_err(AppError::Internal)?;
+
+    let _ = minerva_db::queries::documents::set_classification(
+        &state.db,
+        doc.id,
+        &result.kind,
+        result.confidence,
+        result.rationale.as_deref(),
+    )
+    .await?;
+
+    Ok(Some((result.kind, result.confidence, result.rationale)))
+}
+
+#[derive(Serialize)]
+struct ReclassifyResponse {
+    classified: bool,
+    locked: bool,
+    kind: Option<String>,
+    confidence: Option<f32>,
+    rationale: Option<String>,
+}
+
+/// Re-run the classifier for a single document. No-op if the doc is
+/// locked by a teacher (returns `locked: true` so the UI can surface
+/// "unlock first").
+async fn reclassify_document(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<ReclassifyResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    let doc = load_doc_in_course(&state, course_id, doc_id).await?;
+
+    match run_classify_one(&state, &doc).await? {
+        None => Ok(Json(ReclassifyResponse {
+            classified: false,
+            locked: true,
+            kind: doc.kind,
+            confidence: doc.kind_confidence,
+            rationale: doc.kind_rationale,
+        })),
+        Some((kind, confidence, rationale)) => Ok(Json(ReclassifyResponse {
+            classified: true,
+            locked: false,
+            kind: Some(kind),
+            confidence: Some(confidence),
+            rationale,
+        })),
+    }
+}
+
+#[derive(Deserialize)]
+struct SetKindBody {
+    kind: String,
+}
+
+/// Manually set a document's kind and lock it against future
+/// auto-classification. If the new kind is `sample_solution`, also
+/// purge any embedded chunks from Qdrant -- otherwise stale vectors
+/// would still be retrievable even though the doc is now flagged.
+async fn set_document_kind(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<SetKindBody>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    let doc = load_doc_in_course(&state, course_id, doc_id).await?;
+
+    // Reject unknown kinds at the API boundary so the user gets a 400
+    // instead of a 500 from the DB CHECK constraint.
+    if crate::classification::types::DocumentKind::from_str(&body.kind).is_none() {
+        return Err(AppError::bad_request_with(
+            "doc.kind_invalid",
+            [("kind", body.kind.clone())],
+        ));
+    }
+
+    minerva_db::queries::documents::set_kind_locked(&state.db, doc_id, &body.kind).await?;
+
+    // If the teacher just declared this doc a sample_solution, purge
+    // any Qdrant chunks so retrieval can't surface them. Idempotent --
+    // if the collection or doc has no points, this is a no-op.
+    if body.kind == "sample_solution" && doc.chunk_count.unwrap_or(0) > 0 {
+        let collection_name = format!("course_{}", course_id);
+        if state
+            .qdrant
+            .collection_exists(&collection_name)
+            .await
+            .unwrap_or(false)
+        {
+            let filter =
+                qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
+                    "document_id",
+                    doc_id.to_string(),
+                )]);
+            if let Err(e) = state
+                .qdrant
+                .delete_points(
+                    DeletePointsBuilder::new(&collection_name)
+                        .points(filter)
+                        .wait(true),
+                )
+                .await
+            {
+                tracing::error!(
+                    "set_document_kind: qdrant purge failed for doc {} after sample_solution lock: {}",
+                    doc_id,
+                    e,
+                );
+                // Non-fatal: the kind is already locked in the DB so
+                // partition_chunks will drop these chunks defensively
+                // even if Qdrant still has them.
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "kind": body.kind,
+        "kind_locked_by_teacher": true,
+    })))
+}
+
+/// Clear the teacher lock so future re-classifications can overwrite
+/// the kind. Doesn't trigger a re-run -- the teacher can press
+/// re-classify after if they want.
+async fn clear_kind_lock(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    let _doc = load_doc_in_course(&state, course_id, doc_id).await?;
+    minerva_db::queries::documents::clear_kind_lock(&state.db, doc_id).await?;
+    Ok(Json(serde_json::json!({
+        "kind_locked_by_teacher": false,
+    })))
+}
+
+#[derive(Serialize)]
+struct ReclassifyAllResponse {
+    queued: usize,
+}
+
+/// Fan out re-classification across every non-locked document in a
+/// course. Runs in a spawned task so the request returns immediately;
+/// progress is observable by re-fetching the document list (rows show
+/// updated `kind_confidence` / `classified_at` as they finish).
+async fn reclassify_all_in_course(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<ReclassifyAllResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+
+    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+    let candidates: Vec<_> = docs
+        .into_iter()
+        .filter(|d| !d.kind_locked_by_teacher && d.status == "ready")
+        .collect();
+    let queued = candidates.len();
+
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        for doc in candidates {
+            if let Err(e) = run_classify_one(&state_clone, &doc).await {
+                tracing::warn!(
+                    "reclassify-all: doc {} ({}) failed: {:?}",
+                    doc.id,
+                    doc.filename,
+                    e,
+                );
+            }
+        }
+        tracing::info!(
+            "reclassify-all: finished course {} ({} docs)",
+            course_id,
+            queued
+        );
+    });
+
+    Ok(Json(ReclassifyAllResponse { queued }))
 }

@@ -37,7 +37,17 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let unclassified = minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
         .await
         .unwrap_or_default();
-    let rag = common::partition_chunks(raw_chunks, &unclassified);
+    let mut rag = common::partition_chunks(raw_chunks, &unclassified);
+
+    // Adversarial pre-retrieval check: drop any per-chunk worked
+    // solutions that slipped through the doc-level classifier.
+    // Fails open on timeout (see classification::adversarial).
+    rag.context = crate::classification::adversarial::filter_solution_chunks(
+        &http_client,
+        &ctx.cerebras_api_key,
+        rag.context,
+    )
+    .await;
 
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
         .await

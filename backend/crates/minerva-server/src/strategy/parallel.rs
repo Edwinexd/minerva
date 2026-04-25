@@ -98,7 +98,15 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
                     .await
                     .unwrap_or_default();
-            let rag = common::partition_chunks(rag_chunks, &unclassified);
+            let mut rag = common::partition_chunks(rag_chunks, &unclassified);
+
+            // Adversarial pre-retrieval check on context chunks.
+            rag.context = crate::classification::adversarial::filter_solution_chunks(
+                &http_client,
+                &ctx.cerebras_api_key,
+                rag.context,
+            )
+            .await;
 
             let hidden =
                 minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)

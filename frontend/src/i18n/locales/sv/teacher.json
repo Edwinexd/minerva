@@ -193,7 +193,31 @@
     "mbzTitle": "Importera från Moodle-säkerhetskopia (.mbz)",
     "mbzDescription": "Ladda upp en säkerhetskopia av kursen. Endast material som just nu är synligt för studenter importeras. Dolda aktiviteter, dolda avsnitt och material som kräver grupp, genomförande, betyg eller profilvillkor hoppas över. Datumlåst material importeras när dagens datum ligger inom det tillåtna fönstret.",
     "mbzImporting": "Importerar...",
-    "mbzResult": "Importerade {{imported}} resurs(er), hoppade över {{skipped}} dolda."
+    "mbzResult": "Importerade {{imported}} resurs(er), hoppade över {{skipped}} dolda.",
+    "kindLabel": {
+      "lecture": "Föreläsning",
+      "reading": "Läsmaterial",
+      "assignment_brief": "Uppgift",
+      "sample_solution": "Lösningsförslag",
+      "lab_brief": "Laboration",
+      "exam": "Tenta",
+      "syllabus": "Kursplan",
+      "unknown": "Okänd",
+      "unclassified": "Oklassificerad"
+    },
+    "kindConfidenceSubtext": "auto: {{pct}}%",
+    "kindLockedSubtext": "satt av lärare",
+    "setKindTitle": "Åsidosätt klassificering",
+    "setKindAria": "Sätt typ för {{filename}}",
+    "setKindPlaceholder": "Sätt typ",
+    "clearLock": "Lås upp",
+    "clearLockTitle": "Ta bort lärarlåset; framtida omklassificeringar kan skriva över typen.",
+    "reclassify": "Klassificera om",
+    "reclassifying": "Klassificerar om...",
+    "reclassifyTitle": "Kör klassificeraren igen på det här dokumentet.",
+    "reclassifyAll": "Klassificera om alla",
+    "reclassifyingAll": "Klassificerar om alla...",
+    "reclassifyAllTitle": "Kör klassificeraren igen på alla olåsta dokument i den här kursen."
   },
   "invite": {
     "title": "Inbjudningslänkar",

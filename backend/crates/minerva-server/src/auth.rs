@@ -10,6 +10,29 @@ use crate::error::AppError;
 use crate::rules::{self, SUPPORTED_ATTRIBUTES};
 use crate::state::AppState;
 
+/// Promote the raw DB `UserRow` to the typed `User` model.
+///
+/// `auth_middleware` does this implicitly for every Shibboleth request,
+/// but routes that authenticate out-of-band (e.g. embed/integration
+/// token routes) need the same conversion to call shared helpers like
+/// `Pseudonymizer::for_viewer`. Centralised here so the field list only
+/// has to be maintained in one place; `From` impls aren't an option
+/// because both types live in foreign crates (orphan rule).
+pub(crate) fn user_from_row(row: minerva_db::queries::users::UserRow) -> User {
+    User {
+        id: row.id,
+        eppn: row.eppn,
+        display_name: row.display_name,
+        role: UserRole::parse(&row.role),
+        suspended: row.suspended,
+        role_manually_set: row.role_manually_set,
+        owner_daily_token_limit: row.owner_daily_token_limit,
+        privacy_acknowledged_at: row.privacy_acknowledged_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }
+}
+
 /// Cookie attributes for clearing the external-auth cookie. Sent on 401
 /// responses for revoked/expired ext: tokens to break the front-end's
 /// reload-on-401 retry loop -- otherwise the browser keeps re-presenting
@@ -189,18 +212,7 @@ async fn upsert_user(
     )
     .await?;
 
-    Ok(User {
-        id: row.id,
-        eppn: row.eppn,
-        display_name: row.display_name,
-        role: UserRole::parse(&row.role),
-        suspended: row.suspended,
-        role_manually_set: row.role_manually_set,
-        owner_daily_token_limit: row.owner_daily_token_limit,
-        privacy_acknowledged_at: row.privacy_acknowledged_at,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-    })
+    Ok(user_from_row(row))
 }
 
 /// Pure role-decision dispatch, separated from `upsert_user` so the

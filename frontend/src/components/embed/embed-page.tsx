@@ -1,13 +1,14 @@
-import React, { useState, useRef, useEffect, useCallback } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
-import { ChevronDown, ChevronUp, Menu, X } from "lucide-react"
-import Markdown from "react-markdown"
-import remarkGfm from "remark-gfm"
+import { Menu, X } from "lucide-react"
 import { PrivacyAckBanner } from "@/components/privacy-ack"
 import { useDocumentTitle } from "@/lib/use-document-title"
+import { ChatTranscript } from "@/components/chat/chat-transcript"
+import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
+import { ConversationList } from "@/components/chat/conversation-list"
+import { useChatStream } from "@/components/chat/use-chat-stream"
 
 // -- Types for embed API responses --
 
@@ -23,6 +24,19 @@ interface EmbedConversation {
   title: string | null
   created_at: string
   updated_at: string
+}
+
+/**
+ * Pinned-by-teacher conversations carry author metadata so non-owners
+ * can see whose chat the teacher highlighted. Mirrors the
+ * `ConversationWithUserResponse` JSON shape from the backend.
+ */
+interface EmbedPinnedConversation extends EmbedConversation {
+  user_id: string
+  user_eppn: string | null
+  user_display_name: string | null
+  pinned: boolean
+  message_count: number | null
 }
 
 interface EmbedMessage {
@@ -91,6 +105,11 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   const token = useToken()
   const [course, setCourse] = useState<EmbedCourse | null>(null)
   const [conversations, setConversations] = useState<EmbedConversation[]>([])
+  // Pinned-by-teacher chats. Loaded alongside the user's own
+  // conversations so the sidebar can surface them with attribution,
+  // mirroring the regular Shibboleth chat page. Previously absent from
+  // the embed view, leaving teacher pins invisible inside iframes.
+  const [pinned, setPinned] = useState<EmbedPinnedConversation[]>([])
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
   const [me, setMe] = useState<EmbedMe | null>(null)
   const [loading, setLoading] = useState(true)
@@ -103,7 +122,9 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
 
   useDocumentTitle(course ? tCommon("pageTitles.embed", { course: course.name }) : null)
 
-  // Load course, user, and conversations on mount.
+  // Load course, user, conversations, and any teacher-pinned chats on
+  // mount. Pinned failures are tolerated -- the rest of the page still
+  // works without them.
   useEffect(() => {
     if (!token) {
       setError(t("embed.missingToken"))
@@ -113,17 +134,27 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
     let cancelled = false
     ;(async () => {
       try {
-        const [c, convs, m] = await Promise.all([
+        const [c, convs, m, pins] = await Promise.all([
           embedGet<EmbedCourse>(`/course/${courseId}`, token),
           embedGet<EmbedConversation[]>(`/course/${courseId}/conversations`, token),
           embedGet<EmbedMe>(`/course/${courseId}/me`, token),
+          embedGet<EmbedPinnedConversation[]>(
+            `/course/${courseId}/conversations/pinned`,
+            token,
+          ).catch(() => [] as EmbedPinnedConversation[]),
         ])
         if (cancelled) return
         setCourse(c)
         setConversations(convs)
         setMe(m)
+        setPinned(pins)
         if (convs.length > 0) {
           setActiveConvId(convs[0].id)
+        } else if (pins.length > 0) {
+          // Land on a pinned chat if the user has nothing of their own
+          // -- otherwise the pane would be empty even though the
+          // teacher highlighted something.
+          setActiveConvId(pins[0].id)
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : t("embed.failedToLoad"))
@@ -188,6 +219,13 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
     )
   }
 
+  // The active chat is a teacher pin the viewer doesn't own -> render
+  // it read-only (hide the input below). Mirrors the regular page.
+  const isPinnedView =
+    activeConvId !== null &&
+    pinned.some((p) => p.id === activeConvId) &&
+    !conversations.some((c) => c.id === activeConvId)
+
   return (
     <div className="relative flex h-full bg-background text-foreground">
       <Button
@@ -226,19 +264,30 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
           {t("embed.newChat")}
         </Button>
         <div className="space-y-1 overflow-y-auto flex-1">
-          {conversations.map((conv) => (
-            <button
-              key={conv.id}
-              onClick={() => setActiveConvId(conv.id)}
-              className={`block w-full text-left px-3 py-2 rounded text-sm truncate ${
-                activeConvId === conv.id
-                  ? "bg-secondary text-secondary-foreground"
-                  : "hover:bg-muted"
-              }`}
-            >
-              {conv.title || t("embed.untitledConversation")}
-            </button>
-          ))}
+          <ConversationList
+            conversations={conversations}
+            pinned={pinned}
+            activeConversationId={activeConvId}
+            renderRow={({ conversationId: cid, className, children }) => (
+              <button
+                key={cid}
+                onClick={() => setActiveConvId(cid)}
+                className={className}
+              >
+                {children}
+              </button>
+            )}
+            labels={{
+              // Embed has no per-user pin feature, but the field is
+              // optional on `SidebarConversation` so a never-true
+              // string is harmless and keeps the contract uniform.
+              pinned: t("embed.pinnedByTeacher"),
+              newConversation: t("embed.untitledConversation"),
+              conversation: t("embed.untitledConversation"),
+              pinnedByTeacher: t("embed.pinnedByTeacher"),
+              studentFallback: t("embed.studentFallback"),
+            }}
+          />
         </div>
         {course && (
           <div className="text-xs text-muted-foreground pt-2 border-t mt-2">
@@ -256,6 +305,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
           onConversationCreated={setActiveConvId}
           needsPrivacyAck={needsPrivacyAck}
           onAcknowledgePrivacy={acknowledgePrivacy}
+          readOnly={isPinnedView}
         />
       </div>
     </div>
@@ -272,6 +322,7 @@ function EmbedChatWindow({
   onConversationCreated,
   needsPrivacyAck,
   onAcknowledgePrivacy,
+  readOnly = false,
 }: {
   courseId: string
   conversationId: string | null
@@ -280,26 +331,26 @@ function EmbedChatWindow({
   onConversationCreated: (id: string) => void
   needsPrivacyAck: boolean
   onAcknowledgePrivacy: () => Promise<void>
+  /**
+   * Pinned conversations a teacher highlighted are not the viewer's
+   * own; hide the input + send button just like the regular chat page
+   * does for shared pinned views.
+   */
+  readOnly?: boolean
 }) {
   const { t } = useTranslation("auth")
   const [messages, setMessages] = useState<EmbedMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [input, setInput] = useState("")
-  const [streaming, setStreaming] = useState(false)
-  const [streamedTokens, setStreamedTokens] = useState("")
-  const [pendingUserMsg, setPendingUserMsg] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const stream = useChatStream(t("embed.unknownError"))
+  const { send, reset, setError } = stream
 
   // Load messages when conversation changes. When conversationId is null,
   // the user clicked "New chat" and no conv row exists yet; render an
   // empty thread with the input ready (lazy creation happens on first send).
   useEffect(() => {
     let cancelled = false
-    setStreaming(false)
-    setStreamedTokens("")
-    setPendingUserMsg(null)
-    setError(null)
+    reset()
     setInput("")
 
     if (conversationId === null) {
@@ -324,105 +375,65 @@ function EmbedChatWindow({
       })
 
     return () => { cancelled = true }
+    // `reset`/`setError` from useChatStream are stable enough; including
+    // them would refire this on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId, conversationId, token, t])
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [])
-
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages, streamedTokens, scrollToBottom])
-
-  // Returns the conversation id this send landed in (the existing one for
-  // an append, or the server-assigned one for a brand-new conv signaled
-  // via the first SSE event), or null if the send failed before any conv
-  // was created.
-  const sendMessage = async (content: string, existingConvId: string | null): Promise<string | null> => {
-    setError(null)
-    setStreaming(true)
-    setStreamedTokens("")
-    setPendingUserMsg(content)
-
-    // Existing conv -> append endpoint. New conv -> the course-level
-    // create-with-message endpoint, which generates the id server-side and
-    // returns it as the first SSE event.
+  /**
+   * Returns the conversation id this send landed in (the existing one
+   * for an append, or the server-assigned one for a brand-new conv
+   * signaled via the first SSE event), or null if the send failed
+   * before any conv was created.
+   */
+  const sendMessage = async (
+    content: string,
+    existingConvId: string | null,
+  ): Promise<string | null> => {
+    // Existing conv -> append endpoint. New conv -> course-level
+    // create-with-message endpoint, which generates the id server-side
+    // and returns it as the first SSE event.
     const url = existingConvId
       ? `/api/embed/course/${courseId}/conversations/${existingConvId}/message`
       : `/api/embed/course/${courseId}/conversations`
 
     let landedConvId: string | null = existingConvId
-    let success = true
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, token }),
-      })
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: response.statusText }))
-        throw new Error(body.error || response.statusText)
-      }
-
-      const reader = response.body?.getReader()
-      const decoder = new TextDecoder()
-
-      if (reader) {
-        let buffer = ""
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-
-          const lines = buffer.split("\n")
-          buffer = lines.pop() || ""
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6))
-                if (data.type === "token") {
-                  setStreamedTokens((prev) => prev + data.token)
-                } else if (data.type === "conversation_created") {
-                  landedConvId = data.id
-                } else if (data.type === "error") {
-                  setError(data.error)
-                  success = false
-                }
-              } catch {
-                // skip malformed json
-              }
-            }
-          }
+    const ok = await send(
+      content,
+      () =>
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // Token rides in the body for the SSE POST: EventSource can't
+          // add custom headers and the URL gets logged.
+          body: JSON.stringify({ content, token }),
+        }),
+      (data) => {
+        if (data.type === "conversation_created" && typeof data.id === "string") {
+          landedConvId = data.id
         }
+      },
+    )
+    if (ok && landedConvId) {
+      // Reload from the server so the persisted assistant reply
+      // (with metadata) replaces the optimistic streamed copy.
+      try {
+        const data = await embedGet<EmbedConversationDetail>(
+          `/course/${courseId}/conversations/${landedConvId}`,
+          token,
+        )
+        setMessages(data.messages)
+      } catch {
+        // Silent
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("embed.unknownError"))
-      success = false
-    } finally {
-      setStreaming(false)
-      setStreamedTokens("")
-      setPendingUserMsg(null)
-      if (success && landedConvId) {
-        try {
-          const data = await embedGet<EmbedConversationDetail>(
-            `/course/${courseId}/conversations/${landedConvId}`,
-            token,
-          )
-          setMessages(data.messages)
-        } catch {
-          // Silent
-        }
-        onMessageSent()
-      }
+      onMessageSent()
     }
-    return success ? landedConvId : null
+    return ok ? landedConvId : null
   }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || streaming) return
+    if (!input.trim() || stream.streaming) return
     const msg = input
     setInput("")
 
@@ -434,145 +445,51 @@ function EmbedChatWindow({
     })()
   }
 
+  const bubbleLabels: ChatBubbleLabels = {
+    sourceCount: (count) => t("embed.sources", { count }),
+    unknownSource: t("embed.unknownSource"),
+    sourceUnavailable: t("embed.sourceUnavailable"),
+    // The embed view intentionally hides token-usage stats: the iframe
+    // sits in front of students who don't need to see model accounting.
+  }
+
   return (
     <>
       <div className="flex-1 overflow-y-auto px-4">
-        <div className="space-y-4 py-4">
-          {loading &&
-            Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className={`flex ${i % 2 === 0 ? "justify-end" : "justify-start"}`}>
-                <Skeleton className="h-12 w-64 rounded-lg" />
-              </div>
-            ))}
-          {messages.map((msg) => (
-            <EmbedChatBubble key={msg.id} message={msg} />
-          ))}
-          {pendingUserMsg && (
-            <div className="flex justify-end">
-              <div className="rounded-lg px-4 py-2 max-w-[80%] bg-primary text-primary-foreground">
-                <p className="text-sm whitespace-pre-wrap">{pendingUserMsg}</p>
-              </div>
-            </div>
-          )}
-          {streaming && (
-            <div className="flex justify-start">
-              <div
-                className="bg-muted rounded-lg px-4 py-2 max-w-[80%]"
-                aria-live="polite"
-                aria-atomic="false"
-                aria-label={t("embed.assistantResponseLabel")}
-              >
-                {streamedTokens ? (
-                  <MarkdownContent content={streamedTokens} />
-                ) : (
-                  <div className="flex gap-1" aria-hidden="true">
-                    <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
-                    <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
-                    <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:300ms]" />
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          {error && <p role="alert" className="text-sm text-destructive text-center">{error}</p>}
-          <div ref={messagesEndRef} />
+        <ChatTranscript<EmbedMessage>
+          messages={messages}
+          isLoading={loading}
+          pendingUserMsg={stream.pendingUserMsg}
+          streaming={stream.streaming}
+          streamedTokens={stream.streamedTokens}
+          error={stream.error}
+          bubbleLabels={bubbleLabels}
+          assistantResponseLabel={t("embed.assistantResponseLabel")}
+        />
+      </div>
+
+      {!readOnly && (
+        <div className="p-4 border-t space-y-2">
+          {needsPrivacyAck && <PrivacyAckBanner onAcknowledge={onAcknowledgePrivacy} />}
+          <form onSubmit={handleSubmit} className="flex gap-2">
+            <Input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={t("embed.inputPlaceholder")}
+              disabled={stream.streaming || needsPrivacyAck}
+              className="flex-1"
+            />
+            <Button type="submit" disabled={stream.streaming || !input.trim() || needsPrivacyAck}>
+              {t("embed.send")}
+            </Button>
+          </form>
+          <p className="text-xs text-muted-foreground text-center">
+            {t("embed.disclosurePrefix")}
+            <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">{t("embed.disclosureLink")}</a>
+            {t("embed.disclosureSuffix")}
+          </p>
         </div>
-      </div>
-
-      <div className="p-4 border-t space-y-2">
-        {needsPrivacyAck && <PrivacyAckBanner onAcknowledge={onAcknowledgePrivacy} />}
-        <form onSubmit={handleSubmit} className="flex gap-2">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={t("embed.inputPlaceholder")}
-            disabled={streaming || needsPrivacyAck}
-            className="flex-1"
-          />
-          <Button type="submit" disabled={streaming || !input.trim() || needsPrivacyAck}>
-            {t("embed.send")}
-          </Button>
-        </form>
-        <p className="text-xs text-muted-foreground text-center">
-          {t("embed.disclosurePrefix")}
-          <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">{t("embed.disclosureLink")}</a>
-          {t("embed.disclosureSuffix")}
-        </p>
-      </div>
+      )}
     </>
-  )
-}
-
-// -- Shared components --
-
-function MarkdownContent({ content }: { content: string }) {
-  return (
-    <div className="prose prose-sm dark:prose-invert max-w-none">
-      <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
-    </div>
-  )
-}
-
-function EmbedChatBubble({ message }: { message: EmbedMessage }) {
-  const { t } = useTranslation("auth")
-  const isUser = message.role === "user"
-  const [showSources, setShowSources] = useState(false)
-  const chunks: string[] | null = message.chunks_used as string[] | null
-
-  return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`rounded-lg px-4 py-2 max-w-[80%] ${
-          isUser ? "bg-primary text-primary-foreground" : "bg-muted"
-        }`}
-      >
-        {isUser ? (
-          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-        ) : (
-          <MarkdownContent content={message.content} />
-        )}
-        {!isUser && chunks && chunks.length > 0 && (
-          <div className="mt-2 text-xs text-muted-foreground">
-            <button
-              className="underline hover:text-foreground"
-              onClick={() => setShowSources(!showSources)}
-            >
-              {t("embed.sources", { count: chunks.length })}
-              {showSources ? (
-                <ChevronUp className="inline w-3 h-3 ml-0.5" />
-              ) : (
-                <ChevronDown className="inline w-3 h-3 ml-0.5" />
-              )}
-            </button>
-          </div>
-        )}
-        {showSources && chunks && (
-          <div className="mt-2 space-y-2 border-t pt-2">
-            {chunks.map((chunk, i) => {
-              const sourceMatch = chunk.match(/^\[Source: (.+?)\](\n|$)/)
-              const source = sourceMatch ? sourceMatch[1] : t("embed.unknownSource")
-              const hasText = sourceMatch ? chunk.length > sourceMatch[0].length : true
-              const text = hasText
-                ? sourceMatch
-                  ? chunk.slice(sourceMatch[0].length)
-                  : chunk
-                : null
-              return (
-                <div key={i} className="text-xs">
-                  <span className="font-medium text-muted-foreground">{source}</span>
-                  {text ? (
-                    <p className="text-muted-foreground/80 mt-0.5 line-clamp-3">{text}</p>
-                  ) : (
-                    <p className="text-muted-foreground/60 mt-0.5 italic">
-                      {t("embed.sourceUnavailable")}
-                    </p>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </div>
   )
 }

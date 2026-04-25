@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use uuid::Uuid;
 
+use crate::auth::user_from_row;
 use crate::error::AppError;
+use crate::routes::chat::{list_pinned_conversations_for, ConversationWithUserResponse};
 use crate::routes::integration::verify_embed_token;
 use crate::state::AppState;
 
@@ -26,6 +28,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/course/{course_id}/conversations",
             get(list_conversations).post(start_conversation),
+        )
+        .route(
+            "/course/{course_id}/conversations/pinned",
+            get(list_pinned_conversations),
         )
         .route(
             "/course/{course_id}/conversations/{cid}",
@@ -182,6 +188,28 @@ async fn list_conversations(
                 updated_at: r.updated_at,
             })
             .collect(),
+    ))
+}
+
+/// List pinned conversations for the embed view.
+///
+/// Embed token attests course membership (verified by `authenticate`),
+/// so the only extra step before delegating to the shared helper is
+/// promoting the DB row to a `User` -- the embed route doesn't pass
+/// through `auth_middleware` and therefore has no `Extension<User>`.
+async fn list_pinned_conversations(
+    State(state): State<AppState>,
+    Path(course_id): Path<Uuid>,
+    Query(query): Query<TokenQuery>,
+) -> Result<Json<Vec<ConversationWithUserResponse>>, AppError> {
+    let (_, user_id) = authenticate(&state, course_id, &query)?;
+    let viewer = user_from_row(
+        minerva_db::queries::users::find_by_id(&state.db, user_id)
+            .await?
+            .ok_or(AppError::Unauthorized)?,
+    );
+    Ok(Json(
+        list_pinned_conversations_for(&state, course_id, &viewer).await?,
     ))
 }
 

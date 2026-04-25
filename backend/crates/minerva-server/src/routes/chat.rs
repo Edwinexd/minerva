@@ -60,17 +60,17 @@ struct ConversationResponse {
 }
 
 #[derive(Serialize)]
-struct ConversationWithUserResponse {
-    id: Uuid,
-    course_id: Uuid,
-    user_id: Uuid,
-    title: Option<String>,
-    pinned: bool,
-    created_at: chrono::DateTime<chrono::Utc>,
-    updated_at: chrono::DateTime<chrono::Utc>,
-    user_eppn: Option<String>,
-    user_display_name: Option<String>,
-    message_count: Option<i64>,
+pub(crate) struct ConversationWithUserResponse {
+    pub id: Uuid,
+    pub course_id: Uuid,
+    pub user_id: Uuid,
+    pub title: Option<String>,
+    pub pinned: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub user_eppn: Option<String>,
+    pub user_display_name: Option<String>,
+    pub message_count: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -241,6 +241,50 @@ async fn get_course_feedback_stats(
     }))
 }
 
+/// Build the pinned-conversations payload for `viewer` on `course_id`.
+///
+/// Shared between the Shibboleth and embed routes so the
+/// teacher-vs-non-teacher attribution rule, the `ext:`-viewer
+/// pseudonymization, and the response shape can't drift apart.
+/// Callers are responsible for verifying the viewer is allowed to see
+/// the course (membership, embed token, etc.) before invoking this.
+pub(crate) async fn list_pinned_conversations_for(
+    state: &AppState,
+    course_id: Uuid,
+    viewer: &User,
+) -> Result<Vec<ConversationWithUserResponse>, AppError> {
+    let is_teacher = is_course_teacher_or_admin(state, course_id, viewer).await?;
+    let rows =
+        minerva_db::queries::conversations::list_pinned_by_course(&state.db, course_id).await?;
+    let ps = Pseudonymizer::for_viewer(&state.db, viewer, &state.config.hmac_secret).await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let is_own = r.user_id == viewer.id;
+            let (raw_eppn, raw_display) = if is_teacher || is_own {
+                (r.user_eppn, r.user_display_name)
+            } else {
+                (None, None)
+            };
+            let (user_eppn, user_display_name) =
+                ext_obfuscate::apply(ps.as_ref(), r.user_id, raw_eppn, raw_display);
+            ConversationWithUserResponse {
+                id: r.id,
+                course_id: r.course_id,
+                user_id: r.user_id,
+                title: r.title,
+                pinned: r.pinned,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+                user_eppn,
+                user_display_name,
+                message_count: r.message_count,
+            }
+        })
+        .collect())
+}
+
 /// List pinned conversations (any course member)
 async fn list_pinned_conversations(
     State(state): State<AppState>,
@@ -248,37 +292,8 @@ async fn list_pinned_conversations(
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<ConversationWithUserResponse>>, AppError> {
     verify_course_access(&state, course_id, user.id).await?;
-
-    let is_teacher = is_course_teacher_or_admin(&state, course_id, &user).await?;
-    let rows =
-        minerva_db::queries::conversations::list_pinned_by_course(&state.db, course_id).await?;
-    let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
-
     Ok(Json(
-        rows.into_iter()
-            .map(|r| {
-                let is_own = r.user_id == user.id;
-                let (raw_eppn, raw_display) = if is_teacher || is_own {
-                    (r.user_eppn, r.user_display_name)
-                } else {
-                    (None, None)
-                };
-                let (user_eppn, user_display_name) =
-                    ext_obfuscate::apply(ps.as_ref(), r.user_id, raw_eppn, raw_display);
-                ConversationWithUserResponse {
-                    id: r.id,
-                    course_id: r.course_id,
-                    user_id: r.user_id,
-                    title: r.title,
-                    pinned: r.pinned,
-                    created_at: r.created_at,
-                    updated_at: r.updated_at,
-                    user_eppn,
-                    user_display_name,
-                    message_count: r.message_count,
-                }
-            })
-            .collect(),
+        list_pinned_conversations_for(&state, course_id, &user).await?,
     ))
 }
 

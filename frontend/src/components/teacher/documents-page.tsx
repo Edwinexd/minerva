@@ -41,6 +41,35 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/// Multi-line tooltip surfaced by hovering the kind badge: lock
+/// state, classifier confidence, and rationale. Browsers render
+/// `\n` in `title=` as a soft line break which is good enough for a
+/// hover affordance without bringing in a Tooltip primitive.
+function kindBadgeTooltip(
+  doc: DocType,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  const lines: string[] = []
+  if (doc.kind) {
+    lines.push(t(`documents.kindLabel.${doc.kind}`))
+  } else {
+    lines.push(t("documents.kindLabel.unclassified"))
+  }
+  if (doc.kind_locked_by_teacher) {
+    lines.push(t("documents.kindLockedSubtext"))
+  } else if (doc.kind_confidence != null) {
+    lines.push(
+      t("documents.kindConfidenceSubtext", {
+        pct: Math.round(doc.kind_confidence * 100),
+      }),
+    )
+  }
+  if (doc.kind_rationale) {
+    lines.push(doc.kind_rationale)
+  }
+  return lines.join("\n")
+}
+
 export function DocumentsPage({ useParams }: { useParams: () => { courseId: string } }) {
   const { courseId } = useParams()
   const { t } = useTranslation("teacher")
@@ -59,6 +88,10 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [confirmSingle, setConfirmSingle] = React.useState<DocType | null>(null)
   const [confirmBulk, setConfirmBulk] = React.useState(false)
+  // Edit-kind dialog state. Holds the doc being edited; the dialog
+  // owns its own pending-kind selection so the row's badge keeps
+  // showing the current value until the teacher confirms.
+  const [editingKind, setEditingKind] = React.useState<DocType | null>(null)
 
   // Drop selections that no longer exist (e.g. after a delete round-trip).
   React.useEffect(() => {
@@ -243,6 +276,15 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
     return "default" as const
   }
 
+  // When the kind dialog closes after a successful mutation, sync the
+  // displayed editingKind state with the freshly-fetched row so a
+  // teacher who chains operations (e.g. unlock then re-classify) sees
+  // the latest state without closing/reopening.
+  const editingKindFresh = React.useMemo(() => {
+    if (!editingKind || !documents) return editingKind
+    return documents.find((d) => d.id === editingKind.id) ?? editingKind
+  }, [editingKind, documents])
+
   return (
     <Card>
       <CardHeader>
@@ -394,90 +436,38 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                     {doc.chunk_count != null && doc.chunk_count > 0 && (
                       <span>{t("documents.chunksSuffix", { count: doc.chunk_count })}</span>
                     )}
-                    {doc.kind && (
-                      <span title={doc.kind_rationale ?? undefined}>
-                        {doc.kind_locked_by_teacher
-                          ? t("documents.kindLockedSubtext")
-                          : doc.kind_confidence != null
-                            ? t("documents.kindConfidenceSubtext", {
-                                pct: Math.round(doc.kind_confidence * 100),
-                              })
-                            : null}
-                      </span>
-                    )}
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {doc.kind ? (
-                  <Badge
-                    variant={kindBadgeVariant(doc.kind)}
-                    title={doc.kind_rationale ?? undefined}
-                  >
-                    {t(`documents.kindLabel.${doc.kind}`)}
-                  </Badge>
-                ) : (
-                  <Badge variant="outline">
-                    {t("documents.kindLabel.unclassified")}
-                  </Badge>
-                )}
-                {canMutate && (
-                  <Select
-                    value={doc.kind ?? ""}
-                    onValueChange={(value) => {
-                      if (!value) return
-                      setKindMutation.mutate({
-                        docId: doc.id,
-                        kind: value as DocumentKind,
-                      })
-                    }}
-                    disabled={setKindMutation.isPending}
-                  >
-                    <SelectTrigger
-                      className="h-8 w-[150px]"
-                      title={t("documents.setKindTitle")}
-                      aria-label={t("documents.setKindAria", {
-                        filename: doc.filename,
-                      })}
-                    >
-                      <SelectValue
-                        placeholder={t("documents.setKindPlaceholder")}
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DOCUMENT_KINDS.map((k) => (
-                        <SelectItem key={k} value={k}>
-                          {t(`documents.kindLabel.${k}`)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                {canMutate && doc.kind_locked_by_teacher && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    title={t("documents.clearLockTitle")}
-                    onClick={() => clearLockMutation.mutate({ docId: doc.id })}
-                    disabled={clearLockMutation.isPending}
-                  >
-                    {t("documents.clearLock")}
-                  </Button>
-                )}
-                {canMutate && !doc.kind_locked_by_teacher && doc.status === "ready" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    title={t("documents.reclassifyTitle")}
-                    onClick={() => reclassifyMutation.mutate({ docId: doc.id })}
-                    disabled={reclassifyMutation.isPending}
-                  >
-                    {reclassifyMutation.isPending &&
-                    reclassifyMutation.variables?.docId === doc.id
-                      ? t("documents.reclassifying")
-                      : t("documents.reclassify")}
-                  </Button>
-                )}
+                {/*
+                  Single clickable kind badge -- opens the edit dialog
+                  where the teacher can override, re-classify, or
+                  unlock. Tooltip surfaces rationale + confidence so
+                  there's still a hover-to-inspect path without
+                  opening the dialog. When the row can't be mutated
+                  (TA, etc.) the badge stays purely informational.
+                */}
+                <Badge
+                  variant={doc.kind ? kindBadgeVariant(doc.kind) : "outline"}
+                  className={canMutate ? "cursor-pointer hover:opacity-80" : ""}
+                  onClick={canMutate ? () => setEditingKind(doc) : undefined}
+                  title={kindBadgeTooltip(doc, t)}
+                  aria-label={
+                    canMutate
+                      ? t("documents.setKindAria", { filename: doc.filename })
+                      : undefined
+                  }
+                >
+                  {doc.kind
+                    ? t(`documents.kindLabel.${doc.kind}`)
+                    : t("documents.kindLabel.unclassified")}
+                  {doc.kind_locked_by_teacher && (
+                    <span className="ml-1 opacity-70" aria-hidden>
+                      {"\u{1F512}"}
+                    </span>
+                  )}
+                </Badge>
                 <Badge variant={statusColor(doc.status)}>{doc.status}</Badge>
                 {doc.error_msg && (
                   <span className="text-xs text-destructive" title={doc.error_msg}>
@@ -569,6 +559,125 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                   ? t("documents.deletingCount")
                   : t("documents.deleteCount", { count: selected.size })}
               </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/*
+          Edit-kind dialog. The badge in the row is the trigger; this
+          dialog is the only place the teacher can: pick a manual
+          override (Select), trigger a fresh classification, or clear
+          a teacher lock. Kept separate from the row so the row stays
+          a clean two-badge / two-button layout.
+        */}
+        <AlertDialog
+          open={editingKind !== null}
+          onOpenChange={(open) => {
+            if (!open) setEditingKind(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("documents.kindDialogTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {editingKindFresh?.filename}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            {editingKindFresh && (
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  {editingKindFresh.kind_locked_by_teacher
+                    ? t("documents.kindLockedSubtext")
+                    : editingKindFresh.kind_confidence != null
+                      ? t("documents.kindConfidenceSubtext", {
+                          pct: Math.round(
+                            editingKindFresh.kind_confidence * 100,
+                          ),
+                        })
+                      : t("documents.kindLabel.unclassified")}
+                </div>
+                {editingKindFresh.kind_rationale && (
+                  <div className="text-xs italic text-muted-foreground">
+                    {editingKindFresh.kind_rationale}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-4 py-2">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">
+                  {t("documents.kindDialogOverrideLabel")}
+                </label>
+                <Select
+                  value={editingKindFresh?.kind ?? ""}
+                  onValueChange={(value) => {
+                    if (!value || !editingKindFresh) return
+                    setKindMutation.mutate({
+                      docId: editingKindFresh.id,
+                      kind: value as DocumentKind,
+                    })
+                  }}
+                  disabled={setKindMutation.isPending}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue
+                      placeholder={t("documents.setKindPlaceholder")}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DOCUMENT_KINDS.map((k) => (
+                      <SelectItem key={k} value={k}>
+                        {t(`documents.kindLabel.${k}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {t("documents.kindDialogOverrideHelp")}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {editingKindFresh?.kind_locked_by_teacher ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (editingKindFresh) {
+                        clearLockMutation.mutate({ docId: editingKindFresh.id })
+                      }
+                    }}
+                    disabled={clearLockMutation.isPending}
+                  >
+                    {t("documents.clearLock")}
+                  </Button>
+                ) : (
+                  editingKindFresh?.status === "ready" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (editingKindFresh) {
+                          reclassifyMutation.mutate({
+                            docId: editingKindFresh.id,
+                          })
+                        }
+                      }}
+                      disabled={reclassifyMutation.isPending}
+                    >
+                      {reclassifyMutation.isPending
+                        ? t("documents.reclassifying")
+                        : t("documents.reclassify")}
+                    </Button>
+                  )
+                )}
+              </div>
+            </div>
+
+            <AlertDialogFooter>
+              <AlertDialogCancel>{tCommon("actions.close")}</AlertDialogCancel>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

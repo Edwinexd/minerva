@@ -271,6 +271,22 @@
         "table": "Tabell",
         "rowsApprox": "Rader (ungefär)"
       }
+    },
+    "classifications": {
+      "title": "Dokumentklassificeringar",
+      "description": "Dokumenttyper styr vad chatten klistrar in i promptens kontext. Lösningsförslag utesluts helt; uppgiftsbeskrivningar triggar ett vägrande tillägg. Nyuppladdade dokument klassificeras automatiskt; det här kortet låter dig efterklassificera dokument som laddades upp innan klassificeraren var aktiv (eller som fallerade vid första försöket).",
+      "totalReady": "Redo dokument",
+      "classified": "Klassificerade",
+      "unclassified": "Oklassificerade",
+      "lockedByTeacher": "Låsta av lärare",
+      "backfillButton_one": "Klassificera {{count}} dokument",
+      "backfillButton_other": "Klassificera {{count}} dokument",
+      "backfilling": "Köar...",
+      "backfillNoneNeeded": "Inget att efterklassificera",
+      "backfillTitle": "Kör klassificeraren på alla oklassificerade, olåsta, klara dokument. Varje klick köar upp till 5 000 dokument.",
+      "lastQueued_one": "Köade {{count}} dokument; status uppdateras medan det körs.",
+      "lastQueued_other": "Köade {{count}} dokument; status uppdateras medan det körs.",
+      "note": "Varje klick köar upp till 5 000 dokument. För större efterhängningar, klicka igen när siffran sjunkit."
     }
   }
 }

@@ -30,6 +30,8 @@ pub fn router() -> Router<AppState> {
             "/role-rules/conditions/{cond_id}",
             delete(delete_rule_condition),
         )
+        .route("/classification-stats", get(get_classification_stats))
+        .route("/backfill-classifications", post(backfill_classifications))
 }
 
 fn require_admin(user: &User) -> Result<(), AppError> {
@@ -426,4 +428,100 @@ async fn delete_rule_condition(
     }
     state.rules.reload(&state.db).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+// ── Classification backfill (admin-scoped) ─────────────────────────
+//
+// `GET /admin/classification-stats` lets the admin UI show the current
+// state of classification coverage before they decide to backfill.
+// `POST /admin/backfill-classifications` fans out the classifier across
+// every eligible doc in a spawned task and returns immediately. The
+// task respects `kind_locked_by_teacher` (defense in depth on top of
+// the SQL filter) and skips docs whose status isn't `ready`.
+
+#[derive(Serialize)]
+struct ClassificationStatsResponse {
+    total_ready: i64,
+    classified: i64,
+    unclassified: i64,
+    locked_by_teacher: i64,
+}
+
+async fn get_classification_stats(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<ClassificationStatsResponse>, AppError> {
+    require_admin(&user)?;
+    let stats = minerva_db::queries::documents::classification_stats(&state.db).await?;
+    Ok(Json(ClassificationStatsResponse {
+        total_ready: stats.total_ready,
+        classified: stats.classified,
+        unclassified: stats.unclassified,
+        locked_by_teacher: stats.locked_by_teacher,
+    }))
+}
+
+#[derive(Serialize)]
+struct BackfillResponse {
+    /// Number of docs the spawned task will work through. Refresh
+    /// the stats endpoint to watch it tick down.
+    queued: usize,
+}
+
+/// Hard cap on docs claimed in a single backfill invocation. Stops a
+/// single click from spawning a runaway batch on a huge installation;
+/// admin can re-click to drain another batch when the queue drains.
+const BACKFILL_BATCH_LIMIT: i64 = 5_000;
+
+async fn backfill_classifications(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<BackfillResponse>, AppError> {
+    require_admin(&user)?;
+
+    let candidates = minerva_db::queries::documents::list_needing_classification(
+        &state.db,
+        BACKFILL_BATCH_LIMIT,
+    )
+    .await?;
+    let queued = candidates.len();
+
+    if queued == 0 {
+        tracing::info!("admin: backfill-classifications requested but queue is empty");
+        return Ok(Json(BackfillResponse { queued }));
+    }
+
+    tracing::info!(
+        "admin: backfill-classifications queued {} doc(s) (capped at {})",
+        queued,
+        BACKFILL_BATCH_LIMIT,
+    );
+
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        let mut ok = 0usize;
+        let mut errs = 0usize;
+        for doc in candidates {
+            match crate::routes::documents::run_classify_one(&state_clone, &doc).await {
+                Ok(Some(_)) => ok += 1,
+                Ok(None) => {} // race: teacher locked between SELECT and now; skip silently
+                Err(e) => {
+                    errs += 1;
+                    tracing::warn!(
+                        "admin: backfill doc {} ({}) failed: {:?}",
+                        doc.id,
+                        doc.filename,
+                        e,
+                    );
+                }
+            }
+        }
+        tracing::info!(
+            "admin: backfill-classifications finished ({} ok, {} errors)",
+            ok,
+            errs,
+        );
+    });
+
+    Ok(Json(BackfillResponse { queued }))
 }

@@ -628,7 +628,10 @@ async fn load_doc_in_course(
 /// Returns the new (kind, confidence, rationale) tuple, or `None` if
 /// the document was locked by a teacher (in which case we leave it
 /// alone and tell the caller).
-async fn run_classify_one(
+///
+/// Crate-public so the admin backfill endpoint can fan out across
+/// every unclassified doc using the same code path.
+pub(crate) async fn run_classify_one(
     state: &AppState,
     doc: &minerva_db::queries::documents::DocumentRow,
 ) -> Result<Option<(String, f32, Option<String>)>, AppError> {

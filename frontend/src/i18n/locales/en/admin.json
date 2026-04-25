@@ -271,6 +271,22 @@
         "table": "Table",
         "rowsApprox": "Rows (approx)"
       }
+    },
+    "classifications": {
+      "title": "Document classifications",
+      "description": "Per-document kinds drive what the chat path will and won't paste into the prompt context. Sample solutions are excluded entirely; assignment briefs trigger a refusal addendum. Newly uploaded docs are classified automatically; this card lets you backfill any docs that landed before the classifier was wired in (or that errored on first try).",
+      "totalReady": "Ready docs",
+      "classified": "Classified",
+      "unclassified": "Unclassified",
+      "lockedByTeacher": "Locked by teacher",
+      "backfillButton_one": "Backfill {{count}} doc",
+      "backfillButton_other": "Backfill {{count}} docs",
+      "backfilling": "Queueing...",
+      "backfillNoneNeeded": "Nothing to backfill",
+      "backfillTitle": "Run the classifier on every unclassified, unlocked, ready document. Each click queues up to 5,000 docs.",
+      "lastQueued_one": "Queued {{count}} doc; status updates as it runs.",
+      "lastQueued_other": "Queued {{count}} docs; status updates as it runs.",
+      "note": "Each click queues up to 5,000 docs. For larger backlogs, click again once the count has come down."
     }
   }
 }

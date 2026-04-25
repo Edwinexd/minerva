@@ -354,7 +354,8 @@ pub async fn unclassified_doc_ids(
 }
 
 /// List docs that need (re)classification. `limit` caps batch size for
-/// the backfill binary so it doesn't pull a giant course into memory.
+/// the admin backfill so we don't pull a huge installation's worth into
+/// memory in one shot.
 pub async fn list_needing_classification(
     db: &PgPool,
     limit: i64,
@@ -366,4 +367,45 @@ pub async fn list_needing_classification(
     )
     .fetch_all(db)
     .await
+}
+
+/// Aggregate classification counts across the whole installation.
+/// Used by the admin "backfill" UI to show how much work is pending
+/// before the operator clicks the button.
+#[derive(Debug, Clone, Copy)]
+pub struct ClassificationStats {
+    /// Total `documents.status = 'ready'` rows. Other statuses
+    /// (`pending`, `processing`, `unsupported`, `failed`,
+    /// `awaiting_transcript`) aren't backfill candidates.
+    pub total_ready: i64,
+    /// Ready docs with a non-NULL kind, regardless of source
+    /// (auto-classified or teacher-locked).
+    pub classified: i64,
+    /// Ready docs whose kind is NULL and aren't locked by a teacher
+    /// (i.e. eligible backfill targets).
+    pub unclassified: i64,
+    /// Docs whose kind was set/locked by a teacher.
+    pub locked_by_teacher: i64,
+}
+
+pub async fn classification_stats(db: &PgPool) -> Result<ClassificationStats, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'ready') AS "total_ready!",
+            COUNT(*) FILTER (WHERE status = 'ready' AND kind IS NOT NULL) AS "classified!",
+            COUNT(*) FILTER (WHERE status = 'ready' AND kind IS NULL AND kind_locked_by_teacher = FALSE) AS "unclassified!",
+            COUNT(*) FILTER (WHERE kind_locked_by_teacher = TRUE) AS "locked_by_teacher!"
+        FROM documents
+        "#
+    )
+    .fetch_one(db)
+    .await?;
+
+    Ok(ClassificationStats {
+        total_ready: row.total_ready,
+        classified: row.classified,
+        unclassified: row.unclassified,
+        locked_by_teacher: row.locked_by_teacher,
+    })
 }

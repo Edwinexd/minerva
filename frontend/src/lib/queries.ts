@@ -165,6 +165,21 @@ export const adminSystemMetricsQuery = queryOptions({
   refetchInterval: 30_000,
 })
 
+export interface ClassificationStats {
+  total_ready: number
+  classified: number
+  unclassified: number
+  locked_by_teacher: number
+}
+
+export const adminClassificationStatsQuery = queryOptions({
+  queryKey: ["admin", "classification-stats"],
+  queryFn: () => api.get<ClassificationStats>("/admin/classification-stats"),
+  // While a backfill is running the unclassified counter ticks down
+  // doc-by-doc; refresh often enough that the operator sees progress.
+  refetchInterval: 5_000,
+})
+
 export const adminRoleRulesQuery = queryOptions({
   queryKey: ["admin", "role-rules"],
   queryFn: () => api.get<RoleRule[]>("/admin/role-rules"),

@@ -4,6 +4,7 @@ mod config;
 mod error;
 mod ext_obfuscate;
 pub mod lti;
+mod relink_scheduler;
 mod routes;
 mod rules;
 mod state;

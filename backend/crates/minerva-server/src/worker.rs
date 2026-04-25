@@ -19,6 +19,7 @@ use tokio::sync::Semaphore;
 use minerva_ingest::classifier::Classifier;
 
 use crate::classification::CerebrasClassifier;
+use crate::relink_scheduler;
 use crate::state::AppState;
 
 /// How often the worker checks for new pending documents.
@@ -43,7 +44,14 @@ const CANVAS_AUTO_SYNC_CHECK_INTERVAL: std::time::Duration =
 /// On startup it resets any documents stuck in `processing` (crash recovery),
 /// then enters a loop that claims pending documents and processes them with
 /// bounded concurrency.
+///
+/// Also spawns the relink sweeper -- the debounced background task that
+/// drains the per-course dirty queue and re-runs the cross-doc linker.
+/// Sibling task to the document worker because both have the same
+/// "background sweep over course-scoped state" shape.
 pub fn start(state: AppState, max_concurrent: usize) {
+    relink_scheduler::spawn_sweep(state.clone());
+
     // Periodic sweeper: rescue documents whose processing task died silently
     // (e.g. panic inside the spawned task). Runs independently of the main
     // poll loop so a wedged main loop can't block the safety net.
@@ -181,6 +189,8 @@ pub fn start(state: AppState, max_concurrent: usize) {
                 let openai_api_key = state.config.openai_api_key.clone();
                 let docs_path = state.config.docs_path.clone();
                 let doc_id = doc.id;
+                let course_id_for_relink = doc.course_id;
+                let scheduler = state.relink_scheduler.clone();
 
                 // Inner task does the work. Outer task awaits its JoinHandle
                 // so panics become explicit log lines + a 'failed' status,
@@ -295,6 +305,13 @@ pub fn start(state: AppState, max_concurrent: usize) {
                                 result.chunk_count,
                                 result.embedding_tokens,
                             );
+                            // Auto-trigger a debounced relink for the
+                            // course so the knowledge graph stays
+                            // fresh after every ingest. Bursty Moodle
+                            // syncs coalesce into a single linker
+                            // call thanks to the debounce window in
+                            // RelinkScheduler.
+                            scheduler.mark_dirty(course_id_for_relink);
                         }
                         Err(e) => {
                             tracing::error!("worker: document {} processing failed: {}", doc.id, e);

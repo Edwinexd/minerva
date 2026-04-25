@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::lti::LtiKeyPair;
+use crate::relink_scheduler::RelinkScheduler;
 use crate::rules::RuleCache;
 use minerva_ingest::fastembed_embedder::FastEmbedder;
 use qdrant_client::Qdrant;
@@ -19,6 +20,11 @@ pub struct AppState {
     /// request) take an Arc snapshot; writes (admin CRUD on rules) call
     /// `reload`. See `crate::rules`.
     pub rules: Arc<RuleCache>,
+    /// Debounced per-course relink queue. Every classification change
+    /// (worker auto, single-doc reclassify, teacher override) marks the
+    /// course dirty here; a sweep loop drains and relinks. See
+    /// `crate::relink_scheduler`.
+    pub relink_scheduler: Arc<RelinkScheduler>,
 }
 
 impl AppState {
@@ -43,6 +49,7 @@ impl AppState {
             http_client: reqwest::Client::new(),
             fastembed,
             rules,
+            relink_scheduler: Arc::new(RelinkScheduler::new()),
         })
     }
 }

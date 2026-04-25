@@ -527,18 +527,13 @@ async fn backfill_classifications(
             errs,
         );
 
-        // Re-link every course we touched so the knowledge graph
-        // picks up the freshly-classified docs. Sequential so we
-        // don't fire many concurrent linker calls at gpt-oss; the
-        // typical N here is small (one per active course).
+        // Hand each touched course to the relink sweeper rather than
+        // running the linker inline. The sweeper picks them up on its
+        // next tick and runs them sequentially, so we never burst many
+        // concurrent linker calls at Cerebras when a backfill spans
+        // courses.
         for course_id in touched_courses {
-            if let Err(e) = crate::routes::documents::relink_course(&state_clone, course_id).await {
-                tracing::warn!(
-                    "admin: backfill relink failed for course {}: {:?}",
-                    course_id,
-                    e
-                );
-            }
+            state_clone.relink_scheduler.mark_dirty_immediate(course_id);
         }
     });
 

@@ -684,6 +684,11 @@ struct ReclassifyResponse {
 /// Re-run the classifier for a single document. No-op if the doc is
 /// locked by a teacher (returns `locked: true` so the UI can surface
 /// "unlock first").
+///
+/// Marks the course dirty for the relink sweeper -- a single doc's
+/// kind change can shift its `solution_of` / `part_of_unit` edges, so
+/// the graph needs refreshing. Debounced (default 60s) so a teacher
+/// rapid-fire reclassifying several docs only triggers one linker call.
 async fn reclassify_document(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -700,13 +705,16 @@ async fn reclassify_document(
             confidence: doc.kind_confidence,
             rationale: doc.kind_rationale,
         })),
-        Some((kind, confidence, rationale)) => Ok(Json(ReclassifyResponse {
-            classified: true,
-            locked: false,
-            kind: Some(kind),
-            confidence: Some(confidence),
-            rationale,
-        })),
+        Some((kind, confidence, rationale)) => {
+            state.relink_scheduler.mark_dirty(course_id);
+            Ok(Json(ReclassifyResponse {
+                classified: true,
+                locked: false,
+                kind: Some(kind),
+                confidence: Some(confidence),
+                rationale,
+            }))
+        }
     }
 }
 
@@ -776,6 +784,12 @@ async fn set_document_kind(
         }
     }
 
+    // A teacher-driven kind change can flip whether a doc participates
+    // in `solution_of` / `part_of_unit` edges (e.g. flipping reading ->
+    // sample_solution removes its embeddings AND should remove edges
+    // pointing at it). Mark the course dirty for the relink sweeper.
+    state.relink_scheduler.mark_dirty(course_id);
+
     Ok(Json(serde_json::json!({
         "kind": body.kind,
         "kind_locked_by_teacher": true,
@@ -840,24 +854,12 @@ async fn reclassify_all_in_course(
         );
     });
 
-    let state_relink = state.clone();
-    tokio::spawn(async move {
-        // Run after the spawned classify loop has had a chance to
-        // start; the relink itself fetches the *latest* docs from
-        // the DB so it picks up freshly-classified rows. A short
-        // delay coalesces with the classify loop's own work --
-        // worst case both finish in ~the same window.
-        if queued > 0 {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        }
-        if let Err(e) = relink_course(&state_relink, course_id).await {
-            tracing::warn!(
-                "reclassify-all: relink failed for course {}: {:?}",
-                course_id,
-                e
-            );
-        }
-    });
+    // Hand off to the relink sweeper instead of doing it inline. The
+    // per-doc classify loop above already calls `run_classify_one` for
+    // each candidate; we additionally mark the course immediate-dirty
+    // so the sweeper picks it up on its next tick (typically ~10s,
+    // well after the classify task is done).
+    state.relink_scheduler.mark_dirty_immediate(course_id);
 
     Ok(Json(ReclassifyAllResponse { queued }))
 }

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import React from "react"
+import ForceGraph2D from "react-force-graph-2d"
 
 import { api } from "@/lib/api"
 import {
@@ -23,11 +24,15 @@ import { Skeleton } from "@/components/ui/skeleton"
 /// Render the course knowledge graph: every classified document as a
 /// node colored by `kind`, every linker-asserted edge between them.
 ///
-/// Implementation choice: pure SVG with a small force-directed
-/// simulation. No graph library -- React 19 + small node counts (the
-/// linker caps at 300 docs per call) make a hand-rolled simulation
-/// cheaper than pulling in @xyflow/react or cytoscape and adapting
-/// their styling to the kind palette.
+/// Renderer: react-force-graph-2d (vasturiano), which wraps d3-force in
+/// a canvas-based React component. Handles drag, zoom, hover, layout
+/// stability and high node counts out of the box. We previously had a
+/// hand-rolled SVG simulation here; that worked for ~50 nodes but
+/// reinvented half of d3-force and got brittle on edge cases (very
+/// dense subgraphs, hover with many adjacent edges, etc.). Switched
+/// to the established library so the rendering is one fewer thing to
+/// worry about and so future work goes into the data model, not a
+/// custom layout engine.
 export function KnowledgeGraphPage({
   useParams,
 }: {
@@ -94,7 +99,7 @@ export function KnowledgeGraphPage({
         ) : (
           <>
             <Legend />
-            <GraphSvg graph={data} />
+            <ForceGraphCanvas graph={data} />
             <EdgeList edges={data.edges} nodes={data.nodes} />
           </>
         )}
@@ -145,10 +150,15 @@ const KIND_COLORS: Record<string, { fill: string; stroke: string }> = {
 
 const NULL_KIND_COLOR = { fill: "#e5e7eb", stroke: "#9ca3af" }
 
-function colorFor(kind: string | null) {
+function colorFor(kind: string | null | undefined) {
   if (kind == null) return NULL_KIND_COLOR
   return KIND_COLORS[kind] ?? NULL_KIND_COLOR
 }
+
+const EDGE_COLOR = {
+  solution_of: "#dc2626",
+  part_of_unit: "#6b7280",
+} as const
 
 function Legend() {
   const { t } = useTranslation("teacher")
@@ -181,7 +191,14 @@ function Legend() {
       <div className="ml-auto flex items-center gap-3 text-muted-foreground">
         <div className="flex items-center gap-1.5">
           <svg width="24" height="2" aria-hidden>
-            <line x1="0" y1="1" x2="24" y2="1" stroke="#dc2626" strokeWidth="2" />
+            <line
+              x1="0"
+              y1="1"
+              x2="24"
+              y2="1"
+              stroke={EDGE_COLOR.solution_of}
+              strokeWidth="2"
+            />
           </svg>
           <span>{t("knowledgeGraph.edgeKind.solution_of")}</span>
         </div>
@@ -192,7 +209,7 @@ function Legend() {
               y1="1"
               x2="24"
               y2="1"
-              stroke="#6b7280"
+              stroke={EDGE_COLOR.part_of_unit}
               strokeWidth="2"
               strokeDasharray="4 3"
             />
@@ -204,301 +221,207 @@ function Legend() {
   )
 }
 
-// ── Force-directed simulation ──────────────────────────────────────
+// ── Force-directed canvas ──────────────────────────────────────────
 //
-// Tiny in-house simulation: one tick = O(N^2) repulsion + O(E) spring
-// + O(N) centering. With N ≤ 300 and E small, that's a few-ms tick
-// budget. We run for a fixed iteration count off-screen, then render
-// the final positions -- no per-frame React re-render. Drag is added
-// on top with a small pointer handler that pins the dragged node.
+// Adapter: convert KnowledgeGraph (server payload) into the shape
+// react-force-graph expects, and pass through styling. The library
+// mutates node/link objects in place to track simulation state, so
+// we deep-clone via JSON round-trip on each render that introduces
+// new data; otherwise we'd accumulate stale x/y/vx/vy from previous
+// graphs when the user clicks Rebuild.
 
-interface SimNode {
+interface ForceNode {
   id: string
   filename: string
   kind: string | null
-  kind_confidence: number | null
-  kind_locked_by_teacher: boolean
-  chunk_count: number | null
-  x: number
-  y: number
-  vx: number
-  vy: number
-  pinned: boolean
+  kindConfidence: number | null
+  kindLocked: boolean
+  chunkCount: number | null
+  // Simulation fields populated by react-force-graph in place.
+  x?: number
+  y?: number
+  vx?: number
+  vy?: number
 }
 
-interface SimEdge {
-  src: string
-  dst: string
+interface ForceLink {
+  source: string | ForceNode
+  target: string | ForceNode
   relation: KnowledgeGraphEdge["relation"]
   confidence: number
+  rationale: string | null
 }
 
-const VIEWBOX_W = 900
-const VIEWBOX_H = 540
-const CENTER_X = VIEWBOX_W / 2
-const CENTER_Y = VIEWBOX_H / 2
-
-function runSimulation(nodes: SimNode[], edges: SimEdge[], iterations: number) {
-  const repulsion = 18000
-  const springLength = 90
-  const springK = 0.08
-  const centerK = 0.01
-  const damping = 0.85
-
-  for (let i = 0; i < iterations; i++) {
-    // Repulsion (every pair).
-    for (let a = 0; a < nodes.length; a++) {
-      for (let b = a + 1; b < nodes.length; b++) {
-        const na = nodes[a]
-        const nb = nodes[b]
-        const dx = na.x - nb.x
-        const dy = na.y - nb.y
-        const d2 = Math.max(dx * dx + dy * dy, 1)
-        const f = repulsion / d2
-        const d = Math.sqrt(d2)
-        const fx = (f * dx) / d
-        const fy = (f * dy) / d
-        if (!na.pinned) {
-          na.vx += fx
-          na.vy += fy
-        }
-        if (!nb.pinned) {
-          nb.vx -= fx
-          nb.vy -= fy
-        }
-      }
-    }
-    // Spring attraction along edges.
-    for (const e of edges) {
-      const a = nodes.find((n) => n.id === e.src)
-      const b = nodes.find((n) => n.id === e.dst)
-      if (!a || !b) continue
-      const dx = b.x - a.x
-      const dy = b.y - a.y
-      const d = Math.max(Math.sqrt(dx * dx + dy * dy), 1)
-      const f = springK * (d - springLength) * e.confidence
-      const fx = (f * dx) / d
-      const fy = (f * dy) / d
-      if (!a.pinned) {
-        a.vx += fx
-        a.vy += fy
-      }
-      if (!b.pinned) {
-        b.vx -= fx
-        b.vy -= fy
-      }
-    }
-    // Centering pull.
-    for (const n of nodes) {
-      if (n.pinned) continue
-      n.vx += (CENTER_X - n.x) * centerK
-      n.vy += (CENTER_Y - n.y) * centerK
-    }
-    // Integrate + damping.
-    for (const n of nodes) {
-      if (n.pinned) continue
-      n.x += n.vx
-      n.y += n.vy
-      n.vx *= damping
-      n.vy *= damping
-      // Clamp inside viewBox.
-      n.x = Math.max(20, Math.min(VIEWBOX_W - 20, n.x))
-      n.y = Math.max(20, Math.min(VIEWBOX_H - 20, n.y))
-    }
-  }
+function nodeRadius(n: ForceNode): number {
+  const chunks = n.chunkCount ?? 0
+  return 6 + Math.min(Math.sqrt(chunks) * 1.2, 12)
 }
 
-function GraphSvg({ graph }: { graph: KnowledgeGraph }) {
-  // One-shot simulation: deterministic seed positions (golden-angle
-  // distribution on a circle) so re-renders don't reshuffle the
-  // graph; runSimulation then settles them.
-  const sim = React.useMemo(() => {
-    const nodes: SimNode[] = graph.nodes.map((n, i) => {
-      const golden = Math.PI * (3 - Math.sqrt(5))
-      const angle = i * golden
-      const radius = 180
-      return {
-        id: n.id,
-        filename: n.filename,
-        kind: n.kind,
-        kind_confidence: n.kind_confidence,
-        kind_locked_by_teacher: n.kind_locked_by_teacher,
-        chunk_count: n.chunk_count,
-        x: CENTER_X + Math.cos(angle) * radius,
-        y: CENTER_Y + Math.sin(angle) * radius,
-        vx: 0,
-        vy: 0,
-        pinned: false,
+function ForceGraphCanvas({ graph }: { graph: KnowledgeGraph }) {
+  // Build adapter shape. Re-derive whenever the server payload
+  // changes so a Rebuild click picks up the new edges.
+  const data = React.useMemo(
+    () => ({
+      nodes: graph.nodes.map(
+        (n): ForceNode => ({
+          id: n.id,
+          filename: n.filename,
+          kind: n.kind,
+          kindConfidence: n.kind_confidence,
+          kindLocked: n.kind_locked_by_teacher,
+          chunkCount: n.chunk_count,
+        }),
+      ),
+      links: graph.edges.map(
+        (e): ForceLink => ({
+          source: e.src_id,
+          target: e.dst_id,
+          relation: e.relation,
+          confidence: e.confidence,
+          rationale: e.rationale,
+        }),
+      ),
+    }),
+    [graph],
+  )
+
+  // Track container size so the canvas fills available width and
+  // resizes with the panel. The library does not auto-resize on
+  // its own.
+  const containerRef = React.useRef<HTMLDivElement | null>(null)
+  const [size, setSize] = React.useState({ width: 900, height: 540 })
+  React.useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width } = entry.contentRect
+        // Maintain a 5:3 aspect ratio, capped at 720 tall.
+        setSize({ width, height: Math.min(720, Math.max(360, width * 0.6)) })
       }
     })
-    const edges: SimEdge[] = graph.edges.map((e) => ({
-      src: e.src_id,
-      dst: e.dst_id,
-      relation: e.relation,
-      confidence: e.confidence,
-    }))
-    runSimulation(nodes, edges, 250)
-    return { nodes, edges }
-  }, [graph])
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
-  const [hover, setHover] = React.useState<string | null>(null)
-  const nodeById = React.useMemo(() => {
-    const m = new Map<string, SimNode>()
-    for (const n of sim.nodes) m.set(n.id, n)
-    return m
-  }, [sim])
+  // Hover state to fade non-adjacent nodes/edges.
+  const [hoverId, setHoverId] = React.useState<string | null>(null)
+  const adjacent = React.useMemo(() => {
+    if (hoverId == null) return null
+    const ids = new Set<string>([hoverId])
+    for (const link of data.links) {
+      const src =
+        typeof link.source === "object" ? link.source.id : link.source
+      const dst =
+        typeof link.target === "object" ? link.target.id : link.target
+      if (src === hoverId) ids.add(dst)
+      if (dst === hoverId) ids.add(src)
+    }
+    return ids
+  }, [hoverId, data.links])
 
   return (
-    <div className="overflow-hidden rounded border bg-muted/30">
-      <svg
-        viewBox={`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`}
-        className="block w-full"
-        style={{ aspectRatio: `${VIEWBOX_W} / ${VIEWBOX_H}` }}
-      >
-        {/* Edges first so nodes paint over their endpoints. */}
-        {sim.edges.map((e, i) => {
-          const a = nodeById.get(e.src)
-          const b = nodeById.get(e.dst)
-          if (!a || !b) return null
-          const stroke = e.relation === "solution_of" ? "#dc2626" : "#6b7280"
-          const dash = e.relation === "part_of_unit" ? "4 3" : undefined
-          const opacity = 0.4 + 0.5 * e.confidence
-          const isAdjacent = hover != null && (e.src === hover || e.dst === hover)
-          return (
-            <g key={i}>
-              <line
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
-                stroke={stroke}
-                strokeWidth={isAdjacent ? 2.5 : 1.5}
-                strokeDasharray={dash}
-                opacity={hover == null || isAdjacent ? opacity : 0.1}
-              />
-              {/* Direction marker for solution_of: small arrowhead near dst. */}
-              {e.relation === "solution_of" && (
-                <ArrowHead
-                  ax={a.x}
-                  ay={a.y}
-                  bx={b.x}
-                  by={b.y}
-                  color={stroke}
-                  faded={hover != null && !isAdjacent}
-                />
-              )}
-            </g>
-          )
-        })}
-        {/* Nodes. */}
-        {sim.nodes.map((n) => {
-          const c = colorFor(n.kind)
-          const r = nodeRadius(n)
-          const faded = hover != null && hover !== n.id
-          return (
-            <g
-              key={n.id}
-              transform={`translate(${n.x}, ${n.y})`}
-              onMouseEnter={() => setHover(n.id)}
-              onMouseLeave={() => setHover(null)}
-              style={{ cursor: "pointer" }}
-            >
-              <circle
-                r={r}
-                fill={c.fill}
-                stroke={c.stroke}
-                strokeWidth={n.kind_locked_by_teacher ? 3 : 1.5}
-                opacity={faded ? 0.3 : 1}
-              />
-              <title>
-                {nodeTooltip(n)}
-              </title>
-              {hover === n.id && (
-                <text
-                  x={r + 4}
-                  y={4}
-                  fontSize="12"
-                  fill="currentColor"
-                  className="pointer-events-none select-none"
-                >
-                  {truncate(n.filename, 48)}
-                </text>
-              )}
-            </g>
-          )
-        })}
-      </svg>
+    <div
+      ref={containerRef}
+      className="overflow-hidden rounded border bg-muted/30"
+      style={{ height: size.height }}
+    >
+      <ForceGraph2D
+        graphData={data}
+        width={size.width}
+        height={size.height}
+        backgroundColor="rgba(0,0,0,0)"
+        // ── Node rendering ─────────────────────────────────────
+        nodeRelSize={1}
+        nodeVal={(n) => {
+          const r = nodeRadius(n as ForceNode)
+          // Library uses sqrt(val) for radius; we want our own radius
+          // formula, so feed val = r^2 and let the lib do sqrt.
+          return r * r
+        }}
+        nodeColor={(n) => colorFor((n as ForceNode).kind).fill}
+        nodeLabel={(n) => nodeTooltip(n as ForceNode)}
+        onNodeHover={(n) => setHoverId(n ? (n as ForceNode).id : null)}
+        nodeCanvasObjectMode={() => "after"}
+        nodeCanvasObject={(n, ctx) => {
+          const node = n as ForceNode
+          if (node.x == null || node.y == null) return
+          const r = nodeRadius(node)
+          const c = colorFor(node.kind)
+          const faded = adjacent != null && !adjacent.has(node.id)
+          // Outline (extra thick when teacher-locked).
+          ctx.beginPath()
+          ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
+          ctx.lineWidth = node.kindLocked ? 2.5 : 1
+          ctx.strokeStyle = c.stroke
+          ctx.globalAlpha = faded ? 0.3 : 1
+          ctx.stroke()
+          // Hover label: filename next to the node.
+          if (hoverId === node.id) {
+            ctx.font = "12px system-ui, sans-serif"
+            ctx.textBaseline = "middle"
+            ctx.fillStyle = c.stroke
+            ctx.globalAlpha = 1
+            ctx.fillText(truncate(node.filename, 48), node.x + r + 4, node.y)
+          }
+          ctx.globalAlpha = 1
+        }}
+        // ── Edge rendering ─────────────────────────────────────
+        linkColor={(l) => EDGE_COLOR[(l as ForceLink).relation]}
+        linkWidth={(l) => {
+          const link = l as ForceLink
+          const src =
+            typeof link.source === "object" ? link.source.id : link.source
+          const dst =
+            typeof link.target === "object" ? link.target.id : link.target
+          const isAdj =
+            adjacent != null && (adjacent.has(src) || adjacent.has(dst))
+          return isAdj ? 2.5 : 1.2
+        }}
+        linkLineDash={(l) =>
+          (l as ForceLink).relation === "part_of_unit" ? [4, 3] : null
+        }
+        linkDirectionalArrowLength={(l) =>
+          (l as ForceLink).relation === "solution_of" ? 6 : 0
+        }
+        linkDirectionalArrowRelPos={1}
+        linkLabel={(l) => edgeTooltip(l as ForceLink)}
+        // ── Layout tuning ──────────────────────────────────────
+        cooldownTicks={120}
+        d3AlphaDecay={0.03}
+        d3VelocityDecay={0.3}
+      />
     </div>
   )
 }
 
-/// Node radius scales with chunk_count so fat lecture decks visually
-/// dominate over single-page handouts. Solution / brief docs that
-/// have zero chunks (sample_solution short-circuits embedding) still
-/// get a visible minimum radius.
-function nodeRadius(n: SimNode): number {
-  const chunks = n.chunk_count ?? 0
-  return 8 + Math.min(Math.sqrt(chunks) * 1.2, 14)
+function nodeTooltip(n: ForceNode): string {
+  const lines: string[] = [n.filename]
+  lines.push(n.kind ?? "unclassified")
+  if (n.kindLocked) {
+    lines.push("(locked by teacher)")
+  } else if (n.kindConfidence != null) {
+    lines.push(`confidence: ${Math.round(n.kindConfidence * 100)}%`)
+  }
+  if (n.chunkCount != null && n.chunkCount > 0) {
+    lines.push(`${n.chunkCount} chunks`)
+  }
+  // react-force-graph uses HTML for labels; basic line break.
+  return lines.join("<br>")
 }
 
-function nodeTooltip(n: SimNode): string {
-  const lines = [n.filename]
-  lines.push(n.kind ?? "unclassified")
-  if (n.kind_locked_by_teacher) lines.push("(locked by teacher)")
-  else if (n.kind_confidence != null) {
-    lines.push(`confidence: ${Math.round(n.kind_confidence * 100)}%`)
-  }
-  if (n.chunk_count != null && n.chunk_count > 0) {
-    lines.push(`${n.chunk_count} chunks`)
-  }
-  return lines.join("\n")
+function edgeTooltip(l: ForceLink): string {
+  const lines: string[] = [
+    l.relation === "solution_of" ? "is a solution to" : "is in the same unit as",
+    `confidence: ${Math.round(l.confidence * 100)}%`,
+  ]
+  if (l.rationale) lines.push(l.rationale)
+  return lines.join("<br>")
 }
 
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s
   return s.slice(0, max - 1) + "\u2026"
-}
-
-function ArrowHead({
-  ax,
-  ay,
-  bx,
-  by,
-  color,
-  faded,
-}: {
-  ax: number
-  ay: number
-  bx: number
-  by: number
-  color: string
-  faded: boolean
-}) {
-  // Place arrowhead 14px back from b along the a->b vector so it sits
-  // outside the destination node.
-  const dx = bx - ax
-  const dy = by - ay
-  const len = Math.max(Math.sqrt(dx * dx + dy * dy), 1)
-  const ux = dx / len
-  const uy = dy / len
-  const tipX = bx - ux * 14
-  const tipY = by - uy * 14
-  const wingLen = 6
-  const left = {
-    x: tipX - ux * wingLen + uy * wingLen,
-    y: tipY - uy * wingLen - ux * wingLen,
-  }
-  const right = {
-    x: tipX - ux * wingLen - uy * wingLen,
-    y: tipY - uy * wingLen + ux * wingLen,
-  }
-  return (
-    <polygon
-      points={`${tipX},${tipY} ${left.x},${left.y} ${right.x},${right.y}`}
-      fill={color}
-      opacity={faded ? 0.2 : 0.9}
-    />
-  )
 }
 
 // ── Edge list (textual fallback / accessibility) ──────────────────

@@ -580,6 +580,41 @@ async fn popular_topics(
     Ok(Json(topics))
 }
 
+/// Access guard for "show me this conversation" routes.
+///
+/// Returns the conversation row plus the viewer's teacher/admin status
+/// (the latter is computed here anyway for the access check, and the
+/// Shibboleth route reuses it for feedback pseudonymization downstream).
+/// The rule is: owner of the conv, teacher/admin on the course, or the
+/// conv is pinned by a teacher (which makes it readable by every course
+/// member). Mismatched `course_id` is reported as 404 -- not 403 --
+/// so a teacher of course A can't probe for cids in course B.
+///
+/// Shared between the Shibboleth and embed routes; the embed
+/// `get_conversation` previously only allowed the owner, which 403'd
+/// when a student opened a teacher-pinned chat from the sidebar.
+pub(crate) async fn fetch_conversation_for_view(
+    state: &AppState,
+    course_id: Uuid,
+    cid: Uuid,
+    viewer: &User,
+) -> Result<(minerva_db::queries::conversations::ConversationRow, bool), AppError> {
+    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if conv.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+
+    let is_teacher = is_course_teacher_or_admin(state, course_id, viewer).await?;
+    if conv.user_id != viewer.id && !is_teacher && !conv.pinned {
+        return Err(AppError::Forbidden);
+    }
+
+    Ok((conv, is_teacher))
+}
+
 async fn get_conversation(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -587,21 +622,7 @@ async fn get_conversation(
 ) -> Result<Json<ConversationDetailResponse>, AppError> {
     verify_course_access(&state, course_id, user.id).await?;
 
-    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    // Scope the conversation to the URL's course so a teacher/admin of one
-    // course cannot read conversations in another course by guessing cids.
-    if conv.course_id != course_id {
-        return Err(AppError::NotFound);
-    }
-
-    // Owner, admin, course teacher, or pinned conversation
-    let is_teacher = is_course_teacher_or_admin(&state, course_id, &user).await?;
-    if conv.user_id != user.id && !is_teacher && !conv.pinned {
-        return Err(AppError::Forbidden);
-    }
+    let (_conv, is_teacher) = fetch_conversation_for_view(&state, course_id, cid, &user).await?;
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
     let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;

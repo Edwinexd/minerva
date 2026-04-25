@@ -18,7 +18,9 @@ use uuid::Uuid;
 
 use crate::auth::user_from_row;
 use crate::error::AppError;
-use crate::routes::chat::{list_pinned_conversations_for, ConversationWithUserResponse};
+use crate::routes::chat::{
+    fetch_conversation_for_view, list_pinned_conversations_for, ConversationWithUserResponse,
+};
 use crate::routes::integration::verify_embed_token;
 use crate::state::AppState;
 
@@ -219,14 +221,15 @@ async fn get_conversation(
     Query(query): Query<TokenQuery>,
 ) -> Result<Json<ConversationDetailResponse>, AppError> {
     let (_, user_id) = authenticate(&state, course_id, &query)?;
-
-    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if conv.user_id != user_id || conv.course_id != course_id {
-        return Err(AppError::Forbidden);
-    }
+    // Reuse the shared access guard so teacher-pinned conversations are
+    // readable from the embed sidebar (previously 403'd because the
+    // owner-only check rejected non-owner viewers).
+    let viewer = user_from_row(
+        minerva_db::queries::users::find_by_id(&state.db, user_id)
+            .await?
+            .ok_or(AppError::Unauthorized)?,
+    );
+    let (_conv, _is_teacher) = fetch_conversation_for_view(&state, course_id, cid, &viewer).await?;
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
 

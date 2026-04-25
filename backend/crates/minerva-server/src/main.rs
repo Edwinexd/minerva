@@ -1,4 +1,5 @@
 mod auth;
+mod classification;
 mod config;
 mod error;
 mod ext_obfuscate;

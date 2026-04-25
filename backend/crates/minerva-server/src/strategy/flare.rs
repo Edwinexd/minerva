@@ -105,6 +105,10 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // drive the outer loop with scripted Cerebras responses + a mocked
     // retrieval callback, without having to bring up a real Postgres,
     // Qdrant, or FastEmbed stack.
+    let unclassified_doc_ids =
+        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
+            .await
+            .unwrap_or_default();
     let loop_cfg = RunLoopConfig {
         course_name: &ctx.course_name,
         custom_prompt: &ctx.custom_prompt,
@@ -115,6 +119,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         cerebras_api_key: &ctx.cerebras_api_key,
         max_chunks: ctx.max_chunks,
         daily_token_limit: ctx.daily_token_limit,
+        unclassified_doc_ids,
     };
     let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
     let output = run_loop(&http_client, &loop_cfg, initial_chunks, &tx, |sentence| {
@@ -188,6 +193,11 @@ struct RunLoopConfig<'a> {
     cerebras_api_key: &'a str,
     max_chunks: i32,
     daily_token_limit: i64,
+    /// Doc IDs whose classifier hasn't run yet. Their chunks are held
+    /// out of context this turn (defensive -- better a slightly worse
+    /// answer than risk leaking unclassified material). Tests pass an
+    /// empty set; production looks it up once before run_loop.
+    unclassified_doc_ids: std::collections::HashSet<String>,
 }
 
 /// Final state of a FLARE run. Returned by `run_loop` so the caller can
@@ -313,7 +323,16 @@ where
         iterations += 1;
         let iteration_start_text_len = full_text.len();
 
-        let system = common::build_system_prompt(cfg.course_name, cfg.custom_prompt, &all_chunks);
+        // Kind-aware partition every iteration: as `all_chunks` grows
+        // mid-loop via FLARE retrievals, signal chunks may show up that
+        // weren't there at iteration 0. Cheap -- pure in-memory work.
+        let rag = common::partition_chunks(all_chunks.clone(), &cfg.unclassified_doc_ids);
+        let system = common::build_system_prompt_with_signals(
+            cfg.course_name,
+            cfg.custom_prompt,
+            &rag.context,
+            &rag.signals,
+        );
         let mut messages = common::build_chat_messages(&system, cfg.history);
 
         if !full_text.is_empty() {
@@ -981,6 +1000,8 @@ mod tests {
             document_id: doc.to_string(),
             filename: name.to_string(),
             text: text.to_string(),
+            kind: None,
+            score: 0.0,
         }
     }
 
@@ -1128,7 +1149,7 @@ mod tests {
 
     #[test]
     fn extract_headings_recognizes_bold_pseudo_heading() {
-        let text = "**PROG2 VT26 – Semester project**\n\nBody content.";
+        let text = "**PROG2 VT26 -- Semester project**\n\nBody content.";
         let out = extract_normalized_headings(text);
         // The en-dash is punctuation, collapsed to space.
         assert_eq!(out, vec!["prog2 vt26 semester project"]);
@@ -1202,8 +1223,8 @@ mod tests {
 
     #[test]
     fn heading_repeat_bold_pseudo_heading_exact_match() {
-        let prior = "**PROG2 VT26 – Semester project**\n\nBody.";
-        let new = "Some continuation...\n\n**PROG2 VT26 – Semester project**\n\nMore body.";
+        let prior = "**PROG2 VT26 -- Semester project**\n\nBody.";
+        let new = "Some continuation...\n\n**PROG2 VT26 -- Semester project**\n\nMore body.";
         assert!(detect_exact_heading_repeat(prior, new).is_some());
     }
 
@@ -2036,6 +2057,7 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0, // unlimited, so we don't short-circuit on token cap
+            unclassified_doc_ids: std::collections::HashSet::new(),
         };
 
         let http = reqwest::Client::new();
@@ -2099,6 +2121,7 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 500,
+            unclassified_doc_ids: std::collections::HashSet::new(),
         };
 
         let http = reqwest::Client::new();
@@ -2162,6 +2185,7 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
         };
 
         let http = reqwest::Client::new();
@@ -2242,6 +2266,7 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
         };
 
         let retrieve_count = StdArc::new(AtomicUsize::new(0));
@@ -2261,6 +2286,8 @@ mod loop_regression_tests {
                     document_id: "added".to_string(),
                     filename: "new.pdf".to_string(),
                     text: "Freshly retrieved context for the low-confidence sentence.".to_string(),
+                    kind: None,
+                    score: 0.0,
                 }]
             }
         };
@@ -2316,6 +2343,7 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
         };
 
         let retrieve_count = StdArc::new(AtomicUsize::new(0));
@@ -2387,6 +2415,7 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 100, // plenty of room
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
         };
 
         let call = StdArc::new(AtomicUsize::new(0));
@@ -2399,6 +2428,8 @@ mod loop_regression_tests {
                     document_id: format!("doc{}", n),
                     filename: format!("f{}.pdf", n),
                     text: format!("Unique retrieved text window number {}", n),
+                    kind: None,
+                    score: 0.0,
                 }]
             }
         };
@@ -2512,6 +2543,7 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
         };
 
         let http = reqwest::Client::new();
@@ -2597,6 +2629,7 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
         };
 
         let http = reqwest::Client::new();

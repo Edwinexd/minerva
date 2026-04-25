@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE documents\n        SET status = 'processing', processing_started_at = NOW()\n        WHERE id IN (\n            SELECT id FROM documents\n            WHERE status = 'pending'\n            ORDER BY created_at ASC\n            LIMIT $1\n            FOR UPDATE SKIP LOCKED\n        )\n        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url",
+  "query": "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -67,11 +67,36 @@
         "ordinal": 12,
         "name": "source_url",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "kind_confidence",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 15,
+        "name": "kind_rationale",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "kind_locked_by_teacher",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "classified_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -87,8 +112,13 @@
       false,
       false,
       true,
+      true,
+      true,
+      true,
+      true,
+      false,
       true
     ]
   },
-  "hash": "7741664c453cd4331e389aea1b37210d99c74040034fc8d1c5e3bccbda4be441"
+  "hash": "e1a865efc15ef633b8839fb9d2e2cc3cac537e7c2f7c4ffbae8f3ea78698644c"
 }

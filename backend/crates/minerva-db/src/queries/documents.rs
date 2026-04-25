@@ -18,7 +18,25 @@ pub struct DocumentRow {
     /// Origin URL for URL-sourced documents (preserved across the
     /// awaiting_transcript -> text/plain transition so dedup stays correct).
     pub source_url: Option<String>,
+    /// Knowledge-graph classification (nullable until classifier has run).
+    /// One of: lecture, reading, assignment_brief, sample_solution,
+    /// lab_brief, exam, syllabus, unknown. CHECK constraint enforces the set.
+    pub kind: Option<String>,
+    /// Confidence in [0.0, 1.0] reported by the classifier.
+    pub kind_confidence: Option<f32>,
+    /// One-line rationale from the classifier (optional, for teacher review UI).
+    pub kind_rationale: Option<String>,
+    /// True when a teacher has set the kind manually. Auto-classification
+    /// must skip these rows.
+    pub kind_locked_by_teacher: bool,
+    pub classified_at: Option<chrono::DateTime<chrono::Utc>>,
 }
+
+// Note: sqlx::query_as! macros require literal SQL strings, so the column
+// list is repeated below. When adding a new column, update every `SELECT …`
+// and `RETURNING …` site in this file -- the compile-time check will catch
+// the row struct vs query column mismatch but won't catch a column missing
+// from a SELECT that still happens to compile.
 
 #[allow(clippy::too_many_arguments)]
 pub async fn insert(
@@ -35,7 +53,7 @@ pub async fn insert(
         DocumentRow,
         r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url"#,
+        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at"#,
         id,
         course_id,
         filename,
@@ -51,7 +69,7 @@ pub async fn insert(
 pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
         course_id,
     )
     .fetch_all(db)
@@ -61,7 +79,7 @@ pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<Document
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url FROM documents WHERE id = $1",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -77,7 +95,7 @@ pub async fn find_by_course_source_url(
 ) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url FROM documents WHERE course_id = $1 AND source_url = $2",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE course_id = $1 AND source_url = $2",
         course_id,
         source_url,
     )
@@ -135,7 +153,7 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url"#,
+        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at"#,
         limit as i64,
     )
     .fetch_all(db)
@@ -147,7 +165,7 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
 pub async fn list_awaiting_transcripts(db: &PgPool) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
     )
     .fetch_all(db)
     .await
@@ -231,4 +249,121 @@ pub async fn reset_stale_processing_older_than(
     .execute(db)
     .await?;
     Ok(result.rows_affected())
+}
+
+// ── Classification helpers ─────────────────────────────────────────
+
+/// Persist a new auto-classification result. No-ops when the row is locked
+/// by a teacher -- defense in depth on top of the application-layer check
+/// in the worker. Returns true iff a row was actually updated.
+pub async fn set_classification(
+    db: &PgPool,
+    doc_id: Uuid,
+    kind: &str,
+    confidence: f32,
+    rationale: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"UPDATE documents
+        SET kind = $2,
+            kind_confidence = $3,
+            kind_rationale = $4,
+            classified_at = NOW()
+        WHERE id = $1
+          AND kind_locked_by_teacher = FALSE"#,
+        doc_id,
+        kind,
+        confidence,
+        rationale,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Set a kind manually and lock it against future auto-classification.
+/// Clears confidence/rationale (they're only meaningful for auto-classified
+/// rows). The CHECK constraint will reject invalid `kind` values at the DB
+/// level -- we re-validate in the route handler too.
+pub async fn set_kind_locked(db: &PgPool, doc_id: Uuid, kind: &str) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"UPDATE documents
+        SET kind = $2,
+            kind_confidence = NULL,
+            kind_rationale = NULL,
+            kind_locked_by_teacher = TRUE,
+            classified_at = NOW()
+        WHERE id = $1"#,
+        doc_id,
+        kind,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Clear the teacher lock so the next reclassification pass can overwrite
+/// the kind. Does not change the current kind value -- operator can call
+/// reclassify afterwards if they want a fresh run.
+pub async fn clear_kind_lock(db: &PgPool, doc_id: Uuid) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE documents SET kind_locked_by_teacher = FALSE WHERE id = $1",
+        doc_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// IDs of docs in a course whose `kind` is in the given list. Used by the
+/// chat-time RAG filter to drop chunks that came from kinds we never want
+/// pasted into the prompt context (assignment_brief / lab_brief / exam /
+/// sample_solution as defense-in-depth in case stale vectors exist).
+pub async fn doc_ids_with_kind(
+    db: &PgPool,
+    course_id: Uuid,
+    kinds: &[&str],
+) -> Result<std::collections::HashSet<String>, sqlx::Error> {
+    let kinds_owned: Vec<String> = kinds.iter().map(|s| s.to_string()).collect();
+    let rows = sqlx::query_scalar!(
+        "SELECT id FROM documents WHERE course_id = $1 AND kind = ANY($2)",
+        course_id,
+        &kinds_owned,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|id| id.to_string()).collect())
+}
+
+/// IDs of docs in a course whose classification has not yet completed
+/// (`classified_at IS NULL`). The chat-time filter excludes their chunks
+/// from the prompt context -- defensive: we'd rather give a slightly worse
+/// answer for the ~30s after upload than risk leaking an unclassified
+/// sample-solution into context.
+pub async fn unclassified_doc_ids(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<std::collections::HashSet<String>, sqlx::Error> {
+    let rows = sqlx::query_scalar!(
+        "SELECT id FROM documents WHERE course_id = $1 AND classified_at IS NULL",
+        course_id,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|id| id.to_string()).collect())
+}
+
+/// List docs that need (re)classification. `limit` caps batch size for
+/// the backfill binary so it doesn't pull a giant course into memory.
+pub async fn list_needing_classification(
+    db: &PgPool,
+    limit: i64,
+) -> Result<Vec<DocumentRow>, sqlx::Error> {
+    sqlx::query_as!(
+        DocumentRow,
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at FROM documents WHERE classified_at IS NULL AND kind_locked_by_teacher = FALSE AND status = 'ready' ORDER BY created_at ASC LIMIT $1",
+        limit,
+    )
+    .fetch_all(db)
+    .await
 }

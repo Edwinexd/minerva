@@ -16,6 +16,9 @@
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
+use minerva_ingest::classifier::Classifier;
+
+use crate::classification::CerebrasClassifier;
 use crate::state::AppState;
 
 /// How often the worker checks for new pending documents.
@@ -135,6 +138,15 @@ pub fn start(state: AppState, max_concurrent: usize) {
 
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
 
+        // Classifier lives for the lifetime of the worker and is shared
+        // across spawned per-document tasks via Arc. One reqwest::Client
+        // per worker is fine -- Cerebras requests are cheap and the
+        // client owns a connection pool.
+        let classifier: Arc<dyn Classifier> = Arc::new(CerebrasClassifier::new(
+            reqwest::Client::new(),
+            state.config.cerebras_api_key.clone(),
+        ));
+
         loop {
             // Calculate how many slots are free so we only claim what we can process.
             let available = semaphore.available_permits() as i32;
@@ -165,6 +177,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
                 let db = state.db.clone();
                 let qdrant = Arc::clone(&state.qdrant);
                 let fastembed = Arc::clone(&state.fastembed);
+                let classifier = Arc::clone(&classifier);
                 let openai_api_key = state.config.openai_api_key.clone();
                 let docs_path = state.config.docs_path.clone();
                 let doc_id = doc.id;
@@ -264,10 +277,12 @@ pub fn start(state: AppState, max_concurrent: usize) {
                         &client,
                         &openai_api_key,
                         &fastembed,
+                        &classifier,
                         doc.id,
                         doc.course_id,
                         path,
                         &doc.filename,
+                        &doc.mime_type,
                         &course.embedding_provider,
                         &course.embedding_model,
                     )

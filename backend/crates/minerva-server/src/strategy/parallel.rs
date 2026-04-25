@@ -17,7 +17,9 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let http_client = reqwest::Client::new();
     let collection_name = format!("course_{}", ctx.course_id);
 
-    // Build initial prompt WITHOUT RAG
+    // Build initial prompt WITHOUT RAG. No chunks → no signals → no
+    // addendum yet; if RAG arrives mid-stream we rebuild with the right
+    // signals before phase-2.
     let system_no_rag = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &[]);
     let initial_messages = common::build_chat_messages(&system_no_rag, &ctx.history);
 
@@ -89,22 +91,38 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             total_completion += completion_tokens;
             rag_injected = true;
 
+            // Kind-aware partition before showing anything to the model
+            // or to the client. Unclassified-doc lookup is cheap and
+            // gates the brief race window between upload and classify.
+            let unclassified =
+                minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
+                    .await
+                    .unwrap_or_default();
+            let rag = common::partition_chunks(rag_chunks, &unclassified);
+
             let hidden =
                 minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
                     .await
                     .unwrap_or_default();
-            let client_chunks = common::chunks_for_client(&rag_chunks, &hidden);
+            let displayed = rag.all();
+            let client_chunks = common::chunks_for_client(&displayed, &hidden);
             chunks_json = serde_json::to_value(&client_chunks).ok();
 
             tracing::info!(
-                "parallel: RAG arrived after {} chars, continuing with {} chunks",
+                "parallel: RAG arrived after {} chars, continuing with {} context chunk(s) and {} signal(s)",
                 full_text.len(),
-                rag_chunks.len()
+                rag.context.len(),
+                rag.signals.len(),
             );
 
-            // Build continued prompt with RAG + partial assistant output
-            let system_with_rag =
-                common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &rag_chunks);
+            // Build continued prompt with RAG context + signal-driven
+            // refusal addendum (when applicable) + partial assistant output.
+            let system_with_rag = common::build_system_prompt_with_signals(
+                &ctx.course_name,
+                &ctx.custom_prompt,
+                &rag.context,
+                &rag.signals,
+            );
             let mut continued = common::build_chat_messages(&system_with_rag, &ctx.history);
 
             if !full_text.is_empty() {

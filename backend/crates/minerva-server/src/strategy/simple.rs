@@ -16,7 +16,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let collection_name = format!("course_{}", ctx.course_id);
 
     // RAG lookup (blocks before streaming starts)
-    let chunks = common::rag_lookup(
+    let raw_chunks = common::rag_lookup(
         &http_client,
         &ctx.openai_api_key,
         &ctx.fastembed,
@@ -30,13 +30,31 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     )
     .await;
 
+    // Kind-aware partition: assignment_brief / lab_brief / exam matches
+    // become `signals` (the model gets a refusal addendum but never the
+    // chunk text); sample_solution leftovers are dropped defensively;
+    // unclassified docs are held back for this turn.
+    let unclassified = minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
+        .await
+        .unwrap_or_default();
+    let rag = common::partition_chunks(raw_chunks, &unclassified);
+
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
         .await
         .unwrap_or_default();
-    let client_chunks = common::chunks_for_client(&chunks, &hidden);
+    // Sources surfaced to the client include both context + signals -- a
+    // student should see *that* an assignment matched even though its
+    // text is withheld from the model.
+    let displayed = rag.all();
+    let client_chunks = common::chunks_for_client(&displayed, &hidden);
     let chunks_json = serde_json::to_value(&client_chunks).ok();
 
-    let system = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &chunks);
+    let system = common::build_system_prompt_with_signals(
+        &ctx.course_name,
+        &ctx.custom_prompt,
+        &rag.context,
+        &rag.signals,
+    );
     let messages = common::build_chat_messages(&system, &ctx.history);
 
     let mut full_text = String::new();

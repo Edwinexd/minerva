@@ -10,9 +10,15 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::chunker::{self, ChunkerConfig};
+use crate::classifier::Classifier;
 use crate::embedder;
 use crate::fastembed_embedder::FastEmbedder;
 use crate::pdf;
+
+/// Classifier output kind that triggers the embed-skip short-circuit.
+/// Hard-coded here rather than imported from `minerva-server::classification`
+/// to keep the dependency edge one-way.
+const KIND_SAMPLE_SOLUTION: &str = "sample_solution";
 
 enum TextSource {
     Plain,
@@ -60,11 +66,19 @@ fn local_model_dimensions(model: &str) -> Option<u64> {
 }
 
 /// Run the full document ingestion pipeline:
-/// 1. Extract text from PDF
-/// 2. Chunk the text
-/// 3. Embed chunks (via OpenAI or Qdrant server-side inference)
-/// 4. Upsert to Qdrant
-/// 5. Update document status in Postgres
+/// 1. Extract text from PDF / plain / html
+/// 2. Classify the document into a `kind` (lecture, assignment_brief,
+///    sample_solution, …) via the supplied [`Classifier`]. Persisted
+///    immediately so the chat-time RAG filter can see it the moment any
+///    chunks land in Qdrant.
+/// 3. **Short-circuit for `sample_solution`**: do not chunk or embed.
+///    These docs must never appear in retrieval context. We still mark
+///    the doc `ready` so the teacher UI can display it, but with
+///    `chunk_count = 0`.
+/// 4. Otherwise: chunk, embed, upsert (with `kind` baked into each
+///    Qdrant point's payload so the filter is a payload check rather
+///    than a DB roundtrip per retrieved chunk).
+/// 5. Update document status in Postgres.
 #[allow(clippy::too_many_arguments)]
 pub async fn process_document(
     db: &PgPool,
@@ -72,10 +86,12 @@ pub async fn process_document(
     http_client: &reqwest::Client,
     openai_api_key: &str,
     fastembed: &Arc<FastEmbedder>,
+    classifier: &Arc<dyn Classifier>,
     document_id: Uuid,
     course_id: Uuid,
     file_path: &Path,
     filename: &str,
+    mime_type: &str,
     embedding_provider: &str,
     embedding_model: &str,
 ) -> Result<ProcessResult, String> {
@@ -103,7 +119,53 @@ pub async fn process_document(
 
     tracing::info!("extracted {} chars from {}", text.len(), filename);
 
-    // 2. Chunk
+    // 2. Classify. Errors here are not fatal -- we still ingest the doc as
+    // unclassified. The chat-time filter excludes unclassified docs from
+    // prompt context, so leaking is bounded; teacher can also re-trigger
+    // classification from the UI.
+    let kind_str: String = match classifier.classify(filename, mime_type, &text).await {
+        Ok(c) => {
+            tracing::info!(
+                "classifier: {} -> {} (confidence {:.2}, flags {:?})",
+                filename,
+                c.kind,
+                c.confidence,
+                c.suspicious_flags,
+            );
+            // Persist; the query is a no-op if the row is locked by a teacher.
+            let _ = minerva_db::queries::documents::set_classification(
+                db,
+                document_id,
+                &c.kind,
+                c.confidence,
+                c.rationale.as_deref(),
+            )
+            .await;
+            c.kind
+        }
+        Err(e) => {
+            tracing::warn!(
+                "classifier failed for {} ({}); ingesting as unclassified",
+                filename,
+                e
+            );
+            String::new()
+        }
+    };
+
+    // 3. Short-circuit for sample_solution. Never embed; the document
+    // exists in the DB (so teachers can see / delete / reclassify it)
+    // but no chunks land in Qdrant, so retrieval can't surface it.
+    if kind_str == KIND_SAMPLE_SOLUTION {
+        tracing::info!("skipping embedding for {} (kind=sample_solution)", filename);
+        set_status_ready(db, document_id, 0).await;
+        return Ok(ProcessResult {
+            chunk_count: 0,
+            embedding_tokens: 0,
+        });
+    }
+
+    // 4. Chunk
     let chunks = chunker::chunk_text(&text, &ChunkerConfig::default());
     if chunks.is_empty() {
         let msg = "no chunks produced from document".to_string();
@@ -113,11 +175,13 @@ pub async fn process_document(
 
     tracing::info!("produced {} chunks from {}", chunks.len(), filename);
 
-    // 3 & 4. Embed + Upsert (strategy depends on provider)
+    // 5. Embed + Upsert (strategy depends on provider)
     let collection_name = format!("course_{}", course_id);
 
+    // Capture-by-clone for the closure so it can be called per-chunk.
+    let kind_for_payload = kind_str.clone();
     let build_payload = |chunk: &chunker::Chunk| -> std::collections::HashMap<String, qdrant_client::qdrant::Value> {
-        [
+        let mut payload: std::collections::HashMap<String, qdrant_client::qdrant::Value> = [
             ("document_id".to_string(), document_id.to_string().into()),
             ("course_id".to_string(), course_id.to_string().into()),
             ("chunk_index".to_string(), (chunk.index as i64).into()),
@@ -125,7 +189,14 @@ pub async fn process_document(
             ("filename".to_string(), filename.to_string().into()),
         ]
         .into_iter()
-        .collect()
+        .collect();
+        // Only stamp `kind` when classification succeeded; otherwise the
+        // chunk lacks the field and the chat-time filter falls through
+        // to the DB-side `unclassified_doc_ids` check.
+        if !kind_for_payload.is_empty() {
+            payload.insert("kind".to_string(), kind_for_payload.clone().into());
+        }
+        payload
     };
 
     let embedding_tokens = match embedding_provider {

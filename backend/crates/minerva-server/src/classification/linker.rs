@@ -195,9 +195,17 @@ pub struct ProposedEdge {
 
 #[derive(Debug)]
 pub struct LinkerOutput {
-    pub edges: Vec<ProposedEdge>,
     /// Docs the linker considered (for telemetry / log lines).
     pub considered: usize,
+    /// Candidate pairs whose cached decision was still current --
+    /// the LLM was NOT called for these.
+    pub cached_hits: usize,
+    /// Candidate pairs the LLM was called on this run (cache miss
+    /// OR an endpoint had been re-classified since the prior cache).
+    pub re_evaluated: usize,
+    /// Total edges currently in `document_relations` for the course
+    /// after the writeback (positive relations only).
+    pub edges_written: usize,
 }
 
 /// Inputs the linker needs that aren't on `DocumentRow` itself.
@@ -271,8 +279,10 @@ pub async fn link_course(
 
     if classified.len() < 2 {
         return Ok(LinkerOutput {
-            edges: Vec::new(),
             considered: classified.len(),
+            cached_hits: 0,
+            re_evaluated: 0,
+            edges_written: 0,
         });
     }
 
@@ -280,8 +290,10 @@ pub async fn link_course(
         // Dev / test env without CEREBRAS_API_KEY. Skip rather than
         // burn time on a guaranteed-401 call.
         return Ok(LinkerOutput {
-            edges: Vec::new(),
             considered: classified.len(),
+            cached_hits: 0,
+            re_evaluated: 0,
+            edges_written: 0,
         });
     }
 
@@ -376,45 +388,130 @@ pub async fn link_course(
     });
 
     if candidates.is_empty() {
+        // Even if there are no fresh candidates, count what's
+        // already in the table for the response.
+        let edges_written =
+            minerva_db::queries::document_relations::list_by_course(ctx.db, course_id)
+                .await
+                .map(|v| v.len())
+                .unwrap_or(0);
         return Ok(LinkerOutput {
-            edges: Vec::new(),
             considered: truncated.len(),
+            cached_hits: 0,
+            re_evaluated: 0,
+            edges_written,
         });
     }
 
-    // Step 3: content excerpts for every doc in any candidate pair.
+    // Step 3: cache lookup. Skip pairs whose prior decision is
+    // still current (both endpoints' classified_at unchanged since
+    // the snapshot stored at decision time). This is the big
+    // optimisation: a one-doc reclassify only forces re-evaluation
+    // of pairs involving that one doc; everyone else's edges are
+    // preserved without an LLM round-trip.
+    let cached = minerva_db::queries::linker_decisions::list_for_course(ctx.db, course_id)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                "linker: failed to load decision cache ({}); treating all pairs as fresh",
+                e
+            );
+            HashMap::new()
+        });
+    let docs_by_id: HashMap<Uuid, &&DocumentRow> = truncated.iter().map(|d| (d.id, d)).collect();
+    let mut fresh_candidates: HashSet<(Uuid, Uuid)> = HashSet::new();
+    let mut cached_hits: usize = 0;
+    for pair in &candidates {
+        let key = if pair.0 < pair.1 {
+            (pair.0, pair.1)
+        } else {
+            (pair.1, pair.0)
+        };
+        let (Some(da), Some(db)) = (docs_by_id.get(&key.0), docs_by_id.get(&key.1)) else {
+            // Shouldn't happen -- candidate ids come from `truncated`.
+            // Treat as fresh and let the LLM handle it.
+            fresh_candidates.insert(*pair);
+            continue;
+        };
+        match cached.get(&key) {
+            Some(decision)
+                if decision.a_classified_at == da.classified_at
+                    && decision.b_classified_at == db.classified_at =>
+            {
+                cached_hits += 1;
+            }
+            _ => {
+                fresh_candidates.insert(*pair);
+            }
+        }
+    }
+    if cached_hits > 0 {
+        tracing::info!(
+            "linker: course {} -- {} candidate(s) reused from decision cache, {} fresh",
+            course_id,
+            cached_hits,
+            fresh_candidates.len(),
+        );
+    }
+
+    if fresh_candidates.is_empty() {
+        let edges_written =
+            minerva_db::queries::document_relations::list_by_course(ctx.db, course_id)
+                .await
+                .map(|v| v.len())
+                .unwrap_or(0);
+        return Ok(LinkerOutput {
+            considered: truncated.len(),
+            cached_hits,
+            re_evaluated: 0,
+            edges_written,
+        });
+    }
+
+    // Step 4: content excerpts for every doc in any FRESH candidate
+    // pair (cached pairs don't need them -- we won't be sending them
+    // to the LLM).
     let mut docs_in_candidates: HashSet<Uuid> = HashSet::new();
-    for (a, b) in &candidates {
+    for (a, b) in &fresh_candidates {
         docs_in_candidates.insert(*a);
         docs_in_candidates.insert(*b);
     }
     let excerpts: HashMap<Uuid, String> =
         load_excerpts(ctx.qdrant, course_id, truncated, &docs_in_candidates).await;
 
-    // Step 4: LLM labels candidates.
+    // Step 5: LLM labels FRESH candidates only.
     let edges = call_linker_llm(
         ctx.http,
         ctx.api_key,
         truncated,
-        &candidates,
+        &fresh_candidates,
         &similarity_by_pair,
         &excerpts,
     )
     .await?;
-    // Surface the raw LLM edge count separately from the filtered
-    // count, so an "0 edges written" log line is unambiguous between
-    // "the model emitted nothing" and "the model emitted N but every
-    // one tripped a post-filter". Both modes have shipped as bugs
-    // before; explicit counts make them debuggable from logs alone.
     tracing::info!(
-        "linker: course {} -- LLM proposed {} edge(s) over {} candidate pair(s)",
+        "linker: course {} -- LLM proposed {} edge(s) over {} fresh candidate pair(s) ({} cached)",
         course_id,
         edges.len(),
-        candidates.len(),
+        fresh_candidates.len(),
+        cached_hits,
     );
 
-    // Step 5: post-filters.
-    let mut kept = Vec::with_capacity(edges.len());
+    // Step 6: post-filters + per-pair writeback to both
+    // `document_relations` (the live edge set) and `linker_decisions`
+    // (the cache). Everything is keyed by the unordered pair so the
+    // cache row collapses regardless of direction.
+    //
+    // For each FRESH pair:
+    //   - delete any prior edge for the pair (handles direction
+    //     change AND relation change AND "was something, now none")
+    //   - if the LLM emitted a passing edge for this pair: upsert it
+    //   - upsert the cache row with the snapshot timestamps so the
+    //     next relink can short-circuit if nothing changes
+    //
+    // Edges keyed by their canonical unordered pair so we can find
+    // the LLM's proposal (if any) for each fresh pair below.
+    let mut edges_by_pair: HashMap<(Uuid, Uuid), ProposedEdge> = HashMap::new();
     let mut dropped_sim = 0usize;
     let mut dropped_rejected = 0usize;
     for edge in edges {
@@ -459,7 +556,7 @@ pub async fn link_course(
             continue;
         }
 
-        kept.push(edge);
+        edges_by_pair.insert(pair_key, edge);
     }
     if dropped_sim > 0 || dropped_rejected > 0 {
         tracing::info!(
@@ -469,9 +566,89 @@ pub async fn link_course(
         );
     }
 
+    // Step 7: writeback. For each fresh pair, drop any prior
+    // edge for the unordered pair, optionally upsert the new one,
+    // and record the cache row with the snapshot timestamps.
+    for pair in &fresh_candidates {
+        let key = if pair.0 < pair.1 {
+            (pair.0, pair.1)
+        } else {
+            (pair.1, pair.0)
+        };
+        // Doc lookup -- both should exist; if not, skip rather
+        // than panic.
+        let (Some(da), Some(db_doc)) = (docs_by_id.get(&key.0), docs_by_id.get(&key.1)) else {
+            continue;
+        };
+
+        // Always remove the prior edge for this unordered pair.
+        // Required even when the new decision is a relation, because
+        // the direction may have flipped (e.g. solution_of source
+        // moved to the other side after a kind change).
+        let _ = minerva_db::queries::document_relations::delete_relations_for_pair(
+            ctx.db, key.0, key.1,
+        )
+        .await;
+
+        let (rel_for_cache, conf_for_cache) = if let Some(edge) = edges_by_pair.get(&key) {
+            // Insert the fresh edge.
+            if let Err(e) = minerva_db::queries::document_relations::upsert(
+                ctx.db,
+                course_id,
+                edge.src_id,
+                edge.dst_id,
+                &edge.relation,
+                edge.confidence,
+                edge.rationale.as_deref(),
+            )
+            .await
+            {
+                tracing::warn!(
+                    "linker: failed to upsert edge {:?}->{:?} ({}): {}",
+                    edge.src_id,
+                    edge.dst_id,
+                    edge.relation,
+                    e
+                );
+            }
+            (Some(edge.relation.as_str()), Some(edge.confidence))
+        } else {
+            // LLM said `none` (or post-filter dropped). Cache the
+            // null decision so the next relink doesn't re-ask.
+            (None, None)
+        };
+
+        if let Err(e) = minerva_db::queries::linker_decisions::upsert(
+            ctx.db,
+            course_id,
+            key.0,
+            key.1,
+            da.classified_at,
+            db_doc.classified_at,
+            rel_for_cache,
+            conf_for_cache,
+        )
+        .await
+        {
+            tracing::warn!(
+                "linker: failed to upsert decision cache for {:?}<->{:?}: {}",
+                key.0,
+                key.1,
+                e
+            );
+        }
+    }
+
+    let edges_written = minerva_db::queries::document_relations::list_by_course(ctx.db, course_id)
+        .await
+        .map(|v| v.len())
+        .unwrap_or(0);
+
     Ok(LinkerOutput {
-        edges: kept,
         considered: truncated.len(),
+        cached_hits,
+        re_evaluated: fresh_candidates.len(),
+        edges_written,
     })
 }
 

@@ -11,6 +11,7 @@ import {
   type KnowledgeGraphNode,
 } from "@/lib/queries"
 import { useApiErrorMessage } from "@/lib/use-api-error"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -88,12 +89,31 @@ export function KnowledgeGraphPage({
   // tucking one in here trains teachers to think the graph is stale
   // by default. Export is the one manual action that stays.
 
+  // "Linking pending" pill: visible when there's outstanding linker
+  // work for this course (recently-classified docs with stale cache
+  // entries, or brand-new docs the linker hasn't seen yet). Driven
+  // by the per-course graph query's polling refetch -- the pill
+  // self-clears the moment the next sweep finishes.
+  const pendingCount =
+    (data?.pending_pairs ?? 0) + (data?.new_doc_count ?? 0)
+
   return (
     <Card>
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <CardTitle>{t("knowledgeGraph.title")}</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              {t("knowledgeGraph.title")}
+              {pendingCount > 0 && (
+                <Badge
+                  variant="outline"
+                  className="border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+                  title={t("knowledgeGraph.pendingTitle")}
+                >
+                  {t("knowledgeGraph.pending", { count: pendingCount })}
+                </Badge>
+              )}
+            </CardTitle>
             <CardDescription>{t("knowledgeGraph.description")}</CardDescription>
           </div>
           {data && data.nodes.length > 0 && (
@@ -478,6 +498,11 @@ function FilteredGraphView({
     nodes: filteredNodes,
     edges: filteredEdges,
     edges_computed: data.edges_computed,
+    // Carry these through so any consumer of the subgraph (currently
+    // none, but the export also reads from `data` directly) sees a
+    // complete shape.
+    pending_pairs: data.pending_pairs,
+    new_doc_count: data.new_doc_count,
   }
 
   if (filteredNodes.length === 0) {

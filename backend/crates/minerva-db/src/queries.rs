@@ -6,6 +6,7 @@ pub mod document_relations;
 pub mod documents;
 pub mod external_auth;
 pub mod feature_flags;
+pub mod linker_decisions;
 pub mod lti;
 pub mod message_feedback;
 pub mod play_course_catalog;

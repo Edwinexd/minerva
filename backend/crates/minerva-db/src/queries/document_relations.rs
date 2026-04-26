@@ -96,18 +96,36 @@ pub async fn list_by_course(
     .await
 }
 
-/// Delete every edge in a course. Used at the start of the linker
-/// pass when we want a clean rebuild rather than incremental updates.
-/// Cascades come from FK ON DELETE so a doc deletion already cleans
-/// its edges; this is just for full re-link.
+/// Delete every edge in a course. Used by the (full-rebuild) admin
+/// path. Cascades come from FK ON DELETE so a doc deletion already
+/// cleans its edges; this is just for full re-link.
 ///
 /// Note: this does NOT touch `rejected_edge_pairs`. Teacher vetoes
 /// must survive a relink -- otherwise the next pass would re-propose
 /// every rejected edge.
+#[allow(dead_code)]
 pub async fn delete_by_course(db: &PgPool, course_id: Uuid) -> Result<u64, sqlx::Error> {
     let result = sqlx::query!(
         "DELETE FROM document_relations WHERE course_id = $1",
         course_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Per-pair cleanup the linker uses when a freshly-evaluated pair
+/// gets a different relation than its prior decision (or "none"
+/// where there used to be a relation). Drops any existing edge for
+/// the unordered pair so the new decision can upsert without
+/// colliding with a stale row pointing in the wrong direction.
+pub async fn delete_relations_for_pair(db: &PgPool, a: Uuid, b: Uuid) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query!(
+        "DELETE FROM document_relations
+         WHERE (src_doc_id = $1 AND dst_doc_id = $2)
+            OR (src_doc_id = $2 AND dst_doc_id = $1)",
+        a,
+        b,
     )
     .execute(db)
     .await?;

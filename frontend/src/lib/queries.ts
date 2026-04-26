@@ -222,6 +222,12 @@ export interface KnowledgeGraph {
   nodes: KnowledgeGraphNode[]
   edges: KnowledgeGraphEdge[]
   edges_computed: boolean
+  /// Cached pair decisions whose endpoints have been re-classified
+  /// since -- the linker will re-evaluate these on its next sweep.
+  pending_pairs: number
+  /// Classified docs that have never appeared in any cached pair
+  /// yet (a brand-new upload between two relink sweeps).
+  new_doc_count: number
 }
 
 export const courseKnowledgeGraphQuery = (courseId: string) =>
@@ -229,6 +235,10 @@ export const courseKnowledgeGraphQuery = (courseId: string) =>
     queryKey: ["courses", courseId, "knowledge-graph"],
     queryFn: () =>
       api.get<KnowledgeGraph>(`/courses/${courseId}/documents/knowledge-graph`),
+    /// Poll while the linker's catching up; the pending indicators
+    /// flip back to 0 once the next sweep tick lands and the
+    /// teacher sees the graph stabilise without manually refreshing.
+    refetchInterval: 8_000,
   })
 
 export const adminRoleRulesQuery = queryOptions({

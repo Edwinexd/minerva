@@ -904,50 +904,25 @@ pub(crate) async fn relink_course(state: &AppState, course_id: Uuid) -> Result<u
         db: &state.db,
         qdrant: &state.qdrant,
     };
+    // The linker now writes edges + decision cache itself per fresh
+    // pair, so we don't wipe-and-rewrite here. A pair whose endpoints
+    // haven't been re-classified since its prior decision keeps both
+    // its cache row AND its existing document_relations edge (if any)
+    // -- no LLM call, no DB churn.
     let result = crate::classification::linker::link_course(&ctx, course_id, &docs)
         .await
         .map_err(AppError::Internal)?;
 
-    // Wipe existing edges first -- we always replace, never merge.
-    // The DB's ON CONFLICT path on upsert would also work, but a
-    // teacher who manually flipped a doc's kind expects stale edges
-    // for that doc to disappear, which a pure upsert wouldn't do.
-    minerva_db::queries::document_relations::delete_by_course(&state.db, course_id).await?;
-
-    let mut written = 0usize;
-    for edge in result.edges {
-        match minerva_db::queries::document_relations::upsert(
-            &state.db,
-            course_id,
-            edge.src_id,
-            edge.dst_id,
-            &edge.relation,
-            edge.confidence,
-            edge.rationale.as_deref(),
-        )
-        .await
-        {
-            Ok(_) => written += 1,
-            Err(e) => {
-                tracing::warn!(
-                    "relink: failed to write edge {:?} -> {:?} ({}): {}",
-                    edge.src_id,
-                    edge.dst_id,
-                    edge.relation,
-                    e,
-                );
-            }
-        }
-    }
-
     tracing::info!(
-        "relink: course {} considered {} doc(s), wrote {} edge(s)",
+        "relink: course {} considered {} doc(s) -- {} cached, {} re-evaluated, {} live edge(s)",
         course_id,
         result.considered,
-        written
+        result.cached_hits,
+        result.re_evaluated,
+        result.edges_written,
     );
 
-    Ok(written)
+    Ok(result.edges_written)
 }
 
 #[derive(Serialize)]
@@ -986,6 +961,19 @@ struct GraphResponse {
     /// The UI uses this to show "Build the graph" call-to-action vs
     /// rendering the viewer.
     edges_computed: bool,
+    /// Re-link status for the UI's "pending" pill. Three states:
+    ///   * pending_pairs > 0 OR new_doc_count > 0 :
+    ///     the linker has work to do. Shows a "linking N pair(s)"
+    ///     indicator until the next sweep tick clears it.
+    ///   * else: graph is up to date with current doc state.
+    ///
+    /// `pending_pairs` counts cached decisions whose endpoints have
+    /// since been re-classified (cache stale). `new_doc_count` counts
+    /// classified docs that have NEVER been seen by the linker (never
+    /// participated in a cached pair) -- a fresh upload before the
+    /// next relink fires.
+    pending_pairs: i64,
+    new_doc_count: i64,
 }
 
 /// Knowledge-graph view for a single course: every doc as a node
@@ -1028,10 +1016,37 @@ async fn get_knowledge_graph(
         })
         .collect();
 
+    // Compute the "linking pending" signals for the UI. Cheap
+    // queries -- one COUNT(*) each, no joins beyond the cache table
+    // and the docs row.
+    let pending_pairs =
+        minerva_db::queries::linker_decisions::stale_decisions_for_course(&state.db, course_id)
+            .await
+            .unwrap_or(0);
+    // Classified docs that have never been on either side of a
+    // cached pair: a brand-new upload between two relink sweeps.
+    let new_doc_count: i64 = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) AS "count!"
+           FROM documents d
+           WHERE d.course_id = $1
+             AND d.classified_at IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM linker_decisions ld
+                 WHERE ld.course_id = $1
+                   AND (ld.a_doc_id = d.id OR ld.b_doc_id = d.id)
+             )"#,
+        course_id,
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
     Ok(Json(GraphResponse {
         nodes,
         edges,
         edges_computed,
+        pending_pairs,
+        new_doc_count,
     }))
 }
 

@@ -37,7 +37,7 @@ hex = "0.4"
 rand = "0.10"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 rsa = "0.9"
-rand_chacha = "0.3"
+rand_chacha = "0.9"
 urlencoding = "2"
 
 # Utilities
@@ -52,5 +52,5 @@ dotenvy = "0.15"
 # Archive and XML parsing (Moodle .mbz import)
 tar = "0.4"
 flate2 = "1"
-quick-xml = { version = "0.37", features = ["serialize"] }
+quick-xml = { version = "0.39", features = ["serialize"] }
 tempfile = "3"

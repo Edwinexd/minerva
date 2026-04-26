@@ -153,6 +153,35 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     } else {
         std::collections::HashSet::new()
     };
+    // Extraction guard evaluation: runs before we enter the loop.
+    // We feed it a *snapshot* partition of the initial chunks --
+    // mid-loop FLARE retrievals can drag in more assignment
+    // material later, but for the per-turn intent classifier +
+    // multi-turn proximity check the seed view is what matters: it
+    // captures what the student's question matched against, which
+    // is exactly the signal the guard needs. The output check still
+    // runs against the final assistant text after the loop
+    // completes, so any late-arriving solution material in the
+    // reply itself is still caught. None when the feature flag is
+    // off; Some(_) otherwise.
+    let guard_partition = common::partition_chunks(
+        initial_chunks.clone(),
+        &unclassified_doc_ids,
+        ctx.kg_enabled,
+    );
+    let guard_decision = super::extraction_guard::evaluate_for_turn(
+        &ctx.db,
+        &http_client,
+        &ctx.cerebras_api_key,
+        ctx.course_id,
+        ctx.conversation_id,
+        &ctx.history,
+        &ctx.user_content,
+        &guard_partition.signals,
+        &guard_partition.context,
+    )
+    .await;
+
     let loop_cfg = RunLoopConfig {
         course_name: &ctx.course_name,
         custom_prompt: &ctx.custom_prompt,
@@ -251,10 +280,27 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         serde_json::to_value(&client_chunks).ok()
     };
 
+    // Post-generation extraction-guard intercept. No-op when the
+    // guard was disabled or the constraint isn't active. When it
+    // fires: rewrites the assistant reply into a Socratic version,
+    // emits an SSE `rewrite` event so the frontend swaps the
+    // displayed message, and logs a `conversation_flag` row.
+    let final_text = super::extraction_guard::intercept_reply(
+        &ctx.db,
+        &http_client,
+        &ctx.cerebras_api_key,
+        ctx.conversation_id,
+        &guard_decision,
+        &ctx.user_content,
+        &output.full_text,
+        &tx,
+    )
+    .await;
+
     common::finalize(
         &ctx,
         &tx,
-        &output.full_text,
+        &final_text,
         chunks_json.as_ref(),
         output.total_prompt_tokens,
         output.total_completion_tokens,

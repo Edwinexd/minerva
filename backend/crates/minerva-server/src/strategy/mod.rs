@@ -1,4 +1,5 @@
 pub mod common;
+pub mod extraction_guard;
 pub mod flare;
 pub mod parallel;
 pub mod simple;

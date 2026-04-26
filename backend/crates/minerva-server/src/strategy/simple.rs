@@ -81,6 +81,24 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         rag.context.extend(extra);
     }
 
+    // Extraction guard evaluation: runs intent classifier + multi-
+    // turn proximity check, decides whether this turn's generation
+    // needs post-output interception. None when the feature flag
+    // is off; Some(_) otherwise. Doesn't gate generation -- we
+    // always stream, then maybe intercept at the end.
+    let guard_decision = super::extraction_guard::evaluate_for_turn(
+        &ctx.db,
+        &http_client,
+        &ctx.cerebras_api_key,
+        ctx.course_id,
+        ctx.conversation_id,
+        &ctx.history,
+        &ctx.user_content,
+        &rag.signals,
+        &rag.context,
+    )
+    .await;
+
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
         .await
         .unwrap_or_default();
@@ -122,10 +140,28 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         }
     };
 
+    // Post-generation extraction-guard intercept: when the
+    // constraint is active for this turn, run the output-side
+    // solution check. Trips -> Socratic rewrite, conversation_flag
+    // logged, `rewrite` SSE event sent so the frontend swaps the
+    // streamed message. Returns the text that should land in the
+    // DB (original or rewrite).
+    let final_text = super::extraction_guard::intercept_reply(
+        &ctx.db,
+        &http_client,
+        &ctx.cerebras_api_key,
+        ctx.conversation_id,
+        &guard_decision,
+        &ctx.user_content,
+        &full_text,
+        &tx,
+    )
+    .await;
+
     common::finalize(
         &ctx,
         &tx,
-        &full_text,
+        &final_text,
         chunks_json.as_ref(),
         prompt_tokens,
         completion_tokens,

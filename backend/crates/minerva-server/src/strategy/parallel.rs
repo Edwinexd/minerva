@@ -60,6 +60,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let mut total_completion = 0i32;
     let mut chunks_json: Option<serde_json::Value> = None;
     let mut rag_injected = false;
+    // Populated inside the `RagArrived` branch below (the only path
+    // where we have signals + context to evaluate). Stays None for
+    // the no-RAG completion path -- nothing to guard against when
+    // the model never saw assignment material.
+    let mut guard_decision: Option<super::extraction_guard::GuardDecision> = None;
 
     // Phase 1: stream without RAG, checking for RAG results between chunks
     let phase1 = stream_with_rag_check(
@@ -163,6 +168,25 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 rag.signals.len(),
             );
 
+            // Extraction guard evaluation: piggybacks on the just-
+            // finished RAG (signals + context) to decide whether
+            // this turn's reply needs the post-generation output
+            // check. Stashed for use after phase-2 streaming. None
+            // when the feature flag is off; Some(_) otherwise. Same
+            // contract as simple.rs / flare.rs.
+            guard_decision = super::extraction_guard::evaluate_for_turn(
+                &ctx.db,
+                &http_client,
+                &ctx.cerebras_api_key,
+                ctx.course_id,
+                ctx.conversation_id,
+                &ctx.history,
+                &ctx.user_content,
+                &rag.signals,
+                &rag.context,
+            )
+            .await;
+
             // Build continued prompt with RAG context + signal-driven
             // refusal addendum (when applicable) + partial assistant output.
             let system_with_rag = common::build_system_prompt_with_signals(
@@ -224,10 +248,29 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         }
     }
 
+    // Post-generation extraction-guard intercept. No-op when the
+    // guard wasn't enabled (decision is None) or when the
+    // constraint isn't active for this turn. Otherwise: runs the
+    // output-side check, generates a Socratic rewrite if positive,
+    // emits an SSE `rewrite` event so the frontend can swap the
+    // streamed message, logs a `conversation_flag`, and returns the
+    // text that should be persisted (original or rewrite).
+    let final_text = super::extraction_guard::intercept_reply(
+        &ctx.db,
+        &http_client,
+        &ctx.cerebras_api_key,
+        ctx.conversation_id,
+        &guard_decision,
+        &ctx.user_content,
+        &full_text,
+        &tx,
+    )
+    .await;
+
     common::finalize(
         &ctx,
         &tx,
-        &full_text,
+        &final_text,
         chunks_json.as_ref(),
         total_prompt,
         total_completion,

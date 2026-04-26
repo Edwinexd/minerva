@@ -21,7 +21,7 @@ fastembed.workspace = true
 candle-core.workspace = true
 hf-hub.workspace = true
 pdf-extract = "0.10"
-scraper = "0.22"
+scraper = "0.26"
 
 tar.workspace = true
 flate2.workspace = true

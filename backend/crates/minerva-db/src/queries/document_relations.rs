@@ -150,6 +150,91 @@ pub async fn delete_below_confidence(
     Ok(result.rows_affected())
 }
 
+// ── Graph-aware retrieval helpers ──────────────────────────────────
+
+/// For each source doc id, the set of "complementary" doc ids the
+/// chat path should consider pulling additional context from. Used
+/// by `strategy::common::expand_context_via_graph` to enrich the
+/// prompt with material the embedding search alone might have
+/// missed.
+///
+/// Two relation kinds qualify:
+///   * `part_of_unit`: undirected, both sides are siblings in the
+///     same course unit. The student's question matched one; its
+///     unit partners (the lecture's section summary, the
+///     accompanying reading, etc.) are reasonable additional
+///     context.
+///   * `applied_in` (src side only): the source doc is theoretical
+///     content (lecture / reading) and the dst doc applies it in
+///     practice. When a student asks about the lecture, the
+///     applying tutorial is useful background; the reverse
+///     direction (practice -> theory) is intentionally NOT pulled
+///     so an assignment query doesn't drag the lecture's full
+///     content into context unsolicited.
+///
+/// Rejected edges (`document_relations.rejected_by_teacher`) are
+/// excluded -- a teacher veto on an edge means it shouldn't be
+/// part of the inference signal either.
+///
+/// Returned map keys are normalised: each input doc id appears as
+/// a key whether or not it has partners (an empty Vec means no
+/// partners).
+pub async fn unit_partners_for_docs(
+    db: &PgPool,
+    course_id: Uuid,
+    source_doc_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, Vec<Uuid>>, sqlx::Error> {
+    if source_doc_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let rows = sqlx::query!(
+        r#"SELECT src_doc_id, dst_doc_id, relation
+           FROM document_relations
+           WHERE course_id = $1
+             AND rejected_by_teacher = FALSE
+             AND (
+                 (relation = 'part_of_unit'
+                     AND (src_doc_id = ANY($2) OR dst_doc_id = ANY($2)))
+                 OR
+                 (relation = 'applied_in' AND src_doc_id = ANY($2))
+             )"#,
+        course_id,
+        source_doc_ids,
+    )
+    .fetch_all(db)
+    .await?;
+
+    let mut out: std::collections::HashMap<Uuid, Vec<Uuid>> = std::collections::HashMap::new();
+    for src in source_doc_ids {
+        out.entry(*src).or_default();
+    }
+    let source_set: std::collections::HashSet<Uuid> = source_doc_ids.iter().copied().collect();
+    for r in rows {
+        let (key, partner) = match r.relation.as_str() {
+            "part_of_unit" => {
+                // Undirected: figure out which side is the source
+                // (might be either), surface the OTHER as partner.
+                if source_set.contains(&r.src_doc_id) {
+                    (r.src_doc_id, r.dst_doc_id)
+                } else {
+                    (r.dst_doc_id, r.src_doc_id)
+                }
+            }
+            "applied_in" => {
+                // Filtered by SQL to src-side only: source is
+                // theoretical, dst is the practice doc.
+                (r.src_doc_id, r.dst_doc_id)
+            }
+            _ => continue,
+        };
+        // Don't list a doc as its own partner.
+        if partner != key {
+            out.entry(key).or_default().push(partner);
+        }
+    }
+    Ok(out)
+}
+
 // ── Per-edge teacher rejection ─────────────────────────────────────
 
 /// Mark a stored edge as rejected by a teacher. Also writes the

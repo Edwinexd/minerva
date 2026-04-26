@@ -468,6 +468,187 @@ pub fn build_system_prompt_with_signals(
     prompt
 }
 
+/// Maximum number of source docs we expand via the KG. Picking the
+/// top few hits and following their graph edges keeps prompt growth
+/// bounded -- a long-tail of low-similarity chunks dragging in extra
+/// material would dilute the signal.
+const GRAPH_EXPAND_SOURCE_DOCS: usize = 3;
+
+/// Maximum number of expanded chunks added to context per turn.
+/// Capped so a hub doc with many graph partners doesn't take over
+/// the prompt.
+const GRAPH_EXPAND_TOTAL_CHUNKS: usize = 4;
+
+/// Best-effort context enrichment via the course knowledge graph.
+///
+/// For each of the top context chunks (up to GRAPH_EXPAND_SOURCE_DOCS
+/// distinct source docs), look up `part_of_unit` and `applied_in`
+/// (theory -> practice direction only) partners in the KG and pull
+/// the chunk best matching the user's query from each partner doc.
+/// The expanded chunks join `context` with the same kind/payload
+/// shape as direct hits, so partition / formatting / hidden-doc
+/// gating all keep working uniformly.
+///
+/// Skipped silently when:
+///   * The course has no edges yet (cold start).
+///   * Every partner doc is already represented in `base_context`
+///     (the embedding search already pulled it in).
+///   * The course has KG disabled at the feature-flag layer
+///     (caller's responsibility -- this fn doesn't re-check).
+///
+/// Errors at any sub-step (DB outage, Qdrant search failure) are
+/// logged at warn and treated as "no expansion" -- the chat path
+/// continues with the unexpanded context. Better to answer with
+/// less material than refuse to answer because graph lookup hiccupped.
+#[allow(clippy::too_many_arguments)]
+pub async fn expand_context_via_graph(
+    db: &sqlx::PgPool,
+    qdrant: &qdrant_client::Qdrant,
+    fastembed: &Arc<FastEmbedder>,
+    http_client: &reqwest::Client,
+    openai_api_key: &str,
+    course_id: uuid::Uuid,
+    collection_name: &str,
+    embedding_provider: &str,
+    embedding_model: &str,
+    query: &str,
+    base_context: &[RagChunk],
+) -> Vec<RagChunk> {
+    if base_context.is_empty() {
+        return Vec::new();
+    }
+
+    // Gather the top source-doc ids in retrieval order, deduping.
+    let mut source_doc_ids: Vec<uuid::Uuid> = Vec::new();
+    let mut seen_doc_ids: HashSet<String> = HashSet::new();
+    for chunk in base_context.iter() {
+        if seen_doc_ids.insert(chunk.document_id.clone()) {
+            if let Ok(uuid) = uuid::Uuid::parse_str(&chunk.document_id) {
+                source_doc_ids.push(uuid);
+                if source_doc_ids.len() >= GRAPH_EXPAND_SOURCE_DOCS {
+                    break;
+                }
+            }
+        }
+    }
+    if source_doc_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let partners_map = match minerva_db::queries::document_relations::unit_partners_for_docs(
+        db,
+        course_id,
+        &source_doc_ids,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("graph_expand: partner lookup failed: {}", e);
+            return Vec::new();
+        }
+    };
+
+    // Flatten partners across all source docs, dedup, drop any
+    // that are already in base_context.
+    let already_in_context: HashSet<String> =
+        base_context.iter().map(|c| c.document_id.clone()).collect();
+    let mut expansion_targets: Vec<uuid::Uuid> = Vec::new();
+    let mut targets_seen: HashSet<uuid::Uuid> = HashSet::new();
+    for src in &source_doc_ids {
+        if let Some(partners) = partners_map.get(src) {
+            for p in partners {
+                if targets_seen.insert(*p) && !already_in_context.contains(&p.to_string()) {
+                    expansion_targets.push(*p);
+                    if expansion_targets.len() >= GRAPH_EXPAND_TOTAL_CHUNKS {
+                        break;
+                    }
+                }
+            }
+        }
+        if expansion_targets.len() >= GRAPH_EXPAND_TOTAL_CHUNKS {
+            break;
+        }
+    }
+    if expansion_targets.is_empty() {
+        return Vec::new();
+    }
+
+    // Embed the query once, reuse for every per-doc filtered search.
+    let query_vector: Vec<f32> = if embedding_provider == "local" {
+        match fastembed
+            .embed(embedding_model, vec![query.to_string()])
+            .await
+            .map(|mut v| v.pop())
+        {
+            Ok(Some(v)) => v,
+            _ => {
+                tracing::warn!("graph_expand: failed to embed query for partner search; skipping");
+                return Vec::new();
+            }
+        }
+    } else {
+        match minerva_ingest::embedder::embed_texts(
+            http_client,
+            openai_api_key,
+            std::slice::from_ref(&query.to_string()),
+        )
+        .await
+        .map(|r| r.embeddings.into_iter().next())
+        {
+            Ok(Some(v)) => v,
+            _ => {
+                tracing::warn!("graph_expand: failed to embed query for partner search; skipping");
+                return Vec::new();
+            }
+        }
+    };
+
+    // Per-partner filtered Qdrant search: top-1 chunk for the query
+    // restricted to that doc. Sequential is fine -- expansion is
+    // tiny (<= GRAPH_EXPAND_TOTAL_CHUNKS calls) and Qdrant is fast.
+    let mut expanded: Vec<RagChunk> = Vec::with_capacity(expansion_targets.len());
+    for target_doc_id in expansion_targets {
+        let filter =
+            qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
+                "document_id",
+                target_doc_id.to_string(),
+            )]);
+        let req = qdrant_client::qdrant::SearchPointsBuilder::new(
+            collection_name,
+            query_vector.clone(),
+            1,
+        )
+        .filter(filter)
+        .with_payload(true);
+        match qdrant.search_points(req).await {
+            Ok(resp) => {
+                if let Some(point) = resp.result.into_iter().next() {
+                    if let Some(chunk) = scored_point_to_rag_chunk(&point) {
+                        expanded.push(chunk);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::debug!(
+                    "graph_expand: search failed for partner doc {}: {}",
+                    target_doc_id,
+                    e
+                );
+            }
+        }
+    }
+    if !expanded.is_empty() {
+        tracing::info!(
+            "graph_expand: course {} -- added {} chunk(s) from {} partner doc(s)",
+            course_id,
+            expanded.len(),
+            expanded.len(),
+        );
+    }
+    expanded
+}
+
 /// Build the chat messages array for the Cerebras API.
 pub fn build_chat_messages(
     system_prompt: &str,

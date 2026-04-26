@@ -57,6 +57,30 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         .await;
     }
 
+    // Graph-aware enrichment: same logic as parallel.rs -- pull
+    // representative chunks from each top hit's KG partners so
+    // the model sees siblings (part_of_unit) and applied
+    // exercises (applied_in dst) the embedding search would
+    // otherwise miss.
+    if ctx.kg_enabled {
+        let collection_name = format!("course_{}", ctx.course_id);
+        let extra = common::expand_context_via_graph(
+            &ctx.db,
+            &ctx.qdrant,
+            &ctx.fastembed,
+            &http_client,
+            &ctx.openai_api_key,
+            ctx.course_id,
+            &collection_name,
+            &ctx.embedding_provider,
+            &ctx.embedding_model,
+            &ctx.user_content,
+            &rag.context,
+        )
+        .await;
+        rag.context.extend(extra);
+    }
+
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
         .await
         .unwrap_or_default();

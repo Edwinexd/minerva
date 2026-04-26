@@ -121,6 +121,33 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 .await;
             }
 
+            // Graph-aware enrichment: pull representative chunks
+            // from each top hit's KG partners (part_of_unit / theory
+            // -> applied_in dst). Adds material the embedding search
+            // alone might have missed -- e.g. a student asking about
+            // a concept matches the lecture, the graph adds the
+            // lecture's tutorial / section summary as supporting
+            // context. Gated on kg_enabled; the helper itself is a
+            // best-effort no-op on errors.
+            if ctx.kg_enabled {
+                let collection_name = format!("course_{}", ctx.course_id);
+                let extra = common::expand_context_via_graph(
+                    &ctx.db,
+                    &ctx.qdrant,
+                    &ctx.fastembed,
+                    &http_client,
+                    &ctx.openai_api_key,
+                    ctx.course_id,
+                    &collection_name,
+                    &ctx.embedding_provider,
+                    &ctx.embedding_model,
+                    &ctx.user_content,
+                    &rag.context,
+                )
+                .await;
+                rag.context.extend(extra);
+            }
+
             let hidden =
                 minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
                     .await

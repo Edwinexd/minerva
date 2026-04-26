@@ -105,7 +105,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     .await;
     // Adversarial filter is part of the KG bundle (defence in depth on
     // top of per-doc kind classification). Skip when KG is gated off.
-    let initial_chunks = if ctx.kg_enabled {
+    let mut initial_chunks = if ctx.kg_enabled {
         crate::classification::adversarial::filter_solution_chunks(
             &http_client,
             &ctx.cerebras_api_key,
@@ -115,6 +115,32 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     } else {
         initial_chunks_raw
     };
+
+    // Graph-aware enrichment: pull representative chunks from each
+    // top hit's KG partners (part_of_unit + applied_in dst). Same
+    // intent as parallel.rs / simple.rs -- the graph fills gaps the
+    // embedding search missed (a lecture is in context, the graph
+    // adds its tutorial / section summary). FLARE consumes the
+    // enriched seed AND graph-expands every mid-stream retrieval
+    // below, so the loop sees graph context throughout, not just
+    // on turn 1.
+    if ctx.kg_enabled {
+        let extra = common::expand_context_via_graph(
+            &ctx.db,
+            &ctx.qdrant,
+            &ctx.fastembed,
+            &http_client,
+            &ctx.openai_api_key,
+            ctx.course_id,
+            &collection_name,
+            &ctx.embedding_provider,
+            &ctx.embedding_model,
+            &ctx.user_content,
+            &initial_chunks,
+        )
+        .await;
+        initial_chunks.extend(extra);
+    }
 
     // Everything below is in a separate function so integration tests can
     // drive the outer loop with scripted Cerebras responses + a mocked
@@ -147,9 +173,12 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         let cerebras_key = ctx.cerebras_api_key.clone();
         let fastembed = ctx.fastembed.clone();
         let qdrant = ctx.qdrant.clone();
+        let db = ctx.db.clone();
         let collection_name = collection_name.clone();
         let embedding_provider = ctx.embedding_provider.clone();
         let embedding_model = ctx.embedding_model.clone();
+        let course_id = ctx.course_id;
+        let kg_enabled = ctx.kg_enabled;
         async move {
             let raw = flare_retrieve(
                 &http_client,
@@ -166,7 +195,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             .await;
             // Mid-stream adversarial filter: same KG gate as the
             // initial-chunk pass. Disabled courses bypass it.
-            if ctx.kg_enabled {
+            let mut filtered = if kg_enabled {
                 crate::classification::adversarial::filter_solution_chunks(
                     &http_client,
                     &cerebras_key,
@@ -175,7 +204,31 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 .await
             } else {
                 raw
+            };
+            // Graph expansion on the mid-stream batch too -- a
+            // FLARE retrieval is itself a small RAG lookup, so we
+            // enrich it the same way as the initial seed. Without
+            // this, only the first round of context benefits from
+            // the graph; subsequent rounds would shrink back to
+            // bare embedding hits as the model drifts off topic.
+            if kg_enabled {
+                let extra = common::expand_context_via_graph(
+                    &db,
+                    &qdrant,
+                    &fastembed,
+                    &http_client,
+                    &openai_key,
+                    course_id,
+                    &collection_name,
+                    &embedding_provider,
+                    &embedding_model,
+                    &sentence,
+                    &filtered,
+                )
+                .await;
+                filtered.extend(extra);
             }
+            filtered
         }
     })
     .await;

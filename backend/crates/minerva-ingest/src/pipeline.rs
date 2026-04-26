@@ -439,52 +439,88 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
         .await
         .map_err(|e| format!("qdrant collection check failed: {}", e))?;
 
-    if exists {
-        // Verify dimensions match the existing collection
-        let info = qdrant
-            .collection_info(name)
-            .await
-            .map_err(|e| format!("qdrant collection info failed: {}", e))?;
-
-        if let Some(config) = info.result.and_then(|r| r.config) {
-            if let Some(params) = config.params {
-                let existing_dims = params.vectors_config.and_then(|vc| vc.config).and_then(
-                    |config| match config {
-                        qdrant_client::qdrant::vectors_config::Config::Params(p) => Some(p.size),
-                        _ => None,
-                    },
-                );
-                if let Some(existing) = existing_dims {
-                    if existing != dimensions {
-                        return Err(format!(
-                            "collection {} has dimension {} but provider requires {}; re-upload documents after deleting existing ones",
-                            name, existing, dimensions
-                        ));
-                    }
-                }
-            }
-        }
-    } else {
-        qdrant
+    if !exists {
+        // Bursty Moodle / MBZ ingests fire many parallel worker tasks
+        // against a brand-new course at once. Each task does a check-
+        // then-create on the collection, so if N tasks race past the
+        // `collection_exists` line concurrently they all decide it
+        // doesn't exist and all try to create it. One wins; the others
+        // see Qdrant's "already exists" error and used to fail the
+        // doc. We now treat that error as "lost the race" and fall
+        // through to the same dimension-verification path the
+        // already-existed branch uses.
+        match qdrant
             .create_collection(
                 CreateCollectionBuilder::new(name)
                     .vectors_config(VectorParamsBuilder::new(dimensions, Distance::Cosine)),
             )
             .await
-            .map_err(|e| format!("qdrant collection creation failed: {}", e))?;
-
-        // Create payload index up-front so the very first delete/scroll on
-        // this collection benefits. Only done at creation time so we don't
-        // pay a round-trip on every subsequent upload.
-        ensure_document_id_index(qdrant, name).await;
-
-        tracing::info!(
-            "created qdrant collection {} (dimensions: {})",
-            name,
-            dimensions
-        );
+        {
+            Ok(_) => {
+                // Create payload index up-front so the very first
+                // delete/scroll on this collection benefits. Only
+                // done at creation time so we don't pay a round-trip
+                // on every subsequent upload.
+                ensure_document_id_index(qdrant, name).await;
+                tracing::info!(
+                    "created qdrant collection {} (dimensions: {})",
+                    name,
+                    dimensions
+                );
+                // Freshly created with the requested dimensions --
+                // skip the dim verification round-trip on the happy
+                // path.
+                return Ok(());
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                // Qdrant returns this as a tonic AlreadyExists status
+                // with the substring "already exists" in the message.
+                // We don't need a more structural check than this --
+                // the only path that produces it is the race we're
+                // handling, and any other "already exists"-flavoured
+                // failure ALSO means the collection now exists and
+                // we should verify dims rather than bail.
+                if !msg.contains("already exists") {
+                    return Err(format!("qdrant collection creation failed: {}", e));
+                }
+                tracing::info!(
+                    "qdrant: collection {} created concurrently by another worker -- verifying dims",
+                    name
+                );
+            }
+        }
     }
 
+    // Reached either because the collection already existed at
+    // check time, or because we lost the create race. Verify the
+    // existing collection has the dimensions this provider needs --
+    // a mismatch (e.g. switched embedding model after some docs
+    // were uploaded) is a hard failure that requires manual
+    // intervention.
+    let info = qdrant
+        .collection_info(name)
+        .await
+        .map_err(|e| format!("qdrant collection info failed: {}", e))?;
+    if let Some(config) = info.result.and_then(|r| r.config) {
+        if let Some(params) = config.params {
+            let existing_dims = params
+                .vectors_config
+                .and_then(|vc| vc.config)
+                .and_then(|config| match config {
+                    qdrant_client::qdrant::vectors_config::Config::Params(p) => Some(p.size),
+                    _ => None,
+                });
+            if let Some(existing) = existing_dims {
+                if existing != dimensions {
+                    return Err(format!(
+                        "collection {} has dimension {} but provider requires {}; re-upload documents after deleting existing ones",
+                        name, existing, dimensions
+                    ));
+                }
+            }
+        }
+    }
     Ok(())
 }
 

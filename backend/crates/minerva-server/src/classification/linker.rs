@@ -1,22 +1,33 @@
 //! Cross-document linking pass: builds the edges of the course
 //! knowledge graph after every doc has a `kind`.
 //!
-//! The pass is course-scoped. It takes the (id, filename, kind,
-//! rationale) of every classified document in a course, sends them
-//! all to gpt-oss-120b in a single call, and asks the model to
-//! propose typed edges:
+//! The pass is course-scoped. It takes every classified document in
+//! a course, fans out embedding-based candidate pairs, and asks
+//! gpt-oss-120b to label each pair with a typed relation:
 //!
 //!   * `solution_of(src=sample_solution, dst=assignment_brief|lab_brief|exam)`
 //!   * `part_of_unit(src, dst)` -- two docs that belong to the same
 //!     week / module / topic, regardless of kind.
 //!
+//! **Filenames are NOT used anywhere in this module.** Real DSV course
+//! filenames are unreliable (stale templates, copy/paste, names that
+//! contradict content), so:
+//!
+//!   * Candidate generation is pure embedding cosine similarity.
+//!   * The LLM sees only `kind`, `classifier_rationale`, and a content
+//!     `excerpt` per doc -- no filename, no marker tokens, no derived
+//!     priors.
+//!   * Post-filters are similarity-floor / confidence-floor /
+//!     duplicate-content -- all derived from the actual document
+//!     vectors, never from filenames.
+//!
 //! Why one big call rather than per-pair: pairwise scales O(n^2) and
 //! drowns context in noise. A single call lets the model do simple
-//! sanity checks across the corpus (numbering coherence, cluster the
-//! lab+brief+solution+rubric for a unit together) and emit only the
+//! sanity checks across the corpus (cluster the lab+brief+solution+
+//! rubric for a unit together based on content) and emit only the
 //! confident edges. For courses bigger than the model can fit in one
-//! turn we paginate by unit_hint -- but in practice DSV courses are
-//! 20-200 docs, well within budget.
+//! turn we'd paginate by embedding cluster -- but in practice DSV
+//! courses are 20-200 docs, well within budget.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -29,53 +40,6 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::strategy::common::cerebras_request_with_retry;
-
-/// Tokens that, when followed by digits in a filename, indicate "this
-/// doc belongs to <something> #N" -- a unit/week/lab/chapter/exercise
-/// numbering. If two filenames carry the SAME prefix with DIFFERENT
-/// numbers, they're in different units (lab2 vs lab3 are not the same
-/// unit), and any `part_of_unit` edge between them should be dropped.
-///
-/// We list both English and Swedish prefixes since DSV courses have
-/// significant Swedish material (övning, uppgift, vecka, kapitel,
-/// inlämning, etc.). Lowercase comparison; the regex below applies
-/// after lowercasing the filename.
-const UNIT_NUMBER_PREFIXES: &[&str] = &[
-    // English
-    "week",
-    "lab",
-    "lecture",
-    "chapter",
-    "ch",
-    "module",
-    "assignment",
-    "exercise",
-    "ex",
-    "homework",
-    "hw",
-    "session",
-    "unit",
-    "part",
-    // Swedish
-    "vecka",
-    "lektion",
-    "kapitel",
-    "modul",
-    "uppgift",
-    "ovning", // for "övning" after diacritic stripping
-    "ovningsuppgift",
-    "inlamning", // for "inlämning"
-    "laboration",
-    "lab", // already above; harmless duplicate keeps logic order obvious
-    "del",
-    "avsnitt",
-    // DSV-specific lecture-numbering convention: F01, F02, ... is
-    // "Föreläsning 01" etc. The single letter is too generic on its
-    // own but the extractor requires digits IMMEDIATELY after the
-    // prefix (with optional separators), so "f01" matches but
-    // "first" / "fax" / "fri-day" don't.
-    "f",
-];
 
 const LINKER_MODEL: &str = "gpt-oss-120b";
 
@@ -110,9 +74,8 @@ const EMBEDDING_TOP_K: usize = 8;
 const MAX_DOCS_PER_CALL: usize = 300;
 
 /// Per-doc content excerpt size for the LLM prompt. Head of the
-/// document text -- the linker already has filename + kind +
-/// classification rationale, this is the additional grounding that
-/// stops it inventing relationships from filenames alone.
+/// document text -- the linker's only grounding signal beyond
+/// (kind, classifier_rationale). Filenames are deliberately excluded.
 const EXCERPT_CHARS: usize = 400;
 
 const LINKER_SYSTEM_PROMPT: &str = r#"You label edges in a course-document knowledge graph.
@@ -120,56 +83,42 @@ const LINKER_SYSTEM_PROMPT: &str = r#"You label edges in a course-document knowl
 You will receive:
 
 1. A "documents" array. Each document has:
-   - "id": opaque identifier
-   - "filename"
-   - "kind": one of "lecture", "reading", "assignment_brief", "sample_solution", "lab_brief", "exam", "syllabus", "unknown"
+   - "id": opaque identifier (use this verbatim when referring to docs)
+   - "kind": one of "lecture", "lecture_transcript", "reading", "tutorial_exercise", "assignment_brief", "sample_solution", "lab_brief", "exam", "syllabus", "unknown"
    - "classifier_rationale": short note from the per-document classifier
    - "excerpt": the first few hundred characters of the document text
 
 2. A "candidates" array of pre-selected pairs that are SEMANTICALLY similar
-   (high embedding similarity) or share filename markers. Each candidate has:
+   in content (high embedding cosine similarity). Each candidate has:
    - "src_id", "dst_id": the two document ids
    - "similarity": cosine similarity in [0, 1] of the docs' content embeddings
-   - "shared_filename_marker": optional concrete shared marker like "lab2",
-     "F18", "module-trees" -- present when both filenames carry the same
-     unit token, absent otherwise
+
+You are NOT given filenames. Filenames in real courses are unreliable
+(stale templates, copy/paste, names that contradict the content).
+Decide everything from the kind, the classifier_rationale, the excerpt,
+and the embedding similarity.
 
 For EACH candidate pair, decide whether there is a typed relation between
 the two documents. You may also decide there is NONE (omit it from output).
 
-Filename markers are the STRONGEST signal in this task -- much stronger
-than topic-word overlap or embedding similarity. Each candidate may carry
-a `shared_filename_marker` (e.g. "lab2", "f18", "week3"). If present, the
-two documents almost certainly belong to the same unit. Treat the marker
-as a hard prior and lean toward emitting `part_of_unit` unless their
-content disagrees outright (e.g. one is a syllabus and one is a lab).
-
-Conversely, if a candidate has NO shared filename marker, you need much
-stronger evidence to emit `part_of_unit`: either a clear "this is the
-solution to that" / "this is the lab for that lecture" relationship in
-the content, or a unique-and-specific shared subtopic (not a course-wide
-topic word like "inheritance" / "OO" / "loops"). Topic-word overlap
-ALONE is never sufficient.
-
 Possible relations:
 - "solution_of": src is the sample_solution; dst is the assignment_brief /
-  lab_brief / exam it answers. Use when one doc is `kind=sample_solution`
-  AND the OTHER is an assessment kind AND the content/filenames clearly
-  pair them. A shared filename marker (e.g. "lab2") is the strongest
-  evidence. Do NOT emit solution_of without explicit kind=sample_solution
-  on one side.
+  lab_brief / exam it answers. REQUIRES one side to have kind=sample_solution
+  AND the other to have kind in {assignment_brief, lab_brief, exam}, AND the
+  two excerpts to be plainly the same problem (one stating it, the other
+  solving it). High embedding similarity alone is insufficient.
 - "part_of_unit": both documents belong to the same week / module /
-  chapter / topic / unit. Strong path: shared_filename_marker is set,
-  emit with confidence ~0.9 unless content disagrees. Weak path: no
-  filename marker; emit only if both excerpts share a SPECIFIC subtopic
-  AND there is a structural relationship (lab + brief + solution +
-  rubric all in the same unit, etc.). NOTE: two sequential lectures on
-  the same broad subject (F01_Arv_I and F02_Arv_II, week3 and week4) are
-  NOT in the same unit -- they are in adjacent units of a course module.
-  Do not link them. A topic word like "Arv" or "inheritance" appearing
-  in both filenames is NOT sufficient evidence; you need either matching
-  numeric markers, or a clear "this is a summary of that" / "this is
-  the lab for that lecture" relationship visible in the content.
+  chapter / topic / unit. Emit ONLY if both excerpts cover a SPECIFIC
+  shared subtopic (a particular algorithm, a particular case study,
+  one identifiable problem) AND there is a structural relationship
+  visible in the content -- e.g. lecture introduces a concept, the
+  exercise asks the student to apply it; the assignment poses a
+  problem, the lab walks through a related implementation; the
+  reading and the syllabus point at the same module. NOT enough:
+  two docs that happen to share a course-wide topic word
+  ("inheritance", "loops", "OO") -- that's the whole course's vocabulary,
+  not a unit signal. NOT enough: two sequential lectures on related
+  themes -- they belong to ADJACENT units, not the same unit.
 
 Output format -- JSON, nothing else:
 {
@@ -180,8 +129,10 @@ Output format -- JSON, nothing else:
       "relation": "solution_of" | "part_of_unit",
       "confidence": float in [0, 1],
       "rationale": short specific string. CITE concrete evidence visible
-        in the inputs: filename markers, words from both excerpts, the
-        classifier rationale. Do NOT invent shared tokens.
+        in the excerpts: a specific phrase appearing in both, a problem
+        statement in one and its answer in the other, a concept the
+        first introduces and the second exercises. Do NOT invent shared
+        tokens. Do NOT cite filenames -- you don't have them.
     }
   ]
 }
@@ -191,20 +142,15 @@ HARD RULES:
   that are not candidates.
 - AT MOST ONE edge per candidate pair.
 - Do NOT emit self-loops (same src_id and dst_id).
-- DO NOT emit a part_of_unit edge between docs with conflicting numeric
-  markers (e.g. "lab2" vs "lab3", "uppgift3" vs "uppgift4", "F01" vs
-  "F02" with completely different topics). The application post-filter
-  drops these regardless, but emitting them wastes effort.
 - DO NOT emit any edge for pairs whose excerpts are essentially identical
   (likely duplicate uploads of the same document). These belong nowhere.
-- The "rationale" must be grounded. "Both are exercises" or "both contain
-  the topic word" are NOT sufficient unless you can name the concrete
-  shared word verbatim from the inputs.
 - Confidence < 0.6 will be dropped server-side; aim higher or skip the
   edge entirely.
-- For solution_of, prefer kind+filename evidence over similarity alone.
-- For part_of_unit, you need both content overlap AND at least one
-  concrete grounding signal.
+- For solution_of, prefer concrete content alignment (problem -> solution)
+  over similarity alone.
+- For part_of_unit, you need both content overlap AND a STRUCTURAL
+  relationship visible in the excerpts. Topic-word co-occurrence is not
+  a structural relationship.
 
 Reply with the JSON object only. No prose."#;
 
@@ -265,27 +211,22 @@ fn pair_fully_rejected(rejected: &HashSet<RejectedPairKey>, a: Uuid, b: Uuid) ->
 
 /// Run the cross-doc linker over a course's classified documents.
 ///
-/// Pipeline (the "proper KG" shape):
+/// Pipeline:
 ///   1. **Embeddings**: every doc has a pooled embedding from the
 ///      ingest pipeline. For docs missing one (older data), lazily
 ///      backfill by re-embedding the doc text. Embeddings are
 ///      L2-normalised so cosine similarity is just a dot product.
-///   2. **Candidate generation** (blocking): the candidate set is the
-///      union of two channels. (a) Embedding similarity: per doc, top-K
-///      most similar OTHER docs above `MIN_EMBEDDING_SIMILARITY`.
-///      (b) Filename markers: pairs whose filenames share a unit token
-///      with matching numbers ("lab2_brief" + "lab2_solution",
-///      "F18 OO" + "F18_section_summary"). Filename-marker pairs are
-///      kept regardless of embedding similarity -- a shared marker is
-///      strong positive evidence even if surface vocabulary differs.
+///   2. **Candidate generation**: per doc, top-K most similar OTHER
+///      docs above `MIN_EMBEDDING_SIMILARITY`. PURE embedding-based --
+///      no filename heuristics.
 ///   3. **Content excerpts**: for each doc that appears in any
 ///      candidate, read the first EXCERPT_CHARS from disk so the LLM
-///      grounds its decisions in actual content, not just metadata.
-///   4. **LLM labelling** (matching): single Cerebras call labels each
+///      grounds its decisions in actual content.
+///   4. **LLM labelling**: single Cerebras call labels each
 ///      candidate as solution_of / part_of_unit / nothing.
 ///   5. **Post-filters**: confidence floor, similarity floors per
-///      relation type, duplicate detection (cosine ~ 1), and the
-///      filename numeric-marker disagreement filter.
+///      relation type, duplicate detection (cosine ~ 1), teacher
+///      vetoes.
 pub async fn link_course(
     ctx: &LinkContext<'_>,
     course_id: Uuid,
@@ -348,7 +289,8 @@ pub async fn link_course(
     // are missing.
     let embeddings: HashMap<Uuid, Vec<f32>> = gather_embeddings(ctx, course_id, truncated).await?;
 
-    // Step 2a: embedding-similarity candidates.
+    // Step 2: embedding-similarity candidates (the only candidate
+    // channel -- no filename heuristics).
     let mut candidates: HashSet<(Uuid, Uuid)> = HashSet::new();
     let similarity_by_pair: HashMap<(Uuid, Uuid), f32> = build_similarity_matrix(
         truncated,
@@ -358,16 +300,16 @@ pub async fn link_course(
         &mut candidates,
     );
 
-    // Step 2b: filename-marker candidates (matching prefix+number).
-    add_filename_marker_candidates(truncated, &mut candidates);
-
     // Drop probable-duplicate pairs (cosine ~ 1) before we even
     // bother sending them to the model -- they're not "in the same
-    // unit", they're the same document re-uploaded.
+    // unit", they're the same document re-uploaded. Logged as DEBUG
+    // (per-pair) plus one INFO summary line so a course with N
+    // duplicate uploads doesn't spam N lines into the log.
+    let candidates_before = candidates.len();
     candidates.retain(|pair| {
         let sim = similarity_by_pair.get(pair).copied().unwrap_or(0.0);
         if sim >= DUPLICATE_SIMILARITY {
-            tracing::info!(
+            tracing::debug!(
                 "linker: dropping likely-duplicate candidate {:?}<->{:?} (similarity {:.3})",
                 pair.0,
                 pair.1,
@@ -377,6 +319,14 @@ pub async fn link_course(
         }
         true
     });
+    let dup_dropped = candidates_before - candidates.len();
+    if dup_dropped > 0 {
+        tracing::info!(
+            "linker: dropped {} duplicate-content candidate pair(s) (cosine >= {:.3})",
+            dup_dropped,
+            DUPLICATE_SIMILARITY,
+        );
+    }
 
     // Drop pairs where every possible relation has been vetoed by a
     // teacher -- no LLM call needed. Pairs where SOME relations are
@@ -421,12 +371,7 @@ pub async fn link_course(
     .await?;
 
     // Step 5: post-filters.
-    let filenames_by_id: HashMap<Uuid, &str> = truncated
-        .iter()
-        .map(|d| (d.id, d.filename.as_str()))
-        .collect();
     let mut kept = Vec::with_capacity(edges.len());
-    let mut dropped_marker = 0usize;
     let mut dropped_sim = 0usize;
     let mut dropped_rejected = 0usize;
     for edge in edges {
@@ -444,6 +389,7 @@ pub async fn link_course(
             dropped_rejected += 1;
             continue;
         }
+
         let pair_key = if edge.src_id < edge.dst_id {
             (edge.src_id, edge.dst_id)
         } else {
@@ -456,16 +402,8 @@ pub async fn link_course(
             "solution_of" => MIN_SOLUTION_OF_SIMILARITY,
             _ => MIN_EMBEDDING_SIMILARITY,
         };
-        // Allow filename-marker-grounded part_of_unit edges to bypass
-        // the embedding floor: docs in the same unit may have
-        // surface-different content but matching markers are strong
-        // positive evidence ("lab2_brief.pdf" + "lab2_helper.pdf").
-        let a_name = filenames_by_id.get(&edge.src_id).copied().unwrap_or("");
-        let b_name = filenames_by_id.get(&edge.dst_id).copied().unwrap_or("");
-        let has_filename_grounding =
-            edge.relation == "part_of_unit" && shares_matching_marker(a_name, b_name);
 
-        if sim < floor && !has_filename_grounding {
+        if sim < floor {
             tracing::info!(
                 "linker: post-filter dropped {} {:?}<->{:?} (similarity {:.3} below {:.2})",
                 edge.relation,
@@ -478,25 +416,11 @@ pub async fn link_course(
             continue;
         }
 
-        // Filename numeric-marker disagreement filter for part_of_unit.
-        if edge.relation == "part_of_unit" && !part_of_unit_passes_filename_check(a_name, b_name) {
-            tracing::info!(
-                "linker: post-filter dropped part_of_unit between {:?} ({}) and {:?} ({}) -- numeric markers disagree",
-                edge.src_id,
-                a_name,
-                edge.dst_id,
-                b_name,
-            );
-            dropped_marker += 1;
-            continue;
-        }
-
         kept.push(edge);
     }
-    if dropped_marker > 0 || dropped_sim > 0 || dropped_rejected > 0 {
+    if dropped_sim > 0 || dropped_rejected > 0 {
         tracing::info!(
-            "linker: post-filter summary -- {} marker mismatch, {} similarity floor, {} teacher-vetoed",
-            dropped_marker,
+            "linker: post-filter summary -- {} similarity floor, {} teacher-vetoed",
             dropped_sim,
             dropped_rejected,
         );
@@ -535,16 +459,14 @@ async fn gather_embeddings(
             }
             Ok(None) => {
                 tracing::debug!(
-                    "linker: no embedding available for doc {} ({}) -- skipping similarity channel for it",
+                    "linker: no embedding available for doc {} -- skipping similarity channel for it",
                     doc.id,
-                    doc.filename
                 );
             }
             Err(e) => {
                 tracing::warn!(
-                    "linker: failed to backfill embedding for doc {} ({}): {}",
+                    "linker: failed to backfill embedding for doc {}: {}",
                     doc.id,
-                    doc.filename,
                     e
                 );
             }
@@ -558,6 +480,10 @@ async fn recompute_pooled_embedding(
     course_id: Uuid,
     doc: &DocumentRow,
 ) -> Result<Option<Vec<f32>>, String> {
+    // The disk path uses the doc's stored filename only to recover its
+    // file extension (so we feed the right bytes to the right reader).
+    // The content of the file -- not the name -- is what enters the
+    // embedder.
     let ext = doc
         .filename
         .rsplit('.')
@@ -565,11 +491,19 @@ async fn recompute_pooled_embedding(
         .filter(|e| *e != doc.filename.as_str())
         .unwrap_or("bin");
     let path_buf = format!("{}/{}/{}.{}", ctx.docs_path, course_id, doc.id, ext);
-    let path = Path::new(&path_buf);
-    if !path.exists() {
+    if !Path::new(&path_buf).exists() {
         return Ok(None);
     }
-    let text = match minerva_ingest::pipeline::extract_document_text(path) {
+    // PDF parsing + sync file I/O can take hundreds of ms per doc.
+    // Run on the blocking pool so we don't stall the runtime worker
+    // thread while the linker walks the course's documents.
+    let path_for_blocking = path_buf.clone();
+    let text = match tokio::task::spawn_blocking(move || {
+        minerva_ingest::pipeline::extract_document_text(Path::new(&path_for_blocking))
+    })
+    .await
+    .map_err(|e| format!("extract task panicked: {}", e))?
+    {
         Ok(t) if !t.trim().is_empty() => t,
         _ => return Ok(None),
     };
@@ -581,11 +515,18 @@ async fn recompute_pooled_embedding(
     };
     // Chunk the text the same way ingest does, embed each chunk,
     // mean-pool. We don't upsert to Qdrant here -- this is a one-off
-    // computation to populate the doc-level vector.
-    let chunks = minerva_ingest::chunker::chunk_text(
-        &text,
-        &minerva_ingest::chunker::ChunkerConfig::default(),
-    );
+    // computation to populate the doc-level vector. Chunking is pure
+    // CPU work over the extracted text -- spawn_blocking the chunker
+    // too so we don't tie up the runtime thread on big documents.
+    let text_for_chunking = text.clone();
+    let chunks = tokio::task::spawn_blocking(move || {
+        minerva_ingest::chunker::chunk_text(
+            &text_for_chunking,
+            &minerva_ingest::chunker::ChunkerConfig::default(),
+        )
+    })
+    .await
+    .map_err(|e| format!("chunk task panicked: {}", e))?;
     if chunks.is_empty() {
         return Ok(None);
     }
@@ -697,77 +638,72 @@ fn build_similarity_matrix(
     sims
 }
 
-/// Add candidate pairs whose filenames share a unit-prefix marker
-/// with matching numbers ("lab2_brief" + "lab2_solution"). Two docs
-/// with the same prefix+number are nearly always related even if
-/// their content embeddings happen to score below the floor.
-fn add_filename_marker_candidates(docs: &[&DocumentRow], candidates: &mut HashSet<(Uuid, Uuid)>) {
-    for i in 0..docs.len() {
-        for j in (i + 1)..docs.len() {
-            if shares_matching_marker(&docs[i].filename, &docs[j].filename) {
-                let pair = if docs[i].id < docs[j].id {
-                    (docs[i].id, docs[j].id)
-                } else {
-                    (docs[j].id, docs[i].id)
-                };
-                candidates.insert(pair);
-            }
-        }
-    }
-}
-
-/// True iff the two filenames share at least one unit-prefix marker
-/// where the NUMBERS match. ("lab2_brief.pdf" + "lab2_solution.pdf"
-/// -> true; "lab2.pdf" + "lab3.pdf" -> false; "lab2.pdf" +
-/// "intro.pdf" -> false because no shared prefix.)
-fn shares_matching_marker(a: &str, b: &str) -> bool {
-    let ma = extract_unit_markers(a);
-    let mb = extract_unit_markers(b);
-    for (pa, na) in &ma {
-        for (pb, nb) in &mb {
-            if pa == pb && na == nb {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 /// Read the first `EXCERPT_CHARS` of each in-candidate doc's text
 /// from disk. URL/awaiting-transcript/unsupported docs may have no
 /// readable file -- those simply get an empty excerpt.
+///
+/// **Concurrency**: each doc's text extraction runs on the blocking
+/// thread pool via `spawn_blocking`, fanned out concurrently via
+/// `join_all`. Sync PDF parsing on the main runtime previously blocked
+/// the worker thread for hundreds of ms per doc -- a large course
+/// (~30 docs) could stall request handling for several seconds during
+/// every relink. Now the runtime thread just awaits a join_all of
+/// blocking-pool tasks; HTTP handlers stay responsive.
 async fn load_excerpts(
     docs_path: &str,
     course_id: Uuid,
     docs: &[&DocumentRow],
     only_for: &HashSet<Uuid>,
 ) -> HashMap<Uuid, String> {
+    let targets: Vec<(Uuid, String)> = docs
+        .iter()
+        .filter(|d| only_for.contains(&d.id))
+        .map(|d| {
+            // Filename is consulted ONLY to recover the on-disk extension
+            // so the right reader (PDF/HTML/text) parses the right bytes.
+            // The filename never reaches the linker prompt.
+            let ext = d
+                .filename
+                .rsplit('.')
+                .next()
+                .filter(|e| *e != d.filename.as_str())
+                .unwrap_or("bin");
+            let path = format!("{}/{}/{}.{}", docs_path, course_id, d.id, ext);
+            (d.id, path)
+        })
+        .collect();
+
+    let tasks: Vec<_> = targets
+        .into_iter()
+        .map(|(id, path)| {
+            tokio::task::spawn_blocking(move || {
+                if !Path::new(&path).exists() {
+                    return (id, String::new());
+                }
+                match minerva_ingest::pipeline::extract_document_text(Path::new(&path)) {
+                    Ok(text) => {
+                        let normalised: String =
+                            text.split_whitespace().collect::<Vec<_>>().join(" ");
+                        let excerpt: String = normalised.chars().take(EXCERPT_CHARS).collect();
+                        (id, excerpt)
+                    }
+                    Err(e) => {
+                        tracing::debug!("linker: excerpt for doc {} unavailable: {}", id, e);
+                        (id, String::new())
+                    }
+                }
+            })
+        })
+        .collect();
+
     let mut out: HashMap<Uuid, String> = HashMap::new();
-    for doc in docs {
-        if !only_for.contains(&doc.id) {
-            continue;
-        }
-        let ext = doc
-            .filename
-            .rsplit('.')
-            .next()
-            .filter(|e| *e != doc.filename.as_str())
-            .unwrap_or("bin");
-        let path = format!("{}/{}/{}.{}", docs_path, course_id, doc.id, ext);
-        let path_obj = Path::new(&path);
-        if !path_obj.exists() {
-            out.insert(doc.id, String::new());
-            continue;
-        }
-        match minerva_ingest::pipeline::extract_document_text(path_obj) {
-            Ok(text) => {
-                let normalised: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
-                let excerpt: String = normalised.chars().take(EXCERPT_CHARS).collect();
-                out.insert(doc.id, excerpt);
+    for handle in tasks {
+        match handle.await {
+            Ok((id, excerpt)) => {
+                out.insert(id, excerpt);
             }
             Err(e) => {
-                tracing::debug!("linker: excerpt for {} unavailable: {}", doc.filename, e);
-                out.insert(doc.id, String::new());
+                tracing::warn!("linker: excerpt task panicked: {}", e);
             }
         }
     }
@@ -785,6 +721,8 @@ async fn call_linker_llm(
     excerpts: &HashMap<Uuid, String>,
 ) -> Result<Vec<ProposedEdge>, String> {
     // Documents block: only include docs that appear in some candidate.
+    // No filename in the payload -- filenames are unreliable and the
+    // linker is content-only.
     let mut in_candidates: HashSet<Uuid> = HashSet::new();
     for (a, b) in candidates {
         in_candidates.insert(*a);
@@ -796,7 +734,6 @@ async fn call_linker_llm(
         .map(|d| {
             serde_json::json!({
                 "id": d.id.to_string(),
-                "filename": d.filename,
                 "kind": d.kind.as_deref().unwrap_or("unknown"),
                 "classifier_rationale": d.kind_rationale.as_deref().unwrap_or(""),
                 "excerpt": excerpts.get(&d.id).cloned().unwrap_or_default(),
@@ -806,26 +743,17 @@ async fn call_linker_llm(
 
     // Candidates block: stable sort so prompt-cache hits are more
     // likely on re-runs of the same course.
-    let filenames_by_id: HashMap<Uuid, &str> =
-        docs.iter().map(|d| (d.id, d.filename.as_str())).collect();
     let mut sorted_candidates: Vec<(Uuid, Uuid)> = candidates.iter().copied().collect();
     sorted_candidates.sort();
     let candidates_array: Vec<serde_json::Value> = sorted_candidates
         .iter()
         .map(|(a, b)| {
             let sim = similarity.get(&(*a, *b)).copied().unwrap_or(0.0);
-            let na = filenames_by_id.get(a).copied().unwrap_or("");
-            let nb = filenames_by_id.get(b).copied().unwrap_or("");
-            let shared = matched_marker_token(na, nb);
-            let mut obj = serde_json::json!({
+            serde_json::json!({
                 "src_id": a.to_string(),
                 "dst_id": b.to_string(),
                 "similarity": sim,
-            });
-            if let Some(token) = shared {
-                obj["shared_filename_marker"] = serde_json::Value::String(token);
-            }
-            obj
+            })
         })
         .collect();
 
@@ -899,151 +827,6 @@ async fn call_linker_llm(
             candidates.contains(&key)
         })
         .collect())
-}
-
-/// First shared (prefix, number) pair as a "lab2"-style token, for
-/// surfacing to the LLM as a `shared_filename_marker` hint. Returns
-/// the lowercased+folded token if any matches, else None.
-fn matched_marker_token(a: &str, b: &str) -> Option<String> {
-    let ma = extract_unit_markers(a);
-    let mb = extract_unit_markers(b);
-    for (pa, na) in &ma {
-        for (pb, nb) in &mb {
-            if pa == pb && na == nb {
-                return Some(format!("{}{}", pa, na));
-            }
-        }
-    }
-    None
-}
-
-/// Strip Latin diacritics so "övningsuppgift3" and "ovningsuppgift3"
-/// compare the same. Hand-rolled because pulling in unicode-normalization
-/// for one function would be overkill; we only need NFD-style fold for
-/// the small Swedish/English alphabet we care about.
-fn fold_diacritics(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            'å' | 'ä' | 'à' | 'á' | 'â' => 'a',
-            'ö' | 'ø' | 'ò' | 'ó' | 'ô' => 'o',
-            'é' | 'è' | 'ê' | 'ë' => 'e',
-            'ü' | 'ù' | 'ú' | 'û' => 'u',
-            'í' | 'ì' | 'î' | 'ï' => 'i',
-            'ý' => 'y',
-            'ñ' => 'n',
-            'ç' => 'c',
-            _ => c,
-        })
-        .collect()
-}
-
-/// Pull "<unit-prefix><digits>" markers out of a filename. Returns the
-/// (prefix, number) pairs found, lowercased and diacritic-folded. If
-/// the same prefix appears multiple times with different numbers we
-/// keep all of them so the comparison sees every signal.
-///
-/// Examples (post-fold):
-///   "ovningsuppgift3_vt25.pdf" -> [("ovningsuppgift", 3)]
-///     (note: "vt25" doesn't match any prefix, so 25 is ignored.)
-///   "lab2_solution.pdf"        -> [("lab", 2)]
-///   "week3_lecture5.pdf"       -> [("week", 3), ("lecture", 5)]
-///   "intro.pdf"                -> []
-///
-/// Implementation: lowercase + fold diacritics, then walk char-by-char
-/// looking for any prefix substring followed immediately by digits.
-/// We do NOT use the `regex` crate to keep this trivially testable
-/// and avoid reaching across the existing prefix list at runtime.
-fn extract_unit_markers(filename: &str) -> Vec<(String, u32)> {
-    let s = fold_diacritics(&filename.to_lowercase());
-    let bytes = s.as_bytes();
-    let mut out: Vec<(String, u32)> = Vec::new();
-    let mut i = 0usize;
-    while i < bytes.len() {
-        // Try every prefix at position i; pick the longest match so
-        // "ovningsuppgift" wins over "ovning" when both could match.
-        let mut best_prefix_len = 0usize;
-        let mut best_prefix: Option<&'static str> = None;
-        for p in UNIT_NUMBER_PREFIXES {
-            let pb = p.as_bytes();
-            if i + pb.len() > bytes.len() {
-                continue;
-            }
-            if &bytes[i..i + pb.len()] == pb && pb.len() > best_prefix_len {
-                best_prefix_len = pb.len();
-                best_prefix = Some(p);
-            }
-        }
-        if let Some(p) = best_prefix {
-            let mut j = i + best_prefix_len;
-            // Skip optional separator between word and number ("lab-2",
-            // "module_4", "week 3", "kapitel.5").
-            while j < bytes.len() && matches!(bytes[j], b'-' | b'_' | b' ' | b'.') {
-                j += 1;
-            }
-            // Read digits.
-            let digits_start = j;
-            while j < bytes.len() && bytes[j].is_ascii_digit() {
-                j += 1;
-            }
-            if j > digits_start {
-                if let Ok(n) = s[digits_start..j].parse::<u32>() {
-                    // Reject the boundary case where the prefix is the
-                    // tail of a longer word (e.g. "lab" inside "labour").
-                    // Require a non-letter on the left of the prefix
-                    // (or it's at position 0).
-                    let left_ok = i == 0 || !s.as_bytes()[i - 1].is_ascii_alphabetic();
-                    if left_ok {
-                        out.push((p.to_string(), n));
-                    }
-                }
-                i = j;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    out
-}
-
-/// Decide whether a `part_of_unit` edge between two filenames should
-/// survive the deterministic post-filter.
-///
-/// Rule: if BOTH filenames carry at least one unit-marker with the
-/// SAME prefix, the numbers must MATCH. Differing numbers under the
-/// same prefix mean different units -- the model is wrong, drop.
-///
-/// If the filenames don't share a prefix in common, we have no
-/// deterministic signal either way and let the model's confidence
-/// stand (the calling code already enforces a 0.6 confidence floor).
-///
-/// `solution_of` edges are NOT subject to this filter -- there a
-/// shared prefix WITH DIFFERENT NUMBERS is exactly wrong (lab2 +
-/// lab3-solution), but a shared prefix WITH MATCHING NUMBER is the
-/// strongest possible positive signal (lab2 + lab2-solution).
-pub fn part_of_unit_passes_filename_check(a: &str, b: &str) -> bool {
-    let ma = extract_unit_markers(a);
-    let mb = extract_unit_markers(b);
-    if ma.is_empty() || mb.is_empty() {
-        // No deterministic signal; let the LLM confidence stand.
-        return true;
-    }
-    // For every shared prefix, numbers must match in at least one
-    // pairing. If the prefix is shared but no number matches, that's
-    // strong evidence they're different units.
-    for (pa, na) in &ma {
-        for (pb, nb) in &mb {
-            // Different prefix -> no signal at this pair, move on.
-            // Same prefix but different number -> docs are in
-            // different units, drop the edge.
-            // Same prefix and same number -> positive signal, but
-            // other prefixes might still disagree, so keep iterating
-            // rather than short-circuit on a single pair.
-            if pa == pb && na != nb {
-                return false;
-            }
-        }
-    }
-    true
 }
 
 fn parse_edges(
@@ -1144,7 +927,7 @@ mod tests {
         let a = id(1);
         let b = id(2);
         let raw = format!(
-            r#"{{"edges":[{{"src_id":"{a}","dst_id":"{b}","relation":"solution_of","confidence":0.9,"rationale":"Solution to lab 2"}}]}}"#
+            r#"{{"edges":[{{"src_id":"{a}","dst_id":"{b}","relation":"solution_of","confidence":0.9,"rationale":"Restates the problem and provides the answer."}}]}}"#
         );
         let mut valid = std::collections::HashSet::new();
         valid.insert(a);
@@ -1204,7 +987,7 @@ mod tests {
         let a = id(5);
         let b = id(2); // smaller -- should become src
         let raw = format!(
-            r#"{{"edges":[{{"src_id":"{a}","dst_id":"{b}","relation":"part_of_unit","confidence":0.85,"rationale":"week 3"}}]}}"#
+            r#"{{"edges":[{{"src_id":"{a}","dst_id":"{b}","relation":"part_of_unit","confidence":0.85,"rationale":"shared topic"}}]}}"#
         );
         let mut valid = std::collections::HashSet::new();
         valid.insert(a);
@@ -1232,140 +1015,7 @@ mod tests {
         assert_eq!(edges[0].dst_id, assignment);
     }
 
-    // ── Numeric-marker post-filter ────────────────────────────────
-
-    #[test]
-    fn unit_marker_extractor_finds_swedish_ovningsuppgift() {
-        // The filename that triggered the original bug report:
-        // model linked these two with rationale "Both filenames
-        // contain the number 4" (which is wrong AND the numbers
-        // didn't even match).
-        let a = extract_unit_markers("ovningsuppgift3_vt25.pdf");
-        let b = extract_unit_markers("ovningsuppgift4_vt25.pdf");
-        // Each filename should yield exactly one marker, on the
-        // longest-prefix-wins ovningsuppgift token. "vt25" doesn't
-        // match any prefix.
-        assert!(a.iter().any(|(p, n)| p == "ovningsuppgift" && *n == 3));
-        assert!(b.iter().any(|(p, n)| p == "ovningsuppgift" && *n == 4));
-    }
-
-    #[test]
-    fn unit_marker_extractor_handles_diacritics() {
-        let a = extract_unit_markers("övning3.pdf");
-        // Should fold ö -> o and find the marker.
-        assert!(a.iter().any(|(p, n)| p == "ovning" && *n == 3));
-    }
-
-    #[test]
-    fn unit_marker_extractor_handles_separators() {
-        for fname in &["lab-2.pdf", "lab_2.pdf", "lab 2.pdf", "lab.2.pdf"] {
-            let m = extract_unit_markers(fname);
-            assert!(
-                m.iter().any(|(p, n)| p == "lab" && *n == 2),
-                "should extract lab 2 from {}",
-                fname
-            );
-        }
-    }
-
-    #[test]
-    fn unit_marker_extractor_skips_word_boundary_misses() {
-        // "labour" contains "lab" but isn't a unit marker.
-        // Currently we accept "lab1" but reject "labour1" because
-        // there's no digit immediately after "lab" in "labour".
-        // But we DO need to handle "lab" as a substring of e.g.
-        // "lablab2" -- we still want to find lab2 there.
-        let m = extract_unit_markers("labour.pdf");
-        assert!(
-            !m.iter().any(|(p, _)| p == "lab"),
-            "labour shouldn't yield a lab marker: got {:?}",
-            m
-        );
-    }
-
-    #[test]
-    fn unit_marker_extractor_finds_multiple_markers() {
-        // "week3_lecture5.pdf" -> [("week", 3), ("lecture", 5)]
-        let m = extract_unit_markers("week3_lecture5.pdf");
-        assert!(m.iter().any(|(p, n)| p == "week" && *n == 3));
-        assert!(m.iter().any(|(p, n)| p == "lecture" && *n == 5));
-    }
-
-    #[test]
-    fn part_of_unit_filter_drops_the_user_reported_bug() {
-        // The exact case from the user's bug report. Model emitted:
-        //   ovningsuppgift3_vt25.pdf part_of_unit ovningsuppgift4_vt25.pdf
-        //   (confidence 0.75, rationale "Both filenames contain the number 4")
-        // Expected: post-filter drops it because the numeric markers
-        // differ under the shared "ovningsuppgift" prefix.
-        assert!(!part_of_unit_passes_filename_check(
-            "ovningsuppgift3_vt25.pdf",
-            "ovningsuppgift4_vt25.pdf"
-        ));
-        // Diacritic-bearing variant must also drop.
-        assert!(!part_of_unit_passes_filename_check(
-            "övningsuppgift3_vt25.pdf",
-            "övningsuppgift4_vt25.pdf"
-        ));
-    }
-
-    #[test]
-    fn part_of_unit_filter_drops_adjacent_labs() {
-        assert!(!part_of_unit_passes_filename_check(
-            "lab2_brief.pdf",
-            "lab3_brief.pdf"
-        ));
-        assert!(!part_of_unit_passes_filename_check(
-            "week3.pdf",
-            "week6.pdf"
-        ));
-        assert!(!part_of_unit_passes_filename_check(
-            "chapter-04.pdf",
-            "chapter-05.pdf"
-        ));
-    }
-
-    #[test]
-    fn part_of_unit_filter_keeps_matching_numbers() {
-        // Same number, different role within the unit (lecture +
-        // exercises, brief + handout): keep.
-        assert!(part_of_unit_passes_filename_check(
-            "week3_lecture.pdf",
-            "week3_exercises.pdf"
-        ));
-        assert!(part_of_unit_passes_filename_check(
-            "lab2_brief.pdf",
-            "lab2_helper.pdf"
-        ));
-    }
-
-    #[test]
-    fn part_of_unit_filter_keeps_when_no_shared_prefix() {
-        // No deterministic signal -- one has a marker, one doesn't.
-        // Trust the model's confidence; don't over-filter.
-        assert!(part_of_unit_passes_filename_check(
-            "lecture3_intro.pdf",
-            "syllabus.pdf"
-        ));
-        // Both have markers, but DIFFERENT prefixes (week vs lab).
-        // No shared prefix means no filename-level disagreement;
-        // could still be the same unit (week3 lecture + lab2 in same
-        // course module, e.g.) -- not for this filter to decide.
-        assert!(part_of_unit_passes_filename_check(
-            "week3_intro.pdf",
-            "lab2_brief.pdf"
-        ));
-    }
-
-    #[test]
-    fn part_of_unit_filter_passes_when_neither_has_markers() {
-        assert!(part_of_unit_passes_filename_check(
-            "intro.pdf",
-            "course-overview.pdf"
-        ));
-    }
-
-    // ── Embedding similarity / candidate generation ───────────────
+    // ── Embedding similarity ──────────────────────────────────────
 
     #[test]
     fn cosine_orthogonal_is_zero() {
@@ -1391,49 +1041,7 @@ mod tests {
     }
 
     #[test]
-    fn shares_matching_marker_user_reported_f18_case() {
-        // F18_OO + F18_section_summary -> matching F18 marker -> true.
-        // This is one of the cases the user pointed out the linker
-        // got right; our marker detector should agree.
-        assert!(shares_matching_marker(
-            "F18 OO.pdf",
-            "section-F18_-_Programspraak_objektorientering_section_summary.html"
-        ));
-    }
-
-    #[test]
-    fn shares_matching_marker_handles_f01_f02_disagreement() {
-        // F01_Arv_I and F02_Arv_II have different "F" numbers -- the
-        // marker detector should NOT report them as sharing a marker.
-        // (The model can still propose part_of_unit on content
-        // grounds, but filename markers are NOT positive evidence.)
-        assert!(!shares_matching_marker("F01_Arv_I.pdf", "F02_Arv_II.pdf"));
-    }
-
-    #[test]
-    fn part_of_unit_filter_drops_f01_f02_lecture_pair() {
-        // The user's other reported false-positive: F02_Arv_II linked
-        // to F01_Arv_I "by shared 'Arv'". With the F-prefix in the
-        // unit-marker list, the post-filter now drops these even
-        // though both filenames contain the "Arv" topic word.
-        assert!(!part_of_unit_passes_filename_check(
-            "F01_Arv_I.pdf",
-            "F02_Arv_II.pdf"
-        ));
-    }
-
-    #[test]
-    fn matched_marker_token_returns_lowercased_concat() {
-        let tok = matched_marker_token("Lab2_brief.pdf", "lab2_solution.pdf");
-        assert_eq!(tok.as_deref(), Some("lab2"));
-    }
-
-    #[test]
     fn build_similarity_matrix_picks_top_k_above_floor() {
-        // Mocked DocumentRow -- we only need id + status + kind to
-        // get past the linker's gating, but build_similarity_matrix
-        // doesn't filter, just iterates docs. So we can pass tiny
-        // shells.
         fn mk(id: u8) -> DocumentRow {
             DocumentRow {
                 id: Uuid::from_bytes([id; 16]),

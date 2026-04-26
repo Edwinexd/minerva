@@ -53,16 +53,27 @@ const LINKER_MODEL: &str = "gpt-oss-120b";
 /// downstream similarity filter do calibration.
 const MIN_EDGE_CONFIDENCE: f32 = 0.5;
 
-/// Drop edges between docs whose embedding similarity is below this
-/// threshold. Tuned empirically: lecture+exercise pairs in the same
-/// unit usually score 0.5-0.8; pairs from different units sit
-/// 0.2-0.5. 0.45 gives a generous floor without burning candidates.
-const MIN_EMBEDDING_SIMILARITY: f32 = 0.45;
+/// Embedding-similarity floor for candidate generation. Pairs below
+/// this are NOT shown to the LLM at all -- the embeddings are doing
+/// the heavy lifting of "are these two docs about the same thing?".
+///
+/// Calibration after the 47-doc / 266-candidate / 0-edge episode:
+///   * pairs from different units mostly score 0.2-0.5
+///   * pairs in the same unit (lecture + section summary, assignment
+///     + tutorial version, etc.) score 0.55-0.85
+///   * duplicate uploads score 0.98+
+///
+/// 0.65 puts the floor inside the same-unit band: we let through only
+/// pairs the embedding model is confident enough about that the LLM's
+/// job is "what KIND of relation" rather than "is there one at all".
+/// Lower floors flood the prompt with noise; the model spends its
+/// reasoning budget enumerating uncertain pairs and ends up emitting
+/// nothing.
+const MIN_EMBEDDING_SIMILARITY: f32 = 0.65;
 
-/// `solution_of` requires a higher similarity floor than
-/// `part_of_unit` because solutions are essentially restatements of
-/// their assignments and so should score very close.
-const MIN_SOLUTION_OF_SIMILARITY: f32 = 0.6;
+/// `solution_of` requires a tighter floor than `part_of_unit` because
+/// solutions are essentially restatements of their assignments.
+const MIN_SOLUTION_OF_SIMILARITY: f32 = 0.72;
 
 /// Cosine similarity above which we treat two docs as effectively
 /// identical (duplicate uploads). Such pairs are dropped: they're
@@ -70,10 +81,20 @@ const MIN_SOLUTION_OF_SIMILARITY: f32 = 0.6;
 const DUPLICATE_SIMILARITY: f32 = 0.985;
 
 /// Per-doc top-K when generating embedding-similarity candidates.
-/// Bounded so a fully-connected course doesn't explode candidate
-/// count; combined with the symmetric edge dedup this caps total
-/// candidates at roughly N * TOP_K / 2.
-const EMBEDDING_TOP_K: usize = 8;
+/// Combined with the symmetric edge dedup this caps total candidates
+/// at roughly N * TOP_K / 2. Lowered from 8 to 4 -- with the new
+/// 0.65 similarity floor most docs don't even have 4 neighbours that
+/// qualify, so the cap rarely binds; for ones that do it picks the
+/// strongest matches.
+const EMBEDDING_TOP_K: usize = 4;
+
+/// Final hard cap on candidates sent to the LLM in one call. The
+/// embedding floor + top-K keep us well under this on typical DSV
+/// courses (~20-50 pairs for a 50-doc course); the cap is a
+/// belt-and-braces guard against a pathologically dense course
+/// blowing the LLM's context window. When we hit the cap we keep
+/// the highest-similarity pairs.
+const MAX_CANDIDATES_PER_CALL: usize = 80;
 
 /// Hard cap on docs sent to the linker in one call. Keeps the prompt
 /// token cost bounded; courses larger than this would need pagination
@@ -94,116 +115,68 @@ const MAX_DOCS_PER_CALL: usize = 300;
 /// well inside gpt-oss-120b's 128K window.
 const EXCERPT_CHARS: usize = 1500;
 
-const LINKER_SYSTEM_PROMPT: &str = r#"You label edges in a course-document knowledge graph.
+const LINKER_SYSTEM_PROMPT: &str = r#"You evaluate ONE pair of course documents and decide if they're related.
 
-You will receive:
+You're given Document A and Document B. For each:
+- kind: one of "lecture", "lecture_transcript", "reading", "tutorial_exercise", "assignment_brief", "sample_solution", "lab_brief", "exam", "syllabus", "unknown"
+- classifier_rationale: short note from the per-document classifier
+- excerpt: the first ~1500 chars of the document text
 
-1. A "documents" array. Each document has:
-   - "id": opaque identifier (use this verbatim when referring to docs)
-   - "kind": one of "lecture", "lecture_transcript", "reading", "tutorial_exercise", "assignment_brief", "sample_solution", "lab_brief", "exam", "syllabus", "unknown"
-   - "classifier_rationale": short note from the per-document classifier
-   - "excerpt": the first few hundred characters of the document text
+You're also given the embedding cosine similarity between A and B.
 
-2. A "candidates" array of pre-selected pairs that are SEMANTICALLY similar
-   in content (high embedding cosine similarity). Each candidate has:
-   - "src_id", "dst_id": the two document ids
-   - "similarity": cosine similarity in [0, 1] of the docs' content embeddings
+You are NOT given filenames -- in real courses they're unreliable.
+Decide from kind + rationale + excerpt + similarity only.
 
-You are NOT given filenames. Filenames in real courses are unreliable
-(stale templates, copy/paste, names that contradict the content).
-Decide everything from the kind, the classifier_rationale, the excerpt,
-and the embedding similarity.
+Pick ONE of:
 
-For EACH candidate pair, decide whether there is a typed relation between
-the two documents. You may also decide there is NONE (omit it from output).
+- "solution_of": one of A/B is a sample_solution and the other is its
+  assignment_brief / lab_brief / exam. The solution's excerpt should
+  plainly answer the problem the assignment poses (same numbers,
+  function names, dataset, scenario). Requires the kinds to line up.
 
-Possible relations:
-
-- "solution_of": src is the sample_solution; dst is the assignment_brief /
-  lab_brief / exam it answers. Requires one side to have
-  kind=sample_solution AND the other to have kind in
-  {assignment_brief, lab_brief, exam}. Use when the solution's excerpt
-  references the same problem the assignment poses (numbers, function
-  names, dataset, scenario). High embedding similarity is a strong
-  hint but the kind-pair check is the gate. Confidence ~0.85+ when
-  the alignment is unambiguous; lower if the solution might cover
-  multiple assignments.
-
-- "part_of_unit": both documents belong to the same week / module /
-  chapter / topic / unit. Emit when the two excerpts plainly discuss
-  the same SPECIFIC subtopic in a way that suggests they're paired
-  course material -- not just "both touch on inheritance somewhere".
-  Examples that SHOULD emit a part_of_unit edge (with confidence ~0.8):
-    * Two assignment_briefs that pose the same task in different
-      formats (e.g. a PDF and an HTML version of the same exercise).
-    * A reading + an assignment_brief / tutorial_exercise that asks
-      the student to apply the same specific concept the reading
-      introduces.
-    * A lecture overview / section summary + the lecture itself
-      covering the same content.
-    * An assignment_brief + the page describing its submission rules
-      ("how to hand in lab 2").
+- "part_of_unit": both belong to the same week / module / unit and
+  appear to be paired course material. Examples that SHOULD emit:
+    * Two docs that are different formats of the same exercise
+      (PDF + HTML / page + section summary).
+    * A reading + an assignment_brief / tutorial_exercise that
+      asks the student to apply the same specific concept the
+      reading introduces.
+    * A lecture + an overview / section summary that points at it.
+    * An assignment_brief + the page describing its submission rules.
   Examples that should NOT emit:
     * Two sequential lectures on related themes (e.g. "Arv I" and
-      "Arv II"). They belong to ADJACENT units; this graph captures
-      same-unit, not topical-neighbours.
-    * Two docs that happen to share a course-wide topic word
-      ("inheritance", "loops", "OO"). That's the whole course's
-      vocabulary, not a unit signal.
-    * Generic syllabus / instructions material that mentions a topic
-      in passing.
+      "Arv II"). Adjacent units, not the same unit.
+    * Two docs sharing a course-wide topic word ("inheritance",
+      "loops", "OO") with no concrete pairing.
 
-Calibration: pairs in the candidate list ALREADY passed an embedding
-similarity threshold (>=0.45 cosine), so they share substantive
-content. Your job is to decide which kind of relation each pair is,
-not whether ANY relation exists -- in a typical 30-50 doc DSV course
-we expect 5-30% of candidate pairs to map to a real edge. If you're
-labelling 0 of N candidates, you're being too conservative.
+- "none": no clear relation. The candidate similarity made the pair
+  worth checking but the content doesn't actually pair them.
+
+Calibration: this pair already passed an embedding similarity
+threshold (>=0.65), so they share substantive content. Your job
+is to identify the relation, not whether ANY relation exists.
+A meaningful fraction of candidates SHOULD be "solution_of" or
+"part_of_unit" -- be willing to commit when the pairing is visible.
 
 Confidence guidance:
-  * 0.85+ : the pairing is unambiguous (e.g. solution clearly answers
-    the assignment, two docs are obviously different formats of the
-    same exercise).
-  * 0.7-0.84 : confident but not certain. Use freely.
-  * 0.5-0.69 : a reasonable guess based on visible content overlap.
-    Emit these too -- the server floor is 0.5 and filters edges
-    further by embedding similarity, so a moderate confidence is
-    fine.
-  * <0.5 : skip. Random guesses hurt.
+  * 0.85+ : unambiguous (problem stated in one, answered in the
+    other; two formats of identical content; etc.).
+  * 0.7-0.84 : confident but not certain.
+  * 0.5-0.69 : a reasonable guess from visible content overlap.
+  * Below 0.5 : use "none".
 
-Output format -- JSON, nothing else:
+Output JSON only, matching this schema exactly:
 {
-  "edges": [
-    {
-      "src_id": <id from candidate>,
-      "dst_id": <id from candidate>,
-      "relation": "solution_of" | "part_of_unit",
-      "confidence": float in [0, 1],
-      "rationale": short specific string. CITE concrete evidence visible
-        in the excerpts: a specific phrase appearing in both, a problem
-        statement in one and its answer in the other, a concept the
-        first introduces and the second exercises. Do NOT invent shared
-        tokens. Do NOT cite filenames -- you don't have them.
-    }
-  ]
+  "relation": "solution_of" | "part_of_unit" | "none",
+  "confidence": float in [0, 1],
+  "rationale": short specific string citing concrete evidence
+    visible in the excerpts (a phrase appearing in both, a problem
+    and its answer, a concept introduced and applied). Do NOT
+    invent shared tokens. Do NOT cite filenames -- you don't
+    have them.
 }
 
-HARD RULES:
-- ONLY emit edges for pairs in the candidates list. Do NOT propose pairs
-  that are not candidates.
-- AT MOST ONE edge per candidate pair.
-- Do NOT emit self-loops (same src_id and dst_id).
-- DO NOT emit any edge for pairs whose excerpts are essentially identical
-  (likely duplicate uploads of the same document). These belong nowhere.
-- Confidence < 0.6 will be dropped server-side; aim higher or skip the
-  edge entirely.
-- For solution_of, prefer concrete content alignment (problem -> solution)
-  over similarity alone.
-- For part_of_unit, you need both content overlap AND a STRUCTURAL
-  relationship visible in the excerpts. Topic-word co-occurrence is not
-  a structural relationship.
-
-Reply with the JSON object only. No prose."#;
+No prose."#;
 
 #[derive(Debug, Clone)]
 pub struct ProposedEdge {
@@ -395,6 +368,34 @@ pub async fn link_course(
         }
         true
     });
+
+    // Hard cap on candidates the LLM has to evaluate. Each pair is
+    // its own Cerebras call (parallelised below), so a runaway
+    // course-with-many-similar-docs translates directly to N HTTP
+    // requests; the cap keeps that bounded. Pairs ranked by
+    // similarity so the strongest survive when we hit the cap.
+    if candidates.len() > MAX_CANDIDATES_PER_CALL {
+        let before = candidates.len();
+        let mut by_sim: Vec<(Uuid, Uuid, f32)> = candidates
+            .iter()
+            .map(|pair| {
+                let s = similarity_by_pair.get(pair).copied().unwrap_or(0.0);
+                (pair.0, pair.1, s)
+            })
+            .collect();
+        by_sim.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        candidates = by_sim
+            .into_iter()
+            .take(MAX_CANDIDATES_PER_CALL)
+            .map(|(a, b, _)| (a, b))
+            .collect();
+        tracing::info!(
+            "linker: course {} had {} candidates above embedding floor, capped to top {} by similarity",
+            course_id,
+            before,
+            MAX_CANDIDATES_PER_CALL,
+        );
+    }
 
     if candidates.is_empty() {
         return Ok(LinkerOutput {
@@ -815,8 +816,28 @@ async fn load_excerpts(
     results.into_iter().collect()
 }
 
-/// Build the LLM prompt body and call Cerebras. Returns parsed
-/// edges; empty on no-edges, error on JSON or transport failure.
+/// How many per-pair Cerebras requests are in flight at once.
+/// Tuned conservatively: each call is small and Cerebras is fast,
+/// so we don't need a huge fan-out, but enough that an 80-pair
+/// course finishes in well under a minute.
+const PAIR_CALL_CONCURRENCY: usize = 12;
+
+/// Per-pair LLM dispatch. Replaces the prior "send all candidates
+/// in one mega-prompt" architecture, which broke when a 47-doc
+/// course produced 266 candidates: at medium reasoning effort the
+/// model spiralled into a 40K-token chain-of-thought enumerating
+/// every doc and ran out of completion budget before emitting JSON.
+///
+/// Each surviving candidate now gets its own focused Cerebras call:
+///   * tiny prompt (system + 2 docs + similarity)
+///   * three-way decision (solution_of / part_of_unit / none)
+///   * structured-output schema -> small, well-formed JSON
+///
+/// Calls run in parallel with a bounded concurrency cap so we don't
+/// rate-limit ourselves against Cerebras. With ~30-50 surviving
+/// candidates after the embedding-similarity floor and the final
+/// MAX_CANDIDATES_PER_CALL guard, total wall-clock is on the order
+/// of 5-10 seconds per relink.
 async fn call_linker_llm(
     http: &reqwest::Client,
     api_key: &str,
@@ -825,52 +846,114 @@ async fn call_linker_llm(
     similarity: &HashMap<(Uuid, Uuid), f32>,
     excerpts: &HashMap<Uuid, String>,
 ) -> Result<Vec<ProposedEdge>, String> {
-    // Documents block: only include docs that appear in some candidate.
-    // No filename in the payload -- filenames are unreliable and the
-    // linker is content-only.
-    let mut in_candidates: HashSet<Uuid> = HashSet::new();
-    for (a, b) in candidates {
-        in_candidates.insert(*a);
-        in_candidates.insert(*b);
-    }
-    let docs_array: Vec<serde_json::Value> = docs
-        .iter()
-        .filter(|d| in_candidates.contains(&d.id))
-        .map(|d| {
-            serde_json::json!({
-                "id": d.id.to_string(),
-                "kind": d.kind.as_deref().unwrap_or("unknown"),
-                "classifier_rationale": d.kind_rationale.as_deref().unwrap_or(""),
-                "excerpt": excerpts.get(&d.id).cloned().unwrap_or_default(),
-            })
-        })
-        .collect();
+    use futures::stream::{self, StreamExt};
 
-    // Candidates block: stable sort so prompt-cache hits are more
-    // likely on re-runs of the same course.
+    // Index docs by id for cheap lookup inside each per-pair task.
+    let docs_by_id: HashMap<Uuid, &&DocumentRow> = docs.iter().map(|d| (d.id, d)).collect();
+
+    // Stable sort so log lines are consistent across reruns and
+    // so prompt-cache hits within a course (per-pair system prompt
+    // is byte-identical, only user payload differs) reuse the
+    // cached system prefix.
     let mut sorted_candidates: Vec<(Uuid, Uuid)> = candidates.iter().copied().collect();
     sorted_candidates.sort();
-    let candidates_array: Vec<serde_json::Value> = sorted_candidates
+
+    // Build per-pair input bundles up-front so the async stream
+    // doesn't have to clone the docs/excerpts hashes.
+    let pair_inputs: Vec<PairInput> = sorted_candidates
         .iter()
-        .map(|(a, b)| {
+        .filter_map(|(a, b)| {
+            let doc_a = docs_by_id.get(a).copied().copied()?;
+            let doc_b = docs_by_id.get(b).copied().copied()?;
             let sim = similarity.get(&(*a, *b)).copied().unwrap_or(0.0);
-            serde_json::json!({
-                "src_id": a.to_string(),
-                "dst_id": b.to_string(),
-                "similarity": sim,
+            Some(PairInput {
+                a_id: *a,
+                a_kind: doc_a.kind.clone().unwrap_or_else(|| "unknown".to_string()),
+                a_rationale: doc_a.kind_rationale.clone().unwrap_or_default(),
+                a_excerpt: excerpts.get(a).cloned().unwrap_or_default(),
+                b_id: *b,
+                b_kind: doc_b.kind.clone().unwrap_or_else(|| "unknown".to_string()),
+                b_rationale: doc_b.kind_rationale.clone().unwrap_or_default(),
+                b_excerpt: excerpts.get(b).cloned().unwrap_or_default(),
+                similarity: sim,
             })
         })
         .collect();
 
+    let total_pairs = pair_inputs.len();
+    tracing::info!(
+        "linker: dispatching {} per-pair Cerebras calls (concurrency {})",
+        total_pairs,
+        PAIR_CALL_CONCURRENCY,
+    );
+
+    // Bounded-parallel stream: at most PAIR_CALL_CONCURRENCY in
+    // flight. `filter_map` drops `none` results and per-pair errors
+    // (which are logged inside `classify_one_pair`) so the final
+    // collected Vec only contains real edges.
+    let edges: Vec<ProposedEdge> = stream::iter(pair_inputs)
+        .map(|pair| async move { classify_one_pair(http, api_key, pair).await })
+        .buffer_unordered(PAIR_CALL_CONCURRENCY)
+        .filter_map(|r| async move { r })
+        .collect()
+        .await;
+
+    tracing::info!(
+        "linker: per-pair pass complete -- {} edges proposed across {} pairs",
+        edges.len(),
+        total_pairs,
+    );
+
+    Ok(edges)
+}
+
+/// Inputs for a single per-pair Cerebras call. Owns its strings so
+/// it can be moved into the async block under `buffer_unordered`.
+struct PairInput {
+    a_id: Uuid,
+    a_kind: String,
+    a_rationale: String,
+    a_excerpt: String,
+    b_id: Uuid,
+    b_kind: String,
+    b_rationale: String,
+    b_excerpt: String,
+    similarity: f32,
+}
+
+/// Single per-pair Cerebras request. Returns Some(edge) when the
+/// model labels the pair `solution_of` or `part_of_unit` with
+/// confidence above the floor; None for `none`, low-confidence
+/// guesses, malformed responses, or transport errors. All failure
+/// modes are logged at debug/info; the caller only cares about the
+/// edge stream.
+async fn classify_one_pair(
+    http: &reqwest::Client,
+    api_key: &str,
+    p: PairInput,
+) -> Option<ProposedEdge> {
     let user_payload = serde_json::json!({
-        "documents": docs_array,
-        "candidates": candidates_array,
+        "document_a": {
+            "kind": p.a_kind,
+            "classifier_rationale": p.a_rationale,
+            "excerpt": p.a_excerpt,
+        },
+        "document_b": {
+            "kind": p.b_kind,
+            "classifier_rationale": p.b_rationale,
+            "excerpt": p.b_excerpt,
+        },
+        "embedding_similarity": p.similarity,
     });
 
     let body = serde_json::json!({
         "model": LINKER_MODEL,
         "temperature": 0.0,
-        "reasoning_effort": "medium",
+        "reasoning_effort": "low",
+        // Tight ceiling -- the response is at most ~150 tokens of
+        // JSON. Generous overhead for the model's brief CoT but
+        // small enough to fail fast on a runaway.
+        "max_completion_tokens": 1024,
         "messages": [
             { "role": "system", "content": LINKER_SYSTEM_PROMPT },
             { "role": "user", "content": user_payload.to_string() },
@@ -878,287 +961,144 @@ async fn call_linker_llm(
         "response_format": {
             "type": "json_schema",
             "json_schema": {
-                "name": "course_kg_edges",
+                "name": "course_kg_pair_decision",
                 "strict": true,
                 "schema": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["edges"],
+                    "required": ["relation", "confidence", "rationale"],
                     "properties": {
-                        "edges": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": false,
-                                "required": ["src_id", "dst_id", "relation", "confidence", "rationale"],
-                                "properties": {
-                                    "src_id": { "type": "string" },
-                                    "dst_id": { "type": "string" },
-                                    "relation": {
-                                        "type": "string",
-                                        "enum": ["solution_of", "part_of_unit"],
-                                    },
-                                    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-                                    "rationale": { "type": "string" },
-                                }
-                            }
-                        }
+                        "relation": {
+                            "type": "string",
+                            "enum": ["solution_of", "part_of_unit", "none"],
+                        },
+                        "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                        "rationale": { "type": "string" },
                     }
                 }
             }
         }
     });
 
-    let response = cerebras_request_with_retry(http, api_key, &body).await?;
-    let payload: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("linker: response not JSON: {e}"))?;
+    let response = match cerebras_request_with_retry(http, api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                "linker: per-pair request failed for {}<->{}: {}",
+                p.a_id,
+                p.b_id,
+                e
+            );
+            return None;
+        }
+    };
+    let payload: serde_json::Value = match response.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "linker: per-pair response not JSON for {}<->{}: {}",
+                p.a_id,
+                p.b_id,
+                e
+            );
+            return None;
+        }
+    };
+    // Guard against finish_reason=length producing an empty content
+    // field -- caller would otherwise see this as "no edge" without
+    // knowing the model was cut off mid-token.
+    let finish = payload["choices"][0]["finish_reason"]
+        .as_str()
+        .unwrap_or("");
+    if finish == "length" {
+        tracing::warn!(
+            "linker: per-pair {}<->{} hit completion-token cap -- raising max_completion_tokens may help",
+            p.a_id,
+            p.b_id,
+        );
+        return None;
+    }
     let raw = payload["choices"][0]["message"]["content"]
         .as_str()
-        .ok_or_else(|| format!("linker: missing message content; got: {payload}"))?;
-
-    let id_set: HashSet<Uuid> = docs.iter().map(|d| d.id).collect();
-    let edges = parse_edges(raw, &id_set)?;
-
-    // Operator visibility: when the model returns nothing, dump the
-    // raw response (truncated) so we can tell whether it was a
-    // genuinely empty `{"edges": []}`, a refusal narrative, or
-    // something else weird. This is the single most useful signal
-    // for tuning the prompt -- without it "0 edges" is opaque.
-    if edges.is_empty() {
-        let preview: String = raw.chars().take(500).collect();
-        tracing::info!(
-            "linker: model returned 0 edges over {} candidates -- raw response head: {}",
-            candidates.len(),
-            preview,
+        .unwrap_or("");
+    if raw.is_empty() {
+        tracing::warn!(
+            "linker: per-pair {}<->{} returned empty content (finish={})",
+            p.a_id,
+            p.b_id,
+            finish
         );
+        return None;
     }
 
-    // Ignore any edge the model emitted for a non-candidate pair.
-    Ok(edges
-        .into_iter()
-        .filter(|e| {
-            let key = if e.src_id < e.dst_id {
-                (e.src_id, e.dst_id)
-            } else {
-                (e.dst_id, e.src_id)
-            };
-            candidates.contains(&key)
-        })
-        .collect())
-}
-
-fn parse_edges(
-    raw: &str,
-    valid_ids: &std::collections::HashSet<Uuid>,
-) -> Result<Vec<ProposedEdge>, String> {
-    let trimmed = raw.trim();
-    let json_str = if let Some(stripped) = trimmed.strip_prefix("```json") {
-        stripped
-            .trim_start()
-            .strip_suffix("```")
-            .unwrap_or(stripped)
-            .trim()
-    } else if let Some(stripped) = trimmed.strip_prefix("```") {
-        stripped
-            .trim_start()
-            .strip_suffix("```")
-            .unwrap_or(stripped)
-            .trim()
-    } else {
-        trimmed
+    let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "linker: per-pair {}<->{} unparseable JSON: {} (raw: {})",
+                p.a_id,
+                p.b_id,
+                e,
+                raw.chars().take(200).collect::<String>(),
+            );
+            return None;
+        }
     };
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| format!("linker: invalid JSON: {e}"))?;
+    let relation = parsed["relation"].as_str().unwrap_or("none");
+    if relation == "none" {
+        return None;
+    }
+    if relation != "solution_of" && relation != "part_of_unit" {
+        return None;
+    }
+    let confidence = parsed["confidence"].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) as f32;
+    if confidence < MIN_EDGE_CONFIDENCE {
+        return None;
+    }
+    let rationale = parsed["rationale"].as_str().map(str::to_string);
 
-    let raw_edges = parsed["edges"]
-        .as_array()
-        .ok_or_else(|| "linker: missing 'edges' array".to_string())?;
-
-    let mut out: Vec<ProposedEdge> = Vec::with_capacity(raw_edges.len());
-    let mut dedup: HashMap<(Uuid, Uuid, String), f32> = HashMap::new();
-    // Per-reason drop tally so the operator can see why a "0 edges
-    // written" run actually produced 0 -- model emitting low-conf
-    // guesses, hallucinated IDs, malformed relations are all
-    // observably distinct here.
-    let mut dropped_low_conf = 0usize;
-    let mut dropped_self_loop = 0usize;
-    let mut dropped_hallucinated = 0usize;
-    let mut dropped_bad_relation = 0usize;
-
-    for e in raw_edges {
-        let src_id = match e["src_id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) {
-            Some(id) => id,
-            None => continue,
-        };
-        let dst_id = match e["dst_id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) {
-            Some(id) => id,
-            None => continue,
-        };
-        if src_id == dst_id {
-            dropped_self_loop += 1;
-            continue;
-        }
-        if !valid_ids.contains(&src_id) || !valid_ids.contains(&dst_id) {
-            // Model hallucinated an id we never sent in; drop.
-            dropped_hallucinated += 1;
-            continue;
-        }
-        let relation = match e["relation"].as_str() {
-            Some(r @ ("solution_of" | "part_of_unit")) => r.to_string(),
-            _ => {
-                dropped_bad_relation += 1;
-                continue;
-            }
-        };
-        let confidence = e["confidence"].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) as f32;
-        if confidence < MIN_EDGE_CONFIDENCE {
-            dropped_low_conf += 1;
-            continue;
-        }
-        let rationale = e["rationale"].as_str().map(str::to_string);
-
-        // For undirected `part_of_unit`, normalise direction by id
-        // so duplicates collapse on the unique constraint.
-        let (src, dst) = if relation == "part_of_unit" && src_id > dst_id {
-            (dst_id, src_id)
+    // Direction:
+    //   * `part_of_unit` is undirected -- src/dst are normalised by
+    //     id ordering at upsert time anyway, so we can just keep
+    //     the input order here.
+    //   * `solution_of` is directional: src must be the
+    //     sample_solution, dst the assignment. Derive that from the
+    //     kinds rather than asking the model to pick (one less
+    //     thing for it to get wrong). If neither side is
+    //     sample_solution, the model is wrong about the relation
+    //     and we drop it.
+    let (src, dst) = if relation == "solution_of" {
+        if p.a_kind == "sample_solution" {
+            (p.a_id, p.b_id)
+        } else if p.b_kind == "sample_solution" {
+            (p.b_id, p.a_id)
         } else {
-            (src_id, dst_id)
-        };
-
-        let key = (src, dst, relation.clone());
-        let entry = dedup.entry(key).or_insert(0.0);
-        if confidence > *entry {
-            *entry = confidence;
-            out.retain(|edge| {
-                !(edge.src_id == src && edge.dst_id == dst && edge.relation == relation)
-            });
-            out.push(ProposedEdge {
-                src_id: src,
-                dst_id: dst,
-                relation,
-                confidence,
-                rationale,
-            });
+            tracing::info!(
+                "linker: dropping solution_of {}<->{} -- neither side has kind=sample_solution",
+                p.a_id,
+                p.b_id,
+            );
+            return None;
         }
-    }
+    } else if p.a_id < p.b_id {
+        (p.a_id, p.b_id)
+    } else {
+        (p.b_id, p.a_id)
+    };
 
-    if dropped_low_conf + dropped_self_loop + dropped_hallucinated + dropped_bad_relation > 0 {
-        tracing::info!(
-            "linker: parse_edges -- raw {}, kept {}, dropped low_conf={} self_loop={} hallucinated={} bad_relation={}",
-            raw_edges.len(),
-            out.len(),
-            dropped_low_conf,
-            dropped_self_loop,
-            dropped_hallucinated,
-            dropped_bad_relation,
-        );
-    }
-    Ok(out)
+    Some(ProposedEdge {
+        src_id: src,
+        dst_id: dst,
+        relation: relation.to_string(),
+        confidence,
+        rationale,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn id(n: u8) -> Uuid {
-        Uuid::from_bytes([n; 16])
-    }
-
-    #[test]
-    fn parses_well_formed_response() {
-        let a = id(1);
-        let b = id(2);
-        let raw = format!(
-            r#"{{"edges":[{{"src_id":"{a}","dst_id":"{b}","relation":"solution_of","confidence":0.9,"rationale":"Restates the problem and provides the answer."}}]}}"#
-        );
-        let mut valid = std::collections::HashSet::new();
-        valid.insert(a);
-        valid.insert(b);
-        let edges = parse_edges(&raw, &valid).unwrap();
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].src_id, a);
-        assert_eq!(edges[0].dst_id, b);
-        assert_eq!(edges[0].relation, "solution_of");
-        assert!((edges[0].confidence - 0.9).abs() < 1e-6);
-    }
-
-    #[test]
-    fn drops_low_confidence_edges() {
-        let a = id(1);
-        let b = id(2);
-        let raw = format!(
-            r#"{{"edges":[{{"src_id":"{a}","dst_id":"{b}","relation":"part_of_unit","confidence":0.4,"rationale":"weak"}}]}}"#
-        );
-        let mut valid = std::collections::HashSet::new();
-        valid.insert(a);
-        valid.insert(b);
-        let edges = parse_edges(&raw, &valid).unwrap();
-        assert!(edges.is_empty());
-    }
-
-    #[test]
-    fn drops_self_loops() {
-        let a = id(1);
-        let raw = format!(
-            r#"{{"edges":[{{"src_id":"{a}","dst_id":"{a}","relation":"solution_of","confidence":0.9,"rationale":"x"}}]}}"#
-        );
-        let mut valid = std::collections::HashSet::new();
-        valid.insert(a);
-        let edges = parse_edges(&raw, &valid).unwrap();
-        assert!(edges.is_empty());
-    }
-
-    #[test]
-    fn drops_hallucinated_ids() {
-        let a = id(1);
-        let b = id(2);
-        let c = id(99); // not in valid set
-        let raw = format!(
-            r#"{{"edges":[{{"src_id":"{a}","dst_id":"{c}","relation":"solution_of","confidence":0.9,"rationale":"x"}},{{"src_id":"{a}","dst_id":"{b}","relation":"solution_of","confidence":0.85,"rationale":"y"}}]}}"#
-        );
-        let mut valid = std::collections::HashSet::new();
-        valid.insert(a);
-        valid.insert(b);
-        let edges = parse_edges(&raw, &valid).unwrap();
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].dst_id, b);
-    }
-
-    #[test]
-    fn normalises_part_of_unit_direction() {
-        let a = id(5);
-        let b = id(2); // smaller -- should become src
-        let raw = format!(
-            r#"{{"edges":[{{"src_id":"{a}","dst_id":"{b}","relation":"part_of_unit","confidence":0.85,"rationale":"shared topic"}}]}}"#
-        );
-        let mut valid = std::collections::HashSet::new();
-        valid.insert(a);
-        valid.insert(b);
-        let edges = parse_edges(&raw, &valid).unwrap();
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].src_id, b);
-        assert_eq!(edges[0].dst_id, a);
-    }
-
-    #[test]
-    fn solution_of_direction_preserved() {
-        // solution_of is directional; do NOT swap by id ordering.
-        let solution = id(7);
-        let assignment = id(3);
-        let raw = format!(
-            r#"{{"edges":[{{"src_id":"{solution}","dst_id":"{assignment}","relation":"solution_of","confidence":0.92,"rationale":"x"}}]}}"#
-        );
-        let mut valid = std::collections::HashSet::new();
-        valid.insert(solution);
-        valid.insert(assignment);
-        let edges = parse_edges(&raw, &valid).unwrap();
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].src_id, solution);
-        assert_eq!(edges[0].dst_id, assignment);
-    }
 
     // ── Embedding similarity ──────────────────────────────────────
 
@@ -1247,23 +1187,5 @@ mod tests {
             (docs[2].id, docs[0].id)
         };
         assert!(!candidates.contains(&key13));
-    }
-
-    #[test]
-    fn dedups_repeated_edges_keeping_highest_confidence() {
-        let a = id(1);
-        let b = id(2);
-        let raw = format!(
-            r#"{{"edges":[
-                {{"src_id":"{a}","dst_id":"{b}","relation":"solution_of","confidence":0.7,"rationale":"first"}},
-                {{"src_id":"{a}","dst_id":"{b}","relation":"solution_of","confidence":0.95,"rationale":"second"}}
-            ]}}"#
-        );
-        let mut valid = std::collections::HashSet::new();
-        valid.insert(a);
-        valid.insert(b);
-        let edges = parse_edges(&raw, &valid).unwrap();
-        assert_eq!(edges.len(), 1);
-        assert!((edges[0].confidence - 0.95).abs() < 1e-6);
     }
 }

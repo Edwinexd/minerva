@@ -159,7 +159,7 @@
     "migrateButton": "Migrate",
     "migrateButtonTitle": "Force-migrate this course onto a different embedding provider/model. Re-queues every document for re-embedding.",
     "migrateDialogTitle": "Migrate \"{{course}}\" to a different embedding model",
-    "migrateDialogDescription": "Pick the new provider and (for local) model. Admins can target disabled catalog models too -- this is the way to walk a course off a model you've just disabled. Confirming bumps the course's embedding_version, opens a fresh Qdrant collection, and re-queues every document. The previous collection stays on disk (orphaned) so the change is reversible.",
+    "migrateDialogDescription": "Pick the new provider and (for local) model. Admins can target disabled catalog models too; this is the way to walk a course off a model you've just disabled. Confirming bumps the course's embedding_version, opens a fresh Qdrant collection, and re-queues every document. The previous collection stays on disk (orphaned) so the change is reversible.",
     "migrateProviderLabel": "Provider",
     "migrateModelLabel": "Model",
     "migrateModelDisabledTag": "(disabled)",
@@ -324,7 +324,7 @@
     },
     "embeddingModels": {
       "title": "Embedding models",
-      "description": "Catalog of local embedding models the runtime can load. Toggle 'Enabled' to control which ones show up in the per-course teacher dropdown -- existing courses on a model keep working when you disable it, but teachers can't pick it for a new rotation. Throughput numbers come from running each model against a small academic corpus on this server; only the four boot models are benchmarked automatically (loading every catalog entry at boot would OOM-kill the pod), the rest are benchmarked on demand. The server serializes runs, so only one model is loaded at a time.",
+      "description": "Catalog of local embedding models the runtime can load. Toggle 'Enabled' to control which ones show up in the per-course teacher dropdown. Existing courses on a model keep working when you disable it, but teachers can't pick it for a new rotation. Throughput numbers come from running each model against a small academic corpus on this server. Only the four boot models are benchmarked automatically (loading every catalog entry at boot would OOM-kill the pod); the rest are benchmarked on demand. The server serializes runs, so only one model is loaded at a time.",
       "columns": {
         "enabled": "Enabled",
         "model": "Model",
@@ -342,8 +342,10 @@
       "runBenchmarkTitle": "Load this model and run the benchmark corpus through it. Disabled while another model is benchmarking.",
       "runningHint": "Currently benchmarking {{model}}. The page polls every 1.5s while a run is in flight and will update the row when it finishes.",
       "note": "First run for a model includes a one-time download from HuggingFace, which can take a minute or two for the larger candidates. Subsequent runs are warm.",
-      "confirmDisableTitle": "Disable a model that {{count}} course(s) are using?",
-      "confirmDisableBody": "The model \"{{model}}\" is currently selected by {{count}} active course(s). Disabling it removes it from the teacher picker but leaves those courses on it -- they keep working under the model. To move them off, force-migrate each course on the Course Management page (admins can target any catalog model, including disabled ones).",
+      "confirmDisableTitle_one": "Disable a model that {{count}} course is using?",
+      "confirmDisableTitle_other": "Disable a model that {{count}} courses are using?",
+      "confirmDisableBody_one": "The model \"{{model}}\" is currently selected by {{count}} active course. Disabling it removes it from the teacher picker but leaves the course on it; it keeps working under the model. To move it off, force-migrate the course from the Course Management page (admins can target any catalog model, including disabled ones).",
+      "confirmDisableBody_other": "The model \"{{model}}\" is currently selected by {{count}} active courses. Disabling it removes it from the teacher picker but leaves those courses on it; they keep working under the model. To move them off, force-migrate each course from the Course Management page (admins can target any catalog model, including disabled ones).",
       "confirmDisableCancel": "Keep enabled",
       "confirmDisableAction": "Disable anyway"
     }

@@ -159,7 +159,7 @@
     "migrateButton": "Migrera",
     "migrateButtonTitle": "Tvångsmigrera kursen till en annan embedding-leverantör/modell. Köar om alla dokument för ny embedding.",
     "migrateDialogTitle": "Migrera \"{{course}}\" till en annan embedding-modell",
-    "migrateDialogDescription": "Välj ny leverantör och (för lokal) modell. Admin kan välja även inaktiverade katalogmodeller -- det är så man flyttar en kurs av en modell man precis inaktiverat. Att bekräfta stegar upp kursens embedding_version, öppnar en ny Qdrant-collection och köar om alla dokument. Den tidigare collection-en ligger kvar på disk (övergiven) så ändringen kan återställas.",
+    "migrateDialogDescription": "Välj ny leverantör och (för lokal) modell. Admin kan välja även inaktiverade katalogmodeller; det är så man flyttar en kurs av en modell man precis inaktiverat. Att bekräfta stegar upp kursens embedding_version, öppnar en ny Qdrant-collection och köar om alla dokument. Den tidigare collection-en ligger kvar på disk (övergiven) så ändringen kan återställas.",
     "migrateProviderLabel": "Leverantör",
     "migrateModelLabel": "Modell",
     "migrateModelDisabledTag": "(inaktiverad)",
@@ -324,7 +324,7 @@
     },
     "embeddingModels": {
       "title": "Embedding-modeller",
-      "description": "Katalog över lokala embedding-modeller som körtiden kan ladda. Slå på/av 'Aktiverad' för att styra vilka som visas i lärarens kurskonfigurationsmeny -- befintliga kurser som redan kör en modell fortsätter fungera om du inaktiverar den, men lärare kan inte välja den för en ny rotation. Hastighetssiffrorna kommer från att köra varje modell mot en liten akademisk testkorpus på den här servern; bara de fyra start-modellerna mäts automatiskt (att ladda hela katalogen vid start skulle OOM-döda podden), resten mäts på begäran. Servern serialiserar körningar, så bara en modell laddas i taget.",
+      "description": "Katalog över lokala embedding-modeller som körtiden kan ladda. Slå på/av 'Aktiverad' för att styra vilka som visas i lärarens kurskonfigurationsmeny. Befintliga kurser som redan kör en modell fortsätter fungera om du inaktiverar den, men lärare kan inte välja den för en ny rotation. Hastighetssiffrorna kommer från att köra varje modell mot en liten akademisk testkorpus på den här servern. Bara de fyra start-modellerna mäts automatiskt (att ladda hela katalogen vid start skulle OOM-döda podden); resten mäts på begäran. Servern serialiserar körningar, så bara en modell laddas i taget.",
       "columns": {
         "enabled": "Aktiverad",
         "model": "Modell",
@@ -342,8 +342,10 @@
       "runBenchmarkTitle": "Ladda modellen och kör testkorpusen genom den. Inaktiverad medan en annan modell körs.",
       "runningHint": "Mäter {{model}} just nu. Sidan pollar var 1,5 s medan körningen pågår och uppdaterar raden när den är klar.",
       "note": "Första körningen av en modell inkluderar en engångsnedladdning från HuggingFace, vilket kan ta en minut eller två för de större kandidaterna. Påföljande körningar är varma.",
-      "confirmDisableTitle": "Inaktivera en modell som {{count}} kurs(er) använder?",
-      "confirmDisableBody": "Modellen \"{{model}}\" används just nu av {{count}} aktiv(a) kurs(er). Att inaktivera den döljer den från lärarmenyn men låter kurserna fortsätta köra på den. För att flytta dem, gör en force-migrate per kurs på Kurshantering-sidan (admin kan välja vilken katalogmodell som helst, även inaktiverade).",
+      "confirmDisableTitle_one": "Inaktivera en modell som {{count}} kurs använder?",
+      "confirmDisableTitle_other": "Inaktivera en modell som {{count}} kurser använder?",
+      "confirmDisableBody_one": "Modellen \"{{model}}\" används just nu av {{count}} aktiv kurs. Att inaktivera den döljer den från lärarmenyn men låter kursen fortsätta köra på den. För att flytta den, gör en force-migrate på kursen från Kurshantering-sidan (admin kan välja vilken katalogmodell som helst, även inaktiverade).",
+      "confirmDisableBody_other": "Modellen \"{{model}}\" används just nu av {{count}} aktiva kurser. Att inaktivera den döljer den från lärarmenyn men låter kurserna fortsätta köra på den. För att flytta dem, gör en force-migrate per kurs från Kurshantering-sidan (admin kan välja vilken katalogmodell som helst, även inaktiverade).",
       "confirmDisableCancel": "Behåll aktiverad",
       "confirmDisableAction": "Inaktivera ändå"
     }

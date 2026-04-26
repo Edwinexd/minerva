@@ -477,7 +477,9 @@ function EmbeddingModelsCard() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t("system.embeddingModels.confirmDisableTitle")}
+              {t("system.embeddingModels.confirmDisableTitle", {
+                count: confirmDisable?.coursesUsing ?? 0,
+              })}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t("system.embeddingModels.confirmDisableBody", {

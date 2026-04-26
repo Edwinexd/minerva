@@ -282,15 +282,28 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
                                 {t("conversations.helpfulBadge", { count: conv.feedback_up })}
                               </Badge>
                             )}
-                            {/* Extraction-guard badges: one per
-                                distinct flag kind attached to the
-                                conversation. Filters out the
-                                companion lift flag so the list-view
-                                only highlights *active* concerns;
-                                the per-turn detail still shows the
-                                full lifecycle. */}
+                            {/* Extraction-guard list-view badges.
+                                The append-only flag log emits
+                                five kinds per lifecycle:
+                                  - extraction_intent_detected
+                                  - extraction_constraint_activated
+                                  - extraction_engagement_refused
+                                  - extraction_rewrote
+                                  - extraction_constraint_lifted
+                                For triage we badge only the two
+                                that signal *something happened
+                                that warrants a teacher's attention*
+                                (constraint activated, output got
+                                rewritten). The other three are
+                                trace events that show the full
+                                lifecycle on the detail page but
+                                would be noise here. */}
                             {(flagKinds?.[conv.id] || [])
-                              .filter((k) => k !== "extraction_constraint_lifted")
+                              .filter(
+                                (k) =>
+                                  k === "extraction_constraint_activated" ||
+                                  k === "extraction_rewrote",
+                              )
                               .map((kind) => (
                                 <Badge
                                   key={kind}
@@ -363,17 +376,34 @@ function FeedbackBadges({ feedback }: { feedback: MessageFeedback[] }) {
 /**
  * Per-turn extraction-guard flag display. Renders a coloured
  * badge with a teacher-readable label and the classifier's
- * rationale verbatim. Different colours per flag kind:
- * extraction trips are amber (something to look at), lifts are
- * green (it auto-resolved). Title-attribute carries the raw
- * metadata JSON for power users who want the full payload.
+ * rationale verbatim. Title-attribute carries the raw metadata
+ * JSON for power users who want the full payload.
+ *
+ * Colour coding mirrors the lifecycle:
+ *   - amber: high-signal events that warrant attention --
+ *     constraint just activated, or the assistant text was
+ *     rewritten because the output check tripped.
+ *   - green: a lift event (engagement was detected and the
+ *     constraint relaxed -- positive outcome).
+ *   - muted/neutral: trace events (intent classifier said yes,
+ *     student refused engagement). Useful for the lifecycle
+ *     timeline but not themselves a "look at this" signal.
  */
 function ConversationFlagDisplay({ flag }: { flag: ConversationFlag }) {
   const { t } = useTranslation("teacher")
-  const isLift = flag.flag === "extraction_constraint_lifted"
-  const colour = isLift
-    ? "border-green-300 text-green-700 dark:border-green-700 dark:text-green-300"
-    : "border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+  const colour = (() => {
+    switch (flag.flag) {
+      case "extraction_constraint_lifted":
+        return "border-green-300 text-green-700 dark:border-green-700 dark:text-green-300"
+      case "extraction_constraint_activated":
+      case "extraction_rewrote":
+        return "border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+      case "extraction_intent_detected":
+      case "extraction_engagement_refused":
+      default:
+        return "border-muted-foreground/40 text-muted-foreground"
+    }
+  })()
   const label = t(`conversations.flagKind.${flag.flag}`, flag.flag)
   return (
     <div className="mt-1.5 flex flex-wrap items-start gap-2">

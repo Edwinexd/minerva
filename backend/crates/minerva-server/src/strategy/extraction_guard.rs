@@ -43,14 +43,45 @@ use crate::error::AppError;
 use crate::feature_flags::extraction_guard_enabled;
 use crate::strategy::common::RagChunk;
 
-/// Constant flag string written into `conversation_flags.flag` when
-/// the guard fires. Stable across versions; the dashboard reads it.
-pub const EXTRACTION_FLAG_NAME: &str = "extraction_attempt";
+// ── flag kind constants ────────────────────────────────────────────
+//
+// We log an append-only event-stream of guard decisions to
+// `conversation_flags`. Each row records ONE classifier verdict or
+// state transition; the dashboard reconstructs the lifecycle by
+// reading them oldest-first. Five kinds, all turn-indexed so the
+// per-turn UI on the conversation detail page can align them.
 
-/// Companion flag emitted when engagement detection lifts the
-/// constraint. Lets the dashboard show the lifecycle of an
-/// extraction attempt: tripped at turn N, lifted at turn N+k.
-pub const LIFT_FLAG_NAME: &str = "extraction_constraint_lifted";
+/// Intent classifier returned `is_extraction = true` for this turn.
+/// Independent of whether the constraint was already active --
+/// gives the teacher the per-turn classifier signal even when the
+/// guard was already locked on from a prior turn.
+pub const INTENT_DETECTED_FLAG: &str = "extraction_intent_detected";
+
+/// Constraint flipped from off to on this turn. Cause may be
+/// intent OR proximity OR both -- the metadata records which.
+/// This is the "the guard is now constraining this conversation"
+/// event the teacher dashboard primarily badges.
+pub const CONSTRAINT_ACTIVATED_FLAG: &str = "extraction_constraint_activated";
+
+/// Output check tripped during `intercept_reply` and we replaced
+/// the streamed assistant text with a Socratic rewrite. Distinct
+/// from `extraction_intent_detected` because the input-side and
+/// output-side checks are independent: one can fire without the
+/// other (e.g. the model produced a complete solution despite the
+/// intent classifier saying no, or the intent classifier flagged
+/// the input but the model handled it Socratically anyway).
+pub const REWROTE_FLAG: &str = "extraction_rewrote";
+
+/// Engagement classifier said `engaged = true` and we lifted the
+/// constraint. Pairs with the `_activated` flag from earlier in
+/// the conversation to bracket the lifecycle.
+pub const CONSTRAINT_LIFTED_FLAG: &str = "extraction_constraint_lifted";
+
+/// Engagement classifier said `engaged = false` -- the student
+/// didn't take the Socratic bait. Constraint stays on. Logged so
+/// the teacher can see how many refusals it took before the
+/// constraint either lifted or the conversation ended.
+pub const ENGAGEMENT_REFUSED_FLAG: &str = "extraction_engagement_refused";
 
 /// How many recent turns to keep in `kg_state.recent_turns` for the
 /// multi-turn proximity check. 5 matches the spec
@@ -153,6 +184,10 @@ pub async fn evaluate_for_turn(
     rag_context: &[RagChunk],
 ) -> Option<GuardDecision> {
     if !extraction_guard_enabled(db, course_id).await {
+        tracing::debug!(
+            "extraction_guard: feature flag off for course {}, skipping",
+            course_id
+        );
         return None;
     }
 
@@ -162,6 +197,52 @@ pub async fn evaluate_for_turn(
     // first, with the current turn's input as the most recent.
     let recent_user_messages = recent_user_messages(history, user_content, INTENT_HISTORY_TURNS);
     let intent = extraction_guard::classify_intent(http, api_key, &recent_user_messages).await;
+    tracing::info!(
+        "extraction_guard: turn={} conversation={} intent.is_extraction={} intent.rationale={:?}",
+        turn_index,
+        conversation_id,
+        intent.is_extraction,
+        intent.rationale
+    );
+
+    // Per-turn intent classifier flag. Append-only event log:
+    // recorded whenever the classifier returns yes, *independent*
+    // of whether the constraint was already active. Lets the
+    // teacher see every turn the classifier flagged, not just the
+    // first one in a streak.
+    if intent.is_extraction {
+        let metadata = serde_json::json!({
+            "intent": {
+                "is_extraction": true,
+                "rationale": intent.rationale,
+            },
+        });
+        if let Err(e) = minerva_db::queries::conversation_flags::insert(
+            db,
+            conversation_id,
+            INTENT_DETECTED_FLAG,
+            Some(turn_index),
+            Some(intent.rationale.as_str()),
+            Some(&metadata),
+        )
+        .await
+        {
+            tracing::warn!(
+                "extraction_guard: failed to insert {} flag for {}: {}",
+                INTENT_DETECTED_FLAG,
+                conversation_id,
+                e
+            );
+        }
+    }
+    tracing::info!(
+        target: "extraction_guard",
+        conversation_id = %conversation_id,
+        turn = turn_index,
+        is_extraction = intent.is_extraction,
+        rationale = %intent.rationale,
+        "intent verdict",
+    );
 
     // Compute "assignments near this turn":
     //   * direct: signals are assignment-kind chunks above the
@@ -221,14 +302,22 @@ pub async fn evaluate_for_turn(
             .unwrap_or("");
         let v = extraction_guard::classify_engagement(http, api_key, prior_assistant, user_content)
             .await;
+        tracing::info!(
+            "extraction_guard: turn={} conversation={} engagement.engaged={} engagement.rationale={:?}",
+            turn_index,
+            conversation_id,
+            v.engaged,
+            v.rationale
+        );
         if v.engaged {
             state.constraint_active = false;
             state.constraint_lifted_at_turn = Some(turn_index);
             // Log the lift so the dashboard can show the
-            // lifecycle (tripped at turn X, lifted at turn Y).
+            // lifecycle (activated at turn X, lifted at turn Y).
             // Best-effort -- log and move on if it fails.
             let metadata = serde_json::json!({
                 "engagement": {
+                    "engaged": true,
                     "rationale": v.rationale,
                 },
                 "lifted_assignment_doc_ids": state.constraint_assignment_doc_ids,
@@ -236,7 +325,7 @@ pub async fn evaluate_for_turn(
             if let Err(e) = minerva_db::queries::conversation_flags::insert(
                 db,
                 conversation_id,
-                LIFT_FLAG_NAME,
+                CONSTRAINT_LIFTED_FLAG,
                 Some(turn_index),
                 Some(v.rationale.as_str()),
                 Some(&metadata),
@@ -245,6 +334,38 @@ pub async fn evaluate_for_turn(
             {
                 tracing::warn!(
                     "extraction_guard: failed to log lift flag for {}: {}",
+                    conversation_id,
+                    e
+                );
+            }
+        } else {
+            // Refusal event: student didn't take the Socratic
+            // bait. Constraint stays on. Logged so the teacher
+            // can see how many refusals it took before either a
+            // lift or the conversation ending. Per the on-
+            // transitions policy: only logged when constraint
+            // was active going in -- we don't log "engaged" for
+            // turns where the constraint was off (those would be
+            // noise).
+            let metadata = serde_json::json!({
+                "engagement": {
+                    "engaged": false,
+                    "rationale": v.rationale,
+                },
+                "active_assignment_doc_ids": state.constraint_assignment_doc_ids,
+            });
+            if let Err(e) = minerva_db::queries::conversation_flags::insert(
+                db,
+                conversation_id,
+                ENGAGEMENT_REFUSED_FLAG,
+                Some(turn_index),
+                Some(v.rationale.as_str()),
+                Some(&metadata),
+            )
+            .await
+            {
+                tracing::warn!(
+                    "extraction_guard: failed to log refused flag for {}: {}",
                     conversation_id,
                     e
                 );
@@ -265,6 +386,7 @@ pub async fn evaluate_for_turn(
     // student who engaged AND immediately pasted another assignment
     // counts as a fresh trip, with the lift flag recording the
     // brief gap between the two attempts.
+    let mut newly_activated = false;
     if constraint_active && !prev_active && !prev_active_before_lift {
         state.constraint_active = true;
         // Pick the assignments that justify the activation:
@@ -276,14 +398,82 @@ pub async fn evaluate_for_turn(
             assignments_near_vec.clone()
         };
         state.constraint_lifted_at_turn = None;
+        newly_activated = true;
     } else if constraint_active && !prev_active {
         // Was active before lift, lifted, then re-tripped within
         // the same turn (intent classifier said extraction). Keep
         // the prior assignment scope but turn the flag back on.
         state.constraint_active = true;
+        newly_activated = true;
     }
     // If constraint was active and neither intent nor proximity
     // re-fired but engagement didn't lift either, we keep it on.
+
+    // Per-turn decision summary: one INFO line that shows the
+    // full reasoning trace at a glance. The intent + engagement
+    // verdicts have their own lines above; this one is the
+    // post-decision state.
+    tracing::info!(
+        "extraction_guard: turn={} conversation={} decision: intent.is_extraction={} proximity_active={} prev_active_before_lift={} newly_activated={} constraint_active={} assignment_scope={:?}",
+        turn_index,
+        conversation_id,
+        intent.is_extraction,
+        proximity_active,
+        prev_active_before_lift,
+        newly_activated,
+        constraint_active,
+        state.constraint_assignment_doc_ids
+    );
+
+    // Append-only activation event. Recorded whenever the
+    // constraint flips from off to on this turn (covering the
+    // first-trip case AND the same-turn lift-then-retrip case).
+    // Lets the dashboard render an "extraction guard activated"
+    // badge tied to the specific turn that started the streak.
+    if newly_activated {
+        let cause = if intent.is_extraction && proximity_active {
+            "intent_and_proximity"
+        } else if intent.is_extraction {
+            "intent"
+        } else {
+            "proximity"
+        };
+        let rationale = if intent.is_extraction {
+            intent.rationale.clone()
+        } else {
+            format!(
+                "proximity threshold tripped; assignment(s) recurred in recent turns: {:?}",
+                state.constraint_assignment_doc_ids
+            )
+        };
+        let metadata = serde_json::json!({
+            "cause": cause,
+            "intent": {
+                "is_extraction": intent.is_extraction,
+                "rationale": intent.rationale,
+            },
+            "proximity_active": proximity_active,
+            "constraint_assignment_doc_ids": state.constraint_assignment_doc_ids,
+            "recent_turns": state.recent_turns,
+        });
+        if let Err(e) = minerva_db::queries::conversation_flags::insert(
+            db,
+            conversation_id,
+            CONSTRAINT_ACTIVATED_FLAG,
+            Some(turn_index),
+            Some(rationale.as_str()),
+            Some(&metadata),
+        )
+        .await
+        {
+            tracing::warn!(
+                "extraction_guard: failed to insert {} flag for {}: {}",
+                CONSTRAINT_ACTIVATED_FLAG,
+                conversation_id,
+                e
+            );
+        }
+    }
 
     save_kg_state(db, conversation_id, &state).await;
     // Suppress unused lint when the verdict is held purely for
@@ -338,6 +528,13 @@ pub async fn intercept_reply(
         &decision.assignment_excerpts,
     )
     .await;
+    tracing::info!(
+        "extraction_guard: turn={} conversation={} output.is_complete_solution={} output.rationale={:?}",
+        decision.turn_index,
+        conversation_id,
+        verdict.is_complete_solution,
+        verdict.rationale
+    );
     if !verdict.is_complete_solution {
         // Constraint was active (e.g. previously flagged) but this
         // turn's output is fine. Return original; no flag emitted.
@@ -364,12 +561,11 @@ pub async fn intercept_reply(
             "rationale": verdict.rationale,
         },
         "matched_assignment_doc_ids": decision.in_scope_assignment_doc_ids,
-        "rewrote_response": true,
     });
     if let Err(e) = minerva_db::queries::conversation_flags::insert(
         db,
         conversation_id,
-        EXTRACTION_FLAG_NAME,
+        REWROTE_FLAG,
         Some(decision.turn_index),
         Some(verdict.rationale.as_str()),
         Some(&metadata),
@@ -377,7 +573,8 @@ pub async fn intercept_reply(
     .await
     {
         tracing::warn!(
-            "extraction_guard: failed to insert conversation_flag: {}",
+            "extraction_guard: failed to insert {} flag: {}",
+            REWROTE_FLAG,
             e
         );
     }

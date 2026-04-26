@@ -163,7 +163,10 @@
     "correctionPrefixWithCategories": "Correction (re: {{categories}}): ",
     "correctionPrefix": "Correction: ",
     "flagKind": {
-      "extraction_attempt": "Extraction guard tripped",
+      "extraction_intent_detected": "Intent classifier flagged this turn",
+      "extraction_constraint_activated": "Extraction guard activated",
+      "extraction_rewrote": "Response rewritten by guard",
+      "extraction_engagement_refused": "Student didn't engage with Socratic prompt",
       "extraction_constraint_lifted": "Engagement detected -- constraint lifted"
     }
   },

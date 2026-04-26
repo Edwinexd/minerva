@@ -163,7 +163,10 @@
     "correctionPrefixWithCategories": "Rättelse (ang. {{categories}}): ",
     "correctionPrefix": "Rättelse: ",
     "flagKind": {
-      "extraction_attempt": "Extraktionsskydd utlöst",
+      "extraction_intent_detected": "Intent-klassificeraren markerade denna tur",
+      "extraction_constraint_activated": "Extraktionsskydd aktiverat",
+      "extraction_rewrote": "Svaret omskrevs av skyddet",
+      "extraction_engagement_refused": "Studenten engagerade sig inte i den sokratiska frågan",
       "extraction_constraint_lifted": "Studenten engagerade sig -- begränsning hävd"
     }
   },

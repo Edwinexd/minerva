@@ -31,9 +31,33 @@
 
 use crate::strategy::common::cerebras_request_with_retry;
 
-/// Cerebras model used for all three calls. Same as the rest of
-/// the KG bundle so a single warmed cache services them all.
-const GUARD_MODEL: &str = "gpt-oss-120b";
+// ── Cerebras model selection ───────────────────────────────────────
+//
+// Three of the four guard calls are simple binary-classification
+// tasks (intent / output / engagement) where a small fast model is
+// the right tool. The intent classifier in particular runs on
+// EVERY chat turn when the feature flag is on, so its latency is
+// the single most important number in this whole module. Cerebras
+// already hosts llama3.1-8b in the catalog (see health.rs); using
+// it cuts ~10x off the prompt-cost and a meaningful chunk of
+// latency vs. gpt-oss-120b without measurable quality loss for
+// JSON-schema-constrained binary decisions.
+//
+// The rewrite call is different: it produces user-visible prose
+// (the Socratic question + policy-note), runs only when the
+// output check tripped (rare), and the model's writing quality
+// directly affects whether the student's experience feels coherent.
+// We keep gpt-oss-120b for that path.
+
+/// Tiny model for the always-on / conditional binary classifiers.
+/// Cheapest in the Cerebras catalog. JSON-schema-constrained
+/// outputs and `reasoning_effort: low` keep it on rails.
+const GUARD_CLASSIFIER_MODEL: &str = "llama3.1-8b";
+
+/// Larger model for the rewrite path only -- runs rarely (only
+/// when the output check trips) and produces text the student
+/// reads, so quality matters.
+const GUARD_REWRITE_MODEL: &str = "gpt-oss-120b";
 
 /// How many recent user messages the intent classifier sees. Five
 /// turns is enough to catch "drift" cases where the student didn't
@@ -119,7 +143,7 @@ pub async fn classify_intent(
     });
 
     let body = serde_json::json!({
-        "model": GUARD_MODEL,
+        "model": GUARD_CLASSIFIER_MODEL,
         "temperature": 0.0,
         "reasoning_effort": "low",
         "max_completion_tokens": INTENT_MAX_TOKENS,
@@ -238,7 +262,7 @@ pub async fn check_output_for_solution(
         "assistant_reply": assistant_reply,
     });
     let body = serde_json::json!({
-        "model": GUARD_MODEL,
+        "model": GUARD_CLASSIFIER_MODEL,
         "temperature": 0.0,
         "reasoning_effort": "low",
         "max_completion_tokens": OUTPUT_CHECK_MAX_TOKENS,
@@ -338,7 +362,7 @@ pub async fn generate_socratic_rewrite(
         "original_reply_we_blocked": original_reply,
     });
     let body = serde_json::json!({
-        "model": GUARD_MODEL,
+        "model": GUARD_REWRITE_MODEL,
         "temperature": 0.3,
         "reasoning_effort": "low",
         "max_completion_tokens": REWRITE_MAX_TOKENS,
@@ -447,7 +471,7 @@ pub async fn classify_engagement(
         "new_student_message": new_student_message,
     });
     let body = serde_json::json!({
-        "model": GUARD_MODEL,
+        "model": GUARD_CLASSIFIER_MODEL,
         "temperature": 0.0,
         "reasoning_effort": "low",
         "max_completion_tokens": OUTPUT_CHECK_MAX_TOKENS,

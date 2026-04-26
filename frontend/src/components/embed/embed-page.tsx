@@ -8,7 +8,9 @@ import { useDocumentTitle } from "@/lib/use-document-title"
 import { ChatTranscript } from "@/components/chat/chat-transcript"
 import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
 import { ConversationList } from "@/components/chat/conversation-list"
+import { TeacherNoteInline } from "@/components/chat/teacher-note-inline"
 import { useChatStream } from "@/components/chat/use-chat-stream"
+import type { TeacherNote } from "@/lib/types"
 
 // -- Types for embed API responses --
 
@@ -50,6 +52,7 @@ interface EmbedMessage {
 
 interface EmbedConversationDetail {
   messages: EmbedMessage[]
+  notes: TeacherNote[]
 }
 
 interface EmbedMe {
@@ -340,6 +343,7 @@ function EmbedChatWindow({
 }) {
   const { t } = useTranslation("auth")
   const [messages, setMessages] = useState<EmbedMessage[]>([])
+  const [notes, setNotes] = useState<TeacherNote[]>([])
   const [loading, setLoading] = useState(true)
   const [input, setInput] = useState("")
   const stream = useChatStream(t("embed.unknownError"))
@@ -355,6 +359,7 @@ function EmbedChatWindow({
 
     if (conversationId === null) {
       setMessages([])
+      setNotes([])
       setLoading(false)
       return
     }
@@ -364,6 +369,7 @@ function EmbedChatWindow({
       .then((data) => {
         if (!cancelled) {
           setMessages(data.messages)
+          setNotes(data.notes ?? [])
           setLoading(false)
         }
       })
@@ -379,6 +385,21 @@ function EmbedChatWindow({
     // them would refire this on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId, conversationId, token, t])
+
+  // Index notes the same way the regular chat page does: per-message
+  // notes render right after that bubble; conversation-level notes
+  // (no message_id) render once above the thread.
+  const notesByMessage = new Map<string, TeacherNote[]>()
+  const conversationNotes: TeacherNote[] = []
+  for (const note of notes) {
+    if (note.message_id) {
+      const existing = notesByMessage.get(note.message_id) ?? []
+      existing.push(note)
+      notesByMessage.set(note.message_id, existing)
+    } else {
+      conversationNotes.push(note)
+    }
+  }
 
   /**
    * Returns the conversation id this send landed in (the existing one
@@ -423,6 +444,7 @@ function EmbedChatWindow({
           token,
         )
         setMessages(data.messages)
+        setNotes(data.notes ?? [])
       } catch {
         // Silent
       }
@@ -465,6 +487,28 @@ function EmbedChatWindow({
           error={stream.error}
           bubbleLabels={bubbleLabels}
           assistantResponseLabel={t("embed.assistantResponseLabel")}
+          renderBeforeMessages={() =>
+            conversationNotes.length > 0 ? (
+              <div className="space-y-2">
+                {conversationNotes.map((note) => (
+                  <TeacherNoteInline
+                    key={note.id}
+                    note={note}
+                    label={t("embed.teacherNote")}
+                  />
+                ))}
+              </div>
+            ) : null
+          }
+          renderAfterMessage={(msg) =>
+            notesByMessage.get(msg.id)?.map((note) => (
+              <TeacherNoteInline
+                key={note.id}
+                note={note}
+                label={t("embed.teacherNote")}
+              />
+            ))
+          }
         />
       </div>
 

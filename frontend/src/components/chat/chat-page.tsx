@@ -11,10 +11,7 @@ import {
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import { Menu, X } from "lucide-react"
-import Markdown from "react-markdown"
-import remarkGfm from "remark-gfm"
 import React, { useEffect, useState } from "react"
 import type { Message, MessageFeedback, TeacherNote } from "@/lib/types"
 import { FeedbackControls } from "@/components/message-feedback"
@@ -23,6 +20,7 @@ import { useDocumentTitle } from "@/lib/use-document-title"
 import { ChatTranscript } from "./chat-transcript"
 import type { ChatBubbleLabels } from "./chat-bubble"
 import { ConversationList } from "./conversation-list"
+import { TeacherNoteInline } from "./teacher-note-inline"
 import { useChatStream } from "./use-chat-stream"
 
 export function ChatRouteComponent({
@@ -309,7 +307,11 @@ function ChatWindow({
             conversationNotes.length > 0 ? (
               <div className="space-y-2">
                 {conversationNotes.map((note) => (
-                  <TeacherNoteInline key={note.id} note={note} />
+                  <TeacherNoteInline
+                    key={note.id}
+                    note={note}
+                    label={t("message.teacherNote")}
+                  />
                 ))}
               </div>
             ) : null
@@ -326,7 +328,11 @@ function ChatWindow({
           }
           renderAfterMessage={(msg) =>
             notesByMessage.get(msg.id)?.map((note) => (
-              <TeacherNoteInline key={note.id} note={note} />
+              <TeacherNoteInline
+                key={note.id}
+                note={note}
+                label={t("message.teacherNote")}
+              />
             ))
           }
         />
@@ -368,23 +374,3 @@ function ChatWindow({
   )
 }
 
-function TeacherNoteInline({ note }: { note: TeacherNote }) {
-  const { t } = useTranslation("student")
-  return (
-    <div className="flex justify-center">
-      <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-2 max-w-[80%]">
-        <div className="flex items-center gap-2 mb-1">
-          <Badge variant="outline" className="text-xs border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300">
-            {t("message.teacherNote")}
-          </Badge>
-          {note.author_display_name && (
-            <span className="text-xs text-muted-foreground">{note.author_display_name}</span>
-          )}
-        </div>
-        <div className="prose prose-sm dark:prose-invert max-w-none">
-          <Markdown remarkPlugins={[remarkGfm]}>{note.content}</Markdown>
-        </div>
-      </div>
-    </div>
-  )
-}

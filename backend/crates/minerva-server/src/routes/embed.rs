@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use crate::auth::user_from_row;
 use crate::error::AppError;
+use crate::ext_obfuscate::{self, Pseudonymizer};
 use crate::routes::chat::{
     fetch_conversation_for_view, list_pinned_conversations_for, ConversationWithUserResponse,
 };
@@ -99,8 +100,21 @@ struct MessageResponse {
 }
 
 #[derive(Serialize)]
+struct TeacherNoteResponse {
+    id: Uuid,
+    conversation_id: Uuid,
+    message_id: Option<Uuid>,
+    author_id: Uuid,
+    author_display_name: Option<String>,
+    content: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
 struct ConversationDetailResponse {
     messages: Vec<MessageResponse>,
+    notes: Vec<TeacherNoteResponse>,
 }
 
 #[derive(Serialize)]
@@ -232,6 +246,11 @@ async fn get_conversation(
     let (_conv, _is_teacher) = fetch_conversation_for_view(&state, course_id, cid, &viewer).await?;
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
+    // Teacher notes are the whole point of pinning a conversation, so the
+    // embed view has to surface them too. Author display name goes through
+    // the same `ext:` pseudonymizer as the Shibboleth route.
+    let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;
+    let ps = Pseudonymizer::for_viewer(&state.db, &viewer, &state.config.hmac_secret).await?;
 
     Ok(Json(ConversationDetailResponse {
         messages: messages
@@ -243,6 +262,23 @@ async fn get_conversation(
                 chunks_used: m.chunks_used,
                 model_used: m.model_used,
                 created_at: m.created_at,
+            })
+            .collect(),
+        notes: notes
+            .into_iter()
+            .map(|n| {
+                let (_, author_display_name) =
+                    ext_obfuscate::apply(ps.as_ref(), n.author_id, None, n.author_display_name);
+                TeacherNoteResponse {
+                    id: n.id,
+                    conversation_id: n.conversation_id,
+                    message_id: n.message_id,
+                    author_id: n.author_id,
+                    author_display_name,
+                    content: n.content,
+                    created_at: n.created_at,
+                    updated_at: n.updated_at,
+                }
             })
             .collect(),
     }))

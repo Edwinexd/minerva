@@ -34,21 +34,15 @@ impl CerebrasClassifier {
 
     async fn call(
         &self,
-        filename: &str,
         mime_type: &str,
         excerpt: &str,
         reasoning_effort: &str,
     ) -> Result<ClassifiedKind, String> {
-        // Filename hints get serialised as a JSON array literal so the
-        // model sees them as an actual array (not a comma-separated
-        // string). Empty list still serialises as "[]" -- harmless and
-        // keeps the prompt template byte-stable across calls.
-        let hints = filename_hints(filename);
-        let hints_json = serde_json::to_string(&hints).unwrap_or_else(|_| "[]".to_string());
+        // Filename is intentionally NOT in the prompt -- see the
+        // CLASSIFIER_USER_TEMPLATE doc comment. Classifier must decide
+        // from content alone.
         let user = CLASSIFIER_USER_TEMPLATE
-            .replace("{filename}", filename)
             .replace("{mime_type}", mime_type)
-            .replace("{filename_hints}", &hints_json)
             .replace("{excerpt}", excerpt);
 
         // Cerebras supports OpenAI-style `response_format: json_schema`,
@@ -112,13 +106,18 @@ impl Classifier for CerebrasClassifier {
         mime_type: &str,
         text: &str,
     ) -> Result<ClassifiedKind, String> {
+        // `filename` arrives here as part of the Classifier trait but is
+        // ONLY used for log lines -- we deliberately do not feed it to
+        // the model. Filenames in real DSV courses are too unreliable
+        // (stale templates, copy/pasted names, F-numbers that don't
+        // match content). Pure content classification.
+
         // Zero-text fast-path: if the extractor produced nothing
         // (URL stubs, scanned PDFs without OCR, unsupported types,
         // etc.) there's nothing for the model to read. Return
         // `unknown` with low confidence and the "no_text_extracted"
-        // flag rather than asking the model to hallucinate from a
-        // filename alone. The chat-time partition keeps unknowns out
-        // of context anyway, so this is the safe default.
+        // flag. The chat-time partition keeps unknowns out of context
+        // anyway, so this is the safe default.
         if text.trim().is_empty() {
             tracing::info!(
                 "classifier: empty text for {} -> short-circuiting to unknown/no_text_extracted",
@@ -136,7 +135,7 @@ impl Classifier for CerebrasClassifier {
 
         // First pass -- cheap, low effort.
         let initial = self
-            .call(filename, mime_type, &excerpt, "low")
+            .call(mime_type, &excerpt, "low")
             .await
             .map_err(|e| format!("classifier: low-effort call failed: {e}"))?;
 
@@ -155,7 +154,7 @@ impl Classifier for CerebrasClassifier {
             initial.suspicious_flags,
         );
 
-        match self.call(filename, mime_type, &excerpt, "high").await {
+        match self.call(mime_type, &excerpt, "high").await {
             Ok(refined) => Ok(refined),
             Err(e) => {
                 tracing::warn!(
@@ -167,231 +166,6 @@ impl Classifier for CerebrasClassifier {
             }
         }
     }
-}
-
-/// Deterministic filename-pattern hints, surfaced to the classifier as
-/// priors. We extract these in Rust (rather than letting the model
-/// guess from the raw filename) so the model sees a structured signal
-/// it can override only with explicit content evidence -- not just a
-/// vague "the filename also says assignment".
-///
-/// Kept in sync with the linker's `UNIT_NUMBER_PREFIXES`: anything
-/// that's a unit marker is also a kind hint here when it appears with
-/// a known role keyword.
-///
-/// The hints are intentionally informal English sentences. The classifier
-/// reads them as user-message context, not as schema enums; phrasing
-/// like "looks like a Swedish 'övningsuppgift' (assignment)" makes the
-/// signal unambiguous to a multilingual LLM without adding a fragile
-/// enum the model might decline to extend.
-pub fn filename_hints(filename: &str) -> Vec<String> {
-    // Lower-case + drop diacritics so the same matcher handles both
-    // "övningsuppgift" and "ovningsuppgift".
-    let lc = filename.to_lowercase();
-    let folded: String = lc
-        .chars()
-        .map(|c| match c {
-            'å' | 'ä' | 'à' | 'á' | 'â' => 'a',
-            'ö' | 'ø' | 'ò' | 'ó' | 'ô' => 'o',
-            'é' | 'è' | 'ê' | 'ë' => 'e',
-            'ü' | 'ù' | 'ú' | 'û' => 'u',
-            'í' | 'ì' | 'î' | 'ï' => 'i',
-            'ý' => 'y',
-            'ñ' => 'n',
-            'ç' => 'c',
-            _ => c,
-        })
-        .collect();
-    let mut hints: Vec<String> = Vec::new();
-
-    // Solution markers: very high signal. Several Swedish variants for
-    // DSV courses where lecturers love mixing Swedish and English.
-    for token in &[
-        "solution",
-        "solutions",
-        "answer",
-        "answers",
-        "answerkey",
-        "facit",
-        "losning",         // "lösning"
-        "losningar",       // "lösningar"
-        "losningsforslag", // "lösningsförslag"
-        "model_answer",
-        "modelanswer",
-        "key.pdf",
-    ] {
-        if folded.contains(token) {
-            hints.push(format!(
-                "filename contains \"{}\" -- likely sample_solution",
-                token
-            ));
-            break;
-        }
-    }
-
-    // Tutorial / optional-practice markers (Swedish "övning" without
-    // "uppgift" suffix usually means OPTIONAL practice, distinct from
-    // a graded "uppgift"). Voluntary/optional language is also a
-    // strong tutorial_exercise signal.
-    //
-    // Note the ordering: this runs BEFORE the assignment block so the
-    // standalone "ovning" hint can fire without being shadowed by the
-    // longer "ovningsuppgift" match below.
-    let has_ovning_alone = folded.contains("ovning") && !folded.contains("ovningsuppgift");
-    let has_voluntary_marker = [
-        "frivillig",
-        "voluntary",
-        "optional",
-        "self_study",
-        "self-study",
-    ]
-    .iter()
-    .any(|t| folded.contains(t));
-    if has_ovning_alone {
-        hints.push(
-            "filename contains Swedish \"övning\" (without \"uppgift\") -- likely tutorial_exercise (optional practice). If the content shows grading/submission, override to assignment_brief.".to_string(),
-        );
-    }
-    if has_voluntary_marker {
-        hints.push(
-            "filename suggests voluntary / non-graded material -- likely tutorial_exercise"
-                .to_string(),
-        );
-    }
-    for token in &["tutorial", "practice", "exercise"] {
-        if folded.contains(token) && !has_ovning_alone {
-            hints.push(format!(
-                "filename contains \"{}\" -- could be tutorial_exercise (optional) or assignment_brief (graded); decide from content (deadlines/grading = assignment_brief, otherwise tutorial_exercise)",
-                token
-            ));
-            break;
-        }
-    }
-
-    // Assignment markers (graded). "övningsuppgift" usually means a
-    // graded exercise at DSV; map to assignment_brief but with a note
-    // that the model may override if content shows it's optional.
-    for token in &[
-        "assignment",
-        "assignments",
-        "homework",
-        "uppgift",        // Swedish "task/assignment"
-        "ovningsuppgift", // Swedish "exercise task" -- graded at DSV by convention
-        "inlamning",      // Swedish "submission"
-    ] {
-        if folded.contains(token) {
-            hints.push(format!(
-                "filename contains \"{}\" -- likely assignment_brief (graded). If content explicitly says optional/voluntary, override to tutorial_exercise.",
-                token
-            ));
-            break;
-        }
-    }
-
-    // Lab markers.
-    for token in &["lab", "laboration", "practical"] {
-        if folded.contains(token) {
-            hints.push(format!(
-                "filename contains \"{}\" -- likely lab_brief",
-                token
-            ));
-            break;
-        }
-    }
-
-    // Exam markers.
-    for token in &["exam", "tenta", "tentamen", "midterm", "final_exam"] {
-        if folded.contains(token) {
-            hints.push(format!("filename contains \"{}\" -- likely exam", token));
-            break;
-        }
-    }
-
-    // Transcript markers: hand-crafted from how the transcript pipeline
-    // names files (it prefixes "transcript_" before saving the .txt) and
-    // common ".vtt" / "captions" patterns.
-    for token in &["transcript", "captions", ".vtt", "subtitle"] {
-        if folded.contains(token) {
-            hints.push(format!(
-                "filename contains \"{}\" -- likely lecture_transcript (auto-generated speech-to-text)",
-                token
-            ));
-            break;
-        }
-    }
-
-    // Lecture markers (prepared content). Only fires when no transcript
-    // hint matched -- a "transcript" filename should win against a
-    // "lecture" substring inside it.
-    let already_transcript = hints.iter().any(|h| h.contains("lecture_transcript"));
-    if !already_transcript {
-        for token in &["lecture", "lecturenotes", "slides", "forelasning"] {
-            if folded.contains(token) {
-                hints.push(format!("filename contains \"{}\" -- likely lecture", token));
-                break;
-            }
-        }
-        // DSV-specific F01/F02/... naming convention is shorthand for
-        // "Föreläsning 01" -- almost always a lecture.
-        if has_f_lecture_prefix(&folded) {
-            hints.push(
-                "filename starts with DSV \"F<number>\" lecture pattern -- likely lecture"
-                    .to_string(),
-            );
-        }
-    }
-
-    // Reading markers.
-    for token in &["chapter", "ch_", "kapitel", "reading", "paper", "article"] {
-        if folded.contains(token) {
-            hints.push(format!("filename contains \"{}\" -- likely reading", token));
-            break;
-        }
-    }
-
-    // Syllabus markers.
-    for token in &["syllabus", "schedule", "courseplan", "kursplan", "kurs_pm"] {
-        if folded.contains(token) {
-            hints.push(format!(
-                "filename contains \"{}\" -- likely syllabus",
-                token
-            ));
-            break;
-        }
-    }
-
-    hints
-}
-
-/// True iff the filename starts with a DSV-style "F<digits>" or
-/// "f<digits>" lecture marker (e.g. "F01_Arv.pdf", "f12-trees.pdf"),
-/// case-insensitive, separator-tolerant. Avoids false positives like
-/// "f1-results" being mistaken for a single-digit lecture marker by
-/// requiring at least one digit and rejecting words starting with f
-/// followed by a non-digit ("first.pdf" / "facit.pdf").
-fn has_f_lecture_prefix(folded_lc: &str) -> bool {
-    let trimmed = folded_lc.trim_start_matches(['_', '-', ' ']);
-    let bytes = trimmed.as_bytes();
-    if bytes.first().copied() != Some(b'f') {
-        return false;
-    }
-    if bytes.len() < 2 {
-        return false;
-    }
-    // Reject "facit" / "first" / "final" -- letter immediately after f.
-    if bytes[1].is_ascii_alphabetic() {
-        return false;
-    }
-    // Skip optional separator (rare for F-numbering but cheap).
-    let mut j = 1;
-    while j < bytes.len() && matches!(bytes[j], b'-' | b'_' | b' ' | b'.') {
-        j += 1;
-    }
-    let digits_start = j;
-    while j < bytes.len() && bytes[j].is_ascii_digit() {
-        j += 1;
-    }
-    j > digits_start
 }
 
 /// Head/tail char-window. UTF-8 safe: we use `char_indices` to split on
@@ -546,86 +320,6 @@ mod tests {
         assert!(out.starts_with('a'));
         assert!(out.contains("characters omitted"));
         assert!(out.ends_with('z'));
-    }
-
-    #[test]
-    fn filename_hints_extracts_swedish_assignment() {
-        let h = filename_hints("ovningsuppgift3_vt25.pdf");
-        assert!(h.iter().any(|s| s.contains("assignment_brief")));
-    }
-
-    #[test]
-    fn filename_hints_extracts_diacritic_assignment() {
-        let h = filename_hints("Övningsuppgift_4.pdf");
-        assert!(h.iter().any(|s| s.contains("assignment_brief")));
-    }
-
-    #[test]
-    fn filename_hints_extracts_swedish_solution() {
-        let h = filename_hints("Lösningsforslag_lab2.pdf");
-        assert!(h.iter().any(|s| s.contains("sample_solution")));
-    }
-
-    #[test]
-    fn filename_hints_extracts_dsv_lecture_pattern() {
-        let h = filename_hints("F18_OO.pdf");
-        assert!(h.iter().any(|s| s.contains("lecture")));
-    }
-
-    #[test]
-    fn filename_hints_skips_non_lecture_f_words() {
-        let h = filename_hints("facit_kapitel3.pdf");
-        // "facit" should fire the solution hint, but the F-prefix
-        // detector should NOT misread "facit" as a lecture marker.
-        assert!(h.iter().any(|s| s.contains("sample_solution")));
-        assert!(!h.iter().any(|s| s.contains("F<number>")));
-    }
-
-    #[test]
-    fn filename_hints_returns_empty_for_generic_name() {
-        let h = filename_hints("notes.pdf");
-        assert!(h.is_empty());
-    }
-
-    #[test]
-    fn filename_hints_distinguishes_ovning_from_ovningsuppgift() {
-        // "övning_recursion.pdf" -> tutorial_exercise (optional)
-        let practice = filename_hints("Övning_recursion.pdf");
-        assert!(
-            practice.iter().any(|h| h.contains("tutorial_exercise")),
-            "övning alone should hint tutorial_exercise: {:?}",
-            practice
-        );
-        assert!(
-            !practice
-                .iter()
-                .any(|h| h.contains("likely assignment_brief")),
-            "övning alone should NOT hint assignment_brief: {:?}",
-            practice
-        );
-
-        // "ovningsuppgift3.pdf" -> assignment_brief (graded by DSV convention)
-        let task = filename_hints("ovningsuppgift3_vt25.pdf");
-        assert!(
-            task.iter().any(|h| h.contains("assignment_brief")),
-            "övningsuppgift should hint assignment_brief: {:?}",
-            task
-        );
-    }
-
-    #[test]
-    fn filename_hints_picks_up_voluntary_marker() {
-        let h = filename_hints("frivillig_extrauppgift.pdf");
-        assert!(h.iter().any(|h| h.contains("tutorial_exercise")));
-    }
-
-    #[test]
-    fn filename_hints_detects_transcript() {
-        let h = filename_hints("transcript_F01_intro.txt");
-        assert!(h.iter().any(|h| h.contains("lecture_transcript")));
-        // Crucially, it should NOT also fire the regular "lecture" hint
-        // for the "lecture"-shaped substring "F01" -- transcript wins.
-        assert!(!h.iter().any(|h| h.ends_with("likely lecture")));
     }
 
     #[test]

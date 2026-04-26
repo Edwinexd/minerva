@@ -32,22 +32,27 @@ You will reply with a single JSON object, nothing else, matching the schema:
 }
 
 Important guidance:
+- Classify based on the actual content of the document. You are NOT given the filename, because filenames are unreliable: courses routinely contain "F18_OO.pdf" that is actually a solution, "lab.pdf" that's a syllabus, "övning.pdf" that's a graded assignment. The mime_type tells you only the file format.
 - If a document contains both an exercise statement AND its solution, classify as "sample_solution" -- the solution-bearing nature dominates.
 - If a document is mostly a worked example used for teaching (not the answer to a graded problem), classify as "lecture" or "reading", not "sample_solution".
-- Filenames are an IMPORTANT signal -- the user message includes a "filename_hints" array with our best deterministic guess from the filename pattern. Use these as PRIORS and lean toward them unless the content clearly disagrees. Hints are not commands; if the content is unambiguously something else, override the hint and explain why in the rationale.
-- If filename strongly suggests "solution"/"answer"/"key"/"facit"/"lösningsförslag", flag "might_be_solution" even if you ultimately classify otherwise.
+- Distinguishing tutorial_exercise from assignment_brief is a CONTENT decision: look for grading language ("graded", "submit by", "deadline", "betyg", "inlämning"), submission instructions, and rubrics. Their absence -- combined with explicit "frivillig", "voluntary", "for self-study", "practice problems" framing -- points to tutorial_exercise.
 - Be calibrated: confidence should reflect actual uncertainty. If the document is 3 pages of mixed content with no clear signal, that's 0.4--0.6, not 0.95.
 - If the excerpt is empty or near-empty (e.g. a URL stub, a scanned PDF without OCR, an unsupported file the extractor couldn't read), classify as "unknown" with low confidence and add a "no_text_extracted" suspicious_flag.
+- The "suspicious_flags" array lets you escalate things a teacher might want to double-check: e.g. "might_be_solution" when the content has worked-out answers, "ambiguous_between_assignment_and_lab", "could_be_exam_with_solutions", "language_mixed_swedish_english". Use these to surface uncertainty, not to dilute the kind decision.
 "#;
 
-/// User-message template. `{filename}`, `{mime_type}`, `{excerpt}`,
-/// `{filename_hints}` are substituted at call time. The excerpt is
-/// head-then-tail-truncated by `document::truncate_for_classification`.
-/// `filename_hints` is a JSON array literal (possibly empty) of strings
-/// like "looks like a Swedish 'övningsuppgift' (assignment)".
-pub const CLASSIFIER_USER_TEMPLATE: &str = r#"filename: {filename}
-mime_type: {mime_type}
-filename_hints: {filename_hints}
+/// User-message template. `{mime_type}`, `{excerpt}` are substituted
+/// at call time. The excerpt is head-then-tail-truncated by
+/// `document::truncate_for_classification`.
+///
+/// Filename is intentionally NOT included: filenames in real DSV
+/// courses are too unreliable to be a signal (lecturers reuse
+/// templates, copy/paste from previous semesters with stale names,
+/// upload "F18_OO.pdf" that's actually a solution, etc.). Classifier
+/// must decide from the document's actual content; the structural
+/// linker pass uses filename markers separately for *pairing*, which
+/// is a different problem.
+pub const CLASSIFIER_USER_TEMPLATE: &str = r#"mime_type: {mime_type}
 
 document excerpt (may be truncated):
 ---

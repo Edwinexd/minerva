@@ -1,33 +1,35 @@
 //! Cross-document linking pass: builds the edges of the course
 //! knowledge graph after every doc has a `kind`.
 //!
-//! The pass is course-scoped. It takes every classified document in
-//! a course, fans out embedding-based candidate pairs, and asks
-//! gpt-oss-120b to label each pair with a typed relation:
+//! Pipeline (all course-scoped):
 //!
-//!   * `solution_of(src=sample_solution, dst=assignment_brief|lab_brief|exam)`
-//!   * `part_of_unit(src, dst)` -- two docs that belong to the same
-//!     week / module / topic, regardless of kind.
+//!   1. **Aggressive embedding filter.** Per-doc top-K nearest
+//!      neighbours above `MIN_EMBEDDING_SIMILARITY` (0.65). The
+//!      embeddings do the heavy lifting of "do these two docs
+//!      share substantive content?" -- a course of 50 docs typically
+//!      yields ~20-50 surviving pairs, never anywhere near N^2.
+//!   2. **Per-pair LLM dispatch in parallel.** Each surviving pair
+//!      gets its own focused Cerebras call (`classify_one_pair`),
+//!      with a tight prompt -- two docs + their kinds + content
+//!      excerpts + similarity, three-way decision
+//!      (solution_of / part_of_unit / none). Calls run via
+//!      `buffer_unordered(PAIR_CALL_CONCURRENCY)` so an N-pair
+//!      course finishes in O(N / concurrency) wall-clock.
+//!   3. **Post-filter.** Confidence floor, similarity floor per
+//!      relation type, teacher vetoes (`rejected_edge_pairs`).
 //!
-//! **Filenames are NOT used anywhere in this module.** Real DSV course
-//! filenames are unreliable (stale templates, copy/paste, names that
-//! contradict content), so:
+//! Why per-pair instead of "one mega-call with all candidates": at
+//! medium reasoning effort gpt-oss-120b spent 40K completion tokens
+//! enumerating doc IDs in chain-of-thought before reaching JSON, ran
+//! out of budget, returned empty. Per-pair gives the model a tiny
+//! decision space, runs in parallel, and isolates each pair from
+//! sibling failures.
 //!
-//!   * Candidate generation is pure embedding cosine similarity.
-//!   * The LLM sees only `kind`, `classifier_rationale`, and a content
-//!     `excerpt` per doc -- no filename, no marker tokens, no derived
-//!     priors.
-//!   * Post-filters are similarity-floor / confidence-floor /
-//!     duplicate-content -- all derived from the actual document
-//!     vectors, never from filenames.
-//!
-//! Why one big call rather than per-pair: pairwise scales O(n^2) and
-//! drowns context in noise. A single call lets the model do simple
-//! sanity checks across the corpus (cluster the lab+brief+solution+
-//! rubric for a unit together based on content) and emit only the
-//! confident edges. For courses bigger than the model can fit in one
-//! turn we'd paginate by embedding cluster -- but in practice DSV
-//! courses are 20-200 docs, well within budget.
+//! **Filenames are NOT used anywhere in this module.** Real DSV
+//! course filenames are unreliable (stale templates, copy/paste,
+//! names that contradict content), so the candidate generator looks
+//! at embeddings only and the LLM prompt sees `kind` +
+//! `classifier_rationale` + `excerpt` per doc -- never the filename.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

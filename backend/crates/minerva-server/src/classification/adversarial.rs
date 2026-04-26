@@ -62,9 +62,13 @@ pub fn snapshot_stats() -> AdversarialStats {
     }
 }
 
-/// Cerebras model used for the per-chunk check. Same family as the
-/// document classifier so we benefit from a single warmed-up cache.
-const ADVERSARIAL_MODEL: &str = "gpt-oss-120b";
+/// Cerebras model used for the per-chunk check. Binary
+/// classification with a 4-token output cap and `reasoning_effort:
+/// low` -- exactly the kind of small-model task where llama3.1-8b
+/// is the right tool. Cheaper, faster (matters here: this filter
+/// runs per-chunk and fans out across all retrieved chunks every
+/// chat turn, against an 800ms total budget).
+const ADVERSARIAL_MODEL: &str = "llama3.1-8b";
 
 /// Total wall-clock budget for the whole filter (across all chunks
 /// fanned out concurrently). On timeout the filter fails open.

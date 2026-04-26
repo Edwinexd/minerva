@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -157,6 +157,20 @@ export const canvasFilesQuery = (courseId: string, connectionId: string) =>
     queryKey: ["courses", courseId, "canvas", connectionId, "files"],
     queryFn: () =>
       api.get<CanvasItemsResponse>(`/courses/${courseId}/canvas/${connectionId}/files`),
+  })
+
+/**
+ * Per-course KG / extraction-guard token spend, broken out per
+ * (category, model) for the last 30 days. Distinct from the
+ * existing per-student chat-token tracking -- this is the cost the
+ * course itself burned on classifier / linker / adversarial filter
+ * / extraction guard. Teacher / owner / admin only.
+ */
+export const courseKgTokenUsageQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "kg-token-usage"],
+    queryFn: () =>
+      api.get<KgTokenUsage>(`/courses/${courseId}/kg-token-usage`),
   })
 
 export const adminUsersQuery = queryOptions({

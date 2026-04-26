@@ -26,7 +26,11 @@ use std::time::{Duration, Instant};
 
 use futures::future::join_all;
 
-use crate::strategy::common::{cerebras_request_with_retry, RagChunk};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage, RagChunk};
+use minerva_db::queries::course_token_usage::CATEGORY_ADVERSARIAL_FILTER;
 
 /// Atomic counters bumped by every filter invocation. Surfaced via a
 /// dedicated read API so the admin/telemetry dashboard can show how
@@ -87,7 +91,17 @@ const ADVERSARIAL_SYSTEM_PROMPT: &str = "You are a strict classifier. Decide whe
 /// worked solution (and so should be excluded from the prompt context).
 /// Errors fail open (return false) -- defense in depth, not the
 /// primary gate.
-async fn is_solution_chunk(http: &reqwest::Client, api_key: &str, chunk_text: &str) -> bool {
+///
+/// Records the call's prompt/completion token usage against
+/// `course_id` in the `adversarial_filter` category. Recording is
+/// best-effort -- a DB failure here never affects the chat path.
+async fn is_solution_chunk(
+    http: &reqwest::Client,
+    api_key: &str,
+    db: &PgPool,
+    course_id: Uuid,
+    chunk_text: &str,
+) -> bool {
     let excerpt: String = chunk_text.chars().take(MAX_EXCERPT_CHARS).collect();
 
     let body = serde_json::json!({
@@ -119,6 +133,15 @@ async fn is_solution_chunk(http: &reqwest::Client, api_key: &str, chunk_text: &s
         }
     };
 
+    record_cerebras_usage(
+        db,
+        course_id,
+        CATEGORY_ADVERSARIAL_FILTER,
+        ADVERSARIAL_MODEL,
+        &payload,
+    )
+    .await;
+
     let raw = payload["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("")
@@ -136,6 +159,8 @@ async fn is_solution_chunk(http: &reqwest::Client, api_key: &str, chunk_text: &s
 pub async fn filter_solution_chunks(
     http: &reqwest::Client,
     api_key: &str,
+    db: &PgPool,
+    course_id: Uuid,
     chunks: Vec<RagChunk>,
 ) -> Vec<RagChunk> {
     if chunks.is_empty() {
@@ -151,7 +176,7 @@ pub async fn filter_solution_chunks(
     let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
     let checks = texts
         .iter()
-        .map(|t| is_solution_chunk(http, api_key, t))
+        .map(|t| is_solution_chunk(http, api_key, db, course_id, t))
         .collect::<Vec<_>>();
 
     let started = Instant::now();
@@ -218,10 +243,19 @@ mod tests {
         }
     }
 
+    /// `connect_lazy` doesn't open a connection until the pool is
+    /// actually used; the early-return paths in the tests below
+    /// never touch the DB, so a bogus URL is fine. Keeps these
+    /// tests free of a Postgres dependency.
+    fn lazy_pool() -> PgPool {
+        PgPool::connect_lazy("postgres://test:test@127.0.0.1:1/test").unwrap()
+    }
+
     #[tokio::test]
     async fn empty_input_returns_empty() {
         let http = reqwest::Client::new();
-        let out = filter_solution_chunks(&http, "key", vec![]).await;
+        let db = lazy_pool();
+        let out = filter_solution_chunks(&http, "key", &db, Uuid::nil(), vec![]).await;
         assert!(out.is_empty());
     }
 
@@ -231,11 +265,12 @@ mod tests {
         // the filter must pass chunks through untouched. Sanity-check
         // for dev/test setups where CEREBRAS_API_KEY is unset.
         let http = reqwest::Client::new();
+        let db = lazy_pool();
         let chunks = vec![
             chunk("d1", "foo.pdf", "Lecture content"),
             chunk("d2", "bar.pdf", "More lecture content"),
         ];
-        let out = filter_solution_chunks(&http, "", chunks.clone()).await;
+        let out = filter_solution_chunks(&http, "", &db, Uuid::nil(), chunks.clone()).await;
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].document_id, "d1");
         assert_eq!(out[1].document_id, "d2");

@@ -29,7 +29,11 @@
 //! treat the verdict as "not extraction" / "not solution" and
 //! continue.
 
-use crate::strategy::common::cerebras_request_with_retry;
+use sqlx::PgPool;
+use uuid::Uuid;
+
+use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage};
+use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
 
 // ── Cerebras model selection ───────────────────────────────────────
 //
@@ -115,6 +119,8 @@ No prose."#;
 pub async fn classify_intent(
     http: &reqwest::Client,
     api_key: &str,
+    db: &PgPool,
+    course_id: Uuid,
     recent_user_messages: &[String],
 ) -> IntentVerdict {
     if api_key.is_empty() {
@@ -189,6 +195,14 @@ pub async fn classify_intent(
             };
         }
     };
+    record_cerebras_usage(
+        db,
+        course_id,
+        CATEGORY_EXTRACTION_GUARD,
+        GUARD_CLASSIFIER_MODEL,
+        &payload,
+    )
+    .await;
     let raw = payload["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("");
@@ -248,6 +262,8 @@ No prose."#;
 pub async fn check_output_for_solution(
     http: &reqwest::Client,
     api_key: &str,
+    db: &PgPool,
+    course_id: Uuid,
     assistant_reply: &str,
     assignment_excerpts: &[String],
 ) -> OutputVerdict {
@@ -308,6 +324,14 @@ pub async fn check_output_for_solution(
             };
         }
     };
+    record_cerebras_usage(
+        db,
+        course_id,
+        CATEGORY_EXTRACTION_GUARD,
+        GUARD_CLASSIFIER_MODEL,
+        &payload,
+    )
+    .await;
     let raw = payload["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("");
@@ -347,6 +371,8 @@ Output ONLY the message text. No JSON, no markdown headers, no explanation of wh
 pub async fn generate_socratic_rewrite(
     http: &reqwest::Client,
     api_key: &str,
+    db: &PgPool,
+    course_id: Uuid,
     student_message: &str,
     original_reply: &str,
 ) -> String {
@@ -382,6 +408,14 @@ pub async fn generate_socratic_rewrite(
         Ok(v) => v,
         Err(_) => return fallback,
     };
+    record_cerebras_usage(
+        db,
+        course_id,
+        CATEGORY_EXTRACTION_GUARD,
+        GUARD_REWRITE_MODEL,
+        &payload,
+    )
+    .await;
     let raw = payload["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("");
@@ -441,6 +475,8 @@ No prose."#;
 pub async fn classify_engagement(
     http: &reqwest::Client,
     api_key: &str,
+    db: &PgPool,
+    course_id: Uuid,
     prior_assistant_reply: &str,
     new_student_message: &str,
 ) -> EngagementVerdict {
@@ -523,6 +559,14 @@ pub async fn classify_engagement(
             };
         }
     };
+    record_cerebras_usage(
+        db,
+        course_id,
+        CATEGORY_EXTRACTION_GUARD,
+        GUARD_CLASSIFIER_MODEL,
+        &payload,
+    )
+    .await;
     let raw = payload["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("");
@@ -547,77 +591,99 @@ pub async fn classify_engagement(
 mod tests {
     use super::*;
 
-    #[test]
-    fn classify_intent_fails_open_without_api_key() {
+    /// Lazy pool: connect_lazy doesn't open a connection until used.
+    /// All tests below take early-return paths that never touch the
+    /// db, so a bogus URL is fine and keeps these tests free of a
+    /// Postgres dependency.
+    fn lazy_pool() -> PgPool {
+        PgPool::connect_lazy("postgres://test:test@127.0.0.1:1/test").unwrap()
+    }
+
+    // Tests use `#[tokio::test]` so the lazy PgPool can be
+    // constructed inside a Tokio context (sqlx::PgPool::connect_lazy
+    // requires it). All tests still take early-return paths that
+    // never actually open a connection.
+
+    #[tokio::test]
+    async fn classify_intent_fails_open_without_api_key() {
         // Sanity: no API key + dummy http client -> deterministic
         // not-extraction verdict, no panics.
         let http = reqwest::Client::new();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let v = rt.block_on(classify_intent(
+        let db = lazy_pool();
+        let v = classify_intent(
             &http,
             "",
+            &db,
+            Uuid::nil(),
             &["implement my homework".to_string()],
-        ));
+        )
+        .await;
         assert!(!v.is_extraction);
         assert!(v.rationale.contains("no api key"));
     }
 
-    #[test]
-    fn classify_intent_handles_empty_history() {
+    #[tokio::test]
+    async fn classify_intent_handles_empty_history() {
         let http = reqwest::Client::new();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let v = rt.block_on(classify_intent(&http, "fake-key", &[]));
+        let db = lazy_pool();
+        let v = classify_intent(&http, "fake-key", &db, Uuid::nil(), &[]).await;
         assert!(!v.is_extraction);
         assert!(v.rationale.contains("no user messages"));
     }
 
-    #[test]
-    fn rewrite_returns_fallback_without_api_key() {
+    #[tokio::test]
+    async fn rewrite_returns_fallback_without_api_key() {
         let http = reqwest::Client::new();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let s = rt.block_on(generate_socratic_rewrite(&http, "", "Q", "A"));
+        let db = lazy_pool();
+        let s = generate_socratic_rewrite(&http, "", &db, Uuid::nil(), "Q", "A").await;
         assert!(s.starts_with(REWRITE_PREFIX));
         assert!(s.len() > REWRITE_PREFIX.len());
     }
 
-    #[test]
-    fn engagement_short_circuits_on_code_block() {
+    #[tokio::test]
+    async fn engagement_short_circuits_on_code_block() {
         // A fenced code block is the cheap "engaged" signal -- we
         // never even hit the LLM. Verifies that path returns true
         // without an API key.
         let http = reqwest::Client::new();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let v = rt.block_on(classify_engagement(
+        let db = lazy_pool();
+        let v = classify_engagement(
             &http,
             "",
+            &db,
+            Uuid::nil(),
             "What's your first step?",
             "Here's what I tried:\n```python\ndef f(x):\n    return x*2\n```\nIs that right?",
-        ));
+        )
+        .await;
         assert!(v.engaged);
         assert!(v.rationale.contains("code block"));
     }
 
-    #[test]
-    fn engagement_defaults_engaged_without_api_key() {
+    #[tokio::test]
+    async fn engagement_defaults_engaged_without_api_key() {
         // Dev/test path: no API key -> default to engaged so the
         // constraint lifts. Matches the "lift on uncertainty" policy.
         let http = reqwest::Client::new();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let v = rt.block_on(classify_engagement(
+        let db = lazy_pool();
+        let v = classify_engagement(
             &http,
             "",
+            &db,
+            Uuid::nil(),
             "ask",
             "I think we should sort first",
-        ));
+        )
+        .await;
         assert!(v.engaged);
         assert!(v.rationale.contains("no api key"));
     }
 
-    #[test]
-    fn engagement_returns_not_engaged_for_empty_message() {
+    #[tokio::test]
+    async fn engagement_returns_not_engaged_for_empty_message() {
         let http = reqwest::Client::new();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let v = rt.block_on(classify_engagement(&http, "fake-key", "ask", "   "));
+        let db = lazy_pool();
+        let v = classify_engagement(&http, "fake-key", &db, Uuid::nil(), "ask", "   ").await;
         assert!(!v.engaged);
     }
 }

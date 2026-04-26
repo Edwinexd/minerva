@@ -149,7 +149,10 @@ pub async fn process_document(
             "no usable text extracted from {}; persisting as unknown/no-content",
             filename
         );
-        if let Ok(c) = classifier.classify(filename, mime_type, &text).await {
+        if let Ok(c) = classifier
+            .classify(course_id, filename, mime_type, &text)
+            .await
+        {
             let _ = minerva_db::queries::documents::set_classification(
                 db,
                 document_id,
@@ -170,7 +173,10 @@ pub async fn process_document(
     // unclassified. The chat-time filter excludes unclassified docs from
     // prompt context, so leaking is bounded; teacher can also re-trigger
     // classification from the UI.
-    let kind_str: String = match classifier.classify(filename, mime_type, &text).await {
+    let kind_str: String = match classifier
+        .classify(course_id, filename, mime_type, &text)
+        .await
+    {
         Ok(c) => {
             tracing::info!(
                 "classifier: {} -> {} (confidence {:.2}, flags {:?})",

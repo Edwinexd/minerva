@@ -669,10 +669,11 @@ pub(crate) async fn run_classify_one(
     let classifier = crate::classification::CerebrasClassifier::new(
         reqwest::Client::new(),
         state.config.cerebras_api_key.clone(),
+        state.db.clone(),
     );
     use minerva_ingest::classifier::Classifier;
     let result = classifier
-        .classify(&doc.filename, &doc.mime_type, &text)
+        .classify(doc.course_id, &doc.filename, &doc.mime_type, &text)
         .await
         .map_err(AppError::Internal)?;
 

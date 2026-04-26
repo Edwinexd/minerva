@@ -41,7 +41,10 @@ use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::strategy::common::{cerebras_request_with_retry, payload_int, payload_string};
+use crate::strategy::common::{
+    cerebras_request_with_retry, payload_int, payload_string, record_cerebras_usage,
+};
+use minerva_db::queries::course_token_usage::CATEGORY_LINKER;
 
 const LINKER_MODEL: &str = "gpt-oss-120b";
 
@@ -483,6 +486,8 @@ pub async fn link_course(
     let edges = call_linker_llm(
         ctx.http,
         ctx.api_key,
+        ctx.db,
+        course_id,
         truncated,
         &fresh_candidates,
         &similarity_by_pair,
@@ -993,9 +998,12 @@ const PAIR_CALL_CONCURRENCY: usize = 12;
 /// candidates after the embedding-similarity floor and the final
 /// MAX_CANDIDATES_PER_CALL guard, total wall-clock is on the order
 /// of 5-10 seconds per relink.
+#[allow(clippy::too_many_arguments)]
 async fn call_linker_llm(
     http: &reqwest::Client,
     api_key: &str,
+    db: &sqlx::PgPool,
+    course_id: Uuid,
     docs: &[&DocumentRow],
     candidates: &HashSet<(Uuid, Uuid)>,
     similarity: &HashMap<(Uuid, Uuid), f32>,
@@ -1047,7 +1055,7 @@ async fn call_linker_llm(
     // (which are logged inside `classify_one_pair`) so the final
     // collected Vec only contains real edges.
     let edges: Vec<ProposedEdge> = stream::iter(pair_inputs)
-        .map(|pair| async move { classify_one_pair(http, api_key, pair).await })
+        .map(|pair| async move { classify_one_pair(http, api_key, db, course_id, pair).await })
         .buffer_unordered(PAIR_CALL_CONCURRENCY)
         .filter_map(|r| async move { r })
         .collect()
@@ -1085,6 +1093,8 @@ struct PairInput {
 async fn classify_one_pair(
     http: &reqwest::Client,
     api_key: &str,
+    db: &sqlx::PgPool,
+    course_id: Uuid,
     p: PairInput,
 ) -> Option<ProposedEdge> {
     let user_payload = serde_json::json!({
@@ -1168,6 +1178,11 @@ async fn classify_one_pair(
             return None;
         }
     };
+    // Best-effort token-spend bookkeeping. Records every per-pair
+    // call against `course_id` in the `linker` category, regardless
+    // of whether the call ultimately produced an edge -- the cost
+    // was paid either way.
+    record_cerebras_usage(db, course_id, CATEGORY_LINKER, LINKER_MODEL, &payload).await;
     // Guard against finish_reason=length producing an empty content
     // field -- caller would otherwise see this as "no edge" without
     // knowing the model was cut off mid-token.

@@ -2,10 +2,13 @@
 
 use async_trait::async_trait;
 use minerva_ingest::classifier::{ClassifiedKind, Classifier};
+use sqlx::PgPool;
+use uuid::Uuid;
 
 use super::prompts::{CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_TEMPLATE};
 use super::types::{DocumentKind, ALL_KINDS};
-use crate::strategy::common::cerebras_request_with_retry;
+use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage};
+use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
 
 /// Cerebras model name for ingest-time classification work. Open-weights
 /// gpt-oss-120b -- strong instruction-following, reasoning_effort
@@ -25,15 +28,19 @@ const HEAD_FRACTION: f64 = 0.85;
 pub struct CerebrasClassifier {
     http: reqwest::Client,
     api_key: String,
+    /// DB handle so each Cerebras call can record its token spend
+    /// to `course_token_usage`. Cloned cheaply per ingest call.
+    db: PgPool,
 }
 
 impl CerebrasClassifier {
-    pub fn new(http: reqwest::Client, api_key: String) -> Self {
-        Self { http, api_key }
+    pub fn new(http: reqwest::Client, api_key: String, db: PgPool) -> Self {
+        Self { http, api_key, db }
     }
 
     async fn call(
         &self,
+        course_id: Uuid,
         mime_type: &str,
         excerpt: &str,
         reasoning_effort: &str,
@@ -85,6 +92,18 @@ impl CerebrasClassifier {
             .await
             .map_err(|e| format!("classifier: response not JSON: {e}"))?;
 
+        // Best-effort token-spend bookkeeping. Both the low-effort
+        // and high-effort retry calls land here -- the dashboard
+        // sums them as one bucket per (category, model).
+        record_cerebras_usage(
+            &self.db,
+            course_id,
+            CATEGORY_DOCUMENT_CLASSIFIER,
+            CLASSIFIER_MODEL,
+            &payload,
+        )
+        .await;
+
         let raw = payload["choices"][0]["message"]["content"]
             .as_str()
             .ok_or_else(|| {
@@ -102,6 +121,7 @@ impl CerebrasClassifier {
 impl Classifier for CerebrasClassifier {
     async fn classify(
         &self,
+        course_id: Uuid,
         filename: &str,
         mime_type: &str,
         text: &str,
@@ -135,7 +155,7 @@ impl Classifier for CerebrasClassifier {
 
         // First pass -- cheap, low effort.
         let initial = self
-            .call(mime_type, &excerpt, "low")
+            .call(course_id, mime_type, &excerpt, "low")
             .await
             .map_err(|e| format!("classifier: low-effort call failed: {e}"))?;
 
@@ -154,7 +174,7 @@ impl Classifier for CerebrasClassifier {
             initial.suspicious_flags,
         );
 
-        match self.call(mime_type, &excerpt, "high").await {
+        match self.call(course_id, mime_type, &excerpt, "high").await {
             Ok(refined) => Ok(refined),
             Err(e) => {
                 tracing::warn!(

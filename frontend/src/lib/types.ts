@@ -219,6 +219,26 @@ export const FEEDBACK_CATEGORIES = [
   { value: "other", label: "Other" },
 ] as const
 
+/**
+ * Per-(category, model) aggregate of token spend over a window
+ * (the backend currently returns a 30-day rolling window). The
+ * dashboard sums these across categories for a "total spend" line
+ * and shows the per-category breakdown as a small table.
+ */
+export interface KgTokenUsageRow {
+  category: string
+  model: string
+  call_count: number
+  prompt_tokens: number
+  completion_tokens: number
+}
+
+export interface KgTokenUsage {
+  /** ISO-8601 timestamp of the window start. */
+  since: string
+  rows: KgTokenUsageRow[]
+}
+
 export interface MessageFeedback {
   id: string
   message_id: string

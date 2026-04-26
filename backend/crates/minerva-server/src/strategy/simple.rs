@@ -52,6 +52,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         rag.context = crate::classification::adversarial::filter_solution_chunks(
             &http_client,
             &ctx.cerebras_api_key,
+            &ctx.db,
+            ctx.course_id,
             rag.context,
         )
         .await;
@@ -150,6 +152,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.db,
         &http_client,
         &ctx.cerebras_api_key,
+        ctx.course_id,
         ctx.conversation_id,
         &guard_decision,
         &ctx.user_content,

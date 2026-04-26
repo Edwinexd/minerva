@@ -335,6 +335,57 @@ pub async fn cerebras_request_with_retry_to(
     Err(last_err)
 }
 
+/// Pull `(prompt_tokens, completion_tokens)` out of a parsed
+/// Cerebras chat-completions response payload. Returns `None`
+/// when the usage block is missing or malformed -- callers should
+/// just skip token recording in that case (we never block a chat
+/// path because tracking failed).
+pub fn extract_cerebras_usage(payload: &serde_json::Value) -> Option<(i32, i32)> {
+    let usage = payload.get("usage")?;
+    let p = usage.get("prompt_tokens")?.as_i64()?;
+    let c = usage.get("completion_tokens")?.as_i64()?;
+    Some((p as i32, c as i32))
+}
+
+/// Convenience wrapper: pull usage out of `payload` and record a
+/// `course_token_usage` row. Best-effort -- logs a warning on
+/// either missing-usage or DB error and returns silently. Used
+/// from every classification call site so they don't all repeat
+/// the same boilerplate.
+pub async fn record_cerebras_usage(
+    db: &sqlx::PgPool,
+    course_id: uuid::Uuid,
+    category: &'static str,
+    model: &str,
+    payload: &serde_json::Value,
+) {
+    let Some((prompt_tokens, completion_tokens)) = extract_cerebras_usage(payload) else {
+        tracing::warn!(
+            "course_token_usage: skipping record for course={} category={}: usage block missing/malformed",
+            course_id,
+            category
+        );
+        return;
+    };
+    if let Err(e) = minerva_db::queries::course_token_usage::record(
+        db,
+        course_id,
+        category,
+        model,
+        prompt_tokens,
+        completion_tokens,
+    )
+    .await
+    {
+        tracing::warn!(
+            "course_token_usage: insert failed for course={} category={}: {}",
+            course_id,
+            category,
+            e
+        );
+    }
+}
+
 /// Build the system prompt with optional RAG chunks.
 /// When chunks are empty (e.g. parallel phase 1), uses a generic prompt
 /// that doesn't tell the model to refuse -- since context may arrive later.

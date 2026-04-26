@@ -170,6 +170,24 @@
       "extraction_constraint_lifted": "Studenten engagerade sig -- begränsning hävd"
     }
   },
+  "kgTokenUsage": {
+    "title": "Tokenförbrukning för kunskapsgrafen",
+    "subtitle": "Tokens som klassificerare / länkare / skydd har förbrukat sedan {{since}}. Embeddings exkluderas.",
+    "loading": "Laddar...",
+    "empty": "Ingen tokenförbrukning registrerad i detta intervall.",
+    "colCategory": "Kategori",
+    "colModel": "Modell",
+    "colCalls": "Anrop",
+    "colPrompt": "Prompt-tokens",
+    "colCompletion": "Completion-tokens",
+    "total": "Totalt",
+    "category": {
+      "document_classifier": "Dokumentklassificerare",
+      "linker": "Graflänkare",
+      "adversarial_filter": "Adversariellt filter",
+      "extraction_guard": "Extraktionsskydd"
+    }
+  },
   "documents": {
     "title": "Dokument",
     "description": "Ladda upp PDF:er och andra dokument för RAG",

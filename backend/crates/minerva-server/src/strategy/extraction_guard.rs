@@ -196,7 +196,9 @@ pub async fn evaluate_for_turn(
     // Intent classifier sees the last N user messages, oldest
     // first, with the current turn's input as the most recent.
     let recent_user_messages = recent_user_messages(history, user_content, INTENT_HISTORY_TURNS);
-    let intent = extraction_guard::classify_intent(http, api_key, &recent_user_messages).await;
+    let intent =
+        extraction_guard::classify_intent(http, api_key, db, course_id, &recent_user_messages)
+            .await;
     tracing::info!(
         "extraction_guard: turn={} conversation={} intent.is_extraction={} intent.rationale={:?}",
         turn_index,
@@ -300,8 +302,15 @@ pub async fn evaluate_for_turn(
             .find(|m| m.role == "assistant")
             .map(|m| m.content.as_str())
             .unwrap_or("");
-        let v = extraction_guard::classify_engagement(http, api_key, prior_assistant, user_content)
-            .await;
+        let v = extraction_guard::classify_engagement(
+            http,
+            api_key,
+            db,
+            course_id,
+            prior_assistant,
+            user_content,
+        )
+        .await;
         tracing::info!(
             "extraction_guard: turn={} conversation={} engagement.engaged={} engagement.rationale={:?}",
             turn_index,
@@ -505,6 +514,7 @@ pub async fn intercept_reply(
     db: &PgPool,
     http: &reqwest::Client,
     api_key: &str,
+    course_id: Uuid,
     conversation_id: Uuid,
     decision: &Option<GuardDecision>,
     student_message: &str,
@@ -524,6 +534,8 @@ pub async fn intercept_reply(
     let verdict: OutputVerdict = extraction_guard::check_output_for_solution(
         http,
         api_key,
+        db,
+        course_id,
         assistant_reply,
         &decision.assignment_excerpts,
     )
@@ -546,6 +558,8 @@ pub async fn intercept_reply(
     let rewrite = extraction_guard::generate_socratic_rewrite(
         http,
         api_key,
+        db,
+        course_id,
         student_message,
         assistant_reply,
     )

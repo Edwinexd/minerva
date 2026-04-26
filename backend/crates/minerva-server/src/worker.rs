@@ -36,6 +36,7 @@ struct NoopClassifier;
 impl Classifier for NoopClassifier {
     async fn classify(
         &self,
+        _course_id: uuid::Uuid,
         _filename: &str,
         _mime_type: &str,
         _text: &str,
@@ -184,6 +185,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
         let kg_classifier: Arc<dyn Classifier> = Arc::new(CerebrasClassifier::new(
             reqwest::Client::new(),
             state.config.cerebras_api_key.clone(),
+            state.db.clone(),
         ));
         let noop_classifier: Arc<dyn Classifier> = Arc::new(NoopClassifier);
 

@@ -170,6 +170,24 @@
       "extraction_constraint_lifted": "Engagement detected -- constraint lifted"
     }
   },
+  "kgTokenUsage": {
+    "title": "Knowledge-graph token usage",
+    "subtitle": "Tokens spent on classifier / linker / guard since {{since}}. Embeddings excluded.",
+    "loading": "Loading...",
+    "empty": "No token usage recorded in this window.",
+    "colCategory": "Category",
+    "colModel": "Model",
+    "colCalls": "Calls",
+    "colPrompt": "Prompt tokens",
+    "colCompletion": "Completion tokens",
+    "total": "Total",
+    "category": {
+      "document_classifier": "Document classifier",
+      "linker": "Graph linker",
+      "adversarial_filter": "Adversarial filter",
+      "extraction_guard": "Extraction guard"
+    }
+  },
   "documents": {
     "title": "Documents",
     "description": "Upload PDFs and other documents for RAG",

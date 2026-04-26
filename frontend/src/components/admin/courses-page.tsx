@@ -8,6 +8,7 @@ import {
   coursesQuery,
 } from "@/lib/queries"
 import type { Course } from "@/lib/types"
+import { modelDisplayName } from "@/lib/embedding-models"
 import { api } from "@/lib/api"
 import {
   Card,
@@ -370,26 +371,30 @@ const PROVIDERS = ["local", "openai"] as const
 function CourseEmbeddingCell({ course }: { course: Course }) {
   const { t } = useTranslation("admin")
   const [open, setOpen] = useState(false)
+  // Friendly name for the model id; falls back to the raw HF id for
+  // anything no longer in the catalog (admin disabled + dropped).
+  // The full id stays accessible via the cell's title attribute, so
+  // we don't lose fidelity by hiding it from the visual layer.
+  const friendly = modelDisplayName(course.embedding_model)
+  // `local` is the default provider for almost every course, so
+  // showing it on every row is just noise. Only surface a provider
+  // hint when it's something else (today: openai).
+  const showProvider = course.embedding_provider !== "local"
   return (
     <>
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className="font-mono text-[10px]">
-          {course.embedding_provider}
-        </Badge>
-        <span
-          className="font-mono text-xs text-muted-foreground truncate max-w-[14rem]"
-          title={course.embedding_model}
-        >
-          {course.embedding_model}
-        </span>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setOpen(true)}
-          title={t("courses.migrateButtonTitle")}
-        >
-          {t("courses.migrateButton")}
-        </Button>
+      <div className="space-y-0.5" title={course.embedding_model}>
+        <div className="text-sm">{friendly}</div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {showProvider && <span>{course.embedding_provider}</span>}
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            title={t("courses.migrateButtonTitle")}
+            className="text-primary underline-offset-4 hover:underline"
+          >
+            {t("courses.migrateButton")}
+          </button>
+        </div>
       </div>
       {open && (
         <CourseMigrateDialog
@@ -488,7 +493,7 @@ function CourseMigrateDialog({
                 <SelectContent>
                   {localOptions.map((m) => (
                     <SelectItem key={m.model} value={m.model}>
-                      <span className="font-mono text-xs">{m.model}</span>
+                      <span title={m.model}>{modelDisplayName(m.model)}</span>
                       {!m.enabled && (
                         <span className="ml-2 text-[10px] text-muted-foreground">
                           {t("courses.migrateModelDisabledTag")}

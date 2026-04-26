@@ -120,53 +120,66 @@ You're also given the embedding cosine similarity between A and B.
 You are NOT given filenames -- in real courses they're unreliable.
 Decide from kind + rationale + excerpt + similarity only.
 
-Pick ONE of:
+Possible relations (pick ONE):
 
-- "solution_of": one of A/B is a sample_solution and the other is its
-  assignment_brief / lab_brief / exam. The solution's excerpt should
-  plainly answer the problem the assignment poses (same numbers,
-  function names, dataset, scenario). Requires the kinds to line up.
+UNDIRECTED:
+- "part_of_unit": A and B are paired course material from the same
+  week / module / unit. Reserved for tight pairings -- different
+  formats of the same content, a lecture + its dedicated overview /
+  section summary, an assignment + its submission-instructions page.
+  NOT for: two lectures on adjacent topics, two docs that just share
+  a course-wide topic word, "this might be the same week".
 
-- "part_of_unit": both belong to the same week / module / unit and
-  appear to be paired course material. Examples that SHOULD emit:
-    * Two docs that are different formats of the same exercise
-      (PDF + HTML / page + section summary).
-    * A reading + an assignment_brief / tutorial_exercise that
-      asks the student to apply the same specific concept the
-      reading introduces.
-    * A lecture + an overview / section summary that points at it.
-    * An assignment_brief + the page describing its submission rules.
-  Examples that should NOT emit:
-    * Two sequential lectures on related themes (e.g. "Arv I" and
-      "Arv II"). Adjacent units, not the same unit.
-    * Two docs sharing a course-wide topic word ("inheritance",
-      "loops", "OO") with no concrete pairing.
+DIRECTED (the relation has a source and destination, you pick which
+side is "a" and which is "b"):
+- "a_solution_of_b" / "b_solution_of_a": the source side is a
+  sample_solution and the dest side is its assignment_brief /
+  lab_brief / exam. The solution's excerpt should plainly answer
+  the problem the assignment poses. Requires kinds to line up
+  (one side MUST be sample_solution).
 
-- "none": no clear relation. The candidate similarity made the pair
-  worth checking but the content doesn't actually pair them.
+- "a_prerequisite_of_b" / "b_prerequisite_of_a": the source doc
+  introduces concepts the destination doc builds on. Source is
+  earlier / more foundational; destination assumes the source's
+  material is understood. Pick this when one excerpt explicitly
+  uses concepts (terms, theorems, code abstractions) the other
+  introduces, OR when both are teaching content (lecture / reading
+  / lecture_transcript) and one is a clear stepping stone for the
+  other.
+
+- "a_applied_in_b" / "b_applied_in_a": the source is theoretical /
+  expository content (lecture, reading, lecture_transcript) and the
+  destination applies it in practice (tutorial_exercise,
+  assignment_brief, lab_brief, exam). The destination's excerpt
+  references concepts / terms the source introduces. Source MUST be
+  one of {lecture, reading, lecture_transcript}; destination MUST
+  be one of {tutorial_exercise, assignment_brief, lab_brief, exam}.
+
+- "none": no clear relation -- the candidate similarity made this
+  pair worth checking but the content doesn't actually pair them.
 
 Calibration: this pair already passed an embedding similarity
-threshold (>=0.65), so they share substantive content. Your job
+threshold (>=0.70), so they share substantive content. Your job
 is to identify the relation, not whether ANY relation exists.
-A meaningful fraction of candidates SHOULD be "solution_of" or
-"part_of_unit" -- be willing to commit when the pairing is visible.
+A meaningful fraction of candidates SHOULD be one of the four
+non-"none" relations -- be willing to commit when the pairing is
+visible.
 
 Confidence guidance:
   * 0.85+ : unambiguous (problem stated in one, answered in the
-    other; two formats of identical content; etc.).
+    other; concept introduced in lecture, exercised in tutorial).
   * 0.7-0.84 : confident but not certain.
   * 0.5-0.69 : a reasonable guess from visible content overlap.
   * Below 0.5 : use "none".
 
-Output JSON only, matching this schema exactly:
+Output JSON only, matching the schema exactly:
 {
-  "relation": "solution_of" | "part_of_unit" | "none",
+  "relation": one of the eight enum values above,
   "confidence": float in [0, 1],
-  "rationale": short specific string citing concrete evidence
-    visible in the excerpts (a phrase appearing in both, a problem
-    and its answer, a concept introduced and applied). Do NOT
-    invent shared tokens. Do NOT cite filenames -- you don't
-    have them.
+  "rationale": short specific string citing concrete evidence visible
+    in the excerpts (a phrase appearing in both, a problem and its
+    answer, a concept introduced and applied). Do NOT invent shared
+    tokens. Do NOT cite filenames -- you don't have them.
 }
 
 No prose."#;
@@ -935,7 +948,16 @@ async fn classify_one_pair(
                     "properties": {
                         "relation": {
                             "type": "string",
-                            "enum": ["solution_of", "part_of_unit", "none"],
+                            "enum": [
+                                "part_of_unit",
+                                "a_solution_of_b",
+                                "b_solution_of_a",
+                                "a_prerequisite_of_b",
+                                "b_prerequisite_of_a",
+                                "a_applied_in_b",
+                                "b_applied_in_a",
+                                "none",
+                            ],
                         },
                         "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
                         "rationale": { "type": "string" },
@@ -1010,11 +1032,8 @@ async fn classify_one_pair(
         }
     };
 
-    let relation = parsed["relation"].as_str().unwrap_or("none");
-    if relation == "none" {
-        return None;
-    }
-    if relation != "solution_of" && relation != "part_of_unit" {
+    let raw_relation = parsed["relation"].as_str().unwrap_or("none");
+    if raw_relation == "none" {
         return None;
     }
     let confidence = parsed["confidence"].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) as f32;
@@ -1023,39 +1042,98 @@ async fn classify_one_pair(
     }
     let rationale = parsed["rationale"].as_str().map(str::to_string);
 
-    // Direction:
-    //   * `part_of_unit` is undirected -- src/dst are normalised by
-    //     id ordering at upsert time anyway, so we can just keep
-    //     the input order here.
-    //   * `solution_of` is directional: src must be the
-    //     sample_solution, dst the assignment. Derive that from the
-    //     kinds rather than asking the model to pick (one less
-    //     thing for it to get wrong). If neither side is
-    //     sample_solution, the model is wrong about the relation
-    //     and we drop it.
-    let (src, dst) = if relation == "solution_of" {
-        if p.a_kind == "sample_solution" {
-            (p.a_id, p.b_id)
-        } else if p.b_kind == "sample_solution" {
-            (p.b_id, p.a_id)
-        } else {
-            tracing::info!(
-                "linker: dropping solution_of {}<->{} -- neither side has kind=sample_solution",
-                p.a_id,
-                p.b_id,
-            );
-            return None;
+    // Decode the (relation, direction) pair from the model's enum
+    // value. Directed relations are split into `a_X_of_b` /
+    // `b_X_of_a` variants so the model commits to a direction
+    // rather than emitting a separate optional field. Returns None
+    // for any value we don't recognise (defensive against the
+    // model going off-schema).
+    let (canonical_relation, src_is_a) = match raw_relation {
+        "part_of_unit" => ("part_of_unit", true), // direction normalised by id below
+        "a_solution_of_b" => ("solution_of", true),
+        "b_solution_of_a" => ("solution_of", false),
+        "a_prerequisite_of_b" => ("prerequisite_of", true),
+        "b_prerequisite_of_a" => ("prerequisite_of", false),
+        "a_applied_in_b" => ("applied_in", true),
+        "b_applied_in_a" => ("applied_in", false),
+        _ => return None,
+    };
+
+    // Direction-derive the (src, dst) tuple per relation:
+    //
+    //   * `part_of_unit` is undirected -- normalise by id ordering
+    //     so duplicates collapse on the unique constraint at upsert
+    //     time.
+    //   * `solution_of` is directional and the kinds tell us which
+    //     side is which (sample_solution -> dst). We override the
+    //     model's a/b choice with the kind-derived direction since
+    //     the kind is the ground truth and one less thing for the
+    //     model to get wrong; drop the edge if neither side is a
+    //     sample_solution (model picked the wrong relation).
+    //   * `applied_in` is directional with a kind-based gate
+    //     (theory -> practice). Same override-from-kinds logic;
+    //     drop if neither side fits the theory/practice pattern.
+    //   * `prerequisite_of` is directional with no kind-based
+    //     gate -- both sides are typically lecture / reading.
+    //     Trust the model's a/b pick.
+    let theory = ["lecture", "lecture_transcript", "reading"];
+    let practice = ["tutorial_exercise", "assignment_brief", "lab_brief", "exam"];
+    let (src, dst) = match canonical_relation {
+        "part_of_unit" => {
+            if p.a_id < p.b_id {
+                (p.a_id, p.b_id)
+            } else {
+                (p.b_id, p.a_id)
+            }
         }
-    } else if p.a_id < p.b_id {
-        (p.a_id, p.b_id)
-    } else {
-        (p.b_id, p.a_id)
+        "solution_of" => {
+            if p.a_kind == "sample_solution" {
+                (p.a_id, p.b_id)
+            } else if p.b_kind == "sample_solution" {
+                (p.b_id, p.a_id)
+            } else {
+                tracing::info!(
+                    "linker: dropping solution_of {}<->{} -- neither side has kind=sample_solution",
+                    p.a_id,
+                    p.b_id,
+                );
+                return None;
+            }
+        }
+        "applied_in" => {
+            let a_theory = theory.contains(&p.a_kind.as_str());
+            let b_theory = theory.contains(&p.b_kind.as_str());
+            let a_practice = practice.contains(&p.a_kind.as_str());
+            let b_practice = practice.contains(&p.b_kind.as_str());
+            if a_theory && b_practice {
+                (p.a_id, p.b_id)
+            } else if b_theory && a_practice {
+                (p.b_id, p.a_id)
+            } else {
+                tracing::info!(
+                    "linker: dropping applied_in {}<->{} -- kinds don't fit theory->practice (a={}, b={})",
+                    p.a_id,
+                    p.b_id,
+                    p.a_kind,
+                    p.b_kind,
+                );
+                return None;
+            }
+        }
+        "prerequisite_of" => {
+            if src_is_a {
+                (p.a_id, p.b_id)
+            } else {
+                (p.b_id, p.a_id)
+            }
+        }
+        _ => unreachable!("canonical_relation matched non-handled variant"),
     };
 
     Some(ProposedEdge {
         src_id: src,
         dst_id: dst,
-        relation: relation.to_string(),
+        relation: canonical_relation.to_string(),
         confidence,
         rationale,
     })

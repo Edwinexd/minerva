@@ -240,7 +240,9 @@
     "edgeListTitle_other": "{{count}} kanter (klicka för att expandera)",
     "edgeKind": {
       "solution_of": "är ett lösningsförslag till",
-      "part_of_unit": "ligger i samma modul som"
+      "part_of_unit": "ligger i samma modul som",
+      "prerequisite_of": "är en förkunskap för",
+      "applied_in": "tillämpas i"
     },
     "filters": {
       "title": "Filter",

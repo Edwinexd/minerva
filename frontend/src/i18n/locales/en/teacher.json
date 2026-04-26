@@ -240,7 +240,9 @@
     "edgeListTitle_other": "{{count}} edges (click to expand)",
     "edgeKind": {
       "solution_of": "is a solution to",
-      "part_of_unit": "is in the same unit as"
+      "part_of_unit": "is in the same unit as",
+      "prerequisite_of": "is a prerequisite of",
+      "applied_in": "is applied in"
     },
     "filters": {
       "title": "Filters",

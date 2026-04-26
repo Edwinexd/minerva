@@ -212,7 +212,7 @@ export interface KnowledgeGraphEdge {
   id: string
   src_id: string
   dst_id: string
-  relation: "solution_of" | "part_of_unit"
+  relation: "solution_of" | "part_of_unit" | "prerequisite_of" | "applied_in"
   confidence: number
   rationale: string | null
   rejected_by_teacher: boolean

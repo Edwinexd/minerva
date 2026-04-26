@@ -69,7 +69,15 @@ export function KnowledgeGraphPage({
   )
   const [relationFilter, setRelationFilter] = React.useState<
     Set<KnowledgeGraphEdge["relation"]>
-  >(() => new Set(["solution_of", "part_of_unit"]))
+  >(
+    () =>
+      new Set([
+        "solution_of",
+        "part_of_unit",
+        "prerequisite_of",
+        "applied_in",
+      ]),
+  )
   const [showRejected, setShowRejected] = React.useState(false)
 
   // No "rebuild graph" button: relinking is wired into the ingestion
@@ -166,11 +174,22 @@ function colorFor(kind: string | null | undefined) {
 }
 
 const EDGE_COLOR = {
-  solution_of: "#dc2626",
-  part_of_unit: "#6b7280",
+  solution_of: "#dc2626",       // red    -- solution -> assessment (directional)
+  part_of_unit: "#6b7280",      // grey   -- same-unit cluster (undirected)
+  prerequisite_of: "#7c3aed",   // violet -- A teaches concepts B builds on (directional)
+  applied_in: "#0ea5e9",        // sky    -- theory -> practice (directional)
 } as const
 
-const REJECTED_EDGE_COLOR = "#fbbf24" // amber-400 -- visually distinct from both edge kinds
+// Whether each edge kind is directional. Drives arrowhead rendering
+// in the force-graph + the human-readable phrasing in tooltips.
+const EDGE_DIRECTIONAL: Record<keyof typeof EDGE_COLOR, boolean> = {
+  solution_of: true,
+  part_of_unit: false,
+  prerequisite_of: true,
+  applied_in: true,
+}
+
+const REJECTED_EDGE_COLOR = "#fbbf24" // amber-400 -- visually distinct from edge kinds
 
 function Legend() {
   const { t } = useTranslation("teacher")
@@ -202,34 +221,25 @@ function Legend() {
           </span>
         </div>
       ))}
-      <div className="ml-auto flex items-center gap-3 text-muted-foreground">
-        <div className="flex items-center gap-1.5">
-          <svg width="24" height="2" aria-hidden>
-            <line
-              x1="0"
-              y1="1"
-              x2="24"
-              y2="1"
-              stroke={EDGE_COLOR.solution_of}
-              strokeWidth="2"
-            />
-          </svg>
-          <span>{t("knowledgeGraph.edgeKind.solution_of")}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <svg width="24" height="2" aria-hidden>
-            <line
-              x1="0"
-              y1="1"
-              x2="24"
-              y2="1"
-              stroke={EDGE_COLOR.part_of_unit}
-              strokeWidth="2"
-              strokeDasharray="4 3"
-            />
-          </svg>
-          <span>{t("knowledgeGraph.edgeKind.part_of_unit")}</span>
-        </div>
+      <div className="ml-auto flex flex-wrap items-center gap-3 text-muted-foreground">
+        {(["solution_of", "applied_in", "prerequisite_of", "part_of_unit"] as const).map(
+          (rel) => (
+            <div key={rel} className="flex items-center gap-1.5">
+              <svg width="24" height="2" aria-hidden>
+                <line
+                  x1="0"
+                  y1="1"
+                  x2="24"
+                  y2="1"
+                  stroke={EDGE_COLOR[rel]}
+                  strokeWidth="2"
+                  strokeDasharray={EDGE_DIRECTIONAL[rel] ? undefined : "4 3"}
+                />
+              </svg>
+              <span>{t(`knowledgeGraph.edgeKind.${rel}`)}</span>
+            </div>
+          ),
+        )}
       </div>
     </div>
   )
@@ -264,6 +274,8 @@ const ALL_KIND_FILTER: Set<DocumentKind | "unclassified"> = new Set([
 const ALL_RELATION_FILTER: Set<KnowledgeGraphEdge["relation"]> = new Set([
   "solution_of",
   "part_of_unit",
+  "prerequisite_of",
+  "applied_in",
 ])
 
 function FilterBar({
@@ -369,12 +381,18 @@ function FilterBar({
               <SelectItem value="__all">
                 {t("knowledgeGraph.filters.all")}
               </SelectItem>
-              <SelectItem value="solution_of">
-                {t("knowledgeGraph.edgeKind.solution_of")}
-              </SelectItem>
-              <SelectItem value="part_of_unit">
-                {t("knowledgeGraph.edgeKind.part_of_unit")}
-              </SelectItem>
+              {(
+                [
+                  "solution_of",
+                  "part_of_unit",
+                  "prerequisite_of",
+                  "applied_in",
+                ] as const
+              ).map((rel) => (
+                <SelectItem key={rel} value={rel}>
+                  {t(`knowledgeGraph.edgeKind.${rel}`)}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -639,10 +657,12 @@ function ForceGraphCanvas({ graph }: { graph: KnowledgeGraph }) {
         linkLineDash={(l) => {
           const link = l as ForceLink
           if (link.rejected) return [2, 4]
-          return link.relation === "part_of_unit" ? [4, 3] : null
+          // Undirected relations get a dashed render so the
+          // direction signal stays visible at a glance.
+          return EDGE_DIRECTIONAL[link.relation] ? null : [4, 3]
         }}
         linkDirectionalArrowLength={(l) =>
-          (l as ForceLink).relation === "solution_of" ? 6 : 0
+          EDGE_DIRECTIONAL[(l as ForceLink).relation] ? 6 : 0
         }
         linkDirectionalArrowRelPos={1}
         linkLabel={(l) => edgeTooltip(l as ForceLink)}
@@ -670,8 +690,14 @@ function nodeTooltip(n: ForceNode): string {
 }
 
 function edgeTooltip(l: ForceLink): string {
+  const verb: Record<ForceLink["relation"], string> = {
+    solution_of: "is a solution to",
+    part_of_unit: "is in the same unit as",
+    prerequisite_of: "is a prerequisite of",
+    applied_in: "is applied in",
+  }
   const lines: string[] = [
-    l.relation === "solution_of" ? "is a solution to" : "is in the same unit as",
+    verb[l.relation] ?? l.relation,
     `confidence: ${Math.round(l.confidence * 100)}%`,
   ]
   if (l.rejected) lines.push("REJECTED by teacher")

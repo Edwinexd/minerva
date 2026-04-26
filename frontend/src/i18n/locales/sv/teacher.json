@@ -137,7 +137,7 @@
     "conversationsDescription": "Se alla studentkonversationer. Fäst bra svar för att göra dem synliga för alla studenter.",
     "tabAll": "Alla",
     "tabFlagged": "Behöver granskas",
-    "emptyFlagged": "Inga konversationer med flaggade svar.",
+    "emptyFlagged": "Inga konversationer behöver granskas.",
     "emptyTopic": "Inga konversationer matchar det här ämnet.",
     "emptyAll": "Inga konversationer ännu.",
     "untitled": "Konversation utan titel",

@@ -137,7 +137,7 @@
     "conversationsDescription": "View all student conversations. Pin good answers to make them visible to all students.",
     "tabAll": "All",
     "tabFlagged": "Needs Review",
-    "emptyFlagged": "No conversations with flagged responses.",
+    "emptyFlagged": "No conversations need review.",
     "emptyTopic": "No conversations match this topic.",
     "emptyAll": "No conversations yet.",
     "untitled": "Untitled conversation",

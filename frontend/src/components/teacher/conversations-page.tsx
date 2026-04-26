@@ -73,6 +73,22 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
     [activeTopic],
   )
 
+  // A conversation lands in the "Needs Review" tab when either
+  // signal is true:
+  //   1. Unaddressed student downvotes (existing behaviour).
+  //   2. The extraction guard fired in a way that warrants a
+  //      teacher's attention -- i.e. the constraint activated, or
+  //      the assistant text got rewritten. Other guard flags
+  //      (intent_detected, engagement_refused, constraint_lifted)
+  //      are trace events that don't themselves require review.
+  const needsReview = (convId: string): boolean => {
+    const kinds = flagKinds?.[convId] || []
+    return (
+      kinds.includes("extraction_constraint_activated") ||
+      kinds.includes("extraction_rewrote")
+    )
+  }
+
   const displayConversations = useMemo(() => {
     let list = topicConvIds
       ? (conversations || []).filter((c) => topicConvIds.has(c.id))
@@ -80,15 +96,28 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
 
     if (activeTab === "flagged") {
       list = list
-        .filter((c) => (c.unaddressed_down ?? 0) > 0)
-        .sort((a, b) => (b.unaddressed_down ?? 0) - (a.unaddressed_down ?? 0))
+        .filter((c) => (c.unaddressed_down ?? 0) > 0 || needsReview(c.id))
+        // Sort: extraction-flagged conversations float to the top
+        // (those are the ones that need a fresh teacher look),
+        // then by unaddressed downvote count desc for the rest.
+        .sort((a, b) => {
+          const ax = needsReview(a.id) ? 1 : 0
+          const bx = needsReview(b.id) ? 1 : 0
+          if (ax !== bx) return bx - ax
+          return (b.unaddressed_down ?? 0) - (a.unaddressed_down ?? 0)
+        })
     }
     return list
-  }, [conversations, topicConvIds, activeTab])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations, topicConvIds, activeTab, flagKinds])
 
   const flaggedCount = useMemo(
-    () => (conversations || []).filter((c) => (c.unaddressed_down ?? 0) > 0).length,
-    [conversations],
+    () =>
+      (conversations || []).filter(
+        (c) => (c.unaddressed_down ?? 0) > 0 || needsReview(c.id),
+      ).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [conversations, flagKinds],
   )
 
   const grouped = new Map<string, { label: string; conversations: ConversationWithUser[] }>()

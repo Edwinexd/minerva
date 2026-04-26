@@ -44,7 +44,14 @@ use crate::strategy::common::{cerebras_request_with_retry, payload_int, payload_
 const LINKER_MODEL: &str = "gpt-oss-120b";
 
 /// Drop edges the model emits below this confidence.
-const MIN_EDGE_CONFIDENCE: f32 = 0.6;
+///
+/// Lowered from 0.6 to 0.5 after observing gpt-oss-120b emit
+/// `{"edges": []}` on a 47-doc course (266 candidate pairs) when
+/// the prompt nudged it toward "don't guess". The model defaults to
+/// silence under uncertainty, so the floor needs to be permissive
+/// enough that it'll commit to a reasonable guess and let the
+/// downstream similarity filter do calibration.
+const MIN_EDGE_CONFIDENCE: f32 = 0.5;
 
 /// Drop edges between docs whose embedding similarity is below this
 /// threshold. Tuned empirically: lecture+exercise pairs in the same
@@ -146,11 +153,23 @@ Possible relations:
     * Generic syllabus / instructions material that mentions a topic
       in passing.
 
-You are encouraged to emit moderate-confidence edges (0.7-0.85) when
-you genuinely see a pairing -- the server applies a final 0.6 floor and
-extra similarity-based filters, so under-emitting hides real edges
-that would have survived. Don't reach for low-confidence guesses though;
-~0.6 is a no-go.
+Calibration: pairs in the candidate list ALREADY passed an embedding
+similarity threshold (>=0.45 cosine), so they share substantive
+content. Your job is to decide which kind of relation each pair is,
+not whether ANY relation exists -- in a typical 30-50 doc DSV course
+we expect 5-30% of candidate pairs to map to a real edge. If you're
+labelling 0 of N candidates, you're being too conservative.
+
+Confidence guidance:
+  * 0.85+ : the pairing is unambiguous (e.g. solution clearly answers
+    the assignment, two docs are obviously different formats of the
+    same exercise).
+  * 0.7-0.84 : confident but not certain. Use freely.
+  * 0.5-0.69 : a reasonable guess based on visible content overlap.
+    Emit these too -- the server floor is 0.5 and filters edges
+    further by embedding similarity, so a moderate confidence is
+    fine.
+  * <0.5 : skip. Random guesses hurt.
 
 Output format -- JSON, nothing else:
 {
@@ -901,6 +920,21 @@ async fn call_linker_llm(
 
     let id_set: HashSet<Uuid> = docs.iter().map(|d| d.id).collect();
     let edges = parse_edges(raw, &id_set)?;
+
+    // Operator visibility: when the model returns nothing, dump the
+    // raw response (truncated) so we can tell whether it was a
+    // genuinely empty `{"edges": []}`, a refusal narrative, or
+    // something else weird. This is the single most useful signal
+    // for tuning the prompt -- without it "0 edges" is opaque.
+    if edges.is_empty() {
+        let preview: String = raw.chars().take(500).collect();
+        tracing::info!(
+            "linker: model returned 0 edges over {} candidates -- raw response head: {}",
+            candidates.len(),
+            preview,
+        );
+    }
+
     // Ignore any edge the model emitted for a non-candidate pair.
     Ok(edges
         .into_iter()

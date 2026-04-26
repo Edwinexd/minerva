@@ -16,7 +16,39 @@
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
+use async_trait::async_trait;
+use minerva_ingest::classifier::{ClassifiedKind, Classifier};
+
+use crate::classification::CerebrasClassifier;
+use crate::feature_flags;
+use crate::relink_scheduler;
 use crate::state::AppState;
+
+/// No-op classifier used when KG is gated off for a course. Returns
+/// an empty kind (which `process_document` interprets as "don't stamp
+/// a kind into Qdrant payload" and `set_classification` ignores).
+/// Lets us keep `process_document`'s signature unchanged whether or
+/// not KG is enabled -- the gating decision lives entirely in the
+/// worker, not in the ingest crate.
+struct NoopClassifier;
+
+#[async_trait]
+impl Classifier for NoopClassifier {
+    async fn classify(
+        &self,
+        _course_id: uuid::Uuid,
+        _filename: &str,
+        _mime_type: &str,
+        _text: &str,
+    ) -> Result<ClassifiedKind, String> {
+        // Returning an Err means `set_classification` is never called
+        // and the doc keeps `kind = NULL`. The chat-time partition
+        // (which is also gated on KG) treats NULL as "no classification
+        // applied", so for KG-disabled courses chunks just flow through
+        // as plain RAG context.
+        Err("kg disabled for course".to_string())
+    }
+}
 
 /// How often the worker checks for new pending documents.
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
@@ -40,7 +72,14 @@ const CANVAS_AUTO_SYNC_CHECK_INTERVAL: std::time::Duration =
 /// On startup it resets any documents stuck in `processing` (crash recovery),
 /// then enters a loop that claims pending documents and processes them with
 /// bounded concurrency.
+///
+/// Also spawns the relink sweeper -- the debounced background task that
+/// drains the per-course dirty queue and re-runs the cross-doc linker.
+/// Sibling task to the document worker because both have the same
+/// "background sweep over course-scoped state" shape.
 pub fn start(state: AppState, max_concurrent: usize) {
+    relink_scheduler::spawn_sweep(state.clone());
+
     // Periodic sweeper: rescue documents whose processing task died silently
     // (e.g. panic inside the spawned task). Runs independently of the main
     // poll loop so a wedged main loop can't block the safety net.
@@ -135,6 +174,21 @@ pub fn start(state: AppState, max_concurrent: usize) {
 
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
 
+        // Classifiers live for the lifetime of the worker and are
+        // shared across spawned per-document tasks via Arc. One
+        // reqwest::Client per worker is fine -- Cerebras requests are
+        // cheap and the client owns a connection pool.
+        //
+        // We hold both a real classifier and a no-op so we can pick
+        // per-doc based on the KG feature flag without re-allocating
+        // anything in the hot loop.
+        let kg_classifier: Arc<dyn Classifier> = Arc::new(CerebrasClassifier::new(
+            reqwest::Client::new(),
+            state.config.cerebras_api_key.clone(),
+            state.db.clone(),
+        ));
+        let noop_classifier: Arc<dyn Classifier> = Arc::new(NoopClassifier);
+
         loop {
             // Calculate how many slots are free so we only claim what we can process.
             let available = semaphore.available_permits() as i32;
@@ -165,9 +219,22 @@ pub fn start(state: AppState, max_concurrent: usize) {
                 let db = state.db.clone();
                 let qdrant = Arc::clone(&state.qdrant);
                 let fastembed = Arc::clone(&state.fastembed);
+                // Per-doc gate: if the course has the KG feature flag
+                // off, swap in the no-op classifier so the ingest
+                // pipeline doesn't burn a Cerebras call AND doesn't
+                // emit a kind into Qdrant. The mark_dirty for the
+                // relink sweeper is also skipped further down.
+                let kg_on = feature_flags::course_kg_enabled(&db, doc.course_id).await;
+                let classifier = if kg_on {
+                    Arc::clone(&kg_classifier)
+                } else {
+                    Arc::clone(&noop_classifier)
+                };
                 let openai_api_key = state.config.openai_api_key.clone();
                 let docs_path = state.config.docs_path.clone();
                 let doc_id = doc.id;
+                let course_id_for_relink = doc.course_id;
+                let scheduler = state.relink_scheduler.clone();
 
                 // Inner task does the work. Outer task awaits its JoinHandle
                 // so panics become explicit log lines + a 'failed' status,
@@ -264,10 +331,12 @@ pub fn start(state: AppState, max_concurrent: usize) {
                         &client,
                         &openai_api_key,
                         &fastembed,
+                        &classifier,
                         doc.id,
                         doc.course_id,
                         path,
                         &doc.filename,
+                        &doc.mime_type,
                         &course.embedding_provider,
                         &course.embedding_model,
                     )
@@ -280,6 +349,26 @@ pub fn start(state: AppState, max_concurrent: usize) {
                                 result.chunk_count,
                                 result.embedding_tokens,
                             );
+                            // Auto-trigger a debounced relink for the
+                            // course so the knowledge graph stays
+                            // fresh after every ingest. Bursty Moodle
+                            // syncs coalesce into a single linker
+                            // call thanks to the debounce window in
+                            // RelinkScheduler -- with a hard cap so a
+                            // long sustained burst still fires the
+                            // linker within MAX_PENDING_AGE.
+                            //
+                            // Skipped entirely when the course has
+                            // KG disabled; nothing classified means
+                            // nothing for the linker to chew on.
+                            if kg_on {
+                                scheduler.mark_dirty(course_id_for_relink).await;
+                                tracing::info!(
+                                    "worker: marked course {} dirty after doc {} ingest -- linker will fire on next sweep tick",
+                                    course_id_for_relink,
+                                    doc.id,
+                                );
+                            }
                         }
                         Err(e) => {
                             tracing::error!("worker: document {} processing failed: {}", doc.id, e);

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents\n        SET kind = $2,\n            kind_confidence = NULL,\n            kind_rationale = NULL,\n            kind_locked_by_teacher = TRUE,\n            classified_at = NOW()\n        WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "344247b62ee1a2aeeba0a2fc91ca0a3c27c6add1a15428da100e5a5668cfe672"
+}

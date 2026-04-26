@@ -29,6 +29,22 @@ export interface Course {
   updated_at: string
   /** Viewing user's course_member role, if any. Drives UI gating for TAs. */
   my_role: "student" | "ta" | "teacher" | null
+  /**
+   * Per-course feature flags. Resolved server-side through the same
+   * path the backend uses, so the UI's "is X enabled" check matches
+   * what the runtime actually does. Drives hide/show on KG-related
+   * tabs, badges, and dialogs.
+   */
+  feature_flags: CourseFeatureFlags
+}
+
+export interface CourseFeatureFlags {
+  /**
+   * Course knowledge graph V1: per-doc kind classification + linker
+   * + graph viewer + assignment-refusal addendum + adversarial
+   * chunk filter. Off by default until an admin opts the course in.
+   */
+  course_kg: boolean
 }
 
 export interface AdminUser {
@@ -167,6 +183,31 @@ export interface ConversationDetail {
   messages: Message[]
   notes: TeacherNote[]
   feedback: MessageFeedback[]
+  /**
+   * Extraction-guard flag log. Empty for non-teacher viewers (the
+   * backend gates this for privacy -- a student viewing their own
+   * conversation doesn't need to see "you tripped the guard at
+   * turn 3" metadata; the rewrite already surfaced the visible
+   * policy note to them). Ordered oldest-first, aligned to user
+   * messages via `turn_index`.
+   */
+  flags: ConversationFlag[]
+}
+
+export interface ConversationFlag {
+  id: string
+  flag: string
+  /**
+   * 1-based index into the conversation's user-message stream.
+   * Lets the per-turn UI on the conversation detail page align
+   * the flag badge to the assistant message that followed the
+   * flagged user input. Nullable because the flag schema is
+   * generic; future flag kinds may not be turn-scoped.
+   */
+  turn_index: number | null
+  rationale: string | null
+  metadata: Record<string, unknown> | null
+  created_at: string
 }
 
 export const FEEDBACK_CATEGORIES = [
@@ -177,6 +218,26 @@ export const FEEDBACK_CATEGORIES = [
   { value: "harmful", label: "Harmful or inappropriate" },
   { value: "other", label: "Other" },
 ] as const
+
+/**
+ * Per-(category, model) aggregate of token spend over a window
+ * (the backend currently returns a 30-day rolling window). The
+ * dashboard sums these across categories for a "total spend" line
+ * and shows the per-category breakdown as a small table.
+ */
+export interface KgTokenUsageRow {
+  category: string
+  model: string
+  call_count: number
+  prompt_tokens: number
+  completion_tokens: number
+}
+
+export interface KgTokenUsage {
+  /** ISO-8601 timestamp of the window start. */
+  since: string
+  rows: KgTokenUsageRow[]
+}
 
 export interface MessageFeedback {
   id: string
@@ -414,6 +475,31 @@ export interface SystemMetrics {
   }
 }
 
+export type DocumentKind =
+  | "lecture"
+  | "lecture_transcript"
+  | "reading"
+  | "tutorial_exercise"
+  | "assignment_brief"
+  | "sample_solution"
+  | "lab_brief"
+  | "exam"
+  | "syllabus"
+  | "unknown"
+
+export const DOCUMENT_KINDS: DocumentKind[] = [
+  "lecture",
+  "lecture_transcript",
+  "reading",
+  "tutorial_exercise",
+  "assignment_brief",
+  "sample_solution",
+  "lab_brief",
+  "exam",
+  "syllabus",
+  "unknown",
+]
+
 export interface Document {
   id: string
   course_id: string
@@ -427,4 +513,10 @@ export interface Document {
   uploaded_by: string
   created_at: string
   processed_at: string | null
+  // Course knowledge graph V1 -- nullable until classifier runs.
+  kind: DocumentKind | null
+  kind_confidence: number | null
+  kind_rationale: string | null
+  kind_locked_by_teacher: boolean
+  classified_at: string | null
 }

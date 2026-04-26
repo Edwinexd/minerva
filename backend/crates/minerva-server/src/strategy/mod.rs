@@ -1,4 +1,5 @@
 pub mod common;
+pub mod extraction_guard;
 pub mod flare;
 pub mod parallel;
 pub mod simple;
@@ -39,6 +40,18 @@ pub struct GenerationContext {
     pub db: sqlx::PgPool,
     pub qdrant: std::sync::Arc<qdrant_client::Qdrant>,
     pub fastembed: std::sync::Arc<minerva_ingest::fastembed_embedder::FastEmbedder>,
+    /// Resolved per-request from the `course_kg` feature flag. When
+    /// FALSE, RAG behaviour reverts to the pre-KG baseline:
+    ///
+    ///   * adversarial chunk filter skipped
+    ///   * `unclassified_doc_ids` lookup skipped (treated as empty)
+    ///   * `partition_chunks` puts every chunk into context
+    ///   * `build_system_prompt_with_signals` gets no signals (no
+    ///     refusal addendum)
+    ///
+    /// Decided once at the chat-route entry and propagated through
+    /// the strategy so each pass sees a stable view.
+    pub kg_enabled: bool,
 }
 
 /// Run the appropriate strategy based on the strategy name.

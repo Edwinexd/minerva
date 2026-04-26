@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT cf.conversation_id, cf.flag\n           FROM conversation_flags cf\n           JOIN conversations c ON c.id = cf.conversation_id\n           WHERE c.course_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conversation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "flag",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a3e7865237a4b0039ffb6144e602f5fcbab7adf1504d7c765923d83127c979f0"
+}

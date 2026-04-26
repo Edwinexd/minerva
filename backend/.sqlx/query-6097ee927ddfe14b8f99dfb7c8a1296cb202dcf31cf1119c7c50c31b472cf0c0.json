@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET pooled_embedding = $2 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6097ee927ddfe14b8f99dfb7c8a1296cb202dcf31cf1119c7c50c31b472cf0c0"
+}

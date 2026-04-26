@@ -30,6 +30,12 @@ pub fn router() -> Router<AppState> {
             "/role-rules/conditions/{cond_id}",
             delete(delete_rule_condition),
         )
+        .route("/classification-stats", get(get_classification_stats))
+        .route("/backfill-classifications", post(backfill_classifications))
+        .route(
+            "/courses/{course_id}/feature-flags",
+            get(get_course_feature_flags).put(set_course_feature_flags),
+        )
 }
 
 fn require_admin(user: &User) -> Result<(), AppError> {
@@ -426,4 +432,291 @@ async fn delete_rule_condition(
     }
     state.rules.reload(&state.db).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+// ── Classification backfill (admin-scoped) ─────────────────────────
+//
+// `GET /admin/classification-stats` lets the admin UI show the current
+// state of classification coverage before they decide to backfill.
+// `POST /admin/backfill-classifications` fans out the classifier across
+// every eligible doc in a spawned task and returns immediately. The
+// task respects `kind_locked_by_teacher` (defense in depth on top of
+// the SQL filter) and skips docs whose status isn't `ready`.
+
+#[derive(Serialize)]
+struct ClassificationStatsResponse {
+    total_ready: i64,
+    classified: i64,
+    unclassified: i64,
+    locked_by_teacher: i64,
+    /// Progress of the most recent admin backfill (or `None` if no
+    /// backfill has run since the last server restart). Cleared when
+    /// the next backfill kicks off; the UI uses this to show a
+    /// progress bar with ok/errors/skipped counts ticking up in
+    /// real time.
+    backfill: Option<BackfillProgressResponse>,
+}
+
+#[derive(Serialize)]
+struct BackfillProgressResponse {
+    started_at: chrono::DateTime<chrono::Utc>,
+    total: usize,
+    ok: usize,
+    errors: usize,
+    skipped: usize,
+    finished: bool,
+}
+
+async fn get_classification_stats(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<ClassificationStatsResponse>, AppError> {
+    require_admin(&user)?;
+    let stats = minerva_db::queries::documents::classification_stats(&state.db).await?;
+    let backfill = state
+        .backfill_tracker
+        .snapshot()
+        .map(|p| BackfillProgressResponse {
+            started_at: p.started_at,
+            total: p.total,
+            ok: p.ok,
+            errors: p.errors,
+            skipped: p.skipped,
+            finished: p.finished,
+        });
+    Ok(Json(ClassificationStatsResponse {
+        total_ready: stats.total_ready,
+        classified: stats.classified,
+        unclassified: stats.unclassified,
+        locked_by_teacher: stats.locked_by_teacher,
+        backfill,
+    }))
+}
+
+#[derive(Serialize)]
+struct BackfillResponse {
+    /// Number of docs the spawned task will work through. Refresh
+    /// the stats endpoint to watch it tick down.
+    queued: usize,
+}
+
+/// Hard cap on docs claimed in a single backfill invocation. Stops a
+/// single click from spawning a runaway batch on a huge installation;
+/// admin can re-click to drain another batch when the queue drains.
+const BACKFILL_BATCH_LIMIT: i64 = 5_000;
+
+async fn backfill_classifications(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<BackfillResponse>, AppError> {
+    require_admin(&user)?;
+
+    let candidates = minerva_db::queries::documents::list_needing_classification(
+        &state.db,
+        BACKFILL_BATCH_LIMIT,
+    )
+    .await?;
+    let queued = candidates.len();
+
+    if queued == 0 {
+        tracing::info!("admin: backfill-classifications requested but queue is empty");
+        return Ok(Json(BackfillResponse { queued }));
+    }
+
+    tracing::info!(
+        "admin: backfill-classifications queued {} doc(s) (capped at {})",
+        queued,
+        BACKFILL_BATCH_LIMIT,
+    );
+
+    // Initialise progress tracker before spawning so the UI's first
+    // poll sees the new backfill, not a stale "finished" state from
+    // a previous run.
+    state.backfill_tracker.start(queued);
+
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        let mut ok = 0usize;
+        let mut errs = 0usize;
+        let mut touched_courses: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+        for doc in candidates {
+            let course_id = doc.course_id;
+            match crate::routes::documents::run_classify_one(&state_clone, &doc).await {
+                Ok(Some(_)) => {
+                    ok += 1;
+                    touched_courses.insert(course_id);
+                    state_clone.backfill_tracker.record_ok();
+                }
+                Ok(None) => {
+                    // race: teacher locked between SELECT and now; skip silently
+                    state_clone.backfill_tracker.record_skipped();
+                }
+                Err(e) => {
+                    errs += 1;
+                    state_clone.backfill_tracker.record_error();
+                    tracing::warn!(
+                        "admin: backfill doc {} ({}) failed: {:?}",
+                        doc.id,
+                        doc.filename,
+                        e,
+                    );
+                }
+            }
+        }
+        tracing::info!(
+            "admin: backfill-classifications finished ({} ok, {} errors)",
+            ok,
+            errs,
+        );
+
+        // Hand each touched course to the relink sweeper rather than
+        // running the linker inline. The sweeper picks them up on its
+        // next tick and runs them sequentially, so we never burst many
+        // concurrent linker calls at Cerebras when a backfill spans
+        // courses.
+        for course_id in touched_courses {
+            state_clone
+                .relink_scheduler
+                .mark_dirty_immediate(course_id)
+                .await;
+        }
+        state_clone.backfill_tracker.finish();
+    });
+
+    Ok(Json(BackfillResponse { queued }))
+}
+
+// ── Per-course feature flags (admin-managed) ───────────────────────
+//
+// We surface these as a generic toggle list (each known flag = a
+// switch the admin can flip per course) so adding a new flag
+// later is just appending to `feature_flags::ALL_FLAGS` and the UI
+// renders an extra row. The admin UI submits the FULL desired flag
+// state on PUT, mirroring how /admin/users/{id}/role works -- avoids
+// drift between an in-memory list and a stale DB row.
+
+#[derive(Serialize)]
+struct FeatureFlagStateResponse {
+    /// Flag name (matches `feature_flags::ALL_FLAGS`).
+    flag: String,
+    /// Effective state for this course (course-scoped row > global
+    /// row > compiled-in default = false).
+    enabled: bool,
+    /// Whether the course has its own row (vs inheriting from
+    /// global/default). Lets the admin UI show a "set explicitly"
+    /// indicator.
+    course_override: bool,
+}
+
+#[derive(Serialize)]
+struct CourseFeatureFlagsResponse {
+    course_id: Uuid,
+    flags: Vec<FeatureFlagStateResponse>,
+}
+
+async fn get_course_feature_flags(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<CourseFeatureFlagsResponse>, AppError> {
+    require_admin(&user)?;
+
+    // 404 if course doesn't exist (avoid leaking flags for a nonexistent id).
+    if minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::NotFound);
+    }
+
+    let course_rows =
+        minerva_db::queries::feature_flags::list_for_course(&state.db, course_id).await?;
+    let course_overrides: std::collections::HashMap<String, bool> = course_rows
+        .into_iter()
+        .map(|r| (r.flag, r.enabled))
+        .collect();
+
+    let mut flags = Vec::with_capacity(crate::feature_flags::ALL_FLAGS.len());
+    for &flag in crate::feature_flags::ALL_FLAGS {
+        let course_override = course_overrides.contains_key(flag);
+        // Resolve effective state through the same path the
+        // application uses, so the admin UI cannot disagree with
+        // runtime behaviour.
+        let enabled = minerva_db::queries::feature_flags::is_enabled_for_course(
+            &state.db, flag, course_id, false,
+        )
+        .await?;
+        flags.push(FeatureFlagStateResponse {
+            flag: flag.to_string(),
+            enabled,
+            course_override,
+        });
+    }
+
+    Ok(Json(CourseFeatureFlagsResponse { course_id, flags }))
+}
+
+#[derive(Deserialize)]
+struct SetCourseFeatureFlagsRequest {
+    /// Map of flag-name -> desired state. Flags not in the map are
+    /// left untouched -- admin can selectively patch by sending only
+    /// the changed entries.
+    ///
+    /// To revert a course back to the global default, set the value
+    /// to `null` (which `serde` deserialises as `None`); the row is
+    /// then deleted rather than overwritten with `false`.
+    flags: std::collections::HashMap<String, Option<bool>>,
+}
+
+async fn set_course_feature_flags(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<SetCourseFeatureFlagsRequest>,
+) -> Result<Json<CourseFeatureFlagsResponse>, AppError> {
+    require_admin(&user)?;
+    if minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::NotFound);
+    }
+
+    // Validate every flag the request mentions is one we recognise --
+    // a typo from the admin UI shouldn't quietly persist a row whose
+    // flag string nothing reads.
+    for flag in body.flags.keys() {
+        if !crate::feature_flags::ALL_FLAGS.contains(&flag.as_str()) {
+            return Err(AppError::bad_request_with(
+                "admin.feature_flag_unknown",
+                [("flag", flag.clone())],
+            ));
+        }
+    }
+
+    for (flag, desired) in &body.flags {
+        match desired {
+            Some(enabled) => {
+                minerva_db::queries::feature_flags::set(
+                    &state.db,
+                    flag,
+                    minerva_db::queries::feature_flags::Scope::Course(course_id),
+                    *enabled,
+                )
+                .await?;
+            }
+            None => {
+                minerva_db::queries::feature_flags::delete(
+                    &state.db,
+                    flag,
+                    minerva_db::queries::feature_flags::Scope::Course(course_id),
+                )
+                .await?;
+            }
+        }
+    }
+
+    // Reuse the GET handler's shape so the client can apply the
+    // response directly without an extra round-trip.
+    get_course_feature_flags(State(state), Extension(user), Path(course_id)).await
 }

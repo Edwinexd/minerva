@@ -37,6 +37,19 @@ pub fn router() -> Router<AppState> {
         )
         .route("/{doc_id}", delete(delete_document).patch(patch_document))
         .route("/{doc_id}/chunks", get(list_chunks))
+        // Course-knowledge-graph endpoints. Teacher-only (course
+        // owner / admin / course teacher); auth is enforced inside each
+        // handler with the same pattern as `patch_document`.
+        .route("/{doc_id}/reclassify", post(reclassify_document))
+        .route("/{doc_id}/kind", axum::routing::patch(set_document_kind))
+        .route("/{doc_id}/kind/lock", delete(clear_kind_lock))
+        .route("/reclassify-all", post(reclassify_all_in_course))
+        .route("/knowledge-graph", get(get_knowledge_graph))
+        .route("/knowledge-graph/rebuild", post(rebuild_knowledge_graph))
+        .route(
+            "/knowledge-graph/edges/{edge_id}/reject",
+            post(reject_edge).delete(unreject_edge),
+        )
         .route("/search", get(search_chunks))
 }
 
@@ -53,6 +66,14 @@ struct DocumentResponse {
     displayable: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     processed_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Knowledge-graph classification. `None` until the classifier has
+    /// run for this doc; the chat-time RAG filter holds unclassified
+    /// docs out of context (see `partition_chunks`).
+    kind: Option<String>,
+    kind_confidence: Option<f32>,
+    kind_rationale: Option<String>,
+    kind_locked_by_teacher: bool,
+    classified_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
@@ -69,6 +90,11 @@ impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
             displayable: row.displayable,
             created_at: row.created_at,
             processed_at: row.processed_at,
+            kind: row.kind,
+            kind_confidence: row.kind_confidence,
+            kind_rationale: row.kind_rationale,
+            kind_locked_by_teacher: row.kind_locked_by_teacher,
+            classified_at: row.classified_at,
         }
     }
 }
@@ -562,4 +588,554 @@ pub fn extension_from_filename(filename: &str) -> &str {
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("bin")
+}
+
+// ── Course-knowledge-graph V1 endpoints ────────────────────────────
+//
+// Auth: same pattern as `patch_document` -- course owner OR admin OR a
+// teacher of the course. We don't allow students or TAs to flip a
+// document's classification.
+
+/// Shared auth check: caller is course owner, admin, or course teacher.
+async fn require_course_teacher(
+    state: &AppState,
+    course_id: Uuid,
+    user: &User,
+) -> Result<(), AppError> {
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if course.owner_id == user.id || user.role.is_admin() {
+        return Ok(());
+    }
+    if minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await? {
+        return Ok(());
+    }
+    Err(AppError::Forbidden)
+}
+
+/// Gate every KG-related endpoint on the `course_kg` feature flag.
+/// Returns 404 (not 403) when off so a non-KG course "looks like"
+/// the feature simply doesn't exist -- no surface for student or
+/// teacher fishing.
+async fn require_kg_enabled(state: &AppState, course_id: Uuid) -> Result<(), AppError> {
+    if crate::feature_flags::course_kg_enabled(&state.db, course_id).await {
+        Ok(())
+    } else {
+        Err(AppError::NotFound)
+    }
+}
+
+/// Resolve a `(course_id, doc_id)` pair, ensuring the document actually
+/// belongs to the course. Same scope-check as `patch_document`.
+async fn load_doc_in_course(
+    state: &AppState,
+    course_id: Uuid,
+    doc_id: Uuid,
+) -> Result<minerva_db::queries::documents::DocumentRow, AppError> {
+    let doc = minerva_db::queries::documents::find_by_id(&state.db, doc_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if doc.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+    Ok(doc)
+}
+
+/// Run the classifier on a single document and persist the result.
+/// Returns the new (kind, confidence, rationale) tuple, or `None` if
+/// the document was locked by a teacher (in which case we leave it
+/// alone and tell the caller).
+///
+/// Crate-public so the admin backfill endpoint can fan out across
+/// every unclassified doc using the same code path.
+pub(crate) async fn run_classify_one(
+    state: &AppState,
+    doc: &minerva_db::queries::documents::DocumentRow,
+) -> Result<Option<(String, f32, Option<String>)>, AppError> {
+    if doc.kind_locked_by_teacher {
+        return Ok(None);
+    }
+
+    let ext = extension_from_filename(&doc.filename);
+    let file_path = format!(
+        "{}/{}/{}.{}",
+        state.config.docs_path, doc.course_id, doc.id, ext
+    );
+    let path = std::path::Path::new(&file_path);
+    let text = minerva_ingest::pipeline::extract_document_text(path)
+        .map_err(|e| AppError::Internal(format!("text extraction failed: {}", e)))?;
+
+    let classifier = crate::classification::CerebrasClassifier::new(
+        reqwest::Client::new(),
+        state.config.cerebras_api_key.clone(),
+        state.db.clone(),
+    );
+    use minerva_ingest::classifier::Classifier;
+    let result = classifier
+        .classify(doc.course_id, &doc.filename, &doc.mime_type, &text)
+        .await
+        .map_err(AppError::Internal)?;
+
+    let _ = minerva_db::queries::documents::set_classification(
+        &state.db,
+        doc.id,
+        &result.kind,
+        result.confidence,
+        result.rationale.as_deref(),
+    )
+    .await?;
+
+    Ok(Some((result.kind, result.confidence, result.rationale)))
+}
+
+#[derive(Serialize)]
+struct ReclassifyResponse {
+    classified: bool,
+    locked: bool,
+    kind: Option<String>,
+    confidence: Option<f32>,
+    rationale: Option<String>,
+}
+
+/// Re-run the classifier for a single document. No-op if the doc is
+/// locked by a teacher (returns `locked: true` so the UI can surface
+/// "unlock first").
+///
+/// Marks the course dirty for the relink sweeper -- a single doc's
+/// kind change can shift its `solution_of` / `part_of_unit` edges, so
+/// the graph needs refreshing. Debounced (default 60s) so a teacher
+/// rapid-fire reclassifying several docs only triggers one linker call.
+async fn reclassify_document(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<ReclassifyResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
+    let doc = load_doc_in_course(&state, course_id, doc_id).await?;
+
+    match run_classify_one(&state, &doc).await? {
+        None => Ok(Json(ReclassifyResponse {
+            classified: false,
+            locked: true,
+            kind: doc.kind,
+            confidence: doc.kind_confidence,
+            rationale: doc.kind_rationale,
+        })),
+        Some((kind, confidence, rationale)) => {
+            state.relink_scheduler.mark_dirty(course_id).await;
+            Ok(Json(ReclassifyResponse {
+                classified: true,
+                locked: false,
+                kind: Some(kind),
+                confidence: Some(confidence),
+                rationale,
+            }))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct SetKindBody {
+    kind: String,
+}
+
+/// Manually set a document's kind and lock it against future
+/// auto-classification. If the new kind is `sample_solution`, also
+/// purge any embedded chunks from Qdrant -- otherwise stale vectors
+/// would still be retrievable even though the doc is now flagged.
+async fn set_document_kind(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<SetKindBody>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
+    let doc = load_doc_in_course(&state, course_id, doc_id).await?;
+
+    // Reject unknown kinds at the API boundary so the user gets a 400
+    // instead of a 500 from the DB CHECK constraint.
+    if crate::classification::types::DocumentKind::from_str(&body.kind).is_none() {
+        return Err(AppError::bad_request_with(
+            "doc.kind_invalid",
+            [("kind", body.kind.clone())],
+        ));
+    }
+
+    minerva_db::queries::documents::set_kind_locked(&state.db, doc_id, &body.kind).await?;
+
+    // If the teacher just declared this doc a sample_solution, purge
+    // any Qdrant chunks so retrieval can't surface them. Idempotent --
+    // if the collection or doc has no points, this is a no-op.
+    if body.kind == "sample_solution" && doc.chunk_count.unwrap_or(0) > 0 {
+        let collection_name = format!("course_{}", course_id);
+        if state
+            .qdrant
+            .collection_exists(&collection_name)
+            .await
+            .unwrap_or(false)
+        {
+            let filter =
+                qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
+                    "document_id",
+                    doc_id.to_string(),
+                )]);
+            if let Err(e) = state
+                .qdrant
+                .delete_points(
+                    DeletePointsBuilder::new(&collection_name)
+                        .points(filter)
+                        .wait(true),
+                )
+                .await
+            {
+                tracing::error!(
+                    "set_document_kind: qdrant purge failed for doc {} after sample_solution lock: {}",
+                    doc_id,
+                    e,
+                );
+                // Non-fatal: the kind is already locked in the DB so
+                // partition_chunks will drop these chunks defensively
+                // even if Qdrant still has them.
+            }
+        }
+    }
+
+    // A teacher-driven kind change can flip whether a doc participates
+    // in `solution_of` / `part_of_unit` edges (e.g. flipping reading ->
+    // sample_solution removes its embeddings AND should remove edges
+    // pointing at it). Mark the course dirty for the relink sweeper.
+    state.relink_scheduler.mark_dirty(course_id).await;
+
+    Ok(Json(serde_json::json!({
+        "kind": body.kind,
+        "kind_locked_by_teacher": true,
+    })))
+}
+
+/// Clear the teacher lock so future re-classifications can overwrite
+/// the kind. Doesn't trigger a re-run -- the teacher can press
+/// re-classify after if they want.
+async fn clear_kind_lock(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
+    let _doc = load_doc_in_course(&state, course_id, doc_id).await?;
+    minerva_db::queries::documents::clear_kind_lock(&state.db, doc_id).await?;
+    Ok(Json(serde_json::json!({
+        "kind_locked_by_teacher": false,
+    })))
+}
+
+#[derive(Serialize)]
+struct ReclassifyAllResponse {
+    queued: usize,
+}
+
+/// Fan out re-classification across every non-locked document in a
+/// course. Runs in a spawned task so the request returns immediately;
+/// progress is observable by re-fetching the document list (rows show
+/// updated `kind_confidence` / `classified_at` as they finish).
+async fn reclassify_all_in_course(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<ReclassifyAllResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
+
+    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+    let candidates: Vec<_> = docs
+        .into_iter()
+        .filter(|d| !d.kind_locked_by_teacher && d.status == "ready")
+        .collect();
+    let queued = candidates.len();
+
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        for doc in candidates {
+            if let Err(e) = run_classify_one(&state_clone, &doc).await {
+                tracing::warn!(
+                    "reclassify-all: doc {} ({}) failed: {:?}",
+                    doc.id,
+                    doc.filename,
+                    e,
+                );
+            }
+        }
+        tracing::info!(
+            "reclassify-all: finished course {} ({} docs)",
+            course_id,
+            queued
+        );
+    });
+
+    // Hand off to the relink sweeper instead of doing it inline. The
+    // per-doc classify loop above already calls `run_classify_one` for
+    // each candidate; we additionally mark the course immediate-dirty
+    // so the sweeper picks it up on its next tick (typically ~10s,
+    // well after the classify task is done).
+    state.relink_scheduler.mark_dirty_immediate(course_id).await;
+
+    Ok(Json(ReclassifyAllResponse { queued }))
+}
+
+// ── Knowledge graph: cross-doc linking + view ─────────────────────
+
+/// Run the cross-doc linker for a single course and replace its
+/// stored edges with the result. Idempotent: each call wipes the
+/// existing edges and writes fresh ones, so a no-op course (no
+/// confident edges) ends up with an empty graph rather than a stale
+/// one.
+///
+/// Crate-public so the admin backfill task can relink each course it
+/// touched after the per-doc classification finishes.
+pub(crate) async fn relink_course(state: &AppState, course_id: Uuid) -> Result<usize, AppError> {
+    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+
+    let http = reqwest::Client::new();
+    let ctx = crate::classification::linker::LinkContext {
+        http: &http,
+        api_key: &state.config.cerebras_api_key,
+        db: &state.db,
+        qdrant: &state.qdrant,
+    };
+    // The linker now writes edges + decision cache itself per fresh
+    // pair, so we don't wipe-and-rewrite here. A pair whose endpoints
+    // haven't been re-classified since its prior decision keeps both
+    // its cache row AND its existing document_relations edge (if any)
+    // -- no LLM call, no DB churn.
+    let result = crate::classification::linker::link_course(&ctx, course_id, &docs)
+        .await
+        .map_err(AppError::Internal)?;
+
+    tracing::info!(
+        "relink: course {} considered {} doc(s) -- {} cached, {} re-evaluated, {} live edge(s)",
+        course_id,
+        result.considered,
+        result.cached_hits,
+        result.re_evaluated,
+        result.edges_written,
+    );
+
+    Ok(result.edges_written)
+}
+
+#[derive(Serialize)]
+struct GraphNode {
+    id: Uuid,
+    filename: String,
+    kind: Option<String>,
+    kind_confidence: Option<f32>,
+    kind_locked_by_teacher: bool,
+    chunk_count: Option<i32>,
+}
+
+#[derive(Serialize)]
+struct GraphEdge {
+    /// Stable id, used as the addressable handle for per-edge reject /
+    /// unreject. Returned even for rejected edges so the UI can show them
+    /// in a "vetoed" filter.
+    id: Uuid,
+    src_id: Uuid,
+    dst_id: Uuid,
+    relation: String,
+    confidence: f32,
+    rationale: Option<String>,
+    /// True when a teacher has explicitly rejected this edge. Rejected
+    /// edges are filtered out of the default graph render (the linker
+    /// won't even re-propose them on the next pass) but exposed in the
+    /// API payload so the UI can show a "show rejected" toggle.
+    rejected_by_teacher: bool,
+}
+
+#[derive(Serialize)]
+struct GraphResponse {
+    nodes: Vec<GraphNode>,
+    edges: Vec<GraphEdge>,
+    /// Whether at least one edge has been computed for this course.
+    /// The UI uses this to show "Build the graph" call-to-action vs
+    /// rendering the viewer.
+    edges_computed: bool,
+    /// Re-link status for the UI's "pending" pill. Three states:
+    ///   * pending_pairs > 0 OR new_doc_count > 0 :
+    ///     the linker has work to do. Shows a "linking N pair(s)"
+    ///     indicator until the next sweep tick clears it.
+    ///   * else: graph is up to date with current doc state.
+    ///
+    /// `pending_pairs` counts cached decisions whose endpoints have
+    /// since been re-classified (cache stale). `new_doc_count` counts
+    /// classified docs that have NEVER been seen by the linker (never
+    /// participated in a cached pair) -- a fresh upload before the
+    /// next relink fires.
+    pending_pairs: i64,
+    new_doc_count: i64,
+}
+
+/// Knowledge-graph view for a single course: every doc as a node
+/// (typed by `kind`), every linker-asserted edge between them.
+async fn get_knowledge_graph(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<GraphResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
+
+    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+    let edges_rows =
+        minerva_db::queries::document_relations::list_by_course(&state.db, course_id).await?;
+
+    let nodes: Vec<GraphNode> = docs
+        .into_iter()
+        .map(|d| GraphNode {
+            id: d.id,
+            filename: d.filename,
+            kind: d.kind,
+            kind_confidence: d.kind_confidence,
+            kind_locked_by_teacher: d.kind_locked_by_teacher,
+            chunk_count: d.chunk_count,
+        })
+        .collect();
+
+    let edges_computed = !edges_rows.is_empty();
+    let edges: Vec<GraphEdge> = edges_rows
+        .into_iter()
+        .map(|e| GraphEdge {
+            id: e.id,
+            src_id: e.src_doc_id,
+            dst_id: e.dst_doc_id,
+            relation: e.relation,
+            confidence: e.confidence,
+            rationale: e.rationale,
+            rejected_by_teacher: e.rejected_by_teacher,
+        })
+        .collect();
+
+    // Compute the "linking pending" signals for the UI. Cheap
+    // queries -- one COUNT(*) each, no joins beyond the cache table
+    // and the docs row.
+    let pending_pairs =
+        minerva_db::queries::linker_decisions::stale_decisions_for_course(&state.db, course_id)
+            .await
+            .unwrap_or(0);
+    // Classified docs that have never been on either side of a
+    // cached pair: a brand-new upload between two relink sweeps.
+    let new_doc_count: i64 = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) AS "count!"
+           FROM documents d
+           WHERE d.course_id = $1
+             AND d.classified_at IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM linker_decisions ld
+                 WHERE ld.course_id = $1
+                   AND (ld.a_doc_id = d.id OR ld.b_doc_id = d.id)
+             )"#,
+        course_id,
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    Ok(Json(GraphResponse {
+        nodes,
+        edges,
+        edges_computed,
+        pending_pairs,
+        new_doc_count,
+    }))
+}
+
+#[derive(Serialize)]
+struct EdgeMutationResponse {
+    /// Echo of the edge's id so the UI can confirm the mutation
+    /// landed against the right row. (Matches the path parameter.)
+    id: Uuid,
+    rejected_by_teacher: bool,
+}
+
+/// Reject an edge: the linker won't re-propose this pair, and the
+/// graph-view filter hides it from the default render. Idempotent --
+/// rejecting an already-rejected edge just refreshes `rejected_at`.
+async fn reject_edge(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, edge_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<EdgeMutationResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
+
+    // Cross-course safety: if the edge id resolves to a different
+    // course, surface 404 rather than silently allowing a teacher to
+    // mutate edges in courses they don't own.
+    let edge = minerva_db::queries::document_relations::find_by_id(&state.db, edge_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if edge.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+
+    let updated =
+        minerva_db::queries::document_relations::reject_edge(&state.db, edge_id, user.id).await?;
+    if !updated {
+        return Err(AppError::NotFound);
+    }
+
+    Ok(Json(EdgeMutationResponse {
+        id: edge_id,
+        rejected_by_teacher: true,
+    }))
+}
+
+/// Undo a rejection. The pair becomes eligible for the next linker
+/// pass to re-emit if the model still likes it.
+async fn unreject_edge(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, edge_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<EdgeMutationResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
+
+    let edge = minerva_db::queries::document_relations::find_by_id(&state.db, edge_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if edge.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+
+    let updated =
+        minerva_db::queries::document_relations::unreject_edge(&state.db, edge_id).await?;
+    if !updated {
+        return Err(AppError::NotFound);
+    }
+
+    Ok(Json(EdgeMutationResponse {
+        id: edge_id,
+        rejected_by_teacher: false,
+    }))
+}
+
+#[derive(Serialize)]
+struct RelinkResponse {
+    edges: usize,
+}
+
+/// Manually trigger a re-link of the course's knowledge graph. Useful
+/// after a teacher edits kinds and wants the edges refreshed without
+/// firing a full re-classify.
+async fn rebuild_knowledge_graph(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<RelinkResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
+    let edges = relink_course(&state, course_id).await?;
+    Ok(Json(RelinkResponse { edges }))
 }

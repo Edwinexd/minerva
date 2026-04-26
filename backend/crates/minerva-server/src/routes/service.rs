@@ -137,6 +137,11 @@ async fn submit_transcript(
             .map_err(|e| AppError::Internal(format!("failed to write transcript: {}", e)))?;
 
         // Update DB: new filename, mime type, size, reset to pending.
+        // The classifier never sees filenames -- it decides
+        // lecture_transcript vs lecture from the actual content (a VTT
+        // transcript is recognisable by its disfluencies and lack of
+        // structure). So we just swap .url for .txt without injecting
+        // any marker token.
         let new_filename = doc
             .filename
             .strip_suffix(".url")

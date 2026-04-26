@@ -32,6 +32,7 @@ pub fn router() -> Router<AppState> {
             "/conversations/feedback-stats",
             get(get_course_feedback_stats),
         )
+        .route("/conversations/flag-kinds", get(list_flag_kinds))
         .route("/conversations/{cid}", get(get_conversation))
         .route("/conversations/{cid}/message", post(send_message))
         .route("/conversations/{cid}/pin", put(set_pin))
@@ -144,10 +145,36 @@ struct MessageFeedbackResponse {
 }
 
 #[derive(Serialize)]
+struct ConversationFlagResponse {
+    id: Uuid,
+    flag: String,
+    /// 1-based index into the conversation's user-message stream.
+    /// The frontend aligns each flag to the corresponding user
+    /// message (and the assistant reply that followed) for the
+    /// per-turn UI. Nullable because the schema is generic --
+    /// future flag kinds may not be turn-scoped.
+    turn_index: Option<i32>,
+    /// Short human-readable string from whichever classifier
+    /// produced the flag. Surfaced to teachers verbatim so they
+    /// can sanity-check the model's judgement.
+    rationale: Option<String>,
+    /// Full JSON payload with classifier verdicts, matched
+    /// assignment ids, etc. Renderable by the dashboard for the
+    /// "details" pane.
+    metadata: Option<serde_json::Value>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
 struct ConversationDetailResponse {
     messages: Vec<MessageResponse>,
     notes: Vec<TeacherNoteResponse>,
     feedback: Vec<MessageFeedbackResponse>,
+    /// Empty for non-teacher viewers (the conversation owner). The
+    /// teacher dashboard reads this to render guard-trip badges
+    /// and per-turn detail. Ordered oldest-first to match message
+    /// order; same shape as `list_for_conversation` returns.
+    flags: Vec<ConversationFlagResponse>,
 }
 
 async fn list_conversations(
@@ -211,6 +238,24 @@ async fn list_all_conversations(
             })
             .collect(),
     ))
+}
+
+/// Per-conversation flag-kind map for the teacher conversation
+/// list page. Returns only the distinct flag *kinds* (e.g.
+/// "extraction_attempt") attached to each conversation, not the
+/// full flag rows -- the list view only needs to know which
+/// badges to render. Detailed per-turn flag data is fetched on
+/// demand via `get_conversation`. Teacher/admin only.
+async fn list_flag_kinds(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<HashMap<Uuid, Vec<String>>>, AppError> {
+    verify_course_teacher_access(&state, course_id, &user).await?;
+    let map =
+        minerva_db::queries::conversation_flags::flag_kinds_by_conversation(&state.db, course_id)
+            .await?;
+    Ok(Json(map))
 }
 
 /// Course-level feedback stats (teacher/admin only).
@@ -628,6 +673,19 @@ async fn get_conversation(
     let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;
     let feedback_rows =
         minerva_db::queries::message_feedback::list_for_conversation(&state.db, cid).await?;
+    // Conversation flags are teacher-only by policy: a student
+    // shouldn't see "you tripped the extraction guard at turn 3"
+    // metadata about themselves -- the rewrite already surfaces
+    // the visible policy note to them. Empty Vec for non-teacher
+    // viewers so the response shape stays stable for the typed
+    // frontend client.
+    let flag_rows = if is_teacher {
+        minerva_db::queries::conversation_flags::list_for_conversation(&state.db, cid)
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
 
     // Hide eppn/display_name from non-teachers viewing other students' feedback
@@ -692,6 +750,17 @@ async fn get_conversation(
             })
             .collect(),
         feedback,
+        flags: flag_rows
+            .into_iter()
+            .map(|f| ConversationFlagResponse {
+                id: f.id,
+                flag: f.flag,
+                turn_index: f.turn_index,
+                rationale: f.rationale,
+                metadata: f.metadata,
+                created_at: f.created_at,
+            })
+            .collect(),
     }))
 }
 
@@ -842,6 +911,12 @@ pub(super) async fn run_chat_message(
 
     let strategy_name = course.strategy.clone();
 
+    // Resolve the KG feature flag once per chat request and pin it
+    // into the strategy context. This both saves a DB lookup per
+    // partition call and guarantees a stable view across the run --
+    // an admin flipping the flag mid-conversation won't half-apply.
+    let kg_enabled = crate::feature_flags::course_kg_enabled(&state.db, course_id).await;
+
     let ctx = strategy::GenerationContext {
         course_name: course.name,
         custom_prompt: course.system_prompt,
@@ -864,6 +939,7 @@ pub(super) async fn run_chat_message(
         db: state.db.clone(),
         qdrant: Arc::clone(&state.qdrant),
         fastembed: Arc::clone(&state.fastembed),
+        kg_enabled,
     };
 
     tokio::spawn(async move {

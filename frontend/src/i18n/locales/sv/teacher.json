@@ -3,6 +3,7 @@
     "tryChat": "Prova chatten",
     "courseNotFound": "Kursen hittades inte",
     "tabs": {
+      "knowledgeGraph": "Kunskapsgraf",
       "config": "Konfiguration",
       "members": "Medlemmar",
       "conversations": "Konversationer",
@@ -136,7 +137,7 @@
     "conversationsDescription": "Se alla studentkonversationer. Fäst bra svar för att göra dem synliga för alla studenter.",
     "tabAll": "Alla",
     "tabFlagged": "Behöver granskas",
-    "emptyFlagged": "Inga konversationer med flaggade svar.",
+    "emptyFlagged": "Inga konversationer behöver granskas.",
     "emptyTopic": "Inga konversationer matchar det här ämnet.",
     "emptyAll": "Inga konversationer ännu.",
     "untitled": "Konversation utan titel",
@@ -160,7 +161,32 @@
     "teacherNote": "Lärares anteckning",
     "otherCategory": "Annat",
     "correctionPrefixWithCategories": "Rättelse (ang. {{categories}}): ",
-    "correctionPrefix": "Rättelse: "
+    "correctionPrefix": "Rättelse: ",
+    "flagKind": {
+      "extraction_intent_detected": "Intent-klassificeraren markerade denna tur",
+      "extraction_constraint_activated": "Extraktionsskydd aktiverat",
+      "extraction_rewrote": "Svaret omskrevs av skyddet",
+      "extraction_engagement_refused": "Studenten engagerade sig inte i den sokratiska frågan",
+      "extraction_constraint_lifted": "Studenten engagerade sig -- begränsning hävd"
+    }
+  },
+  "kgTokenUsage": {
+    "title": "Tokenförbrukning för kunskapsgrafen",
+    "subtitle": "Tokens som klassificerare / länkare / skydd har förbrukat sedan {{since}}. Embeddings exkluderas.",
+    "loading": "Laddar...",
+    "empty": "Ingen tokenförbrukning registrerad i detta intervall.",
+    "colCategory": "Kategori",
+    "colModel": "Modell",
+    "colCalls": "Anrop",
+    "colPrompt": "Prompt-tokens",
+    "colCompletion": "Completion-tokens",
+    "total": "Totalt",
+    "category": {
+      "document_classifier": "Dokumentklassificerare",
+      "linker": "Graflänkare",
+      "adversarial_filter": "Adversariellt filter",
+      "extraction_guard": "Extraktionsskydd"
+    }
   },
   "documents": {
     "title": "Dokument",
@@ -193,7 +219,76 @@
     "mbzTitle": "Importera från Moodle-säkerhetskopia (.mbz)",
     "mbzDescription": "Ladda upp en säkerhetskopia av kursen. Endast material som just nu är synligt för studenter importeras. Dolda aktiviteter, dolda avsnitt och material som kräver grupp, genomförande, betyg eller profilvillkor hoppas över. Datumlåst material importeras när dagens datum ligger inom det tillåtna fönstret.",
     "mbzImporting": "Importerar...",
-    "mbzResult": "Importerade {{imported}} resurs(er), hoppade över {{skipped}} dolda."
+    "mbzResult": "Importerade {{imported}} resurs(er), hoppade över {{skipped}} dolda.",
+    "kindLabel": {
+      "lecture": "Föreläsning",
+      "lecture_transcript": "Föreläsnings-transkript",
+      "reading": "Läsmaterial",
+      "tutorial_exercise": "Övning",
+      "assignment_brief": "Uppgift",
+      "sample_solution": "Lösningsförslag",
+      "lab_brief": "Laboration",
+      "exam": "Tenta",
+      "syllabus": "Kursplan",
+      "unknown": "Okänd",
+      "unclassified": "Oklassificerad"
+    },
+    "kindConfidenceSubtext": "auto: {{pct}}%",
+    "kindLockedSubtext": "satt av lärare",
+    "kindDialogTitle": "Dokumentklassificering",
+    "kindDialogOverrideLabel": "Sätt typ manuellt",
+    "kindDialogOverrideHelp": "Väljer du ett värde här låses det; den automatiska klassificeraren kommer inte att skriva över det vid framtida körningar.",
+    "setKindAria": "Redigera klassificering för {{filename}}",
+    "setKindPlaceholder": "Välj typ",
+    "clearLock": "Lås upp",
+    "reclassify": "Klassificera om",
+    "reclassifying": "Klassificerar om...",
+    "reclassifySelected_one": "Klassificera om {{count}} dokument",
+    "reclassifySelected_other": "Klassificera om {{count}} dokument",
+    "reclassifyingSelected": "Klassificerar om...",
+    "reclassifySelectedTitle": "Kör klassificeraren igen på alla markerade olåsta dokument.",
+    "reclassifySelectedFailed": "Omklassificering misslyckades för {{failed}} av {{total}} dokument.",
+    "reclassifyLockedSkipped_one": "{{count}} låst dokument hoppades över",
+    "reclassifyLockedSkipped_other": "{{count}} låsta dokument hoppades över"
+  },
+  "knowledgeGraph": {
+    "title": "Kunskapsgraf",
+    "description": "Dokumenten i den här kursen som en graf: varje nod är ett dokument färgat efter sin klassificering, varje kant är en typad relation som länkaren har inferred (ett lösningsförslag som pekar på sin uppgift, två dokument som hör till samma vecka/modul, osv.). Hovra över en nod för att markera dess grannar; expandera listan nedan för alla kanter med motiveringar.",
+    "rebuild": "Bygg om grafen",
+    "rebuilding": "Bygger om...",
+    "rebuildTitle": "Kör tvärdokuments-länkaren igen. Använd efter att ha redigerat typer eller laddat upp nya dokument.",
+    "pending_one": "Länkar {{count}} par...",
+    "pending_other": "Länkar {{count}} par...",
+    "pendingTitle": "Länkaren bearbetar nyligen tillagt eller omklassificerat material. Grafen uppdateras automatiskt inom ~30 sekunder.",
+    "noDocuments": "Inga dokument i den här kursen ännu.",
+    "notBuiltYet": "Inga kanter har beräknats än.",
+    "pipelinePending": "Inga kanter än -- länkaren körs automatiskt några sekunder efter varje ingest. Vänta lite eller titta i serverloggarna.",
+    "noEdges": "Länkaren hittade inga säkra relationer mellan dokumenten i den här kursen.",
+    "edgeListTitle_one": "{{count}} kant (klicka för att expandera)",
+    "edgeListTitle_other": "{{count}} kanter (klicka för att expandera)",
+    "edgeKind": {
+      "solution_of": "är ett lösningsförslag till",
+      "part_of_unit": "ligger i samma modul som",
+      "prerequisite_of": "är en förkunskap för",
+      "applied_in": "tillämpas i"
+    },
+    "filters": {
+      "title": "Filter",
+      "kindLabel": "Dokumenttyp",
+      "relationLabel": "Relationstyp",
+      "showRejected": "Visa avvisade kanter",
+      "all": "Alla",
+      "reset": "Nollställ filter"
+    },
+    "export": "Exportera JSON",
+    "exportTitle": "Ladda ner noder och kanter som en JSON-fil (lämplig för import till Gephi / NetworkX).",
+    "reject": "Avvisa kant",
+    "rejectTitle": "Dölj kanten och hindra länkaren från att föreslå den igen. Avvisningen består över ombyggnader.",
+    "unreject": "Återställ kant",
+    "unrejectTitle": "Häv avvisningen så att länkaren får föreslå paret igen vid nästa ombyggnad.",
+    "rejectedSuffix": "(avvisad av lärare)",
+    "rejectedHidden_one": "{{count}} avvisad kant dold",
+    "rejectedHidden_other": "{{count}} avvisade kanter dolda"
   },
   "invite": {
     "title": "Inbjudningslänkar",

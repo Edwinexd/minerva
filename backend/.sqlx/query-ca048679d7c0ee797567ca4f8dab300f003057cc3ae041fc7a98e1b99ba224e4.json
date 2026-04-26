@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT src_doc_id, dst_doc_id, relation\n           FROM document_relations\n           WHERE course_id = $1\n             AND rejected_by_teacher = FALSE\n             AND (\n                 (relation = 'part_of_unit'\n                     AND (src_doc_id = ANY($2) OR dst_doc_id = ANY($2)))\n                 OR\n                 (relation = 'applied_in' AND src_doc_id = ANY($2))\n             )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "src_doc_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "dst_doc_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "relation",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ca048679d7c0ee797567ca4f8dab300f003057cc3ae041fc7a98e1b99ba224e4"
+}

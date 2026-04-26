@@ -19,6 +19,7 @@ const TAB_VALUES = [
   "members",
   "conversations",
   "documents",
+  "knowledge-graph",
   "invite",
   "lti",
   "canvas",
@@ -33,6 +34,7 @@ const TAB_LABEL_KEYS: Record<(typeof TAB_VALUES)[number], string> = {
   "members": "layout.tabs.members",
   "conversations": "layout.tabs.conversations",
   "documents": "layout.tabs.documents",
+  "knowledge-graph": "layout.tabs.knowledgeGraph",
   "invite": "layout.tabs.invite",
   "lti": "layout.tabs.lti",
   "canvas": "layout.tabs.canvas",
@@ -49,6 +51,7 @@ const TAB_ROUTES = {
   "members": "/teacher/courses/$courseId/members",
   "conversations": "/teacher/courses/$courseId/conversations",
   "documents": "/teacher/courses/$courseId/documents",
+  "knowledge-graph": "/teacher/courses/$courseId/knowledge-graph",
   "invite": "/teacher/courses/$courseId/invite",
   "lti": "/teacher/courses/$courseId/lti",
   "canvas": "/teacher/courses/$courseId/canvas",
@@ -78,9 +81,18 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
 
   useDocumentTitle(course ? tCommon("pageTitles.teacherCourse", { course: course.name }) : null)
 
-  const visibleTabValues = course?.my_role === "ta"
+  // Tab visibility is the union of role gating and feature-flag
+  // gating. KG-only tabs (knowledge-graph today) hide automatically
+  // when the course doesn't have the `course_kg` flag flipped on by
+  // an admin -- matches the backend, which 404s those endpoints in
+  // the same case.
+  const kgEnabled = course?.feature_flags?.course_kg === true
+  const baseTabs = course?.my_role === "ta"
     ? TAB_VALUES.filter((v) => !TA_HIDDEN_TABS.has(v))
     : TAB_VALUES
+  const visibleTabValues = baseTabs.filter(
+    (v) => kgEnabled || v !== "knowledge-graph",
+  )
   const validTabs = new Set<string>(visibleTabValues)
 
   const lastSegment = location.pathname.split("/").pop() || ""

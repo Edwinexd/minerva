@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"count!\"\n           FROM documents d\n           WHERE d.course_id = $1\n             AND d.classified_at IS NOT NULL\n             AND NOT EXISTS (\n                 SELECT 1 FROM linker_decisions ld\n                 WHERE ld.course_id = $1\n                   AND (ld.a_doc_id = d.id OR ld.b_doc_id = d.id)\n             )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e2efbad18c89604ec28b6cfd3346b622dd469d5804bb773f6c5aa9538d012764"
+}

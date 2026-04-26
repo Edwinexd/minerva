@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO relink_queue (course_id, first_marked_at, due_at)\n        VALUES ($1, NOW(), NOW())\n        ON CONFLICT (course_id) DO UPDATE\n            SET due_at = LEAST(relink_queue.due_at, NOW())\n        RETURNING course_id, first_marked_at, due_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "first_marked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "due_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3023aba4925e271a7b57c87bbc0dc685752bbd0ea389c12cfc889e9f618487ea"
+}

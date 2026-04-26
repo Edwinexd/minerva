@@ -1,7 +1,7 @@
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { allConversationsQuery, conversationDetailQuery, courseFeedbackStatsQuery, popularTopicsQuery } from "@/lib/queries"
+import { allConversationsQuery, conversationDetailQuery, conversationFlagKindsQuery, courseFeedbackStatsQuery, popularTopicsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,7 +26,7 @@ import {
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import React, { useMemo, useState } from "react"
-import type { ConversationWithUser, MessageFeedback, TeacherNote } from "@/lib/types"
+import type { ConversationFlag, ConversationWithUser, MessageFeedback, TeacherNote } from "@/lib/types"
 import { FEEDBACK_CATEGORIES } from "@/lib/types"
 
 function useCategoryLabel() {
@@ -44,6 +44,10 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   const { data: conversations, isLoading } = useQuery(allConversationsQuery(courseId))
   const { data: topics, isLoading: topicsLoading } = useQuery(popularTopicsQuery(courseId))
   const { data: feedbackStats } = useQuery(courseFeedbackStatsQuery(courseId))
+  // Flag-kind map keyed by conversation id. Drives the per-row
+  // "extraction guard tripped" badge in the conversation list. Same
+  // shape as the backend `flag_kinds_by_conversation` returns.
+  const { data: flagKinds } = useQuery(conversationFlagKindsQuery(courseId))
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<"all" | "flagged">("all")
@@ -69,6 +73,22 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
     [activeTopic],
   )
 
+  // A conversation lands in the "Needs Review" tab when either
+  // signal is true:
+  //   1. Unaddressed student downvotes (existing behaviour).
+  //   2. The extraction guard fired in a way that warrants a
+  //      teacher's attention -- i.e. the constraint activated, or
+  //      the assistant text got rewritten. Other guard flags
+  //      (intent_detected, engagement_refused, constraint_lifted)
+  //      are trace events that don't themselves require review.
+  const needsReview = (convId: string): boolean => {
+    const kinds = flagKinds?.[convId] || []
+    return (
+      kinds.includes("extraction_constraint_activated") ||
+      kinds.includes("extraction_rewrote")
+    )
+  }
+
   const displayConversations = useMemo(() => {
     let list = topicConvIds
       ? (conversations || []).filter((c) => topicConvIds.has(c.id))
@@ -76,15 +96,28 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
 
     if (activeTab === "flagged") {
       list = list
-        .filter((c) => (c.unaddressed_down ?? 0) > 0)
-        .sort((a, b) => (b.unaddressed_down ?? 0) - (a.unaddressed_down ?? 0))
+        .filter((c) => (c.unaddressed_down ?? 0) > 0 || needsReview(c.id))
+        // Sort: extraction-flagged conversations float to the top
+        // (those are the ones that need a fresh teacher look),
+        // then by unaddressed downvote count desc for the rest.
+        .sort((a, b) => {
+          const ax = needsReview(a.id) ? 1 : 0
+          const bx = needsReview(b.id) ? 1 : 0
+          if (ax !== bx) return bx - ax
+          return (b.unaddressed_down ?? 0) - (a.unaddressed_down ?? 0)
+        })
     }
     return list
-  }, [conversations, topicConvIds, activeTab])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations, topicConvIds, activeTab, flagKinds])
 
   const flaggedCount = useMemo(
-    () => (conversations || []).filter((c) => (c.unaddressed_down ?? 0) > 0).length,
-    [conversations],
+    () =>
+      (conversations || []).filter(
+        (c) => (c.unaddressed_down ?? 0) > 0 || needsReview(c.id),
+      ).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [conversations, flagKinds],
   )
 
   const grouped = new Map<string, { label: string; conversations: ConversationWithUser[] }>()
@@ -278,6 +311,37 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
                                 {t("conversations.helpfulBadge", { count: conv.feedback_up })}
                               </Badge>
                             )}
+                            {/* Extraction-guard list-view badges.
+                                The append-only flag log emits
+                                five kinds per lifecycle:
+                                  - extraction_intent_detected
+                                  - extraction_constraint_activated
+                                  - extraction_engagement_refused
+                                  - extraction_rewrote
+                                  - extraction_constraint_lifted
+                                For triage we badge only the two
+                                that signal *something happened
+                                that warrants a teacher's attention*
+                                (constraint activated, output got
+                                rewritten). The other three are
+                                trace events that show the full
+                                lifecycle on the detail page but
+                                would be noise here. */}
+                            {(flagKinds?.[conv.id] || [])
+                              .filter(
+                                (k) =>
+                                  k === "extraction_constraint_activated" ||
+                                  k === "extraction_rewrote",
+                              )
+                              .map((kind) => (
+                                <Badge
+                                  key={kind}
+                                  variant="outline"
+                                  className="shrink-0 border-amber-300 text-amber-700 dark:border-amber-600 dark:text-amber-400 text-xs"
+                                >
+                                  {t(`conversations.flagKind.${kind}`, kind)}
+                                </Badge>
+                              ))}
                           </button>
                           <div className="flex items-center gap-2 shrink-0 ml-2">
                             <span className="text-xs text-muted-foreground">
@@ -338,6 +402,56 @@ function FeedbackBadges({ feedback }: { feedback: MessageFeedback[] }) {
   )
 }
 
+/**
+ * Per-turn extraction-guard flag display. Renders a coloured
+ * badge with a teacher-readable label and the classifier's
+ * rationale verbatim. Title-attribute carries the raw metadata
+ * JSON for power users who want the full payload.
+ *
+ * Colour coding mirrors the lifecycle:
+ *   - amber: high-signal events that warrant attention --
+ *     constraint just activated, or the assistant text was
+ *     rewritten because the output check tripped.
+ *   - green: a lift event (engagement was detected and the
+ *     constraint relaxed -- positive outcome).
+ *   - muted/neutral: trace events (intent classifier said yes,
+ *     student refused engagement). Useful for the lifecycle
+ *     timeline but not themselves a "look at this" signal.
+ */
+function ConversationFlagDisplay({ flag }: { flag: ConversationFlag }) {
+  const { t } = useTranslation("teacher")
+  const colour = (() => {
+    switch (flag.flag) {
+      case "extraction_constraint_lifted":
+        return "border-green-300 text-green-700 dark:border-green-700 dark:text-green-300"
+      case "extraction_constraint_activated":
+      case "extraction_rewrote":
+        return "border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+      case "extraction_intent_detected":
+      case "extraction_engagement_refused":
+      default:
+        return "border-muted-foreground/40 text-muted-foreground"
+    }
+  })()
+  const label = t(`conversations.flagKind.${flag.flag}`, flag.flag)
+  return (
+    <div className="mt-1.5 flex flex-wrap items-start gap-2">
+      <Badge
+        variant="outline"
+        className={`text-xs ${colour}`}
+        title={flag.metadata ? JSON.stringify(flag.metadata, null, 2) : undefined}
+      >
+        {label}
+      </Badge>
+      {flag.rationale && (
+        <span className="text-xs text-muted-foreground italic">
+          {flag.rationale}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function ConversationExpanded({ courseId, conversationId }: { courseId: string; conversationId: string }) {
   const { data, isLoading } = useQuery(conversationDetailQuery(courseId, conversationId))
   const { t } = useTranslation("teacher")
@@ -391,6 +505,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
   const messages = data?.messages || []
   const notes = data?.notes || []
   const feedback = data?.feedback || []
+  const flags = data?.flags || []
 
   const notesByMessage = new Map<string, TeacherNote[]>()
   const conversationNotes: TeacherNote[] = []
@@ -409,6 +524,26 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
     const existing = feedbackByMessage.get(f.message_id) || []
     existing.push(f)
     feedbackByMessage.set(f.message_id, existing)
+  }
+
+  // Walk the message list once to assign each message its 1-based
+  // turn index (= count of user messages up to and including this
+  // one). Backend flags carry the same index, so this gives us a
+  // direct join between flags and the assistant reply that closed
+  // the turn -- which is the message the badge attaches to in the
+  // UI.
+  const turnByMessageId = new Map<string, number>()
+  let turnCounter = 0
+  for (const m of messages) {
+    if (m.role === "user") turnCounter++
+    turnByMessageId.set(m.id, turnCounter)
+  }
+  const flagsByTurn = new Map<number, ConversationFlag[]>()
+  for (const f of flags) {
+    if (f.turn_index === null || f.turn_index === undefined) continue
+    const existing = flagsByTurn.get(f.turn_index) || []
+    existing.push(f)
+    flagsByTurn.set(f.turn_index, existing)
   }
 
   const handleAddNote = (messageId?: string) => {
@@ -450,6 +585,16 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
       {messages.map((msg) => {
         const msgFeedback = feedbackByMessage.get(msg.id) || []
         const hasDownFeedback = msgFeedback.some((f) => f.rating === "down")
+        // Flags align to the user-message-indexed turn. We attach
+        // them to the assistant reply that closed the turn (the
+        // visible "this answer was modified" UX) -- showing them
+        // on the user message would be wrong UX (the user message
+        // wasn't itself altered).
+        const turnIdx = turnByMessageId.get(msg.id)
+        const turnFlags =
+          msg.role === "assistant" && turnIdx !== undefined
+            ? flagsByTurn.get(turnIdx) || []
+            : []
         return (
           <React.Fragment key={msg.id}>
             <div
@@ -470,6 +615,9 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
               {msg.role === "assistant" && msgFeedback.length > 0 && (
                 <FeedbackBadges feedback={msgFeedback} />
               )}
+              {turnFlags.map((f) => (
+                <ConversationFlagDisplay key={f.id} flag={f} />
+              ))}
               <div className="flex items-center gap-3 mt-1.5">
                 <button
                   className="text-xs text-muted-foreground hover:text-foreground underline"

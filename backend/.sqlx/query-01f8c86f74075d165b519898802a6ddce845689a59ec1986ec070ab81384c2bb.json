@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            COUNT(*) FILTER (WHERE status = 'ready') AS \"total_ready!\",\n            COUNT(*) FILTER (WHERE status = 'ready' AND kind IS NOT NULL) AS \"classified!\",\n            COUNT(*) FILTER (WHERE status = 'ready' AND kind IS NULL AND kind_locked_by_teacher = FALSE) AS \"unclassified!\",\n            COUNT(*) FILTER (WHERE kind_locked_by_teacher = TRUE) AS \"locked_by_teacher!\"\n        FROM documents\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total_ready!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "classified!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "unclassified!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "locked_by_teacher!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "01f8c86f74075d165b519898802a6ddce845689a59ec1986ec070ab81384c2bb"
+}

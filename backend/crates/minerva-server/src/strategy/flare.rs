@@ -86,8 +86,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let http_client = reqwest::Client::new();
     let collection_name = format!("course_{}", ctx.course_id);
 
-    // Initial retrieval using user's question (per the paper)
-    let initial_chunks = common::rag_lookup(
+    // Initial retrieval using user's question (per the paper).
+    // Adversarial filter runs on the initial chunks before they enter
+    // the loop's accumulator; mid-loop retrievals get the same pass
+    // (see retrieve_more closure below).
+    let initial_chunks_raw = common::rag_lookup(
         &http_client,
         &ctx.openai_api_key,
         &ctx.fastembed,
@@ -100,11 +103,87 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.embedding_model,
     )
     .await;
+    // Adversarial filter is part of the KG bundle (defence in depth on
+    // top of per-doc kind classification). Skip when KG is gated off.
+    let mut initial_chunks = if ctx.kg_enabled {
+        crate::classification::adversarial::filter_solution_chunks(
+            &http_client,
+            &ctx.cerebras_api_key,
+            &ctx.db,
+            ctx.course_id,
+            initial_chunks_raw,
+        )
+        .await
+    } else {
+        initial_chunks_raw
+    };
+
+    // Graph-aware enrichment: pull representative chunks from each
+    // top hit's KG partners (part_of_unit + applied_in dst). Same
+    // intent as parallel.rs / simple.rs -- the graph fills gaps the
+    // embedding search missed (a lecture is in context, the graph
+    // adds its tutorial / section summary). FLARE consumes the
+    // enriched seed AND graph-expands every mid-stream retrieval
+    // below, so the loop sees graph context throughout, not just
+    // on turn 1.
+    if ctx.kg_enabled {
+        let extra = common::expand_context_via_graph(
+            &ctx.db,
+            &ctx.qdrant,
+            &ctx.fastembed,
+            &http_client,
+            &ctx.openai_api_key,
+            ctx.course_id,
+            &collection_name,
+            &ctx.embedding_provider,
+            &ctx.embedding_model,
+            &ctx.user_content,
+            &initial_chunks,
+        )
+        .await;
+        initial_chunks.extend(extra);
+    }
 
     // Everything below is in a separate function so integration tests can
     // drive the outer loop with scripted Cerebras responses + a mocked
     // retrieval callback, without having to bring up a real Postgres,
     // Qdrant, or FastEmbed stack.
+    let unclassified_doc_ids = if ctx.kg_enabled {
+        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
+            .await
+            .unwrap_or_default()
+    } else {
+        std::collections::HashSet::new()
+    };
+    // Extraction guard evaluation: runs before we enter the loop.
+    // We feed it a *snapshot* partition of the initial chunks --
+    // mid-loop FLARE retrievals can drag in more assignment
+    // material later, but for the per-turn intent classifier +
+    // multi-turn proximity check the seed view is what matters: it
+    // captures what the student's question matched against, which
+    // is exactly the signal the guard needs. The output check still
+    // runs against the final assistant text after the loop
+    // completes, so any late-arriving solution material in the
+    // reply itself is still caught. None when the feature flag is
+    // off; Some(_) otherwise.
+    let guard_partition = common::partition_chunks(
+        initial_chunks.clone(),
+        &unclassified_doc_ids,
+        ctx.kg_enabled,
+    );
+    let guard_decision = super::extraction_guard::evaluate_for_turn(
+        &ctx.db,
+        &http_client,
+        &ctx.cerebras_api_key,
+        ctx.course_id,
+        ctx.conversation_id,
+        &ctx.history,
+        &ctx.user_content,
+        &guard_partition.signals,
+        &guard_partition.context,
+    )
+    .await;
+
     let loop_cfg = RunLoopConfig {
         course_name: &ctx.course_name,
         custom_prompt: &ctx.custom_prompt,
@@ -115,18 +194,24 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         cerebras_api_key: &ctx.cerebras_api_key,
         max_chunks: ctx.max_chunks,
         daily_token_limit: ctx.daily_token_limit,
+        unclassified_doc_ids,
+        kg_enabled: ctx.kg_enabled,
     };
     let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
     let output = run_loop(&http_client, &loop_cfg, initial_chunks, &tx, |sentence| {
         let http_client = http_client.clone();
         let openai_key = ctx.openai_api_key.clone();
+        let cerebras_key = ctx.cerebras_api_key.clone();
         let fastembed = ctx.fastembed.clone();
         let qdrant = ctx.qdrant.clone();
+        let db = ctx.db.clone();
         let collection_name = collection_name.clone();
         let embedding_provider = ctx.embedding_provider.clone();
         let embedding_model = ctx.embedding_model.clone();
+        let course_id = ctx.course_id;
+        let kg_enabled = ctx.kg_enabled;
         async move {
-            flare_retrieve(
+            let raw = flare_retrieve(
                 &http_client,
                 &openai_key,
                 &fastembed,
@@ -138,7 +223,45 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 &embedding_provider,
                 &embedding_model,
             )
-            .await
+            .await;
+            // Mid-stream adversarial filter: same KG gate as the
+            // initial-chunk pass. Disabled courses bypass it.
+            let mut filtered = if kg_enabled {
+                crate::classification::adversarial::filter_solution_chunks(
+                    &http_client,
+                    &cerebras_key,
+                    &db,
+                    course_id,
+                    raw,
+                )
+                .await
+            } else {
+                raw
+            };
+            // Graph expansion on the mid-stream batch too -- a
+            // FLARE retrieval is itself a small RAG lookup, so we
+            // enrich it the same way as the initial seed. Without
+            // this, only the first round of context benefits from
+            // the graph; subsequent rounds would shrink back to
+            // bare embedding hits as the model drifts off topic.
+            if kg_enabled {
+                let extra = common::expand_context_via_graph(
+                    &db,
+                    &qdrant,
+                    &fastembed,
+                    &http_client,
+                    &openai_key,
+                    course_id,
+                    &collection_name,
+                    &embedding_provider,
+                    &embedding_model,
+                    &sentence,
+                    &filtered,
+                )
+                .await;
+                filtered.extend(extra);
+            }
+            filtered
         }
     })
     .await;
@@ -161,10 +284,28 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         serde_json::to_value(&client_chunks).ok()
     };
 
+    // Post-generation extraction-guard intercept. No-op when the
+    // guard was disabled or the constraint isn't active. When it
+    // fires: rewrites the assistant reply into a Socratic version,
+    // emits an SSE `rewrite` event so the frontend swaps the
+    // displayed message, and logs a `conversation_flag` row.
+    let final_text = super::extraction_guard::intercept_reply(
+        &ctx.db,
+        &http_client,
+        &ctx.cerebras_api_key,
+        ctx.course_id,
+        ctx.conversation_id,
+        &guard_decision,
+        &ctx.user_content,
+        &output.full_text,
+        &tx,
+    )
+    .await;
+
     common::finalize(
         &ctx,
         &tx,
-        &output.full_text,
+        &final_text,
         chunks_json.as_ref(),
         output.total_prompt_tokens,
         output.total_completion_tokens,
@@ -188,6 +329,15 @@ struct RunLoopConfig<'a> {
     cerebras_api_key: &'a str,
     max_chunks: i32,
     daily_token_limit: i64,
+    /// Doc IDs whose classifier hasn't run yet. Their chunks are held
+    /// out of context this turn (defensive -- better a slightly worse
+    /// answer than risk leaking unclassified material). Tests pass an
+    /// empty set; production looks it up once before run_loop.
+    unclassified_doc_ids: std::collections::HashSet<String>,
+    /// Mirror of `GenerationContext::kg_enabled` -- forwarded so the
+    /// inner loop's `partition_chunks` and adversarial-filter calls
+    /// honour the gate without re-resolving the flag mid-stream.
+    kg_enabled: bool,
 }
 
 /// Final state of a FLARE run. Returned by `run_loop` so the caller can
@@ -313,7 +463,20 @@ where
         iterations += 1;
         let iteration_start_text_len = full_text.len();
 
-        let system = common::build_system_prompt(cfg.course_name, cfg.custom_prompt, &all_chunks);
+        // Kind-aware partition every iteration: as `all_chunks` grows
+        // mid-loop via FLARE retrievals, signal chunks may show up that
+        // weren't there at iteration 0. Cheap -- pure in-memory work.
+        let rag = common::partition_chunks(
+            all_chunks.clone(),
+            &cfg.unclassified_doc_ids,
+            cfg.kg_enabled,
+        );
+        let system = common::build_system_prompt_with_signals(
+            cfg.course_name,
+            cfg.custom_prompt,
+            &rag.context,
+            &rag.signals,
+        );
         let mut messages = common::build_chat_messages(&system, cfg.history);
 
         if !full_text.is_empty() {
@@ -981,6 +1144,8 @@ mod tests {
             document_id: doc.to_string(),
             filename: name.to_string(),
             text: text.to_string(),
+            kind: None,
+            score: 0.0,
         }
     }
 
@@ -1128,7 +1293,7 @@ mod tests {
 
     #[test]
     fn extract_headings_recognizes_bold_pseudo_heading() {
-        let text = "**PROG2 VT26 – Semester project**\n\nBody content.";
+        let text = "**PROG2 VT26 -- Semester project**\n\nBody content.";
         let out = extract_normalized_headings(text);
         // The en-dash is punctuation, collapsed to space.
         assert_eq!(out, vec!["prog2 vt26 semester project"]);
@@ -1202,8 +1367,8 @@ mod tests {
 
     #[test]
     fn heading_repeat_bold_pseudo_heading_exact_match() {
-        let prior = "**PROG2 VT26 – Semester project**\n\nBody.";
-        let new = "Some continuation...\n\n**PROG2 VT26 – Semester project**\n\nMore body.";
+        let prior = "**PROG2 VT26 -- Semester project**\n\nBody.";
+        let new = "Some continuation...\n\n**PROG2 VT26 -- Semester project**\n\nMore body.";
         assert!(detect_exact_heading_repeat(prior, new).is_some());
     }
 
@@ -2036,6 +2201,8 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0, // unlimited, so we don't short-circuit on token cap
+            unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let http = reqwest::Client::new();
@@ -2099,6 +2266,8 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 500,
+            unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let http = reqwest::Client::new();
@@ -2162,6 +2331,8 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let http = reqwest::Client::new();
@@ -2242,6 +2413,8 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let retrieve_count = StdArc::new(AtomicUsize::new(0));
@@ -2261,6 +2434,8 @@ mod loop_regression_tests {
                     document_id: "added".to_string(),
                     filename: "new.pdf".to_string(),
                     text: "Freshly retrieved context for the low-confidence sentence.".to_string(),
+                    kind: None,
+                    score: 0.0,
                 }]
             }
         };
@@ -2316,6 +2491,8 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let retrieve_count = StdArc::new(AtomicUsize::new(0));
@@ -2387,6 +2564,8 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 100, // plenty of room
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let call = StdArc::new(AtomicUsize::new(0));
@@ -2399,6 +2578,8 @@ mod loop_regression_tests {
                     document_id: format!("doc{}", n),
                     filename: format!("f{}.pdf", n),
                     text: format!("Unique retrieved text window number {}", n),
+                    kind: None,
+                    score: 0.0,
                 }]
             }
         };
@@ -2512,6 +2693,8 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let http = reqwest::Client::new();
@@ -2597,6 +2780,8 @@ mod loop_regression_tests {
             cerebras_api_key: &cerebras_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
+            unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let http = reqwest::Client::new();

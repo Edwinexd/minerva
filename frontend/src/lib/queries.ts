@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -88,6 +88,21 @@ export const courseFeedbackStatsQuery = (courseId: string) =>
     queryFn: () => api.get<CourseFeedbackStats>(`/courses/${courseId}/conversations/feedback-stats`),
   })
 
+/**
+ * Per-conversation flag-kind map for the teacher conversation list.
+ * Returns `{ conversationId: ["extraction_attempt", ...] }` so each
+ * row can render badges without fetching the full flag log.
+ * Teacher-only; backend rejects with 403 otherwise.
+ */
+export const conversationFlagKindsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "conversations", "flag-kinds"],
+    queryFn: () =>
+      api.get<Record<string, string[]>>(
+        `/courses/${courseId}/conversations/flag-kinds`,
+      ),
+  })
+
 export const conversationDetailQuery = (courseId: string, conversationId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", conversationId],
@@ -144,6 +159,20 @@ export const canvasFilesQuery = (courseId: string, connectionId: string) =>
       api.get<CanvasItemsResponse>(`/courses/${courseId}/canvas/${connectionId}/files`),
   })
 
+/**
+ * Per-course KG / extraction-guard token spend, broken out per
+ * (category, model) for the last 30 days. Distinct from the
+ * existing per-student chat-token tracking -- this is the cost the
+ * course itself burned on classifier / linker / adversarial filter
+ * / extraction guard. Teacher / owner / admin only.
+ */
+export const courseKgTokenUsageQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "kg-token-usage"],
+    queryFn: () =>
+      api.get<KgTokenUsage>(`/courses/${courseId}/kg-token-usage`),
+  })
+
 export const adminUsersQuery = queryOptions({
   queryKey: ["admin", "users"],
   queryFn: () => api.get<AdminUser[]>("/admin/users"),
@@ -164,6 +193,82 @@ export const adminSystemMetricsQuery = queryOptions({
   queryFn: () => api.get<SystemMetrics>("/admin/system"),
   refetchInterval: 30_000,
 })
+
+export interface BackfillProgress {
+  started_at: string
+  total: number
+  ok: number
+  errors: number
+  skipped: number
+  finished: boolean
+}
+
+export interface ClassificationStats {
+  total_ready: number
+  classified: number
+  unclassified: number
+  locked_by_teacher: number
+  /// `null` until the admin has kicked off at least one backfill since
+  /// the last server restart. While a backfill is running the polling
+  /// /admin/classification-stats endpoint returns updated counters
+  /// every 5s so the UI's progress bar ticks live.
+  backfill: BackfillProgress | null
+}
+
+export const adminClassificationStatsQuery = queryOptions({
+  queryKey: ["admin", "classification-stats"],
+  queryFn: () => api.get<ClassificationStats>("/admin/classification-stats"),
+  // While a backfill is running the unclassified counter ticks down
+  // doc-by-doc; refresh often enough that the operator sees progress.
+  refetchInterval: 5_000,
+})
+
+// ── Course knowledge graph ─────────────────────────────────────────
+
+export interface KnowledgeGraphNode {
+  id: string
+  filename: string
+  kind: string | null
+  kind_confidence: number | null
+  kind_locked_by_teacher: boolean
+  chunk_count: number | null
+}
+
+export interface KnowledgeGraphEdge {
+  /// Stable identifier; addressable as
+  /// `/courses/{courseId}/documents/knowledge-graph/edges/{id}/reject`
+  /// for per-edge teacher veto + un-veto.
+  id: string
+  src_id: string
+  dst_id: string
+  relation: "solution_of" | "part_of_unit" | "prerequisite_of" | "applied_in"
+  confidence: number
+  rationale: string | null
+  rejected_by_teacher: boolean
+}
+
+export interface KnowledgeGraph {
+  nodes: KnowledgeGraphNode[]
+  edges: KnowledgeGraphEdge[]
+  edges_computed: boolean
+  /// Cached pair decisions whose endpoints have been re-classified
+  /// since -- the linker will re-evaluate these on its next sweep.
+  pending_pairs: number
+  /// Classified docs that have never appeared in any cached pair
+  /// yet (a brand-new upload between two relink sweeps).
+  new_doc_count: number
+}
+
+export const courseKnowledgeGraphQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "knowledge-graph"],
+    queryFn: () =>
+      api.get<KnowledgeGraph>(`/courses/${courseId}/documents/knowledge-graph`),
+    /// Poll while the linker's catching up; the pending indicators
+    /// flip back to 0 once the next sweep tick lands and the
+    /// teacher sees the graph stabilise without manually refreshing.
+    refetchInterval: 8_000,
+  })
 
 export const adminRoleRulesQuery = queryOptions({
   queryKey: ["admin", "role-rules"],

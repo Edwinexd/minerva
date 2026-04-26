@@ -1,6 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { courseQuery, modelsQuery, embeddingBenchmarksQuery } from "@/lib/queries"
+import {
+  courseQuery,
+  modelsQuery,
+  embeddingBenchmarksQuery,
+  courseKgTokenUsageQuery,
+} from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
@@ -30,7 +35,119 @@ export function ConfigPage({ useParams }: { useParams: () => { courseId: string 
   const { courseId } = useParams()
   const { data: course } = useQuery(courseQuery(courseId))
   if (!course) return null
-  return <CourseConfigForm course={course} />
+  return (
+    <div className="space-y-6">
+      <CourseConfigForm course={course} />
+      <KgTokenUsageCard courseId={courseId} />
+    </div>
+  )
+}
+
+/**
+ * Per-course KG / extraction-guard token-spend card. One row per
+ * (category, model) over the last 30 days, plus a totals line.
+ * No spending limits enforced -- this is observability only --
+ * but the data feeds straight from `course_token_usage`, so once
+ * we add limits it'll be the same numbers shown here.
+ */
+function KgTokenUsageCard({ courseId }: { courseId: string }) {
+  const { t } = useTranslation("teacher")
+  const { data, isLoading } = useQuery(courseKgTokenUsageQuery(courseId))
+  if (isLoading || !data) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("kgTokenUsage.title")}</CardTitle>
+          <CardDescription>{t("kgTokenUsage.loading")}</CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
+
+  const totalPrompt = data.rows.reduce((s, r) => s + r.prompt_tokens, 0)
+  const totalCompletion = data.rows.reduce((s, r) => s + r.completion_tokens, 0)
+  const totalCalls = data.rows.reduce((s, r) => s + r.call_count, 0)
+  const sinceDate = new Date(data.since)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("kgTokenUsage.title")}</CardTitle>
+        <CardDescription>
+          {t("kgTokenUsage.subtitle", {
+            since: sinceDate.toISOString().slice(0, 10),
+          })}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {data.rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t("kgTokenUsage.empty")}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b text-muted-foreground">
+                  <th className="py-1 pr-3 font-medium">
+                    {t("kgTokenUsage.colCategory")}
+                  </th>
+                  <th className="py-1 pr-3 font-medium">
+                    {t("kgTokenUsage.colModel")}
+                  </th>
+                  <th className="py-1 pr-3 font-medium text-right">
+                    {t("kgTokenUsage.colCalls")}
+                  </th>
+                  <th className="py-1 pr-3 font-medium text-right">
+                    {t("kgTokenUsage.colPrompt")}
+                  </th>
+                  <th className="py-1 font-medium text-right">
+                    {t("kgTokenUsage.colCompletion")}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.map((r) => (
+                  <tr
+                    key={`${r.category}-${r.model}`}
+                    className="border-b last:border-b-0"
+                  >
+                    <td className="py-1 pr-3">
+                      {t(`kgTokenUsage.category.${r.category}`, r.category)}
+                    </td>
+                    <td className="py-1 pr-3 font-mono text-xs">{r.model}</td>
+                    <td className="py-1 pr-3 text-right tabular-nums">
+                      {r.call_count.toLocaleString()}
+                    </td>
+                    <td className="py-1 pr-3 text-right tabular-nums">
+                      {r.prompt_tokens.toLocaleString()}
+                    </td>
+                    <td className="py-1 text-right tabular-nums">
+                      {r.completion_tokens.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="font-medium">
+                  <td className="py-1 pr-3" colSpan={2}>
+                    {t("kgTokenUsage.total")}
+                  </td>
+                  <td className="py-1 pr-3 text-right tabular-nums">
+                    {totalCalls.toLocaleString()}
+                  </td>
+                  <td className="py-1 pr-3 text-right tabular-nums">
+                    {totalPrompt.toLocaleString()}
+                  </td>
+                  <td className="py-1 text-right tabular-nums">
+                    {totalCompletion.toLocaleString()}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 function CourseConfigForm({ course }: { course: Course }) {

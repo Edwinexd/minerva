@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO linker_decisions\n            (course_id, a_doc_id, b_doc_id, decided_at,\n             a_classified_at, b_classified_at, relation, confidence)\n        VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7)\n        ON CONFLICT (a_doc_id, b_doc_id) DO UPDATE\n            SET decided_at = NOW(),\n                a_classified_at = EXCLUDED.a_classified_at,\n                b_classified_at = EXCLUDED.b_classified_at,\n                relation = EXCLUDED.relation,\n                confidence = EXCLUDED.confidence",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Float4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bd7e0bd7a92ca75f831eeee53821d23c8b2b05bfc0d7d815f228b17ecf39b64d"
+}

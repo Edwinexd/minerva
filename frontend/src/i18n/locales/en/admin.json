@@ -152,6 +152,7 @@
       "status": "Status",
       "tokenLimit": "Token limit/student/day",
       "created": "Created",
+      "features": "Features",
       "settings": "Settings"
     },
     "status": {
@@ -160,7 +161,24 @@
     },
     "tokenLimitUnlimited": "unlimited",
     "settingsLink": "Settings",
-    "empty": "No courses match the filter."
+    "empty": "No courses match the filter.",
+    "featuresButton": "Features ({{enabled}}/{{total}})",
+    "featuresButtonShort": "Features",
+    "featuresButtonTitle": "Toggle which experimental / opt-in features are enabled for this course.",
+    "featuresDialogTitle": "Course features",
+    "featuresDialogDescription": "Per-course feature flags for {{course}}. Changes apply immediately; flipping a flag off reverts the course to the global default for that flag.",
+    "featuresDialogClose": "Close",
+    "featureOverridden": "course override",
+    "featureInherited": "default",
+    "featureRevertToDefault": "Revert to global default",
+    "featureFlagLabel": {
+      "course_kg": "Course knowledge graph",
+      "extraction_guard": "Extraction guard"
+    },
+    "featureFlagDescription": {
+      "course_kg": "Per-document kind classification, cross-document linker, knowledge-graph viewer, assignment-refusal addendum, and per-chunk adversarial filter. Off by default while we calibrate.",
+      "extraction_guard": "Pre-generation intent classifier + output-side solution detector + Socratic rewriter, plus multi-turn assignment-proximity tracking. Catches the 'student pasted assignment, asks for code' case and intercepts the response with a Socratic question. Independent of course_kg so admins can pilot separately."
+    }
   },
   "rules": {
     "title": "Role Auto-Promotion Rules",
@@ -271,6 +289,26 @@
         "table": "Table",
         "rowsApprox": "Rows (approx)"
       }
+    },
+    "classifications": {
+      "title": "Document classifications",
+      "description": "Per-document kinds drive what the chat path will and won't paste into the prompt context. Sample solutions are excluded entirely; assignment briefs trigger a refusal addendum. Newly uploaded docs are classified automatically; this card lets you backfill any docs that landed before the classifier was wired in (or that errored on first try).",
+      "totalReady": "Ready docs",
+      "classified": "Classified",
+      "unclassified": "Unclassified",
+      "lockedByTeacher": "Locked by teacher",
+      "backfillButton_one": "Backfill {{count}} doc",
+      "backfillButton_other": "Backfill {{count}} docs",
+      "backfilling": "Queueing...",
+      "backfillNoneNeeded": "Nothing to backfill",
+      "backfillTitle": "Run the classifier on every unclassified, unlocked, ready document. Each click queues up to 5,000 docs.",
+      "lastQueued_one": "Queued {{count}} doc; status updates as it runs.",
+      "lastQueued_other": "Queued {{count}} docs; status updates as it runs.",
+      "backfillRunning": "Backfilling: {{done}} of {{total}} done",
+      "backfillFinished": "Done: {{ok}} ok, {{errors}} errors, {{skipped}} skipped",
+      "backfillErrors_one": "{{count}} document failed; check server logs.",
+      "backfillErrors_other": "{{count}} documents failed; check server logs.",
+      "note": "Each click queues up to 5,000 docs. For larger backlogs, click again once the count has come down."
     }
   }
 }

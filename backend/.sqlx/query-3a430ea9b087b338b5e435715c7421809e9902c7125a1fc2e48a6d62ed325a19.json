@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rejected_edge_pairs\n            (course_id, src_doc_id, dst_doc_id, relation, rejected_by)\n        VALUES ($1, $2, $3, $4, $5)\n        ON CONFLICT (src_doc_id, dst_doc_id, relation) DO UPDATE\n            SET rejected_at = NOW(),\n                rejected_by = EXCLUDED.rejected_by",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3a430ea9b087b338b5e435715c7421809e9902c7125a1fc2e48a6d62ed325a19"
+}

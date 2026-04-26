@@ -72,10 +72,24 @@ struct CourseResponse {
     /// Viewer's course_member role ("teacher"|"ta"|"student"), or None if
     /// viewer is admin-only / not a member. Lets the frontend gate UI tabs.
     my_role: Option<String>,
+    /// Per-course feature-flag state, resolved through the same path
+    /// the runtime uses (course-scoped row > global row > compiled-in
+    /// default). Frontend reads this to decide whether to show
+    /// KG-related tabs / badges / dialogs.
+    feature_flags: CourseFeatureFlagsView,
+}
+
+#[derive(Serialize, Default)]
+struct CourseFeatureFlagsView {
+    course_kg: bool,
 }
 
 impl CourseResponse {
-    fn from_row(row: minerva_db::queries::courses::CourseRow, my_role: Option<String>) -> Self {
+    fn from_row(
+        row: minerva_db::queries::courses::CourseRow,
+        my_role: Option<String>,
+        feature_flags: CourseFeatureFlagsView,
+    ) -> Self {
         Self {
             id: row.id,
             name: row.name,
@@ -95,7 +109,17 @@ impl CourseResponse {
             created_at: row.created_at,
             updated_at: row.updated_at,
             my_role,
+            feature_flags,
         }
+    }
+}
+
+/// Resolve every course-scoped feature flag for the response. Single
+/// place to extend when new flags land -- callers don't have to know
+/// the flag list.
+async fn resolve_course_flags(db: &sqlx::PgPool, course_id: Uuid) -> CourseFeatureFlagsView {
+    CourseFeatureFlagsView {
+        course_kg: crate::feature_flags::course_kg_enabled(db, course_id).await,
     }
 }
 
@@ -117,7 +141,8 @@ async fn list_courses(
     for row in rows {
         let my_role =
             minerva_db::queries::courses::get_member_role(&state.db, row.id, user.id).await?;
-        out.push(CourseResponse::from_row(row, my_role));
+        let flags = resolve_course_flags(&state.db, row.id).await;
+        out.push(CourseResponse::from_row(row, my_role, flags));
     }
     Ok(Json(out))
 }
@@ -147,7 +172,12 @@ async fn create_course(
     // Auto-add owner as teacher member
     minerva_db::queries::courses::add_member(&state.db, id, user.id, "teacher").await?;
 
-    Ok(Json(CourseResponse::from_row(row, Some("teacher".into()))))
+    let flags = resolve_course_flags(&state.db, row.id).await;
+    Ok(Json(CourseResponse::from_row(
+        row,
+        Some("teacher".into()),
+        flags,
+    )))
 }
 
 async fn get_course(
@@ -165,7 +195,8 @@ async fn get_course(
         return Err(AppError::Forbidden);
     }
 
-    Ok(Json(CourseResponse::from_row(row, my_role)))
+    let flags = resolve_course_flags(&state.db, row.id).await;
+    Ok(Json(CourseResponse::from_row(row, my_role, flags)))
 }
 
 async fn update_course(
@@ -257,7 +288,8 @@ async fn update_course(
         .ok_or(AppError::NotFound)?;
 
     let my_role = minerva_db::queries::courses::get_member_role(&state.db, id, user.id).await?;
-    Ok(Json(CourseResponse::from_row(row, my_role)))
+    let flags = resolve_course_flags(&state.db, row.id).await;
+    Ok(Json(CourseResponse::from_row(row, my_role, flags)))
 }
 
 async fn archive_course(

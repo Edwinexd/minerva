@@ -1,6 +1,10 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { adminSystemMetricsQuery } from "@/lib/queries"
+import {
+  adminClassificationStatsQuery,
+  adminSystemMetricsQuery,
+} from "@/lib/queries"
+import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import {
   Card,
@@ -10,7 +14,9 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import React from "react"
 
 function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return "-"
@@ -229,6 +235,184 @@ export function SystemPanel() {
           )}
         </CardContent>
       </Card>
+
+      <ClassificationBackfillCard />
+    </div>
+  )
+}
+
+/// Admin-scoped classification status + backfill trigger. Shows the
+/// current eligible/done counts and lets an operator queue a batch.
+/// The backend caps each click at BACKFILL_BATCH_LIMIT docs, so for
+/// huge installations the admin re-clicks until `unclassified` reaches
+/// zero (the polling stats query updates every 5s so progress is
+/// visible without manual refresh).
+function ClassificationBackfillCard() {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
+  const queryClient = useQueryClient()
+  const { data: stats, isLoading, error } = useQuery(adminClassificationStatsQuery)
+  const [lastQueued, setLastQueued] = React.useState<number | null>(null)
+
+  const backfillMutation = useMutation({
+    mutationFn: () =>
+      api.post<{ queued: number }>("/admin/backfill-classifications", {}),
+    onSuccess: (data) => {
+      setLastQueued(data.queued)
+      queryClient.invalidateQueries({ queryKey: ["admin", "classification-stats"] })
+    },
+  })
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("system.classifications.title")}</CardTitle>
+        <CardDescription>{t("system.classifications.description")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-20 w-full" />
+        ) : error || !stats ? (
+          <p className="text-sm text-destructive">{formatError(error)}</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <Stat
+                label={t("system.classifications.totalReady")}
+                value={stats.total_ready}
+              />
+              <Stat
+                label={t("system.classifications.classified")}
+                value={stats.classified}
+                tone={stats.classified === stats.total_ready ? "good" : "neutral"}
+              />
+              <Stat
+                label={t("system.classifications.unclassified")}
+                value={stats.unclassified}
+                tone={stats.unclassified > 0 ? "warn" : "good"}
+              />
+              <Stat
+                label={t("system.classifications.lockedByTeacher")}
+                value={stats.locked_by_teacher}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                onClick={() => backfillMutation.mutate()}
+                disabled={
+                  backfillMutation.isPending ||
+                  stats.unclassified === 0 ||
+                  (stats.backfill != null && !stats.backfill.finished)
+                }
+                title={t("system.classifications.backfillTitle")}
+              >
+                {backfillMutation.isPending
+                  ? t("system.classifications.backfilling")
+                  : stats.unclassified === 0
+                    ? t("system.classifications.backfillNoneNeeded")
+                    : t("system.classifications.backfillButton", {
+                        count: stats.unclassified,
+                      })}
+              </Button>
+              {lastQueued != null && (
+                <span className="text-sm text-muted-foreground">
+                  {t("system.classifications.lastQueued", { count: lastQueued })}
+                </span>
+              )}
+            </div>
+            {/*
+              Live progress of the running backfill. The backend
+              tracker stays in `Some(_)` for one more poll cycle after
+              the task drains, so the UI gets to flash the final
+              "all done" state before the panel collapses back to the
+              idle layout. Width caps at 100% defensively in case the
+              candidate count grew between SELECT and processing.
+            */}
+            {stats.backfill && (
+              <div className="space-y-1 rounded border p-3">
+                <div className="flex items-baseline justify-between text-sm">
+                  <span className="font-medium">
+                    {stats.backfill.finished
+                      ? t("system.classifications.backfillFinished", {
+                          ok: stats.backfill.ok,
+                          errors: stats.backfill.errors,
+                          skipped: stats.backfill.skipped,
+                        })
+                      : t("system.classifications.backfillRunning", {
+                          done: stats.backfill.ok + stats.backfill.errors + stats.backfill.skipped,
+                          total: stats.backfill.total,
+                        })}
+                  </span>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {Math.round(
+                      (Math.min(
+                        stats.backfill.ok + stats.backfill.errors + stats.backfill.skipped,
+                        stats.backfill.total,
+                      ) /
+                        Math.max(stats.backfill.total, 1)) *
+                        100,
+                    )}
+                    %
+                  </span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={`h-full transition-all ${stats.backfill.errors > 0 ? "bg-amber-500" : "bg-emerald-600"}`}
+                    style={{
+                      width: `${Math.min(
+                        ((stats.backfill.ok + stats.backfill.errors + stats.backfill.skipped) /
+                          Math.max(stats.backfill.total, 1)) *
+                          100,
+                        100,
+                      ).toFixed(1)}%`,
+                    }}
+                  />
+                </div>
+                {stats.backfill.errors > 0 && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {t("system.classifications.backfillErrors", {
+                      count: stats.backfill.errors,
+                    })}
+                  </p>
+                )}
+              </div>
+            )}
+            {backfillMutation.isError && (
+              <p className="text-sm text-destructive">
+                {formatError(backfillMutation.error)}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {t("system.classifications.note")}
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function Stat({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string
+  value: number
+  tone?: "good" | "warn" | "neutral"
+}) {
+  const toneClass =
+    tone === "good"
+      ? "text-emerald-700 dark:text-emerald-400"
+      : tone === "warn"
+        ? "text-amber-700 dark:text-amber-400"
+        : "text-foreground"
+  return (
+    <div className="space-y-1">
+      <div className={`text-2xl font-semibold tabular-nums ${toneClass}`}>
+        {value.toLocaleString()}
+      </div>
+      <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   )
 }

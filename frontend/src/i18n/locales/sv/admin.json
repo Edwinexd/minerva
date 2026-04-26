@@ -152,6 +152,7 @@
       "status": "Status",
       "tokenLimit": "Tokengräns/student/dag",
       "created": "Skapad",
+      "features": "Funktioner",
       "settings": "Inställningar"
     },
     "status": {
@@ -160,7 +161,24 @@
     },
     "tokenLimitUnlimited": "obegränsat",
     "settingsLink": "Inställningar",
-    "empty": "Inga kurser matchar filtret."
+    "empty": "Inga kurser matchar filtret.",
+    "featuresButton": "Funktioner ({{enabled}}/{{total}})",
+    "featuresButtonShort": "Funktioner",
+    "featuresButtonTitle": "Slå på/av experimentella eller opt-in-funktioner för den här kursen.",
+    "featuresDialogTitle": "Kursfunktioner",
+    "featuresDialogDescription": "Funktionsflaggor per kurs för {{course}}. Ändringar gäller direkt; att slå av en flagga återställer kursen till den globala standardinställningen.",
+    "featuresDialogClose": "Stäng",
+    "featureOverridden": "kursöverstyrning",
+    "featureInherited": "standard",
+    "featureRevertToDefault": "Återställ till global standard",
+    "featureFlagLabel": {
+      "course_kg": "Kunskapsgraf för kurs",
+      "extraction_guard": "Skydd mot uppgiftslösning"
+    },
+    "featureFlagDescription": {
+      "course_kg": "Klassificering per dokument, tvärdokumentlänkare, grafvisare, vägrasinstruktion vid uppgiftsmatch och per-chunk-skyddsfilter. Avstängd som standard medan vi kalibrerar.",
+      "extraction_guard": "Avsiktsklassificerare före generering + lösningsdetektor på utdatasidan + sokratisk omformulerare, plus uppgiftsnärhetsspårning över flera turer. Fångar fallet \"studenten klistrar in uppgift och frågar efter kod\" och avbryter svaret med en sokratisk fråga. Oberoende av course_kg så att admins kan piloter separat."
+    }
   },
   "rules": {
     "title": "Regler för automatisk rollbefordran",
@@ -271,6 +289,26 @@
         "table": "Tabell",
         "rowsApprox": "Rader (ungefär)"
       }
+    },
+    "classifications": {
+      "title": "Dokumentklassificeringar",
+      "description": "Dokumenttyper styr vad chatten klistrar in i promptens kontext. Lösningsförslag utesluts helt; uppgiftsbeskrivningar triggar ett vägrande tillägg. Nyuppladdade dokument klassificeras automatiskt; det här kortet låter dig efterklassificera dokument som laddades upp innan klassificeraren var aktiv (eller som fallerade vid första försöket).",
+      "totalReady": "Redo dokument",
+      "classified": "Klassificerade",
+      "unclassified": "Oklassificerade",
+      "lockedByTeacher": "Låsta av lärare",
+      "backfillButton_one": "Klassificera {{count}} dokument",
+      "backfillButton_other": "Klassificera {{count}} dokument",
+      "backfilling": "Köar...",
+      "backfillNoneNeeded": "Inget att efterklassificera",
+      "backfillTitle": "Kör klassificeraren på alla oklassificerade, olåsta, klara dokument. Varje klick köar upp till 5 000 dokument.",
+      "lastQueued_one": "Köade {{count}} dokument; status uppdateras medan det körs.",
+      "lastQueued_other": "Köade {{count}} dokument; status uppdateras medan det körs.",
+      "backfillRunning": "Klassificerar: {{done}} av {{total}} klara",
+      "backfillFinished": "Klart: {{ok}} ok, {{errors}} fel, {{skipped}} hoppade över",
+      "backfillErrors_one": "{{count}} dokument misslyckades; se serverloggar.",
+      "backfillErrors_other": "{{count}} dokument misslyckades; se serverloggar.",
+      "note": "Varje klick köar upp till 5 000 dokument. För större efterhängningar, klicka igen när siffran sjunkit."
     }
   }
 }

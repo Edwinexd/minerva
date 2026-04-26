@@ -2617,6 +2617,7 @@ dependencies = [
 name = "minerva-ingest"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "fastembed",
  "flate2",
@@ -2643,6 +2644,7 @@ name = "minerva-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum 0.8.8",
  "axum-extra",
  "base64 0.22.1",

@@ -17,7 +17,9 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let http_client = reqwest::Client::new();
     let collection_name = format!("course_{}", ctx.course_id);
 
-    // Build initial prompt WITHOUT RAG
+    // Build initial prompt WITHOUT RAG. No chunks → no signals → no
+    // addendum yet; if RAG arrives mid-stream we rebuild with the right
+    // signals before phase-2.
     let system_no_rag = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &[]);
     let initial_messages = common::build_chat_messages(&system_no_rag, &ctx.history);
 
@@ -58,6 +60,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let mut total_completion = 0i32;
     let mut chunks_json: Option<serde_json::Value> = None;
     let mut rag_injected = false;
+    // Populated inside the `RagArrived` branch below (the only path
+    // where we have signals + context to evaluate). Stays None for
+    // the no-RAG completion path -- nothing to guard against when
+    // the model never saw assignment material.
+    let mut guard_decision: Option<super::extraction_guard::GuardDecision> = None;
 
     // Phase 1: stream without RAG, checking for RAG results between chunks
     let phase1 = stream_with_rag_check(
@@ -89,22 +96,107 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             total_completion += completion_tokens;
             rag_injected = true;
 
+            // Kind-aware partition before showing anything to the
+            // model or to the client. Skipped entirely when the KG
+            // feature flag is off for this course -- partition_chunks
+            // sees `kg_enabled=false` and returns every chunk as
+            // context with no signals, and we don't run the
+            // adversarial filter (which is part of the same KG
+            // bundle). The unclassified lookup is also skipped to
+            // save a roundtrip on the hot chat path.
+            let unclassified = if ctx.kg_enabled {
+                minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                std::collections::HashSet::new()
+            };
+            let mut rag = common::partition_chunks(rag_chunks, &unclassified, ctx.kg_enabled);
+
+            // Adversarial pre-retrieval check on context chunks
+            // (gated on kg_enabled -- it's defence in depth on top
+            // of the per-doc kind classifier, so it only matters
+            // when classification is on at all).
+            if ctx.kg_enabled {
+                rag.context = crate::classification::adversarial::filter_solution_chunks(
+                    &http_client,
+                    &ctx.cerebras_api_key,
+                    &ctx.db,
+                    ctx.course_id,
+                    rag.context,
+                )
+                .await;
+            }
+
+            // Graph-aware enrichment: pull representative chunks
+            // from each top hit's KG partners (part_of_unit / theory
+            // -> applied_in dst). Adds material the embedding search
+            // alone might have missed -- e.g. a student asking about
+            // a concept matches the lecture, the graph adds the
+            // lecture's tutorial / section summary as supporting
+            // context. Gated on kg_enabled; the helper itself is a
+            // best-effort no-op on errors.
+            if ctx.kg_enabled {
+                let collection_name = format!("course_{}", ctx.course_id);
+                let extra = common::expand_context_via_graph(
+                    &ctx.db,
+                    &ctx.qdrant,
+                    &ctx.fastembed,
+                    &http_client,
+                    &ctx.openai_api_key,
+                    ctx.course_id,
+                    &collection_name,
+                    &ctx.embedding_provider,
+                    &ctx.embedding_model,
+                    &ctx.user_content,
+                    &rag.context,
+                )
+                .await;
+                rag.context.extend(extra);
+            }
+
             let hidden =
                 minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
                     .await
                     .unwrap_or_default();
-            let client_chunks = common::chunks_for_client(&rag_chunks, &hidden);
+            let displayed = rag.all();
+            let client_chunks = common::chunks_for_client(&displayed, &hidden);
             chunks_json = serde_json::to_value(&client_chunks).ok();
 
             tracing::info!(
-                "parallel: RAG arrived after {} chars, continuing with {} chunks",
+                "parallel: RAG arrived after {} chars, continuing with {} context chunk(s) and {} signal(s)",
                 full_text.len(),
-                rag_chunks.len()
+                rag.context.len(),
+                rag.signals.len(),
             );
 
-            // Build continued prompt with RAG + partial assistant output
-            let system_with_rag =
-                common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, &rag_chunks);
+            // Extraction guard evaluation: piggybacks on the just-
+            // finished RAG (signals + context) to decide whether
+            // this turn's reply needs the post-generation output
+            // check. Stashed for use after phase-2 streaming. None
+            // when the feature flag is off; Some(_) otherwise. Same
+            // contract as simple.rs / flare.rs.
+            guard_decision = super::extraction_guard::evaluate_for_turn(
+                &ctx.db,
+                &http_client,
+                &ctx.cerebras_api_key,
+                ctx.course_id,
+                ctx.conversation_id,
+                &ctx.history,
+                &ctx.user_content,
+                &rag.signals,
+                &rag.context,
+            )
+            .await;
+
+            // Build continued prompt with RAG context + signal-driven
+            // refusal addendum (when applicable) + partial assistant output.
+            let system_with_rag = common::build_system_prompt_with_signals(
+                &ctx.course_name,
+                &ctx.custom_prompt,
+                &rag.context,
+                &rag.signals,
+            );
             let mut continued = common::build_chat_messages(&system_with_rag, &ctx.history);
 
             if !full_text.is_empty() {
@@ -158,10 +250,30 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         }
     }
 
+    // Post-generation extraction-guard intercept. No-op when the
+    // guard wasn't enabled (decision is None) or when the
+    // constraint isn't active for this turn. Otherwise: runs the
+    // output-side check, generates a Socratic rewrite if positive,
+    // emits an SSE `rewrite` event so the frontend can swap the
+    // streamed message, logs a `conversation_flag`, and returns the
+    // text that should be persisted (original or rewrite).
+    let final_text = super::extraction_guard::intercept_reply(
+        &ctx.db,
+        &http_client,
+        &ctx.cerebras_api_key,
+        ctx.course_id,
+        ctx.conversation_id,
+        &guard_decision,
+        &ctx.user_content,
+        &full_text,
+        &tx,
+    )
+    .await;
+
     common::finalize(
         &ctx,
         &tx,
-        &full_text,
+        &final_text,
         chunks_json.as_ref(),
         total_prompt,
         total_completion,

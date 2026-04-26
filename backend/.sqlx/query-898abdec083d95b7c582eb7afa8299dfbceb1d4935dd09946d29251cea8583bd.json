@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM document_relations\n         WHERE (src_doc_id = $1 AND dst_doc_id = $2)\n            OR (src_doc_id = $2 AND dst_doc_id = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "898abdec083d95b7c582eb7afa8299dfbceb1d4935dd09946d29251cea8583bd"
+}

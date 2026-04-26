@@ -23,6 +23,13 @@ export interface Course {
   strategy: string
   embedding_provider: string
   embedding_model: string
+  /**
+   * Bumped each time `embedding_provider` or `embedding_model`
+   * rotates. Surfaced for diagnostics; the config form doesn't
+   * read it directly, but the documents tab uses it to correlate
+   * post-rotation re-ingestion progress with the live generation.
+   */
+  embedding_version: number
   daily_token_limit: number
   active: boolean
   created_at: string

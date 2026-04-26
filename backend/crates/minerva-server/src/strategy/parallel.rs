@@ -15,7 +15,8 @@ use crate::error::AppError;
 pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError>>) {
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
-    let collection_name = format!("course_{}", ctx.course_id);
+    let collection_name =
+        minerva_ingest::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
 
     // Build initial prompt WITHOUT RAG. No chunks → no signals → no
     // addendum yet; if RAG arrives mid-stream we rebuild with the right
@@ -137,7 +138,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             // context. Gated on kg_enabled; the helper itself is a
             // best-effort no-op on errors.
             if ctx.kg_enabled {
-                let collection_name = format!("course_{}", ctx.course_id);
+                let collection_name =
+                    minerva_ingest::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
                 let extra = common::expand_context_via_graph(
                     &ctx.db,
                     &ctx.qdrant,

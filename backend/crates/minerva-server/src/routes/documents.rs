@@ -390,7 +390,8 @@ async fn delete_document(
 
     // Delete vectors from Qdrant first -- if this fails we can retry safely
     // without leaving orphaned vectors behind.
-    let collection_name = format!("course_{}", course_id);
+    let collection_name =
+        minerva_ingest::pipeline::collection_name(course_id, course.embedding_version);
     let collection_exists = state
         .qdrant
         .collection_exists(&collection_name)
@@ -454,7 +455,8 @@ async fn list_chunks(
         return Err(AppError::Forbidden);
     }
 
-    let collection_name = format!("course_{}", course_id);
+    let collection_name =
+        minerva_ingest::pipeline::collection_name(course_id, course.embedding_version);
 
     // Check if collection exists
     let exists = state
@@ -535,7 +537,8 @@ async fn search_chunks(
         return Err(AppError::Forbidden);
     }
 
-    let collection_name = format!("course_{}", course_id);
+    let collection_name =
+        minerva_ingest::pipeline::collection_name(course_id, course.embedding_version);
     let exists = state
         .qdrant
         .collection_exists(&collection_name)
@@ -770,7 +773,14 @@ async fn set_document_kind(
     // any Qdrant chunks so retrieval can't surface them. Idempotent --
     // if the collection or doc has no points, this is a no-op.
     if body.kind == "sample_solution" && doc.chunk_count.unwrap_or(0) > 0 {
-        let collection_name = format!("course_{}", course_id);
+        // Look up the course's current embedding_version so we hit
+        // the live collection rather than a previous-rotation
+        // orphan. One quick round-trip; this path is only taken on a
+        // teacher's manual lock action so it's not hot.
+        let collection_name =
+            minerva_ingest::pipeline::collection_name_for_course(&state.db, course_id)
+                .await
+                .map_err(|e| AppError::Internal(format!("course lookup failed: {}", e)))?;
         if state
             .qdrant
             .collection_exists(&collection_name)

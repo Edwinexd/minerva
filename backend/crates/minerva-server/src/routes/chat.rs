@@ -932,6 +932,7 @@ pub(super) async fn run_chat_message(
         openai_api_key: state.config.openai_api_key.clone(),
         embedding_provider: course.embedding_provider,
         embedding_model: course.embedding_model,
+        embedding_version: course.embedding_version,
         history,
         user_content,
         is_first_message,

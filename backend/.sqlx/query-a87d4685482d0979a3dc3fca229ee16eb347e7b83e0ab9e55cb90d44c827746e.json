@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE courses SET\n            name = COALESCE($2, name),\n            description = COALESCE($3, description),\n            context_ratio = COALESCE($4, context_ratio),\n            temperature = COALESCE($5, temperature),\n            model = COALESCE($6, model),\n            system_prompt = COALESCE($7, system_prompt),\n            max_chunks = COALESCE($8, max_chunks),\n            strategy = COALESCE($9, strategy),\n            daily_token_limit = COALESCE($10, daily_token_limit),\n            embedding_provider = COALESCE($11, embedding_provider),\n            embedding_model = COALESCE($12, embedding_model),\n            min_score = COALESCE($13, min_score),\n            updated_at = NOW()\n        WHERE id = $1 AND active = true\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at",
+  "query": "UPDATE courses SET\n            name = COALESCE($2, name),\n            description = COALESCE($3, description),\n            context_ratio = COALESCE($4, context_ratio),\n            temperature = COALESCE($5, temperature),\n            model = COALESCE($6, model),\n            system_prompt = COALESCE($7, system_prompt),\n            max_chunks = COALESCE($8, max_chunks),\n            strategy = COALESCE($9, strategy),\n            daily_token_limit = COALESCE($10, daily_token_limit),\n            embedding_provider = COALESCE($11, embedding_provider),\n            embedding_model = COALESCE($12, embedding_model),\n            min_score = COALESCE($13, min_score),\n            updated_at = NOW()\n        WHERE id = $1 AND active = true\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -70,21 +70,26 @@
       },
       {
         "ordinal": 13,
+        "name": "embedding_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
         "name": "daily_token_limit",
         "type_info": "Int8"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -123,8 +128,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "006e897a161e083959fef02cab820ca80d9405ea8775f7c9a25a453fecd297cd"
+  "hash": "a87d4685482d0979a3dc3fca229ee16eb347e7b83e0ab9e55cb90d44c827746e"
 }

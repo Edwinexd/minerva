@@ -856,7 +856,15 @@ fn needs_resync(
 }
 
 async fn purge_chunks(state: &AppState, course_id: Uuid, doc_id: Uuid) -> Result<(), AppError> {
-    let collection = format!("course_{}", course_id);
+    // Look up the live collection name from the course's
+    // embedding_version. Canvas resync runs on a sweeper, not the
+    // hot chat path, so the extra DB roundtrip is fine -- and it's
+    // the only safe option since `purge_chunks` is invoked from
+    // multiple call sites (file vs page replace) without a course
+    // row in scope.
+    let collection = minerva_ingest::pipeline::collection_name_for_course(&state.db, course_id)
+        .await
+        .map_err(|e| AppError::Internal(format!("course lookup failed: {}", e)))?;
     let exists = state
         .qdrant
         .collection_exists(&collection)

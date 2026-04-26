@@ -479,8 +479,14 @@ pub async fn link_course(
         docs_in_candidates.insert(*a);
         docs_in_candidates.insert(*b);
     }
-    let excerpts: HashMap<Uuid, String> =
-        load_excerpts(ctx.qdrant, course_id, truncated, &docs_in_candidates).await;
+    let excerpts: HashMap<Uuid, String> = load_excerpts(
+        ctx.db,
+        ctx.qdrant,
+        course_id,
+        truncated,
+        &docs_in_candidates,
+    )
+    .await;
 
     // Step 5: LLM labels FRESH candidates only.
     let edges = call_linker_llm(
@@ -687,7 +693,9 @@ async fn gather_embeddings(
     docs: &[&DocumentRow],
 ) -> Result<HashMap<Uuid, Vec<f32>>, String> {
     let mut out: HashMap<Uuid, Vec<f32>> = HashMap::new();
-    let collection = format!("course_{}", course_id);
+    let collection = minerva_ingest::pipeline::collection_name_for_course(ctx.db, course_id)
+        .await
+        .unwrap_or_else(|_| minerva_ingest::pipeline::collection_name(course_id, 1));
     let collection_exists = ctx
         .qdrant
         .collection_exists(&collection)
@@ -890,12 +898,15 @@ fn build_similarity_matrix(
 /// then leans on `kind=sample_solution` + the assignment doc's
 /// excerpt + embedding similarity to decide solution_of edges.
 async fn load_excerpts(
+    db: &PgPool,
     qdrant: &Qdrant,
     course_id: Uuid,
     docs: &[&DocumentRow],
     only_for: &HashSet<Uuid>,
 ) -> HashMap<Uuid, String> {
-    let collection = format!("course_{}", course_id);
+    let collection = minerva_ingest::pipeline::collection_name_for_course(db, course_id)
+        .await
+        .unwrap_or_else(|_| minerva_ingest::pipeline::collection_name(course_id, 1));
     if !qdrant.collection_exists(&collection).await.unwrap_or(false) {
         // Collection hasn't been created yet (e.g. brand-new course
         // with all-sample_solution uploads): nothing to scroll.

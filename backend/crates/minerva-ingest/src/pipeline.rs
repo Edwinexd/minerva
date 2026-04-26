@@ -64,6 +64,45 @@ pub fn extract_document_text(file_path: &Path) -> Result<String, String> {
     }
 }
 
+/// Compose the Qdrant collection name for a course at a given
+/// embedding-rotation version.
+///
+/// `version=1` returns the legacy `course_{id}` name so existing
+/// production collections keep working without a Qdrant data move.
+/// `version>=2` returns `course_{id}_v{version}` -- a fresh
+/// collection that the lazy-migration path writes to once a teacher
+/// switches embedding model.
+///
+/// One source of truth: every chunk-search, chunk-delete, and ingest
+/// upsert in the codebase goes through this helper, so a rotation can
+/// never leak references to the wrong collection.
+pub fn collection_name(course_id: uuid::Uuid, version: i32) -> String {
+    if version <= 1 {
+        format!("course_{}", course_id)
+    } else {
+        format!("course_{}_v{}", course_id, version)
+    }
+}
+
+/// DB-backed convenience for callers that don't already have the
+/// course row in scope (route handlers that purge chunks for a single
+/// document, KG linker fan-out, etc.). One round-trip; cheap. If the
+/// course is missing, fall back to version=1 so we still hit the
+/// legacy collection name (callers are about to fail anyway, but we
+/// avoid a panic).
+pub async fn collection_name_for_course(
+    db: &sqlx::PgPool,
+    course_id: uuid::Uuid,
+) -> Result<String, sqlx::Error> {
+    let version: Option<i32> = sqlx::query_scalar!(
+        "SELECT embedding_version FROM courses WHERE id = $1",
+        course_id,
+    )
+    .fetch_optional(db)
+    .await?;
+    Ok(collection_name(course_id, version.unwrap_or(1)))
+}
+
 pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "local"];
 
 pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
@@ -112,6 +151,7 @@ pub async fn process_document(
     mime_type: &str,
     embedding_provider: &str,
     embedding_model: &str,
+    embedding_version: i32,
 ) -> Result<ProcessResult, String> {
     // 1. Extract text
     let text = match text_source(file_path) {
@@ -220,8 +260,12 @@ pub async fn process_document(
 
     tracing::info!("produced {} chunks from {}", chunks.len(), filename);
 
-    // 4. Embed + Upsert (strategy depends on provider)
-    let collection_name = format!("course_{}", course_id);
+    // 4. Embed + Upsert (strategy depends on provider). Collection
+    // name is composed from `embedding_version` so a model rotation
+    // (which bumps the version in courses.rs::rotate_embedding) lands
+    // chunks in a fresh collection without colliding with the
+    // previous-model vectors.
+    let collection_name = collection_name(course_id, embedding_version);
     let is_sample_solution = kind_str == KIND_SAMPLE_SOLUTION;
     if is_sample_solution {
         tracing::info!(
@@ -605,5 +649,47 @@ mod tests {
     fn mean_pool_rejects_dim_mismatch() {
         let v = mean_pool_normalized(&[vec![1.0, 2.0], vec![1.0, 2.0, 3.0]]);
         assert!(v.is_none());
+    }
+
+    #[test]
+    fn collection_name_v1_uses_legacy_unsuffixed_name() {
+        // Production collections were created as `course_{id}` before
+        // the rotation feature landed. Version=1 must keep matching
+        // them so the migration is a no-op for existing data.
+        let id = uuid::Uuid::nil();
+        assert_eq!(
+            collection_name(id, 1),
+            "course_00000000-0000-0000-0000-000000000000"
+        );
+    }
+
+    #[test]
+    fn collection_name_v2_plus_uses_suffixed_name() {
+        let id = uuid::Uuid::nil();
+        assert_eq!(
+            collection_name(id, 2),
+            "course_00000000-0000-0000-0000-000000000000_v2"
+        );
+        assert_eq!(
+            collection_name(id, 7),
+            "course_00000000-0000-0000-0000-000000000000_v7"
+        );
+    }
+
+    #[test]
+    fn collection_name_zero_or_negative_falls_back_to_legacy() {
+        // Defensive: a stale row read with version=0 (shouldn't
+        // happen given the DEFAULT 1 + NOT NULL on the column) still
+        // points at the legacy collection rather than producing
+        // `course_{id}_v0`, which has no useful semantics.
+        let id = uuid::Uuid::nil();
+        assert_eq!(
+            collection_name(id, 0),
+            "course_00000000-0000-0000-0000-000000000000"
+        );
+        assert_eq!(
+            collection_name(id, -1),
+            "course_00000000-0000-0000-0000-000000000000"
+        );
     }
 }

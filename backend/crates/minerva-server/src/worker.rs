@@ -339,6 +339,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
                         &doc.mime_type,
                         &course.embedding_provider,
                         &course.embedding_model,
+                        course.embedding_version,
                     )
                     .await
                     {

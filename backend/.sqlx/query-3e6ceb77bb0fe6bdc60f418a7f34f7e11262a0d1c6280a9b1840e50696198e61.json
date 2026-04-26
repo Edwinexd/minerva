@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
+  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
   "describe": {
     "columns": [
       {
@@ -70,21 +70,26 @@
       },
       {
         "ordinal": 13,
+        "name": "embedding_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
         "name": "daily_token_limit",
         "type_info": "Int8"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -111,8 +116,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "8183fb36ae5b29a83b912e5f3af384b2a6d83142ae8865b8af8094133f483a23"
+  "hash": "3e6ceb77bb0fe6bdc60f418a7f34f7e11262a0d1c6280a9b1840e50696198e61"
 }

@@ -28,6 +28,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useState } from "react"
 import type { Course } from "@/lib/types"
 
@@ -170,14 +180,45 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [embeddingProvider, setEmbeddingProvider] = useState(course.embedding_provider)
   const [embeddingModel, setEmbeddingModel] = useState(course.embedding_model)
   const [dailyTokenLimit, setDailyTokenLimit] = useState(course.daily_token_limit)
+  // Two-step save: any provider/model change opens this dialog so the
+  // teacher acknowledges the re-ingestion. Other field changes save
+  // immediately. The dialog is keyed off the *baseline* values from
+  // `course` so a subsequent save without further embedding edits
+  // doesn't re-prompt.
+  const [pendingRotate, setPendingRotate] = useState(false)
 
   const mutation = useMutation({
     mutationFn: (data: Record<string, unknown>) =>
       api.put<Course>(`/courses/${course.id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["courses"] })
+      setPendingRotate(false)
     },
   })
+
+  const buildPayload = () => ({
+    name,
+    description: description || null,
+    context_ratio: contextRatio,
+    temperature,
+    model,
+    system_prompt: systemPrompt || null,
+    max_chunks: maxChunks,
+    min_score: minScore,
+    strategy,
+    embedding_provider: embeddingProvider,
+    embedding_model: embeddingModel,
+    daily_token_limit: dailyTokenLimit,
+  })
+
+  // The backend only rotates when provider or model differ from the
+  // currently-persisted values, so mirror that condition here. A
+  // provider switch to "openai" canonicalizes the model server-side
+  // (text-embedding-3-small) -- treat that as a rotation too because
+  // the persisted model name will change even if the dropdown didn't.
+  const willRotate =
+    embeddingProvider !== course.embedding_provider ||
+    embeddingModel !== course.embedding_model
 
   return (
     <Card>
@@ -197,20 +238,15 @@ function CourseConfigForm({ course }: { course: Course }) {
           className="space-y-6"
           onSubmit={(e) => {
             e.preventDefault()
-            mutation.mutate({
-              name,
-              description: description || null,
-              context_ratio: contextRatio,
-              temperature,
-              model,
-              system_prompt: systemPrompt || null,
-              max_chunks: maxChunks,
-              min_score: minScore,
-              strategy,
-              embedding_provider: embeddingProvider,
-              embedding_model: embeddingModel,
-              daily_token_limit: dailyTokenLimit,
-            })
+            if (willRotate) {
+              // Defer the actual PUT until the teacher confirms in
+              // the AlertDialog below. Without this gate a misclick
+              // on the model dropdown silently re-embeds an entire
+              // course's worth of documents.
+              setPendingRotate(true)
+              return
+            }
+            mutation.mutate(buildPayload())
           }}
         >
           <div className="space-y-2">
@@ -422,6 +458,42 @@ function CourseConfigForm({ course }: { course: Course }) {
             <p className="text-sm text-destructive">{formatError(mutation.error)}</p>
           )}
         </form>
+
+        <AlertDialog
+          open={pendingRotate}
+          onOpenChange={(open) => {
+            if (!open) setPendingRotate(false)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t("config.embeddingRotateConfirmTitle")}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("config.embeddingRotateConfirmBody", {
+                  fromProvider: course.embedding_provider,
+                  fromModel: course.embedding_model,
+                  toProvider: embeddingProvider,
+                  toModel: embeddingModel,
+                })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>
+                {t("config.embeddingRotateConfirmCancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate(buildPayload())}
+              >
+                {mutation.isPending
+                  ? tCommon("actions.saving")
+                  : t("config.embeddingRotateConfirmAction")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   )

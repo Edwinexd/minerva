@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, daily_token_limit, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",
+  "query": "INSERT INTO courses (id, name, description, owner_id, daily_token_limit)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -70,27 +70,38 @@
       },
       {
         "ordinal": 13,
+        "name": "embedding_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
         "name": "daily_token_limit",
         "type_info": "Int8"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8"
+      ]
     },
     "nullable": [
       false,
@@ -109,8 +120,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "b9360f0819bee5bc9ddf64a4dc8f5ac4a6564aaa65957fe6ebd82e6a36638145"
+  "hash": "6bab9ee5cf0e80f9ff2ff06afb8dbfa664293187d37b2ba948d53bca2083c75a"
 }

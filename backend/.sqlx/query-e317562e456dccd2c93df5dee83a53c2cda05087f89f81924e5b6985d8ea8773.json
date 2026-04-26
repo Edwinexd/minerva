@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE courses\n           SET embedding_provider = $2,\n               embedding_model = $3,\n               embedding_version = embedding_version + 1,\n               updated_at = NOW()\n           WHERE id = $1 AND active = true\n           RETURNING embedding_version",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "embedding_version",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e317562e456dccd2c93df5dee83a53c2cda05087f89f81924e5b6985d8ea8773"
+}

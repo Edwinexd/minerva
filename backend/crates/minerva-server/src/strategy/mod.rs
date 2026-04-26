@@ -29,6 +29,11 @@ pub struct GenerationContext {
     pub openai_api_key: String,
     pub embedding_provider: String,
     pub embedding_model: String,
+    /// Version stamp for the course's Qdrant collection; bumped when
+    /// the teacher rotates embedding model. Strategies thread this
+    /// into `pipeline::collection_name(course_id, version)` so query
+    /// vectors land in the same collection ingest writes to.
+    pub embedding_version: i32,
     pub history: Vec<minerva_db::queries::conversations::MessageRow>,
     pub user_content: String,
     pub is_first_message: bool,

@@ -13,7 +13,8 @@ use crate::error::AppError;
 pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError>>) {
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
-    let collection_name = format!("course_{}", ctx.course_id);
+    let collection_name =
+        minerva_ingest::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
 
     // RAG lookup (blocks before streaming starts)
     let raw_chunks = common::rag_lookup(
@@ -65,7 +66,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // exercises (applied_in dst) the embedding search would
     // otherwise miss.
     if ctx.kg_enabled {
-        let collection_name = format!("course_{}", ctx.course_id);
+        let collection_name =
+            minerva_ingest::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
         let extra = common::expand_context_via_graph(
             &ctx.db,
             &ctx.qdrant,

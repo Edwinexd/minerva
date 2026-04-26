@@ -65,6 +65,10 @@ struct CourseResponse {
     strategy: String,
     embedding_provider: String,
     embedding_model: String,
+    /// Bumped each time `embedding_provider` or `embedding_model`
+    /// rotates. Surfaced so the UI can correlate post-rotation
+    /// re-ingestion progress with the current embedding generation.
+    embedding_version: i32,
     daily_token_limit: i64,
     active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -104,6 +108,7 @@ impl CourseResponse {
             strategy: row.strategy,
             embedding_provider: row.embedding_provider,
             embedding_model: row.embedding_model,
+            embedding_version: row.embedding_version,
             daily_token_limit: row.daily_token_limit,
             active: row.active,
             created_at: row.created_at,
@@ -268,6 +273,53 @@ async fn update_course(
         body.embedding_model
     };
 
+    // Detect a real embedding rotation. We compare against the
+    // existing row so a no-op PUT (frontend echoing the current
+    // values back) doesn't trigger a wasteful re-ingest of the whole
+    // course. Either provider or model changing counts -- a same-dim
+    // model swap (e.g. MiniLM-L6 -> BGE-small, both 384) silently
+    // degrades retrieval quality without a re-embed, so we still
+    // rotate.
+    let new_provider_value = body
+        .embedding_provider
+        .as_deref()
+        .unwrap_or(&existing.embedding_provider);
+    let new_model_value = embedding_model
+        .as_deref()
+        .unwrap_or(&existing.embedding_model);
+    let rotation_needed = new_provider_value != existing.embedding_provider
+        || new_model_value != existing.embedding_model;
+
+    if rotation_needed {
+        // Lazy migration: bump `embedding_version` so the next
+        // ingest writes to a fresh `course_{id}_v{n}` Qdrant
+        // collection, and re-queue every document so the worker
+        // re-chunks + re-embeds them. The previous-model collection
+        // is left untouched -- orphaned, not deleted -- so a
+        // mistaken rotation can be rolled back manually by the ops
+        // team. The rotation runs in a transaction (see
+        // `rotate_embedding`) so the version bump and the document
+        // re-queue cannot be observed in a partial state.
+        let outcome = minerva_db::queries::courses::rotate_embedding(
+            &state.db,
+            id,
+            new_provider_value,
+            new_model_value,
+        )
+        .await?;
+        tracing::info!(
+            "course {} rotated to embedding_provider={}, embedding_model={}, version={} ({} documents re-queued)",
+            id,
+            new_provider_value,
+            new_model_value,
+            outcome.new_version,
+            outcome.requeued_documents,
+        );
+    }
+
+    // Apply the rest of the update. Provider/model are intentionally
+    // omitted -- if a rotation just ran they're already persisted; if
+    // it didn't, COALESCE on `None` is a no-op anyway.
     let input = minerva_db::queries::courses::UpdateCourse {
         name: body.name,
         description: body.description,
@@ -278,8 +330,8 @@ async fn update_course(
         max_chunks: body.max_chunks,
         min_score: body.min_score,
         strategy: body.strategy,
-        embedding_provider: body.embedding_provider,
-        embedding_model,
+        embedding_provider: None,
+        embedding_model: None,
         daily_token_limit: body.daily_token_limit,
     };
 

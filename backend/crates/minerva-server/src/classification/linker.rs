@@ -30,16 +30,16 @@
 //! courses are 20-200 docs, well within budget.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use std::sync::Arc;
 
 use minerva_db::queries::document_relations::RejectedPairKey;
 use minerva_db::queries::documents::DocumentRow;
-use minerva_ingest::fastembed_embedder::FastEmbedder;
+use qdrant_client::qdrant::{Condition, Filter, ScrollPointsBuilder};
+use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::strategy::common::cerebras_request_with_retry;
+use crate::strategy::common::{cerebras_request_with_retry, payload_int, payload_string};
 
 const LINKER_MODEL: &str = "gpt-oss-120b";
 
@@ -170,17 +170,19 @@ pub struct LinkerOutput {
     pub considered: usize,
 }
 
-/// Inputs the linker needs that aren't on `DocumentRow` itself: a
-/// way to lazily backfill missing pooled embeddings (Qdrant scroll +
-/// re-pool), and the path to read content excerpts from disk. Bundling
-/// these into a struct keeps `link_course`'s signature manageable.
+/// Inputs the linker needs that aren't on `DocumentRow` itself.
+///
+/// Note what's NOT here: no fastembed, no OpenAI key, no docs_path.
+/// The linker reads everything it needs (chunk text for excerpts,
+/// chunk vectors for the lazy-pooled-embedding backfill) from
+/// Qdrant. We never re-read PDFs from disk or call an embedder
+/// during a relink -- the ingest pipeline has already done that work
+/// and persisted it to the doc row + Qdrant.
 pub struct LinkContext<'a> {
     pub http: &'a reqwest::Client,
     pub api_key: &'a str,
     pub db: &'a PgPool,
-    pub fastembed: &'a Arc<FastEmbedder>,
-    pub openai_api_key: &'a str,
-    pub docs_path: &'a str,
+    pub qdrant: &'a Arc<Qdrant>,
 }
 
 /// True iff the (src, dst, relation) triple has been vetoed by a teacher.
@@ -357,7 +359,7 @@ pub async fn link_course(
         docs_in_candidates.insert(*b);
     }
     let excerpts: HashMap<Uuid, String> =
-        load_excerpts(ctx.docs_path, course_id, truncated, &docs_in_candidates).await;
+        load_excerpts(ctx.qdrant, course_id, truncated, &docs_in_candidates).await;
 
     // Step 4: LLM labels candidates.
     let edges = call_linker_llm(
@@ -436,12 +438,38 @@ pub async fn link_course(
 /// back to re-embedding on the fly for older docs whose
 /// pooled_embedding is NULL. Lazy backfill writes the result back to
 /// the DB so subsequent link calls don't repeat the work.
+/// Gather pooled embeddings for every doc the linker is going to
+/// consider. Two paths:
+///
+/// 1. **Hot path**: `documents.pooled_embedding` is set by the ingest
+///    pipeline at upload time (mean-pool + L2-normalise of all chunk
+///    vectors), so this is just a clone out of the DB row -- no
+///    network, no recompute.
+///
+/// 2. **Cold path** (only when `pooled_embedding IS NULL`, i.e. data
+///    that predates the column or a transient ingest failure): scroll
+///    Qdrant for the doc's existing chunk VECTORS and mean-pool them.
+///    No file re-read, no embedder call -- vectors are already there.
+///    The result is persisted back so the next relink hits the hot
+///    path.
+///
+/// For docs without an entry in either source (e.g. a `sample_solution`
+/// uploaded before pooled_embedding was added: chunks weren't upserted
+/// to Qdrant AND the column was NULL), we just skip them -- they won't
+/// participate in the similarity matrix this run, but the next ingest
+/// of a new doc will repopulate.
 async fn gather_embeddings(
     ctx: &LinkContext<'_>,
     course_id: Uuid,
     docs: &[&DocumentRow],
 ) -> Result<HashMap<Uuid, Vec<f32>>, String> {
     let mut out: HashMap<Uuid, Vec<f32>> = HashMap::new();
+    let collection = format!("course_{}", course_id);
+    let collection_exists = ctx
+        .qdrant
+        .collection_exists(&collection)
+        .await
+        .unwrap_or(false);
     for doc in docs {
         if let Some(emb) = &doc.pooled_embedding {
             if !emb.is_empty() {
@@ -449,9 +477,10 @@ async fn gather_embeddings(
                 continue;
             }
         }
-
-        // Lazy backfill: read text, re-embed, mean-pool, persist.
-        match recompute_pooled_embedding(ctx, course_id, doc).await {
+        if !collection_exists {
+            continue;
+        }
+        match pool_from_qdrant(ctx.qdrant, &collection, doc.id).await {
             Ok(Some(emb)) => {
                 let _ = minerva_db::queries::documents::set_pooled_embedding(ctx.db, doc.id, &emb)
                     .await;
@@ -459,13 +488,13 @@ async fn gather_embeddings(
             }
             Ok(None) => {
                 tracing::debug!(
-                    "linker: no embedding available for doc {} -- skipping similarity channel for it",
+                    "linker: no embedding available for doc {} -- skipping similarity channel",
                     doc.id,
                 );
             }
             Err(e) => {
                 tracing::warn!(
-                    "linker: failed to backfill embedding for doc {}: {}",
+                    "linker: qdrant pool fallback failed for doc {}: {}",
                     doc.id,
                     e
                 );
@@ -475,77 +504,55 @@ async fn gather_embeddings(
     Ok(out)
 }
 
-async fn recompute_pooled_embedding(
-    ctx: &LinkContext<'_>,
-    course_id: Uuid,
-    doc: &DocumentRow,
+/// Cold-path: scroll the doc's existing chunk vectors out of Qdrant and
+/// mean-pool them. Replaces the old "re-extract PDF, re-chunk, re-embed"
+/// path -- the vectors are already there, just pool them. Returns None
+/// if the collection has no chunks for this doc.
+async fn pool_from_qdrant(
+    qdrant: &Qdrant,
+    collection: &str,
+    doc_id: Uuid,
 ) -> Result<Option<Vec<f32>>, String> {
-    // The disk path uses the doc's stored filename only to recover its
-    // file extension (so we feed the right bytes to the right reader).
-    // The content of the file -- not the name -- is what enters the
-    // embedder.
-    let ext = doc
-        .filename
-        .rsplit('.')
-        .next()
-        .filter(|e| *e != doc.filename.as_str())
-        .unwrap_or("bin");
-    let path_buf = format!("{}/{}/{}.{}", ctx.docs_path, course_id, doc.id, ext);
-    if !Path::new(&path_buf).exists() {
-        return Ok(None);
-    }
-    // PDF parsing + sync file I/O can take hundreds of ms per doc.
-    // Run on the blocking pool so we don't stall the runtime worker
-    // thread while the linker walks the course's documents.
-    let path_for_blocking = path_buf.clone();
-    let text = match tokio::task::spawn_blocking(move || {
-        minerva_ingest::pipeline::extract_document_text(Path::new(&path_for_blocking))
-    })
-    .await
-    .map_err(|e| format!("extract task panicked: {}", e))?
-    {
-        Ok(t) if !t.trim().is_empty() => t,
-        _ => return Ok(None),
-    };
-
-    // Look up the course's embedding config.
-    let course = match minerva_db::queries::courses::find_by_id(ctx.db, course_id).await {
-        Ok(Some(c)) => c,
-        _ => return Ok(None),
-    };
-    // Chunk the text the same way ingest does, embed each chunk,
-    // mean-pool. We don't upsert to Qdrant here -- this is a one-off
-    // computation to populate the doc-level vector. Chunking is pure
-    // CPU work over the extracted text -- spawn_blocking the chunker
-    // too so we don't tie up the runtime thread on big documents.
-    let text_for_chunking = text.clone();
-    let chunks = tokio::task::spawn_blocking(move || {
-        minerva_ingest::chunker::chunk_text(
-            &text_for_chunking,
-            &minerva_ingest::chunker::ChunkerConfig::default(),
+    let filter = Filter::must([Condition::matches("document_id", doc_id.to_string())]);
+    let result = qdrant
+        .scroll(
+            ScrollPointsBuilder::new(collection)
+                .filter(filter)
+                .with_payload(false)
+                .with_vectors(true)
+                // Cap at 1000 chunks per doc -- our chunker's default
+                // produces far fewer than this even on the biggest
+                // course material; this is a sanity ceiling.
+                .limit(1000),
         )
-    })
-    .await
-    .map_err(|e| format!("chunk task panicked: {}", e))?;
-    if chunks.is_empty() {
-        return Ok(None);
-    }
-    let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
-    let embeddings: Vec<Vec<f32>> = match course.embedding_provider.as_str() {
-        "local" => ctx
-            .fastembed
-            .embed(&course.embedding_model, chunk_texts)
-            .await
-            .map_err(|e| format!("fastembed failed: {}", e))?,
-        _ => {
-            let result =
-                minerva_ingest::embedder::embed_texts(ctx.http, ctx.openai_api_key, &chunk_texts)
-                    .await
-                    .map_err(|e| format!("openai embed failed: {}", e))?;
-            result.embeddings
-        }
-    };
-    Ok(mean_pool_normalized(&embeddings))
+        .await
+        .map_err(|e| format!("qdrant scroll failed: {}", e))?;
+
+    let vectors: Vec<Vec<f32>> = result
+        .result
+        .into_iter()
+        .filter_map(|p| {
+            // VectorOutput went through a deprecation cycle in 1.16:
+            // `data` is gone; the supported path is `into_vector()`
+            // which returns the typed `Vector` enum we then match on
+            // for the Dense variant. Sparse/multi-dense aren't a
+            // shape this collection produces (we only ever upsert
+            // single dense vectors via the ingest pipeline), so we
+            // safely ignore them.
+            let v = p.vectors?;
+            match v.vectors_options? {
+                qdrant_client::qdrant::vectors_output::VectorsOptions::Vector(vec) => {
+                    match vec.into_vector() {
+                        qdrant_client::qdrant::vector_output::Vector::Dense(d) => Some(d.data),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        })
+        .collect();
+
+    Ok(mean_pool_normalized(&vectors))
 }
 
 /// Mean-pool + L2-normalise. Same shape as the ingest pipeline's
@@ -649,65 +656,101 @@ fn build_similarity_matrix(
 /// (~30 docs) could stall request handling for several seconds during
 /// every relink. Now the runtime thread just awaits a join_all of
 /// blocking-pool tasks; HTTP handlers stay responsive.
+/// Pull a content excerpt for each in-candidate doc out of Qdrant.
+/// We grab a few chunks per doc (sorted by chunk_index ascending) and
+/// concatenate their text up to `EXCERPT_CHARS`. No file I/O, no PDF
+/// re-parsing -- the chunks are already there from ingest.
+///
+/// Sample-solution docs aren't in Qdrant (they're embedded into the
+/// doc-row pooled vector but their chunks are deliberately excluded
+/// from retrieval). Those simply get an empty excerpt; the linker
+/// then leans on `kind=sample_solution` + the assignment doc's
+/// excerpt + embedding similarity to decide solution_of edges.
 async fn load_excerpts(
-    docs_path: &str,
+    qdrant: &Qdrant,
     course_id: Uuid,
     docs: &[&DocumentRow],
     only_for: &HashSet<Uuid>,
 ) -> HashMap<Uuid, String> {
-    let targets: Vec<(Uuid, String)> = docs
+    let collection = format!("course_{}", course_id);
+    if !qdrant.collection_exists(&collection).await.unwrap_or(false) {
+        // Collection hasn't been created yet (e.g. brand-new course
+        // with all-sample_solution uploads): nothing to scroll.
+        return docs
+            .iter()
+            .filter(|d| only_for.contains(&d.id))
+            .map(|d| (d.id, String::new()))
+            .collect();
+    }
+
+    let target_ids: Vec<Uuid> = docs
         .iter()
         .filter(|d| only_for.contains(&d.id))
-        .map(|d| {
-            // Filename is consulted ONLY to recover the on-disk extension
-            // so the right reader (PDF/HTML/text) parses the right bytes.
-            // The filename never reaches the linker prompt.
-            let ext = d
-                .filename
-                .rsplit('.')
-                .next()
-                .filter(|e| *e != d.filename.as_str())
-                .unwrap_or("bin");
-            let path = format!("{}/{}/{}.{}", docs_path, course_id, d.id, ext);
-            (d.id, path)
-        })
+        .map(|d| d.id)
         .collect();
 
-    let tasks: Vec<_> = targets
+    // Per-doc Qdrant scroll, fanned out concurrently. Each scroll is
+    // a single round-trip pulling at most a handful of chunks, so we
+    // can launch them all in parallel without overwhelming Qdrant.
+    // The async blocks borrow `qdrant` for the duration of join_all,
+    // and clone the collection name per-task (cheap -- a small
+    // String, no allocations on the hot path of the await chain).
+    let tasks: Vec<_> = target_ids
         .into_iter()
-        .map(|(id, path)| {
-            tokio::task::spawn_blocking(move || {
-                if !Path::new(&path).exists() {
-                    return (id, String::new());
-                }
-                match minerva_ingest::pipeline::extract_document_text(Path::new(&path)) {
-                    Ok(text) => {
-                        let normalised: String =
-                            text.split_whitespace().collect::<Vec<_>>().join(" ");
-                        let excerpt: String = normalised.chars().take(EXCERPT_CHARS).collect();
-                        (id, excerpt)
-                    }
+        .map(|id| {
+            let collection = collection.clone();
+            async move {
+                let filter = Filter::must([Condition::matches("document_id", id.to_string())]);
+                let scroll = qdrant
+                    .scroll(
+                        ScrollPointsBuilder::new(&collection)
+                            .filter(filter)
+                            .with_payload(true)
+                            .with_vectors(false)
+                            // Pull a small head: enough to assemble
+                            // EXCERPT_CHARS even if the first chunk is
+                            // unusually small. Chunks come back in
+                            // unspecified order so we sort client-side.
+                            .limit(5),
+                    )
+                    .await;
+                let mut chunks: Vec<(i64, String)> = match scroll {
+                    Ok(r) => r
+                        .result
+                        .iter()
+                        .filter_map(|p| {
+                            let text = payload_string(&p.payload, "text")?;
+                            let idx = payload_int(&p.payload, "chunk_index").unwrap_or(0);
+                            Some((idx, text))
+                        })
+                        .collect(),
                     Err(e) => {
-                        tracing::debug!("linker: excerpt for doc {} unavailable: {}", id, e);
-                        (id, String::new())
+                        tracing::debug!("linker: excerpt scroll failed for doc {}: {}", id, e);
+                        return (id, String::new());
                     }
+                };
+                chunks.sort_by_key(|(i, _)| *i);
+                let mut buf = String::with_capacity(EXCERPT_CHARS + 32);
+                for (_, text) in chunks {
+                    if buf.chars().count() >= EXCERPT_CHARS {
+                        break;
+                    }
+                    if !buf.is_empty() {
+                        buf.push(' ');
+                    }
+                    // Normalise whitespace as we go (some chunkers
+                    // preserve newlines / tabs that don't help the LLM).
+                    let normalised: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                    buf.push_str(&normalised);
                 }
-            })
+                let excerpt: String = buf.chars().take(EXCERPT_CHARS).collect();
+                (id, excerpt)
+            }
         })
         .collect();
 
-    let mut out: HashMap<Uuid, String> = HashMap::new();
-    for handle in tasks {
-        match handle.await {
-            Ok((id, excerpt)) => {
-                out.insert(id, excerpt);
-            }
-            Err(e) => {
-                tracing::warn!("linker: excerpt task panicked: {}", e);
-            }
-        }
-    }
-    out
+    let results = futures::future::join_all(tasks).await;
+    results.into_iter().collect()
 }
 
 /// Build the LLM prompt body and call Cerebras. Returns parsed

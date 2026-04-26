@@ -36,6 +36,12 @@ pub fn router() -> Router<AppState> {
             "/courses/{course_id}/feature-flags",
             get(get_course_feature_flags).put(set_course_feature_flags),
         )
+        .route("/embedding-models", get(list_embedding_models))
+        .route(
+            "/embedding-models/{model}",
+            put(update_embedding_model_enabled),
+        )
+        .route("/embedding-benchmark", post(run_embedding_benchmark))
 }
 
 fn require_admin(user: &User) -> Result<(), AppError> {
@@ -719,4 +725,220 @@ async fn set_course_feature_flags(
     // Reuse the GET handler's shape so the client can apply the
     // response directly without an extra round-trip.
     get_course_feature_flags(State(state), Extension(user), Path(course_id)).await
+}
+
+// ── Embedding model benchmarks (admin-scoped) ──────────────────────
+//
+// `GET /admin/embedding-models` returns the full whitelist with
+// dimensions, latest benchmark (if any), and a `running` flag so the
+// UI can grey out the buttons while a run is in flight.
+//
+// `POST /admin/embedding-benchmark` runs the benchmark for a single
+// model and returns the result. `FastEmbedder::benchmark_one`
+// internally `try_lock`s a serialization mutex; if a second admin
+// click lands while the first is still running we map that to
+// `admin.benchmark_busy` (400). Loading two heavy candle/ONNX models
+// at once on the prod pod would OOM-kill us.
+
+#[derive(Serialize)]
+struct EmbeddingModelEntry {
+    model: String,
+    dimensions: u64,
+    /// Latest benchmark result for this model, if it has been run since
+    /// the server started. Boot-time `STARTUP_BENCHMARK_MODELS` are
+    /// always populated; the rest are only populated after an admin
+    /// runs them on demand.
+    benchmark: Option<minerva_ingest::fastembed_embedder::BenchmarkResult>,
+    /// True if this model is in the boot warmup set. The admin UI
+    /// uses this purely as a hint -- nothing depends on it server-side.
+    warmed_at_startup: bool,
+    /// Admin-managed picker policy. When false, teachers can't pick
+    /// this model in the per-course config dropdown; courses already
+    /// using it keep working (rotation requires admin or no model
+    /// change). Backed by the `embedding_models` table.
+    enabled: bool,
+    /// How many courses currently have this model selected. Surfaced so
+    /// the admin can see the impact of disabling before they do it.
+    /// Counted against `courses` filtered to `embedding_provider='local'`
+    /// + `active=true` -- archived courses don't count.
+    courses_using: i64,
+}
+
+#[derive(Serialize)]
+struct EmbeddingModelsResponse {
+    models: Vec<EmbeddingModelEntry>,
+    /// True while a benchmark is currently running. The frontend
+    /// disables every "Run benchmark" button on the page when this is
+    /// true to avoid a guaranteed-409 click.
+    running: bool,
+}
+
+async fn list_embedding_models(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<EmbeddingModelsResponse>, AppError> {
+    require_admin(&user)?;
+
+    let benchmarks = state.fastembed.get_benchmarks().await;
+    let lookup: std::collections::HashMap<
+        &str,
+        &minerva_ingest::fastembed_embedder::BenchmarkResult,
+    > = benchmarks.iter().map(|b| (b.model.as_str(), b)).collect();
+
+    let warm: std::collections::HashSet<&str> = minerva_ingest::pipeline::STARTUP_BENCHMARK_MODELS
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
+
+    // Pull the admin-managed enabled flags. Catalog entries that
+    // somehow aren't in the DB yet (shouldn't happen post-startup-sync,
+    // but defend anyway) default to disabled in the response.
+    let policy: std::collections::HashMap<String, bool> =
+        minerva_db::queries::embedding_models::list_all(&state.db)
+            .await?
+            .into_iter()
+            .map(|r| (r.model, r.enabled))
+            .collect();
+
+    // Per-model usage counts. One scan over `courses` -> hashmap.
+    // Filtered to active + local-provider rows: archived courses
+    // wouldn't be re-embedded if the admin disabled the model anyway,
+    // and openai-provider rows don't surface in the picker.
+    let usage_rows = sqlx::query!(
+        r#"SELECT embedding_model, COUNT(*)::BIGINT AS "count!"
+           FROM courses
+           WHERE active = true
+             AND embedding_provider = 'local'
+           GROUP BY embedding_model"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let usage: std::collections::HashMap<String, i64> = usage_rows
+        .into_iter()
+        .map(|r| (r.embedding_model, r.count))
+        .collect();
+
+    let models = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+        .iter()
+        .map(|(name, dims)| EmbeddingModelEntry {
+            model: (*name).to_string(),
+            dimensions: *dims,
+            benchmark: lookup.get(name).map(|b| (*b).clone()),
+            warmed_at_startup: warm.contains(name),
+            enabled: policy.get(*name).copied().unwrap_or(false),
+            courses_using: usage.get(*name).copied().unwrap_or(0),
+        })
+        .collect();
+
+    Ok(Json(EmbeddingModelsResponse {
+        models,
+        running: state.fastembed.is_benchmark_running().await,
+    }))
+}
+
+#[derive(Deserialize)]
+struct UpdateEmbeddingModelRequest {
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+struct UpdateEmbeddingModelResponse {
+    model: String,
+    enabled: bool,
+}
+
+/// Toggle the admin-managed `enabled` flag for one catalog model. The
+/// model id comes in via the path; the body is `{ "enabled": bool }`.
+///
+/// Disabling a model only affects future picker decisions: courses
+/// already using it keep working until an admin force-migrates them
+/// (which is just `PUT /courses/{id}` with a different model -- admins
+/// bypass the enabled check there). Returns 404 for ids the catalog
+/// doesn't know about; 400 for ids that are catalog members but
+/// missing the policy row (indicates a startup-sync bug, not a
+/// user-facing error).
+async fn update_embedding_model_enabled(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(model): Path<String>,
+    Json(body): Json<UpdateEmbeddingModelRequest>,
+) -> Result<Json<UpdateEmbeddingModelResponse>, AppError> {
+    require_admin(&user)?;
+
+    let in_catalog = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+        .iter()
+        .any(|(name, _)| *name == model.as_str());
+    if !in_catalog {
+        return Err(AppError::NotFound);
+    }
+
+    let row = minerva_db::queries::embedding_models::set_enabled(&state.db, &model, body.enabled)
+        .await?
+        .ok_or_else(|| {
+            AppError::Internal(format!(
+                "embedding_models row missing for catalog entry {} (startup sync should have seeded it)",
+                model,
+            ))
+        })?;
+
+    tracing::info!(
+        "admin {} set embedding model {} enabled={}",
+        user.id,
+        row.model,
+        row.enabled,
+    );
+
+    Ok(Json(UpdateEmbeddingModelResponse {
+        model: row.model,
+        enabled: row.enabled,
+    }))
+}
+
+#[derive(Deserialize)]
+struct RunBenchmarkRequest {
+    /// HuggingFace-style model id, must be a member of
+    /// `VALID_LOCAL_MODELS`. Anything else is rejected here rather
+    /// than being passed through to fastembed.
+    model: String,
+}
+
+#[derive(Serialize)]
+struct RunBenchmarkResponse {
+    result: minerva_ingest::fastembed_embedder::BenchmarkResult,
+}
+
+async fn run_embedding_benchmark(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<RunBenchmarkRequest>,
+) -> Result<Json<RunBenchmarkResponse>, AppError> {
+    require_admin(&user)?;
+
+    // Look up dimensions from the whitelist; reject unknown ids
+    // before paying the cost of a model load.
+    let dimensions = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+        .iter()
+        .find_map(|(n, d)| (*n == body.model).then_some(*d))
+        .ok_or_else(|| {
+            AppError::bad_request_with(
+                "admin.embedding_model_unknown",
+                [("model", body.model.clone())],
+            )
+        })?;
+
+    match state.fastembed.benchmark_one(&body.model, dimensions).await {
+        Ok(result) => Ok(Json(RunBenchmarkResponse { result })),
+        Err(minerva_ingest::fastembed_embedder::BenchmarkError::Busy) => {
+            Err(AppError::bad_request("admin.benchmark_busy"))
+        }
+        Err(minerva_ingest::fastembed_embedder::BenchmarkError::Failed(e)) => {
+            // Failed loads (network/HF, candle init errors, …) are
+            // surfaced as Internal so the operator looks at the logs;
+            // we don't want to leak stack traces to the client.
+            Err(AppError::Internal(format!(
+                "embedding benchmark failed for {}: {}",
+                body.model, e
+            )))
+        }
+    }
 }

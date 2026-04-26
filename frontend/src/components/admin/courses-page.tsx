@@ -2,7 +2,12 @@ import { Link } from "@tanstack/react-router"
 import { RelativeTime } from "@/components/relative-time"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { adminUsersQuery, coursesQuery } from "@/lib/queries"
+import {
+  adminEmbeddingModelsQuery,
+  adminUsersQuery,
+  coursesQuery,
+} from "@/lib/queries"
+import type { Course } from "@/lib/types"
 import { api } from "@/lib/api"
 import {
   Card,
@@ -16,6 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -23,6 +29,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useState } from "react"
 import { useApiErrorMessage } from "@/lib/use-api-error"
@@ -88,6 +101,7 @@ export function CourseManagementPanel() {
                 <th className="py-2 pr-4 font-medium">{t("courses.columns.status")}</th>
                 <th className="py-2 pr-4 font-medium">{t("courses.columns.tokenLimit")}</th>
                 <th className="py-2 pr-4 font-medium">{t("courses.columns.created")}</th>
+                <th className="py-2 pr-4 font-medium">{t("courses.columns.embedding")}</th>
                 <th className="py-2 pr-4 font-medium">{t("courses.columns.features")}</th>
                 <th className="py-2 font-medium">{t("courses.columns.settings")}</th>
               </tr>
@@ -117,6 +131,9 @@ export function CourseManagementPanel() {
                     </td>
                     <td className="py-2 pr-4 text-muted-foreground">
                       <RelativeTime date={course.created_at} />
+                    </td>
+                    <td className="py-2 pr-4">
+                      <CourseEmbeddingCell course={course} />
                     </td>
                     <td className="py-2 pr-4">
                       <CourseFeatureFlagsCell
@@ -329,5 +346,188 @@ function CourseFeatureFlagsCell({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  )
+}
+
+// ── Embedding cell + force-migrate dialog ──────────────────────────
+//
+// The cell shows the course's currently-configured embedding provider
+// + model and a "Migrate" button. The button opens an AlertDialog with
+// a provider radio and a model select; on confirm we PUT to
+// `/courses/{id}` with the new (provider, model). Admins bypass the
+// `local_embedding_model_disabled` check on that route, so we can
+// target *any* catalog model -- including ones currently disabled in
+// the picker (a typical workflow is "disable model X site-wide, then
+// walk every course off it").
+//
+// Re-embedding cost: the rotation path (`rotate_embedding` in
+// `minerva-db`) bumps `embedding_version` and re-queues every document
+// in the course. The dialog body warns about that explicitly so a
+// distracted admin doesn't fire it on a 1000-doc course by accident.
+
+const PROVIDERS = ["local", "openai"] as const
+
+function CourseEmbeddingCell({ course }: { course: Course }) {
+  const { t } = useTranslation("admin")
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className="font-mono text-[10px]">
+          {course.embedding_provider}
+        </Badge>
+        <span
+          className="font-mono text-xs text-muted-foreground truncate max-w-[14rem]"
+          title={course.embedding_model}
+        >
+          {course.embedding_model}
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setOpen(true)}
+          title={t("courses.migrateButtonTitle")}
+        >
+          {t("courses.migrateButton")}
+        </Button>
+      </div>
+      {open && (
+        <CourseMigrateDialog
+          course={course}
+          open={open}
+          onOpenChange={setOpen}
+        />
+      )}
+    </>
+  )
+}
+
+function CourseMigrateDialog({
+  course,
+  open,
+  onOpenChange,
+}: {
+  course: Course
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
+  const queryClient = useQueryClient()
+  const { data: catalog } = useQuery(adminEmbeddingModelsQuery)
+
+  const [provider, setProvider] = useState(course.embedding_provider)
+  const [model, setModel] = useState(course.embedding_model)
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.put(`/courses/${course.id}`, {
+        embedding_provider: provider,
+        // OpenAI canonicalises the model server-side; sending the
+        // current value here is a no-op and keeps the payload simple.
+        embedding_model:
+          provider === "openai" ? course.embedding_model : model,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["courses"] })
+      onOpenChange(false)
+    },
+  })
+
+  // Local-provider option list = full catalog (admin can target
+  // disabled models too -- that's the whole point of force-migrate).
+  // Sort current selection first so it stays visible after a click.
+  const localOptions = (catalog?.models ?? []).slice().sort((a, b) => {
+    if (a.model === course.embedding_model) return -1
+    if (b.model === course.embedding_model) return 1
+    return a.model.localeCompare(b.model)
+  })
+
+  const willRotate =
+    provider !== course.embedding_provider ||
+    (provider === "local" && model !== course.embedding_model)
+
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {t("courses.migrateDialogTitle", { course: course.name })}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("courses.migrateDialogDescription")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1">
+            <label className="text-sm font-medium">
+              {t("courses.migrateProviderLabel")}
+            </label>
+            <Select value={provider} onValueChange={(v) => v && setProvider(v)}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROVIDERS.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {p}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {provider === "local" && (
+            <div className="space-y-1">
+              <label className="text-sm font-medium">
+                {t("courses.migrateModelLabel")}
+              </label>
+              <Select value={model} onValueChange={(v) => v && setModel(v)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {localOptions.map((m) => (
+                    <SelectItem key={m.model} value={m.model}>
+                      <span className="font-mono text-xs">{m.model}</span>
+                      {!m.enabled && (
+                        <span className="ml-2 text-[10px] text-muted-foreground">
+                          {t("courses.migrateModelDisabledTag")}
+                        </span>
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {willRotate && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              {t("courses.migrateWarning")}
+            </div>
+          )}
+          {mutation.isError && (
+            <p className="text-sm text-destructive">
+              {formatError(mutation.error)}
+            </p>
+          )}
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel>
+            {t("courses.migrateCancel")}
+          </AlertDialogCancel>
+          <AlertDialogAction
+            disabled={!willRotate || mutation.isPending}
+            onClick={(e) => {
+              e.preventDefault()
+              mutation.mutate()
+            }}
+          >
+            {mutation.isPending
+              ? t("courses.migrateSubmitting")
+              : t("courses.migrateConfirm")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

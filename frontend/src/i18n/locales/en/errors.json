@@ -39,7 +39,9 @@
     "rule_name_required": "Name is required.",
     "condition_attribute_unsupported": "Unsupported attribute '{{attribute}}'. Supported: {{supported}}.",
     "condition_operator_invalid": "Operator must be one of contains, not_contains, regex, not_regex.",
-    "condition_regex_invalid": "Invalid regex: {{detail}}"
+    "condition_regex_invalid": "Invalid regex: {{detail}}",
+    "embedding_model_unknown": "Unknown embedding model '{{model}}'. Pick one from the whitelist.",
+    "benchmark_busy": "Another benchmark is already running. Wait for it to finish (the page will update on its own)."
   },
   "chat": {
     "rating_invalid": "Rating must be 'up' or 'down'.",
@@ -86,7 +88,8 @@
   "course": {
     "min_score_out_of_range": "min_score must be between 0.0 and 1.0.",
     "embedding_provider_invalid": "Invalid embedding provider: {{provider}}",
-    "local_embedding_model_invalid": "Invalid local embedding model: {{model}}"
+    "local_embedding_model_invalid": "Invalid local embedding model: {{model}}",
+    "local_embedding_model_disabled": "The embedding model \"{{model}}\" has been disabled by an administrator. Pick a different model or ask the admin to re-enable it."
   },
   "play": {
     "designation_invalid_length": "Designation must be between 1 and 64 characters.",

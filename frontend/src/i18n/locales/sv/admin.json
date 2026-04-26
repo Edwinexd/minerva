@@ -152,9 +152,21 @@
       "status": "Status",
       "tokenLimit": "Tokengräns/student/dag",
       "created": "Skapad",
+      "embedding": "Embedding",
       "features": "Funktioner",
       "settings": "Inställningar"
     },
+    "migrateButton": "Migrera",
+    "migrateButtonTitle": "Tvångsmigrera kursen till en annan embedding-leverantör/modell. Köar om alla dokument för ny embedding.",
+    "migrateDialogTitle": "Migrera \"{{course}}\" till en annan embedding-modell",
+    "migrateDialogDescription": "Välj ny leverantör och (för lokal) modell. Admin kan välja även inaktiverade katalogmodeller -- det är så man flyttar en kurs av en modell man precis inaktiverat. Att bekräfta stegar upp kursens embedding_version, öppnar en ny Qdrant-collection och köar om alla dokument. Den tidigare collection-en ligger kvar på disk (övergiven) så ändringen kan återställas.",
+    "migrateProviderLabel": "Leverantör",
+    "migrateModelLabel": "Modell",
+    "migrateModelDisabledTag": "(inaktiverad)",
+    "migrateWarning": "Att spara kommer stega upp kursens embedding_version och köa om alla dokument för ny embedding under den nya modellen. Sökresultat blir ofullständiga tills arbetaren tömt kön (en kurs med hundratals dokument kan ta flera minuter).",
+    "migrateCancel": "Avbryt",
+    "migrateConfirm": "Migrera",
+    "migrateSubmitting": "Migrerar...",
     "status": {
       "active": "aktiv",
       "archived": "arkiverad"
@@ -309,6 +321,31 @@
       "backfillErrors_one": "{{count}} dokument misslyckades; se serverloggar.",
       "backfillErrors_other": "{{count}} dokument misslyckades; se serverloggar.",
       "note": "Varje klick köar upp till 5 000 dokument. För större efterhängningar, klicka igen när siffran sjunkit."
+    },
+    "embeddingModels": {
+      "title": "Embedding-modeller",
+      "description": "Katalog över lokala embedding-modeller som körtiden kan ladda. Slå på/av 'Aktiverad' för att styra vilka som visas i lärarens kurskonfigurationsmeny -- befintliga kurser som redan kör en modell fortsätter fungera om du inaktiverar den, men lärare kan inte välja den för en ny rotation. Hastighetssiffrorna kommer från att köra varje modell mot en liten akademisk testkorpus på den här servern; bara de fyra start-modellerna mäts automatiskt (att ladda hela katalogen vid start skulle OOM-döda podden), resten mäts på begäran. Servern serialiserar körningar, så bara en modell laddas i taget.",
+      "columns": {
+        "enabled": "Aktiverad",
+        "model": "Modell",
+        "dimensions": "Dim",
+        "speed": "Hastighet",
+        "coursesUsing": "Kurser",
+        "action": " "
+      },
+      "speedValue": "{{value}} emb/s",
+      "warmBadge": "uppvärmd",
+      "enabledAriaLabel": "Slå på/av synlighet i läraremenyn för {{model}}",
+      "run": "Kör benchmark",
+      "rerun": "Kör om",
+      "running": "Kör...",
+      "runBenchmarkTitle": "Ladda modellen och kör testkorpusen genom den. Inaktiverad medan en annan modell körs.",
+      "runningHint": "Mäter {{model}} just nu. Sidan pollar var 1,5 s medan körningen pågår och uppdaterar raden när den är klar.",
+      "note": "Första körningen av en modell inkluderar en engångsnedladdning från HuggingFace, vilket kan ta en minut eller två för de större kandidaterna. Påföljande körningar är varma.",
+      "confirmDisableTitle": "Inaktivera en modell som {{count}} kurs(er) använder?",
+      "confirmDisableBody": "Modellen \"{{model}}\" används just nu av {{count}} aktiv(a) kurs(er). Att inaktivera den döljer den från lärarmenyn men låter kurserna fortsätta köra på den. För att flytta dem, gör en force-migrate per kurs på Kurshantering-sidan (admin kan välja vilken katalogmodell som helst, även inaktiverade).",
+      "confirmDisableCancel": "Behåll aktiverad",
+      "confirmDisableAction": "Inaktivera ändå"
     }
   }
 }

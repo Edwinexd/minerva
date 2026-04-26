@@ -123,6 +123,24 @@ impl AppState {
 
         let fastembed = Arc::new(FastEmbedder::new());
 
+        // Sync `VALID_LOCAL_MODELS` into the admin-managed
+        // `embedding_models` table. Existing rows are left alone (so an
+        // admin's runtime toggle survives restarts); newly-added catalog
+        // entries land disabled so they never auto-appear in the
+        // teacher picker -- the admin opts in deliberately. See
+        // migration `20260427000001_embedding_models.sql` for the
+        // initial-policy reasoning.
+        for (model, _dims) in minerva_ingest::pipeline::VALID_LOCAL_MODELS {
+            let inserted =
+                minerva_db::queries::embedding_models::seed_if_missing(&db, model, false).await?;
+            if inserted {
+                tracing::info!(
+                    "embedding_models: seeded new catalog entry {} (enabled=false)",
+                    model
+                );
+            }
+        }
+
         let rules = Arc::new(RuleCache::load(&db).await?);
 
         Ok(Self {

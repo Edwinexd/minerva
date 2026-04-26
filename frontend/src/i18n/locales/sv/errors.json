@@ -39,7 +39,9 @@
     "rule_name_required": "Namn krävs.",
     "condition_attribute_unsupported": "Attributet '{{attribute}}' stöds inte. Stöds: {{supported}}.",
     "condition_operator_invalid": "Operatorn måste vara en av contains, not_contains, regex, not_regex.",
-    "condition_regex_invalid": "Ogiltigt regex: {{detail}}"
+    "condition_regex_invalid": "Ogiltigt regex: {{detail}}",
+    "embedding_model_unknown": "Okänd embedding-modell '{{model}}'. Välj en från listan.",
+    "benchmark_busy": "Ett benchmark körs redan. Vänta tills det är klart (sidan uppdateras automatiskt)."
   },
   "chat": {
     "rating_invalid": "Betyget måste vara 'up' eller 'down'.",
@@ -86,7 +88,8 @@
   "course": {
     "min_score_out_of_range": "min_score måste vara mellan 0,0 och 1,0.",
     "embedding_provider_invalid": "Ogiltig embedding-leverantör: {{provider}}",
-    "local_embedding_model_invalid": "Ogiltig lokal embedding-modell: {{model}}"
+    "local_embedding_model_invalid": "Ogiltig lokal embedding-modell: {{model}}",
+    "local_embedding_model_disabled": "Embedding-modellen \"{{model}}\" har inaktiverats av en administratör. Välj en annan modell eller be admin slå på den igen."
   },
   "play": {
     "designation_invalid_length": "Beteckningen måste vara mellan 1 och 64 tecken.",

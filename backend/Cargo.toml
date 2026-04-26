@@ -24,7 +24,13 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "migrate", "c
 
 # Vector DB
 qdrant-client = "1"
-fastembed = "5"
+# `qwen3` feature pulls in candle-core/candle-nn so we can run
+# Qwen/Qwen3-Embedding-0.6B alongside the ONNX-backed fastembed models.
+# That model isn't part of `EmbeddingModel`; it goes through fastembed's
+# separate `Qwen3TextEmbedding` API. See
+# `crates/minerva-ingest/src/fastembed_embedder.rs`.
+fastembed = { version = "5", features = ["qwen3"] }
+candle-core = "0.9"
 
 # LLM / Embeddings (HTTP)
 reqwest = { version = "0.13", features = ["json", "stream"] }

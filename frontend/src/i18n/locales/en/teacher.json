@@ -51,11 +51,21 @@
     "embeddingRotateConfirmAction": "Re-embed",
     "embeddingRotateConfirmCancel": "Keep current model",
     "embeddingModelHelpSpeed": " Speed measured on this server at startup.",
+    "embeddingModelDisabledSuffix": "(no longer offered)",
     "embeddingModels": {
       "miniLmDesc": "fast, good quality",
       "bgeSmallDesc": "optimized for retrieval",
       "bgeBaseDesc": "higher quality",
-      "nomicDesc": "long context"
+      "nomicDesc": "long context",
+      "e5SmallDesc": "multilingual, drop-in upgrade",
+      "e5BaseDesc": "multilingual, balanced",
+      "e5LargeDesc": "multilingual, best quality",
+      "bgeM3Desc": "multilingual, 8k context",
+      "gemmaDesc": "Google multilingual",
+      "mxbaiDesc": "English, top of MTEB",
+      "gteDesc": "English, 8k context",
+      "arcticDesc": "English, fast and strong",
+      "qwen3Desc": "Qwen3, multilingual, heavy"
     },
     "maxChunksLabel": "Max Retrieved Chunks",
     "minScoreLabel": "Minimum Similarity Score: {{value}}",

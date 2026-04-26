@@ -244,14 +244,41 @@ async fn update_course(
 
     if effective_provider == "local" {
         if let Some(ref model) = body.embedding_model {
-            let valid = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+            // Two-layer check: catalog membership (compile-time list) +
+            // admin-managed enabled flag (DB-backed). Catalog rejects
+            // typos with a clear error; the enabled gate prevents
+            // teachers from picking a model the admin has switched
+            // off. Bypassed in two cases:
+            //   * `model == existing.embedding_model` -- no rotation
+            //     happens in the rotate path below, so any other
+            //     unrelated PUT (rename / temperature change / …) on a
+            //     course currently sitting on a now-disabled model
+            //     still saves.
+            //   * caller is an admin -- admins use the same route to
+            //     force-migrate any course onto any catalog model,
+            //     including currently-disabled ones (a typical
+            //     workflow is "disable model X site-wide, then walk
+            //     each course off it"). The catalog membership check
+            //     still applies.
+            let in_catalog = minerva_ingest::pipeline::VALID_LOCAL_MODELS
                 .iter()
                 .any(|(name, _)| *name == model.as_str());
-            if !valid {
+            if !in_catalog {
                 return Err(AppError::bad_request_with(
                     "course.local_embedding_model_invalid",
                     [("model", model.clone())],
                 ));
+            }
+            let unchanged = model.as_str() == existing.embedding_model.as_str();
+            if !unchanged && !user.role.is_admin() {
+                let enabled =
+                    minerva_db::queries::embedding_models::is_enabled(&state.db, model).await?;
+                if !enabled {
+                    return Err(AppError::bad_request_with(
+                        "course.local_embedding_model_disabled",
+                        [("model", model.clone())],
+                    ));
+                }
             }
         }
     }

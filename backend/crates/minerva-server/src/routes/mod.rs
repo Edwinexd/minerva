@@ -54,6 +54,13 @@ pub fn api_router(state: AppState) -> Router<AppState> {
     let authed = Router::new()
         .route("/auth/me", get(me))
         .route("/auth/acknowledge-privacy", post(acknowledge_privacy))
+        // Auth-gated picker list for the per-course config dropdown.
+        // Returns only `enabled` catalog rows -- teachers can't see
+        // (and therefore can't pick) models the admin has switched off.
+        // The legacy public `/embedding-benchmarks` is left in place
+        // for now; it leaks model ids but no policy state, and
+        // refactoring its consumers is outside this change.
+        .route("/embedding-models", get(health::embedding_models))
         .nest("/courses", courses::router())
         .nest("/courses/{course_id}/documents", documents::router())
         .nest("/courses/{course_id}", chat::router())

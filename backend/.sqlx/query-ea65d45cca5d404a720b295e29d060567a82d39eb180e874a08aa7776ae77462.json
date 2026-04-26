@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT embedding_model, COUNT(*)::BIGINT AS \"count!\"\n           FROM courses\n           WHERE active = true\n             AND embedding_provider = 'local'\n           GROUP BY embedding_model",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "embedding_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "ea65d45cca5d404a720b295e29d060567a82d39eb180e874a08aa7776ae77462"
+}

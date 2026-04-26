@@ -6,6 +6,7 @@ pub mod course_token_usage;
 pub mod courses;
 pub mod document_relations;
 pub mod documents;
+pub mod embedding_models;
 pub mod external_auth;
 pub mod feature_flags;
 pub mod linker_decisions;

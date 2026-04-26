@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import {
   courseQuery,
   modelsQuery,
-  embeddingBenchmarksQuery,
+  embeddingModelsQuery,
   courseKgTokenUsageQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
@@ -40,6 +40,33 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useState } from "react"
 import type { Course } from "@/lib/types"
+
+/// Display metadata for every catalog model the picker might surface.
+/// Keys are the canonical HuggingFace-style ids the backend uses; the
+/// `descKey` points at an i18n string under `config.embeddingModels.*`.
+/// `dims` is a fallback used when the API response somehow doesn't
+/// carry a dimension (e.g. a legacy model dropped from the catalog
+/// that's still attached to a course). Keep this list in sync with
+/// `pipeline::VALID_LOCAL_MODELS`; an unknown id just falls back to
+/// the raw id with no description, which is ugly but not broken.
+const MODEL_DISPLAY: Record<
+  string,
+  { name: string; dims: number; descKey: string }
+> = {
+  "sentence-transformers/all-MiniLM-L6-v2": { name: "all-MiniLM-L6-v2", dims: 384, descKey: "config.embeddingModels.miniLmDesc" },
+  "BAAI/bge-small-en-v1.5": { name: "BGE Small EN v1.5", dims: 384, descKey: "config.embeddingModels.bgeSmallDesc" },
+  "BAAI/bge-base-en-v1.5": { name: "BGE Base EN v1.5", dims: 768, descKey: "config.embeddingModels.bgeBaseDesc" },
+  "nomic-ai/nomic-embed-text-v1.5": { name: "Nomic Embed Text v1.5", dims: 768, descKey: "config.embeddingModels.nomicDesc" },
+  "intfloat/multilingual-e5-small": { name: "Multilingual E5 Small", dims: 384, descKey: "config.embeddingModels.e5SmallDesc" },
+  "intfloat/multilingual-e5-base": { name: "Multilingual E5 Base", dims: 768, descKey: "config.embeddingModels.e5BaseDesc" },
+  "intfloat/multilingual-e5-large": { name: "Multilingual E5 Large", dims: 1024, descKey: "config.embeddingModels.e5LargeDesc" },
+  "BAAI/bge-m3": { name: "BGE M3", dims: 1024, descKey: "config.embeddingModels.bgeM3Desc" },
+  "google/embeddinggemma-300m": { name: "EmbeddingGemma 300M", dims: 768, descKey: "config.embeddingModels.gemmaDesc" },
+  "mixedbread-ai/mxbai-embed-large-v1": { name: "Mxbai Embed Large v1", dims: 1024, descKey: "config.embeddingModels.mxbaiDesc" },
+  "Alibaba-NLP/gte-large-en-v1.5": { name: "GTE Large EN v1.5", dims: 1024, descKey: "config.embeddingModels.gteDesc" },
+  "snowflake/snowflake-arctic-embed-l": { name: "Arctic Embed L", dims: 1024, descKey: "config.embeddingModels.arcticDesc" },
+  "Qwen/Qwen3-Embedding-0.6B": { name: "Qwen3 Embedding 0.6B", dims: 1024, descKey: "config.embeddingModels.qwen3Desc" },
+}
 
 export function ConfigPage({ useParams }: { useParams: () => { courseId: string } }) {
   const { courseId } = useParams()
@@ -166,7 +193,14 @@ function CourseConfigForm({ course }: { course: Course }) {
   const { t: tCommon } = useTranslation("common")
   const formatError = useApiErrorMessage()
   const { data: modelsData } = useQuery(modelsQuery)
-  const { data: benchmarksData } = useQuery(embeddingBenchmarksQuery)
+  // Backend filters this list to admin-enabled catalog rows. If an
+  // admin disabled the model this course is currently on, it won't be
+  // here -- we patch the current course's model back into the option
+  // list below so the teacher still sees what they're using rather
+  // than an empty trigger. They can save unrelated config without
+  // re-picking; only an actual model *change* hits the
+  // `local_embedding_model_disabled` server-side check.
+  const { data: embeddingModelsData } = useQuery(embeddingModelsQuery)
   const readOnly = course.my_role === "ta"
   const [name, setName] = useState(course.name)
   const [description, setDescription] = useState(course.description || "")
@@ -368,25 +402,64 @@ function CourseConfigForm({ course }: { course: Course }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[
-                    { id: "sentence-transformers/all-MiniLM-L6-v2", name: "all-MiniLM-L6-v2", dims: 384, descKey: "config.embeddingModels.miniLmDesc" },
-                    { id: "BAAI/bge-small-en-v1.5", name: "BGE Small EN v1.5", dims: 384, descKey: "config.embeddingModels.bgeSmallDesc" },
-                    { id: "BAAI/bge-base-en-v1.5", name: "BGE Base EN v1.5", dims: 768, descKey: "config.embeddingModels.bgeBaseDesc" },
-                    { id: "nomic-ai/nomic-embed-text-v1.5", name: "Nomic Embed Text v1.5", dims: 768, descKey: "config.embeddingModels.nomicDesc" },
-                  ].map((m) => {
-                    const bench = benchmarksData?.benchmarks.find((b) => b.model === m.id)
-                    const speed = bench ? t("config.embeddingSpeedSuffix", { value: Math.round(bench.embeddings_per_second) }) : ""
-                    return (
-                      <SelectItem key={m.id} value={m.id}>
-                        {t("config.embeddingModelItem", { name: m.name, dims: m.dims, desc: t(m.descKey), speed })}
-                      </SelectItem>
-                    )
-                  })}
+                  {(() => {
+                    // Build the picker option set from the public
+                    // /embedding-models feed (admin-enabled only) and
+                    // patch in the course's currently-saved model if
+                    // it's not in that list -- happens when an admin
+                    // has since disabled the model the course is on.
+                    // Without the patch the Select trigger renders
+                    // blank, which looks broken even though the value
+                    // is correct.
+                    const apiModels = embeddingModelsData?.models ?? []
+                    const ids = new Set(apiModels.map((m) => m.model))
+                    const merged = [...apiModels]
+                    if (
+                      embeddingProvider === "local" &&
+                      embeddingModel &&
+                      !ids.has(embeddingModel)
+                    ) {
+                      merged.push({
+                        model: embeddingModel,
+                        dimensions: 0,
+                        benchmark: null,
+                      })
+                    }
+                    return merged.map((m) => {
+                      const meta = MODEL_DISPLAY[m.model]
+                      const name = meta?.name ?? m.model
+                      const desc = meta?.descKey ? t(meta.descKey) : ""
+                      const dims = m.dimensions || meta?.dims || 0
+                      const speed = m.benchmark
+                        ? t("config.embeddingSpeedSuffix", {
+                            value: Math.round(
+                              m.benchmark.embeddings_per_second,
+                            ),
+                          })
+                        : ""
+                      const disabledNote = !ids.has(m.model)
+                        ? ` ${t("config.embeddingModelDisabledSuffix")}`
+                        : ""
+                      return (
+                        <SelectItem key={m.model} value={m.model}>
+                          {t("config.embeddingModelItem", {
+                            name,
+                            dims,
+                            desc,
+                            speed,
+                          })}
+                          {disabledNote}
+                        </SelectItem>
+                      )
+                    })
+                  })()}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
                 {t("config.embeddingModelHelp")}
-                {benchmarksData?.benchmarks.length ? t("config.embeddingModelHelpSpeed") : ""}
+                {embeddingModelsData?.models.some((m) => m.benchmark)
+                  ? t("config.embeddingModelHelpSpeed")
+                  : ""}
               </p>
             </div>
           )}

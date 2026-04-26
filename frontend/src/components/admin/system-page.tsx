@@ -2,7 +2,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import {
   adminClassificationStatsQuery,
+  adminEmbeddingModelsQuery,
   adminSystemMetricsQuery,
+  type AdminEmbeddingModel,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
@@ -15,7 +17,18 @@ import {
 } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import React from "react"
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -237,7 +250,258 @@ export function SystemPanel() {
       </Card>
 
       <ClassificationBackfillCard />
+      <EmbeddingModelsCard />
     </div>
+  )
+}
+
+/// Admin-scoped table of every whitelisted local embedding model with
+/// its latest benchmark and a per-row "Run benchmark" button. Backend
+/// serializes runs (one model loaded at a time) to keep peak RAM
+/// bounded -- a second click while a run is in flight returns a
+/// `admin.benchmark_busy` error which we surface as a toast-style
+/// alert. Polling the list query while `running` is true means the
+/// row's speed number flips in automatically when the run finishes,
+/// so the admin doesn't have to refresh.
+function EmbeddingModelsCard() {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
+  const queryClient = useQueryClient()
+  const { data, isLoading, error } = useQuery({
+    ...adminEmbeddingModelsQuery,
+    // While a benchmark is running, poll fast so the freshly-finished
+    // row updates without a manual refresh. Otherwise stay on the
+    // default 5s cadence that the queryOptions sets globally.
+    refetchInterval: (q) => (q.state.data?.running ? 1500 : 5000),
+  })
+  const [pendingModel, setPendingModel] = React.useState<string | null>(null)
+
+  const benchmarkMutation = useMutation({
+    mutationFn: (model: string) =>
+      api.post<{ result: unknown }>("/admin/embedding-benchmark", { model }),
+    onMutate: (model) => {
+      setPendingModel(model)
+    },
+    onSettled: () => {
+      setPendingModel(null)
+      queryClient.invalidateQueries({ queryKey: ["admin", "embedding-models"] })
+      // Also refresh the public benchmarks query so the teacher
+      // config dropdown picks up the new speed.
+      queryClient.invalidateQueries({ queryKey: ["embedding-benchmarks"] })
+    },
+  })
+
+  // Toggle the picker policy for one catalog model. Optimistically
+  // refetch the admin list and the public picker feed so the teacher
+  // dropdown updates without a hard refresh.
+  const enabledMutation = useMutation({
+    mutationFn: ({ model, enabled }: { model: string; enabled: boolean }) =>
+      api.put<{ model: string; enabled: boolean }>(
+        `/admin/embedding-models/${encodeURIComponent(model)}`,
+        { enabled },
+      ),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "embedding-models"] })
+      queryClient.invalidateQueries({ queryKey: ["embedding-models"] })
+    },
+  })
+
+  // Confirmation gate for the "disable model that's currently in use"
+  // case. We only prompt when `courses_using > 0`; flipping a model
+  // that no live course depends on saves immediately.
+  const [confirmDisable, setConfirmDisable] = React.useState<{
+    model: string
+    coursesUsing: number
+  } | null>(null)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("system.embeddingModels.title")}</CardTitle>
+        <CardDescription>{t("system.embeddingModels.description")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-40 w-full" />
+        ) : error || !data ? (
+          <p className="text-sm text-destructive">{formatError(error)}</p>
+        ) : (
+          <div className="space-y-3">
+            {data.running && (
+              <p className="text-xs text-muted-foreground">
+                {t("system.embeddingModels.runningHint", {
+                  model: pendingModel ?? "",
+                })}
+              </p>
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="py-2 pr-4 font-medium">
+                      {t("system.embeddingModels.columns.enabled")}
+                    </th>
+                    <th className="py-2 pr-4 font-medium">
+                      {t("system.embeddingModels.columns.model")}
+                    </th>
+                    <th className="py-2 pr-4 font-medium text-right">
+                      {t("system.embeddingModels.columns.dimensions")}
+                    </th>
+                    <th className="py-2 pr-4 font-medium text-right">
+                      {t("system.embeddingModels.columns.speed")}
+                    </th>
+                    <th className="py-2 pr-4 font-medium text-right">
+                      {t("system.embeddingModels.columns.coursesUsing")}
+                    </th>
+                    <th className="py-2 font-medium text-right">
+                      {t("system.embeddingModels.columns.action")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.models.map((m: AdminEmbeddingModel) => {
+                    const isThisRunning =
+                      data.running && pendingModel === m.model
+                    const buttonDisabled =
+                      data.running ||
+                      benchmarkMutation.isPending
+                    return (
+                      <tr key={m.model} className="border-b">
+                        <td className="py-2 pr-4">
+                          <Checkbox
+                            checked={m.enabled}
+                            disabled={enabledMutation.isPending}
+                            onCheckedChange={(value) => {
+                              const next = value === true
+                              // Disabling a model that's currently in
+                              // use: bounce through a confirmation
+                              // dialog so the admin sees the impact
+                              // (and can decide whether to migrate
+                              // those courses first). Enabling, or
+                              // disabling an unused model, saves
+                              // immediately.
+                              if (!next && m.courses_using > 0) {
+                                setConfirmDisable({
+                                  model: m.model,
+                                  coursesUsing: m.courses_using,
+                                })
+                                return
+                              }
+                              enabledMutation.mutate({
+                                model: m.model,
+                                enabled: next,
+                              })
+                            }}
+                            aria-label={t(
+                              "system.embeddingModels.enabledAriaLabel",
+                              { model: m.model },
+                            )}
+                          />
+                        </td>
+                        <td className="py-2 pr-4 font-mono text-xs">
+                          {m.model}
+                          {m.warmed_at_startup && (
+                            <Badge variant="secondary" className="ml-2">
+                              {t("system.embeddingModels.warmBadge")}
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono">
+                          {m.dimensions}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono">
+                          {m.benchmark
+                            ? t("system.embeddingModels.speedValue", {
+                                value: Math.round(
+                                  m.benchmark.embeddings_per_second,
+                                ),
+                              })
+                            : "-"}
+                        </td>
+                        <td className="py-2 pr-4 text-right tabular-nums">
+                          {m.courses_using > 0 ? (
+                            <Badge variant="outline">
+                              {m.courses_using}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </td>
+                        <td className="py-2 text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => benchmarkMutation.mutate(m.model)}
+                            disabled={buttonDisabled}
+                            title={t(
+                              "system.embeddingModels.runBenchmarkTitle",
+                            )}
+                          >
+                            {isThisRunning
+                              ? t("system.embeddingModels.running")
+                              : m.benchmark
+                                ? t("system.embeddingModels.rerun")
+                                : t("system.embeddingModels.run")}
+                          </Button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {(benchmarkMutation.isError || enabledMutation.isError) && (
+              <p className="text-sm text-destructive">
+                {formatError(
+                  benchmarkMutation.error ?? enabledMutation.error,
+                )}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {t("system.embeddingModels.note")}
+            </p>
+          </div>
+        )}
+      </CardContent>
+      <AlertDialog
+        open={confirmDisable != null}
+        onOpenChange={(o) => {
+          if (!o) setConfirmDisable(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("system.embeddingModels.confirmDisableTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("system.embeddingModels.confirmDisableBody", {
+                model: confirmDisable?.model ?? "",
+                count: confirmDisable?.coursesUsing ?? 0,
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t("system.embeddingModels.confirmDisableCancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirmDisable) {
+                  enabledMutation.mutate({
+                    model: confirmDisable.model,
+                    enabled: false,
+                  })
+                  setConfirmDisable(null)
+                }
+              }}
+            >
+              {t("system.embeddingModels.confirmDisableAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
   )
 }
 

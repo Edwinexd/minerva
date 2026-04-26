@@ -51,11 +51,21 @@
     "embeddingRotateConfirmAction": "Embedda om",
     "embeddingRotateConfirmCancel": "Behåll nuvarande modell",
     "embeddingModelHelpSpeed": " Hastigheten uppmätt på den här servern vid uppstart.",
+    "embeddingModelDisabledSuffix": "(erbjuds inte längre)",
     "embeddingModels": {
       "miniLmDesc": "snabb, god kvalitet",
       "bgeSmallDesc": "optimerad för hämtning",
       "bgeBaseDesc": "högre kvalitet",
-      "nomicDesc": "lång kontext"
+      "nomicDesc": "lång kontext",
+      "e5SmallDesc": "flerspråkig, direkt uppgradering",
+      "e5BaseDesc": "flerspråkig, balanserad",
+      "e5LargeDesc": "flerspråkig, högsta kvalitet",
+      "bgeM3Desc": "flerspråkig, 8k kontext",
+      "gemmaDesc": "Google flerspråkig",
+      "mxbaiDesc": "engelska, topp på MTEB",
+      "gteDesc": "engelska, 8k kontext",
+      "arcticDesc": "engelska, snabb och stark",
+      "qwen3Desc": "Qwen3, flerspråkig, tung"
     },
     "maxChunksLabel": "Maximalt antal hämtade stycken",
     "minScoreLabel": "Lägsta likhetspoäng: {{value}}",

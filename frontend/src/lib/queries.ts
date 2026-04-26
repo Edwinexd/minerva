@@ -58,6 +58,62 @@ export const embeddingBenchmarksQuery = queryOptions({
   staleTime: Infinity,
 })
 
+export interface AdminEmbeddingModel {
+  model: string
+  dimensions: number
+  // Latest benchmark for this model, or null if it hasn't been run on
+  // this server boot. Models in `STARTUP_BENCHMARK_MODELS` are
+  // populated automatically; everything else only fills in after an
+  // admin runs the benchmark from the system page.
+  benchmark: EmbeddingBenchmark | null
+  warmed_at_startup: boolean
+  // Admin-managed picker policy. When false, teachers can't pick this
+  // model in the per-course config dropdown; courses already on it
+  // keep working. Toggled via `PUT /admin/embedding-models/{model}`.
+  enabled: boolean
+  // Number of active local-provider courses currently using this
+  // model. Surfaced so the admin can see the impact of disabling
+  // (and walk through the migrate dialog on the courses page after).
+  courses_using: number
+}
+
+export interface AdminEmbeddingModelsResponse {
+  models: AdminEmbeddingModel[]
+  // True if a benchmark is currently in flight on the server. Used
+  // to disable every "Run benchmark" button while we wait, since
+  // the backend serializes runs to keep peak RAM bounded.
+  running: boolean
+}
+
+export const adminEmbeddingModelsQuery = queryOptions({
+  queryKey: ["admin", "embedding-models"],
+  queryFn: () => api.get<AdminEmbeddingModelsResponse>("/admin/embedding-models"),
+  // Poll while a benchmark is running so the row's speed populates
+  // automatically once it finishes. The hook in the page swaps to
+  // a faster interval when `running` is true.
+  refetchInterval: 5000,
+})
+
+/// Public picker feed for the per-course teacher dropdown. Auth-gated
+/// (any logged-in user can fetch it -- the list itself is non-secret),
+/// returns only `enabled` catalog entries with their dimensions and
+/// latest benchmark. Replaces the previous hardcoded model list in
+/// the teacher config page.
+export interface PublicEmbeddingModel {
+  model: string
+  dimensions: number
+  benchmark: EmbeddingBenchmark | null
+}
+
+export const embeddingModelsQuery = queryOptions({
+  queryKey: ["embedding-models"],
+  queryFn: () =>
+    api.get<{ models: PublicEmbeddingModel[] }>("/embedding-models"),
+  // Fresh-ish: a teacher reopening config after an admin re-enables
+  // a model shouldn't have to hard-refresh.
+  staleTime: 60_000,
+})
+
 export const conversationsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations"],

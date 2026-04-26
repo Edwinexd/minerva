@@ -77,6 +77,54 @@ pub async fn embedding_benchmarks(State(state): State<AppState>) -> Json<Value> 
     Json(json!({ "benchmarks": results }))
 }
 
+/// Auth-gated catalog feed for the teacher dropdown. Returns
+/// `{ models: [{model, dimensions, benchmark | null}, …] }` filtered to
+/// `enabled = true` rows. Anything an admin has disabled in
+/// `/admin/system` disappears from the picker on next refetch.
+///
+/// Unknown / unseeded catalog entries are skipped silently rather than
+/// shown disabled; the admin endpoint is the right place to surface
+/// "this model exists in code but isn't in the policy table."
+pub async fn embedding_models(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, crate::error::AppError> {
+    let benchmarks = state.fastembed.get_benchmarks().await;
+    let bench_lookup: std::collections::HashMap<
+        &str,
+        &minerva_ingest::fastembed_embedder::BenchmarkResult,
+    > = benchmarks.iter().map(|b| (b.model.as_str(), b)).collect();
+
+    let policy: std::collections::HashMap<String, bool> =
+        minerva_db::queries::embedding_models::list_all(&state.db)
+            .await?
+            .into_iter()
+            .map(|r| (r.model, r.enabled))
+            .collect();
+
+    let models: Vec<Value> = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+        .iter()
+        .filter(|(name, _)| policy.get(*name).copied().unwrap_or(false))
+        .map(|(name, dims)| {
+            let benchmark = bench_lookup.get(name).map(|b| {
+                json!({
+                    "model": b.model,
+                    "dimensions": b.dimensions,
+                    "embeddings_per_second": b.embeddings_per_second,
+                    "total_ms": b.total_ms,
+                    "corpus_size": b.corpus_size,
+                })
+            });
+            json!({
+                "model": name,
+                "dimensions": dims,
+                "benchmark": benchmark,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "models": models })))
+}
+
 fn fallback_models() -> Vec<Value> {
     vec![
         json!({ "id": "qwen-3-235b-a22b-instruct-2507", "name": "Qwen 3 235B A22B Instruct" }),

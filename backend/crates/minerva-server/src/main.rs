@@ -47,11 +47,16 @@ async fn main() -> anyhow::Result<()> {
     worker::start(state.clone(), config.max_concurrent_ingests);
 
     // Benchmark FastEmbed models in the background (doesn't block startup).
+    // Only the small ONNX models in `STARTUP_BENCHMARK_MODELS` are warmed
+    // here -- loading every entry in `VALID_LOCAL_MODELS` (which now
+    // includes Qwen3 0.6B, bge-m3, e5-large, etc.) would OOM-kill the
+    // pod. Heavier candidates are benchmarked on demand via the admin
+    // `POST /admin/embedding-benchmark` endpoint.
     let fastembed = state.fastembed.clone();
     tokio::spawn(async move {
         tracing::info!("running fastembed model benchmarks...");
         match fastembed
-            .run_benchmarks(minerva_ingest::pipeline::VALID_LOCAL_MODELS)
+            .run_benchmarks(minerva_ingest::pipeline::STARTUP_BENCHMARK_MODELS)
             .await
         {
             Ok(results) => {

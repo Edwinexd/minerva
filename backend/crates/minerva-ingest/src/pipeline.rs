@@ -105,7 +105,49 @@ pub async fn collection_name_for_course(
 
 pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "local"];
 
+/// Whitelist of local embedding models a course owner can pick. Each
+/// entry is `(huggingface-style id, output dimension)`. The dimension is
+/// authoritative: `ensure_collection` reads from this list when creating
+/// the per-course Qdrant collection, so a wrong number here means
+/// upserts will fail with a vector-size mismatch.
+///
+/// Sourced from fastembed-rs's `EmbeddingModel` enum (ONNX backend) plus
+/// one Qwen3 entry that goes through `Qwen3TextEmbedding` (candle
+/// backend, gated behind the `qwen3` feature on fastembed). The Qwen3
+/// dispatch lives in `fastembed_embedder::FastEmbedder`.
+///
+/// Adding a model here: also add a `parse_model_name` arm in
+/// `fastembed_embedder.rs`, and consider whether it's small enough to
+/// warm up at boot (`STARTUP_BENCHMARK_MODELS` below). If unsure, leave
+/// it out of startup -- admins can run `POST /api/admin/embedding-benchmark`
+/// to benchmark on demand without OOMing the box.
 pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
+    // English-only, original set kept for backwards compatibility with
+    // courses that picked these before multilingual options existed.
+    ("sentence-transformers/all-MiniLM-L6-v2", 384),
+    ("BAAI/bge-small-en-v1.5", 384),
+    ("BAAI/bge-base-en-v1.5", 768),
+    ("nomic-ai/nomic-embed-text-v1.5", 768),
+    // Multilingual (Swedish + English, matters for SU/DSV course mix).
+    ("intfloat/multilingual-e5-small", 384),
+    ("intfloat/multilingual-e5-base", 768),
+    ("intfloat/multilingual-e5-large", 1024),
+    ("BAAI/bge-m3", 1024),
+    ("google/embeddinggemma-300m", 768),
+    // English, top-of-MTEB-class upgrades.
+    ("mixedbread-ai/mxbai-embed-large-v1", 1024),
+    ("Alibaba-NLP/gte-large-en-v1.5", 1024),
+    ("snowflake/snowflake-arctic-embed-l", 1024),
+    // Qwen3 (candle backend). Dim 1024, multilingual.
+    ("Qwen/Qwen3-Embedding-0.6B", 1024),
+];
+
+/// Models the server warms up + benchmarks at boot. Subset of
+/// `VALID_LOCAL_MODELS`: only the small ONNX models the box can
+/// hold all of in RAM simultaneously. Everything else gets benchmarked
+/// on demand via the admin endpoint so a single boot doesn't try to
+/// load every candidate at once and OOM-kill the pod.
+pub const STARTUP_BENCHMARK_MODELS: &[(&str, u64)] = &[
     ("sentence-transformers/all-MiniLM-L6-v2", 384),
     ("BAAI/bge-small-en-v1.5", 384),
     ("BAAI/bge-base-en-v1.5", 768),

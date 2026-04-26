@@ -120,6 +120,11 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   const { data: documents, isLoading } = useQuery(courseDocumentsQuery(courseId))
   const { data: course } = useQuery(courseQuery(courseId))
   const canMutate = course?.my_role !== "ta"
+  // Per-course feature flag. When KG is off the kind badge, the
+  // edit-kind dialog, the bulk re-classify button, and the locked
+  // pencil-icon all collapse out of the row -- matches the backend
+  // which 404s the KG endpoints in the same case.
+  const kgEnabled = course?.feature_flags?.course_kg === true
   const queryClient = useQueryClient()
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const mbzInputRef = React.useRef<HTMLInputElement>(null)
@@ -447,21 +452,23 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
             <div className="flex items-center gap-2">
               {selected.size > 0 && (
                 <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    title={t("documents.reclassifySelectedTitle")}
-                    onClick={() =>
-                      bulkReclassifyMutation.mutate(Array.from(selected))
-                    }
-                    disabled={bulkReclassifyMutation.isPending}
-                  >
-                    {bulkReclassifyMutation.isPending
-                      ? t("documents.reclassifyingSelected")
-                      : t("documents.reclassifySelected", {
-                          count: selected.size,
-                        })}
-                  </Button>
+                  {kgEnabled && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      title={t("documents.reclassifySelectedTitle")}
+                      onClick={() =>
+                        bulkReclassifyMutation.mutate(Array.from(selected))
+                      }
+                      disabled={bulkReclassifyMutation.isPending}
+                    >
+                      {bulkReclassifyMutation.isPending
+                        ? t("documents.reclassifyingSelected")
+                        : t("documents.reclassifySelected", {
+                            count: selected.size,
+                          })}
+                    </Button>
+                  )}
                   <Button
                     variant="destructive"
                     size="sm"
@@ -531,26 +538,28 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                   opening the dialog. When the row can't be mutated
                   (TA, etc.) the badge stays purely informational.
                 */}
-                <Badge
-                  variant="outline"
-                  className={`${kindBadgeClass(doc.kind)} ${canMutate ? "cursor-pointer hover:opacity-80" : ""}`}
-                  onClick={canMutate ? () => setEditingKind(doc) : undefined}
-                  title={kindBadgeTooltip(doc, t)}
-                  aria-label={
-                    canMutate
-                      ? t("documents.setKindAria", { filename: doc.filename })
-                      : undefined
-                  }
-                >
-                  {doc.kind
-                    ? t(`documents.kindLabel.${doc.kind}`)
-                    : t("documents.kindLabel.unclassified")}
-                  {doc.kind_locked_by_teacher && (
-                    <span className="ml-1 opacity-70" aria-hidden>
-                      {"\u{1F512}"}
-                    </span>
-                  )}
-                </Badge>
+                {kgEnabled && (
+                  <Badge
+                    variant="outline"
+                    className={`${kindBadgeClass(doc.kind)} ${canMutate ? "cursor-pointer hover:opacity-80" : ""}`}
+                    onClick={canMutate ? () => setEditingKind(doc) : undefined}
+                    title={kindBadgeTooltip(doc, t)}
+                    aria-label={
+                      canMutate
+                        ? t("documents.setKindAria", { filename: doc.filename })
+                        : undefined
+                    }
+                  >
+                    {doc.kind
+                      ? t(`documents.kindLabel.${doc.kind}`)
+                      : t("documents.kindLabel.unclassified")}
+                    {doc.kind_locked_by_teacher && (
+                      <span className="ml-1 opacity-70" aria-hidden>
+                        {"\u{1F512}"}
+                      </span>
+                    )}
+                  </Badge>
+                )}
                 <Badge variant={statusColor(doc.status)}>{doc.status}</Badge>
                 {doc.error_msg && (
                   <span className="text-xs text-destructive" title={doc.error_msg}>

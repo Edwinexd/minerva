@@ -16,11 +16,38 @@
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-use minerva_ingest::classifier::Classifier;
+use async_trait::async_trait;
+use minerva_ingest::classifier::{ClassifiedKind, Classifier};
 
 use crate::classification::CerebrasClassifier;
+use crate::feature_flags;
 use crate::relink_scheduler;
 use crate::state::AppState;
+
+/// No-op classifier used when KG is gated off for a course. Returns
+/// an empty kind (which `process_document` interprets as "don't stamp
+/// a kind into Qdrant payload" and `set_classification` ignores).
+/// Lets us keep `process_document`'s signature unchanged whether or
+/// not KG is enabled -- the gating decision lives entirely in the
+/// worker, not in the ingest crate.
+struct NoopClassifier;
+
+#[async_trait]
+impl Classifier for NoopClassifier {
+    async fn classify(
+        &self,
+        _filename: &str,
+        _mime_type: &str,
+        _text: &str,
+    ) -> Result<ClassifiedKind, String> {
+        // Returning an Err means `set_classification` is never called
+        // and the doc keeps `kind = NULL`. The chat-time partition
+        // (which is also gated on KG) treats NULL as "no classification
+        // applied", so for KG-disabled courses chunks just flow through
+        // as plain RAG context.
+        Err("kg disabled for course".to_string())
+    }
+}
 
 /// How often the worker checks for new pending documents.
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
@@ -146,14 +173,19 @@ pub fn start(state: AppState, max_concurrent: usize) {
 
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
 
-        // Classifier lives for the lifetime of the worker and is shared
-        // across spawned per-document tasks via Arc. One reqwest::Client
-        // per worker is fine -- Cerebras requests are cheap and the
-        // client owns a connection pool.
-        let classifier: Arc<dyn Classifier> = Arc::new(CerebrasClassifier::new(
+        // Classifiers live for the lifetime of the worker and are
+        // shared across spawned per-document tasks via Arc. One
+        // reqwest::Client per worker is fine -- Cerebras requests are
+        // cheap and the client owns a connection pool.
+        //
+        // We hold both a real classifier and a no-op so we can pick
+        // per-doc based on the KG feature flag without re-allocating
+        // anything in the hot loop.
+        let kg_classifier: Arc<dyn Classifier> = Arc::new(CerebrasClassifier::new(
             reqwest::Client::new(),
             state.config.cerebras_api_key.clone(),
         ));
+        let noop_classifier: Arc<dyn Classifier> = Arc::new(NoopClassifier);
 
         loop {
             // Calculate how many slots are free so we only claim what we can process.
@@ -185,7 +217,17 @@ pub fn start(state: AppState, max_concurrent: usize) {
                 let db = state.db.clone();
                 let qdrant = Arc::clone(&state.qdrant);
                 let fastembed = Arc::clone(&state.fastembed);
-                let classifier = Arc::clone(&classifier);
+                // Per-doc gate: if the course has the KG feature flag
+                // off, swap in the no-op classifier so the ingest
+                // pipeline doesn't burn a Cerebras call AND doesn't
+                // emit a kind into Qdrant. The mark_dirty for the
+                // relink sweeper is also skipped further down.
+                let kg_on = feature_flags::course_kg_enabled(&db, doc.course_id).await;
+                let classifier = if kg_on {
+                    Arc::clone(&kg_classifier)
+                } else {
+                    Arc::clone(&noop_classifier)
+                };
                 let openai_api_key = state.config.openai_api_key.clone();
                 let docs_path = state.config.docs_path.clone();
                 let doc_id = doc.id;
@@ -313,12 +355,18 @@ pub fn start(state: AppState, max_concurrent: usize) {
                             // RelinkScheduler -- with a hard cap so a
                             // long sustained burst still fires the
                             // linker within MAX_PENDING_AGE.
-                            scheduler.mark_dirty(course_id_for_relink).await;
-                            tracing::info!(
-                                "worker: marked course {} dirty after doc {} ingest -- linker will fire on next sweep tick",
-                                course_id_for_relink,
-                                doc.id,
-                            );
+                            //
+                            // Skipped entirely when the course has
+                            // KG disabled; nothing classified means
+                            // nothing for the linker to chew on.
+                            if kg_on {
+                                scheduler.mark_dirty(course_id_for_relink).await;
+                                tracing::info!(
+                                    "worker: marked course {} dirty after doc {} ingest -- linker will fire on next sweep tick",
+                                    course_id_for_relink,
+                                    doc.id,
+                                );
+                            }
                         }
                         Err(e) => {
                             tracing::error!("worker: document {} processing failed: {}", doc.id, e);

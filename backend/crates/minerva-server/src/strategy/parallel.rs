@@ -91,22 +91,35 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             total_completion += completion_tokens;
             rag_injected = true;
 
-            // Kind-aware partition before showing anything to the model
-            // or to the client. Unclassified-doc lookup is cheap and
-            // gates the brief race window between upload and classify.
-            let unclassified =
+            // Kind-aware partition before showing anything to the
+            // model or to the client. Skipped entirely when the KG
+            // feature flag is off for this course -- partition_chunks
+            // sees `kg_enabled=false` and returns every chunk as
+            // context with no signals, and we don't run the
+            // adversarial filter (which is part of the same KG
+            // bundle). The unclassified lookup is also skipped to
+            // save a roundtrip on the hot chat path.
+            let unclassified = if ctx.kg_enabled {
                 minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
                     .await
-                    .unwrap_or_default();
-            let mut rag = common::partition_chunks(rag_chunks, &unclassified);
+                    .unwrap_or_default()
+            } else {
+                std::collections::HashSet::new()
+            };
+            let mut rag = common::partition_chunks(rag_chunks, &unclassified, ctx.kg_enabled);
 
-            // Adversarial pre-retrieval check on context chunks.
-            rag.context = crate::classification::adversarial::filter_solution_chunks(
-                &http_client,
-                &ctx.cerebras_api_key,
-                rag.context,
-            )
-            .await;
+            // Adversarial pre-retrieval check on context chunks
+            // (gated on kg_enabled -- it's defence in depth on top
+            // of the per-doc kind classifier, so it only matters
+            // when classification is on at all).
+            if ctx.kg_enabled {
+                rag.context = crate::classification::adversarial::filter_solution_chunks(
+                    &http_client,
+                    &ctx.cerebras_api_key,
+                    rag.context,
+                )
+                .await;
+            }
 
             let hidden =
                 minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)

@@ -32,6 +32,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/classification-stats", get(get_classification_stats))
         .route("/backfill-classifications", post(backfill_classifications))
+        .route(
+            "/courses/{course_id}/feature-flags",
+            get(get_course_feature_flags).put(set_course_feature_flags),
+        )
 }
 
 fn require_admin(user: &User) -> Result<(), AppError> {
@@ -580,4 +584,139 @@ async fn backfill_classifications(
     });
 
     Ok(Json(BackfillResponse { queued }))
+}
+
+// ── Per-course feature flags (admin-managed) ───────────────────────
+//
+// We surface these as a generic toggle list (each known flag = a
+// switch the admin can flip per course) so adding a new flag
+// later is just appending to `feature_flags::ALL_FLAGS` and the UI
+// renders an extra row. The admin UI submits the FULL desired flag
+// state on PUT, mirroring how /admin/users/{id}/role works -- avoids
+// drift between an in-memory list and a stale DB row.
+
+#[derive(Serialize)]
+struct FeatureFlagStateResponse {
+    /// Flag name (matches `feature_flags::ALL_FLAGS`).
+    flag: String,
+    /// Effective state for this course (course-scoped row > global
+    /// row > compiled-in default = false).
+    enabled: bool,
+    /// Whether the course has its own row (vs inheriting from
+    /// global/default). Lets the admin UI show a "set explicitly"
+    /// indicator.
+    course_override: bool,
+}
+
+#[derive(Serialize)]
+struct CourseFeatureFlagsResponse {
+    course_id: Uuid,
+    flags: Vec<FeatureFlagStateResponse>,
+}
+
+async fn get_course_feature_flags(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<CourseFeatureFlagsResponse>, AppError> {
+    require_admin(&user)?;
+
+    // 404 if course doesn't exist (avoid leaking flags for a nonexistent id).
+    if minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::NotFound);
+    }
+
+    let course_rows =
+        minerva_db::queries::feature_flags::list_for_course(&state.db, course_id).await?;
+    let course_overrides: std::collections::HashMap<String, bool> = course_rows
+        .into_iter()
+        .map(|r| (r.flag, r.enabled))
+        .collect();
+
+    let mut flags = Vec::with_capacity(crate::feature_flags::ALL_FLAGS.len());
+    for &flag in crate::feature_flags::ALL_FLAGS {
+        let course_override = course_overrides.contains_key(flag);
+        // Resolve effective state through the same path the
+        // application uses, so the admin UI cannot disagree with
+        // runtime behaviour.
+        let enabled = minerva_db::queries::feature_flags::is_enabled_for_course(
+            &state.db, flag, course_id, false,
+        )
+        .await?;
+        flags.push(FeatureFlagStateResponse {
+            flag: flag.to_string(),
+            enabled,
+            course_override,
+        });
+    }
+
+    Ok(Json(CourseFeatureFlagsResponse { course_id, flags }))
+}
+
+#[derive(Deserialize)]
+struct SetCourseFeatureFlagsRequest {
+    /// Map of flag-name -> desired state. Flags not in the map are
+    /// left untouched -- admin can selectively patch by sending only
+    /// the changed entries.
+    ///
+    /// To revert a course back to the global default, set the value
+    /// to `null` (which `serde` deserialises as `None`); the row is
+    /// then deleted rather than overwritten with `false`.
+    flags: std::collections::HashMap<String, Option<bool>>,
+}
+
+async fn set_course_feature_flags(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<SetCourseFeatureFlagsRequest>,
+) -> Result<Json<CourseFeatureFlagsResponse>, AppError> {
+    require_admin(&user)?;
+    if minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::NotFound);
+    }
+
+    // Validate every flag the request mentions is one we recognise --
+    // a typo from the admin UI shouldn't quietly persist a row whose
+    // flag string nothing reads.
+    for flag in body.flags.keys() {
+        if !crate::feature_flags::ALL_FLAGS.contains(&flag.as_str()) {
+            return Err(AppError::bad_request_with(
+                "admin.feature_flag_unknown",
+                [("flag", flag.clone())],
+            ));
+        }
+    }
+
+    for (flag, desired) in &body.flags {
+        match desired {
+            Some(enabled) => {
+                minerva_db::queries::feature_flags::set(
+                    &state.db,
+                    flag,
+                    minerva_db::queries::feature_flags::Scope::Course(course_id),
+                    *enabled,
+                )
+                .await?;
+            }
+            None => {
+                minerva_db::queries::feature_flags::delete(
+                    &state.db,
+                    flag,
+                    minerva_db::queries::feature_flags::Scope::Course(course_id),
+                )
+                .await?;
+            }
+        }
+    }
+
+    // Reuse the GET handler's shape so the client can apply the
+    // response directly without an extra round-trip.
+    get_course_feature_flags(State(state), Extension(user), Path(course_id)).await
 }

@@ -3,6 +3,7 @@ mod classification;
 mod config;
 mod error;
 mod ext_obfuscate;
+mod feature_flags;
 pub mod lti;
 mod relink_scheduler;
 mod routes;

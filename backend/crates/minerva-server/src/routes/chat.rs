@@ -842,6 +842,12 @@ pub(super) async fn run_chat_message(
 
     let strategy_name = course.strategy.clone();
 
+    // Resolve the KG feature flag once per chat request and pin it
+    // into the strategy context. This both saves a DB lookup per
+    // partition call and guarantees a stable view across the run --
+    // an admin flipping the flag mid-conversation won't half-apply.
+    let kg_enabled = crate::feature_flags::course_kg_enabled(&state.db, course_id).await;
+
     let ctx = strategy::GenerationContext {
         course_name: course.name,
         custom_prompt: course.system_prompt,
@@ -864,6 +870,7 @@ pub(super) async fn run_chat_message(
         db: state.db.clone(),
         qdrant: Arc::clone(&state.qdrant),
         fastembed: Arc::clone(&state.fastembed),
+        kg_enabled,
     };
 
     tokio::spawn(async move {

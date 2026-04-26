@@ -81,9 +81,18 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
 
   useDocumentTitle(course ? tCommon("pageTitles.teacherCourse", { course: course.name }) : null)
 
-  const visibleTabValues = course?.my_role === "ta"
+  // Tab visibility is the union of role gating and feature-flag
+  // gating. KG-only tabs (knowledge-graph today) hide automatically
+  // when the course doesn't have the `course_kg` flag flipped on by
+  // an admin -- matches the backend, which 404s those endpoints in
+  // the same case.
+  const kgEnabled = course?.feature_flags?.course_kg === true
+  const baseTabs = course?.my_role === "ta"
     ? TAB_VALUES.filter((v) => !TA_HIDDEN_TABS.has(v))
     : TAB_VALUES
+  const visibleTabValues = baseTabs.filter(
+    (v) => kgEnabled || v !== "knowledge-graph",
+  )
   const validTabs = new Set<string>(visibleTabValues)
 
   const lastSegment = location.pathname.split("/").pop() || ""

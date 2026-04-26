@@ -33,21 +33,29 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // Kind-aware partition: assignment_brief / lab_brief / exam matches
     // become `signals` (the model gets a refusal addendum but never the
     // chunk text); sample_solution leftovers are dropped defensively;
-    // unclassified docs are held back for this turn.
-    let unclassified = minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
-        .await
-        .unwrap_or_default();
-    let mut rag = common::partition_chunks(raw_chunks, &unclassified);
+    // unclassified docs are held back for this turn. All gated on
+    // `kg_enabled` -- KG-disabled courses bypass the partition and the
+    // adversarial filter entirely.
+    let unclassified = if ctx.kg_enabled {
+        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
+            .await
+            .unwrap_or_default()
+    } else {
+        std::collections::HashSet::new()
+    };
+    let mut rag = common::partition_chunks(raw_chunks, &unclassified, ctx.kg_enabled);
 
     // Adversarial pre-retrieval check: drop any per-chunk worked
     // solutions that slipped through the doc-level classifier.
     // Fails open on timeout (see classification::adversarial).
-    rag.context = crate::classification::adversarial::filter_solution_chunks(
-        &http_client,
-        &ctx.cerebras_api_key,
-        rag.context,
-    )
-    .await;
+    if ctx.kg_enabled {
+        rag.context = crate::classification::adversarial::filter_solution_chunks(
+            &http_client,
+            &ctx.cerebras_api_key,
+            rag.context,
+        )
+        .await;
+    }
 
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
         .await

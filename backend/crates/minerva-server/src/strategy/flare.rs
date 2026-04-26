@@ -103,21 +103,30 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.embedding_model,
     )
     .await;
-    let initial_chunks = crate::classification::adversarial::filter_solution_chunks(
-        &http_client,
-        &ctx.cerebras_api_key,
-        initial_chunks_raw,
-    )
-    .await;
+    // Adversarial filter is part of the KG bundle (defence in depth on
+    // top of per-doc kind classification). Skip when KG is gated off.
+    let initial_chunks = if ctx.kg_enabled {
+        crate::classification::adversarial::filter_solution_chunks(
+            &http_client,
+            &ctx.cerebras_api_key,
+            initial_chunks_raw,
+        )
+        .await
+    } else {
+        initial_chunks_raw
+    };
 
     // Everything below is in a separate function so integration tests can
     // drive the outer loop with scripted Cerebras responses + a mocked
     // retrieval callback, without having to bring up a real Postgres,
     // Qdrant, or FastEmbed stack.
-    let unclassified_doc_ids =
+    let unclassified_doc_ids = if ctx.kg_enabled {
         minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
             .await
-            .unwrap_or_default();
+            .unwrap_or_default()
+    } else {
+        std::collections::HashSet::new()
+    };
     let loop_cfg = RunLoopConfig {
         course_name: &ctx.course_name,
         custom_prompt: &ctx.custom_prompt,
@@ -129,6 +138,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         max_chunks: ctx.max_chunks,
         daily_token_limit: ctx.daily_token_limit,
         unclassified_doc_ids,
+        kg_enabled: ctx.kg_enabled,
     };
     let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
     let output = run_loop(&http_client, &loop_cfg, initial_chunks, &tx, |sentence| {
@@ -154,12 +164,18 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 &embedding_model,
             )
             .await;
-            crate::classification::adversarial::filter_solution_chunks(
-                &http_client,
-                &cerebras_key,
-                raw,
-            )
-            .await
+            // Mid-stream adversarial filter: same KG gate as the
+            // initial-chunk pass. Disabled courses bypass it.
+            if ctx.kg_enabled {
+                crate::classification::adversarial::filter_solution_chunks(
+                    &http_client,
+                    &cerebras_key,
+                    raw,
+                )
+                .await
+            } else {
+                raw
+            }
         }
     })
     .await;
@@ -214,6 +230,10 @@ struct RunLoopConfig<'a> {
     /// answer than risk leaking unclassified material). Tests pass an
     /// empty set; production looks it up once before run_loop.
     unclassified_doc_ids: std::collections::HashSet<String>,
+    /// Mirror of `GenerationContext::kg_enabled` -- forwarded so the
+    /// inner loop's `partition_chunks` and adversarial-filter calls
+    /// honour the gate without re-resolving the flag mid-stream.
+    kg_enabled: bool,
 }
 
 /// Final state of a FLARE run. Returned by `run_loop` so the caller can
@@ -342,7 +362,11 @@ where
         // Kind-aware partition every iteration: as `all_chunks` grows
         // mid-loop via FLARE retrievals, signal chunks may show up that
         // weren't there at iteration 0. Cheap -- pure in-memory work.
-        let rag = common::partition_chunks(all_chunks.clone(), &cfg.unclassified_doc_ids);
+        let rag = common::partition_chunks(
+            all_chunks.clone(),
+            &cfg.unclassified_doc_ids,
+            cfg.kg_enabled,
+        );
         let system = common::build_system_prompt_with_signals(
             cfg.course_name,
             cfg.custom_prompt,
@@ -2074,6 +2098,7 @@ mod loop_regression_tests {
             max_chunks: 8,
             daily_token_limit: 0, // unlimited, so we don't short-circuit on token cap
             unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let http = reqwest::Client::new();
@@ -2138,6 +2163,7 @@ mod loop_regression_tests {
             max_chunks: 8,
             daily_token_limit: 500,
             unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let http = reqwest::Client::new();
@@ -2202,6 +2228,7 @@ mod loop_regression_tests {
             max_chunks: 8,
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let http = reqwest::Client::new();
@@ -2283,6 +2310,7 @@ mod loop_regression_tests {
             max_chunks: 8,
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let retrieve_count = StdArc::new(AtomicUsize::new(0));
@@ -2360,6 +2388,7 @@ mod loop_regression_tests {
             max_chunks: 8,
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let retrieve_count = StdArc::new(AtomicUsize::new(0));
@@ -2432,6 +2461,7 @@ mod loop_regression_tests {
             max_chunks: 100, // plenty of room
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let call = StdArc::new(AtomicUsize::new(0));
@@ -2560,6 +2590,7 @@ mod loop_regression_tests {
             max_chunks: 8,
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let http = reqwest::Client::new();
@@ -2646,6 +2677,7 @@ mod loop_regression_tests {
             max_chunks: 8,
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
+            kg_enabled: true,
         };
 
         let http = reqwest::Client::new();

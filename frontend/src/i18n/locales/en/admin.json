@@ -152,6 +152,7 @@
       "status": "Status",
       "tokenLimit": "Token limit/student/day",
       "created": "Created",
+      "features": "Features",
       "settings": "Settings"
     },
     "status": {
@@ -160,7 +161,22 @@
     },
     "tokenLimitUnlimited": "unlimited",
     "settingsLink": "Settings",
-    "empty": "No courses match the filter."
+    "empty": "No courses match the filter.",
+    "featuresButton": "Features ({{enabled}}/{{total}})",
+    "featuresButtonShort": "Features",
+    "featuresButtonTitle": "Toggle which experimental / opt-in features are enabled for this course.",
+    "featuresDialogTitle": "Course features",
+    "featuresDialogDescription": "Per-course feature flags for {{course}}. Changes apply immediately; flipping a flag off reverts the course to the global default for that flag.",
+    "featuresDialogClose": "Close",
+    "featureOverridden": "course override",
+    "featureInherited": "default",
+    "featureRevertToDefault": "Revert to global default",
+    "featureFlagLabel": {
+      "course_kg": "Course knowledge graph"
+    },
+    "featureFlagDescription": {
+      "course_kg": "Per-document kind classification, cross-document linker, knowledge-graph viewer, assignment-refusal addendum, and per-chunk adversarial filter. Off by default while we calibrate."
+    }
   },
   "rules": {
     "title": "Role Auto-Promotion Rules",

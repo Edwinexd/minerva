@@ -614,6 +614,18 @@ async fn require_course_teacher(
     Err(AppError::Forbidden)
 }
 
+/// Gate every KG-related endpoint on the `course_kg` feature flag.
+/// Returns 404 (not 403) when off so a non-KG course "looks like"
+/// the feature simply doesn't exist -- no surface for student or
+/// teacher fishing.
+async fn require_kg_enabled(state: &AppState, course_id: Uuid) -> Result<(), AppError> {
+    if crate::feature_flags::course_kg_enabled(&state.db, course_id).await {
+        Ok(())
+    } else {
+        Err(AppError::NotFound)
+    }
+}
+
 /// Resolve a `(course_id, doc_id)` pair, ensuring the document actually
 /// belongs to the course. Same scope-check as `patch_document`.
 async fn load_doc_in_course(
@@ -699,6 +711,7 @@ async fn reclassify_document(
     Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ReclassifyResponse>, AppError> {
     require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
     let doc = load_doc_in_course(&state, course_id, doc_id).await?;
 
     match run_classify_one(&state, &doc).await? {
@@ -738,6 +751,7 @@ async fn set_document_kind(
     Json(body): Json<SetKindBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
     let doc = load_doc_in_course(&state, course_id, doc_id).await?;
 
     // Reject unknown kinds at the API boundary so the user gets a 400
@@ -809,6 +823,7 @@ async fn clear_kind_lock(
     Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
     let _doc = load_doc_in_course(&state, course_id, doc_id).await?;
     minerva_db::queries::documents::clear_kind_lock(&state.db, doc_id).await?;
     Ok(Json(serde_json::json!({
@@ -831,6 +846,7 @@ async fn reclassify_all_in_course(
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<ReclassifyAllResponse>, AppError> {
     require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
 
     let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
     let candidates: Vec<_> = docs
@@ -980,6 +996,7 @@ async fn get_knowledge_graph(
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<GraphResponse>, AppError> {
     require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
 
     let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
     let edges_rows =
@@ -1035,6 +1052,7 @@ async fn reject_edge(
     Path((course_id, edge_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<EdgeMutationResponse>, AppError> {
     require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
 
     // Cross-course safety: if the edge id resolves to a different
     // course, surface 404 rather than silently allowing a teacher to
@@ -1066,6 +1084,7 @@ async fn unreject_edge(
     Path((course_id, edge_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<EdgeMutationResponse>, AppError> {
     require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
 
     let edge = minerva_db::queries::document_relations::find_by_id(&state.db, edge_id)
         .await?
@@ -1100,6 +1119,7 @@ async fn rebuild_knowledge_graph(
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<RelinkResponse>, AppError> {
     require_course_teacher(&state, course_id, &user).await?;
+    require_kg_enabled(&state, course_id).await?;
     let edges = relink_course(&state, course_id).await?;
     Ok(Json(RelinkResponse { edges }))
 }

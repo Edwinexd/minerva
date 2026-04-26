@@ -152,6 +152,7 @@
       "status": "Status",
       "tokenLimit": "Tokengräns/student/dag",
       "created": "Skapad",
+      "features": "Funktioner",
       "settings": "Inställningar"
     },
     "status": {
@@ -160,7 +161,22 @@
     },
     "tokenLimitUnlimited": "obegränsat",
     "settingsLink": "Inställningar",
-    "empty": "Inga kurser matchar filtret."
+    "empty": "Inga kurser matchar filtret.",
+    "featuresButton": "Funktioner ({{enabled}}/{{total}})",
+    "featuresButtonShort": "Funktioner",
+    "featuresButtonTitle": "Slå på/av experimentella eller opt-in-funktioner för den här kursen.",
+    "featuresDialogTitle": "Kursfunktioner",
+    "featuresDialogDescription": "Funktionsflaggor per kurs för {{course}}. Ändringar gäller direkt; att slå av en flagga återställer kursen till den globala standardinställningen.",
+    "featuresDialogClose": "Stäng",
+    "featureOverridden": "kursöverstyrning",
+    "featureInherited": "standard",
+    "featureRevertToDefault": "Återställ till global standard",
+    "featureFlagLabel": {
+      "course_kg": "Kunskapsgraf för kurs"
+    },
+    "featureFlagDescription": {
+      "course_kg": "Klassificering per dokument, tvärdokumentlänkare, grafvisare, vägrasinstruktion vid uppgiftsmatch och per-chunk-skyddsfilter. Avstängd som standard medan vi kalibrerar."
+    }
   },
   "rules": {
     "title": "Regler för automatisk rollbefordran",

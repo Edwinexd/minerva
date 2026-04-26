@@ -29,6 +29,22 @@ export interface Course {
   updated_at: string
   /** Viewing user's course_member role, if any. Drives UI gating for TAs. */
   my_role: "student" | "ta" | "teacher" | null
+  /**
+   * Per-course feature flags. Resolved server-side through the same
+   * path the backend uses, so the UI's "is X enabled" check matches
+   * what the runtime actually does. Drives hide/show on KG-related
+   * tabs, badges, and dialogs.
+   */
+  feature_flags: CourseFeatureFlags
+}
+
+export interface CourseFeatureFlags {
+  /**
+   * Course knowledge graph V1: per-doc kind classification + linker
+   * + graph viewer + assignment-refusal addendum + adversarial
+   * chunk filter. Off by default until an admin opts the course in.
+   */
+  course_kg: boolean
 }
 
 export interface AdminUser {

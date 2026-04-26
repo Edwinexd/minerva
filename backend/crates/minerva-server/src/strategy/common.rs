@@ -153,7 +153,17 @@ pub fn scored_point_to_rag_chunk(point: &ScoredPoint) -> Option<RagChunk> {
 pub fn partition_chunks(
     chunks: Vec<RagChunk>,
     unclassified_doc_ids: &HashSet<String>,
+    kg_enabled: bool,
 ) -> RagResult {
+    if !kg_enabled {
+        // KG feature flag is off for this course: bypass every
+        // kind-based partition rule and just feed every chunk into
+        // context. No signals (so no refusal addendum gets appended).
+        return RagResult {
+            context: chunks,
+            signals: Vec::new(),
+        };
+    }
     let mut context = Vec::with_capacity(chunks.len());
     let mut signals = Vec::new();
     for c in chunks {
@@ -731,7 +741,7 @@ mod tests {
             ),
             chunk("d4", "midterm.pdf", "Q1: prove …", Some("exam")),
         ];
-        let r = partition_chunks(chunks, &HashSet::new());
+        let r = partition_chunks(chunks, &HashSet::new(), true);
         assert_eq!(r.context.len(), 1);
         assert_eq!(r.context[0].filename, "lecture1.pdf");
         assert_eq!(r.signals.len(), 3);
@@ -752,7 +762,7 @@ mod tests {
             "Here is the answer …",
             Some("sample_solution"),
         )];
-        let r = partition_chunks(chunks, &HashSet::new());
+        let r = partition_chunks(chunks, &HashSet::new(), true);
         assert!(r.context.is_empty());
         assert!(r.signals.is_empty());
     }
@@ -765,7 +775,7 @@ mod tests {
         ];
         let mut unclassified = HashSet::new();
         unclassified.insert("d2".to_string());
-        let r = partition_chunks(chunks, &unclassified);
+        let r = partition_chunks(chunks, &unclassified, true);
         assert_eq!(r.context.len(), 1);
         assert_eq!(r.context[0].filename, "ready.pdf");
         assert!(r.signals.is_empty());
@@ -853,7 +863,7 @@ mod tests {
             chunk("d1", "lecture.pdf", "Lecture content", Some("lecture")),
             chunk("d2", "mystery.pdf", "Ambiguous content", Some("unknown")),
         ];
-        let r = partition_chunks(chunks, &HashSet::new());
+        let r = partition_chunks(chunks, &HashSet::new(), true);
         assert_eq!(r.context.len(), 1);
         assert_eq!(r.context[0].filename, "lecture.pdf");
         assert!(r.signals.is_empty());

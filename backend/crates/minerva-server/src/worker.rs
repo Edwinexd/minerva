@@ -314,6 +314,11 @@ pub fn start(state: AppState, max_concurrent: usize) {
                             // long sustained burst still fires the
                             // linker within MAX_PENDING_AGE.
                             scheduler.mark_dirty(course_id_for_relink).await;
+                            tracing::info!(
+                                "worker: marked course {} dirty after doc {} ingest -- linker will fire on next sweep tick",
+                                course_id_for_relink,
+                                doc.id,
+                            );
                         }
                         Err(e) => {
                             tracing::error!("worker: document {} processing failed: {}", doc.id, e);

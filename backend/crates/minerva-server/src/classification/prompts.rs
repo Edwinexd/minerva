@@ -11,9 +11,11 @@
 /// to return JSON matching the schema declared in `document.rs`.
 pub const CLASSIFIER_SYSTEM_PROMPT: &str = r#"You classify a single course document into one of these kinds:
 
-- "lecture": slides, lecture notes, recordings transcripts, instructor-authored expository material teaching a topic.
+- "lecture": slides, lecture notes, instructor-authored expository material teaching a topic. Structured, prepared content.
+- "lecture_transcript": auto-generated speech-to-text transcript of a lecture recording (verbatim spoken language, often with timestamps, filler words, "um/uh", incomplete sentences, no headings). Same teaching purpose as a lecture but the prose is messy and unstructured. Pick this over "lecture" when the text reads like a transcription rather than prepared notes/slides.
 - "reading": textbook chapters, papers, supplementary articles, links to external readings.
-- "assignment_brief": the description of an assignment students must complete and submit. Numbered steps, "your task", "implement", grading criteria, deliverables, due dates.
+- "tutorial_exercise": Swedish "övning" / English "tutorial" / "exercise" / "practice problems". OPTIONAL practice material that students work through but is NOT graded -- typically marked "frivillig", "ej obligatorisk", "voluntary", "for practice", "self-study", or similar. Distinct from assignment_brief (which is graded). When in doubt between tutorial_exercise and assignment_brief, look for grading language, deadlines, submission instructions -- those make it an assignment_brief.
+- "assignment_brief": the description of a GRADED assignment students must complete and submit. Numbered steps, "your task", "implement", grading criteria, deliverables, due dates, "submit by".
 - "sample_solution": a worked-out solution, model answer, grading rubric with answers, or any document whose primary purpose is to show students the answer to a graded problem.
 - "lab_brief": a practical lab or exercise description, similar to assignment_brief but for hands-on/lab work. If unsure between assignment_brief and lab_brief, prefer assignment_brief.
 - "exam": past exams, mock exams, exam-style problem sets without solutions.

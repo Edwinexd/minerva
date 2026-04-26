@@ -41,6 +41,48 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/// Per-kind tint for the kind badge. Soft Tailwind palette so the
+/// teacher gets a glanceable color signal without anything looking
+/// like an error -- previously assignment_brief used the destructive
+/// (red) variant and read as a system error rather than a category.
+///
+/// Picked to coordinate with the graph viewer's KIND_COLORS (same
+/// hue family per kind) so a doc's badge here matches its node color
+/// over there.
+const KIND_BADGE_CLASS: Record<string, string> = {
+  lecture:
+    "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-800",
+  lecture_transcript:
+    "bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-950 dark:text-sky-200 dark:border-sky-800",
+  reading:
+    "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-200 dark:border-emerald-800",
+  tutorial_exercise:
+    "bg-teal-100 text-teal-800 border-teal-200 dark:bg-teal-950 dark:text-teal-200 dark:border-teal-800",
+  // assignment_brief / lab_brief / exam: warm but not destructive.
+  // Teachers should *notice* assessment kinds (chat path treats them
+  // specially) without reading them as errors.
+  assignment_brief:
+    "bg-amber-100 text-amber-900 border-amber-200 dark:bg-amber-950 dark:text-amber-100 dark:border-amber-800",
+  lab_brief:
+    "bg-orange-100 text-orange-900 border-orange-200 dark:bg-orange-950 dark:text-orange-100 dark:border-orange-800",
+  exam:
+    "bg-rose-100 text-rose-900 border-rose-200 dark:bg-rose-950 dark:text-rose-100 dark:border-rose-800",
+  sample_solution:
+    "bg-violet-100 text-violet-900 border-violet-200 dark:bg-violet-950 dark:text-violet-100 dark:border-violet-800",
+  syllabus:
+    "bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700",
+  unknown:
+    "bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:border-zinc-700",
+}
+
+const UNCLASSIFIED_BADGE_CLASS =
+  "bg-muted text-muted-foreground border-dashed"
+
+function kindBadgeClass(kind: DocumentKind | null): string {
+  if (kind == null) return UNCLASSIFIED_BADGE_CLASS
+  return KIND_BADGE_CLASS[kind] ?? UNCLASSIFIED_BADGE_CLASS
+}
+
 /// Multi-line tooltip surfaced by hovering the kind badge: lock
 /// state, classifier confidence, and rationale. Browsers render
 /// `\n` in `title=` as a soft line break which is good enough for a
@@ -241,13 +283,46 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
     },
   })
 
-  const reclassifyAllMutation = useMutation({
-    mutationFn: () =>
-      api.post(`/courses/${courseId}/documents/reclassify-all`, {}),
-    onSuccess: () => {
+  // Bulk reclassify the currently-selected documents. We loop the
+  // existing per-doc endpoint rather than introducing a new bulk
+  // endpoint -- it's the same code path the dialog's "Re-classify"
+  // button uses, so behaviour stays consistent (locked rows skip,
+  // failures are reported individually). Each docId is fired in
+  // parallel with bounded concurrency via Promise.allSettled, then
+  // we surface a summary on completion.
+  const bulkReclassifyMutation = useMutation({
+    mutationFn: async (docIds: string[]) => {
+      const docsById = new Map(documents?.map((d) => [d.id, d]) ?? [])
+      // Drop locked rows up front -- the per-doc endpoint silently
+      // returns `{locked: true}` for them, which we'd otherwise count
+      // as a success and confuse the teacher.
+      const eligible = docIds.filter(
+        (id) => !docsById.get(id)?.kind_locked_by_teacher,
+      )
+      const skippedLocked = docIds.length - eligible.length
+      const results = await Promise.allSettled(
+        eligible.map((id) =>
+          api.post(`/courses/${courseId}/documents/${id}/reclassify`, {}),
+        ),
+      )
+      const failed = results.filter((r) => r.status === "rejected").length
+      if (failed > 0) {
+        throw new Error(
+          t("documents.reclassifySelectedFailed", {
+            failed,
+            total: eligible.length,
+          }),
+        )
+      }
+      return { ok: eligible.length, skippedLocked }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: ["courses", courseId, "documents"],
       })
+    },
+    onSuccess: () => {
+      setSelected(new Set())
     },
   })
 
@@ -258,23 +333,11 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
     return "outline" as const
   }
 
-  // Visual signal: assignment-bearing kinds (which the chat path
-  // refuses to solve from) get a destructive badge so the teacher can
-  // spot them at a glance; sample_solution gets the secondary/muted
-  // look since it's locked out of RAG entirely. Lecture/reading/
-  // syllabus are the "normal" surface.
-  const kindBadgeVariant = (kind: DocumentKind | null) => {
-    if (kind == null) return "outline" as const
-    if (
-      kind === "assignment_brief" ||
-      kind === "lab_brief" ||
-      kind === "exam"
-    ) {
-      return "destructive" as const
-    }
-    if (kind === "sample_solution") return "secondary" as const
-    return "default" as const
-  }
+  // Visual signal: each kind gets a soft semantic tint via
+  // KIND_BADGE_CLASS rather than the destructive (red) variant we
+  // used to use for assessment kinds. The destructive look read as a
+  // system error; the new palette keeps assessments distinct (warm
+  // amber/orange/rose) while staying calm.
 
   // When the kind dialog closes after a successful mutation, sync the
   // displayed editingKind state with the freshly-fetched row so a
@@ -382,28 +445,34 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
               </span>
             </label>
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                title={t("documents.reclassifyAllTitle")}
-                onClick={() => reclassifyAllMutation.mutate()}
-                disabled={reclassifyAllMutation.isPending}
-              >
-                {reclassifyAllMutation.isPending
-                  ? t("documents.reclassifyingAll")
-                  : t("documents.reclassifyAll")}
-              </Button>
               {selected.size > 0 && (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setConfirmBulk(true)}
-                  disabled={bulkDeleteMutation.isPending}
-                >
-                  {bulkDeleteMutation.isPending
-                    ? t("documents.deletingCount")
-                    : t("documents.deleteCount", { count: selected.size })}
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title={t("documents.reclassifySelectedTitle")}
+                    onClick={() =>
+                      bulkReclassifyMutation.mutate(Array.from(selected))
+                    }
+                    disabled={bulkReclassifyMutation.isPending}
+                  >
+                    {bulkReclassifyMutation.isPending
+                      ? t("documents.reclassifyingSelected")
+                      : t("documents.reclassifySelected", {
+                          count: selected.size,
+                        })}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setConfirmBulk(true)}
+                    disabled={bulkDeleteMutation.isPending}
+                  >
+                    {bulkDeleteMutation.isPending
+                      ? t("documents.deletingCount")
+                      : t("documents.deleteCount", { count: selected.size })}
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -414,6 +483,20 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
             {formatError(bulkDeleteMutation.error)}
           </p>
         )}
+        {bulkReclassifyMutation.isError && (
+          <p className="text-sm text-destructive">
+            {formatError(bulkReclassifyMutation.error)}
+          </p>
+        )}
+        {bulkReclassifyMutation.isSuccess &&
+          bulkReclassifyMutation.data &&
+          bulkReclassifyMutation.data.skippedLocked > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {t("documents.reclassifyLockedSkipped", {
+                count: bulkReclassifyMutation.data.skippedLocked,
+              })}
+            </p>
+          )}
 
         <div className="space-y-2">
           {documents?.map((doc) => (
@@ -449,8 +532,8 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                   (TA, etc.) the badge stays purely informational.
                 */}
                 <Badge
-                  variant={doc.kind ? kindBadgeVariant(doc.kind) : "outline"}
-                  className={canMutate ? "cursor-pointer hover:opacity-80" : ""}
+                  variant="outline"
+                  className={`${kindBadgeClass(doc.kind)} ${canMutate ? "cursor-pointer hover:opacity-80" : ""}`}
                   onClick={canMutate ? () => setEditingKind(doc) : undefined}
                   title={kindBadgeTooltip(doc, t)}
                   aria-label={

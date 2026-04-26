@@ -137,12 +137,18 @@ async fn submit_transcript(
             .map_err(|e| AppError::Internal(format!("failed to write transcript: {}", e)))?;
 
         // Update DB: new filename, mime type, size, reset to pending.
-        let new_filename = doc
-            .filename
-            .strip_suffix(".url")
-            .unwrap_or(&doc.filename)
-            .to_string()
-            + ".txt";
+        // Prefix with "transcript_" so the classifier's filename_hints
+        // recognises this as auto-generated speech-to-text and assigns
+        // the `lecture_transcript` kind (lower-quality / messier text
+        // than prepared lecture notes; teachers can spot why retrieval
+        // surfaces awkward speech blocks).
+        let stem = doc.filename.strip_suffix(".url").unwrap_or(&doc.filename);
+        let new_filename = if stem.starts_with("transcript_") {
+            // already-prefixed (re-submission path); don't double-prefix
+            format!("{stem}.txt")
+        } else {
+            format!("transcript_{stem}.txt")
+        };
         let size_bytes = text.len() as i64;
 
         let updated = minerva_db::queries::documents::replace_with_transcript(

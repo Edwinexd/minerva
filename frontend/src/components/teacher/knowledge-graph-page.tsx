@@ -20,6 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -57,21 +58,7 @@ export function KnowledgeGraphPage({
   const { courseId } = useParams()
   const { t } = useTranslation("teacher")
   const formatError = useApiErrorMessage()
-  const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery(courseKnowledgeGraphQuery(courseId))
-
-  const rebuildMutation = useMutation({
-    mutationFn: () =>
-      api.post<{ edges: number }>(
-        `/courses/${courseId}/documents/knowledge-graph/rebuild`,
-        {},
-      ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "knowledge-graph"],
-      })
-    },
-  })
 
   // Filter state. Defaults: all kinds visible, both relations
   // visible, rejected edges hidden. Held as Sets so we can
@@ -85,6 +72,14 @@ export function KnowledgeGraphPage({
   >(() => new Set(["solution_of", "part_of_unit"]))
   const [showRejected, setShowRejected] = React.useState(false)
 
+  // No "rebuild graph" button: relinking is wired into the ingestion
+  // pipeline via `relink_scheduler::spawn_sweep` (debounced after every
+  // classification change). A teacher who's just edited a kind sees
+  // updated edges on the next sweep tick (~5-30s); needing a manual
+  // button would mean the auto-pipeline isn't doing its job, and
+  // tucking one in here trains teachers to think the graph is stale
+  // by default. Export is the one manual action that stays.
+
   return (
     <Card>
       <CardHeader>
@@ -93,35 +88,18 @@ export function KnowledgeGraphPage({
             <CardTitle>{t("knowledgeGraph.title")}</CardTitle>
             <CardDescription>{t("knowledgeGraph.description")}</CardDescription>
           </div>
-          <div className="flex gap-2">
-            {data && data.nodes.length > 0 && (
-              <Button
-                variant="outline"
-                onClick={() => downloadGraphJson(courseId, data)}
-                title={t("knowledgeGraph.exportTitle")}
-              >
-                {t("knowledgeGraph.export")}
-              </Button>
-            )}
+          {data && data.nodes.length > 0 && (
             <Button
               variant="outline"
-              onClick={() => rebuildMutation.mutate()}
-              disabled={rebuildMutation.isPending}
-              title={t("knowledgeGraph.rebuildTitle")}
+              onClick={() => downloadGraphJson(courseId, data)}
+              title={t("knowledgeGraph.exportTitle")}
             >
-              {rebuildMutation.isPending
-                ? t("knowledgeGraph.rebuilding")
-                : t("knowledgeGraph.rebuild")}
+              {t("knowledgeGraph.export")}
             </Button>
-          </div>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {rebuildMutation.isError && (
-          <p className="text-sm text-destructive">
-            {formatError(rebuildMutation.error)}
-          </p>
-        )}
         {isLoading ? (
           <Skeleton className="h-[500px] w-full" />
         ) : error || !data ? (
@@ -144,8 +122,6 @@ export function KnowledgeGraphPage({
               kindFilter={kindFilter}
               relationFilter={relationFilter}
               showRejected={showRejected}
-              onRebuild={() => rebuildMutation.mutate()}
-              rebuildPending={rebuildMutation.isPending}
               courseId={courseId}
             />
           </>
@@ -155,25 +131,10 @@ export function KnowledgeGraphPage({
   )
 }
 
-function EmptyState({
-  message,
-  cta,
-  onCta,
-  disabled,
-}: {
-  message: string
-  cta?: string
-  onCta?: () => void
-  disabled?: boolean
-}) {
+function EmptyState({ message }: { message: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded border border-dashed py-16">
       <p className="text-sm text-muted-foreground">{message}</p>
-      {cta && (
-        <Button onClick={onCta} disabled={disabled}>
-          {cta}
-        </Button>
-      )}
     </div>
   )
 }
@@ -186,11 +147,13 @@ function EmptyState({
 
 const KIND_COLORS: Record<string, { fill: string; stroke: string }> = {
   lecture: { fill: "#3b82f6", stroke: "#1d4ed8" },
+  lecture_transcript: { fill: "#0ea5e9", stroke: "#0369a1" },
   reading: { fill: "#10b981", stroke: "#047857" },
-  assignment_brief: { fill: "#ef4444", stroke: "#b91c1c" },
+  tutorial_exercise: { fill: "#14b8a6", stroke: "#0f766e" },
+  assignment_brief: { fill: "#f59e0b", stroke: "#b45309" },
   sample_solution: { fill: "#a855f7", stroke: "#7e22ce" },
   lab_brief: { fill: "#f97316", stroke: "#c2410c" },
-  exam: { fill: "#dc2626", stroke: "#991b1b" },
+  exam: { fill: "#e11d48", stroke: "#9f1239" },
   syllabus: { fill: "#6b7280", stroke: "#374151" },
   unknown: { fill: "#9ca3af", stroke: "#4b5563" },
 }
@@ -213,7 +176,9 @@ function Legend() {
   const { t } = useTranslation("teacher")
   const items = [
     "lecture",
+    "lecture_transcript",
     "reading",
+    "tutorial_exercise",
     "assignment_brief",
     "sample_solution",
     "lab_brief",
@@ -332,91 +297,110 @@ function FilterBar({
     "unclassified",
   ]
 
+  const isFiltered =
+    kindFilter.size !== ALL_KIND_FILTER.size ||
+    relationFilter.size !== ALL_RELATION_FILTER.size ||
+    showRejected
+
+  // Layout mirrors the RAG-debug panel (`rag-page.tsx`) so this and
+  // that look like siblings: bordered card-ish container with the
+  // muted background, label-on-top form rows, and a footer row of
+  // toggles + reset. Selects + checkbox align cleanly because they
+  // share the same `space-y-1` label group; the reset button hangs
+  // off the right end without trying to vertically center against
+  // labelled controls (the previous source of the off-by-half-line
+  // misalignment the user complained about).
   return (
-    <div className="flex flex-wrap items-end gap-3 rounded border bg-muted/20 px-3 py-2">
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">
-          {t("knowledgeGraph.filters.kindLabel")}
-        </label>
-        <Select
-          value={kindValue}
-          onValueChange={(v) => {
-            if (v === "__all") {
-              setKindFilter(new Set(ALL_KIND_FILTER))
-            } else {
-              setKindFilter(new Set([v as DocumentKind | "unclassified"]))
-            }
-          }}
-        >
-          <SelectTrigger className="w-[200px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all">
-              {t("knowledgeGraph.filters.all")}
-            </SelectItem>
-            {allKindKinds.map((k) => (
-              <SelectItem key={k} value={k}>
-                {t(
-                  k === "unclassified"
-                    ? "documents.kindLabel.unclassified"
-                    : `documents.kindLabel.${k}`,
-                )}
+    <div className="space-y-3 rounded border p-3 bg-muted/30">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">
+            {t("knowledgeGraph.filters.kindLabel")}
+          </Label>
+          <Select
+            value={kindValue}
+            onValueChange={(v) => {
+              if (v === "__all") {
+                setKindFilter(new Set(ALL_KIND_FILTER))
+              } else {
+                setKindFilter(new Set([v as DocumentKind | "unclassified"]))
+              }
+            }}
+          >
+            <SelectTrigger className="w-[220px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all">
+                {t("knowledgeGraph.filters.all")}
               </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+              {allKindKinds.map((k) => (
+                <SelectItem key={k} value={k}>
+                  {t(
+                    k === "unclassified"
+                      ? "documents.kindLabel.unclassified"
+                      : `documents.kindLabel.${k}`,
+                  )}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">
+            {t("knowledgeGraph.filters.relationLabel")}
+          </Label>
+          <Select
+            value={relationValue}
+            onValueChange={(v) => {
+              if (v === "__all") {
+                setRelationFilter(new Set(ALL_RELATION_FILTER))
+              } else {
+                setRelationFilter(
+                  new Set([v as KnowledgeGraphEdge["relation"]]),
+                )
+              }
+            }}
+          >
+            <SelectTrigger className="w-[220px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all">
+                {t("knowledgeGraph.filters.all")}
+              </SelectItem>
+              <SelectItem value="solution_of">
+                {t("knowledgeGraph.edgeKind.solution_of")}
+              </SelectItem>
+              <SelectItem value="part_of_unit">
+                {t("knowledgeGraph.edgeKind.part_of_unit")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">
-          {t("knowledgeGraph.filters.relationLabel")}
-        </label>
-        <Select
-          value={relationValue}
-          onValueChange={(v) => {
-            if (v === "__all") {
-              setRelationFilter(new Set(ALL_RELATION_FILTER))
-            } else {
-              setRelationFilter(
-                new Set([v as KnowledgeGraphEdge["relation"]]),
-              )
-            }
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Label className="flex items-center gap-2 text-sm font-normal">
+          <Checkbox
+            checked={showRejected}
+            onCheckedChange={(v) => setShowRejected(v === true)}
+          />
+          <span>{t("knowledgeGraph.filters.showRejected")}</span>
+        </Label>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={!isFiltered}
+          onClick={() => {
+            setKindFilter(new Set(ALL_KIND_FILTER))
+            setRelationFilter(new Set(ALL_RELATION_FILTER))
+            setShowRejected(false)
           }}
         >
-          <SelectTrigger className="w-[200px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all">
-              {t("knowledgeGraph.filters.all")}
-            </SelectItem>
-            <SelectItem value="solution_of">
-              {t("knowledgeGraph.edgeKind.solution_of")}
-            </SelectItem>
-            <SelectItem value="part_of_unit">
-              {t("knowledgeGraph.edgeKind.part_of_unit")}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+          {t("knowledgeGraph.filters.reset")}
+        </Button>
       </div>
-      <label className="flex items-center gap-2 text-sm">
-        <Checkbox
-          checked={showRejected}
-          onCheckedChange={(v) => setShowRejected(v === true)}
-        />
-        <span>{t("knowledgeGraph.filters.showRejected")}</span>
-      </label>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => {
-          setKindFilter(new Set(ALL_KIND_FILTER))
-          setRelationFilter(new Set(ALL_RELATION_FILTER))
-          setShowRejected(false)
-        }}
-      >
-        {t("knowledgeGraph.filters.reset")}
-      </Button>
     </div>
   )
 }
@@ -428,16 +412,12 @@ function FilteredGraphView({
   kindFilter,
   relationFilter,
   showRejected,
-  onRebuild,
-  rebuildPending,
   courseId,
 }: {
   data: KnowledgeGraph
   kindFilter: Set<DocumentKind | "unclassified">
   relationFilter: Set<KnowledgeGraphEdge["relation"]>
   showRejected: boolean
-  onRebuild: () => void
-  rebuildPending: boolean
   courseId: string
 }) {
   const { t } = useTranslation("teacher")
@@ -483,21 +463,14 @@ function FilteredGraphView({
   }
 
   if (filteredNodes.length === 0) {
-    return (
-      <EmptyState
-        message={t("knowledgeGraph.noDocuments")}
-        cta={data.edges_computed ? undefined : t("knowledgeGraph.rebuild")}
-        onCta={data.edges_computed ? undefined : onRebuild}
-        disabled={rebuildPending}
-      />
-    )
+    return <EmptyState message={t("knowledgeGraph.noDocuments")} />
   }
 
   return (
     <>
       {!data.edges_computed && data.edges.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          {t("knowledgeGraph.notBuiltYet")}
+          {t("knowledgeGraph.pipelinePending")}
         </p>
       )}
       <ForceGraphCanvas graph={subgraph} />

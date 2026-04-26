@@ -197,7 +197,9 @@
     "mbzResult": "Imported {{imported}} item(s); skipped {{skipped}} hidden.",
     "kindLabel": {
       "lecture": "Lecture",
+      "lecture_transcript": "Lecture transcript",
       "reading": "Reading",
+      "tutorial_exercise": "Tutorial",
       "assignment_brief": "Assignment",
       "sample_solution": "Solution",
       "lab_brief": "Lab",
@@ -216,9 +218,13 @@
     "clearLock": "Unlock",
     "reclassify": "Re-classify",
     "reclassifying": "Re-classifying...",
-    "reclassifyAll": "Re-classify all",
-    "reclassifyingAll": "Re-classifying all...",
-    "reclassifyAllTitle": "Re-run the classifier on every unlocked document in this course."
+    "reclassifySelected_one": "Re-classify {{count}} doc",
+    "reclassifySelected_other": "Re-classify {{count}} docs",
+    "reclassifyingSelected": "Re-classifying...",
+    "reclassifySelectedTitle": "Re-run the classifier on every selected unlocked document.",
+    "reclassifySelectedFailed": "Re-classification failed for {{failed}} of {{total}} doc(s).",
+    "reclassifyLockedSkipped_one": "{{count}} locked doc skipped",
+    "reclassifyLockedSkipped_other": "{{count}} locked docs skipped"
   },
   "knowledgeGraph": {
     "title": "Knowledge Graph",
@@ -227,7 +233,8 @@
     "rebuilding": "Rebuilding...",
     "rebuildTitle": "Re-run the cross-document linker. Use after editing kinds or uploading new docs.",
     "noDocuments": "No documents in this course yet.",
-    "notBuiltYet": "No edges have been computed yet. Click 'Rebuild graph' to run the linker.",
+    "notBuiltYet": "No edges have been computed yet.",
+    "pipelinePending": "No edges yet -- the linker runs automatically a few seconds after each ingest. Hold tight or check the server logs.",
     "noEdges": "The linker found no confident relationships between docs in this course.",
     "edgeListTitle_one": "{{count}} edge (click to expand)",
     "edgeListTitle_other": "{{count}} edges (click to expand)",

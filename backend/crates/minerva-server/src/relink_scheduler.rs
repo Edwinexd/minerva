@@ -34,10 +34,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 /// How long to wait after the most recent dirty-mark before a course is
-/// considered "due" for linking. Long enough that a Moodle sync of 50
-/// docs ends up as one linker call, short enough that a teacher who
-/// edits one doc sees fresh edges within ~a minute.
-pub const RELINK_DEBOUNCE: Duration = Duration::from_secs(60);
+/// considered "due" for linking. Short enough that a teacher uploading
+/// a single doc sees fresh edges within ~half a minute, long enough
+/// that a bursty Moodle sync of N docs (typical inter-arrival ~1-3s)
+/// still coalesces into one linker call rather than N.
+pub const RELINK_DEBOUNCE: Duration = Duration::from_secs(20);
 
 /// Hard cap on how long the debounce can defer a queued relink. After
 /// this many seconds since `first_marked_at`, the linker fires on the
@@ -46,8 +47,11 @@ pub const RELINK_DEBOUNCE: Duration = Duration::from_secs(60);
 /// indefinitely starving the linker.
 pub const MAX_PENDING_AGE: Duration = Duration::from_secs(5 * 60);
 
-/// How often the sweep loop wakes up to look for due courses.
-pub const SWEEP_INTERVAL: Duration = Duration::from_secs(10);
+/// How often the sweep loop wakes up to look for due courses. Tightened
+/// to 5s (from 10s) so the worst-case "ingest finishes, relink debounce
+/// expires, but we wait for next tick" window stays short for
+/// single-doc uploads.
+pub const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Async wrapper around the DB-backed relink queue. Holds a pool clone
 /// so callers can keep using `state.relink_scheduler.mark_dirty(course_id)`
@@ -124,6 +128,12 @@ impl RelinkScheduler {
 /// Sequential per tick so we don't fire many concurrent linker calls
 /// at gpt-oss; in practice the typical pending-N is small.
 pub fn spawn_sweep(state: crate::state::AppState) {
+    tracing::info!(
+        "relink sweeper: spawning (debounce {}s, max-age {}s, sweep every {}s)",
+        RELINK_DEBOUNCE.as_secs(),
+        MAX_PENDING_AGE.as_secs(),
+        SWEEP_INTERVAL.as_secs(),
+    );
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(SWEEP_INTERVAL).await;
@@ -131,14 +141,25 @@ pub fn spawn_sweep(state: crate::state::AppState) {
             if due.is_empty() {
                 continue;
             }
-            tracing::info!("relink sweeper: {} course(s) due", due.len());
+            tracing::info!("relink sweeper: firing linker for {} course(s)", due.len());
             for course_id in due {
-                if let Err(e) = crate::routes::documents::relink_course(&state, course_id).await {
-                    tracing::warn!("relink sweeper: course {} failed: {:?}", course_id, e);
-                    // On error, re-mark immediate so the next sweep
-                    // retries. Avoids losing a relink to a transient
-                    // Cerebras 5xx.
-                    state.relink_scheduler.mark_dirty_immediate(course_id).await;
+                let started = std::time::Instant::now();
+                match crate::routes::documents::relink_course(&state, course_id).await {
+                    Ok(edges_written) => {
+                        tracing::info!(
+                            "relink sweeper: course {} done in {}ms ({} edges)",
+                            course_id,
+                            started.elapsed().as_millis(),
+                            edges_written,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("relink sweeper: course {} failed: {:?}", course_id, e);
+                        // On error, re-mark immediate so the next sweep
+                        // retries. Avoids losing a relink to a transient
+                        // Cerebras 5xx.
+                        state.relink_scheduler.mark_dirty_immediate(course_id).await;
+                    }
                 }
             }
         }

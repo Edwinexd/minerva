@@ -7,7 +7,9 @@
 /// junk value is a 400 rather than a 500 from the DB.
 pub const ALL_KINDS: &[&str] = &[
     "lecture",
+    "lecture_transcript",
     "reading",
+    "tutorial_exercise",
     "assignment_brief",
     "sample_solution",
     "lab_brief",
@@ -22,7 +24,16 @@ pub const ALL_KINDS: &[&str] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentKind {
     Lecture,
+    /// Auto-generated speech-to-text transcript from a lecture
+    /// recording. Same semantic role as `Lecture` but typically
+    /// noisier; kept distinct so teachers can spot why retrieval
+    /// surfaces awkward speech-to-text blocks.
+    LectureTranscript,
     Reading,
+    /// Swedish "övning" -- practice/exercise material that's NOT
+    /// graded. Distinct from `AssignmentBrief` (graded mandatory
+    /// work): the chat path can discuss tutorial exercises freely.
+    TutorialExercise,
     AssignmentBrief,
     SampleSolution,
     LabBrief,
@@ -39,7 +50,9 @@ impl DocumentKind {
     pub fn as_str(self) -> &'static str {
         match self {
             DocumentKind::Lecture => "lecture",
+            DocumentKind::LectureTranscript => "lecture_transcript",
             DocumentKind::Reading => "reading",
+            DocumentKind::TutorialExercise => "tutorial_exercise",
             DocumentKind::AssignmentBrief => "assignment_brief",
             DocumentKind::SampleSolution => "sample_solution",
             DocumentKind::LabBrief => "lab_brief",
@@ -52,7 +65,9 @@ impl DocumentKind {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "lecture" => Some(DocumentKind::Lecture),
+            "lecture_transcript" => Some(DocumentKind::LectureTranscript),
             "reading" => Some(DocumentKind::Reading),
+            "tutorial_exercise" => Some(DocumentKind::TutorialExercise),
             "assignment_brief" => Some(DocumentKind::AssignmentBrief),
             "sample_solution" => Some(DocumentKind::SampleSolution),
             "lab_brief" => Some(DocumentKind::LabBrief),
@@ -115,7 +130,12 @@ mod tests {
         assert!(is_signal_only_kind("exam"));
         assert!(is_signal_only_kind("sample_solution"));
         assert!(!is_signal_only_kind("lecture"));
+        assert!(!is_signal_only_kind("lecture_transcript"));
         assert!(!is_signal_only_kind("reading"));
+        // tutorial_exercise is NOT signal-only: it's optional practice
+        // material the chat path is allowed to walk through with the
+        // student, unlike the graded assessment kinds.
+        assert!(!is_signal_only_kind("tutorial_exercise"));
         assert!(!is_signal_only_kind("syllabus"));
         assert!(!is_signal_only_kind("unknown"));
     }

@@ -416,7 +416,9 @@ export interface SystemMetrics {
 
 export type DocumentKind =
   | "lecture"
+  | "lecture_transcript"
   | "reading"
+  | "tutorial_exercise"
   | "assignment_brief"
   | "sample_solution"
   | "lab_brief"
@@ -426,7 +428,9 @@ export type DocumentKind =
 
 export const DOCUMENT_KINDS: DocumentKind[] = [
   "lecture",
+  "lecture_transcript",
   "reading",
+  "tutorial_exercise",
   "assignment_brief",
   "sample_solution",
   "lab_brief",

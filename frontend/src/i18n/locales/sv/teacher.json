@@ -197,7 +197,9 @@
     "mbzResult": "Importerade {{imported}} resurs(er), hoppade över {{skipped}} dolda.",
     "kindLabel": {
       "lecture": "Föreläsning",
+      "lecture_transcript": "Föreläsnings-transkript",
       "reading": "Läsmaterial",
+      "tutorial_exercise": "Övning",
       "assignment_brief": "Uppgift",
       "sample_solution": "Lösningsförslag",
       "lab_brief": "Laboration",
@@ -216,9 +218,13 @@
     "clearLock": "Lås upp",
     "reclassify": "Klassificera om",
     "reclassifying": "Klassificerar om...",
-    "reclassifyAll": "Klassificera om alla",
-    "reclassifyingAll": "Klassificerar om alla...",
-    "reclassifyAllTitle": "Kör klassificeraren igen på alla olåsta dokument i den här kursen."
+    "reclassifySelected_one": "Klassificera om {{count}} dokument",
+    "reclassifySelected_other": "Klassificera om {{count}} dokument",
+    "reclassifyingSelected": "Klassificerar om...",
+    "reclassifySelectedTitle": "Kör klassificeraren igen på alla markerade olåsta dokument.",
+    "reclassifySelectedFailed": "Omklassificering misslyckades för {{failed}} av {{total}} dokument.",
+    "reclassifyLockedSkipped_one": "{{count}} låst dokument hoppades över",
+    "reclassifyLockedSkipped_other": "{{count}} låsta dokument hoppades över"
   },
   "knowledgeGraph": {
     "title": "Kunskapsgraf",
@@ -227,7 +233,8 @@
     "rebuilding": "Bygger om...",
     "rebuildTitle": "Kör tvärdokuments-länkaren igen. Använd efter att ha redigerat typer eller laddat upp nya dokument.",
     "noDocuments": "Inga dokument i den här kursen ännu.",
-    "notBuiltYet": "Inga kanter har beräknats än. Klicka på 'Bygg om grafen' för att köra länkaren.",
+    "notBuiltYet": "Inga kanter har beräknats än.",
+    "pipelinePending": "Inga kanter än -- länkaren körs automatiskt några sekunder efter varje ingest. Vänta lite eller titta i serverloggarna.",
     "noEdges": "Länkaren hittade inga säkra relationer mellan dokumenten i den här kursen.",
     "edgeListTitle_one": "{{count}} kant (klicka för att expandera)",
     "edgeListTitle_other": "{{count}} kanter (klicka för att expandera)",

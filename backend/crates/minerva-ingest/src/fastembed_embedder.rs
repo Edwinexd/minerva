@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
@@ -18,25 +17,32 @@ pub struct BenchmarkResult {
 /// Keeps peak tensor memory predictable regardless of document size.
 const EMBED_BATCH_SIZE: usize = 32;
 
-/// Thread-safe wrapper around FastEmbed models.
-/// Models are lazily initialized on first use and cached for reuse.
+/// Single-slot model cache around fastembed.
+///
+/// Only one model is resident at a time. The `current` lock is held across the
+/// entire embed call so that concurrent requests for *different* models queue
+/// behind each other instead of both loading and OOMing the pod. Requests for
+/// the *same* model share the cached handle (the inner blocking mutex inside
+/// `TextEmbedding` already serializes inference, so this matches prior throughput
+/// for the same-model case).
 #[derive(Default)]
 pub struct FastEmbedder {
-    models: tokio::sync::Mutex<HashMap<String, Arc<Mutex<TextEmbedding>>>>,
+    current: tokio::sync::Mutex<Option<(String, Arc<Mutex<TextEmbedding>>)>>,
     benchmarks: tokio::sync::Mutex<Vec<BenchmarkResult>>,
 }
 
 impl FastEmbedder {
     pub fn new() -> Self {
         Self {
-            models: tokio::sync::Mutex::new(HashMap::new()),
+            current: tokio::sync::Mutex::new(None),
             benchmarks: tokio::sync::Mutex::new(Vec::new()),
         }
     }
 
     /// Embed texts using the given model name.
-    /// The model is loaded on first use (may download weights).
-    /// Texts are processed in batches of `EMBED_BATCH_SIZE` to bound peak memory.
+    /// The model is loaded on first use (may download weights). If a different
+    /// model is currently cached it is dropped before the new one is loaded so
+    /// peak memory stays at one model.
     pub async fn embed(
         &self,
         model_name: &str,
@@ -46,9 +52,10 @@ impl FastEmbedder {
             return Ok(Vec::new());
         }
 
-        let model = self.get_or_init(model_name).await?;
-        let mut all_embeddings: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
+        let mut slot = self.current.lock().await;
+        let model = Self::acquire(&mut slot, model_name).await?;
 
+        let mut all_embeddings: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
         for batch in texts.chunks(EMBED_BATCH_SIZE) {
             let batch = batch.to_vec();
             let model = Arc::clone(&model);
@@ -65,11 +72,14 @@ impl FastEmbedder {
             all_embeddings.extend(batch_embeddings);
         }
 
+        drop(slot);
         Ok(all_embeddings)
     }
 
     /// Benchmark all supported models and store results.
-    /// Each model is loaded (warming the cache) and timed embedding a small corpus.
+    /// Each iteration goes through the same single-slot admission path as
+    /// `embed`, so the benchmark loop is correctly interleaved with worker
+    /// embeds rather than stacking models on top of them.
     pub async fn run_benchmarks(
         &self,
         models: &[(&str, u64)],
@@ -81,15 +91,16 @@ impl FastEmbedder {
         for &(model_name, dimensions) in models {
             tracing::info!("benchmarking fastembed model: {}", model_name);
 
-            let model = self.get_or_init(model_name).await?;
+            let mut slot = self.current.lock().await;
+            let model = Self::acquire(&mut slot, model_name).await?;
             let texts = corpus.clone();
 
-            let result = tokio::task::spawn_blocking(move || {
-                let mut model = model
+            let model_for_blocking = Arc::clone(&model);
+            let secs = tokio::task::spawn_blocking(move || {
+                let mut model = model_for_blocking
                     .lock()
                     .map_err(|e| format!("fastembed lock poisoned: {}", e))?;
 
-                // Warmup run (first inference can be slower due to ONNX session init)
                 let _ = model.embed(vec!["warmup".to_string()], None);
 
                 let start = std::time::Instant::now();
@@ -101,8 +112,10 @@ impl FastEmbedder {
             .await
             .map_err(|e| format!("spawn_blocking failed: {}", e))??;
 
-            let embeddings_per_second = corpus_size as f64 / result;
-            let total_ms = result * 1000.0;
+            drop(slot);
+
+            let embeddings_per_second = corpus_size as f64 / secs;
+            let total_ms = secs * 1000.0;
 
             tracing::info!(
                 "  {}: {:.1} embeddings/sec ({:.0}ms for {} texts)",
@@ -130,11 +143,20 @@ impl FastEmbedder {
         self.benchmarks.lock().await.clone()
     }
 
-    async fn get_or_init(&self, model_name: &str) -> Result<Arc<Mutex<TextEmbedding>>, String> {
-        let mut models = self.models.lock().await;
-
-        if let Some(model) = models.get(model_name) {
-            return Ok(Arc::clone(model));
+    async fn acquire(
+        slot: &mut Option<(String, Arc<Mutex<TextEmbedding>>)>,
+        model_name: &str,
+    ) -> Result<Arc<Mutex<TextEmbedding>>, String> {
+        if let Some((name, model)) = slot.as_ref() {
+            if name == model_name {
+                return Ok(Arc::clone(model));
+            }
+            tracing::info!(
+                "fastembed cache: evicting {} to make room for {}",
+                name,
+                model_name
+            );
+            *slot = None;
         }
 
         let name = model_name.to_string();
@@ -147,7 +169,7 @@ impl FastEmbedder {
         .map_err(|e| format!("spawn_blocking failed: {}", e))??;
 
         let model = Arc::new(Mutex::new(model));
-        models.insert(model_name.to_string(), Arc::clone(&model));
+        *slot = Some((model_name.to_string(), Arc::clone(&model)));
         tracing::info!("fastembed: loaded model {}", model_name);
         Ok(model)
     }

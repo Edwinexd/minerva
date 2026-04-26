@@ -36,10 +36,9 @@ pub fn router() -> Router<AppState> {
             "/courses/{course_id}/feature-flags",
             get(get_course_feature_flags).put(set_course_feature_flags),
         )
-        .route("/embedding-models", get(list_embedding_models))
         .route(
-            "/embedding-models/{model}",
-            put(update_embedding_model_enabled),
+            "/embedding-models",
+            get(list_embedding_models).put(update_embedding_model_enabled),
         )
         .route("/embedding-benchmark", post(run_embedding_benchmark))
 }
@@ -838,6 +837,12 @@ async fn list_embedding_models(
 
 #[derive(Deserialize)]
 struct UpdateEmbeddingModelRequest {
+    /// Catalog model id. Carried in the body, not the URL, because
+    /// HuggingFace ids contain forward slashes ("Qwen/Qwen3-...");
+    /// axum's path router collapses %2F-encoded slashes back into
+    /// segment boundaries, so a path-param route would silently 404
+    /// on every multi-segment id. Body avoids the whole class of bug.
+    model: String,
     enabled: bool,
 }
 
@@ -847,39 +852,38 @@ struct UpdateEmbeddingModelResponse {
     enabled: bool,
 }
 
-/// Toggle the admin-managed `enabled` flag for one catalog model. The
-/// model id comes in via the path; the body is `{ "enabled": bool }`.
+/// Toggle the admin-managed `enabled` flag for one catalog model.
 ///
 /// Disabling a model only affects future picker decisions: courses
 /// already using it keep working until an admin force-migrates them
 /// (which is just `PUT /courses/{id}` with a different model -- admins
 /// bypass the enabled check there). Returns 404 for ids the catalog
-/// doesn't know about; 400 for ids that are catalog members but
+/// doesn't know about; 500 for ids that are catalog members but
 /// missing the policy row (indicates a startup-sync bug, not a
 /// user-facing error).
 async fn update_embedding_model_enabled(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(model): Path<String>,
     Json(body): Json<UpdateEmbeddingModelRequest>,
 ) -> Result<Json<UpdateEmbeddingModelResponse>, AppError> {
     require_admin(&user)?;
 
     let in_catalog = minerva_ingest::pipeline::VALID_LOCAL_MODELS
         .iter()
-        .any(|(name, _)| *name == model.as_str());
+        .any(|(name, _)| *name == body.model.as_str());
     if !in_catalog {
         return Err(AppError::NotFound);
     }
 
-    let row = minerva_db::queries::embedding_models::set_enabled(&state.db, &model, body.enabled)
-        .await?
-        .ok_or_else(|| {
-            AppError::Internal(format!(
-                "embedding_models row missing for catalog entry {} (startup sync should have seeded it)",
-                model,
-            ))
-        })?;
+    let row =
+        minerva_db::queries::embedding_models::set_enabled(&state.db, &body.model, body.enabled)
+            .await?
+            .ok_or_else(|| {
+                AppError::Internal(format!(
+                    "embedding_models row missing for catalog entry {} (startup sync should have seeded it)",
+                    body.model,
+                ))
+            })?;
 
     tracing::info!(
         "admin {} set embedding model {} enabled={}",

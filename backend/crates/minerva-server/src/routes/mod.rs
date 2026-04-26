@@ -54,13 +54,18 @@ pub fn api_router(state: AppState) -> Router<AppState> {
     let authed = Router::new()
         .route("/auth/me", get(me))
         .route("/auth/acknowledge-privacy", post(acknowledge_privacy))
-        // Auth-gated picker list for the per-course config dropdown.
-        // Returns only `enabled` catalog rows -- teachers can't see
-        // (and therefore can't pick) models the admin has switched off.
-        // The legacy public `/embedding-benchmarks` is left in place
-        // for now; it leaks model ids but no policy state, and
-        // refactoring its consumers is outside this change.
-        .route("/embedding-models", get(health::embedding_models))
+        // Auth-gated catalog feed for the per-course teacher dropdown.
+        // Path is `/embedding-catalog` rather than `/embedding-models`
+        // because Apache's no-Shib carve-out regex
+        // `^/api/(integration|service|embed|external-auth)` is
+        // unanchored and matches anything starting with `/api/embed`,
+        // including `/api/embedding-models`. That sent the request
+        // through Apache without a Shib challenge, so no `eppn` header
+        // arrived at the backend and auth_middleware 401'd. The apache
+        // regex is being tightened in `apache/minerva-app.conf`, but
+        // renaming the route is the immediate fix that doesn't depend
+        // on the manual prod-server apache update.
+        .route("/embedding-catalog", get(health::embedding_models))
         .nest("/courses", courses::router())
         .nest("/courses/{course_id}/documents", documents::router())
         .nest("/courses/{course_id}", chat::router())

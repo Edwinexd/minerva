@@ -295,10 +295,15 @@ function EmbeddingModelsCard() {
   // refetch the admin list and the public picker feed so the teacher
   // dropdown updates without a hard refresh.
   const enabledMutation = useMutation({
+    // Model id goes in the body, not the path. HuggingFace ids
+    // contain forward slashes ("Qwen/Qwen3-Embedding-0.6B") and
+    // axum's path router collapses %2F-encoded slashes back into
+    // segment boundaries, so a path-param route silently 404's on
+    // every multi-segment id.
     mutationFn: ({ model, enabled }: { model: string; enabled: boolean }) =>
       api.put<{ model: string; enabled: boolean }>(
-        `/admin/embedding-models/${encodeURIComponent(model)}`,
-        { enabled },
+        "/admin/embedding-models",
+        { model, enabled },
       ),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "embedding-models"] })

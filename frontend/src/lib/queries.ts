@@ -69,7 +69,8 @@ export interface AdminEmbeddingModel {
   warmed_at_startup: boolean
   // Admin-managed picker policy. When false, teachers can't pick this
   // model in the per-course config dropdown; courses already on it
-  // keep working. Toggled via `PUT /admin/embedding-models/{model}`.
+  // keep working. Toggled via `PUT /admin/embedding-models` with
+  // `{model, enabled}` in the body.
   enabled: boolean
   // Number of active local-provider courses currently using this
   // model. Surfaced so the admin can see the impact of disabling
@@ -108,7 +109,7 @@ export interface PublicEmbeddingModel {
 export const embeddingModelsQuery = queryOptions({
   queryKey: ["embedding-models"],
   queryFn: () =>
-    api.get<{ models: PublicEmbeddingModel[] }>("/embedding-models"),
+    api.get<{ models: PublicEmbeddingModel[] }>("/embedding-catalog"),
   // Fresh-ish: a teacher reopening config after an admin re-enables
   // a model shouldn't have to hard-refresh.
   staleTime: 60_000,

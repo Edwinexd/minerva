@@ -2,7 +2,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use candle_core::{DType, Device};
-use fastembed::{EmbeddingModel, InitOptions, Qwen3TextEmbedding, TextEmbedding};
+use fastembed::{
+    EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, QuantizationMode,
+    Qwen3TextEmbedding, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel,
+};
+use hf_hub::api::sync::ApiBuilder;
 use serde::Serialize;
 
 /// Result of benchmarking a single embedding model.
@@ -104,18 +108,135 @@ pub struct FastEmbedder {
 }
 
 /// Backend dispatch for a model id.
+///
+/// Three paths, all producing handles managed by the same LRU cache:
+/// * `Fast` -- model is one of fastembed-rs's built-in `EmbeddingModel`
+///   variants. Loaded by name, weights downloaded by fastembed via hf-hub.
+/// * `Qwen3` -- candle-backed Qwen3-Embedding family (separate fastembed
+///   API gated behind the `qwen3` feature).
+/// * `Custom` -- "bring your own ONNX": we download the model files
+///   ourselves and feed them to fastembed's `UserDefinedEmbeddingModel`
+///   API. Used for HF repos whose ONNX exports work but aren't part of
+///   `EmbeddingModel` (e.g. snowflake-arctic-embed-m-v2.0, multilingual,
+///   custom GteModel architecture). Output handle is still a
+///   `TextEmbedding`, so `run_embed` doesn't need to know the difference.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Backend {
     Fast,
     Qwen3,
+    Custom,
 }
 
 fn backend_for(model_name: &str) -> Backend {
     if model_name.starts_with("Qwen/") {
         Backend::Qwen3
+    } else if custom_model_spec(model_name).is_some() {
+        Backend::Custom
     } else {
         Backend::Fast
     }
+}
+
+/// Loading recipe for a "bring your own ONNX" model.
+///
+/// We carry only the bits fastembed's `UserDefinedEmbeddingModel` needs --
+/// the ONNX file, the four tokenizer JSONs, the pooling strategy, and a
+/// max-length cap. Everything else (output normalization, `[CLS]` token
+/// detection, etc.) is handled inside fastembed.
+struct CustomModelSpec {
+    /// HF repo id, e.g. `Snowflake/snowflake-arctic-embed-m-v2.0`.
+    repo_id: &'static str,
+    /// Path inside the repo to the ONNX graph to load. We ship int8
+    /// quantized graphs by default to keep RSS predictable -- the fp32
+    /// variants of these models are typically >1 GB and would also need
+    /// `with_external_initializer` plumbing to load (model.onnx +
+    /// model.onnx.data split).
+    onnx_path: &'static str,
+    /// CLS or Mean. Sourced from each repo's `1_Pooling/config.json`.
+    pooling: Pooling,
+    /// Static = quantization is baked into the ONNX graph (int8 ops).
+    /// `None` = the graph is fp32. We never use `Dynamic` here because
+    /// dynamic-quant fastembed entries go through the `Fast` backend.
+    quantization: QuantizationMode,
+    /// Tokenizer max-length cap. Models with very long context windows
+    /// (arctic-m-v2.0 trains at 8192) still get clamped here so a single
+    /// pathological input can't blow the activation budget.
+    max_length: usize,
+}
+
+fn custom_model_spec(model_name: &str) -> Option<CustomModelSpec> {
+    match model_name {
+        // Snowflake Arctic Embed M v2.0: multilingual (Swedish + English
+        // matter for SU/DSV), 768-dim, ~311 MB int8 ONNX, CLS pooling per
+        // the model's `1_Pooling/config.json`. Not in fastembed-rs's
+        // `EmbeddingModel` enum yet (PR #239 still open upstream), so we
+        // load the ONNX through `UserDefinedEmbeddingModel`.
+        //
+        // Note: the model card recommends prefixing queries with
+        // `query: ` for retrieval; document chunks should stay bare.
+        // Minerva's embed call sites don't currently apply per-model
+        // prefixes (multilingual-e5 is in the same boat), so the
+        // numbers here will be slightly below the model's published
+        // benchmarks until a prefix-handling pass lands. Embeddings are
+        // still L2-normalized and produce sensible cross-lingual cosine
+        // sims even without the prefix.
+        "Snowflake/snowflake-arctic-embed-m-v2.0" => Some(CustomModelSpec {
+            repo_id: "Snowflake/snowflake-arctic-embed-m-v2.0",
+            onnx_path: "onnx/model_int8.onnx",
+            pooling: Pooling::Cls,
+            quantization: QuantizationMode::None,
+            max_length: 512,
+        }),
+        _ => None,
+    }
+}
+
+/// Download a custom model's files from the Hub and assemble it into a
+/// loaded `TextEmbedding`. Runs inside `spawn_blocking` -- the hf-hub
+/// sync API blocks, and the ONNX session build is CPU-heavy.
+fn load_custom_model(spec: &CustomModelSpec) -> Result<TextEmbedding, String> {
+    // Reuse fastembed's hf-hub cache layout when possible: the env var
+    // `HF_HOME` (and the per-app `HF_CACHE_DIR`) point at the shared
+    // cache, so a model downloaded here can be reused by anything else
+    // that consults the Hub. `ApiBuilder::default()` already honors
+    // those envs.
+    let api = ApiBuilder::new()
+        .with_progress(true)
+        .build()
+        .map_err(|e| format!("hf-hub init failed: {}", e))?;
+    let repo = api.model(spec.repo_id.to_string());
+
+    let fetch = |relative: &str| -> Result<std::path::PathBuf, String> {
+        repo.get(relative)
+            .map_err(|e| format!("hf-hub fetch {}/{} failed: {}", spec.repo_id, relative, e))
+    };
+
+    let onnx_path = fetch(spec.onnx_path)?;
+    let tokenizer_path = fetch("tokenizer.json")?;
+    let tokenizer_config_path = fetch("tokenizer_config.json")?;
+    let special_tokens_path = fetch("special_tokens_map.json")?;
+    let config_path = fetch("config.json")?;
+
+    let read = |p: std::path::PathBuf| -> Result<Vec<u8>, String> {
+        std::fs::read(&p).map_err(|e| format!("read {}: {}", p.display(), e))
+    };
+
+    let tokenizer_files = TokenizerFiles {
+        tokenizer_file: read(tokenizer_path)?,
+        config_file: read(config_path)?,
+        special_tokens_map_file: read(special_tokens_path)?,
+        tokenizer_config_file: read(tokenizer_config_path)?,
+    };
+
+    let model = UserDefinedEmbeddingModel::new(read(onnx_path)?, tokenizer_files)
+        .with_pooling(spec.pooling.clone())
+        .with_quantization(spec.quantization);
+
+    TextEmbedding::try_new_from_user_defined(
+        model,
+        InitOptionsUserDefined::new().with_max_length(spec.max_length),
+    )
+    .map_err(|e| format!("user-defined init failed for {}: {}", spec.repo_id, e))
 }
 
 impl FastEmbedder {
@@ -368,6 +489,12 @@ impl FastEmbedder {
                     .map_err(|e| format!("qwen3 init failed for {}: {}", name, e))?;
                     Ok(LoadedModel::Qwen3(Arc::new(Mutex::new(m))))
                 }
+                Backend::Custom => {
+                    let spec = custom_model_spec(&name)
+                        .ok_or_else(|| format!("no custom-model spec for {}", name))?;
+                    let m = load_custom_model(&spec)?;
+                    Ok(LoadedModel::Fast(Arc::new(Mutex::new(m))))
+                }
             }
         })
         .await
@@ -599,5 +726,35 @@ mod tests {
         // test just guards against a panic in compute_budget_bytes.
         let n = compute_budget_bytes();
         assert!(n > 0);
+    }
+
+    #[test]
+    fn backend_dispatch_routes_arctic_m_v2_to_custom() {
+        // The arctic-m-v2.0 ONNX is loaded through `UserDefinedEmbeddingModel`,
+        // not the built-in `EmbeddingModel` enum. If somebody adds a new
+        // model and accidentally drops the `custom_model_spec` arm, this
+        // catches it before the route silently falls back to `Fast` and
+        // panics deep inside `parse_fast_model_name` at boot.
+        assert_eq!(
+            backend_for("Snowflake/snowflake-arctic-embed-m-v2.0"),
+            Backend::Custom,
+        );
+        assert_eq!(backend_for("Qwen/Qwen3-Embedding-0.6B"), Backend::Qwen3);
+        assert_eq!(backend_for("BAAI/bge-m3"), Backend::Fast);
+    }
+
+    #[test]
+    fn arctic_m_v2_is_in_valid_local_models() {
+        // `pipeline::VALID_LOCAL_MODELS` is the catalog the rest of the
+        // app keys off (qdrant collection dim, admin policy, teacher
+        // dropdown). If the custom-backend dispatch exists but the
+        // catalog entry is missing, course owners can't actually pick
+        // the model.
+        use crate::pipeline::VALID_LOCAL_MODELS;
+        let entry = VALID_LOCAL_MODELS
+            .iter()
+            .find(|(name, _)| *name == "Snowflake/snowflake-arctic-embed-m-v2.0")
+            .expect("arctic-m-v2.0 missing from VALID_LOCAL_MODELS");
+        assert_eq!(entry.1, 768, "arctic-m-v2.0 is 768-dim, not {}", entry.1);
     }
 }

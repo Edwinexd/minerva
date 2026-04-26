@@ -65,6 +65,7 @@
       "mxbaiDesc": "engelska, topp på MTEB",
       "gteDesc": "engelska, 8k kontext",
       "arcticDesc": "engelska, snabb och stark",
+      "arcticMV2Desc": "flerspråkig (inkl. svenska), 768 dim, int8",
       "qwen3Desc": "Qwen3, flerspråkig, tung"
     },
     "maxChunksLabel": "Maximalt antal hämtade stycken",

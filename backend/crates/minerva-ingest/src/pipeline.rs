@@ -111,12 +111,17 @@ pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "local"];
 /// the per-course Qdrant collection, so a wrong number here means
 /// upserts will fail with a vector-size mismatch.
 ///
-/// Sourced from fastembed-rs's `EmbeddingModel` enum (ONNX backend) plus
-/// one Qwen3 entry that goes through `Qwen3TextEmbedding` (candle
-/// backend, gated behind the `qwen3` feature on fastembed). The Qwen3
-/// dispatch lives in `fastembed_embedder::FastEmbedder`.
+/// Sourced from three backends, all dispatched by
+/// `fastembed_embedder::FastEmbedder`:
+/// * fastembed-rs's `EmbeddingModel` enum (ONNX, the default path);
+/// * the Qwen3 candle entry (`Qwen3TextEmbedding`, gated behind
+///   fastembed's `qwen3` feature);
+/// * "bring your own ONNX" via `UserDefinedEmbeddingModel` for HF repos
+///   whose ONNX export works but isn't part of `EmbeddingModel` yet --
+///   currently snowflake-arctic-embed-m-v2.0.
 ///
-/// Adding a model here: also add a `parse_model_name` arm in
+/// Adding a model here: also add a `parse_fast_model_name` arm (or a
+/// `custom_model_spec` arm for the user-defined path) in
 /// `fastembed_embedder.rs`, and consider whether it's small enough to
 /// warm up at boot (`STARTUP_BENCHMARK_MODELS` below). If unsure, leave
 /// it out of startup -- admins can run `POST /api/admin/embedding-benchmark`
@@ -134,6 +139,11 @@ pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
     ("intfloat/multilingual-e5-large", 1024),
     ("BAAI/bge-m3", 1024),
     ("google/embeddinggemma-300m", 768),
+    // Snowflake Arctic Embed M v2.0: multilingual (Swedish + English),
+    // 768 dims, ~311 MB int8 ONNX. Not part of fastembed-rs's
+    // `EmbeddingModel` enum; loaded via `UserDefinedEmbeddingModel` --
+    // see the `Backend::Custom` branch in `fastembed_embedder.rs`.
+    ("Snowflake/snowflake-arctic-embed-m-v2.0", 768),
     // English, top-of-MTEB-class upgrades.
     ("mixedbread-ai/mxbai-embed-large-v1", 1024),
     ("Alibaba-NLP/gte-large-en-v1.5", 1024),

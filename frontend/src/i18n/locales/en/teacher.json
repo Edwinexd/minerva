@@ -65,6 +65,7 @@
       "mxbaiDesc": "English, top of MTEB",
       "gteDesc": "English, 8k context",
       "arcticDesc": "English, fast and strong",
+      "arcticMV2Desc": "multilingual (incl. Swedish), 768 dims, int8",
       "qwen3Desc": "Qwen3, multilingual, heavy"
     },
     "maxChunksLabel": "Max Retrieved Chunks",

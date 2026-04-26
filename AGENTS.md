@@ -212,10 +212,6 @@ Two layers, both daily:
    embed routes return `429` with a body pointing teachers to
    `lambda@dsv.su.se` for an increase.
 
-## TODO
-
-- [ ] Add `snowflake-arctic-embed-m-v2.0` (768 dims, ~311 MB INT8) as a local embedding model once fastembed-rs PR #239 is merged. Multilingual (Swedish+English), replaces English-only models. Track: https://github.com/Anush008/fastembed-rs/pull/239
-
 ## Terraform
 
 Manages GitHub environment secrets for the `prod` environment. Generates `K8S_SECRETS` manifest from individual secret variables.

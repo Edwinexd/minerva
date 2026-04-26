@@ -27,6 +27,7 @@ export const MODEL_DISPLAY: Record<
   "mixedbread-ai/mxbai-embed-large-v1": { name: "Mxbai Embed Large v1", dims: 1024, descKey: "config.embeddingModels.mxbaiDesc" },
   "Alibaba-NLP/gte-large-en-v1.5": { name: "GTE Large EN v1.5", dims: 1024, descKey: "config.embeddingModels.gteDesc" },
   "snowflake/snowflake-arctic-embed-l": { name: "Arctic Embed L", dims: 1024, descKey: "config.embeddingModels.arcticDesc" },
+  "Snowflake/snowflake-arctic-embed-m-v2.0": { name: "Arctic Embed M v2.0", dims: 768, descKey: "config.embeddingModels.arcticMV2Desc" },
   "Qwen/Qwen3-Embedding-0.6B": { name: "Qwen3 Embedding 0.6B", dims: 1024, descKey: "config.embeddingModels.qwen3Desc" },
   "text-embedding-3-small": { name: "OpenAI text-embedding-3-small", dims: 1536, descKey: "" },
 }

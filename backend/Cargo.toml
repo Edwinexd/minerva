@@ -31,6 +31,11 @@ qdrant-client = "1"
 # `crates/minerva-ingest/src/fastembed_embedder.rs`.
 fastembed = { version = "5", features = ["qwen3"] }
 candle-core = "0.9"
+# Direct hf-hub dep so the custom-ONNX loader (e.g. snowflake-arctic-embed-m-v2.0
+# via fastembed's `UserDefinedEmbeddingModel` API) can fetch model files from
+# the Hub. Pinned to the same major as fastembed's transitive copy so cargo
+# doesn't compile two versions side-by-side.
+hf-hub = "0.4"
 
 # LLM / Embeddings (HTTP)
 reqwest = { version = "0.13", features = ["json", "stream"] }

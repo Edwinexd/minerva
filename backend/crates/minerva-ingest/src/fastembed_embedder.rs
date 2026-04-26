@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use candle_core::{DType, Device};
 use fastembed::{EmbeddingModel, InitOptions, Qwen3TextEmbedding, TextEmbedding};
@@ -26,43 +27,80 @@ const EMBED_BATCH_SIZE: usize = 32;
 /// chunk will hit.
 const QWEN3_MAX_LENGTH: usize = 4096;
 
-/// What's currently sitting in the single-slot cache. Two backends:
+/// Fallback budget when the cgroup limit can't be read and no env override is set.
+const DEFAULT_CACHE_BUDGET_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Fraction of the cgroup memory limit we let the cache consume by default.
+/// The rest of the pod (request handlers, qdrant client buffers, classifier
+/// state, baseline app heap, transient ONNX inference buffers) needs the
+/// remainder. 40% is conservative -- the worker doesn't only allocate models.
+const DEFAULT_CACHE_BUDGET_FRACTION: f64 = 0.4;
+
+/// Fallback cost when RSS measurement isn't available (non-Linux dev hosts)
+/// or returns nonsense. Picked to be on the high side of the largest model
+/// we currently load through the ONNX path, so the budget logic still
+/// throttles correctly without a real measurement.
+const ESTIMATED_MODEL_COST_BYTES: u64 = 800 * 1024 * 1024;
+
+/// What's currently sitting in the cache. Two backends:
 /// * **ONNX** (the default fastembed path) -- `TextEmbedding`.
 /// * **Candle** for Qwen3-Embedding (separate `Qwen3TextEmbedding` API
 ///   enabled by the `qwen3` feature on fastembed).
 ///
-/// Wrapped in `Arc<Mutex<...>>` so a single embed call can release the
-/// outer slot lock if needed while still holding an exclusive handle.
-/// In practice we hold the slot lock across the entire embed call (see
-/// `embed`) to make cross-model loads queue instead of stacking.
+/// Wrapped in `Arc<Mutex<...>>` so the cache, in-flight embed callers,
+/// and benchmark callers can all share a single inner handle while the
+/// outer `Mutex` serializes inference on that one model.
 #[derive(Clone)]
 enum LoadedModel {
     Fast(Arc<Mutex<TextEmbedding>>),
     Qwen3(Arc<Mutex<Qwen3TextEmbedding>>),
 }
 
-/// Single-slot model cache around fastembed.
+struct CacheEntry {
+    name: String,
+    model: LoadedModel,
+    /// Bytes added to process RSS when this model was loaded -- measured by
+    /// diffing `/proc/self/status:VmRSS` before and after init. Drives both
+    /// eviction decisions and per-load logging. On hosts without a readable
+    /// VmRSS (e.g. macOS dev) this falls back to `ESTIMATED_MODEL_COST_BYTES`
+    /// so the budget still throttles.
+    rss_cost_bytes: u64,
+    last_used: Instant,
+}
+
+/// Memory-budgeted LRU cache over fastembed / Qwen3 models.
 ///
-/// Only one model is resident at a time. The `current` lock is held across
-/// the entire embed call so that concurrent requests for *different* models
-/// queue behind each other instead of both loading and OOMing the pod.
-/// Requests for the *same* model share the cached handle (the inner blocking
-/// mutex inside `TextEmbedding` / `Qwen3TextEmbedding` already serializes
-/// inference, so this matches prior throughput for the same-model case).
+/// Why a budget instead of a fixed slot count: model footprints differ by
+/// 30x+ (MiniLM ~90 MB resident, Qwen3-0.6B ~2.4 GB resident on first load),
+/// so "keep N models" either wastes memory or thrashes depending on which N
+/// we pick. Instead we measure each model's actual RSS cost at load time
+/// and evict LRU until the new model fits under the budget.
+///
+/// The budget caps the sum of measured per-model costs; it does NOT cap
+/// total process RSS (other parts of the app can grow independently).
+/// Default: 40% of the cgroup memory limit, env-overridable via
+/// `MINERVA_FASTEMBED_CACHE_BUDGET_BYTES`.
+///
+/// Concurrency: the cache mutex is held only across admission (lookup +
+/// possible eviction + load + insert). Embeds run with the lock released,
+/// so multiple cached models can serve requests in parallel. Eviction is
+/// best-effort -- if an in-flight embed holds an `Arc` to an evicted
+/// model, the model's memory lives until that embed finishes.
 ///
 /// `benchmark_lock` is a separate `try_lock`-style mutex used only by the
 /// admin "Run benchmark" path. It serves two purposes:
 /// 1. Gives the admin UI a clean "Busy" affordance instead of silently
 ///    queueing multiple heavy model loads behind each other.
 /// 2. Prevents an admin who fat-fingers the button N times from blocking
-///    the worker for N × (load + benchmark) minutes -- only one
+///    the worker for N x (load + benchmark) minutes -- only one
 ///    admin-triggered benchmark can be queued at a time, the rest are
 ///    rejected up front.
 #[derive(Default)]
 pub struct FastEmbedder {
-    current: tokio::sync::Mutex<Option<(String, LoadedModel)>>,
+    cache: tokio::sync::Mutex<Vec<CacheEntry>>,
     benchmarks: tokio::sync::Mutex<Vec<BenchmarkResult>>,
     benchmark_lock: tokio::sync::Mutex<()>,
+    cache_budget_bytes: u64,
 }
 
 /// Backend dispatch for a model id.
@@ -82,13 +120,24 @@ fn backend_for(model_name: &str) -> Backend {
 
 impl FastEmbedder {
     pub fn new() -> Self {
-        Self::default()
+        let cache_budget_bytes = compute_budget_bytes();
+        tracing::info!(
+            "fastembed cache: budget {} MiB ({})",
+            cache_budget_bytes / (1024 * 1024),
+            budget_source(),
+        );
+        Self {
+            cache: tokio::sync::Mutex::new(Vec::new()),
+            benchmarks: tokio::sync::Mutex::new(Vec::new()),
+            benchmark_lock: tokio::sync::Mutex::new(()),
+            cache_budget_bytes,
+        }
     }
 
-    /// Embed texts using the given model name. The model is loaded on
-    /// first use (may download weights). If a different model is
-    /// currently cached it is dropped before the new one is loaded so
-    /// peak memory stays at one model.
+    /// Embed texts using the given model name. The model is loaded on first
+    /// use (may download weights). Subsequent calls for the same model hit
+    /// the cache. Calls for different models may evict LRU entries to stay
+    /// under the configured RSS budget.
     pub async fn embed(
         &self,
         model_name: &str,
@@ -98,8 +147,7 @@ impl FastEmbedder {
             return Ok(Vec::new());
         }
 
-        let mut slot = self.current.lock().await;
-        let model = Self::acquire(&mut slot, model_name).await?;
+        let model = self.acquire(model_name).await?;
 
         let mut all_embeddings: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
         for batch in texts.chunks(EMBED_BATCH_SIZE) {
@@ -111,17 +159,16 @@ impl FastEmbedder {
             all_embeddings.extend(batch_embeddings);
         }
 
-        drop(slot);
         Ok(all_embeddings)
     }
 
     /// Run the benchmark corpus against every model in `models`,
-    /// sequentially. Each iteration goes through the same single-slot
-    /// admission path as `embed`, so the boot benchmark loop is correctly
-    /// interleaved with worker embeds rather than stacking models on top
-    /// of them.
+    /// sequentially. Each iteration goes through the same budgeted cache as
+    /// `embed`, so models the budget can hold stay warm after the benchmark
+    /// completes (the worker's first real embed against them avoids a
+    /// cold load).
     ///
-    /// Heavy models (Qwen3 0.6B, multilingual-e5-large, bge-m3, …) are
+    /// Heavy models (Qwen3 0.6B, multilingual-e5-large, bge-m3, ...) are
     /// NOT in the boot list -- they're loaded on first real embed call or
     /// when an admin clicks "Run benchmark" on the admin system page.
     pub async fn run_benchmarks(
@@ -148,8 +195,8 @@ impl FastEmbedder {
     /// "Run benchmark" UI. Acquires `benchmark_lock` non-blockingly so a
     /// second concurrent click bounces with `BenchmarkError::Busy` rather
     /// than stacking another heavy model load on top of the running one
-    /// (which the single-slot cache would otherwise queue, blocking the
-    /// worker for the duration).
+    /// (which would consume budget and potentially evict a model the
+    /// worker is actively using).
     pub async fn benchmark_one(
         &self,
         model_name: &str,
@@ -178,10 +225,10 @@ impl FastEmbedder {
     }
 
     /// Shared body for both the boot-time loop and the on-demand admin
-    /// benchmark. Goes through the slot's `acquire` admission, so a
-    /// benchmark on a different model evicts whatever was loaded -- same
-    /// as a real embed -- and the slot lock keeps it from racing with
-    /// worker embed calls.
+    /// benchmark. Goes through the same budgeted cache admission as a
+    /// real embed -- so the benchmark may evict an LRU entry, but the
+    /// freshly-loaded benchmark target stays in cache (last_used is now)
+    /// and is available to the worker if they share a model.
     async fn benchmark_inner(
         &self,
         model_name: &str,
@@ -190,15 +237,14 @@ impl FastEmbedder {
         let corpus: Vec<String> = BENCHMARK_CORPUS.iter().map(|s| s.to_string()).collect();
         let corpus_size = corpus.len();
 
-        let mut slot = self.current.lock().await;
-        let model = Self::acquire(&mut slot, model_name).await?;
+        let model = self.acquire(model_name).await?;
         let texts = corpus.clone();
         let model_for_blocking = model.clone();
 
         let secs = tokio::task::spawn_blocking(move || {
             // Warmup run -- first inference can be much slower than steady
             // state (ONNX session init, candle kernel JIT, allocator
-            // touching pages for the first time, …).
+            // touching pages for the first time, ...).
             let _ = run_embed(&model_for_blocking, vec!["warmup".to_string()]);
             let start = std::time::Instant::now();
             run_embed(&model_for_blocking, texts)?;
@@ -206,8 +252,6 @@ impl FastEmbedder {
         })
         .await
         .map_err(|e| format!("spawn_blocking failed: {}", e))??;
-
-        drop(slot);
 
         let embeddings_per_second = corpus_size as f64 / secs;
         let total_ms = secs * 1000.0;
@@ -240,37 +284,66 @@ impl FastEmbedder {
     /// paying for a full fetch of the running task's state.
     ///
     /// Note: this only reflects the `benchmark_one` path. Boot-time
-    /// `run_benchmarks` and worker embeds also serialize on the
-    /// single-slot mutex but don't show up here, on purpose -- admins
+    /// `run_benchmarks` and worker embeds also serialize on the cache
+    /// admission lock but don't show up here, on purpose -- admins
     /// don't need to know about them.
     pub async fn is_benchmark_running(&self) -> bool {
         self.benchmark_lock.try_lock().is_err()
     }
 
-    /// Single-slot admission. If the requested model matches what's
-    /// already loaded, hand back the cached handle. Otherwise evict
-    /// (drops the old `Arc`, freeing the model once the inner mutex
-    /// has no other holders) and load the new one through the right
-    /// backend.
-    async fn acquire(
-        slot: &mut Option<(String, LoadedModel)>,
-        model_name: &str,
-    ) -> Result<LoadedModel, String> {
-        if let Some((name, model)) = slot.as_ref() {
-            if name == model_name {
-                return Ok(model.clone());
-            }
-            tracing::info!(
-                "fastembed cache: evicting {} to make room for {}",
-                name,
-                model_name
-            );
-            *slot = None;
+    /// Cache admission. If the requested model is in the cache, bump its
+    /// `last_used` and return a clone of the handle. Otherwise evict LRU
+    /// entries until the new model's estimated cost fits under the budget,
+    /// then load the model through the appropriate backend, measure the
+    /// RSS delta, and insert it.
+    async fn acquire(&self, model_name: &str) -> Result<LoadedModel, String> {
+        let mut cache = self.cache.lock().await;
+
+        if let Some(idx) = cache.iter().position(|e| e.name == model_name) {
+            cache[idx].last_used = Instant::now();
+            return Ok(cache[idx].model.clone());
         }
 
+        // Pick an estimate for the new model's cost. If we've measured
+        // anything, the largest measured value is a reasonable upper bound;
+        // otherwise fall back to a generous default so the budget still
+        // throttles on hosts without RSS introspection.
+        let estimate = cache
+            .iter()
+            .map(|e| e.rss_cost_bytes)
+            .max()
+            .unwrap_or(ESTIMATED_MODEL_COST_BYTES);
+
+        // Evict LRU until adding `estimate` would fit under the budget.
+        // If the cache is empty we just load whatever's asked for; the
+        // pod's memory limit is the backstop.
+        while !cache.is_empty() {
+            let used: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
+            if used + estimate <= self.cache_budget_bytes {
+                break;
+            }
+            let lru_idx = cache
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, e)| e.last_used)
+                .map(|(i, _)| i)
+                .expect("cache non-empty");
+            let evicted = cache.remove(lru_idx);
+            let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
+            tracing::info!(
+                "fastembed cache: evicting {} ({} MiB) to make room for {} (footprint {} MiB / budget {} MiB)",
+                evicted.name,
+                evicted.rss_cost_bytes / (1024 * 1024),
+                model_name,
+                footprint / (1024 * 1024),
+                self.cache_budget_bytes / (1024 * 1024),
+            );
+        }
+
+        let rss_before = read_rss_bytes();
         let backend = backend_for(model_name);
         let name = model_name.to_string();
-        let model = tokio::task::spawn_blocking(move || -> Result<LoadedModel, String> {
+        let loaded = tokio::task::spawn_blocking(move || -> Result<LoadedModel, String> {
             match backend {
                 Backend::Fast => {
                     let model_enum = parse_fast_model_name(&name)?;
@@ -299,10 +372,41 @@ impl FastEmbedder {
         })
         .await
         .map_err(|e| format!("spawn_blocking failed: {}", e))??;
+        let rss_after = read_rss_bytes();
 
-        *slot = Some((model_name.to_string(), model.clone()));
-        tracing::info!("fastembed: loaded model {}", model_name);
-        Ok(model)
+        let cost = match (rss_before, rss_after) {
+            (Some(b), Some(a)) => a.saturating_sub(b),
+            _ => ESTIMATED_MODEL_COST_BYTES,
+        };
+
+        cache.push(CacheEntry {
+            name: model_name.to_string(),
+            model: loaded.clone(),
+            rss_cost_bytes: cost,
+            last_used: Instant::now(),
+        });
+
+        let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
+        let cached_count = cache.len();
+        match (rss_before, rss_after) {
+            (Some(_), Some(after)) => tracing::info!(
+                "fastembed: loaded model {} (+{} MiB, RSS now {} MiB, cache footprint {} MiB / budget {} MiB, {} cached)",
+                model_name,
+                cost / (1024 * 1024),
+                after / (1024 * 1024),
+                footprint / (1024 * 1024),
+                self.cache_budget_bytes / (1024 * 1024),
+                cached_count,
+            ),
+            _ => tracing::info!(
+                "fastembed: loaded model {} (RSS measurement unavailable, assumed +{} MiB, {} cached)",
+                model_name,
+                cost / (1024 * 1024),
+                cached_count,
+            ),
+        };
+
+        Ok(loaded)
     }
 }
 
@@ -378,6 +482,66 @@ fn parse_fast_model_name(name: &str) -> Result<EmbeddingModel, String> {
     }
 }
 
+fn read_rss_bytes() -> Option<u64> {
+    let content = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            return Some(kb * 1024);
+        }
+    }
+    None
+}
+
+fn compute_budget_bytes() -> u64 {
+    if let Ok(v) = std::env::var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES") {
+        if let Ok(n) = v.parse::<u64>() {
+            return n;
+        }
+    }
+    if let Some(limit) = read_cgroup_memory_limit() {
+        return ((limit as f64) * DEFAULT_CACHE_BUDGET_FRACTION) as u64;
+    }
+    DEFAULT_CACHE_BUDGET_BYTES
+}
+
+fn budget_source() -> &'static str {
+    if std::env::var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES").is_ok() {
+        "env override"
+    } else if read_cgroup_memory_limit().is_some() {
+        "40% of cgroup memory.max"
+    } else {
+        "static default (no cgroup, no env override)"
+    }
+}
+
+fn read_cgroup_memory_limit() -> Option<u64> {
+    // Try cgroup v2 first; fall back to v1. Both expose a single number in
+    // bytes. v2 uses "max" (literal) for unlimited; v1 uses a sentinel that
+    // exceeds physical memory. In either unlimited case we return None so
+    // the caller falls back to the static default.
+    if let Ok(s) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
+        let trimmed = s.trim();
+        if trimmed == "max" {
+            return None;
+        }
+        if let Ok(n) = trimmed.parse::<u64>() {
+            return Some(n);
+        }
+    }
+    if let Ok(s) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
+        if let Ok(n) = s.trim().parse::<u64>() {
+            // v1 sentinel "unlimited" tends to be a value larger than any
+            // realistic RAM. Treat anything north of 1 PiB as unlimited.
+            if n >= 1u64 << 50 {
+                return None;
+            }
+            return Some(n);
+        }
+    }
+    None
+}
+
 /// Representative text corpus for benchmarking embedding throughput.
 /// Simulates typical document chunks (academic/educational content).
 const BENCHMARK_CORPUS: &[&str] = &[
@@ -414,3 +578,26 @@ const BENCHMARK_CORPUS: &[&str] = &[
     "Word embeddings like Word2Vec capture semantic relationships between words in vector space.",
     "The BERT model uses bidirectional context to produce rich token representations for downstream tasks.",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn budget_env_override_parses() {
+        std::env::set_var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES", "12345");
+        assert_eq!(compute_budget_bytes(), 12345);
+        std::env::remove_var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES");
+    }
+
+    #[test]
+    fn budget_falls_back_to_static_default_when_no_cgroup() {
+        std::env::remove_var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES");
+        // Either we're in a cgroup (CI or prod) and read_cgroup returns
+        // a real number, or we're on macOS dev where it returns None and
+        // we hit the static fallback. Both branches are valid -- this
+        // test just guards against a panic in compute_budget_bytes.
+        let n = compute_budget_bytes();
+        assert!(n > 0);
+    }
+}

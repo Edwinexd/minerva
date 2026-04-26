@@ -172,10 +172,12 @@
     "featureInherited": "default",
     "featureRevertToDefault": "Revert to global default",
     "featureFlagLabel": {
-      "course_kg": "Course knowledge graph"
+      "course_kg": "Course knowledge graph",
+      "extraction_guard": "Extraction guard"
     },
     "featureFlagDescription": {
-      "course_kg": "Per-document kind classification, cross-document linker, knowledge-graph viewer, assignment-refusal addendum, and per-chunk adversarial filter. Off by default while we calibrate."
+      "course_kg": "Per-document kind classification, cross-document linker, knowledge-graph viewer, assignment-refusal addendum, and per-chunk adversarial filter. Off by default while we calibrate.",
+      "extraction_guard": "Pre-generation intent classifier + output-side solution detector + Socratic rewriter, plus multi-turn assignment-proximity tracking. Catches the 'student pasted assignment, asks for code' case and intercepts the response with a Socratic question. Independent of course_kg so admins can pilot separately."
     }
   },
   "rules": {

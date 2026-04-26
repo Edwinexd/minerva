@@ -21,10 +21,19 @@ use uuid::Uuid;
 /// chunk filter. All KG behaviour gates on this single flag.
 pub const FLAG_COURSE_KG: &str = "course_kg";
 
+/// Extraction guard: pre-generation intent classifier (catches
+/// pasted-assignment-asking-for-implementation), output-side
+/// solution-detection check, Socratic rewriter, multi-turn
+/// proximity tracking via the KG. Independently flagged from
+/// `course_kg` so admins can opt courses into the graph view
+/// without the harder student-facing constraints (or vice versa
+/// once the guard stabilises).
+pub const FLAG_EXTRACTION_GUARD: &str = "extraction_guard";
+
 /// All flags the application currently knows about. The admin UI
 /// uses this to enumerate available toggles per course; new flags
 /// must be added here AND have a `pub const` above.
-pub const ALL_FLAGS: &[&str] = &[FLAG_COURSE_KG];
+pub const ALL_FLAGS: &[&str] = &[FLAG_COURSE_KG, FLAG_EXTRACTION_GUARD];
 
 /// True iff the KG bundle is enabled for this course. Resolution:
 /// course-scoped row -> global row -> default (FALSE).
@@ -45,6 +54,31 @@ pub async fn course_kg_enabled(db: &PgPool, course_id: Uuid) -> bool {
         Err(e) => {
             tracing::warn!(
                 "feature_flags: course_kg lookup for course {} failed ({}); treating as disabled",
+                course_id,
+                e,
+            );
+            false
+        }
+    }
+}
+
+/// True iff the extraction guard is enabled for this course. Same
+/// resolution + fail-closed semantics as `course_kg_enabled`.
+/// Used by the chat strategies (wired in a follow-up commit).
+#[allow(dead_code)]
+pub async fn extraction_guard_enabled(db: &PgPool, course_id: Uuid) -> bool {
+    match minerva_db::queries::feature_flags::is_enabled_for_course(
+        db,
+        FLAG_EXTRACTION_GUARD,
+        course_id,
+        false,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "feature_flags: extraction_guard lookup for course {} failed ({}); treating as disabled",
                 course_id,
                 e,
             );

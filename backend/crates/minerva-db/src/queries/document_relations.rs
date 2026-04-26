@@ -235,6 +235,40 @@ pub async fn unit_partners_for_docs(
     Ok(out)
 }
 
+/// Assignment-shaped doc ids that the given lectures (or readings,
+/// transcripts) are connected to via `applied_in` source edges,
+/// filtered to assignment-bearing kinds. Used by the chat path's
+/// extraction-guard to decide which assignments are "in proximity"
+/// when retrieval surfaced lecture content -- a student asking
+/// about a lecture that's applied_in to assignment X is implicitly
+/// near X for the purposes of multi-turn extraction signals.
+///
+/// Excludes teacher-rejected edges. Returns deduped doc ids.
+pub async fn applied_in_assignments_for_lectures(
+    db: &PgPool,
+    course_id: Uuid,
+    lecture_doc_ids: &[Uuid],
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    if lecture_doc_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query_scalar!(
+        r#"SELECT DISTINCT dr.dst_doc_id
+           FROM document_relations dr
+           JOIN documents d ON d.id = dr.dst_doc_id
+           WHERE dr.course_id = $1
+             AND dr.relation = 'applied_in'
+             AND dr.rejected_by_teacher = FALSE
+             AND dr.src_doc_id = ANY($2)
+             AND d.kind IN ('assignment_brief', 'lab_brief', 'exam')"#,
+        course_id,
+        lecture_doc_ids,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
+}
+
 // ── Per-edge teacher rejection ─────────────────────────────────────
 
 /// Mark a stored edge as rejected by a teacher. Also writes the

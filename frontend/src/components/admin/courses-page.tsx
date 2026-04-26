@@ -31,7 +31,7 @@ import { useApiErrorMessage } from "@/lib/use-api-error"
 /// from the backend's `feature_flags::ALL_FLAGS`. Adding a flag here
 /// + i18n key + bumping the backend list is everything needed for
 /// the admin UI to surface a new toggle.
-const KNOWN_FEATURE_FLAGS = ["course_kg"] as const
+const KNOWN_FEATURE_FLAGS = ["course_kg", "extraction_guard"] as const
 type FeatureFlagName = (typeof KNOWN_FEATURE_FLAGS)[number]
 
 export function CourseManagementPanel() {

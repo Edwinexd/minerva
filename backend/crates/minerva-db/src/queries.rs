@@ -1,5 +1,6 @@
 pub mod api_keys;
 pub mod canvas;
+pub mod conversation_flags;
 pub mod conversations;
 pub mod courses;
 pub mod document_relations;

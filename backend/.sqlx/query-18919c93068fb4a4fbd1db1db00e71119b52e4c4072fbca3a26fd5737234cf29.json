@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT model, enabled, created_at, updated_at\n           FROM embedding_models\n           ORDER BY model ASC",
+  "query": "UPDATE embedding_models\n           SET enabled = $2, updated_at = NOW()\n           WHERE model = $1\n           RETURNING model, enabled, is_default, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -15,24 +15,33 @@
       },
       {
         "ordinal": 2,
+        "name": "is_default",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Text",
+        "Bool"
+      ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "13f3005045259f891c010f65028ee8616f06962bb0b5a423eacbbb4ae90d5ea9"
+  "hash": "18919c93068fb4a4fbd1db1db00e71119b52e4c4072fbca3a26fd5737234cf29"
 }

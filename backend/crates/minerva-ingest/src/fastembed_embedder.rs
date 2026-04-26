@@ -164,6 +164,47 @@ struct CustomModelSpec {
     max_length: usize,
 }
 
+/// Per-model query-side prefix for asymmetric retrieval models.
+///
+/// Some embedding models are trained with distinct prompt templates for
+/// queries vs documents (`query: ...` for the search side, `passage: ...`
+/// for the indexed side). Calling them without those prefixes works but
+/// gives up some recall.
+///
+/// We only apply the *query-side* prefix here, and only for models that
+/// have always been query-prefixed in production. The document side is
+/// never touched because:
+/// 1. Existing Qdrant collections were built without prefixes. Switching
+///    document prefixing on at ingest would silently mismatch every
+///    chunk currently in storage; a rebuild is the only correct fix and
+///    that's an explicit migration, not an automatic one.
+/// 2. For arctic-m-v2.0 specifically, the model card *only* prescribes a
+///    query prefix -- documents stay bare by design.
+///
+/// Multilingual-e5-* is intentionally not in this list: its training
+/// regime expects both `query:` and `passage:` prefixes, so prefixing
+/// only the query side against bare-embedded documents would be an
+/// asymmetric mismatch that's likely to *hurt* retrieval more than the
+/// missing prefix already does. Fixing E5 properly requires a per-course
+/// re-embed and is out of scope here.
+pub fn query_prefix_for_model(model: &str) -> Option<&'static str> {
+    match model {
+        "Snowflake/snowflake-arctic-embed-m-v2.0" => Some("query: "),
+        _ => None,
+    }
+}
+
+/// Apply the query-side prefix for `model` (if any) to `query` and
+/// return an owned `String`. Cheap when no prefix is registered (one
+/// move, no allocation). Used by the retrieval call sites in
+/// `strategy::common`; the embed pipeline doesn't go through this.
+pub fn format_query_for_model(model: &str, query: &str) -> String {
+    match query_prefix_for_model(model) {
+        Some(prefix) => format!("{prefix}{query}"),
+        None => query.to_string(),
+    }
+}
+
 fn custom_model_spec(model_name: &str) -> Option<CustomModelSpec> {
     match model_name {
         // Snowflake Arctic Embed M v2.0: multilingual (Swedish + English
@@ -172,14 +213,12 @@ fn custom_model_spec(model_name: &str) -> Option<CustomModelSpec> {
         // `EmbeddingModel` enum yet (PR #239 still open upstream), so we
         // load the ONNX through `UserDefinedEmbeddingModel`.
         //
-        // Note: the model card recommends prefixing queries with
-        // `query: ` for retrieval; document chunks should stay bare.
-        // Minerva's embed call sites don't currently apply per-model
-        // prefixes (multilingual-e5 is in the same boat), so the
-        // numbers here will be slightly below the model's published
-        // benchmarks until a prefix-handling pass lands. Embeddings are
-        // still L2-normalized and produce sensible cross-lingual cosine
-        // sims even without the prefix.
+        // The model card prescribes asymmetric prompts: prefix queries
+        // with `query: ` at retrieval time, leave document chunks bare
+        // at ingestion. Plumbed through `query_prefix_for_model` below
+        // and applied at the two query call sites in
+        // `strategy::common`; the document-side `embed` in `pipeline`
+        // is left untouched.
         "Snowflake/snowflake-arctic-embed-m-v2.0" => Some(CustomModelSpec {
             repo_id: "Snowflake/snowflake-arctic-embed-m-v2.0",
             onnx_path: "onnx/model_int8.onnx",
@@ -741,6 +780,36 @@ mod tests {
         );
         assert_eq!(backend_for("Qwen/Qwen3-Embedding-0.6B"), Backend::Qwen3);
         assert_eq!(backend_for("BAAI/bge-m3"), Backend::Fast);
+    }
+
+    #[test]
+    fn query_prefix_only_applied_to_arctic_m_v2() {
+        // arctic-m-v2.0 is the one model we currently prefix at query time.
+        assert_eq!(
+            query_prefix_for_model("Snowflake/snowflake-arctic-embed-m-v2.0"),
+            Some("query: "),
+        );
+        // Multilingual-e5 deliberately has no prefix wired up here even
+        // though the model card recommends one -- we'd need a per-course
+        // rebuild with `passage:` on the doc side first. Guard the
+        // omission so a well-meaning future change can't sneak it in.
+        assert_eq!(
+            query_prefix_for_model("intfloat/multilingual-e5-large"),
+            None,
+        );
+        assert_eq!(query_prefix_for_model("BAAI/bge-m3"), None);
+    }
+
+    #[test]
+    fn format_query_prepends_or_returns_owned_clone() {
+        assert_eq!(
+            format_query_for_model("Snowflake/snowflake-arctic-embed-m-v2.0", "hello world"),
+            "query: hello world",
+        );
+        assert_eq!(
+            format_query_for_model("BAAI/bge-m3", "hello world"),
+            "hello world",
+        );
     }
 
     #[test]

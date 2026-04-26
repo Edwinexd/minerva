@@ -153,15 +153,27 @@ pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
 ];
 
 /// Models the server warms up + benchmarks at boot. Subset of
-/// `VALID_LOCAL_MODELS`: only the small ONNX models the box can
-/// hold all of in RAM simultaneously. Everything else gets benchmarked
-/// on demand via the admin endpoint so a single boot doesn't try to
-/// load every candidate at once and OOM-kill the pod.
+/// `VALID_LOCAL_MODELS`: small/fast ONNX models the pod can hold in RAM
+/// simultaneously without touching the cache budget too hard.
+/// Everything else gets benchmarked on demand via the admin endpoint
+/// so a single boot doesn't try to load every candidate at once and
+/// OOM-kill the pod.
+///
+/// Arctic-m-v2.0 is in the warm set despite its ~311 MB int8 footprint
+/// because (a) it's the multilingual default we now recommend for new
+/// SU/DSV courses and (b) on first benchmark its session takes 30-60 s
+/// to materialize from the freshly-downloaded ONNX -- warming at boot
+/// shifts that cost off the first teacher's "Run benchmark" click.
+///
+/// `BAAI/bge-base-en-v1.5` is intentionally not warmed: it's English-
+/// only and overlapping with bge-small-en (also warmed). Existing
+/// courses on bge-base still work; teachers who want a benchmark can
+/// trigger one from the admin page.
 pub const STARTUP_BENCHMARK_MODELS: &[(&str, u64)] = &[
     ("sentence-transformers/all-MiniLM-L6-v2", 384),
     ("BAAI/bge-small-en-v1.5", 384),
-    ("BAAI/bge-base-en-v1.5", 768),
     ("nomic-ai/nomic-embed-text-v1.5", 768),
+    ("Snowflake/snowflake-arctic-embed-m-v2.0", 768),
 ];
 
 pub const OPENAI_EMBEDDING_MODEL: &str = "text-embedding-3-small";

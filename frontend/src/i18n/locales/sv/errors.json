@@ -41,7 +41,8 @@
     "condition_operator_invalid": "Operatorn måste vara en av contains, not_contains, regex, not_regex.",
     "condition_regex_invalid": "Ogiltigt regex: {{detail}}",
     "embedding_model_unknown": "Okänd embedding-modell '{{model}}'. Välj en från listan.",
-    "benchmark_busy": "Ett benchmark körs redan. Vänta tills det är klart (sidan uppdateras automatiskt)."
+    "benchmark_busy": "Ett benchmark körs redan. Vänta tills det är klart (sidan uppdateras automatiskt).",
+    "embedding_default_disabled": "Kan inte göra '{{model}}' till standard medan den är inaktiverad. Aktivera den först och sätt den sedan som standard."
   },
   "chat": {
     "rating_invalid": "Betyget måste vara 'up' eller 'down'.",

@@ -33,6 +33,14 @@ pub struct CreateCourse {
     pub description: Option<String>,
     pub owner_id: Uuid,
     pub daily_token_limit: i64,
+    /// When `Some`, the new course is created with this embedding model
+    /// instead of the SQL column DEFAULT. Used to honor the
+    /// admin-managed `embedding_models.is_default` row -- which lives
+    /// in a separate table and so can't be wired through the ALTER
+    /// COLUMN DEFAULT machinery. `None` keeps the original behaviour
+    /// (column DEFAULT applies) so legacy callers and tests don't have
+    /// to know about the table.
+    pub embedding_model: Option<String>,
 }
 
 pub struct UpdateCourse {
@@ -51,19 +59,43 @@ pub struct UpdateCourse {
 }
 
 pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<CourseRow, sqlx::Error> {
-    sqlx::query_as!(
-        CourseRow,
-        r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
-        id,
-        input.name,
-        input.description,
-        input.owner_id,
-        input.daily_token_limit,
-    )
-    .fetch_one(db)
-    .await
+    // `COALESCE($6, embedding_model_default)` would be nicer but
+    // postgres doesn't expose a column DEFAULT in expressions. Instead
+    // we let `NULL::TEXT` fall through to the SQL DEFAULT via a
+    // conditional INSERT: when the caller supplies `Some`, we override;
+    // when `None`, we omit the column entirely so the DEFAULT kicks in.
+    // Branching here keeps the row construction in one statement and
+    // dodges a second UPDATE that would also bump `updated_at`.
+    if let Some(model) = input.embedding_model.as_deref() {
+        sqlx::query_as!(
+            CourseRow,
+            r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit, embedding_model)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
+            id,
+            input.name,
+            input.description,
+            input.owner_id,
+            input.daily_token_limit,
+            model,
+        )
+        .fetch_one(db)
+        .await
+    } else {
+        sqlx::query_as!(
+            CourseRow,
+            r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
+            id,
+            input.name,
+            input.description,
+            input.owner_id,
+            input.daily_token_limit,
+        )
+        .fetch_one(db)
+        .await
+    }
 }
 
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {

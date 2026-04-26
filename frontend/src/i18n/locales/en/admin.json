@@ -324,9 +324,10 @@
     },
     "embeddingModels": {
       "title": "Embedding models",
-      "description": "Catalog of local embedding models the runtime can load. Toggle 'Enabled' to control which ones show up in the per-course teacher dropdown. Existing courses on a model keep working when you disable it, but teachers can't pick it for a new rotation. Throughput numbers come from running each model against a small academic corpus on this server. Only the four boot models are benchmarked automatically (loading every catalog entry at boot would OOM-kill the pod); the rest are benchmarked on demand. The server serializes runs, so only one model is loaded at a time.",
+      "description": "Catalog of local embedding models the runtime can load. Toggle 'Enabled' to control which ones show up in the per-course teacher dropdown. The 'Default' radio picks which model new courses are created with; only enabled models can be made default, and the default itself can't be disabled (clear it from another row first). Existing courses on a model keep working when you disable it, but teachers can't pick it for a new rotation. Throughput numbers come from running each model against a small academic corpus on this server. The 'warm' models are benchmarked automatically at boot (loading every catalog entry would OOM-kill the pod); the rest are benchmarked on demand. The server serializes runs, so only one model is loaded at a time.",
       "columns": {
         "enabled": "Enabled",
+        "default": "Default",
         "model": "Model",
         "dimensions": "Dim",
         "speed": "Speed",
@@ -335,7 +336,9 @@
       },
       "speedValue": "{{value}} emb/s",
       "warmBadge": "warm",
+      "defaultBadge": "default",
       "enabledAriaLabel": "Toggle picker visibility for {{model}}",
+      "defaultAriaLabel": "Make {{model}} the default for new courses",
       "run": "Run benchmark",
       "rerun": "Re-run",
       "running": "Running...",

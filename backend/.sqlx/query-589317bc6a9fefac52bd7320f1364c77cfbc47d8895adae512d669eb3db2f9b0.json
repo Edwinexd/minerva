@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE embedding_models SET is_default = FALSE, updated_at = NOW() WHERE is_default = TRUE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "589317bc6a9fefac52bd7320f1364c77cfbc47d8895adae512d669eb3db2f9b0"
+}

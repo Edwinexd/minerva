@@ -226,8 +226,14 @@ pub async fn embedding_search(
     embedding_model: &str,
 ) -> Result<Vec<ScoredPoint>, String> {
     let vector = if embedding_provider == "local" {
+        // Apply the model's query-side prefix (e.g. `query: ` for
+        // arctic-m-v2.0). No-op for models without one. Documents in
+        // the collection are *not* prefixed -- see
+        // `fastembed_embedder::query_prefix_for_model`.
+        let formatted_query =
+            minerva_ingest::fastembed_embedder::format_query_for_model(embedding_model, query);
         let embeddings = fastembed
-            .embed(embedding_model, vec![query.to_string()])
+            .embed(embedding_model, vec![formatted_query])
             .await?;
         embeddings
             .into_iter()
@@ -627,8 +633,10 @@ pub async fn expand_context_via_graph(
 
     // Embed the query once, reuse for every per-doc filtered search.
     let query_vector: Vec<f32> = if embedding_provider == "local" {
+        let formatted_query =
+            minerva_ingest::fastembed_embedder::format_query_for_model(embedding_model, query);
         match fastembed
-            .embed(embedding_model, vec![query.to_string()])
+            .embed(embedding_model, vec![formatted_query])
             .await
             .map(|mut v| v.pop())
         {

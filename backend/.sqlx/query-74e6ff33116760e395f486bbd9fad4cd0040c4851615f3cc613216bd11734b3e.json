@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO courses (id, name, description, owner_id, daily_token_limit)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at",
+  "query": "INSERT INTO courses (id, name, description, owner_id, daily_token_limit, embedding_model)\n            VALUES ($1, $2, $3, $4, $5, $6)\n            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -100,7 +100,8 @@
         "Text",
         "Text",
         "Uuid",
-        "Int8"
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -124,5 +125,5 @@
       false
     ]
   },
-  "hash": "6bab9ee5cf0e80f9ff2ff06afb8dbfa664293187d37b2ba948d53bca2083c75a"
+  "hash": "74e6ff33116760e395f486bbd9fad4cd0040c4851615f3cc613216bd11734b3e"
 }

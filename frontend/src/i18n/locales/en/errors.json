@@ -41,7 +41,8 @@
     "condition_operator_invalid": "Operator must be one of contains, not_contains, regex, not_regex.",
     "condition_regex_invalid": "Invalid regex: {{detail}}",
     "embedding_model_unknown": "Unknown embedding model '{{model}}'. Pick one from the whitelist.",
-    "benchmark_busy": "Another benchmark is already running. Wait for it to finish (the page will update on its own)."
+    "benchmark_busy": "Another benchmark is already running. Wait for it to finish (the page will update on its own).",
+    "embedding_default_disabled": "Cannot make '{{model}}' the default while it's disabled. Enable it first, then set it as default."
   },
   "chat": {
     "rating_invalid": "Rating must be 'up' or 'down'.",

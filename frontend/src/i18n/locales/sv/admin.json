@@ -324,9 +324,10 @@
     },
     "embeddingModels": {
       "title": "Embedding-modeller",
-      "description": "Katalog över lokala embedding-modeller som körtiden kan ladda. Slå på/av 'Aktiverad' för att styra vilka som visas i lärarens kurskonfigurationsmeny. Befintliga kurser som redan kör en modell fortsätter fungera om du inaktiverar den, men lärare kan inte välja den för en ny rotation. Hastighetssiffrorna kommer från att köra varje modell mot en liten akademisk testkorpus på den här servern. Bara de fyra start-modellerna mäts automatiskt (att ladda hela katalogen vid start skulle OOM-döda podden); resten mäts på begäran. Servern serialiserar körningar, så bara en modell laddas i taget.",
+      "description": "Katalog över lokala embedding-modeller som körtiden kan ladda. Slå på/av 'Aktiverad' för att styra vilka som visas i lärarens kurskonfigurationsmeny. Radioknappen 'Standard' väljer vilken modell nya kurser skapas med; bara aktiverade modeller kan göras till standard, och själva standardmodellen kan inte inaktiveras (välj en annan rad först). Befintliga kurser som redan kör en modell fortsätter fungera om du inaktiverar den, men lärare kan inte välja den för en ny rotation. Hastighetssiffrorna kommer från att köra varje modell mot en liten akademisk testkorpus på den här servern. De 'uppvärmda' modellerna mäts automatiskt vid start (att ladda hela katalogen skulle OOM-döda podden); resten mäts på begäran. Servern serialiserar körningar, så bara en modell laddas i taget.",
       "columns": {
         "enabled": "Aktiverad",
+        "default": "Standard",
         "model": "Modell",
         "dimensions": "Dim",
         "speed": "Hastighet",
@@ -335,7 +336,9 @@
       },
       "speedValue": "{{value}} emb/s",
       "warmBadge": "uppvärmd",
+      "defaultBadge": "standard",
       "enabledAriaLabel": "Slå på/av synlighet i läraremenyn för {{model}}",
+      "defaultAriaLabel": "Gör {{model}} till standard för nya kurser",
       "run": "Kör benchmark",
       "rerun": "Kör om",
       "running": "Kör...",

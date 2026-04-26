@@ -72,6 +72,11 @@ export interface AdminEmbeddingModel {
   // keep working. Toggled via `PUT /admin/embedding-models` with
   // `{model, enabled}` in the body.
   enabled: boolean
+  // True for the single model new courses are created with. Set via
+  // `PUT /admin/embedding-models/default` with `{model}` in the body.
+  // Existing courses are not touched when the default flips -- only
+  // future POST /courses calls pick up the new value.
+  is_default: boolean
   // Number of active local-provider courses currently using this
   // model. Surfaced so the admin can see the impact of disabling
   // (and walk through the migrate dialog on the courses page after).

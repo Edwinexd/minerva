@@ -162,6 +162,13 @@ async fn create_course(
     }
 
     let id = Uuid::new_v4();
+    // Resolve the admin-managed default embedding model. Falls through
+    // to the courses-table column DEFAULT (`all-MiniLM-L6-v2`) if no
+    // row is flagged -- that's a "the migration was never applied"
+    // state, not an error, so we don't fail course creation over it.
+    let default_embedding_model =
+        minerva_db::queries::embedding_models::current_default(&state.db).await?;
+
     let input = minerva_db::queries::courses::CreateCourse {
         name: body.name,
         description: body.description,
@@ -170,6 +177,7 @@ async fn create_course(
         // can adjust (including to 0 = unlimited) via PUT afterwards; the
         // per-owner aggregate cap on `users` is the real spend backstop.
         daily_token_limit: state.config.default_course_daily_token_limit,
+        embedding_model: default_embedding_model,
     };
 
     let row = minerva_db::queries::courses::create(&state.db, id, &input).await?;

@@ -291,6 +291,22 @@ function EmbeddingModelsCard() {
     },
   })
 
+  // Promote one catalog model to the "default for new courses". The
+  // backend rejects this for disabled models with
+  // `admin.embedding_default_disabled`, which `formatError` surfaces
+  // as a localized toast/inline message. Existing courses aren't
+  // touched -- only future POST /courses pick up the new default.
+  const defaultMutation = useMutation({
+    mutationFn: (model: string) =>
+      api.put<{ model: string; is_default: boolean }>(
+        "/admin/embedding-models/default",
+        { model },
+      ),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "embedding-models"] })
+    },
+  })
+
   // Toggle the picker policy for one catalog model. Optimistically
   // refetch the admin list and the public picker feed so the teacher
   // dropdown updates without a hard refresh.
@@ -347,6 +363,9 @@ function EmbeddingModelsCard() {
                       {t("system.embeddingModels.columns.enabled")}
                     </th>
                     <th className="py-2 pr-4 font-medium">
+                      {t("system.embeddingModels.columns.default")}
+                    </th>
+                    <th className="py-2 pr-4 font-medium">
                       {t("system.embeddingModels.columns.model")}
                     </th>
                     <th className="py-2 pr-4 font-medium text-right">
@@ -375,7 +394,7 @@ function EmbeddingModelsCard() {
                         <td className="py-2 pr-4">
                           <Checkbox
                             checked={m.enabled}
-                            disabled={enabledMutation.isPending}
+                            disabled={enabledMutation.isPending || m.is_default}
                             onCheckedChange={(value) => {
                               const next = value === true
                               // Disabling a model that's currently in
@@ -403,11 +422,44 @@ function EmbeddingModelsCard() {
                             )}
                           />
                         </td>
+                        <td className="py-2 pr-4">
+                          {/*
+                            Native radio rather than a styled radio-group:
+                            we want exactly-one selection across the
+                            table, the table itself acts as the group.
+                            Disabled radios for non-enabled models so
+                            there's a visible affordance that you have to
+                            enable it first -- the backend will 400
+                            otherwise but we'd rather not let the click
+                            register at all.
+                          */}
+                          <input
+                            type="radio"
+                            name="default-embedding-model"
+                            checked={m.is_default}
+                            disabled={!m.enabled || defaultMutation.isPending}
+                            onChange={(e) => {
+                              if (e.target.checked && !m.is_default) {
+                                defaultMutation.mutate(m.model)
+                              }
+                            }}
+                            aria-label={t(
+                              "system.embeddingModels.defaultAriaLabel",
+                              { model: m.model },
+                            )}
+                            className="size-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                          />
+                        </td>
                         <td className="py-2 pr-4 font-mono text-xs">
                           {m.model}
                           {m.warmed_at_startup && (
                             <Badge variant="secondary" className="ml-2">
                               {t("system.embeddingModels.warmBadge")}
+                            </Badge>
+                          )}
+                          {m.is_default && (
+                            <Badge variant="default" className="ml-2">
+                              {t("system.embeddingModels.defaultBadge")}
                             </Badge>
                           )}
                         </td>
@@ -455,10 +507,14 @@ function EmbeddingModelsCard() {
                 </tbody>
               </table>
             </div>
-            {(benchmarkMutation.isError || enabledMutation.isError) && (
+            {(benchmarkMutation.isError ||
+              enabledMutation.isError ||
+              defaultMutation.isError) && (
               <p className="text-sm text-destructive">
                 {formatError(
-                  benchmarkMutation.error ?? enabledMutation.error,
+                  benchmarkMutation.error ??
+                    enabledMutation.error ??
+                    defaultMutation.error,
                 )}
               </p>
             )}

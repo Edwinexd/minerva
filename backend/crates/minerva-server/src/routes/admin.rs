@@ -40,6 +40,10 @@ pub fn router() -> Router<AppState> {
             "/embedding-models",
             get(list_embedding_models).put(update_embedding_model_enabled),
         )
+        .route(
+            "/embedding-models/default",
+            put(set_default_embedding_model),
+        )
         .route("/embedding-benchmark", post(run_embedding_benchmark))
 }
 
@@ -756,6 +760,11 @@ struct EmbeddingModelEntry {
     /// using it keep working (rotation requires admin or no model
     /// change). Backed by the `embedding_models` table.
     enabled: bool,
+    /// True for the single model new courses are created with. Lifted
+    /// out of the `courses` SQL DEFAULT so admins can swap it from the
+    /// UI without a migration. Exactly one row in the response should
+    /// carry this flag (enforced by a partial unique index server-side).
+    is_default: bool,
     /// How many courses currently have this model selected. Surfaced so
     /// the admin can see the impact of disabling before they do it.
     /// Counted against `courses` filtered to `embedding_provider='local'`
@@ -789,14 +798,15 @@ async fn list_embedding_models(
         .map(|(name, _)| *name)
         .collect();
 
-    // Pull the admin-managed enabled flags. Catalog entries that
-    // somehow aren't in the DB yet (shouldn't happen post-startup-sync,
-    // but defend anyway) default to disabled in the response.
-    let policy: std::collections::HashMap<String, bool> =
+    // Pull the admin-managed enabled flags + is_default. Catalog
+    // entries that somehow aren't in the DB yet (shouldn't happen
+    // post-startup-sync, but defend anyway) default to
+    // `enabled=false, is_default=false` in the response.
+    let policy: std::collections::HashMap<String, (bool, bool)> =
         minerva_db::queries::embedding_models::list_all(&state.db)
             .await?
             .into_iter()
-            .map(|r| (r.model, r.enabled))
+            .map(|r| (r.model, (r.enabled, r.is_default)))
             .collect();
 
     // Per-model usage counts. One scan over `courses` -> hashmap.
@@ -819,13 +829,17 @@ async fn list_embedding_models(
 
     let models = minerva_ingest::pipeline::VALID_LOCAL_MODELS
         .iter()
-        .map(|(name, dims)| EmbeddingModelEntry {
-            model: (*name).to_string(),
-            dimensions: *dims,
-            benchmark: lookup.get(name).map(|b| (*b).clone()),
-            warmed_at_startup: warm.contains(name),
-            enabled: policy.get(*name).copied().unwrap_or(false),
-            courses_using: usage.get(*name).copied().unwrap_or(0),
+        .map(|(name, dims)| {
+            let (enabled, is_default) = policy.get(*name).copied().unwrap_or((false, false));
+            EmbeddingModelEntry {
+                model: (*name).to_string(),
+                dimensions: *dims,
+                benchmark: lookup.get(name).map(|b| (*b).clone()),
+                warmed_at_startup: warm.contains(name),
+                enabled,
+                is_default,
+                courses_using: usage.get(*name).copied().unwrap_or(0),
+            }
         })
         .collect();
 
@@ -895,6 +909,76 @@ async fn update_embedding_model_enabled(
     Ok(Json(UpdateEmbeddingModelResponse {
         model: row.model,
         enabled: row.enabled,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SetDefaultEmbeddingModelRequest {
+    /// Catalog model id to mark as the default for new courses. Carried
+    /// in the body for the same reason as the enabled toggle: HF ids
+    /// contain forward slashes and axum path-routing collapses them.
+    /// Must already be `enabled = TRUE`; the route returns 400 with a
+    /// friendly i18n code otherwise.
+    model: String,
+}
+
+#[derive(Serialize)]
+struct SetDefaultEmbeddingModelResponse {
+    model: String,
+    is_default: bool,
+}
+
+/// Promote one catalog model to be the default for new courses.
+///
+/// Atomicity is in `set_default`: the previous default's flag is
+/// cleared and the new default is set in a single transaction so the
+/// partial unique index never sees two `TRUE` rows.
+///
+/// Existing courses are not touched -- they keep whatever embedding
+/// model they were created with. This endpoint only affects the model
+/// inserted by future `POST /courses` calls.
+async fn set_default_embedding_model(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<SetDefaultEmbeddingModelRequest>,
+) -> Result<Json<SetDefaultEmbeddingModelResponse>, AppError> {
+    require_admin(&user)?;
+
+    // Catalog membership check up front, same pattern as the enabled
+    // toggle. Shaves a transaction-open + rollback off the 404 path.
+    let in_catalog = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+        .iter()
+        .any(|(name, _)| *name == body.model.as_str());
+    if !in_catalog {
+        return Err(AppError::NotFound);
+    }
+
+    let row = match minerva_db::queries::embedding_models::set_default(&state.db, &body.model).await
+    {
+        Ok(row) => row,
+        Err(minerva_db::queries::embedding_models::SetDefaultError::NotFound) => {
+            return Err(AppError::NotFound);
+        }
+        Err(minerva_db::queries::embedding_models::SetDefaultError::Disabled) => {
+            return Err(AppError::bad_request_with(
+                "admin.embedding_default_disabled",
+                [("model", body.model.clone())],
+            ));
+        }
+        Err(minerva_db::queries::embedding_models::SetDefaultError::Db(e)) => {
+            return Err(AppError::from(e));
+        }
+    };
+
+    tracing::info!(
+        "admin {} set embedding model {} as default for new courses",
+        user.id,
+        row.model,
+    );
+
+    Ok(Json(SetDefaultEmbeddingModelResponse {
+        model: row.model,
+        is_default: row.is_default,
     }))
 }
 

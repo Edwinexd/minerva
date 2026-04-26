@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE embedding_models\n           SET enabled = $2, updated_at = NOW()\n           WHERE model = $1\n           RETURNING model, enabled, created_at, updated_at",
+  "query": "UPDATE embedding_models\n           SET is_default = TRUE, updated_at = NOW()\n           WHERE model = $1\n           RETURNING model, enabled, is_default, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -15,27 +15,32 @@
       },
       {
         "ordinal": 2,
+        "name": "is_default",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Bool"
+        "Text"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "51c22e0660e42da21e2ee8b383be7df3bbd05acafa11941f7f682ffd04fb6697"
+  "hash": "30ffec68d3b103e76ffc4be8af21efa4d0adc21afaffc713f4551209107552cb"
 }

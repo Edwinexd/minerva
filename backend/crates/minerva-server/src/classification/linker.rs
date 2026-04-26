@@ -76,7 +76,16 @@ const MAX_DOCS_PER_CALL: usize = 300;
 /// Per-doc content excerpt size for the LLM prompt. Head of the
 /// document text -- the linker's only grounding signal beyond
 /// (kind, classifier_rationale). Filenames are deliberately excluded.
-const EXCERPT_CHARS: usize = 400;
+///
+/// Sized for "the LLM has enough context to recognise a shared
+/// problem statement / topic". 400 chars (the previous value) was
+/// too tight: a typical assignment brief opens with course-name
+/// boilerplate, and 400 chars rarely got past the boilerplate to
+/// the actual problem. 1500 captures the problem statement on
+/// almost every DSV doc we've inspected. Total prompt size with
+/// 47 candidate-included docs * 1500 chars ≈ 70KB of content,
+/// well inside gpt-oss-120b's 128K window.
+const EXCERPT_CHARS: usize = 1500;
 
 const LINKER_SYSTEM_PROMPT: &str = r#"You label edges in a course-document knowledge graph.
 
@@ -102,23 +111,46 @@ For EACH candidate pair, decide whether there is a typed relation between
 the two documents. You may also decide there is NONE (omit it from output).
 
 Possible relations:
+
 - "solution_of": src is the sample_solution; dst is the assignment_brief /
-  lab_brief / exam it answers. REQUIRES one side to have kind=sample_solution
-  AND the other to have kind in {assignment_brief, lab_brief, exam}, AND the
-  two excerpts to be plainly the same problem (one stating it, the other
-  solving it). High embedding similarity alone is insufficient.
+  lab_brief / exam it answers. Requires one side to have
+  kind=sample_solution AND the other to have kind in
+  {assignment_brief, lab_brief, exam}. Use when the solution's excerpt
+  references the same problem the assignment poses (numbers, function
+  names, dataset, scenario). High embedding similarity is a strong
+  hint but the kind-pair check is the gate. Confidence ~0.85+ when
+  the alignment is unambiguous; lower if the solution might cover
+  multiple assignments.
+
 - "part_of_unit": both documents belong to the same week / module /
-  chapter / topic / unit. Emit ONLY if both excerpts cover a SPECIFIC
-  shared subtopic (a particular algorithm, a particular case study,
-  one identifiable problem) AND there is a structural relationship
-  visible in the content -- e.g. lecture introduces a concept, the
-  exercise asks the student to apply it; the assignment poses a
-  problem, the lab walks through a related implementation; the
-  reading and the syllabus point at the same module. NOT enough:
-  two docs that happen to share a course-wide topic word
-  ("inheritance", "loops", "OO") -- that's the whole course's vocabulary,
-  not a unit signal. NOT enough: two sequential lectures on related
-  themes -- they belong to ADJACENT units, not the same unit.
+  chapter / topic / unit. Emit when the two excerpts plainly discuss
+  the same SPECIFIC subtopic in a way that suggests they're paired
+  course material -- not just "both touch on inheritance somewhere".
+  Examples that SHOULD emit a part_of_unit edge (with confidence ~0.8):
+    * Two assignment_briefs that pose the same task in different
+      formats (e.g. a PDF and an HTML version of the same exercise).
+    * A reading + an assignment_brief / tutorial_exercise that asks
+      the student to apply the same specific concept the reading
+      introduces.
+    * A lecture overview / section summary + the lecture itself
+      covering the same content.
+    * An assignment_brief + the page describing its submission rules
+      ("how to hand in lab 2").
+  Examples that should NOT emit:
+    * Two sequential lectures on related themes (e.g. "Arv I" and
+      "Arv II"). They belong to ADJACENT units; this graph captures
+      same-unit, not topical-neighbours.
+    * Two docs that happen to share a course-wide topic word
+      ("inheritance", "loops", "OO"). That's the whole course's
+      vocabulary, not a unit signal.
+    * Generic syllabus / instructions material that mentions a topic
+      in passing.
+
+You are encouraged to emit moderate-confidence edges (0.7-0.85) when
+you genuinely see a pairing -- the server applies a final 0.6 floor and
+extra similarity-based filters, so under-emitting hides real edges
+that would have survived. Don't reach for low-confidence guesses though;
+~0.6 is a no-go.
 
 Output format -- JSON, nothing else:
 {
@@ -371,6 +403,17 @@ pub async fn link_course(
         &excerpts,
     )
     .await?;
+    // Surface the raw LLM edge count separately from the filtered
+    // count, so an "0 edges written" log line is unambiguous between
+    // "the model emitted nothing" and "the model emitted N but every
+    // one tripped a post-filter". Both modes have shipped as bugs
+    // before; explicit counts make them debuggable from logs alone.
+    tracing::info!(
+        "linker: course {} -- LLM proposed {} edge(s) over {} candidate pair(s)",
+        course_id,
+        edges.len(),
+        candidates.len(),
+    );
 
     // Step 5: post-filters.
     let mut kept = Vec::with_capacity(edges.len());
@@ -902,6 +945,14 @@ fn parse_edges(
 
     let mut out: Vec<ProposedEdge> = Vec::with_capacity(raw_edges.len());
     let mut dedup: HashMap<(Uuid, Uuid, String), f32> = HashMap::new();
+    // Per-reason drop tally so the operator can see why a "0 edges
+    // written" run actually produced 0 -- model emitting low-conf
+    // guesses, hallucinated IDs, malformed relations are all
+    // observably distinct here.
+    let mut dropped_low_conf = 0usize;
+    let mut dropped_self_loop = 0usize;
+    let mut dropped_hallucinated = 0usize;
+    let mut dropped_bad_relation = 0usize;
 
     for e in raw_edges {
         let src_id = match e["src_id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) {
@@ -913,18 +964,24 @@ fn parse_edges(
             None => continue,
         };
         if src_id == dst_id {
+            dropped_self_loop += 1;
             continue;
         }
         if !valid_ids.contains(&src_id) || !valid_ids.contains(&dst_id) {
             // Model hallucinated an id we never sent in; drop.
+            dropped_hallucinated += 1;
             continue;
         }
         let relation = match e["relation"].as_str() {
             Some(r @ ("solution_of" | "part_of_unit")) => r.to_string(),
-            _ => continue,
+            _ => {
+                dropped_bad_relation += 1;
+                continue;
+            }
         };
         let confidence = e["confidence"].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) as f32;
         if confidence < MIN_EDGE_CONFIDENCE {
+            dropped_low_conf += 1;
             continue;
         }
         let rationale = e["rationale"].as_str().map(str::to_string);
@@ -954,6 +1011,17 @@ fn parse_edges(
         }
     }
 
+    if dropped_low_conf + dropped_self_loop + dropped_hallucinated + dropped_bad_relation > 0 {
+        tracing::info!(
+            "linker: parse_edges -- raw {}, kept {}, dropped low_conf={} self_loop={} hallucinated={} bad_relation={}",
+            raw_edges.len(),
+            out.len(),
+            dropped_low_conf,
+            dropped_self_loop,
+            dropped_hallucinated,
+            dropped_bad_relation,
+        );
+    }
     Ok(out)
 }
 

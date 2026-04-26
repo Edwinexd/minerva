@@ -310,8 +310,10 @@ pub fn start(state: AppState, max_concurrent: usize) {
                             // fresh after every ingest. Bursty Moodle
                             // syncs coalesce into a single linker
                             // call thanks to the debounce window in
-                            // RelinkScheduler.
-                            scheduler.mark_dirty(course_id_for_relink);
+                            // RelinkScheduler -- with a hard cap so a
+                            // long sustained burst still fires the
+                            // linker within MAX_PENDING_AGE.
+                            scheduler.mark_dirty(course_id_for_relink).await;
                         }
                         Err(e) => {
                             tracing::error!("worker: document {} processing failed: {}", doc.id, e);

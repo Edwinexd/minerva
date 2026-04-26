@@ -137,6 +137,35 @@ pub async fn process_document(
 
     tracing::info!("extracted {} chars from {}", text.len(), filename);
 
+    // Zero-text fast-path: if the extractor produced nothing usable
+    // (scanned PDF without OCR, empty .txt, parse failure that returned
+    // an empty string) we still want a classified row so the graph viewer
+    // shows the doc as "unclassified" rather than hiding it. We mark it
+    // ready with chunk_count=0 and let the classifier short-circuit to
+    // `unknown` with the `no_text_extracted` flag. No embedding, no
+    // Qdrant upsert.
+    if text.trim().is_empty() {
+        tracing::warn!(
+            "no usable text extracted from {}; persisting as unknown/no-content",
+            filename
+        );
+        if let Ok(c) = classifier.classify(filename, mime_type, &text).await {
+            let _ = minerva_db::queries::documents::set_classification(
+                db,
+                document_id,
+                &c.kind,
+                c.confidence,
+                c.rationale.as_deref(),
+            )
+            .await;
+        }
+        set_status_ready(db, document_id, 0).await;
+        return Ok(ProcessResult {
+            chunk_count: 0,
+            embedding_tokens: 0,
+        });
+    }
+
     // 2. Classify. Errors here are not fatal -- we still ingest the doc as
     // unclassified. The chat-time filter excludes unclassified docs from
     // prompt context, so leaking is bounded; teacher can also re-trigger

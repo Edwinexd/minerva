@@ -1,4 +1,4 @@
-//! Debounced per-course relink queue.
+//! Persistent debounced per-course relink queue.
 //!
 //! Every time a document's classification changes -- worker auto-classify
 //! after ingest, single-doc reclassify endpoint, teacher kind override --
@@ -11,15 +11,26 @@
 //! N-1 of them throwaway. With a 60s debounce, a normal sync settles
 //! into a single linker call after the burst.
 //!
-//! The "due time" of a dirty course is pushed back on every mark, so a
-//! sustained burst keeps deferring the linker until the burst stops.
-//! This is the same shape as a leading-edge debouncer, but applied
-//! per-course rather than globally.
+//! Why a max-defer cap: a previous in-memory implementation always
+//! pushed `due_at` forward to `now + RELINK_DEBOUNCE` on every mark.
+//! That meant a slow Moodle sync (one doc every ~20-30s for 50 docs)
+//! kept resetting the timer indefinitely and the linker NEVER fired
+//! during the burst -- the user-reported "auto-ingest doesn't update
+//! the graph" bug. We now cap the wait at `first_marked_at +
+//! MAX_PENDING_AGE` so even a sustained burst guarantees a relink
+//! within ~5 minutes of the first mark.
+//!
+//! Why DB-backed: a server restart used to silently drop every
+//! pending mark, so a course that was 30 seconds away from a relink
+//! could end up not relinked at all if the pod restarted in that
+//! window. The queue now lives in `relink_queue` and the DB-side
+//! `ON CONFLICT (course_id)` upsert collapses concurrent marks into
+//! one row safely. The scheduler struct is now a thin async wrapper
+//! around `minerva_db::queries::relink_queue`.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use sqlx::PgPool;
 use uuid::Uuid;
 
 /// How long to wait after the most recent dirty-mark before a course is
@@ -28,69 +39,83 @@ use uuid::Uuid;
 /// edits one doc sees fresh edges within ~a minute.
 pub const RELINK_DEBOUNCE: Duration = Duration::from_secs(60);
 
+/// Hard cap on how long the debounce can defer a queued relink. After
+/// this many seconds since `first_marked_at`, the linker fires on the
+/// next sweep regardless of any subsequent marks. Prevents a slow,
+/// sustained burst (Moodle sync of 50 docs across 10 minutes) from
+/// indefinitely starving the linker.
+pub const MAX_PENDING_AGE: Duration = Duration::from_secs(5 * 60);
+
 /// How often the sweep loop wakes up to look for due courses.
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(10);
 
-#[derive(Default)]
+/// Async wrapper around the DB-backed relink queue. Holds a pool clone
+/// so callers can keep using `state.relink_scheduler.mark_dirty(course_id)`
+/// without threading the pool everywhere.
+#[derive(Clone)]
 pub struct RelinkScheduler {
-    /// course_id -> earliest Instant at which the linker may run.
-    /// Marking a course pushes the time forward to `now + RELINK_DEBOUNCE`.
-    /// The sweep loop drains courses whose time has passed.
-    inner: Mutex<HashMap<Uuid, Instant>>,
+    db: PgPool,
 }
 
 impl RelinkScheduler {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(db: PgPool) -> Self {
+        Self { db }
     }
 
     /// Mark a course dirty. The actual linker call fires after
-    /// `RELINK_DEBOUNCE` of quiescence -- i.e. no further marks.
-    pub fn mark_dirty(&self, course_id: Uuid) {
-        let due_at = Instant::now() + RELINK_DEBOUNCE;
-        let mut inner = self.inner.lock().expect("relink scheduler mutex poisoned");
-        // Always overwrite: fresher marks push back the run time.
-        // This is what makes the debounce coalesce bursts.
-        inner.insert(course_id, due_at);
+    /// `RELINK_DEBOUNCE` of quiescence -- i.e. no further marks --
+    /// OR `MAX_PENDING_AGE` after the FIRST mark, whichever comes
+    /// first. The cap is what makes long bursts not starve the linker.
+    pub async fn mark_dirty(&self, course_id: Uuid) {
+        if let Err(e) = minerva_db::queries::relink_queue::mark_dirty(
+            &self.db,
+            course_id,
+            RELINK_DEBOUNCE.as_secs() as i64,
+            MAX_PENDING_AGE.as_secs() as i64,
+        )
+        .await
+        {
+            tracing::warn!(
+                "relink_scheduler: mark_dirty({}) failed: {} -- linker will not run",
+                course_id,
+                e
+            );
+        }
     }
 
     /// Mark a course dirty for immediate processing on the next sweep
     /// tick. Used by the explicit "Re-classify all" / admin backfill
     /// completion paths where the user has finished a batch and
     /// reasonably wants edges refreshed without a 60s wait.
-    pub fn mark_dirty_immediate(&self, course_id: Uuid) {
-        let due_at = Instant::now();
-        let mut inner = self.inner.lock().expect("relink scheduler mutex poisoned");
-        // Only push *earlier* -- if a future-due mark exists, we want
-        // immediate to win, but if an even earlier mark exists (already
-        // due), don't push it back.
-        let entry = inner.entry(course_id).or_insert(due_at);
-        if *entry > due_at {
-            *entry = due_at;
+    pub async fn mark_dirty_immediate(&self, course_id: Uuid) {
+        if let Err(e) =
+            minerva_db::queries::relink_queue::mark_dirty_immediate(&self.db, course_id).await
+        {
+            tracing::warn!(
+                "relink_scheduler: mark_dirty_immediate({}) failed: {}",
+                course_id,
+                e
+            );
         }
     }
 
-    /// Drain the courses whose due time has passed. Removes them from
-    /// the dirty map; if the linker fails the caller is responsible
-    /// for re-marking (or letting the next ingest do so).
-    pub fn take_due(&self, now: Instant) -> Vec<Uuid> {
-        let mut inner = self.inner.lock().expect("relink scheduler mutex poisoned");
-        let due: Vec<Uuid> = inner
-            .iter()
-            .filter(|(_, t)| **t <= now)
-            .map(|(id, _)| *id)
-            .collect();
-        for id in &due {
-            inner.remove(id);
+    /// Drain courses whose due time has passed.
+    pub async fn take_due(&self) -> Vec<Uuid> {
+        match minerva_db::queries::relink_queue::take_due(&self.db).await {
+            Ok(rows) => rows.into_iter().map(|r| r.course_id).collect(),
+            Err(e) => {
+                tracing::warn!("relink_scheduler: take_due failed: {}", e);
+                Vec::new()
+            }
         }
-        due
     }
 
-    /// Number of courses currently waiting to be linked. Surfaced for
-    /// telemetry / debugging only; not load-bearing.
+    /// Number of courses currently waiting; surfaced for telemetry.
     #[allow(dead_code)]
-    pub fn pending_count(&self) -> usize {
-        self.inner.lock().map(|i| i.len()).unwrap_or(0)
+    pub async fn pending_count(&self) -> i64 {
+        minerva_db::queries::relink_queue::pending_count(&self.db)
+            .await
+            .unwrap_or(0)
     }
 }
 
@@ -102,7 +127,7 @@ pub fn spawn_sweep(state: crate::state::AppState) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(SWEEP_INTERVAL).await;
-            let due = state.relink_scheduler.take_due(Instant::now());
+            let due = state.relink_scheduler.take_due().await;
             if due.is_empty() {
                 continue;
             }
@@ -113,87 +138,9 @@ pub fn spawn_sweep(state: crate::state::AppState) {
                     // On error, re-mark immediate so the next sweep
                     // retries. Avoids losing a relink to a transient
                     // Cerebras 5xx.
-                    state.relink_scheduler.mark_dirty_immediate(course_id);
+                    state.relink_scheduler.mark_dirty_immediate(course_id).await;
                 }
             }
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mark_dirty_pushes_due_time_forward() {
-        let s = RelinkScheduler::new();
-        let c = Uuid::from_bytes([1; 16]);
-        s.mark_dirty(c);
-
-        let now = Instant::now();
-        let due = s.take_due(now);
-        assert!(due.is_empty(), "should not be due immediately after mark");
-
-        let due_later = s.take_due(now + RELINK_DEBOUNCE + Duration::from_secs(1));
-        assert_eq!(due_later, vec![c]);
-        // Drained -- second take is empty.
-        assert!(s
-            .take_due(now + RELINK_DEBOUNCE + Duration::from_secs(2))
-            .is_empty());
-    }
-
-    #[test]
-    fn repeated_marks_coalesce() {
-        let s = RelinkScheduler::new();
-        let c = Uuid::from_bytes([1; 16]);
-        for _ in 0..50 {
-            s.mark_dirty(c);
-        }
-        // Still only one entry.
-        assert_eq!(s.pending_count(), 1);
-        let due = s.take_due(Instant::now() + RELINK_DEBOUNCE + Duration::from_secs(1));
-        assert_eq!(due.len(), 1);
-    }
-
-    #[test]
-    fn mark_dirty_immediate_overrides_debounce() {
-        let s = RelinkScheduler::new();
-        let c = Uuid::from_bytes([1; 16]);
-        s.mark_dirty(c);
-        s.mark_dirty_immediate(c);
-
-        let due = s.take_due(Instant::now());
-        assert_eq!(due, vec![c], "immediate mark should be due now");
-    }
-
-    #[test]
-    fn mark_dirty_immediate_does_not_push_back() {
-        let s = RelinkScheduler::new();
-        let c = Uuid::from_bytes([1; 16]);
-        // Mark immediate first (due now), then mark normal (which
-        // wants a 60s delay). Expectation: the existing immediate
-        // mark wins -- mark_dirty_immediate's "only push earlier"
-        // semantics prevent the regular mark from delaying it.
-        s.mark_dirty_immediate(c);
-        // mark_dirty does always-overwrite; that's intentional for
-        // the debounce semantics during a burst, even if it means
-        // an immediate mark followed by a regular mark waits the
-        // full debounce. Document this behavior here so a future
-        // change is a deliberate decision, not a regression.
-        s.mark_dirty(c);
-        let due_now = s.take_due(Instant::now());
-        assert!(
-            due_now.is_empty(),
-            "regular mark after immediate intentionally re-debounces"
-        );
-    }
-
-    #[test]
-    fn pending_count_reflects_unique_courses() {
-        let s = RelinkScheduler::new();
-        s.mark_dirty(Uuid::from_bytes([1; 16]));
-        s.mark_dirty(Uuid::from_bytes([2; 16]));
-        s.mark_dirty(Uuid::from_bytes([1; 16]));
-        assert_eq!(s.pending_count(), 2);
-    }
 }

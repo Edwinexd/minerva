@@ -180,6 +180,12 @@ pub async fn list_awaiting_transcripts(db: &PgPool) -> Result<Vec<DocumentRow>, 
 /// the ingest worker re-chunks it. Caller is responsible for having already
 /// cleared the old Qdrant chunks (otherwise stale vectors will coexist with
 /// the new ones).
+///
+/// Also clears `classified_at` (only when the kind isn't teacher-locked).
+/// Replacing a file's content makes the previous classification stale, so
+/// the chat-time filter must treat the doc as unclassified until the
+/// worker re-runs the classifier on the new bytes. Keeping a teacher's
+/// manual lock honours the "manual override wins" contract.
 pub async fn reset_for_resync(
     db: &PgPool,
     id: Uuid,
@@ -188,7 +194,21 @@ pub async fn reset_for_resync(
     size_bytes: i64,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
-        "UPDATE documents SET filename = $1, mime_type = $2, size_bytes = $3, status = 'pending', error_msg = NULL, chunk_count = NULL, processed_at = NULL, processing_started_at = NULL WHERE id = $4",
+        r#"UPDATE documents
+           SET filename = $1,
+               mime_type = $2,
+               size_bytes = $3,
+               status = 'pending',
+               error_msg = NULL,
+               chunk_count = NULL,
+               processed_at = NULL,
+               processing_started_at = NULL,
+               classified_at = CASE WHEN kind_locked_by_teacher THEN classified_at ELSE NULL END,
+               kind = CASE WHEN kind_locked_by_teacher THEN kind ELSE NULL END,
+               kind_confidence = CASE WHEN kind_locked_by_teacher THEN kind_confidence ELSE NULL END,
+               kind_rationale = CASE WHEN kind_locked_by_teacher THEN kind_rationale ELSE NULL END,
+               pooled_embedding = NULL
+           WHERE id = $4"#,
         filename,
         mime_type,
         size_bytes,

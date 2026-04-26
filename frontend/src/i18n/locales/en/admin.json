@@ -286,6 +286,10 @@
       "backfillTitle": "Run the classifier on every unclassified, unlocked, ready document. Each click queues up to 5,000 docs.",
       "lastQueued_one": "Queued {{count}} doc; status updates as it runs.",
       "lastQueued_other": "Queued {{count}} docs; status updates as it runs.",
+      "backfillRunning": "Backfilling: {{done}} of {{total}} done",
+      "backfillFinished": "Done: {{ok}} ok, {{errors}} errors, {{skipped}} skipped",
+      "backfillErrors_one": "{{count}} document failed; check server logs.",
+      "backfillErrors_other": "{{count}} documents failed; check server logs.",
       "note": "Each click queues up to 5,000 docs. For larger backlogs, click again once the count has come down."
     }
   }

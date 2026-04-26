@@ -1,0 +1,93 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO document_relations\n            (course_id, src_doc_id, dst_doc_id, relation, confidence, rationale)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        ON CONFLICT (src_doc_id, dst_doc_id, relation)\n        DO UPDATE SET\n            confidence = EXCLUDED.confidence,\n            rationale = EXCLUDED.rationale,\n            updated_at = NOW()\n        RETURNING id, course_id, src_doc_id, dst_doc_id, relation, confidence, rationale, rejected_by_teacher, rejected_at, rejected_by, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "src_doc_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "dst_doc_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "relation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "confidence",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 6,
+        "name": "rationale",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "rejected_by_teacher",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "rejected_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "rejected_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Float4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "3ec48c827be26ca440ae3bb6deb7dfbb4273e60fc57969e721fa50064bc9e136"
+}

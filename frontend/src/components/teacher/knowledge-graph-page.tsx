@@ -19,20 +19,36 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { DOCUMENT_KINDS, type DocumentKind } from "@/lib/types"
 
 /// Render the course knowledge graph: every classified document as a
 /// node colored by `kind`, every linker-asserted edge between them.
 ///
 /// Renderer: react-force-graph-2d (vasturiano), which wraps d3-force in
-/// a canvas-based React component. Handles drag, zoom, hover, layout
-/// stability and high node counts out of the box. We previously had a
-/// hand-rolled SVG simulation here; that worked for ~50 nodes but
-/// reinvented half of d3-force and got brittle on edge cases (very
-/// dense subgraphs, hover with many adjacent edges, etc.). Switched
-/// to the established library so the rendering is one fewer thing to
-/// worry about and so future work goes into the data model, not a
-/// custom layout engine.
+/// a canvas-based React component. We previously had a hand-rolled SVG
+/// simulation here; switched to the established library so the
+/// rendering is one fewer thing to worry about and so future work goes
+/// into the data model, not a custom layout engine.
+///
+/// Quality affordances on top of the bare canvas:
+///   - Filter controls (by kind, by relation type, show-rejected toggle)
+///     so a teacher can zoom in on a subset of a 200-doc course.
+///   - Per-edge reject button on the edge list, persisted via
+///     POST /knowledge-graph/edges/{id}/reject. Rejected edges hide by
+///     default and the linker won't re-propose them next pass.
+///   - Export JSON button: dump the current (filtered) graph to a
+///     download for offline analysis.
+///   - Always-render-if-nodes-exist: unclassified docs show as grey
+///     nodes so the teacher sees what hasn't been classified yet.
 export function KnowledgeGraphPage({
   useParams,
 }: {
@@ -57,6 +73,18 @@ export function KnowledgeGraphPage({
     },
   })
 
+  // Filter state. Defaults: all kinds visible, both relations
+  // visible, rejected edges hidden. Held as Sets so we can
+  // toggle individual entries on/off without rebuilding the
+  // entire selection.
+  const [kindFilter, setKindFilter] = React.useState<Set<DocumentKind | "unclassified">>(
+    () => new Set([...DOCUMENT_KINDS, "unclassified" as const]),
+  )
+  const [relationFilter, setRelationFilter] = React.useState<
+    Set<KnowledgeGraphEdge["relation"]>
+  >(() => new Set(["solution_of", "part_of_unit"]))
+  const [showRejected, setShowRejected] = React.useState(false)
+
   return (
     <Card>
       <CardHeader>
@@ -65,16 +93,27 @@ export function KnowledgeGraphPage({
             <CardTitle>{t("knowledgeGraph.title")}</CardTitle>
             <CardDescription>{t("knowledgeGraph.description")}</CardDescription>
           </div>
-          <Button
-            variant="outline"
-            onClick={() => rebuildMutation.mutate()}
-            disabled={rebuildMutation.isPending}
-            title={t("knowledgeGraph.rebuildTitle")}
-          >
-            {rebuildMutation.isPending
-              ? t("knowledgeGraph.rebuilding")
-              : t("knowledgeGraph.rebuild")}
-          </Button>
+          <div className="flex gap-2">
+            {data && data.nodes.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => downloadGraphJson(courseId, data)}
+                title={t("knowledgeGraph.exportTitle")}
+              >
+                {t("knowledgeGraph.export")}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              onClick={() => rebuildMutation.mutate()}
+              disabled={rebuildMutation.isPending}
+              title={t("knowledgeGraph.rebuildTitle")}
+            >
+              {rebuildMutation.isPending
+                ? t("knowledgeGraph.rebuilding")
+                : t("knowledgeGraph.rebuild")}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -89,18 +128,26 @@ export function KnowledgeGraphPage({
           <p className="text-sm text-destructive">{formatError(error)}</p>
         ) : data.nodes.length === 0 ? (
           <EmptyState message={t("knowledgeGraph.noDocuments")} />
-        ) : !data.edges_computed ? (
-          <EmptyState
-            message={t("knowledgeGraph.notBuiltYet")}
-            cta={t("knowledgeGraph.rebuild")}
-            onCta={() => rebuildMutation.mutate()}
-            disabled={rebuildMutation.isPending}
-          />
         ) : (
           <>
+            <FilterBar
+              kindFilter={kindFilter}
+              setKindFilter={setKindFilter}
+              relationFilter={relationFilter}
+              setRelationFilter={setRelationFilter}
+              showRejected={showRejected}
+              setShowRejected={setShowRejected}
+            />
             <Legend />
-            <ForceGraphCanvas graph={data} />
-            <EdgeList edges={data.edges} nodes={data.nodes} />
+            <FilteredGraphView
+              data={data}
+              kindFilter={kindFilter}
+              relationFilter={relationFilter}
+              showRejected={showRejected}
+              onRebuild={() => rebuildMutation.mutate()}
+              rebuildPending={rebuildMutation.isPending}
+              courseId={courseId}
+            />
           </>
         )}
       </CardContent>
@@ -159,6 +206,8 @@ const EDGE_COLOR = {
   solution_of: "#dc2626",
   part_of_unit: "#6b7280",
 } as const
+
+const REJECTED_EDGE_COLOR = "#fbbf24" // amber-400 -- visually distinct from both edge kinds
 
 function Legend() {
   const { t } = useTranslation("teacher")
@@ -221,14 +270,248 @@ function Legend() {
   )
 }
 
-// ── Force-directed canvas ──────────────────────────────────────────
+// ── Filter bar ─────────────────────────────────────────────────────
 //
-// Adapter: convert KnowledgeGraph (server payload) into the shape
-// react-force-graph expects, and pass through styling. The library
-// mutates node/link objects in place to track simulation state, so
-// we deep-clone via JSON round-trip on each render that introduces
-// new data; otherwise we'd accumulate stale x/y/vx/vy from previous
-// graphs when the user clicks Rebuild.
+// Two single-value Selects (kind, relation) using a sentinel "all"
+// option for the unfiltered case, plus a checkbox for show-rejected.
+// We deliberately avoid a multi-select widget here: a single-select
+// "All / kind" dropdown is enough to handle the common "I want to see
+// just the assignments and their solutions" case without dragging in
+// a heavier component.
+
+interface FilterBarProps {
+  kindFilter: Set<DocumentKind | "unclassified">
+  setKindFilter: React.Dispatch<
+    React.SetStateAction<Set<DocumentKind | "unclassified">>
+  >
+  relationFilter: Set<KnowledgeGraphEdge["relation"]>
+  setRelationFilter: React.Dispatch<
+    React.SetStateAction<Set<KnowledgeGraphEdge["relation"]>>
+  >
+  showRejected: boolean
+  setShowRejected: React.Dispatch<React.SetStateAction<boolean>>
+}
+
+const ALL_KIND_FILTER: Set<DocumentKind | "unclassified"> = new Set([
+  ...DOCUMENT_KINDS,
+  "unclassified",
+])
+const ALL_RELATION_FILTER: Set<KnowledgeGraphEdge["relation"]> = new Set([
+  "solution_of",
+  "part_of_unit",
+])
+
+function FilterBar({
+  kindFilter,
+  setKindFilter,
+  relationFilter,
+  setRelationFilter,
+  showRejected,
+  setShowRejected,
+}: FilterBarProps) {
+  const { t } = useTranslation("teacher")
+
+  // The Select primitive emits a single string. Map the sentinel
+  // "__all" back to "show everything" and the canonical kind names
+  // through to a singleton Set.
+  const kindValue =
+    kindFilter.size === ALL_KIND_FILTER.size
+      ? "__all"
+      : kindFilter.size === 1
+        ? Array.from(kindFilter)[0]
+        : "__custom"
+  const relationValue =
+    relationFilter.size === ALL_RELATION_FILTER.size
+      ? "__all"
+      : relationFilter.size === 1
+        ? Array.from(relationFilter)[0]
+        : "__custom"
+
+  const allKindKinds: (DocumentKind | "unclassified")[] = [
+    ...DOCUMENT_KINDS,
+    "unclassified",
+  ]
+
+  return (
+    <div className="flex flex-wrap items-end gap-3 rounded border bg-muted/20 px-3 py-2">
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          {t("knowledgeGraph.filters.kindLabel")}
+        </label>
+        <Select
+          value={kindValue}
+          onValueChange={(v) => {
+            if (v === "__all") {
+              setKindFilter(new Set(ALL_KIND_FILTER))
+            } else {
+              setKindFilter(new Set([v as DocumentKind | "unclassified"]))
+            }
+          }}
+        >
+          <SelectTrigger className="w-[200px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">
+              {t("knowledgeGraph.filters.all")}
+            </SelectItem>
+            {allKindKinds.map((k) => (
+              <SelectItem key={k} value={k}>
+                {t(
+                  k === "unclassified"
+                    ? "documents.kindLabel.unclassified"
+                    : `documents.kindLabel.${k}`,
+                )}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          {t("knowledgeGraph.filters.relationLabel")}
+        </label>
+        <Select
+          value={relationValue}
+          onValueChange={(v) => {
+            if (v === "__all") {
+              setRelationFilter(new Set(ALL_RELATION_FILTER))
+            } else {
+              setRelationFilter(
+                new Set([v as KnowledgeGraphEdge["relation"]]),
+              )
+            }
+          }}
+        >
+          <SelectTrigger className="w-[200px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">
+              {t("knowledgeGraph.filters.all")}
+            </SelectItem>
+            <SelectItem value="solution_of">
+              {t("knowledgeGraph.edgeKind.solution_of")}
+            </SelectItem>
+            <SelectItem value="part_of_unit">
+              {t("knowledgeGraph.edgeKind.part_of_unit")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={showRejected}
+          onCheckedChange={(v) => setShowRejected(v === true)}
+        />
+        <span>{t("knowledgeGraph.filters.showRejected")}</span>
+      </label>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          setKindFilter(new Set(ALL_KIND_FILTER))
+          setRelationFilter(new Set(ALL_RELATION_FILTER))
+          setShowRejected(false)
+        }}
+      >
+        {t("knowledgeGraph.filters.reset")}
+      </Button>
+    </div>
+  )
+}
+
+// ── Filtered view ──────────────────────────────────────────────────
+
+function FilteredGraphView({
+  data,
+  kindFilter,
+  relationFilter,
+  showRejected,
+  onRebuild,
+  rebuildPending,
+  courseId,
+}: {
+  data: KnowledgeGraph
+  kindFilter: Set<DocumentKind | "unclassified">
+  relationFilter: Set<KnowledgeGraphEdge["relation"]>
+  showRejected: boolean
+  onRebuild: () => void
+  rebuildPending: boolean
+  courseId: string
+}) {
+  const { t } = useTranslation("teacher")
+  // Apply filters to derive the rendered subgraph.
+  const filteredNodes = React.useMemo(() => {
+    return data.nodes.filter((n) => {
+      const k: DocumentKind | "unclassified" = (n.kind ?? "unclassified") as
+        | DocumentKind
+        | "unclassified"
+      return kindFilter.has(k)
+    })
+  }, [data.nodes, kindFilter])
+
+  const visibleNodeIds = React.useMemo(
+    () => new Set(filteredNodes.map((n) => n.id)),
+    [filteredNodes],
+  )
+
+  const filteredEdges = React.useMemo(() => {
+    return data.edges.filter((e) => {
+      if (e.rejected_by_teacher && !showRejected) return false
+      if (!relationFilter.has(e.relation)) return false
+      // Only show edges whose endpoints both passed the kind filter.
+      if (!visibleNodeIds.has(e.src_id) || !visibleNodeIds.has(e.dst_id))
+        return false
+      return true
+    })
+  }, [data.edges, relationFilter, showRejected, visibleNodeIds])
+
+  const hiddenRejectedCount = React.useMemo(
+    () =>
+      showRejected ? 0 : data.edges.filter((e) => e.rejected_by_teacher).length,
+    [data.edges, showRejected],
+  )
+
+  // If after filtering there are still nodes visible, show the
+  // graph. Otherwise fall back to the empty state -- typically this
+  // means the teacher filtered down to zero nodes.
+  const subgraph: KnowledgeGraph = {
+    nodes: filteredNodes,
+    edges: filteredEdges,
+    edges_computed: data.edges_computed,
+  }
+
+  if (filteredNodes.length === 0) {
+    return (
+      <EmptyState
+        message={t("knowledgeGraph.noDocuments")}
+        cta={data.edges_computed ? undefined : t("knowledgeGraph.rebuild")}
+        onCta={data.edges_computed ? undefined : onRebuild}
+        disabled={rebuildPending}
+      />
+    )
+  }
+
+  return (
+    <>
+      {!data.edges_computed && data.edges.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          {t("knowledgeGraph.notBuiltYet")}
+        </p>
+      )}
+      <ForceGraphCanvas graph={subgraph} />
+      {hiddenRejectedCount > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {t("knowledgeGraph.rejectedHidden", { count: hiddenRejectedCount })}
+        </p>
+      )}
+      <EdgeList edges={filteredEdges} nodes={data.nodes} courseId={courseId} />
+    </>
+  )
+}
+
+// ── Force-directed canvas ──────────────────────────────────────────
 
 interface ForceNode {
   id: string
@@ -250,6 +533,7 @@ interface ForceLink {
   relation: KnowledgeGraphEdge["relation"]
   confidence: number
   rationale: string | null
+  rejected: boolean
 }
 
 function nodeRadius(n: ForceNode): number {
@@ -279,6 +563,7 @@ function ForceGraphCanvas({ graph }: { graph: KnowledgeGraph }) {
           relation: e.relation,
           confidence: e.confidence,
           rationale: e.rationale,
+          rejected: e.rejected_by_teacher,
         }),
       ),
     }),
@@ -335,8 +620,6 @@ function ForceGraphCanvas({ graph }: { graph: KnowledgeGraph }) {
         nodeRelSize={1}
         nodeVal={(n) => {
           const r = nodeRadius(n as ForceNode)
-          // Library uses sqrt(val) for radius; we want our own radius
-          // formula, so feed val = r^2 and let the lib do sqrt.
           return r * r
         }}
         nodeColor={(n) => colorFor((n as ForceNode).kind).fill}
@@ -349,14 +632,12 @@ function ForceGraphCanvas({ graph }: { graph: KnowledgeGraph }) {
           const r = nodeRadius(node)
           const c = colorFor(node.kind)
           const faded = adjacent != null && !adjacent.has(node.id)
-          // Outline (extra thick when teacher-locked).
           ctx.beginPath()
           ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
           ctx.lineWidth = node.kindLocked ? 2.5 : 1
           ctx.strokeStyle = c.stroke
           ctx.globalAlpha = faded ? 0.3 : 1
           ctx.stroke()
-          // Hover label: filename next to the node.
           if (hoverId === node.id) {
             ctx.font = "12px system-ui, sans-serif"
             ctx.textBaseline = "middle"
@@ -367,7 +648,11 @@ function ForceGraphCanvas({ graph }: { graph: KnowledgeGraph }) {
           ctx.globalAlpha = 1
         }}
         // ── Edge rendering ─────────────────────────────────────
-        linkColor={(l) => EDGE_COLOR[(l as ForceLink).relation]}
+        linkColor={(l) => {
+          const link = l as ForceLink
+          if (link.rejected) return REJECTED_EDGE_COLOR
+          return EDGE_COLOR[link.relation]
+        }}
         linkWidth={(l) => {
           const link = l as ForceLink
           const src =
@@ -378,9 +663,11 @@ function ForceGraphCanvas({ graph }: { graph: KnowledgeGraph }) {
             adjacent != null && (adjacent.has(src) || adjacent.has(dst))
           return isAdj ? 2.5 : 1.2
         }}
-        linkLineDash={(l) =>
-          (l as ForceLink).relation === "part_of_unit" ? [4, 3] : null
-        }
+        linkLineDash={(l) => {
+          const link = l as ForceLink
+          if (link.rejected) return [2, 4]
+          return link.relation === "part_of_unit" ? [4, 3] : null
+        }}
         linkDirectionalArrowLength={(l) =>
           (l as ForceLink).relation === "solution_of" ? 6 : 0
         }
@@ -406,7 +693,6 @@ function nodeTooltip(n: ForceNode): string {
   if (n.chunkCount != null && n.chunkCount > 0) {
     lines.push(`${n.chunkCount} chunks`)
   }
-  // react-force-graph uses HTML for labels; basic line break.
   return lines.join("<br>")
 }
 
@@ -415,6 +701,7 @@ function edgeTooltip(l: ForceLink): string {
     l.relation === "solution_of" ? "is a solution to" : "is in the same unit as",
     `confidence: ${Math.round(l.confidence * 100)}%`,
   ]
+  if (l.rejected) lines.push("REJECTED by teacher")
   if (l.rationale) lines.push(l.rationale)
   return lines.join("<br>")
 }
@@ -424,21 +711,50 @@ function truncate(s: string, max: number): string {
   return s.slice(0, max - 1) + "\u2026"
 }
 
-// ── Edge list (textual fallback / accessibility) ──────────────────
+// ── Edge list (textual fallback / accessibility / per-edge actions)
 
 function EdgeList({
   edges,
   nodes,
+  courseId,
 }: {
   edges: KnowledgeGraphEdge[]
   nodes: KnowledgeGraphNode[]
+  courseId: string
 }) {
   const { t } = useTranslation("teacher")
+  const queryClient = useQueryClient()
+  const formatError = useApiErrorMessage()
   const nameById = React.useMemo(() => {
     const m = new Map<string, string>()
     for (const n of nodes) m.set(n.id, n.filename)
     return m
   }, [nodes])
+
+  const rejectMutation = useMutation({
+    mutationFn: (edgeId: string) =>
+      api.post(
+        `/courses/${courseId}/documents/knowledge-graph/edges/${edgeId}/reject`,
+        {},
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "knowledge-graph"],
+      })
+    },
+  })
+
+  const unrejectMutation = useMutation({
+    mutationFn: (edgeId: string) =>
+      api.delete(
+        `/courses/${courseId}/documents/knowledge-graph/edges/${edgeId}/reject`,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "knowledge-graph"],
+      })
+    },
+  })
 
   if (edges.length === 0) {
     return (
@@ -448,14 +764,37 @@ function EdgeList({
     )
   }
 
+  // Track the edge id whose action is currently in flight so we can
+  // disable just that row's button without freezing the entire list.
+  const pendingId =
+    rejectMutation.isPending
+      ? (rejectMutation.variables as string | undefined)
+      : unrejectMutation.isPending
+        ? (unrejectMutation.variables as string | undefined)
+        : undefined
+
+  const lastError = rejectMutation.isError
+    ? rejectMutation.error
+    : unrejectMutation.isError
+      ? unrejectMutation.error
+      : null
+
   return (
     <details className="rounded border">
       <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
         {t("knowledgeGraph.edgeListTitle", { count: edges.length })}
       </summary>
+      {lastError && (
+        <p className="px-3 py-2 text-sm text-destructive">
+          {formatError(lastError)}
+        </p>
+      )}
       <ul className="divide-y text-sm">
-        {edges.map((e, i) => (
-          <li key={i} className="px-3 py-2">
+        {edges.map((e) => (
+          <li
+            key={e.id}
+            className={`px-3 py-2 ${e.rejected_by_teacher ? "opacity-60" : ""}`}
+          >
             <div className="flex items-baseline justify-between gap-3">
               <span className="truncate">
                 <span className="font-medium">
@@ -467,10 +806,38 @@ function EdgeList({
                 <span className="font-medium">
                   {nameById.get(e.dst_id) ?? e.dst_id}
                 </span>
+                {e.rejected_by_teacher && (
+                  <span className="ml-2 text-xs italic text-amber-700 dark:text-amber-400">
+                    {t("knowledgeGraph.rejectedSuffix")}
+                  </span>
+                )}
               </span>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {Math.round(e.confidence * 100)}%
-              </span>
+              <div className="flex shrink-0 items-baseline gap-2">
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {Math.round(e.confidence * 100)}%
+                </span>
+                {e.rejected_by_teacher ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title={t("knowledgeGraph.unrejectTitle")}
+                    disabled={pendingId === e.id}
+                    onClick={() => unrejectMutation.mutate(e.id)}
+                  >
+                    {t("knowledgeGraph.unreject")}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title={t("knowledgeGraph.rejectTitle")}
+                    disabled={pendingId === e.id}
+                    onClick={() => rejectMutation.mutate(e.id)}
+                  >
+                    {t("knowledgeGraph.reject")}
+                  </Button>
+                )}
+              </div>
             </div>
             {e.rationale && (
               <p className="text-xs italic text-muted-foreground">
@@ -482,4 +849,31 @@ function EdgeList({
       </ul>
     </details>
   )
+}
+
+// ── Export ─────────────────────────────────────────────────────────
+
+/// Build a JSON file of the current graph and trigger a download.
+/// Format: `{nodes: [{id, filename, kind, kind_confidence, kind_locked,
+/// chunk_count}], edges: [{src_id, dst_id, relation, confidence,
+/// rationale, rejected_by_teacher}]}`. Designed to be importable into
+/// Gephi (via JSON adapter) or NetworkX.
+function downloadGraphJson(courseId: string, graph: KnowledgeGraph) {
+  const payload = {
+    course_id: courseId,
+    exported_at: new Date().toISOString(),
+    nodes: graph.nodes,
+    edges: graph.edges,
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = `minerva-kg-${courseId}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }

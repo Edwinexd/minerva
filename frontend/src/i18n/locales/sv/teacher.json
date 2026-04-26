@@ -234,7 +234,24 @@
     "edgeKind": {
       "solution_of": "är ett lösningsförslag till",
       "part_of_unit": "ligger i samma modul som"
-    }
+    },
+    "filters": {
+      "title": "Filter",
+      "kindLabel": "Dokumenttyp",
+      "relationLabel": "Relationstyp",
+      "showRejected": "Visa avvisade kanter",
+      "all": "Alla",
+      "reset": "Nollställ filter"
+    },
+    "export": "Exportera JSON",
+    "exportTitle": "Ladda ner noder och kanter som en JSON-fil (lämplig för import till Gephi / NetworkX).",
+    "reject": "Avvisa kant",
+    "rejectTitle": "Dölj kanten och hindra länkaren från att föreslå den igen. Avvisningen består över ombyggnader.",
+    "unreject": "Återställ kant",
+    "unrejectTitle": "Häv avvisningen så att länkaren får föreslå paret igen vid nästa ombyggnad.",
+    "rejectedSuffix": "(avvisad av lärare)",
+    "rejectedHidden_one": "{{count}} avvisad kant dold",
+    "rejectedHidden_other": "{{count}} avvisade kanter dolda"
   },
   "invite": {
     "title": "Inbjudningslänkar",

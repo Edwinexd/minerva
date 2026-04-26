@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, course_id, src_doc_id, dst_doc_id, relation, confidence, rationale, created_at, updated_at FROM document_relations WHERE course_id = $1 ORDER BY relation, created_at",
+  "query": "SELECT id, course_id, src_doc_id, dst_doc_id, relation, confidence, rationale, rejected_by_teacher, rejected_at, rejected_by, created_at, updated_at FROM document_relations WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -40,11 +40,26 @@
       },
       {
         "ordinal": 7,
+        "name": "rejected_by_teacher",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "rejected_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "rejected_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -63,8 +78,11 @@
       false,
       true,
       false,
+      true,
+      true,
+      false,
       false
     ]
   },
-  "hash": "a316fb9362fe0f367d4b1a56d7e3fbe19a2ce4be7e0d7a98e32e00baa370ea29"
+  "hash": "9b3856b456e159117def19e108409416698f42f7813f9c6954fe932834d7205b"
 }

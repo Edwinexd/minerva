@@ -165,11 +165,25 @@ export const adminSystemMetricsQuery = queryOptions({
   refetchInterval: 30_000,
 })
 
+export interface BackfillProgress {
+  started_at: string
+  total: number
+  ok: number
+  errors: number
+  skipped: number
+  finished: boolean
+}
+
 export interface ClassificationStats {
   total_ready: number
   classified: number
   unclassified: number
   locked_by_teacher: number
+  /// `null` until the admin has kicked off at least one backfill since
+  /// the last server restart. While a backfill is running the polling
+  /// /admin/classification-stats endpoint returns updated counters
+  /// every 5s so the UI's progress bar ticks live.
+  backfill: BackfillProgress | null
 }
 
 export const adminClassificationStatsQuery = queryOptions({
@@ -192,11 +206,16 @@ export interface KnowledgeGraphNode {
 }
 
 export interface KnowledgeGraphEdge {
+  /// Stable identifier; addressable as
+  /// `/courses/{courseId}/documents/knowledge-graph/edges/{id}/reject`
+  /// for per-edge teacher veto + un-veto.
+  id: string
   src_id: string
   dst_id: string
   relation: "solution_of" | "part_of_unit"
   confidence: number
   rationale: string | null
+  rejected_by_teacher: boolean
 }
 
 export interface KnowledgeGraph {

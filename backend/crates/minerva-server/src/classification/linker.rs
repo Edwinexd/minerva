@@ -22,6 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
+use minerva_db::queries::document_relations::RejectedPairKey;
 use minerva_db::queries::documents::DocumentRow;
 use minerva_ingest::fastembed_embedder::FastEmbedder;
 use sqlx::PgPool;
@@ -136,21 +137,37 @@ You will receive:
 For EACH candidate pair, decide whether there is a typed relation between
 the two documents. You may also decide there is NONE (omit it from output).
 
+Filename markers are the STRONGEST signal in this task -- much stronger
+than topic-word overlap or embedding similarity. Each candidate may carry
+a `shared_filename_marker` (e.g. "lab2", "f18", "week3"). If present, the
+two documents almost certainly belong to the same unit. Treat the marker
+as a hard prior and lean toward emitting `part_of_unit` unless their
+content disagrees outright (e.g. one is a syllabus and one is a lab).
+
+Conversely, if a candidate has NO shared filename marker, you need much
+stronger evidence to emit `part_of_unit`: either a clear "this is the
+solution to that" / "this is the lab for that lecture" relationship in
+the content, or a unique-and-specific shared subtopic (not a course-wide
+topic word like "inheritance" / "OO" / "loops"). Topic-word overlap
+ALONE is never sufficient.
+
 Possible relations:
 - "solution_of": src is the sample_solution; dst is the assignment_brief /
   lab_brief / exam it answers. Use when one doc is `kind=sample_solution`
   AND the OTHER is an assessment kind AND the content/filenames clearly
-  pair them.
+  pair them. A shared filename marker (e.g. "lab2") is the strongest
+  evidence. Do NOT emit solution_of without explicit kind=sample_solution
+  on one side.
 - "part_of_unit": both documents belong to the same week / module /
-  chapter / topic / unit. Use when both excerpts cover the same topic
-  AND there is at least one concrete grounding signal (shared filename
-  marker, identical week/lab/lecture number, the same specific topic
-  phrase in both excerpts, OR the classifier rationales explicitly tie
-  them together). NOTE: two sequential lectures on the same broad
-  subject (F01_Arv_I and F02_Arv_II, week3 and week4) are NOT in the
-  same unit -- they are in adjacent units of a course module. Do not
-  link them. A topic word like "Arv" or "inheritance" appearing in
-  both filenames is NOT sufficient evidence; you need either matching
+  chapter / topic / unit. Strong path: shared_filename_marker is set,
+  emit with confidence ~0.9 unless content disagrees. Weak path: no
+  filename marker; emit only if both excerpts share a SPECIFIC subtopic
+  AND there is a structural relationship (lab + brief + solution +
+  rubric all in the same unit, etc.). NOTE: two sequential lectures on
+  the same broad subject (F01_Arv_I and F02_Arv_II, week3 and week4) are
+  NOT in the same unit -- they are in adjacent units of a course module.
+  Do not link them. A topic word like "Arv" or "inheritance" appearing
+  in both filenames is NOT sufficient evidence; you need either matching
   numeric markers, or a clear "this is a summary of that" / "this is
   the lab for that lecture" relationship visible in the content.
 
@@ -220,6 +237,32 @@ pub struct LinkContext<'a> {
     pub docs_path: &'a str,
 }
 
+/// True iff the (src, dst, relation) triple has been vetoed by a teacher.
+/// `part_of_unit` is undirected; the linker normalises src < dst before
+/// upsert, but the candidate set sees pairs in arbitrary order, so we
+/// check both orderings here.
+fn is_rejected(rejected: &HashSet<RejectedPairKey>, a: Uuid, b: Uuid, relation: &str) -> bool {
+    rejected.contains(&RejectedPairKey {
+        src_doc_id: a,
+        dst_doc_id: b,
+        relation: relation.to_string(),
+    }) || rejected.contains(&RejectedPairKey {
+        src_doc_id: b,
+        dst_doc_id: a,
+        relation: relation.to_string(),
+    })
+}
+
+/// Pair-level test: should the linker consider this pair at all? Used
+/// to drop candidates BEFORE the LLM call -- if both relation types
+/// for a pair have been vetoed, there's no point asking the model.
+fn pair_fully_rejected(rejected: &HashSet<RejectedPairKey>, a: Uuid, b: Uuid) -> bool {
+    is_rejected(rejected, a, b, "solution_of")
+        && is_rejected(rejected, a, b, "part_of_unit")
+        // solution_of is directional, so we also need to check b->a.
+        && is_rejected(rejected, b, a, "solution_of")
+}
+
 /// Run the cross-doc linker over a course's classified documents.
 ///
 /// Pipeline (the "proper KG" shape):
@@ -281,6 +324,26 @@ pub async fn link_course(
     };
     let truncated: &[&DocumentRow] = &truncated_owned;
 
+    // Load teacher-vetoed pairs ONCE per linker pass. Cheap query;
+    // saves us asking the model about pairs we'd just drop anyway.
+    let rejected =
+        minerva_db::queries::document_relations::rejected_pairs_for_course(ctx.db, course_id)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "linker: failed to load rejected pairs ({}); proceeding without veto list",
+                    e
+                );
+                HashSet::new()
+            });
+    if !rejected.is_empty() {
+        tracing::info!(
+            "linker: course {} has {} teacher-vetoed pair(s) -- those will be skipped",
+            course_id,
+            rejected.len(),
+        );
+    }
+
     // Step 1: gather pooled embeddings, lazily backfilling any that
     // are missing.
     let embeddings: HashMap<Uuid, Vec<f32>> = gather_embeddings(ctx, course_id, truncated).await?;
@@ -309,6 +372,21 @@ pub async fn link_course(
                 pair.0,
                 pair.1,
                 sim
+            );
+            return false;
+        }
+        true
+    });
+
+    // Drop pairs where every possible relation has been vetoed by a
+    // teacher -- no LLM call needed. Pairs where SOME relations are
+    // vetoed still go to the model but get filtered post-hoc.
+    candidates.retain(|pair| {
+        if pair_fully_rejected(&rejected, pair.0, pair.1) {
+            tracing::info!(
+                "linker: dropping fully-rejected pair {:?}<->{:?}",
+                pair.0,
+                pair.1,
             );
             return false;
         }
@@ -350,7 +428,22 @@ pub async fn link_course(
     let mut kept = Vec::with_capacity(edges.len());
     let mut dropped_marker = 0usize;
     let mut dropped_sim = 0usize;
+    let mut dropped_rejected = 0usize;
     for edge in edges {
+        // Teacher veto wins over the model. We already pre-filtered
+        // fully-rejected pairs from candidates, but a partial veto
+        // (e.g. solution_of vetoed but part_of_unit not) still let
+        // the pair through; drop the specific vetoed relation here.
+        if is_rejected(&rejected, edge.src_id, edge.dst_id, &edge.relation) {
+            tracing::info!(
+                "linker: post-filter dropped {} {:?}<->{:?} (teacher-vetoed)",
+                edge.relation,
+                edge.src_id,
+                edge.dst_id,
+            );
+            dropped_rejected += 1;
+            continue;
+        }
         let pair_key = if edge.src_id < edge.dst_id {
             (edge.src_id, edge.dst_id)
         } else {
@@ -400,11 +493,12 @@ pub async fn link_course(
 
         kept.push(edge);
     }
-    if dropped_marker > 0 || dropped_sim > 0 {
+    if dropped_marker > 0 || dropped_sim > 0 || dropped_rejected > 0 {
         tracing::info!(
-            "linker: post-filter summary -- dropped {} for marker mismatch, {} for similarity floor",
+            "linker: post-filter summary -- {} marker mismatch, {} similarity floor, {} teacher-vetoed",
             dropped_marker,
             dropped_sim,
+            dropped_rejected,
         );
     }
 

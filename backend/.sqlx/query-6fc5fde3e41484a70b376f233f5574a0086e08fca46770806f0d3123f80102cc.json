@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents\n           SET filename = $1,\n               mime_type = $2,\n               size_bytes = $3,\n               status = 'pending',\n               error_msg = NULL,\n               chunk_count = NULL,\n               processed_at = NULL,\n               processing_started_at = NULL,\n               classified_at = CASE WHEN kind_locked_by_teacher THEN classified_at ELSE NULL END,\n               kind = CASE WHEN kind_locked_by_teacher THEN kind ELSE NULL END,\n               kind_confidence = CASE WHEN kind_locked_by_teacher THEN kind_confidence ELSE NULL END,\n               kind_rationale = CASE WHEN kind_locked_by_teacher THEN kind_rationale ELSE NULL END,\n               pooled_embedding = NULL\n           WHERE id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6fc5fde3e41484a70b376f233f5574a0086e08fca46770806f0d3123f80102cc"
+}

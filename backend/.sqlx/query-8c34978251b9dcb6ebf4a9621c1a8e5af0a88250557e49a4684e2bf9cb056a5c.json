@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO document_relations\n            (course_id, src_doc_id, dst_doc_id, relation, confidence, rationale)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        ON CONFLICT (src_doc_id, dst_doc_id, relation)\n        DO UPDATE SET\n            confidence = EXCLUDED.confidence,\n            rationale = EXCLUDED.rationale,\n            updated_at = NOW()\n        RETURNING id, course_id, src_doc_id, dst_doc_id, relation, confidence, rationale, created_at, updated_at",
+  "query": "SELECT id, course_id, src_doc_id, dst_doc_id, relation, confidence, rationale, rejected_by_teacher, rejected_at, rejected_by, created_at, updated_at FROM document_relations WHERE course_id = $1 ORDER BY relation, created_at",
   "describe": {
     "columns": [
       {
@@ -40,23 +40,33 @@
       },
       {
         "ordinal": 7,
+        "name": "rejected_by_teacher",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "rejected_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "rejected_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Float4",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -68,8 +78,11 @@
       false,
       true,
       false,
+      true,
+      true,
+      false,
       false
     ]
   },
-  "hash": "6b7b237b1faac683d69f5f271a47572821b8ab03f03259ea3cf0ead555465e8e"
+  "hash": "8c34978251b9dcb6ebf4a9621c1a8e5af0a88250557e49a4684e2bf9cb056a5c"
 }

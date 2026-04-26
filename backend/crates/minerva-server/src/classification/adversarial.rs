@@ -21,11 +21,46 @@
 //!   ran, and blocking student replies for a defensive secondary is
 //!   worse than the small leak risk.
 
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use futures::future::join_all;
 
 use crate::strategy::common::{cerebras_request_with_retry, RagChunk};
+
+/// Atomic counters bumped by every filter invocation. Surfaced via a
+/// dedicated read API so the admin/telemetry dashboard can show how
+/// often the secondary defense fires vs how often the primary
+/// (per-doc kind) catches everything. All counters are monotonic
+/// across a single server instance; reset on restart.
+static CHUNKS_INSPECTED: AtomicU64 = AtomicU64::new(0);
+static CHUNKS_DROPPED: AtomicU64 = AtomicU64::new(0);
+static CHUNKS_PASSED: AtomicU64 = AtomicU64::new(0);
+static CHUNKS_PER_CHECK_FAILED: AtomicU64 = AtomicU64::new(0);
+static FILTER_TIMEOUTS: AtomicU64 = AtomicU64::new(0);
+
+/// Snapshot of the filter's lifetime counters for telemetry. Used by
+/// the admin dashboard via `crate::routes::admin::adversarial_stats`.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // fields read via Debug/serde from a planned admin endpoint
+pub struct AdversarialStats {
+    pub chunks_inspected: u64,
+    pub chunks_dropped: u64,
+    pub chunks_passed: u64,
+    pub per_check_failures: u64,
+    pub filter_timeouts: u64,
+}
+
+#[allow(dead_code)] // referenced from a planned admin telemetry endpoint
+pub fn snapshot_stats() -> AdversarialStats {
+    AdversarialStats {
+        chunks_inspected: CHUNKS_INSPECTED.load(Ordering::Relaxed),
+        chunks_dropped: CHUNKS_DROPPED.load(Ordering::Relaxed),
+        chunks_passed: CHUNKS_PASSED.load(Ordering::Relaxed),
+        per_check_failures: CHUNKS_PER_CHECK_FAILED.load(Ordering::Relaxed),
+        filter_timeouts: FILTER_TIMEOUTS.load(Ordering::Relaxed),
+    }
+}
 
 /// Cerebras model used for the per-chunk check. Same family as the
 /// document classifier so we benefit from a single warmed-up cache.
@@ -65,6 +100,7 @@ async fn is_solution_chunk(http: &reqwest::Client, api_key: &str, chunk_text: &s
     let response = match cerebras_request_with_retry(http, api_key, &body).await {
         Ok(r) => r,
         Err(e) => {
+            CHUNKS_PER_CHECK_FAILED.fetch_add(1, Ordering::Relaxed);
             tracing::warn!("adversarial: request failed, failing open: {e}");
             return false;
         }
@@ -73,6 +109,7 @@ async fn is_solution_chunk(http: &reqwest::Client, api_key: &str, chunk_text: &s
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
         Err(e) => {
+            CHUNKS_PER_CHECK_FAILED.fetch_add(1, Ordering::Relaxed);
             tracing::warn!("adversarial: response not JSON, failing open: {e}");
             return false;
         }
@@ -113,21 +150,35 @@ pub async fn filter_solution_chunks(
         .map(|t| is_solution_chunk(http, api_key, t))
         .collect::<Vec<_>>();
 
+    let started = Instant::now();
+    let chunks_count = chunks.len();
+    CHUNKS_INSPECTED.fetch_add(chunks_count as u64, Ordering::Relaxed);
+
     let verdicts = match tokio::time::timeout(MAX_FILTER_LATENCY, join_all(checks)).await {
         Ok(v) => v,
         Err(_) => {
+            FILTER_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
+            // Count timed-out chunks as "passed" for the bookkeeping
+            // model: they reach the prompt context, just without
+            // having been verified. The metric reader can subtract
+            // FILTER_TIMEOUTS if they want a stricter view.
+            CHUNKS_PASSED.fetch_add(chunks_count as u64, Ordering::Relaxed);
             tracing::warn!(
-                "adversarial: filter exceeded {}ms budget across {} chunks; passing all through",
+                "adversarial: filter exceeded {}ms budget across {} chunks; passing all through (elapsed {}ms)",
                 MAX_FILTER_LATENCY.as_millis(),
-                chunks.len(),
+                chunks_count,
+                started.elapsed().as_millis(),
             );
             return chunks;
         }
     };
 
     let mut kept = Vec::with_capacity(chunks.len());
+    let mut dropped_in_call = 0u64;
     for (chunk, is_solution) in chunks.into_iter().zip(verdicts) {
         if is_solution {
+            CHUNKS_DROPPED.fetch_add(1, Ordering::Relaxed);
+            dropped_in_call += 1;
             tracing::warn!(
                 "adversarial: dropping chunk from doc {} (filename {}) flagged as solution",
                 chunk.document_id,
@@ -135,7 +186,16 @@ pub async fn filter_solution_chunks(
             );
             continue;
         }
+        CHUNKS_PASSED.fetch_add(1, Ordering::Relaxed);
         kept.push(chunk);
+    }
+    if dropped_in_call > 0 {
+        tracing::info!(
+            "adversarial: filter pass dropped {} of {} chunks in {}ms",
+            dropped_in_call,
+            chunks_count,
+            started.elapsed().as_millis(),
+        );
     }
     kept
 }

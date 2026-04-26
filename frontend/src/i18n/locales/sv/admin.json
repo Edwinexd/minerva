@@ -286,6 +286,10 @@
       "backfillTitle": "Kör klassificeraren på alla oklassificerade, olåsta, klara dokument. Varje klick köar upp till 5 000 dokument.",
       "lastQueued_one": "Köade {{count}} dokument; status uppdateras medan det körs.",
       "lastQueued_other": "Köade {{count}} dokument; status uppdateras medan det körs.",
+      "backfillRunning": "Klassificerar: {{done}} av {{total}} klara",
+      "backfillFinished": "Klart: {{ok}} ok, {{errors}} fel, {{skipped}} hoppade över",
+      "backfillErrors_one": "{{count}} dokument misslyckades; se serverloggar.",
+      "backfillErrors_other": "{{count}} dokument misslyckades; se serverloggar.",
       "note": "Varje klick köar upp till 5 000 dokument. För större efterhängningar, klicka igen när siffran sjunkit."
     }
   }

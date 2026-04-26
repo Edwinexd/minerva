@@ -234,7 +234,24 @@
     "edgeKind": {
       "solution_of": "is a solution to",
       "part_of_unit": "is in the same unit as"
-    }
+    },
+    "filters": {
+      "title": "Filters",
+      "kindLabel": "Document kind",
+      "relationLabel": "Relation type",
+      "showRejected": "Show rejected edges",
+      "all": "All",
+      "reset": "Reset filters"
+    },
+    "export": "Export JSON",
+    "exportTitle": "Download nodes and edges as a JSON file (suitable for Gephi / NetworkX import).",
+    "reject": "Reject edge",
+    "rejectTitle": "Hide this edge and prevent the linker from re-proposing it. The teacher veto persists across rebuilds.",
+    "unreject": "Restore edge",
+    "unrejectTitle": "Lift the rejection so the linker can propose this pair again on the next rebuild.",
+    "rejectedSuffix": "(rejected by teacher)",
+    "rejectedHidden_one": "{{count}} rejected edge hidden",
+    "rejectedHidden_other": "{{count}} rejected edges hidden"
   },
   "invite": {
     "title": "Invite Links",

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE document_relations\n           SET rejected_by_teacher = FALSE,\n               rejected_at = NULL,\n               rejected_by = NULL,\n               updated_at = NOW()\n           WHERE id = $1\n           RETURNING src_doc_id, dst_doc_id, relation",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "src_doc_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "dst_doc_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "relation",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "07dd1a3f4ebeefbf114c9196daf84d2aaefd2d1cae631e01666430cf4104196c"
+}

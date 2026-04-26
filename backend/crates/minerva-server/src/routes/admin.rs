@@ -445,6 +445,22 @@ struct ClassificationStatsResponse {
     classified: i64,
     unclassified: i64,
     locked_by_teacher: i64,
+    /// Progress of the most recent admin backfill (or `None` if no
+    /// backfill has run since the last server restart). Cleared when
+    /// the next backfill kicks off; the UI uses this to show a
+    /// progress bar with ok/errors/skipped counts ticking up in
+    /// real time.
+    backfill: Option<BackfillProgressResponse>,
+}
+
+#[derive(Serialize)]
+struct BackfillProgressResponse {
+    started_at: chrono::DateTime<chrono::Utc>,
+    total: usize,
+    ok: usize,
+    errors: usize,
+    skipped: usize,
+    finished: bool,
 }
 
 async fn get_classification_stats(
@@ -453,11 +469,23 @@ async fn get_classification_stats(
 ) -> Result<Json<ClassificationStatsResponse>, AppError> {
     require_admin(&user)?;
     let stats = minerva_db::queries::documents::classification_stats(&state.db).await?;
+    let backfill = state
+        .backfill_tracker
+        .snapshot()
+        .map(|p| BackfillProgressResponse {
+            started_at: p.started_at,
+            total: p.total,
+            ok: p.ok,
+            errors: p.errors,
+            skipped: p.skipped,
+            finished: p.finished,
+        });
     Ok(Json(ClassificationStatsResponse {
         total_ready: stats.total_ready,
         classified: stats.classified,
         unclassified: stats.unclassified,
         locked_by_teacher: stats.locked_by_teacher,
+        backfill,
     }))
 }
 
@@ -497,6 +525,11 @@ async fn backfill_classifications(
         BACKFILL_BATCH_LIMIT,
     );
 
+    // Initialise progress tracker before spawning so the UI's first
+    // poll sees the new backfill, not a stale "finished" state from
+    // a previous run.
+    state.backfill_tracker.start(queued);
+
     let state_clone = state.clone();
     tokio::spawn(async move {
         let mut ok = 0usize;
@@ -508,10 +541,15 @@ async fn backfill_classifications(
                 Ok(Some(_)) => {
                     ok += 1;
                     touched_courses.insert(course_id);
+                    state_clone.backfill_tracker.record_ok();
                 }
-                Ok(None) => {} // race: teacher locked between SELECT and now; skip silently
+                Ok(None) => {
+                    // race: teacher locked between SELECT and now; skip silently
+                    state_clone.backfill_tracker.record_skipped();
+                }
                 Err(e) => {
                     errs += 1;
+                    state_clone.backfill_tracker.record_error();
                     tracing::warn!(
                         "admin: backfill doc {} ({}) failed: {:?}",
                         doc.id,
@@ -533,8 +571,12 @@ async fn backfill_classifications(
         // concurrent linker calls at Cerebras when a backfill spans
         // courses.
         for course_id in touched_courses {
-            state_clone.relink_scheduler.mark_dirty_immediate(course_id);
+            state_clone
+                .relink_scheduler
+                .mark_dirty_immediate(course_id)
+                .await;
         }
+        state_clone.backfill_tracker.finish();
     });
 
     Ok(Json(BackfillResponse { queued }))

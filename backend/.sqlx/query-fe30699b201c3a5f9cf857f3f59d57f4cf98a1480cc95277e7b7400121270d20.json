@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM rejected_edge_pairs WHERE src_doc_id = $1 AND dst_doc_id = $2 AND relation = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fe30699b201c3a5f9cf857f3f59d57f4cf98a1480cc95277e7b7400121270d20"
+}

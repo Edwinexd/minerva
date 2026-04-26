@@ -46,6 +46,10 @@ pub fn router() -> Router<AppState> {
         .route("/reclassify-all", post(reclassify_all_in_course))
         .route("/knowledge-graph", get(get_knowledge_graph))
         .route("/knowledge-graph/rebuild", post(rebuild_knowledge_graph))
+        .route(
+            "/knowledge-graph/edges/{edge_id}/reject",
+            post(reject_edge).delete(unreject_edge),
+        )
         .route("/search", get(search_chunks))
 }
 
@@ -706,7 +710,7 @@ async fn reclassify_document(
             rationale: doc.kind_rationale,
         })),
         Some((kind, confidence, rationale)) => {
-            state.relink_scheduler.mark_dirty(course_id);
+            state.relink_scheduler.mark_dirty(course_id).await;
             Ok(Json(ReclassifyResponse {
                 classified: true,
                 locked: false,
@@ -788,7 +792,7 @@ async fn set_document_kind(
     // in `solution_of` / `part_of_unit` edges (e.g. flipping reading ->
     // sample_solution removes its embeddings AND should remove edges
     // pointing at it). Mark the course dirty for the relink sweeper.
-    state.relink_scheduler.mark_dirty(course_id);
+    state.relink_scheduler.mark_dirty(course_id).await;
 
     Ok(Json(serde_json::json!({
         "kind": body.kind,
@@ -859,7 +863,7 @@ async fn reclassify_all_in_course(
     // each candidate; we additionally mark the course immediate-dirty
     // so the sweeper picks it up on its next tick (typically ~10s,
     // well after the classify task is done).
-    state.relink_scheduler.mark_dirty_immediate(course_id);
+    state.relink_scheduler.mark_dirty_immediate(course_id).await;
 
     Ok(Json(ReclassifyAllResponse { queued }))
 }
@@ -944,11 +948,20 @@ struct GraphNode {
 
 #[derive(Serialize)]
 struct GraphEdge {
+    /// Stable id, used as the addressable handle for per-edge reject /
+    /// unreject. Returned even for rejected edges so the UI can show them
+    /// in a "vetoed" filter.
+    id: Uuid,
     src_id: Uuid,
     dst_id: Uuid,
     relation: String,
     confidence: f32,
     rationale: Option<String>,
+    /// True when a teacher has explicitly rejected this edge. Rejected
+    /// edges are filtered out of the default graph render (the linker
+    /// won't even re-propose them on the next pass) but exposed in the
+    /// API payload so the UI can show a "show rejected" toggle.
+    rejected_by_teacher: bool,
 }
 
 #[derive(Serialize)]
@@ -990,11 +1003,13 @@ async fn get_knowledge_graph(
     let edges: Vec<GraphEdge> = edges_rows
         .into_iter()
         .map(|e| GraphEdge {
+            id: e.id,
             src_id: e.src_doc_id,
             dst_id: e.dst_doc_id,
             relation: e.relation,
             confidence: e.confidence,
             rationale: e.rationale,
+            rejected_by_teacher: e.rejected_by_teacher,
         })
         .collect();
 
@@ -1002,6 +1017,74 @@ async fn get_knowledge_graph(
         nodes,
         edges,
         edges_computed,
+    }))
+}
+
+#[derive(Serialize)]
+struct EdgeMutationResponse {
+    /// Echo of the edge's id so the UI can confirm the mutation
+    /// landed against the right row. (Matches the path parameter.)
+    id: Uuid,
+    rejected_by_teacher: bool,
+}
+
+/// Reject an edge: the linker won't re-propose this pair, and the
+/// graph-view filter hides it from the default render. Idempotent --
+/// rejecting an already-rejected edge just refreshes `rejected_at`.
+async fn reject_edge(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, edge_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<EdgeMutationResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+
+    // Cross-course safety: if the edge id resolves to a different
+    // course, surface 404 rather than silently allowing a teacher to
+    // mutate edges in courses they don't own.
+    let edge = minerva_db::queries::document_relations::find_by_id(&state.db, edge_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if edge.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+
+    let updated =
+        minerva_db::queries::document_relations::reject_edge(&state.db, edge_id, user.id).await?;
+    if !updated {
+        return Err(AppError::NotFound);
+    }
+
+    Ok(Json(EdgeMutationResponse {
+        id: edge_id,
+        rejected_by_teacher: true,
+    }))
+}
+
+/// Undo a rejection. The pair becomes eligible for the next linker
+/// pass to re-emit if the model still likes it.
+async fn unreject_edge(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, edge_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<EdgeMutationResponse>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+
+    let edge = minerva_db::queries::document_relations::find_by_id(&state.db, edge_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if edge.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+
+    let updated =
+        minerva_db::queries::document_relations::unreject_edge(&state.db, edge_id).await?;
+    if !updated {
+        return Err(AppError::NotFound);
+    }
+
+    Ok(Json(EdgeMutationResponse {
+        id: edge_id,
+        rejected_by_teacher: false,
     }))
 }
 

@@ -11,6 +11,18 @@ use crate::classification::prompts::{ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE, PASTED_
 use crate::classification::types::is_signal_only_kind;
 use crate::error::AppError;
 
+/// Minimum retrieval score (cosine similarity in [0, 1]) below which an
+/// assignment-kind signal is considered tangential and the refusal
+/// addendum is NOT appended. Tuned so a student's question that
+/// glances on a topic word from an assignment doesn't trigger the
+/// refusal -- only a substantive overlap with the brief itself does.
+///
+/// Calibrated against typical Qdrant cosine scores for course content:
+/// dense paraphrases of an assignment question score ~0.7+; tangential
+/// topic mentions score 0.5-0.65. 0.65 is the threshold where we
+/// stop trusting the signal as evidence of an actual assignment paste.
+pub const ASSIGNMENT_SIGNAL_MIN_SCORE: f32 = 0.65;
+
 /// Maximum number of retries for transient Cerebras API errors (5XX, timeouts).
 const MAX_RETRIES: u32 = 3;
 
@@ -150,6 +162,19 @@ pub fn partition_chunks(
         if c.kind.as_deref() == Some("sample_solution") {
             tracing::warn!(
                 "rag: dropping stale sample_solution chunk (doc {})",
+                c.document_id
+            );
+            continue;
+        }
+        // `unknown` is the bucket the classifier uses when it can't
+        // confidently place a doc (zero-text URL stubs, ambiguous
+        // material, etc.). Quarantine these from context: a teacher
+        // can promote them to a real kind via the documents UI, at
+        // which point chunks come through normally on the next
+        // retrieval. The chat path stays defensive in the meantime.
+        if c.kind.as_deref() == Some("unknown") {
+            tracing::debug!(
+                "rag: chunk from unknown-kind doc {} held back (teacher review needed)",
                 c.document_id
             );
             continue;
@@ -400,12 +425,34 @@ pub fn build_system_prompt_with_signals(
     // stays byte-stable across turns within a session (Cerebras prompt
     // cache friendliness). One cache miss per matched-turn rather than
     // poisoning the entire conversation's cache.
-    if !signal_chunks.is_empty() {
-        let mut filenames: Vec<String> = signal_chunks.iter().map(|c| c.filename.clone()).collect();
+    //
+    // Apply ASSIGNMENT_SIGNAL_MIN_SCORE: a low-scoring assignment match
+    // is too weak a signal to justify clamping the model into refusal
+    // mode for an otherwise legitimate question. The student asking
+    // "what's a recurrence relation" shouldn't trigger refusal just
+    // because an assignment_brief about recurrence relations exists in
+    // the course.
+    let strong_signals: Vec<&RagChunk> = signal_chunks
+        .iter()
+        .filter(|c| c.score >= ASSIGNMENT_SIGNAL_MIN_SCORE)
+        .collect();
+    if !strong_signals.is_empty() {
+        let mut filenames: Vec<String> =
+            strong_signals.iter().map(|c| c.filename.clone()).collect();
         filenames.sort();
         filenames.dedup();
         let joined = filenames.join(", ");
         prompt.push_str(&ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE.replace("{filenames}", &joined));
+    } else if !signal_chunks.is_empty() {
+        // Tangential assignment match -- log so we can calibrate the
+        // threshold against real traffic. Not visible to the student.
+        let scores: Vec<f32> = signal_chunks.iter().map(|c| c.score).collect();
+        tracing::debug!(
+            "rag: {} assignment-kind signal(s) below {:.2} threshold, refusal addendum suppressed (max score {:.3})",
+            signal_chunks.len(),
+            ASSIGNMENT_SIGNAL_MIN_SCORE,
+            scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+        );
     }
 
     prompt
@@ -763,5 +810,52 @@ mod tests {
     fn build_system_prompt_includes_pasted_problem_rule() {
         let prompt = build_system_prompt("Algorithms", &None, &[]);
         assert!(prompt.contains("pasted verbatim"));
+    }
+
+    #[test]
+    fn build_system_prompt_skips_addendum_for_low_score_signals() {
+        // Score below the threshold -> no addendum.
+        let mut signal = chunk(
+            "d2",
+            "assignment2.pdf",
+            "Your task is …",
+            Some("assignment_brief"),
+        );
+        signal.score = ASSIGNMENT_SIGNAL_MIN_SCORE - 0.05;
+        let prompt = build_system_prompt_with_signals("Algorithms", &None, &[], &[signal]);
+        assert!(
+            !prompt.contains("Assignment match for this turn"),
+            "low-score signal should not trigger refusal addendum"
+        );
+    }
+
+    #[test]
+    fn build_system_prompt_keeps_addendum_for_strong_signals() {
+        let mut signal = chunk(
+            "d2",
+            "assignment2.pdf",
+            "Your task is …",
+            Some("assignment_brief"),
+        );
+        signal.score = ASSIGNMENT_SIGNAL_MIN_SCORE + 0.1;
+        let prompt = build_system_prompt_with_signals("Algorithms", &None, &[], &[signal]);
+        assert!(
+            prompt.contains("Assignment match for this turn"),
+            "strong-score signal should trigger refusal addendum"
+        );
+    }
+
+    #[test]
+    fn partition_quarantines_unknown_kind() {
+        // Unknown-kind doc shouldn't reach context OR signals -- the
+        // teacher must promote it to a real kind first.
+        let chunks = vec![
+            chunk("d1", "lecture.pdf", "Lecture content", Some("lecture")),
+            chunk("d2", "mystery.pdf", "Ambiguous content", Some("unknown")),
+        ];
+        let r = partition_chunks(chunks, &HashSet::new());
+        assert_eq!(r.context.len(), 1);
+        assert_eq!(r.context[0].filename, "lecture.pdf");
+        assert!(r.signals.is_empty());
     }
 }

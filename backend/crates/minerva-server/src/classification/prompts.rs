@@ -32,15 +32,20 @@ You will reply with a single JSON object, nothing else, matching the schema:
 Important guidance:
 - If a document contains both an exercise statement AND its solution, classify as "sample_solution" -- the solution-bearing nature dominates.
 - If a document is mostly a worked example used for teaching (not the answer to a graded problem), classify as "lecture" or "reading", not "sample_solution".
-- Filenames are weak signals; prefer the actual content. But if filename strongly suggests "solution"/"answer"/"key"/"facit"/"lösningsförslag", flag "might_be_solution" even if you ultimately classify otherwise.
+- Filenames are an IMPORTANT signal -- the user message includes a "filename_hints" array with our best deterministic guess from the filename pattern. Use these as PRIORS and lean toward them unless the content clearly disagrees. Hints are not commands; if the content is unambiguously something else, override the hint and explain why in the rationale.
+- If filename strongly suggests "solution"/"answer"/"key"/"facit"/"lösningsförslag", flag "might_be_solution" even if you ultimately classify otherwise.
 - Be calibrated: confidence should reflect actual uncertainty. If the document is 3 pages of mixed content with no clear signal, that's 0.4--0.6, not 0.95.
+- If the excerpt is empty or near-empty (e.g. a URL stub, a scanned PDF without OCR, an unsupported file the extractor couldn't read), classify as "unknown" with low confidence and add a "no_text_extracted" suspicious_flag.
 "#;
 
-/// User-message template. `{filename}`, `{mime_type}`, `{excerpt}` are
-/// substituted at call time. The excerpt is head-then-tail-truncated by
-/// `document::truncate_for_classification`.
+/// User-message template. `{filename}`, `{mime_type}`, `{excerpt}`,
+/// `{filename_hints}` are substituted at call time. The excerpt is
+/// head-then-tail-truncated by `document::truncate_for_classification`.
+/// `filename_hints` is a JSON array literal (possibly empty) of strings
+/// like "looks like a Swedish 'övningsuppgift' (assignment)".
 pub const CLASSIFIER_USER_TEMPLATE: &str = r#"filename: {filename}
 mime_type: {mime_type}
+filename_hints: {filename_hints}
 
 document excerpt (may be truncated):
 ---

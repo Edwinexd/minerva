@@ -300,7 +300,9 @@ function ClassificationBackfillCard() {
               <Button
                 onClick={() => backfillMutation.mutate()}
                 disabled={
-                  backfillMutation.isPending || stats.unclassified === 0
+                  backfillMutation.isPending ||
+                  stats.unclassified === 0 ||
+                  (stats.backfill != null && !stats.backfill.finished)
                 }
                 title={t("system.classifications.backfillTitle")}
               >
@@ -318,6 +320,63 @@ function ClassificationBackfillCard() {
                 </span>
               )}
             </div>
+            {/*
+              Live progress of the running backfill. The backend
+              tracker stays in `Some(_)` for one more poll cycle after
+              the task drains, so the UI gets to flash the final
+              "all done" state before the panel collapses back to the
+              idle layout. Width caps at 100% defensively in case the
+              candidate count grew between SELECT and processing.
+            */}
+            {stats.backfill && (
+              <div className="space-y-1 rounded border p-3">
+                <div className="flex items-baseline justify-between text-sm">
+                  <span className="font-medium">
+                    {stats.backfill.finished
+                      ? t("system.classifications.backfillFinished", {
+                          ok: stats.backfill.ok,
+                          errors: stats.backfill.errors,
+                          skipped: stats.backfill.skipped,
+                        })
+                      : t("system.classifications.backfillRunning", {
+                          done: stats.backfill.ok + stats.backfill.errors + stats.backfill.skipped,
+                          total: stats.backfill.total,
+                        })}
+                  </span>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {Math.round(
+                      (Math.min(
+                        stats.backfill.ok + stats.backfill.errors + stats.backfill.skipped,
+                        stats.backfill.total,
+                      ) /
+                        Math.max(stats.backfill.total, 1)) *
+                        100,
+                    )}
+                    %
+                  </span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={`h-full transition-all ${stats.backfill.errors > 0 ? "bg-amber-500" : "bg-emerald-600"}`}
+                    style={{
+                      width: `${Math.min(
+                        ((stats.backfill.ok + stats.backfill.errors + stats.backfill.skipped) /
+                          Math.max(stats.backfill.total, 1)) *
+                          100,
+                        100,
+                      ).toFixed(1)}%`,
+                    }}
+                  />
+                </div>
+                {stats.backfill.errors > 0 && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {t("system.classifications.backfillErrors", {
+                      count: stats.backfill.errors,
+                    })}
+                  </p>
+                )}
+              </div>
+            )}
             {backfillMutation.isError && (
               <p className="text-sm text-destructive">
                 {formatError(backfillMutation.error)}

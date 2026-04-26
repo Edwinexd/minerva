@@ -59,23 +59,23 @@ const MIN_EDGE_CONFIDENCE: f32 = 0.5;
 /// this are NOT shown to the LLM at all -- the embeddings are doing
 /// the heavy lifting of "are these two docs about the same thing?".
 ///
-/// Calibration after the 47-doc / 266-candidate / 0-edge episode:
+/// Calibration:
 ///   * pairs from different units mostly score 0.2-0.5
 ///   * pairs in the same unit (lecture + section summary, assignment
-///     + tutorial version, etc.) score 0.55-0.85
+///     + tutorial version, etc.) score 0.65-0.85
 ///   * duplicate uploads score 0.98+
 ///
-/// 0.65 puts the floor inside the same-unit band: we let through only
-/// pairs the embedding model is confident enough about that the LLM's
-/// job is "what KIND of relation" rather than "is there one at all".
-/// Lower floors flood the prompt with noise; the model spends its
-/// reasoning budget enumerating uncertain pairs and ends up emitting
-/// nothing.
-const MIN_EMBEDDING_SIMILARITY: f32 = 0.65;
+/// 0.70 puts the floor squarely inside the same-unit band so the
+/// LLM only spends its budget on pairs the embedding model is
+/// already confident overlap. The previous 0.65 leaked too many
+/// borderline pairs through (146 candidates on a 50-doc course),
+/// which forced an arbitrary post-hoc cap. Tightening the floor
+/// keeps the candidate set proportional to course content.
+const MIN_EMBEDDING_SIMILARITY: f32 = 0.70;
 
 /// `solution_of` requires a tighter floor than `part_of_unit` because
 /// solutions are essentially restatements of their assignments.
-const MIN_SOLUTION_OF_SIMILARITY: f32 = 0.72;
+const MIN_SOLUTION_OF_SIMILARITY: f32 = 0.75;
 
 /// Cosine similarity above which we treat two docs as effectively
 /// identical (duplicate uploads). Such pairs are dropped: they're
@@ -84,19 +84,10 @@ const DUPLICATE_SIMILARITY: f32 = 0.985;
 
 /// Per-doc top-K when generating embedding-similarity candidates.
 /// Combined with the symmetric edge dedup this caps total candidates
-/// at roughly N * TOP_K / 2. Lowered from 8 to 4 -- with the new
-/// 0.65 similarity floor most docs don't even have 4 neighbours that
-/// qualify, so the cap rarely binds; for ones that do it picks the
-/// strongest matches.
+/// at roughly N * TOP_K / 2. With the 0.70 similarity floor most
+/// docs don't even have 4 neighbours that qualify, so the cap
+/// rarely binds; for ones that do it picks the strongest matches.
 const EMBEDDING_TOP_K: usize = 4;
-
-/// Final hard cap on candidates sent to the LLM in one call. The
-/// embedding floor + top-K keep us well under this on typical DSV
-/// courses (~20-50 pairs for a 50-doc course); the cap is a
-/// belt-and-braces guard against a pathologically dense course
-/// blowing the LLM's context window. When we hit the cap we keep
-/// the highest-similarity pairs.
-const MAX_CANDIDATES_PER_CALL: usize = 80;
 
 /// Hard cap on docs sent to the linker in one call. Keeps the prompt
 /// token cost bounded; courses larger than this would need pagination
@@ -370,34 +361,6 @@ pub async fn link_course(
         }
         true
     });
-
-    // Hard cap on candidates the LLM has to evaluate. Each pair is
-    // its own Cerebras call (parallelised below), so a runaway
-    // course-with-many-similar-docs translates directly to N HTTP
-    // requests; the cap keeps that bounded. Pairs ranked by
-    // similarity so the strongest survive when we hit the cap.
-    if candidates.len() > MAX_CANDIDATES_PER_CALL {
-        let before = candidates.len();
-        let mut by_sim: Vec<(Uuid, Uuid, f32)> = candidates
-            .iter()
-            .map(|pair| {
-                let s = similarity_by_pair.get(pair).copied().unwrap_or(0.0);
-                (pair.0, pair.1, s)
-            })
-            .collect();
-        by_sim.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-        candidates = by_sim
-            .into_iter()
-            .take(MAX_CANDIDATES_PER_CALL)
-            .map(|(a, b, _)| (a, b))
-            .collect();
-        tracing::info!(
-            "linker: course {} had {} candidates above embedding floor, capped to top {} by similarity",
-            course_id,
-            before,
-            MAX_CANDIDATES_PER_CALL,
-        );
-    }
 
     if candidates.is_empty() {
         return Ok(LinkerOutput {

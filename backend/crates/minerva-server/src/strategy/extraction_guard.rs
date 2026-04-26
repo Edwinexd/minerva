@@ -37,7 +37,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::classification::extraction_guard::{
-    self, IntentVerdict, OutputVerdict, INTENT_HISTORY_TURNS,
+    self, EngagementVerdict, IntentVerdict, OutputVerdict, INTENT_HISTORY_TURNS,
 };
 use crate::error::AppError;
 use crate::feature_flags::extraction_guard_enabled;
@@ -46,6 +46,11 @@ use crate::strategy::common::RagChunk;
 /// Constant flag string written into `conversation_flags.flag` when
 /// the guard fires. Stable across versions; the dashboard reads it.
 pub const EXTRACTION_FLAG_NAME: &str = "extraction_attempt";
+
+/// Companion flag emitted when engagement detection lifts the
+/// constraint. Lets the dashboard show the lifecycle of an
+/// extraction attempt: tripped at turn N, lifted at turn N+k.
+pub const LIFT_FLAG_NAME: &str = "extraction_constraint_lifted";
 
 /// How many recent turns to keep in `kg_state.recent_turns` for the
 /// multi-turn proximity check. 5 matches the spec
@@ -193,17 +198,74 @@ pub async fn evaluate_for_turn(
     }
     let assignments_near_vec: Vec<Uuid> = assignments_near.iter().copied().collect();
 
-    // Read kg_state, slide the window, decide constraint_active.
+    // Read kg_state, slide the window. Engagement check runs
+    // BEFORE the constraint-active decision: if the prior turn
+    // left the constraint on, we look at this turn's student
+    // message to see whether the student engaged with whatever
+    // Socratic prompt they were given. If so, the constraint
+    // lifts for *this* turn and the conversation resumes normal
+    // generation (the output check still runs every turn that's
+    // active, so a relapse re-trips on its own).
     let mut state = load_kg_state(db, conversation_id).await;
     push_turn(&mut state, turn_index, &assignments_near_vec);
     let proximity_active = proximity_threshold_tripped(&state);
-    let prev_active = state.constraint_active;
+    let prev_active_before_lift = state.constraint_active;
 
+    let mut engagement_verdict: Option<EngagementVerdict> = None;
+    if state.constraint_active {
+        let prior_assistant = history
+            .iter()
+            .rev()
+            .find(|m| m.role == "assistant")
+            .map(|m| m.content.as_str())
+            .unwrap_or("");
+        let v = extraction_guard::classify_engagement(http, api_key, prior_assistant, user_content)
+            .await;
+        if v.engaged {
+            state.constraint_active = false;
+            state.constraint_lifted_at_turn = Some(turn_index);
+            // Log the lift so the dashboard can show the
+            // lifecycle (tripped at turn X, lifted at turn Y).
+            // Best-effort -- log and move on if it fails.
+            let metadata = serde_json::json!({
+                "engagement": {
+                    "rationale": v.rationale,
+                },
+                "lifted_assignment_doc_ids": state.constraint_assignment_doc_ids,
+            });
+            if let Err(e) = minerva_db::queries::conversation_flags::insert(
+                db,
+                conversation_id,
+                LIFT_FLAG_NAME,
+                Some(turn_index),
+                Some(v.rationale.as_str()),
+                Some(&metadata),
+            )
+            .await
+            {
+                tracing::warn!(
+                    "extraction_guard: failed to log lift flag for {}: {}",
+                    conversation_id,
+                    e
+                );
+            }
+        }
+        engagement_verdict = Some(v);
+    }
+
+    // After the optional lift, prev_active reflects whether the
+    // constraint is *still* on entering this turn's decision.
+    let prev_active = state.constraint_active;
     let constraint_active = intent.is_extraction || proximity_active || prev_active;
 
-    // When this turn newly trips the constraint, record which
+    // When this turn newly trips the constraint (was off coming
+    // in, but intent or proximity flips it), record which
     // assignments are responsible so the dashboard can show them.
-    if constraint_active && !prev_active {
+    // `prev_active_before_lift` is the *before-lift* state: a
+    // student who engaged AND immediately pasted another assignment
+    // counts as a fresh trip, with the lift flag recording the
+    // brief gap between the two attempts.
+    if constraint_active && !prev_active && !prev_active_before_lift {
         state.constraint_active = true;
         // Pick the assignments that justify the activation:
         // prefer the ones in the proximity window if that's why
@@ -214,12 +276,20 @@ pub async fn evaluate_for_turn(
             assignments_near_vec.clone()
         };
         state.constraint_lifted_at_turn = None;
+    } else if constraint_active && !prev_active {
+        // Was active before lift, lifted, then re-tripped within
+        // the same turn (intent classifier said extraction). Keep
+        // the prior assignment scope but turn the flag back on.
+        state.constraint_active = true;
     }
-    // If constraint was active but neither intent nor proximity
-    // says so this turn, we still keep it active until engagement
-    // lifts it (engagement detection lands in the next commit).
+    // If constraint was active and neither intent nor proximity
+    // re-fired but engagement didn't lift either, we keep it on.
 
     save_kg_state(db, conversation_id, &state).await;
+    // Suppress unused lint when the verdict is held purely for
+    // diagnostic side effects above; the value isn't returned to
+    // the caller.
+    let _ = engagement_verdict;
 
     Some(GuardDecision {
         turn_index,

@@ -183,6 +183,31 @@ export interface ConversationDetail {
   messages: Message[]
   notes: TeacherNote[]
   feedback: MessageFeedback[]
+  /**
+   * Extraction-guard flag log. Empty for non-teacher viewers (the
+   * backend gates this for privacy -- a student viewing their own
+   * conversation doesn't need to see "you tripped the guard at
+   * turn 3" metadata; the rewrite already surfaced the visible
+   * policy note to them). Ordered oldest-first, aligned to user
+   * messages via `turn_index`.
+   */
+  flags: ConversationFlag[]
+}
+
+export interface ConversationFlag {
+  id: string
+  flag: string
+  /**
+   * 1-based index into the conversation's user-message stream.
+   * Lets the per-turn UI on the conversation detail page align
+   * the flag badge to the assistant message that followed the
+   * flagged user input. Nullable because the flag schema is
+   * generic; future flag kinds may not be turn-scoped.
+   */
+  turn_index: number | null
+  rationale: string | null
+  metadata: Record<string, unknown> | null
+  created_at: string
 }
 
 export const FEEDBACK_CATEGORIES = [

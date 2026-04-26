@@ -88,6 +88,21 @@ export const courseFeedbackStatsQuery = (courseId: string) =>
     queryFn: () => api.get<CourseFeedbackStats>(`/courses/${courseId}/conversations/feedback-stats`),
   })
 
+/**
+ * Per-conversation flag-kind map for the teacher conversation list.
+ * Returns `{ conversationId: ["extraction_attempt", ...] }` so each
+ * row can render badges without fetching the full flag log.
+ * Teacher-only; backend rejects with 403 otherwise.
+ */
+export const conversationFlagKindsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "conversations", "flag-kinds"],
+    queryFn: () =>
+      api.get<Record<string, string[]>>(
+        `/courses/${courseId}/conversations/flag-kinds`,
+      ),
+  })
+
 export const conversationDetailQuery = (courseId: string, conversationId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", conversationId],

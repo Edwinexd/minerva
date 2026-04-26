@@ -1,7 +1,7 @@
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { allConversationsQuery, conversationDetailQuery, courseFeedbackStatsQuery, popularTopicsQuery } from "@/lib/queries"
+import { allConversationsQuery, conversationDetailQuery, conversationFlagKindsQuery, courseFeedbackStatsQuery, popularTopicsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,7 +26,7 @@ import {
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import React, { useMemo, useState } from "react"
-import type { ConversationWithUser, MessageFeedback, TeacherNote } from "@/lib/types"
+import type { ConversationFlag, ConversationWithUser, MessageFeedback, TeacherNote } from "@/lib/types"
 import { FEEDBACK_CATEGORIES } from "@/lib/types"
 
 function useCategoryLabel() {
@@ -44,6 +44,10 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   const { data: conversations, isLoading } = useQuery(allConversationsQuery(courseId))
   const { data: topics, isLoading: topicsLoading } = useQuery(popularTopicsQuery(courseId))
   const { data: feedbackStats } = useQuery(courseFeedbackStatsQuery(courseId))
+  // Flag-kind map keyed by conversation id. Drives the per-row
+  // "extraction guard tripped" badge in the conversation list. Same
+  // shape as the backend `flag_kinds_by_conversation` returns.
+  const { data: flagKinds } = useQuery(conversationFlagKindsQuery(courseId))
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<"all" | "flagged">("all")
@@ -278,6 +282,24 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
                                 {t("conversations.helpfulBadge", { count: conv.feedback_up })}
                               </Badge>
                             )}
+                            {/* Extraction-guard badges: one per
+                                distinct flag kind attached to the
+                                conversation. Filters out the
+                                companion lift flag so the list-view
+                                only highlights *active* concerns;
+                                the per-turn detail still shows the
+                                full lifecycle. */}
+                            {(flagKinds?.[conv.id] || [])
+                              .filter((k) => k !== "extraction_constraint_lifted")
+                              .map((kind) => (
+                                <Badge
+                                  key={kind}
+                                  variant="outline"
+                                  className="shrink-0 border-amber-300 text-amber-700 dark:border-amber-600 dark:text-amber-400 text-xs"
+                                >
+                                  {t(`conversations.flagKind.${kind}`, kind)}
+                                </Badge>
+                              ))}
                           </button>
                           <div className="flex items-center gap-2 shrink-0 ml-2">
                             <span className="text-xs text-muted-foreground">
@@ -338,6 +360,39 @@ function FeedbackBadges({ feedback }: { feedback: MessageFeedback[] }) {
   )
 }
 
+/**
+ * Per-turn extraction-guard flag display. Renders a coloured
+ * badge with a teacher-readable label and the classifier's
+ * rationale verbatim. Different colours per flag kind:
+ * extraction trips are amber (something to look at), lifts are
+ * green (it auto-resolved). Title-attribute carries the raw
+ * metadata JSON for power users who want the full payload.
+ */
+function ConversationFlagDisplay({ flag }: { flag: ConversationFlag }) {
+  const { t } = useTranslation("teacher")
+  const isLift = flag.flag === "extraction_constraint_lifted"
+  const colour = isLift
+    ? "border-green-300 text-green-700 dark:border-green-700 dark:text-green-300"
+    : "border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+  const label = t(`conversations.flagKind.${flag.flag}`, flag.flag)
+  return (
+    <div className="mt-1.5 flex flex-wrap items-start gap-2">
+      <Badge
+        variant="outline"
+        className={`text-xs ${colour}`}
+        title={flag.metadata ? JSON.stringify(flag.metadata, null, 2) : undefined}
+      >
+        {label}
+      </Badge>
+      {flag.rationale && (
+        <span className="text-xs text-muted-foreground italic">
+          {flag.rationale}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function ConversationExpanded({ courseId, conversationId }: { courseId: string; conversationId: string }) {
   const { data, isLoading } = useQuery(conversationDetailQuery(courseId, conversationId))
   const { t } = useTranslation("teacher")
@@ -391,6 +446,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
   const messages = data?.messages || []
   const notes = data?.notes || []
   const feedback = data?.feedback || []
+  const flags = data?.flags || []
 
   const notesByMessage = new Map<string, TeacherNote[]>()
   const conversationNotes: TeacherNote[] = []
@@ -409,6 +465,26 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
     const existing = feedbackByMessage.get(f.message_id) || []
     existing.push(f)
     feedbackByMessage.set(f.message_id, existing)
+  }
+
+  // Walk the message list once to assign each message its 1-based
+  // turn index (= count of user messages up to and including this
+  // one). Backend flags carry the same index, so this gives us a
+  // direct join between flags and the assistant reply that closed
+  // the turn -- which is the message the badge attaches to in the
+  // UI.
+  const turnByMessageId = new Map<string, number>()
+  let turnCounter = 0
+  for (const m of messages) {
+    if (m.role === "user") turnCounter++
+    turnByMessageId.set(m.id, turnCounter)
+  }
+  const flagsByTurn = new Map<number, ConversationFlag[]>()
+  for (const f of flags) {
+    if (f.turn_index === null || f.turn_index === undefined) continue
+    const existing = flagsByTurn.get(f.turn_index) || []
+    existing.push(f)
+    flagsByTurn.set(f.turn_index, existing)
   }
 
   const handleAddNote = (messageId?: string) => {
@@ -450,6 +526,16 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
       {messages.map((msg) => {
         const msgFeedback = feedbackByMessage.get(msg.id) || []
         const hasDownFeedback = msgFeedback.some((f) => f.rating === "down")
+        // Flags align to the user-message-indexed turn. We attach
+        // them to the assistant reply that closed the turn (the
+        // visible "this answer was modified" UX) -- showing them
+        // on the user message would be wrong UX (the user message
+        // wasn't itself altered).
+        const turnIdx = turnByMessageId.get(msg.id)
+        const turnFlags =
+          msg.role === "assistant" && turnIdx !== undefined
+            ? flagsByTurn.get(turnIdx) || []
+            : []
         return (
           <React.Fragment key={msg.id}>
             <div
@@ -470,6 +556,9 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
               {msg.role === "assistant" && msgFeedback.length > 0 && (
                 <FeedbackBadges feedback={msgFeedback} />
               )}
+              {turnFlags.map((f) => (
+                <ConversationFlagDisplay key={f.id} flag={f} />
+              ))}
               <div className="flex items-center gap-3 mt-1.5">
                 <button
                   className="text-xs text-muted-foreground hover:text-foreground underline"

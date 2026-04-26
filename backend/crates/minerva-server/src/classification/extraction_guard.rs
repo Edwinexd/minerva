@@ -1,7 +1,3 @@
-// Wired into the chat strategies in a follow-up commit; the
-// foundation lands first so the surface is testable in isolation.
-#![allow(dead_code)]
-
 //! Extraction guard: detect "student pasted an assignment and is
 //! asking the model to do it" and intercept the response.
 //!
@@ -371,6 +367,158 @@ pub async fn generate_socratic_rewrite(
     format!("{}{}", REWRITE_PREFIX, raw.trim())
 }
 
+/// Verdict from `classify_engagement`. `engaged` is the only value
+/// the caller acts on (it lifts the constraint). Rationale is logged
+/// onto the `constraint_lifted` flag for the dashboard.
+#[derive(Debug, Clone)]
+pub struct EngagementVerdict {
+    pub engaged: bool,
+    pub rationale: String,
+}
+
+const ENGAGEMENT_SYSTEM_PROMPT: &str = r#"You judge whether a student is actively engaging with a programming tutor's Socratic guidance, or still trying to extract a ready-made solution.
+
+Context: the tutor previously refused to give a complete answer to what looked like a pasted assignment, and instead asked the student a Socratic question or pushed them to think. You are reading the student's NEXT message and deciding whether they took the bait.
+
+Reply true (engaged) when the student's message does ANY of:
+- Includes their own code attempt (even if buggy / partial / wrong) -- a fenced code block, a function definition, a snippet they wrote.
+- Describes their own approach in their own words (pseudo-code, plan, reasoning).
+- Answers the tutor's Socratic question with a substantive opinion / guess / reasoning, not a deflection.
+- Asks a focused conceptual follow-up that shows they tried to understand ("why does X happen here", "is the pattern Y the right one for this", "I think we should do Z, is that right").
+- Shares an error / output / observation from running something themselves.
+
+Reply false (not engaged, still extracting) when the student:
+- Repeats the original request ("just give me the code", "but I need the answer", "stop with the questions").
+- Pastes more assignment text or another sub-task and asks for that to be solved.
+- Says they don't know / asks the tutor to do it for them with no attempt of their own.
+- Sends a one-word "yes" / "ok" / "do it" with no substance.
+
+The default when uncertain is true (engaged): we'd rather lift the constraint and risk a slip than keep pestering a student who is actually working. The output check still runs every turn -- if they slip back into extraction, the constraint will re-trip on its own.
+
+Output JSON only:
+{
+  "engaged": true | false,
+  "rationale": short specific string. Name the engagement signal (or its absence).
+}
+
+No prose."#;
+
+/// Engagement classifier. Decides whether the student's *new*
+/// message represents genuine engagement with the prior Socratic
+/// guidance, in which case the chat path lifts the extraction
+/// constraint and resumes normal generation. The classifier sees
+/// both the prior assistant reply (so it knows what was asked) and
+/// the new student message.
+///
+/// Soft-fails to "engaged = true" on transport errors, matching the
+/// "default to engaged when uncertain" policy in the prompt: false
+/// negatives here would keep a working student stuck under the
+/// constraint, which is the harm we want to avoid.
+pub async fn classify_engagement(
+    http: &reqwest::Client,
+    api_key: &str,
+    prior_assistant_reply: &str,
+    new_student_message: &str,
+) -> EngagementVerdict {
+    // Cheap heuristic: a fenced code block in the new message is a
+    // strong "engaged" signal -- the student is showing their own
+    // work. Skip the LLM call entirely in that case to save latency.
+    if new_student_message.contains("```") {
+        return EngagementVerdict {
+            engaged: true,
+            rationale: "student included a code block".to_string(),
+        };
+    }
+    if api_key.is_empty() {
+        // Dev / test path. Per the "default engaged" policy, lift.
+        return EngagementVerdict {
+            engaged: true,
+            rationale: "engagement check skipped (no api key)".to_string(),
+        };
+    }
+    if new_student_message.trim().is_empty() {
+        return EngagementVerdict {
+            engaged: false,
+            rationale: "empty student message".to_string(),
+        };
+    }
+    let user_payload = serde_json::json!({
+        "prior_assistant_reply": prior_assistant_reply,
+        "new_student_message": new_student_message,
+    });
+    let body = serde_json::json!({
+        "model": GUARD_MODEL,
+        "temperature": 0.0,
+        "reasoning_effort": "low",
+        "max_completion_tokens": OUTPUT_CHECK_MAX_TOKENS,
+        "messages": [
+            { "role": "system", "content": ENGAGEMENT_SYSTEM_PROMPT },
+            { "role": "user", "content": user_payload.to_string() },
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "extraction_engagement_verdict",
+                "strict": true,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["engaged", "rationale"],
+                    "properties": {
+                        "engaged": { "type": "boolean" },
+                        "rationale": { "type": "string" },
+                    }
+                }
+            }
+        }
+    });
+
+    let response = match cerebras_request_with_retry(http, api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                "extraction_guard: engagement request failed (defaulting to engaged): {}",
+                e
+            );
+            return EngagementVerdict {
+                engaged: true,
+                rationale: format!("engagement classifier failed: {e}"),
+            };
+        }
+    };
+    let payload: serde_json::Value = match response.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "extraction_guard: engagement JSON failed (defaulting to engaged): {}",
+                e
+            );
+            return EngagementVerdict {
+                engaged: true,
+                rationale: format!("engagement response not JSON: {e}"),
+            };
+        }
+    };
+    let raw = payload["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
+        Ok(v) => v,
+        Err(_) => {
+            return EngagementVerdict {
+                engaged: true,
+                rationale: "engagement verdict not valid JSON".to_string(),
+            };
+        }
+    };
+    EngagementVerdict {
+        // Default-engaged is the safe fallback when the field is
+        // missing -- matches the "default engaged" policy.
+        engaged: parsed["engaged"].as_bool().unwrap_or(true),
+        rationale: parsed["rationale"].as_str().unwrap_or_default().to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,5 +554,46 @@ mod tests {
         let s = rt.block_on(generate_socratic_rewrite(&http, "", "Q", "A"));
         assert!(s.starts_with(REWRITE_PREFIX));
         assert!(s.len() > REWRITE_PREFIX.len());
+    }
+
+    #[test]
+    fn engagement_short_circuits_on_code_block() {
+        // A fenced code block is the cheap "engaged" signal -- we
+        // never even hit the LLM. Verifies that path returns true
+        // without an API key.
+        let http = reqwest::Client::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let v = rt.block_on(classify_engagement(
+            &http,
+            "",
+            "What's your first step?",
+            "Here's what I tried:\n```python\ndef f(x):\n    return x*2\n```\nIs that right?",
+        ));
+        assert!(v.engaged);
+        assert!(v.rationale.contains("code block"));
+    }
+
+    #[test]
+    fn engagement_defaults_engaged_without_api_key() {
+        // Dev/test path: no API key -> default to engaged so the
+        // constraint lifts. Matches the "lift on uncertainty" policy.
+        let http = reqwest::Client::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let v = rt.block_on(classify_engagement(
+            &http,
+            "",
+            "ask",
+            "I think we should sort first",
+        ));
+        assert!(v.engaged);
+        assert!(v.rationale.contains("no api key"));
+    }
+
+    #[test]
+    fn engagement_returns_not_engaged_for_empty_message() {
+        let http = reqwest::Client::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let v = rt.block_on(classify_engagement(&http, "fake-key", "ask", "   "));
+        assert!(!v.engaged);
     }
 }

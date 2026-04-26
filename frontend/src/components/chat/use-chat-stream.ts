@@ -107,6 +107,19 @@ export function useChatStream(
                 } else if (data.type === "error") {
                   setError(data.error)
                   success = false
+                } else if (data.type === "rewrite") {
+                  // Extraction-guard intercept: the backend
+                  // streamed an original answer, then decided
+                  // post-generation to swap it for a Socratic
+                  // rewrite. Replace the in-flight token buffer
+                  // so the student sees the rewrite immediately,
+                  // rather than continuing to see the original
+                  // until the conversation query refetches the
+                  // persisted (rewritten) message.
+                  if (typeof data.content === "string") {
+                    setStreamedTokens(data.content)
+                  }
+                  if (onEvent) onEvent(data)
                 } else if (onEvent) {
                   onEvent(data)
                 }

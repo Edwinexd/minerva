@@ -161,7 +161,11 @@
     "teacherNote": "Teacher note",
     "otherCategory": "Other",
     "correctionPrefixWithCategories": "Correction (re: {{categories}}): ",
-    "correctionPrefix": "Correction: "
+    "correctionPrefix": "Correction: ",
+    "flagKind": {
+      "extraction_attempt": "Extraction guard tripped",
+      "extraction_constraint_lifted": "Engagement detected -- constraint lifted"
+    }
   },
   "documents": {
     "title": "Documents",

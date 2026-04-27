@@ -7,10 +7,19 @@ edition = "2021"
 name = "minerva"
 path = "src/main.rs"
 
+[features]
+default = []
+# Compiles in the concept knowledge graph integration via `minerva-eureka`,
+# which path-deps the vendored `eureka-2` release artifact (see
+# `scripts/fetch-eureka.sh` and `.eureka-version`). Per-course gating is
+# additionally controlled at runtime by `courses.concept_graph_enabled`.
+eureka = ["dep:minerva-eureka"]
+
 [dependencies]
 minerva-core = { path = "../minerva-core" }
 minerva-db = { path = "../minerva-db" }
 minerva-ingest = { path = "../minerva-ingest" }
+minerva-eureka = { path = "../minerva-eureka", optional = true }
 
 axum.workspace = true
 axum-extra.workspace = true

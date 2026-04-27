@@ -23,13 +23,13 @@ COPY backend/vendor/eureka-2 vendor/eureka-2
 RUN mkdir -p crates/minerva-core/src crates/minerva-db/src crates/minerva-ingest/src crates/minerva-server/src crates/minerva-eureka/src && \
     echo "fn main() {}" > crates/minerva-server/src/main.rs && \
     touch crates/minerva-core/src/lib.rs crates/minerva-db/src/lib.rs crates/minerva-ingest/src/lib.rs crates/minerva-eureka/src/lib.rs && \
-    cargo build --release -p minerva-server --features eureka && \
+    cargo build --release -p minerva-server && \
     rm -rf crates/minerva-core/src crates/minerva-db/src crates/minerva-ingest/src crates/minerva-server/src crates/minerva-eureka/src
 
 # Phase 2: build actual code (deps cached)
 COPY backend/ .
 ENV SQLX_OFFLINE=true
-RUN touch crates/*/src/*.rs && cargo build --release -p minerva-server --features eureka
+RUN touch crates/*/src/*.rs && cargo build --release -p minerva-server
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y poppler-utils ca-certificates libssl3 && apt-get clean && rm -r /var/lib/apt/lists/*

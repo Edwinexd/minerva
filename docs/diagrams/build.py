@@ -303,29 +303,20 @@ def chat_pipeline() -> graphviz.Digraph:
         _box(c, "lift", "kg_state refusal lift")
         _box(c, "strat", "strategy", shape="diamond", bold=False)
 
-    with g.subgraph(name="cluster_simple") as c:
-        c.attr(label="simple", **CLUSTER_BASE)
-        _box(c, "r1", "embed query, top-k", icon="qdrant")
-
-    with g.subgraph(name="cluster_parallel") as c:
-        c.attr(label="parallel", **CLUSTER_BASE)
-        _box(c, "p1", "stream + retrieve\nconcurrently")
-
-    # FLARE shown as a multi-turn loop: stream a sentence, score logprobs,
-    # if low -> retrieve again -> resume; iteration is capped.
-    with g.subgraph(name="cluster_flare") as c:
-        c.attr(label="FLARE (multi-turn loop)", **CLUSTER_BASE)
-        _box(c, "f_gen", "generate next sentence")
-        _box(c, "f_score", "low-logprob token?",
-             shape="diamond", bold=False)
-        _box(c, "f_retr", "re-retrieve\n(use sentence as query)", icon="qdrant")
-        _box(c, "f_done", "response complete\nor cap reached", shape="stadium")
-        c.edge("f_gen", "f_score")
-        c.edge("f_score", "f_retr", label="yes")
-        c.edge("f_retr", "f_gen", label="resume", color="#3b6ea5")
-        c.edge("f_score", "f_done", label="no /\nfinished")
-
-    _box(g, "kg", "KG expansion", subtitle="part_of_unit / applied_in")
+    # All three strategies share retrieval -> KG -> prompt -> LLM. They differ
+    # in *when* retrieval runs relative to generation:
+    #   simple   : retrieve once, then generate.
+    #   parallel : start the LLM stream and retrieve concurrently; splice in
+    #              context as soon as it lands.
+    #   FLARE    : multi-turn. The LLM streams a sentence; if a token is
+    #              low-confidence, the partial sentence becomes the next
+    #              retrieval query and generation resumes (loop is capped).
+    with g.subgraph(name="cluster_retrieve") as c:
+        c.attr(label="Retrieval", **CLUSTER_BASE)
+        _box(c, "retrieve", "embed query, top-k", icon="qdrant")
+        _box(c, "kg", "KG expansion",
+             subtitle="part_of_unit / applied_in")
+        c.edge("retrieve", "kg")
 
     with g.subgraph(name="cluster_gen") as c:
         c.attr(label="Generation", **CLUSTER_BASE)
@@ -333,6 +324,10 @@ def chat_pipeline() -> graphviz.Digraph:
              subtitle="system + chunks + history")
         _box(c, "llm", "Cerebras LLM",
              subtitle="OpenAI-compatible SSE stream")
+        _box(c, "flare_check", "low-logprob token?",
+             shape="diamond", subtitle="FLARE only", bold=False)
+        c.edge("prompt", "llm")
+        c.edge("llm", "flare_check", label="per sentence")
 
     with g.subgraph(name="cluster_post") as c:
         c.attr(label="Post-generation guard", **CLUSTER_BASE)
@@ -353,17 +348,19 @@ def chat_pipeline() -> graphviz.Digraph:
     g.edge("intent", "lift", label="exfil intent", color=GUARD)
     g.edge("lift", "strat")
 
-    g.edge("strat", "r1", label="simple")
-    g.edge("strat", "p1", label="parallel")
-    g.edge("strat", "f_gen", label="FLARE")
-
-    g.edge("r1", "kg")
-    g.edge("p1", "kg")
-    g.edge("f_done", "kg")
+    # Each strategy enters retrieval; only "parallel" runs it concurrently
+    # with the LLM stream (annotated below).
+    g.edge("strat", "retrieve",
+           label="simple / FLARE-init /\nparallel (concurrent)")
 
     g.edge("kg", "prompt")
-    g.edge("prompt", "llm")
-    g.edge("llm", "out_class")
+
+    # FLARE feedback loop: if a streamed token is low-confidence, use the
+    # partial sentence as the next retrieval query and resume generation.
+    g.edge("flare_check", "retrieve",
+           label="FLARE: re-retrieve\n(partial sentence as query)",
+           color="#3b6ea5", style="dashed", constraint="false")
+    g.edge("flare_check", "out_class", label="continue / finished")
 
     g.edge("out_class", "out", label="clean")
     g.edge("out_class", "rewrite", label="over-extraction", color=GUARD)

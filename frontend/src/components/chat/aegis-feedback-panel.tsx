@@ -1,7 +1,7 @@
 /**
  * Right-rail Feedback panel for the Aegis prompt-coaching feature.
  *
- * Shows actionable SUGGESTIONS for the student's current draft -- not
+ * Shows actionable SUGGESTIONS for the student's current draft; not
  * scores, not a rubric. Per the project brief and Herodotou et al.
  * (2025), grading a student's prompt risks exactly the condescending
  * tone we are trying to avoid; we surface concrete improvements
@@ -9,18 +9,18 @@
  *
  * Three sections in vertical order:
  *
- *   1. **Suggestions for the current draft** -- 0..=3 short tagged
+ *   1. **Suggestions for the current draft**; 0..=3 short tagged
  *      sentences ("you could say what you've already tried"). Empty
  *      = a small "looks good" affirmation rather than a blank slot.
  *
- *   2. **Mode toggle** -- Beginner / Expert badge. Drives the
- *      analyzer's calibration (separate hook -- `useAegisMode`); the
+ *   2. **Mode toggle**; Beginner / Expert badge. Drives the
+ *      analyzer's calibration (separate hook; `useAegisMode`); the
  *      panel just renders the toggle UI.
  *
- *   3. **History** -- past prompts in this conversation that had
+ *   3. **History**; past prompts in this conversation that had
  *      suggestions, newest first. Collapsed to one-liner each.
  *
- * Pure view -- no fetching of its own. Receives `analyses` (history,
+ * Pure view; no fetching of its own. Receives `analyses` (history,
  * from conversation detail) and `latest` (the live verdict for the
  * draft the student is currently composing) from the parent chat
  * page; the parent owns the analyzer call.
@@ -241,7 +241,7 @@ function PlaceholderCard({ kind }: { kind: "pending" | "empty" }) {
 }
 
 /**
- * One suggestion. The kind tag is rendered as a small badge -- it
+ * One suggestion. The kind tag is rendered as a small badge; it
  * gives the student a sense of WHAT category of improvement this
  * is (clarity, rationale, etc.) before they read the body. The
  * card itself is tinted by severity:

@@ -4,7 +4,7 @@
 //! the relation. Without a cache, every relink (triggered by every
 //! ingest) re-asks the model about every pair, even when nothing
 //! has changed. This table records every decision the model has
-//! returned -- INCLUDING `none` -- keyed by the unordered pair
+//! returned; INCLUDING `none`; keyed by the unordered pair
 //! (`a_doc_id < b_doc_id`), with snapshot timestamps for both
 //! endpoints. The linker checks the cache before each call and
 //! only invokes the LLM when at least one endpoint has been
@@ -21,7 +21,7 @@ pub struct DecisionRow {
     pub decided_at: chrono::DateTime<chrono::Utc>,
     pub a_classified_at: Option<chrono::DateTime<chrono::Utc>>,
     pub b_classified_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// `None` means the model said "none" / no relation -- still
+    /// `None` means the model said "none" / no relation; still
     /// recorded so we don't re-ask. `Some(_)` mirrors the
     /// `document_relations.relation` enum.
     pub relation: Option<String>,
@@ -91,7 +91,7 @@ pub async fn upsert(
 }
 
 /// Number of cached decisions whose endpoints have moved past the
-/// snapshot timestamps -- i.e. how many pairs the linker would have
+/// snapshot timestamps; i.e. how many pairs the linker would have
 /// to re-evaluate on the next relink. Surfaced to the graph viewer
 /// so the teacher sees "linking pending" while ingest catches up.
 pub async fn stale_decisions_for_course(db: &PgPool, course_id: Uuid) -> Result<i64, sqlx::Error> {

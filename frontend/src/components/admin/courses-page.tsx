@@ -210,7 +210,7 @@ function CourseFeatureFlagsCell({
       api.get<CourseFeatureFlagsResponse>(
         `/admin/courses/${courseId}/feature-flags`,
       ),
-    // Only fetch when the dialog opens -- saves N admin-courses
+    // Only fetch when the dialog opens; saves N admin-courses
     // queries on initial page load. The cell summary uses the
     // course's `feature_flags` field from the courses list query
     // for its at-a-glance count.
@@ -357,7 +357,7 @@ function CourseFeatureFlagsCell({
 // a provider radio and a model select; on confirm we PUT to
 // `/courses/{id}` with the new (provider, model). Admins bypass the
 // `local_embedding_model_disabled` check on that route, so we can
-// target *any* catalog model -- including ones currently disabled in
+// target *any* catalog model; including ones currently disabled in
 // the picker (a typical workflow is "disable model X site-wide, then
 // walk every course off it").
 //
@@ -440,7 +440,7 @@ function CourseMigrateDialog({
   })
 
   // Local-provider option list = full catalog (admin can target
-  // disabled models too -- that's the whole point of force-migrate).
+  // disabled models too; that's the whole point of force-migrate).
   // Sort current selection first so it stays visible after a click.
   const localOptions = (catalog?.models ?? []).slice().sort((a, b) => {
     if (a.model === course.embedding_model) return -1

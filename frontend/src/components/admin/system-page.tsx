@@ -258,7 +258,7 @@ export function SystemPanel() {
 /// Admin-scoped table of every whitelisted local embedding model with
 /// its latest benchmark and a per-row "Run benchmark" button. Backend
 /// serializes runs (one model loaded at a time) to keep peak RAM
-/// bounded -- a second click while a run is in flight returns a
+/// bounded; a second click while a run is in flight returns a
 /// `admin.benchmark_busy` error which we surface as a toast-style
 /// alert. Polling the list query while `running` is true means the
 /// row's speed number flips in automatically when the run finishes,
@@ -295,7 +295,7 @@ function EmbeddingModelsCard() {
   // backend rejects this for disabled models with
   // `admin.embedding_default_disabled`, which `formatError` surfaces
   // as a localized toast/inline message. Existing courses aren't
-  // touched -- only future POST /courses pick up the new default.
+  // touched; only future POST /courses pick up the new default.
   const defaultMutation = useMutation({
     mutationFn: (model: string) =>
       api.put<{ model: string; is_default: boolean }>(
@@ -429,7 +429,7 @@ function EmbeddingModelsCard() {
                             table, the table itself acts as the group.
                             Disabled radios for non-enabled models so
                             there's a visible affordance that you have to
-                            enable it first -- the backend will 400
+                            enable it first; the backend will 400
                             otherwise but we'd rather not let the click
                             register at all.
                           */}

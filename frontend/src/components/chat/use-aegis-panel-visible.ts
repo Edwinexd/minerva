@@ -9,7 +9,7 @@
  * origin's localStorage).
  *
  * The course-level `aegisEnabled` flag still gates whether the panel
- * exists at all -- this hook only controls visibility WHEN the
+ * exists at all; this hook only controls visibility WHEN the
  * feature is on. A student who finds the panel distracting can
  * dismiss it; a small "Aegis" button in the chat brings it back
  * when wanted.
@@ -30,7 +30,7 @@ function readStored(): boolean {
     if (raw === "true") return true
     if (raw === "false") return false
   } catch {
-    // Storage unavailable (private mode, quota, etc) -- fall through.
+    // Storage unavailable (private mode, quota, etc); fall through.
   }
   return DEFAULT_VISIBLE
 }
@@ -40,7 +40,7 @@ function writeStored(visible: boolean): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, visible ? "true" : "false")
   } catch {
-    // ignore -- the hook still works in-memory for this tab.
+    // ignore; the hook still works in-memory for this tab.
   }
 }
 

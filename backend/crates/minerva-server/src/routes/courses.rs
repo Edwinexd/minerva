@@ -86,7 +86,7 @@ struct CourseResponse {
 /// Per-course feature-flag snapshot, resolved through the runtime
 /// flag path (course row > global > compiled-in default). Shared
 /// between the Shibboleth `/courses/{id}` route and the embed
-/// `/embed/course/{id}` route -- both surface the same shape so the
+/// `/embed/course/{id}` route; both surface the same shape so the
 /// frontend can gate UI uniformly regardless of how the user
 /// reached the chat. Add new flags here AND in `resolve_course_flags`.
 #[derive(Serialize, Default)]
@@ -131,7 +131,7 @@ impl CourseResponse {
 }
 
 /// Resolve every course-scoped feature flag for the response. Single
-/// place to extend when new flags land -- callers don't have to know
+/// place to extend when new flags land; callers don't have to know
 /// the flag list. Shared with the embed route so its course response
 /// stays in lockstep without each consumer duplicating the resolver.
 pub(crate) async fn resolve_course_flags(
@@ -180,7 +180,7 @@ async fn create_course(
     let id = Uuid::new_v4();
     // Resolve the admin-managed default embedding model. Falls through
     // to the courses-table column DEFAULT (`all-MiniLM-L6-v2`) if no
-    // row is flagged -- that's a "the migration was never applied"
+    // row is flagged; that's a "the migration was never applied"
     // state, not an error, so we don't fail course creation over it.
     let default_embedding_model =
         minerva_db::queries::embedding_models::current_default(&state.db).await?;
@@ -273,12 +273,12 @@ async fn update_course(
             // typos with a clear error; the enabled gate prevents
             // teachers from picking a model the admin has switched
             // off. Bypassed in two cases:
-            //   * `model == existing.embedding_model` -- no rotation
+            //   * `model == existing.embedding_model`; no rotation
             //     happens in the rotate path below, so any other
             //     unrelated PUT (rename / temperature change / …) on a
             //     course currently sitting on a now-disabled model
             //     still saves.
-            //   * caller is an admin -- admins use the same route to
+            //   * caller is an admin; admins use the same route to
             //     force-migrate any course onto any catalog model,
             //     including currently-disabled ones (a typical
             //     workflow is "disable model X site-wide, then walk
@@ -327,7 +327,7 @@ async fn update_course(
     // Detect a real embedding rotation. We compare against the
     // existing row so a no-op PUT (frontend echoing the current
     // values back) doesn't trigger a wasteful re-ingest of the whole
-    // course. Either provider or model changing counts -- a same-dim
+    // course. Either provider or model changing counts; a same-dim
     // model swap (e.g. MiniLM-L6 -> BGE-small, both 384) silently
     // degrades retrieval quality without a re-embed, so we still
     // rotate.
@@ -346,7 +346,7 @@ async fn update_course(
         // ingest writes to a fresh `course_{id}_v{n}` Qdrant
         // collection, and re-queue every document so the worker
         // re-chunks + re-embeds them. The previous-model collection
-        // is left untouched -- orphaned, not deleted -- so a
+        // is left untouched; orphaned, not deleted; so a
         // mistaken rotation can be rolled back manually by the ops
         // team. The rotation runs in a transaction (see
         // `rotate_embedding`) so the version bump and the document
@@ -369,7 +369,7 @@ async fn update_course(
     }
 
     // Apply the rest of the update. Provider/model are intentionally
-    // omitted -- if a rotation just ran they're already persisted; if
+    // omitted; if a rotation just ran they're already persisted; if
     // it didn't, COALESCE on `None` is a no-op anyway.
     let input = minerva_db::queries::courses::UpdateCourse {
         name: body.name,
@@ -535,7 +535,7 @@ struct RoleSuggestionResponse {
 
 /// Anyone who can see the member list (owner, admin, course teacher) can
 /// see pending suggestions, so the UI can show a badge. Approve/decline is
-/// stricter -- only owner or admin.
+/// stricter; only owner or admin.
 async fn list_role_suggestions(
     State(state): State<AppState>,
     Extension(user): Extension<User>,

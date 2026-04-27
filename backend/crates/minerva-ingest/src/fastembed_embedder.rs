@@ -37,7 +37,7 @@ const DEFAULT_CACHE_BUDGET_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// Fraction of the cgroup memory limit we let the cache consume by default.
 /// The rest of the pod (request handlers, qdrant client buffers, classifier
 /// state, baseline app heap, transient ONNX inference buffers) needs the
-/// remainder. 40% is conservative -- the worker doesn't only allocate models.
+/// remainder. 40% is conservative; the worker doesn't only allocate models.
 const DEFAULT_CACHE_BUDGET_FRACTION: f64 = 0.4;
 
 /// Fallback cost when RSS measurement isn't available (non-Linux dev hosts)
@@ -47,7 +47,7 @@ const DEFAULT_CACHE_BUDGET_FRACTION: f64 = 0.4;
 const ESTIMATED_MODEL_COST_BYTES: u64 = 800 * 1024 * 1024;
 
 /// What's currently sitting in the cache. Two backends:
-/// * **ONNX** (the default fastembed path) -- `TextEmbedding`.
+/// * **ONNX** (the default fastembed path); `TextEmbedding`.
 /// * **Candle** for Qwen3-Embedding (separate `Qwen3TextEmbedding` API
 ///   enabled by the `qwen3` feature on fastembed).
 ///
@@ -63,7 +63,7 @@ enum LoadedModel {
 struct CacheEntry {
     name: String,
     model: LoadedModel,
-    /// Bytes added to process RSS when this model was loaded -- measured by
+    /// Bytes added to process RSS when this model was loaded; measured by
     /// diffing `/proc/self/status:VmRSS` before and after init. Drives both
     /// eviction decisions and per-load logging. On hosts without a readable
     /// VmRSS (e.g. macOS dev) this falls back to `ESTIMATED_MODEL_COST_BYTES`
@@ -88,7 +88,7 @@ struct CacheEntry {
 /// Concurrency: the cache mutex is held only across admission (lookup +
 /// possible eviction + load + insert). Embeds run with the lock released,
 /// so multiple cached models can serve requests in parallel. Eviction is
-/// best-effort -- if an in-flight embed holds an `Arc` to an evicted
+/// best-effort; if an in-flight embed holds an `Arc` to an evicted
 /// model, the model's memory lives until that embed finishes.
 ///
 /// `benchmark_lock` is a separate `try_lock`-style mutex used only by the
@@ -96,7 +96,7 @@ struct CacheEntry {
 /// 1. Gives the admin UI a clean "Busy" affordance instead of silently
 ///    queueing multiple heavy model loads behind each other.
 /// 2. Prevents an admin who fat-fingers the button N times from blocking
-///    the worker for N x (load + benchmark) minutes -- only one
+///    the worker for N x (load + benchmark) minutes; only one
 ///    admin-triggered benchmark can be queued at a time, the rest are
 ///    rejected up front.
 #[derive(Default)]
@@ -110,11 +110,11 @@ pub struct FastEmbedder {
 /// Backend dispatch for a model id.
 ///
 /// Three paths, all producing handles managed by the same LRU cache:
-/// * `Fast` -- model is one of fastembed-rs's built-in `EmbeddingModel`
+/// * `Fast`; model is one of fastembed-rs's built-in `EmbeddingModel`
 ///   variants. Loaded by name, weights downloaded by fastembed via hf-hub.
-/// * `Qwen3` -- candle-backed Qwen3-Embedding family (separate fastembed
+/// * `Qwen3`; candle-backed Qwen3-Embedding family (separate fastembed
 ///   API gated behind the `qwen3` feature).
-/// * `Custom` -- "bring your own ONNX": we download the model files
+/// * `Custom`; "bring your own ONNX": we download the model files
 ///   ourselves and feed them to fastembed's `UserDefinedEmbeddingModel`
 ///   API. Used for HF repos whose ONNX exports work but aren't part of
 ///   `EmbeddingModel` (e.g. snowflake-arctic-embed-m-v2.0, multilingual,
@@ -147,7 +147,7 @@ struct CustomModelSpec {
     /// HF repo id, e.g. `Snowflake/snowflake-arctic-embed-m-v2.0`.
     repo_id: &'static str,
     /// Path inside the repo to the ONNX graph to load. We ship int8
-    /// quantized graphs by default to keep RSS predictable -- the fp32
+    /// quantized graphs by default to keep RSS predictable; the fp32
     /// variants of these models are typically >1 GB and would also need
     /// `with_external_initializer` plumbing to load (model.onnx +
     /// model.onnx.data split).
@@ -179,7 +179,7 @@ struct CustomModelSpec {
 ///    chunk currently in storage; a rebuild is the only correct fix and
 ///    that's an explicit migration, not an automatic one.
 /// 2. For arctic-m-v2.0 specifically, the model card *only* prescribes a
-///    query prefix -- documents stay bare by design.
+///    query prefix; documents stay bare by design.
 ///
 /// Multilingual-e5-* is intentionally not in this list: its training
 /// regime expects both `query:` and `passage:` prefixes, so prefixing
@@ -231,7 +231,7 @@ fn custom_model_spec(model_name: &str) -> Option<CustomModelSpec> {
 }
 
 /// Download a custom model's files from the Hub and assemble it into a
-/// loaded `TextEmbedding`. Runs inside `spawn_blocking` -- the hf-hub
+/// loaded `TextEmbedding`. Runs inside `spawn_blocking`; the hf-hub
 /// sync API blocks, and the ONNX session build is CPU-heavy.
 fn load_custom_model(spec: &CustomModelSpec) -> Result<TextEmbedding, String> {
     // Reuse fastembed's hf-hub cache layout when possible: the env var
@@ -329,7 +329,7 @@ impl FastEmbedder {
     /// cold load).
     ///
     /// Heavy models (Qwen3 0.6B, multilingual-e5-large, bge-m3, ...) are
-    /// NOT in the boot list -- they're loaded on first real embed call or
+    /// NOT in the boot list; they're loaded on first real embed call or
     /// when an admin clicks "Run benchmark" on the admin system page.
     pub async fn run_benchmarks(
         &self,
@@ -343,7 +343,7 @@ impl FastEmbedder {
             results.push(result);
         }
 
-        // Replace the cached results wholesale -- matches the prior
+        // Replace the cached results wholesale; matches the prior
         // single-shot boot benchmark semantics. Per-model updates from
         // admin clicks go through `benchmark_one`, which upserts a
         // single row.
@@ -386,7 +386,7 @@ impl FastEmbedder {
 
     /// Shared body for both the boot-time loop and the on-demand admin
     /// benchmark. Goes through the same budgeted cache admission as a
-    /// real embed -- so the benchmark may evict an LRU entry, but the
+    /// real embed; so the benchmark may evict an LRU entry, but the
     /// freshly-loaded benchmark target stays in cache (last_used is now)
     /// and is available to the worker if they share a model.
     async fn benchmark_inner(
@@ -402,7 +402,7 @@ impl FastEmbedder {
         let model_for_blocking = model.clone();
 
         let secs = tokio::task::spawn_blocking(move || {
-            // Warmup run -- first inference can be much slower than steady
+            // Warmup run; first inference can be much slower than steady
             // state (ONNX session init, candle kernel JIT, allocator
             // touching pages for the first time, ...).
             let _ = run_embed(&model_for_blocking, vec!["warmup".to_string()]);
@@ -445,7 +445,7 @@ impl FastEmbedder {
     ///
     /// Note: this only reflects the `benchmark_one` path. Boot-time
     /// `run_benchmarks` and worker embeds also serialize on the cache
-    /// admission lock but don't show up here, on purpose -- admins
+    /// admission lock but don't show up here, on purpose; admins
     /// don't need to know about them.
     pub async fn is_benchmark_running(&self) -> bool {
         self.benchmark_lock.try_lock().is_err()
@@ -576,7 +576,7 @@ impl FastEmbedder {
     }
 }
 
-/// Synchronous embed dispatch -- runs inside the spawn_blocking task so
+/// Synchronous embed dispatch; runs inside the spawn_blocking task so
 /// the (blocking) inner mutex on the model handle and the (blocking)
 /// inference call don't tie up the tokio runtime.
 fn run_embed(model: &LoadedModel, texts: Vec<String>) -> Result<Vec<Vec<f32>>, String> {
@@ -761,7 +761,7 @@ mod tests {
         std::env::remove_var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES");
         // Either we're in a cgroup (CI or prod) and read_cgroup returns
         // a real number, or we're on macOS dev where it returns None and
-        // we hit the static fallback. Both branches are valid -- this
+        // we hit the static fallback. Both branches are valid; this
         // test just guards against a panic in compute_budget_bytes.
         let n = compute_budget_bytes();
         assert!(n > 0);
@@ -790,7 +790,7 @@ mod tests {
             Some("query: "),
         );
         // Multilingual-e5 deliberately has no prefix wired up here even
-        // though the model card recommends one -- we'd need a per-course
+        // though the model card recommends one; we'd need a per-course
         // rebuild with `passage:` on the doc side first. Guard the
         // omission so a well-meaning future change can't sneak it in.
         assert_eq!(

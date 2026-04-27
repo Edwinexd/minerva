@@ -4,14 +4,14 @@
 //! counters.
 //!
 //! Categories the rest of the system writes here (free-form
-//! strings -- no enum so we can add categories without touching
+//! strings; no enum so we can add categories without touching
 //! this module):
 //!   * `document_classifier`
 //!   * `linker`
 //!   * `adversarial_filter`
 //!   * `extraction_guard`
 //!
-//! Embeddings are deliberately not tracked -- pocket change
+//! Embeddings are deliberately not tracked; pocket change
 //! relative to LLM calls (per the operational policy).
 //!
 //! No spending limits in this iteration. The dashboard shows
@@ -36,7 +36,7 @@ pub const CATEGORY_EXTRACTION_GUARD: &str = "extraction_guard";
 pub const CATEGORY_AEGIS: &str = "aegis";
 
 /// Insert a single usage row. Best-effort: callers log a warning
-/// on error and continue -- we never block a chat / ingest path
+/// on error and continue; we never block a chat / ingest path
 /// because tracking failed.
 pub async fn record(
     db: &PgPool,

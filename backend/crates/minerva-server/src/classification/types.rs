@@ -1,5 +1,5 @@
 //! Closed set of document kinds. Mirrored in the SQL CHECK constraint on
-//! `documents.kind` (migration 20260425000001_document_kind.sql) -- keep in
+//! `documents.kind` (migration 20260425000001_document_kind.sql); keep in
 //! sync.
 
 /// Canonical kind strings. The DB CHECK constraint enforces this exact
@@ -30,7 +30,7 @@ pub enum DocumentKind {
     /// surfaces awkward speech-to-text blocks.
     LectureTranscript,
     Reading,
-    /// Swedish "övning" -- practice/exercise material that's NOT
+    /// Swedish "övning"; practice/exercise material that's NOT
     /// graded. Distinct from `AssignmentBrief` (graded mandatory
     /// work): the chat path can discuss tutorial exercises freely.
     TutorialExercise,
@@ -84,7 +84,7 @@ impl DocumentKind {
 /// path can recognise that a student's input matches an assignment), but
 /// the chunk *text* never lands in the system prompt.
 ///
-/// `sample_solution` is the strongest case -- those docs aren't even
+/// `sample_solution` is the strongest case; those docs aren't even
 /// embedded; the worker short-circuits before it gets to the embedder.
 /// This list catches stale data and the assignment-brief signal channel.
 pub fn is_signal_only_kind(kind: &str) -> bool {
@@ -95,7 +95,7 @@ pub fn is_signal_only_kind(kind: &str) -> bool {
 }
 
 /// Kinds that should never be embedded into Qdrant in the first place.
-/// Currently just `sample_solution` -- the others stay in Qdrant as a
+/// Currently just `sample_solution`; the others stay in Qdrant as a
 /// detection signal even though their text never enters the prompt.
 ///
 /// This is the contract the ingest pipeline enforces; exposed for tests

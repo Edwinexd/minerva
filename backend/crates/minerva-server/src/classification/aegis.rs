@@ -6,8 +6,8 @@
 //! actionable suggestions for how to improve it.
 //!
 //! We deliberately do NOT score the prompt. The brief is explicit
-//! about tone -- a partner offering ideas, not a grader handing out
-//! marks -- and Herodotou et al. (2025) flag the condescending edge
+//! about tone; a partner offering ideas, not a grader handing out
+//! marks; and Herodotou et al. (2025) flag the condescending edge
 //! that scoring rubrics carry for accessibility-sensitive learners.
 //! Scores also hide the actionable signal under a number; "your
 //! prompt is 4/10" tells the student nothing they can do about it,
@@ -15,11 +15,11 @@
 //! build on it" does.
 //!
 //! Each suggestion has:
-//!   * `kind`  -- short tag the panel uses for grouping/iconography
+//!   * `kind` ; short tag the panel uses for grouping/iconography
 //!     ("context", "constraints", "specificity", "alternatives",
 //!     "clarification"). Free-form string so we can add categories
 //!     without a server change.
-//!   * `text`  -- single-sentence actionable improvement, written
+//!   * `text` ; single-sentence actionable improvement, written
 //!     in the second person ("you might..."), no markdown, no
 //!     leading bullet.
 //!
@@ -28,7 +28,7 @@
 //! pretending there's always something to fix.
 //!
 //! Soft-fail throughout. The chat hot path never waits on the
-//! analyzer -- a transient Cerebras hiccup, malformed JSON, or DB
+//! analyzer; a transient Cerebras hiccup, malformed JSON, or DB
 //! insert failure logs at warn and we move on without a row.
 //!
 //! Mode (`AegisMode::Beginner`/`Expert`) is the student's
@@ -43,7 +43,7 @@ use uuid::Uuid;
 use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_AEGIS;
 
-/// Tiny model -- runs on every debounced keystroke + every Send
+/// Tiny model; runs on every debounced keystroke + every Send
 /// when the flag is on. Latency is the headline number. The
 /// schema-constrained output keeps llama3.1-8b on rails for the
 /// JSON shape we want. `pub` so the route layer can stamp
@@ -65,20 +65,20 @@ You will read the student's current draft (and a short trail of their recent pri
 
 The rubric you check the draft against is grounded in the CLEAR prompt-engineering framework (Concise, Logical, Explicit, Adaptive, Reflective) and the standard prompt-design rubric. Each `kind` below maps to one rubric dimension:
 
-* `clarity`     -- Is the request specific and unambiguous? Are key terms defined? Will the chatbot have to guess at multiple plausible interpretations? (CLEAR: Concise + Explicit.)
-* `rationale`   -- Is there enough background/context to interpret the request? Why does the student want this -- the underlying purpose? Without it the chatbot can answer the literal question and miss the actual goal.
-* `audience`    -- Has the student named who they are (course level, prior knowledge, role)? Should the answer assume a beginner or someone steeped in the topic? Determines the language, complexity, and tone of the reply.
-* `format`      -- Is the desired output shape stated (essay, bullet list, table, code block, comparison, step-by-step)? Without it the chatbot picks a default that may not match what the student needs.
-* `tasks`       -- Is the request a single coherent ask, or several stacked questions that should be split? Breaking down complex queries usually yields a more useful answer than one tangled super-prompt.
-* `instruction` -- Is the verb / action clear? ("Write", "compare", "summarise", "translate", "debug".) An ambiguous verb leaves the chatbot unsure what to actually produce.
-* `examples`    -- Would one or two examples (of the desired output, of an existing attempt, of a similar problem) sharpen the request? Especially useful for stylistic or format-sensitive answers.
-* `constraints` -- Are limits, scope, success criteria, or what's OUT of scope stated? E.g. "in 200 words", "Python 3.11+ only", "without using libraries X".
+* `clarity`    ; Is the request specific and unambiguous? Are key terms defined? Will the chatbot have to guess at multiple plausible interpretations? (CLEAR: Concise + Explicit.)
+* `rationale`  ; Is there enough background/context to interpret the request? Why does the student want this; the underlying purpose? Without it the chatbot can answer the literal question and miss the actual goal.
+* `audience`   ; Has the student named who they are (course level, prior knowledge, role)? Should the answer assume a beginner or someone steeped in the topic? Determines the language, complexity, and tone of the reply.
+* `format`     ; Is the desired output shape stated (essay, bullet list, table, code block, comparison, step-by-step)? Without it the chatbot picks a default that may not match what the student needs.
+* `tasks`      ; Is the request a single coherent ask, or several stacked questions that should be split? Breaking down complex queries usually yields a more useful answer than one tangled super-prompt.
+* `instruction`; Is the verb / action clear? ("Write", "compare", "summarise", "translate", "debug".) An ambiguous verb leaves the chatbot unsure what to actually produce.
+* `examples`   ; Would one or two examples (of the desired output, of an existing attempt, of a similar problem) sharpen the request? Especially useful for stylistic or format-sensitive answers.
+* `constraints`; Are limits, scope, success criteria, or what's OUT of scope stated? E.g. "in 200 words", "Python 3.11+ only", "without using libraries X".
 
 Each suggestion you produce ALSO carries a `severity`:
 
-* `high`   -- The draft is materially harder for the chatbot to answer well without this fix. Vague verbs, missing rationale that changes the answer, ambiguous referents.
-* `medium` -- Useful sharpening; the answer would be substantially better with this change but the chatbot can still produce something reasonable without it.
-* `low`    -- Polish; nice-to-have, would unlock a slightly better answer.
+* `high`  ; The draft is materially harder for the chatbot to answer well without this fix. Vague verbs, missing rationale that changes the answer, ambiguous referents.
+* `medium`; Useful sharpening; the answer would be substantially better with this change but the chatbot can still produce something reasonable without it.
+* `low`   ; Polish; nice-to-have, would unlock a slightly better answer.
 
 Hard rules:
 * Do NOT answer the prompt. Do NOT critique the chatbot's reply. Your only output is suggestions about the prompt itself.
@@ -94,7 +94,7 @@ Be generous on short follow-up questions whose context is obvious from the previ
 /// Calibration addendum. Calibrates the rubric against the
 /// student's self-declared subject expertise. The two addendums
 /// are deliberately written to produce VISIBLY different output
-/// for the same draft -- a beginner's "How to make Python faster?"
+/// for the same draft; a beginner's "How to make Python faster?"
 /// returns []; an expert's same prompt returns a sharp suggestion
 /// that names the missing context (what's slow, what they've
 /// measured, what version). Making the gap pronounced is the whole
@@ -104,17 +104,17 @@ const AEGIS_BEGINNER_ADDENDUM: &str = r#"
 
 THE STUDENT IS A BEGINNER. This changes your behaviour substantially.
 
-Default behaviour: RETURN AN EMPTY SUGGESTION LIST. A beginner asking a question -- any question, even a vague one -- is doing the work we want. The tutoring chatbot will fill in the missing context for them. Your job is NOT to teach them how to prompt; it is to occasionally point out one low-effort improvement when one is genuinely useful.
+Default behaviour: RETURN AN EMPTY SUGGESTION LIST. A beginner asking a question; any question, even a vague one; is doing the work we want. The tutoring chatbot will fill in the missing context for them. Your job is NOT to teach them how to prompt; it is to occasionally point out one low-effort improvement when one is genuinely useful.
 
 Suggest at most ONE thing, and only when the draft is so vague the chatbot would have to guess wildly (e.g. literally one or two words with no verb, or "this" with no antecedent in the trail). For everything else, return [].
 
 NEVER suggest these to a beginner:
-* `audience` -- they don't yet know the level/role labels for their own knowledge.
-* `format` -- the chatbot's default formatting is fine for a beginner; don't push them to specify essay/table/etc.
-* `tasks` -- breaking down a single question is meta-work a beginner shouldn't carry.
-* `examples` -- few-shot prompting is too advanced.
-* `constraints` -- specifying versions, tools, frameworks is jargon-heavy.
-* `rationale` -- don't ask them to articulate why they want to know something simple.
+* `audience`; they don't yet know the level/role labels for their own knowledge.
+* `format`; the chatbot's default formatting is fine for a beginner; don't push them to specify essay/table/etc.
+* `tasks`; breaking down a single question is meta-work a beginner shouldn't carry.
+* `examples`; few-shot prompting is too advanced.
+* `constraints`; specifying versions, tools, frameworks is jargon-heavy.
+* `rationale`; don't ask them to articulate why they want to know something simple.
 
 When you DO suggest, only pick `clarity` or `instruction`, severity `high` (since by definition you're only firing when the prompt is genuinely too vague to act on). Write the suggestion warmly and give the student a verbatim-fillable example.
 
@@ -127,7 +127,7 @@ Examples that should return []:
 
 Examples that warrant ONE suggestion:
 - "this" -> [{kind: "clarity", severity: "high", text: "Could you describe what 'this' refers to? For example: 'this code I just wrote' or 'the topic from the last lecture'."}]
-- "help" -> [{kind: "instruction", severity: "high", text: "What part are you stuck on? Even a few words helps -- like 'I don't get how loops work' or 'my code throws an error'."}]"#;
+- "help" -> [{kind: "instruction", severity: "high", text: "What part are you stuck on? Even a few words helps; like 'I don't get how loops work' or 'my code throws an error'."}]"#;
 
 const AEGIS_EXPERT_ADDENDUM: &str = r#"
 
@@ -136,23 +136,23 @@ THE STUDENT IS AN EXPERT. This changes your behaviour substantially.
 Default behaviour: RETURN AT LEAST ONE SUGGESTION unless the draft is genuinely complete (clear instruction verb, named scope, named tool/version where relevant, stated what they've tried OR a clear conceptual question, no vague referents, format implied or stated). Most expert drafts have at least one fixable gap; find the sharpest one and surface it.
 
 Hold the bar peer-to-peer high. Use the full literature rubric:
-* `clarity` (severity: high) -- vague nouns ("this thing", "the issue", "it's broken") naming the specific concept/symbol.
-* `instruction` (severity: high) -- ambiguous verb -- is the student asking for an explanation, code, comparison, debugging, summary?
-* `rationale` (severity: medium-high) -- missing the WHY behind the question; the same literal question has different best answers depending on whether the student is debugging vs. learning vs. teaching others.
-* `audience` (severity: medium) -- has the student named their level / role so the chatbot can pitch the answer? Pertinent for "explain X" style asks.
-* `format` (severity: medium) -- bullet list vs. essay vs. comparison table vs. step-by-step procedure. Often unlocks substantially better answers.
-* `tasks` (severity: medium) -- a single super-prompt with several stacked questions usually answers each one badly; suggest splitting.
-* `examples` (severity: low-medium) -- one or two examples (of what they've tried, of similar problems) sharpen the response.
-* `constraints` (severity: medium-high) -- explicit version / tool / scope / "without using X" / word limit.
+* `clarity` (severity: high); vague nouns ("this thing", "the issue", "it's broken") naming the specific concept/symbol.
+* `instruction` (severity: high); ambiguous verb; is the student asking for an explanation, code, comparison, debugging, summary?
+* `rationale` (severity: medium-high); missing the WHY behind the question; the same literal question has different best answers depending on whether the student is debugging vs. learning vs. teaching others.
+* `audience` (severity: medium); has the student named their level / role so the chatbot can pitch the answer? Pertinent for "explain X" style asks.
+* `format` (severity: medium); bullet list vs. essay vs. comparison table vs. step-by-step procedure. Often unlocks substantially better answers.
+* `tasks` (severity: medium); a single super-prompt with several stacked questions usually answers each one badly; suggest splitting.
+* `examples` (severity: low-medium); one or two examples (of what they've tried, of similar problems) sharpen the response.
+* `constraints` (severity: medium-high); explicit version / tool / scope / "without using X" / word limit.
 
-When you DO suggest something, write it directly and tersely -- terminology IS expected here. Don't soften with "you could maybe" or "perhaps consider". Use the imperative or near-imperative ("Name the specific X.", "Add what you tried.", "Specify which Y.").
+When you DO suggest something, write it directly and tersely; terminology IS expected here. Don't soften with "you could maybe" or "perhaps consider". Use the imperative or near-imperative ("Name the specific X.", "Add what you tried.", "Specify which Y.").
 
 Examples that should return [] (rare):
 - "Why does Python's GIL prevent CPU-bound multithreading from scaling, and how does multiprocessing sidestep it for tasks that release the GIL inside C extensions?"
 
 Examples that warrant suggestions:
-- "How to make Python faster?" -> [{kind: "rationale", severity: "high", text: "Name what's slow and how you measured it. CPU-bound vs I/O-bound has completely different fixes."}, {kind: "constraints", severity: "medium", text: "Pin the Python version -- 3.11+ has substantial perf changes that change the right answer."}]
-- "Tell me about decorators" -> [{kind: "audience", severity: "medium", text: "Say what you already know about decorators -- syntax-level vs semantics vs typical use cases dictate a very different answer."}, {kind: "format", severity: "low", text: "Specify the depth: a one-paragraph mental model, a worked example, or a reference list of common patterns."}]"#;
+- "How to make Python faster?" -> [{kind: "rationale", severity: "high", text: "Name what's slow and how you measured it. CPU-bound vs I/O-bound has completely different fixes."}, {kind: "constraints", severity: "medium", text: "Pin the Python version; 3.11+ has substantial perf changes that change the right answer."}]
+- "Tell me about decorators" -> [{kind: "audience", severity: "medium", text: "Say what you already know about decorators; syntax-level vs semantics vs typical use cases dictate a very different answer."}, {kind: "format", severity: "low", text: "Specify the depth: a one-paragraph mental model, a worked example, or a reference list of common patterns."}]"#;
 
 const AEGIS_OUTPUT_FOOTER: &str = r#"
 
@@ -205,7 +205,7 @@ pub struct AegisSuggestion {
 }
 
 /// Result of one analyzer run. Empty `suggestions` means the
-/// analyzer found nothing worth saying about the draft -- a
+/// analyzer found nothing worth saying about the draft; a
 /// legitimate output that the panel renders as a "looks good"
 /// affirmation rather than empty.
 #[derive(Debug, Clone)]
@@ -219,15 +219,15 @@ pub struct AegisVerdict {
 ///
 /// Three return shapes:
 ///
-///   * `Ok(None)` -- legitimate "nothing to score" cases (no
+///   * `Ok(None)`; legitimate "nothing to score" cases (no
 ///     CEREBRAS_API_KEY in dev, empty/whitespace draft). The
 ///     analyze route maps this to a 200 + JSON `null`; the panel
 ///     just stays in its empty state.
-///   * `Ok(Some(verdict))` -- analyzer ran. `verdict.suggestions`
+///   * `Ok(Some(verdict))`; analyzer ran. `verdict.suggestions`
 ///     may legitimately be empty (the analyzer thought the draft
 ///     looked fine); that's NOT an error and the panel renders a
 ///     "looks good" affirmation. 200 + JSON object.
-///   * `Err(reason)` -- upstream failure (Cerebras 4xx/5xx,
+///   * `Err(reason)`; upstream failure (Cerebras 4xx/5xx,
 ///     malformed JSON, suggestions array malformed). The route
 ///     maps this to a 500 so the frontend / observability layer
 ///     sees the failure as a failure and not as a "nothing to
@@ -387,7 +387,7 @@ pub async fn analyze_prompt(
 // "Some ideas" button: take the student's current draft + the
 // suggestions Aegis just produced, and ask the model to rewrite the
 // draft incorporating the suggestions verbatim. The student's
-// voice / scope / intent is preserved -- this is a *revision*, not
+// voice / scope / intent is preserved; this is a *revision*, not
 // a complete rewrite by the assistant. Output is plain text (no
 // JSON envelope) since the only consumer pastes it into the chat
 // input box.
@@ -400,10 +400,10 @@ const AEGIS_REWRITE_SYSTEM_PROMPT: &str = r#"You are Aegis, the prompt-coaching 
 
 Hard rules:
 * Preserve the student's voice, intent, scope, level of formality, and what they actually want to know. You are revising their draft, not replacing it with your own question.
-* Do NOT add information that is not implied by the original draft + the suggestions. If a suggestion says "name the version", do not invent which version they mean -- write a placeholder like "(I'm using Python 3.X)" so they can edit, OR rewrite as "(specify which Python version you're using)".
+* Do NOT add information that is not implied by the original draft + the suggestions. If a suggestion says "name the version", do not invent which version they mean; write a placeholder like "(I'm using Python 3.X)" so they can edit, OR rewrite as "(specify which Python version you're using)".
 * Do NOT answer the question. The output is a PROMPT the student will then send to the chatbot, not an answer to the prompt.
 * Do NOT include preamble, headings, "Here is the rewrite:", quote marks, or any wrapping. Output is the prompt and only the prompt, ready to drop into the chat input.
-* Keep the prompt natural and concise. If the original was one sentence, the rewrite should usually still be one or two sentences -- not a multi-paragraph essay just because the suggestions added structure.
+* Keep the prompt natural and concise. If the original was one sentence, the rewrite should usually still be one or two sentences; not a multi-paragraph essay just because the suggestions added structure.
 * Match the original's apparent level: a beginner's casual question stays casual; an expert's terse query stays terse.
 
 Output: the rewritten prompt as plain text, nothing else."#;
@@ -426,7 +426,7 @@ pub async fn rewrite_prompt(
         return Err("empty draft".to_string());
     }
     if suggestions.is_empty() {
-        // Nothing to incorporate -- the rewrite would just be the
+        // Nothing to incorporate; the rewrite would just be the
         // original. We could short-circuit to Ok(original.into()),
         // but it makes more sense to surface this as an error so
         // the frontend doesn't leave a "Some ideas" button enabled

@@ -10,9 +10,9 @@ export interface AegisShieldFilledProps
 /**
  * Aegis: colored tile variant of the shield logo.
  *
- * Mirrors the Minerva favicon's visual language -- a rounded-rect
+ * Mirrors the Minerva favicon's visual language; a rounded-rect
  * tile with a radial blue gradient background and a white-masked
- * foreground shape -- so the Feedback panel reads as part of the
+ * foreground shape; so the Feedback panel reads as part of the
  * Minerva product, not a stuck-on third-party widget. The owl
  * favicon's gradient palette is reused here verbatim (`#bff0ff`
  * highlight -> `#3b86bf` mid -> `#083561` shadow -> `#042448` deep)
@@ -24,7 +24,7 @@ export interface AegisShieldFilledProps
  *
  * Two SVG ids per render are scoped via `useId` so multiple
  * instances of the icon on the same page don't clash on the `<defs>`
- * (a frequent React-icon footgun -- two `<radialGradient id="g1">`
+ * (a frequent React-icon footgun; two `<radialGradient id="g1">`
  * blocks would cause every later one to inherit the first).
  *
  * Sizing API mirrors lucide-react: pass `size` (number or CSS
@@ -75,7 +75,7 @@ export const AegisShieldFilled = forwardRef<
           <stop offset="1" stopColor="#083561" stopOpacity="0" />
         </radialGradient>
         <clipPath id={clipId}>
-          {/* Rounded square tile -- ~18%-radius corners to match
+          {/* Rounded square tile; ~18%-radius corners to match
               the favicon's cushioned feel without going full pill. */}
           <rect x="0.5" y="0.5" width="23" height="23" rx="4.5" ry="4.5" />
         </clipPath>

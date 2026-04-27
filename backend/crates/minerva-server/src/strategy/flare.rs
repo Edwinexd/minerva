@@ -121,7 +121,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
     // Graph-aware enrichment: pull representative chunks from each
     // top hit's KG partners (part_of_unit + applied_in dst). Same
-    // intent as parallel.rs / simple.rs -- the graph fills gaps the
+    // intent as parallel.rs / simple.rs; the graph fills gaps the
     // embedding search missed (a lecture is in context, the graph
     // adds its tutorial / section summary). FLARE consumes the
     // enriched seed AND graph-expands every mid-stream retrieval
@@ -239,7 +239,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             } else {
                 raw
             };
-            // Graph expansion on the mid-stream batch too -- a
+            // Graph expansion on the mid-stream batch too; a
             // FLARE retrieval is itself a small RAG lookup, so we
             // enrich it the same way as the initial seed. Without
             // this, only the first round of context benefits from
@@ -331,11 +331,11 @@ struct RunLoopConfig<'a> {
     max_chunks: i32,
     daily_token_limit: i64,
     /// Doc IDs whose classifier hasn't run yet. Their chunks are held
-    /// out of context this turn (defensive -- better a slightly worse
+    /// out of context this turn (defensive; better a slightly worse
     /// answer than risk leaking unclassified material). Tests pass an
     /// empty set; production looks it up once before run_loop.
     unclassified_doc_ids: std::collections::HashSet<String>,
-    /// Mirror of `GenerationContext::kg_enabled` -- forwarded so the
+    /// Mirror of `GenerationContext::kg_enabled`; forwarded so the
     /// inner loop's `partition_chunks` and adversarial-filter calls
     /// honour the gate without re-resolving the flag mid-stream.
     kg_enabled: bool,
@@ -466,7 +466,7 @@ where
 
         // Kind-aware partition every iteration: as `all_chunks` grows
         // mid-loop via FLARE retrievals, signal chunks may show up that
-        // weren't there at iteration 0. Cheap -- pure in-memory work.
+        // weren't there at iteration 0. Cheap; pure in-memory work.
         let rag = common::partition_chunks(
             all_chunks.clone(),
             &cfg.unclassified_doc_ids,
@@ -571,7 +571,7 @@ where
         // normalization) appears in both the prior content and this
         // iteration's output, the model restarted a section. This is a
         // complement to streaming-time literal detection which catches
-        // 150-char prose overlaps. No fuzzy matching -- paraphrased
+        // 150-char prose overlaps. No fuzzy matching; paraphrased
         // headings are NOT flagged here; the primary defence against
         // paraphrased restarts is the revised continuation prompt.
         if iteration_start_text_len > 0 && full_text.len() > iteration_start_text_len {
@@ -1294,7 +1294,7 @@ mod tests {
 
     #[test]
     fn extract_headings_recognizes_bold_pseudo_heading() {
-        let text = "**PROG2 VT26 -- Semester project**\n\nBody content.";
+        let text = "**PROG2 VT26; Semester project**\n\nBody content.";
         let out = extract_normalized_headings(text);
         // The en-dash is punctuation, collapsed to space.
         assert_eq!(out, vec!["prog2 vt26 semester project"]);
@@ -1341,7 +1341,7 @@ mod tests {
     #[test]
     fn heading_repeat_paraphrase_not_flagged() {
         // Exact-match-only detector: paraphrased variants are NOT flagged,
-        // by design. This keeps the false-positive rate near zero -- the
+        // by design. This keeps the false-positive rate near zero; the
         // continuation prompt is the primary defence against paraphrased
         // restarts, not this detector.
         let prior = "### 1. Project structure you will receive\n\nFoo.";
@@ -1368,8 +1368,8 @@ mod tests {
 
     #[test]
     fn heading_repeat_bold_pseudo_heading_exact_match() {
-        let prior = "**PROG2 VT26 -- Semester project**\n\nBody.";
-        let new = "Some continuation...\n\n**PROG2 VT26 -- Semester project**\n\nMore body.";
+        let prior = "**PROG2 VT26; Semester project**\n\nBody.";
+        let new = "Some continuation...\n\n**PROG2 VT26; Semester project**\n\nMore body.";
         assert!(detect_exact_heading_repeat(prior, new).is_some());
     }
 
@@ -1396,7 +1396,7 @@ mod tests {
 
     #[test]
     fn sentence_boundary_inside_table_false() {
-        // Long text ending on a table row -- should not fire.
+        // Long text ending on a table row; should not fire.
         let t = "Intro paragraph here. ".to_string() + &"| col1 | col2 |\n".repeat(30) + "| next |";
         assert!(!is_sentence_boundary(&t));
     }
@@ -1467,7 +1467,7 @@ mod tests {
     fn simulate_delta_arrival(full_text: &mut String, sent: &mut Vec<String>, delta: &str) {
         // Mirrors the sequence in stream_with_logprobs:
         full_text.push_str(delta);
-        // Simulated tx.send -- runs AFTER push_str.
+        // Simulated tx.send; runs AFTER push_str.
         sent.push(delta.to_string());
     }
 
@@ -1497,7 +1497,7 @@ mod tests {
         // continuation request. We check full_text survives serialization
         // into the JSON body without mutation, so Cerebras on the next
         // request sees exactly what the client saw.
-        let full_text = String::from("Hello, this is FLARE. åäö -- a complete assistant partial.");
+        let full_text = String::from("Hello, this is FLARE. åäö; a complete assistant partial.");
         let msg = serde_json::json!({
             "role": "assistant",
             "content": full_text,
@@ -2025,8 +2025,8 @@ mod stream_integration_tests {
 //
 // These drive `run_loop` directly so we can script Cerebras responses AND
 // mid-stream retrieval without bringing up a Postgres/Qdrant/FastEmbed
-// stack. This is where the 300k-token bug lived -- a state-machine error
-// in how HitLimit outcomes chain across iterations -- so it's the highest
+// stack. This is where the 300k-token bug lived; a state-machine error
+// in how HitLimit outcomes chain across iterations; so it's the highest
 // value test surface.
 //
 // Each scenario is a sequence of scripted Cerebras responses. We wire them
@@ -2216,7 +2216,7 @@ mod loop_regression_tests {
         )
         .await
         .expect(
-            "run_loop must terminate (if this hangs, the loop is unbounded -- the exact 300k bug)",
+            "run_loop must terminate (if this hangs, the loop is unbounded; the exact 300k bug)",
         );
 
         drop(tx);
@@ -2531,7 +2531,7 @@ mod loop_regression_tests {
         );
         // Retrieval was called on every iteration where a low-conf sentence
         // was produced. That should be equal to iterations (minus possibly
-        // the first iteration where prior text is empty -- still called).
+        // the first iteration where prior text is empty; still called).
         assert_eq!(
             retrieve_count.load(Ordering::SeqCst),
             MAX_FLARE_ITERATIONS,
@@ -2638,7 +2638,7 @@ mod loop_regression_tests {
         ));
         first.push_str(&sse_close(10, FLARE_MAX_TOKENS_PER_CHUNK as i64, "length"));
 
-        // Second iteration: regenerate `intro` verbatim -- the streaming
+        // Second iteration: regenerate `intro` verbatim; the streaming
         // repeat detector should fire almost immediately.
         let mut second = String::new();
         // Split the repeat into small chunks so streaming-time checks run.
@@ -2740,7 +2740,7 @@ mod loop_regression_tests {
         }
         first.push_str(&sse_close(10, FLARE_MAX_TOKENS_PER_CHUNK as i64, "length"));
 
-        // Second iteration restarts with the same heading -- post-iteration
+        // Second iteration restarts with the same heading; post-iteration
         // detector must fire.
         let mut second = String::new();
         second.push_str(&sse_token(

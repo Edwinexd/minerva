@@ -98,7 +98,7 @@ kubectl get pods -n minerva    # Check status
 
 **Restore:**
 ```bash
-gunzip -c /data0/minerva/backups/minerva-DATE.sql.gz | kubectl exec -i -n minerva deploy/postgres -- psql -U minerva -d minerva
+gunzip -c /data0/minerva/backups/minerva-DATE.sql.gz | kubectl exec -i -n minerva deploy/postgres; psql -U minerva -d minerva
 ```
 
 ## Transcript Pipeline (play.dsv.su.se)

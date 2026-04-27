@@ -5,7 +5,7 @@
 //! integration API. Each token is scoped to a (course_id, user_id)
 //! pair and has a limited lifetime.
 //!
-//! Mounted at `/api/embed/` -- outside the auth_middleware layer.
+//! Mounted at `/api/embed/`; outside the auth_middleware layer.
 
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, Sse};
@@ -55,7 +55,7 @@ pub fn router() -> Router<AppState> {
         )
         // Mirrors the Shibboleth chat router's live aegis analyzer
         // endpoint. Same `analyze_prompt_for_user` helper backs
-        // both -- the only difference here is the embed-token auth
+        // both; the only difference here is the embed-token auth
         // flow + token in the body.
         .route("/course/{course_id}/aegis/analyze", post(analyze_prompt))
         // Mirrors the Shibboleth aegis rewrite route. Used by the
@@ -84,7 +84,7 @@ fn authenticate(
     Ok((course_id, user_id))
 }
 
-// -- Response types --
+//; Response types --
 
 #[derive(Serialize)]
 struct CourseResponse {
@@ -152,7 +152,7 @@ struct MeResponse {
     lti_client_id: Option<String>,
 }
 
-// -- Handlers --
+//; Handlers --
 
 async fn get_me(
     State(state): State<AppState>,
@@ -238,7 +238,7 @@ async fn list_conversations(
 ///
 /// Embed token attests course membership (verified by `authenticate`),
 /// so the only extra step before delegating to the shared helper is
-/// promoting the DB row to a `User` -- the embed route doesn't pass
+/// promoting the DB row to a `User`; the embed route doesn't pass
 /// through `auth_middleware` and therefore has no `Extension<User>`.
 async fn list_pinned_conversations(
     State(state): State<AppState>,

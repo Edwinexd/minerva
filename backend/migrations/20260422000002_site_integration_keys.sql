@@ -1,6 +1,6 @@
 -- Site-level integration keys. Admin-minted; authorize the Moodle plugin to
 -- *provision* per-course api_keys on behalf of specific users (identified by
--- eppn at call time). The site key itself cannot access course data -- it can
+-- eppn at call time). The site key itself cannot access course data; it can
 -- only list a user's teachable courses and mint regular api_keys scoped to one
 -- of them. That preserves the existing per-course audit trail while removing
 -- the manual copy/paste at link time.

@@ -14,7 +14,7 @@ pub const CLASSIFIER_SYSTEM_PROMPT: &str = r#"You classify a single course docum
 - "lecture": slides, lecture notes, instructor-authored expository material teaching a topic. Structured, prepared content.
 - "lecture_transcript": auto-generated speech-to-text transcript of a lecture recording (verbatim spoken language, often with timestamps, filler words, "um/uh", incomplete sentences, no headings). Same teaching purpose as a lecture but the prose is messy and unstructured. Pick this over "lecture" when the text reads like a transcription rather than prepared notes/slides.
 - "reading": textbook chapters, papers, supplementary articles, links to external readings.
-- "tutorial_exercise": Swedish "övning" / English "tutorial" / "exercise" / "practice problems". OPTIONAL practice material that students work through but is NOT graded -- typically marked "frivillig", "ej obligatorisk", "voluntary", "for practice", "self-study", or similar. Distinct from assignment_brief (which is graded). When in doubt between tutorial_exercise and assignment_brief, look for grading language, deadlines, submission instructions -- those make it an assignment_brief.
+- "tutorial_exercise": Swedish "övning" / English "tutorial" / "exercise" / "practice problems". OPTIONAL practice material that students work through but is NOT graded; typically marked "frivillig", "ej obligatorisk", "voluntary", "for practice", "self-study", or similar. Distinct from assignment_brief (which is graded). When in doubt between tutorial_exercise and assignment_brief, look for grading language, deadlines, submission instructions; those make it an assignment_brief.
 - "assignment_brief": the description of a GRADED assignment students must complete and submit. Numbered steps, "your task", "implement", grading criteria, deliverables, due dates, "submit by".
 - "sample_solution": a worked-out solution, model answer, grading rubric with answers, or any document whose primary purpose is to show students the answer to a graded problem.
 - "lab_brief": a practical lab or exercise description, similar to assignment_brief but for hands-on/lab work. If unsure between assignment_brief and lab_brief, prefer assignment_brief.
@@ -33,9 +33,9 @@ You will reply with a single JSON object, nothing else, matching the schema:
 
 Important guidance:
 - Classify based on the actual content of the document. You are NOT given the filename, because filenames are unreliable: courses routinely contain "F18_OO.pdf" that is actually a solution, "lab.pdf" that's a syllabus, "övning.pdf" that's a graded assignment. The mime_type tells you only the file format.
-- If a document contains both an exercise statement AND its solution, classify as "sample_solution" -- the solution-bearing nature dominates.
+- If a document contains both an exercise statement AND its solution, classify as "sample_solution"; the solution-bearing nature dominates.
 - If a document is mostly a worked example used for teaching (not the answer to a graded problem), classify as "lecture" or "reading", not "sample_solution".
-- Distinguishing tutorial_exercise from assignment_brief is a CONTENT decision: look for grading language ("graded", "submit by", "deadline", "betyg", "inlämning"), submission instructions, and rubrics. Their absence -- combined with explicit "frivillig", "voluntary", "for self-study", "practice problems" framing -- points to tutorial_exercise.
+- Distinguishing tutorial_exercise from assignment_brief is a CONTENT decision: look for grading language ("graded", "submit by", "deadline", "betyg", "inlämning"), submission instructions, and rubrics. Their absence; combined with explicit "frivillig", "voluntary", "for self-study", "practice problems" framing; points to tutorial_exercise.
 - Be calibrated: confidence should reflect actual uncertainty. If the document is 3 pages of mixed content with no clear signal, that's 0.4--0.6, not 0.95.
 - If the excerpt is empty or near-empty (e.g. a URL stub, a scanned PDF without OCR, an unsupported file the extractor couldn't read), classify as "unknown" with low confidence and add a "no_text_extracted" suspicious_flag.
 - The "suspicious_flags" array lets you escalate things a teacher might want to double-check: e.g. "might_be_solution" when the content has worked-out answers, "ambiguous_between_assignment_and_lab", "could_be_exam_with_solutions", "language_mixed_swedish_english". Use these to surface uncertainty, not to dilute the kind decision.
@@ -62,7 +62,7 @@ document excerpt (may be truncated):
 Reply with the JSON object only."#;
 
 /// Bullet added to the base system prompt's "What you will not do" list.
-/// Kept short -- most of the heavy lifting is the per-turn addendum below
+/// Kept short; most of the heavy lifting is the per-turn addendum below
 /// when an actual assignment_brief similarity match is detected.
 pub const PASTED_PROBLEM_RULE: &str = "- Do not produce a complete solution to a problem the student has pasted verbatim from course materials with no work of their own; instead help them reason about it step by step.";
 

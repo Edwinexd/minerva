@@ -2,7 +2,7 @@
 //! at chat time, after RAG retrieval but before chunks are pasted into
 //! the prompt context. Catches the rare case where a `sample_solution`
 //! chunk slipped past the per-doc classifier (or where a `lecture` doc
-//! happens to contain a worked solution) -- the per-doc kind is right
+//! happens to contain a worked solution); the per-doc kind is right
 //! at the document level but a single chunk inside it might still leak.
 //!
 //! This is the belt-and-suspenders layer. The primary defense is the
@@ -16,7 +16,7 @@
 //!   `futures::future::join_all`, so total wall-clock is roughly the
 //!   slowest single call (not the sum).
 //! * A wrapping `tokio::time::timeout` keeps the whole filter under
-//!   `MAX_FILTER_LATENCY`; if we time out, we fail OPEN -- pass all
+//!   `MAX_FILTER_LATENCY`; if we time out, we fail OPEN; pass all
 //!   chunks through. This is intentional: the primary defense already
 //!   ran, and blocking student replies for a defensive secondary is
 //!   worse than the small leak risk.
@@ -68,7 +68,7 @@ pub fn snapshot_stats() -> AdversarialStats {
 
 /// Cerebras model used for the per-chunk check. Binary
 /// classification with a 4-token output cap and `reasoning_effort:
-/// low` -- exactly the kind of small-model task where llama3.1-8b
+/// low`; exactly the kind of small-model task where llama3.1-8b
 /// is the right tool. Cheaper, faster (matters here: this filter
 /// runs per-chunk and fans out across all retrieved chunks every
 /// chat turn, against an 800ms total budget).
@@ -83,18 +83,18 @@ const MAX_FILTER_LATENCY: Duration = Duration::from_millis(800);
 const MAX_EXCERPT_CHARS: usize = 4_000;
 
 /// Single tight prompt. Asks for a strict yes/no. We don't use the
-/// structured-output JSON schema here -- the response is a single token
+/// structured-output JSON schema here; the response is a single token
 /// and the latency saving matters.
-const ADVERSARIAL_SYSTEM_PROMPT: &str = "You are a strict classifier. Decide whether the given excerpt is a worked-out solution to a graded exercise (an answer key, model solution, walkthrough labelled \"solution\"/\"answer\"). Examples in lectures, derivations of definitions, and demonstrations of techniques are NOT solutions to graded exercises -- those are teaching material. Reply with exactly one word: \"yes\" or \"no\". No punctuation, no explanation.";
+const ADVERSARIAL_SYSTEM_PROMPT: &str = "You are a strict classifier. Decide whether the given excerpt is a worked-out solution to a graded exercise (an answer key, model solution, walkthrough labelled \"solution\"/\"answer\"). Examples in lectures, derivations of definitions, and demonstrations of techniques are NOT solutions to graded exercises; those are teaching material. Reply with exactly one word: \"yes\" or \"no\". No punctuation, no explanation.";
 
 /// Per-chunk check. Returns true iff the model says this chunk is a
 /// worked solution (and so should be excluded from the prompt context).
-/// Errors fail open (return false) -- defense in depth, not the
+/// Errors fail open (return false); defense in depth, not the
 /// primary gate.
 ///
 /// Records the call's prompt/completion token usage against
 /// `course_id` in the `adversarial_filter` category. Recording is
-/// best-effort -- a DB failure here never affects the chat path.
+/// best-effort; a DB failure here never affects the chat path.
 async fn is_solution_chunk(
     http: &reqwest::Client,
     api_key: &str,

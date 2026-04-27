@@ -221,7 +221,7 @@ function ChatWindow({
   // Subject-expertise mode (Beginner/Expert). Read from the same
   // storage-backed hook the panel's toggle writes to, so flipping
   // the badge automatically affects the NEXT analyze call without
-  // any prop wiring. We only need the value here -- the setter
+  // any prop wiring. We only need the value here; the setter
   // lives in the panel.
   const [aegisMode] = useAegisMode()
   // Storage-backed; the X on the panel header writes false, the
@@ -231,7 +231,7 @@ function ChatWindow({
 
   // Live aegis analyzer: hits the backend on debounced input
   // changes so the right-rail panel reflects the prompt the
-  // student is currently composing -- BEFORE they hit Send.
+  // student is currently composing; BEFORE they hit Send.
   // The closure threads cookie auth + the dev-user header that
   // the rest of the chat path uses.
   const fetchLiveAnalysis = useCallback(
@@ -312,7 +312,7 @@ function ChatWindow({
       ? `/api/courses/${courseId}/conversations/${existingConvId}/message`
       : `/api/courses/${courseId}/conversations`
 
-    // Snapshot the live analysis on submit -- the panel may
+    // Snapshot the live analysis on submit; the panel may
     // refresh asynchronously after this point, so we lock in
     // exactly what the student saw when they clicked Send. Server
     // persists this with the new message_id for the History panel.
@@ -357,7 +357,7 @@ function ChatWindow({
 
   // Soft-block state for the just-in-time intercept. When the
   // student presses Send AND aegis returns non-empty suggestions
-  // for the current draft, we DON'T dispatch -- we set
+  // for the current draft, we DON'T dispatch; we set
   // `confirmDraftSend` to the draft string so the next press of
   // Send (with the same content) goes through. The Send button
   // re-labels to "Send as-is" + a small inline note appears under
@@ -367,7 +367,7 @@ function ChatWindow({
   // The analyzer runs on Send (`analyzeNow`) so a fast typer who
   // presses Enter inside the 1s debounce window still gets the
   // chance to see suggestions. `analyzeNow` short-circuits when
-  // the cache already matches the exact input -- no second LLM
+  // the cache already matches the exact input; no second LLM
   // call for slow typers.
   //
   // Resets when the student edits the input or after a successful
@@ -403,7 +403,7 @@ function ChatWindow({
     const msg = input
 
     // Second press of Send for the same draft we already
-    // soft-blocked on -- the student saw the suggestions, decided
+    // soft-blocked on; the student saw the suggestions, decided
     // to send anyway. Dispatch immediately, no second analyzer
     // call (the verdict's already cached + visible).
     if (confirmDraftSend === msg) {
@@ -493,7 +493,7 @@ function ChatWindow({
         },
       )
       if (!res.ok) {
-        // Soft fail -- leave the original input in place so the
+        // Soft fail; leave the original input in place so the
         // student can still send. A 5xx logs the upstream error
         // server-side; we don't surface it (the rewrite is
         // optional).
@@ -662,7 +662,7 @@ function ChatWindow({
       {aegisEnabled && !panelVisible && (
         // "Bring Aegis back" pill. Renders at every breakpoint
         // now that the panel itself adapts (drawer below lg,
-        // in-flow rail at lg+) -- a tablet user has the same
+        // in-flow rail at lg+); a tablet user has the same
         // affordance as a desktop one. Pill chrome (bg, border,
         // shadow, label) so it reads as a real button rather
         // than a decorative icon floating in the chat column.

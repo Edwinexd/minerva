@@ -182,7 +182,7 @@
       "extraction_constraint_activated": "Extraktionsskydd aktiverat",
       "extraction_rewrote": "Svaret omskrevs av skyddet",
       "extraction_engagement_refused": "Studenten engagerade sig inte i den sokratiska frågan",
-      "extraction_constraint_lifted": "Studenten engagerade sig -- begränsning hävd"
+      "extraction_constraint_lifted": "Studenten engagerade sig; begränsning hävd"
     }
   },
   "kgTokenUsage": {
@@ -276,7 +276,7 @@
     "pendingTitle": "Länkaren bearbetar nyligen tillagt eller omklassificerat material. Grafen uppdateras automatiskt inom ~30 sekunder.",
     "noDocuments": "Inga dokument i den här kursen ännu.",
     "notBuiltYet": "Inga kanter har beräknats än.",
-    "pipelinePending": "Inga kanter än -- länkaren körs automatiskt några sekunder efter varje ingest. Vänta lite eller titta i serverloggarna.",
+    "pipelinePending": "Inga kanter än; länkaren körs automatiskt några sekunder efter varje ingest. Vänta lite eller titta i serverloggarna.",
     "noEdges": "Länkaren hittade inga säkra relationer mellan dokumenten i den här kursen.",
     "edgeListTitle_one": "{{count}} kant (klicka för att expandera)",
     "edgeListTitle_other": "{{count}} kanter (klicka för att expandera)",

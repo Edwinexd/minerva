@@ -11,7 +11,7 @@ use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage
 use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
 
 /// Cerebras model name for ingest-time classification work. Open-weights
-/// gpt-oss-120b -- strong instruction-following, reasoning_effort
+/// gpt-oss-120b; strong instruction-following, reasoning_effort
 /// supported, structured outputs supported.
 const CLASSIFIER_MODEL: &str = "gpt-oss-120b";
 
@@ -30,7 +30,7 @@ const RETRY_CONFIDENCE_THRESHOLD: f32 = 0.6;
 /// "worked solution", "syllabus / schedule") shows up early. The few
 /// docs that genuinely need more context will fall below the
 /// confidence threshold and pick up `reasoning_effort=high` on the
-/// retry, which is fine -- that path stays cheap because it happens
+/// retry, which is fine; that path stays cheap because it happens
 /// rarely now that flags don't trigger retries.
 const MAX_EXCERPT_CHARS: usize = 10_000;
 const HEAD_FRACTION: f64 = 0.85;
@@ -55,7 +55,7 @@ impl CerebrasClassifier {
         excerpt: &str,
         reasoning_effort: &str,
     ) -> Result<ClassifiedKind, String> {
-        // Filename is intentionally NOT in the prompt -- see the
+        // Filename is intentionally NOT in the prompt; see the
         // CLASSIFIER_USER_TEMPLATE doc comment. Classifier must decide
         // from content alone.
         let user = CLASSIFIER_USER_TEMPLATE
@@ -103,7 +103,7 @@ impl CerebrasClassifier {
             .map_err(|e| format!("classifier: response not JSON: {e}"))?;
 
         // Best-effort token-spend bookkeeping. Both the low-effort
-        // and high-effort retry calls land here -- the dashboard
+        // and high-effort retry calls land here; the dashboard
         // sums them as one bucket per (category, model).
         record_cerebras_usage(
             &self.db,
@@ -137,7 +137,7 @@ impl Classifier for CerebrasClassifier {
         text: &str,
     ) -> Result<ClassifiedKind, String> {
         // `filename` arrives here as part of the Classifier trait but is
-        // ONLY used for log lines -- we deliberately do not feed it to
+        // ONLY used for log lines; we deliberately do not feed it to
         // the model. Filenames in real DSV courses are too unreliable
         // (stale templates, copy/pasted names, F-numbers that don't
         // match content). Pure content classification.
@@ -163,18 +163,18 @@ impl Classifier for CerebrasClassifier {
 
         let excerpt = truncate_for_classification(text);
 
-        // First pass -- cheap, low effort.
+        // First pass; cheap, low effort.
         let initial = self
             .call(course_id, mime_type, &excerpt, "low")
             .await
             .map_err(|e| format!("classifier: low-effort call failed: {e}"))?;
 
-        // Retry on UNCERTAINTY only -- i.e. low confidence. Earlier
+        // Retry on UNCERTAINTY only; i.e. low confidence. Earlier
         // versions also retried whenever `suspicious_flags` was
         // non-empty, but the system prompt actively encourages flags
         // as a UI hint ("might_be_solution",
         // "ambiguous_between_assignment_and_lab",
-        // "language_mixed_swedish_english") -- so flags fired on
+        // "language_mixed_swedish_english"); so flags fired on
         // most nuanced docs and the second high-effort call doubled
         // the classifier's token spend without correspondingly
         // changing the kind decision. Flags now flow through to the
@@ -240,7 +240,7 @@ pub fn truncate_for_classification(text: &str) -> String {
 }
 
 /// Parse the model's JSON reply. Tolerates surrounding whitespace/code
-/// fences from a misbehaving model -- the structured-output contract
+/// fences from a misbehaving model; the structured-output contract
 /// should make this redundant, but defense in depth is cheap.
 pub fn parse_classifier_response(raw: &str) -> Result<ClassifiedKind, String> {
     let trimmed = raw.trim();

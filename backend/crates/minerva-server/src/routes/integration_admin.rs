@@ -3,7 +3,7 @@
 //! api_keys on behalf of a Moodle teacher (identified by eppn) without the
 //! teacher needing to visit Minerva first.
 //!
-//! The keys themselves are never usable for course data access -- they only
+//! The keys themselves are never usable for course data access; they only
 //! authorize the two /api/integration/site/* endpoints. That makes them low
 //! enough risk to keep in a single row, high enough value to keep behind an
 //! admin-only CRUD surface here.
@@ -131,7 +131,7 @@ async fn create_site_integration_key(
 
     let domains = normalize_domains(&body.allowed_eppn_domains)?;
 
-    // Same prefix as course-scoped keys (`mnrv_`) -- no point inventing a
+    // Same prefix as course-scoped keys (`mnrv_`); no point inventing a
     // separate scheme. The lookup path is different so there's no ambiguity.
     let id = Uuid::new_v4();
     let random_bytes: [u8; 16] = rand::random();

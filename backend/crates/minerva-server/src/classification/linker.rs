@@ -6,11 +6,11 @@
 //!   1. **Aggressive embedding filter.** Per-doc top-K nearest
 //!      neighbours above `MIN_EMBEDDING_SIMILARITY` (0.65). The
 //!      embeddings do the heavy lifting of "do these two docs
-//!      share substantive content?" -- a course of 50 docs typically
+//!      share substantive content?"; a course of 50 docs typically
 //!      yields ~20-50 surviving pairs, never anywhere near N^2.
 //!   2. **Per-pair LLM dispatch in parallel.** Each surviving pair
 //!      gets its own focused Cerebras call (`classify_one_pair`),
-//!      with a tight prompt -- two docs + their kinds + content
+//!      with a tight prompt; two docs + their kinds + content
 //!      excerpts + similarity, three-way decision
 //!      (solution_of / part_of_unit / none). Calls run via
 //!      `buffer_unordered(PAIR_CALL_CONCURRENCY)` so an N-pair
@@ -29,7 +29,7 @@
 //! course filenames are unreliable (stale templates, copy/paste,
 //! names that contradict content), so the candidate generator looks
 //! at embeddings only and the LLM prompt sees `kind` +
-//! `classifier_rationale` + `excerpt` per doc -- never the filename.
+//! `classifier_rationale` + `excerpt` per doc; never the filename.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -59,7 +59,7 @@ const LINKER_MODEL: &str = "gpt-oss-120b";
 const MIN_EDGE_CONFIDENCE: f32 = 0.5;
 
 /// Embedding-similarity floor for candidate generation. Pairs below
-/// this are NOT shown to the LLM at all -- the embeddings are doing
+/// this are NOT shown to the LLM at all; the embeddings are doing
 /// the heavy lifting of "are these two docs about the same thing?".
 ///
 /// Calibration:
@@ -94,11 +94,11 @@ const EMBEDDING_TOP_K: usize = 4;
 
 /// Hard cap on docs sent to the linker in one call. Keeps the prompt
 /// token cost bounded; courses larger than this would need pagination
-/// (not implemented in V1 -- DSV courses are well under the cap).
+/// (not implemented in V1; DSV courses are well under the cap).
 const MAX_DOCS_PER_CALL: usize = 300;
 
 /// Per-doc content excerpt size for the LLM prompt. Head of the
-/// document text -- the linker's only grounding signal beyond
+/// document text; the linker's only grounding signal beyond
 /// (kind, classifier_rationale). Filenames are deliberately excluded.
 ///
 /// Sized for "the LLM has enough context to recognise a shared
@@ -120,14 +120,14 @@ You're given Document A and Document B. For each:
 
 You're also given the embedding cosine similarity between A and B.
 
-You are NOT given filenames -- in real courses they're unreliable.
+You are NOT given filenames; in real courses they're unreliable.
 Decide from kind + rationale + excerpt + similarity only.
 
 Possible relations (pick ONE):
 
 UNDIRECTED:
 - "part_of_unit": A and B are paired course material from the same
-  week / module / unit. Reserved for tight pairings -- different
+  week / module / unit. Reserved for tight pairings; different
   formats of the same content, a lecture + its dedicated overview /
   section summary, an assignment + its submission-instructions page.
   NOT for: two lectures on adjacent topics, two docs that just share
@@ -158,14 +158,14 @@ side is "a" and which is "b"):
   one of {lecture, reading, lecture_transcript}; destination MUST
   be one of {tutorial_exercise, assignment_brief, lab_brief, exam}.
 
-- "none": no clear relation -- the candidate similarity made this
+- "none": no clear relation; the candidate similarity made this
   pair worth checking but the content doesn't actually pair them.
 
 Calibration: this pair already passed an embedding similarity
 threshold (>=0.70), so they share substantive content. Your job
 is to identify the relation, not whether ANY relation exists.
 A meaningful fraction of candidates SHOULD be one of the four
-non-"none" relations -- be willing to commit when the pairing is
+non-"none" relations; be willing to commit when the pairing is
 visible.
 
 Confidence guidance:
@@ -182,7 +182,7 @@ Output JSON only, matching the schema exactly:
   "rationale": short specific string citing concrete evidence visible
     in the excerpts (a phrase appearing in both, a problem and its
     answer, a concept introduced and applied). Do NOT invent shared
-    tokens. Do NOT cite filenames -- you don't have them.
+    tokens. Do NOT cite filenames; you don't have them.
 }
 
 No prose."#;
@@ -217,7 +217,7 @@ pub struct LinkerOutput {
 /// The linker reads everything it needs (chunk text for excerpts,
 /// chunk vectors for the lazy-pooled-embedding backfill) from
 /// Qdrant. We never re-read PDFs from disk or call an embedder
-/// during a relink -- the ingest pipeline has already done that work
+/// during a relink; the ingest pipeline has already done that work
 /// and persisted it to the doc row + Qdrant.
 pub struct LinkContext<'a> {
     pub http: &'a reqwest::Client,
@@ -243,7 +243,7 @@ fn is_rejected(rejected: &HashSet<RejectedPairKey>, a: Uuid, b: Uuid, relation: 
 }
 
 /// Pair-level test: should the linker consider this pair at all? Used
-/// to drop candidates BEFORE the LLM call -- if both relation types
+/// to drop candidates BEFORE the LLM call; if both relation types
 /// for a pair have been vetoed, there's no point asking the model.
 fn pair_fully_rejected(rejected: &HashSet<RejectedPairKey>, a: Uuid, b: Uuid) -> bool {
     is_rejected(rejected, a, b, "solution_of")
@@ -326,7 +326,7 @@ pub async fn link_course(
             });
     if !rejected.is_empty() {
         tracing::info!(
-            "linker: course {} has {} teacher-vetoed pair(s) -- those will be skipped",
+            "linker: course {} has {} teacher-vetoed pair(s); those will be skipped",
             course_id,
             rejected.len(),
         );
@@ -337,7 +337,7 @@ pub async fn link_course(
     let embeddings: HashMap<Uuid, Vec<f32>> = gather_embeddings(ctx, course_id, truncated).await?;
 
     // Step 2: embedding-similarity candidates (the only candidate
-    // channel -- no filename heuristics).
+    // channel; no filename heuristics).
     let mut candidates: HashSet<(Uuid, Uuid)> = HashSet::new();
     let similarity_by_pair: HashMap<(Uuid, Uuid), f32> = build_similarity_matrix(
         truncated,
@@ -348,7 +348,7 @@ pub async fn link_course(
     );
 
     // Drop probable-duplicate pairs (cosine ~ 1) before we even
-    // bother sending them to the model -- they're not "in the same
+    // bother sending them to the model; they're not "in the same
     // unit", they're the same document re-uploaded. Logged as DEBUG
     // (per-pair) plus one INFO summary line so a course with N
     // duplicate uploads doesn't spam N lines into the log.
@@ -376,7 +376,7 @@ pub async fn link_course(
     }
 
     // Drop pairs where every possible relation has been vetoed by a
-    // teacher -- no LLM call needed. Pairs where SOME relations are
+    // teacher; no LLM call needed. Pairs where SOME relations are
     // vetoed still go to the model but get filtered post-hoc.
     candidates.retain(|pair| {
         if pair_fully_rejected(&rejected, pair.0, pair.1) {
@@ -401,7 +401,7 @@ pub async fn link_course(
     // overview / admin doc that doesn't slot into any of the four
     // edge types in any useful way), no relation in our taxonomy
     // applies. Calling the LLM on these has been a tax we paid for
-    // structural noise -- a course with N URL-only docs that all
+    // structural noise; a course with N URL-only docs that all
     // classify as `unknown` produces O(N^2) high-similarity pairs
     // that the model dutifully labels `none` at full prompt cost.
     //
@@ -432,7 +432,7 @@ pub async fn link_course(
     });
     if !auto_none_pairs.is_empty() {
         tracing::info!(
-            "linker: course {} -- {} pair(s) auto-none'd by kind prefilter (both kinds in {{unknown, syllabus}}), no LLM call",
+            "linker: course {}; {} pair(s) auto-none'd by kind prefilter (both kinds in {{unknown, syllabus}}), no LLM call",
             course_id,
             auto_none_pairs.len(),
         );
@@ -510,7 +510,7 @@ pub async fn link_course(
             (pair.1, pair.0)
         };
         let (Some(da), Some(db)) = (docs_by_id.get(&key.0), docs_by_id.get(&key.1)) else {
-            // Shouldn't happen -- candidate ids come from `truncated`.
+            // Shouldn't happen; candidate ids come from `truncated`.
             // Treat as fresh and let the LLM handle it.
             fresh_candidates.insert(*pair);
             continue;
@@ -529,7 +529,7 @@ pub async fn link_course(
     }
     if cached_hits > 0 {
         tracing::info!(
-            "linker: course {} -- {} candidate(s) reused from decision cache, {} fresh",
+            "linker: course {}; {} candidate(s) reused from decision cache, {} fresh",
             course_id,
             cached_hits,
             fresh_candidates.len(),
@@ -551,7 +551,7 @@ pub async fn link_course(
     }
 
     // Step 4: content excerpts for every doc in any FRESH candidate
-    // pair (cached pairs don't need them -- we won't be sending them
+    // pair (cached pairs don't need them; we won't be sending them
     // to the LLM).
     let mut docs_in_candidates: HashSet<Uuid> = HashSet::new();
     for (a, b) in &fresh_candidates {
@@ -580,7 +580,7 @@ pub async fn link_course(
     )
     .await?;
     tracing::info!(
-        "linker: course {} -- LLM proposed {} edge(s) over {} fresh candidate pair(s) ({} cached)",
+        "linker: course {}; LLM proposed {} edge(s) over {} fresh candidate pair(s) ({} cached)",
         course_id,
         edges.len(),
         fresh_candidates.len(),
@@ -650,7 +650,7 @@ pub async fn link_course(
     }
     if dropped_sim > 0 || dropped_rejected > 0 {
         tracing::info!(
-            "linker: post-filter summary -- {} similarity floor, {} teacher-vetoed",
+            "linker: post-filter summary; {} similarity floor, {} teacher-vetoed",
             dropped_sim,
             dropped_rejected,
         );
@@ -665,7 +665,7 @@ pub async fn link_course(
         } else {
             (pair.1, pair.0)
         };
-        // Doc lookup -- both should exist; if not, skip rather
+        // Doc lookup; both should exist; if not, skip rather
         // than panic.
         let (Some(da), Some(db_doc)) = (docs_by_id.get(&key.0), docs_by_id.get(&key.1)) else {
             continue;
@@ -751,19 +751,19 @@ pub async fn link_course(
 ///
 /// 1. **Hot path**: `documents.pooled_embedding` is set by the ingest
 ///    pipeline at upload time (mean-pool + L2-normalise of all chunk
-///    vectors), so this is just a clone out of the DB row -- no
+///    vectors), so this is just a clone out of the DB row; no
 ///    network, no recompute.
 ///
 /// 2. **Cold path** (only when `pooled_embedding IS NULL`, i.e. data
 ///    that predates the column or a transient ingest failure): scroll
 ///    Qdrant for the doc's existing chunk VECTORS and mean-pool them.
-///    No file re-read, no embedder call -- vectors are already there.
+///    No file re-read, no embedder call; vectors are already there.
 ///    The result is persisted back so the next relink hits the hot
 ///    path.
 ///
 /// For docs without an entry in either source (e.g. a `sample_solution`
 /// uploaded before pooled_embedding was added: chunks weren't upserted
-/// to Qdrant AND the column was NULL), we just skip them -- they won't
+/// to Qdrant AND the column was NULL), we just skip them; they won't
 /// participate in the similarity matrix this run, but the next ingest
 /// of a new doc will repopulate.
 async fn gather_embeddings(
@@ -798,7 +798,7 @@ async fn gather_embeddings(
             }
             Ok(None) => {
                 tracing::debug!(
-                    "linker: no embedding available for doc {} -- skipping similarity channel",
+                    "linker: no embedding available for doc {}; skipping similarity channel",
                     doc.id,
                 );
             }
@@ -816,7 +816,7 @@ async fn gather_embeddings(
 
 /// Cold-path: scroll the doc's existing chunk vectors out of Qdrant and
 /// mean-pool them. Replaces the old "re-extract PDF, re-chunk, re-embed"
-/// path -- the vectors are already there, just pool them. Returns None
+/// path; the vectors are already there, just pool them. Returns None
 /// if the collection has no chunks for this doc.
 async fn pool_from_qdrant(
     qdrant: &Qdrant,
@@ -830,7 +830,7 @@ async fn pool_from_qdrant(
                 .filter(filter)
                 .with_payload(false)
                 .with_vectors(true)
-                // Cap at 1000 chunks per doc -- our chunker's default
+                // Cap at 1000 chunks per doc; our chunker's default
                 // produces far fewer than this even on the biggest
                 // course material; this is a sanity ceiling.
                 .limit(1000),
@@ -957,19 +957,19 @@ fn build_similarity_matrix(
 
 /// Read the first `EXCERPT_CHARS` of each in-candidate doc's text
 /// from disk. URL/awaiting-transcript/unsupported docs may have no
-/// readable file -- those simply get an empty excerpt.
+/// readable file; those simply get an empty excerpt.
 ///
 /// **Concurrency**: each doc's text extraction runs on the blocking
 /// thread pool via `spawn_blocking`, fanned out concurrently via
 /// `join_all`. Sync PDF parsing on the main runtime previously blocked
-/// the worker thread for hundreds of ms per doc -- a large course
+/// the worker thread for hundreds of ms per doc; a large course
 /// (~30 docs) could stall request handling for several seconds during
 /// every relink. Now the runtime thread just awaits a join_all of
 /// blocking-pool tasks; HTTP handlers stay responsive.
 /// Pull a content excerpt for each in-candidate doc out of Qdrant.
 /// We grab a few chunks per doc (sorted by chunk_index ascending) and
 /// concatenate their text up to `EXCERPT_CHARS`. No file I/O, no PDF
-/// re-parsing -- the chunks are already there from ingest.
+/// re-parsing; the chunks are already there from ingest.
 ///
 /// Sample-solution docs aren't in Qdrant (they're embedded into the
 /// doc-row pooled vector but their chunks are deliberately excluded
@@ -1006,7 +1006,7 @@ async fn load_excerpts(
     // a single round-trip pulling at most a handful of chunks, so we
     // can launch them all in parallel without overwhelming Qdrant.
     // The async blocks borrow `qdrant` for the duration of join_all,
-    // and clone the collection name per-task (cheap -- a small
+    // and clone the collection name per-task (cheap; a small
     // String, no allocations on the hot path of the await chain).
     let tasks: Vec<_> = target_ids
         .into_iter()
@@ -1152,7 +1152,7 @@ async fn call_linker_llm(
         .await;
 
     tracing::info!(
-        "linker: per-pair pass complete -- {} edges proposed across {} pairs",
+        "linker: per-pair pass complete; {} edges proposed across {} pairs",
         edges.len(),
         total_pairs,
     );
@@ -1205,7 +1205,7 @@ async fn classify_one_pair(
         "model": LINKER_MODEL,
         "temperature": 0.0,
         "reasoning_effort": "low",
-        // Tight ceiling -- the response is at most ~150 tokens of
+        // Tight ceiling; the response is at most ~150 tokens of
         // JSON. Generous overhead for the model's brief CoT but
         // small enough to fail fast on a runaway.
         "max_completion_tokens": 1024,
@@ -1270,18 +1270,18 @@ async fn classify_one_pair(
     };
     // Best-effort token-spend bookkeeping. Records every per-pair
     // call against `course_id` in the `linker` category, regardless
-    // of whether the call ultimately produced an edge -- the cost
+    // of whether the call ultimately produced an edge; the cost
     // was paid either way.
     record_cerebras_usage(db, course_id, CATEGORY_LINKER, LINKER_MODEL, &payload).await;
     // Guard against finish_reason=length producing an empty content
-    // field -- caller would otherwise see this as "no edge" without
+    // field; caller would otherwise see this as "no edge" without
     // knowing the model was cut off mid-token.
     let finish = payload["choices"][0]["finish_reason"]
         .as_str()
         .unwrap_or("");
     if finish == "length" {
         tracing::warn!(
-            "linker: per-pair {}<->{} hit completion-token cap -- raising max_completion_tokens may help",
+            "linker: per-pair {}<->{} hit completion-token cap; raising max_completion_tokens may help",
             p.a_id,
             p.b_id,
         );
@@ -1343,7 +1343,7 @@ async fn classify_one_pair(
 
     // Direction-derive the (src, dst) tuple per relation:
     //
-    //   * `part_of_unit` is undirected -- normalise by id ordering
+    //   * `part_of_unit` is undirected; normalise by id ordering
     //     so duplicates collapse on the unique constraint at upsert
     //     time.
     //   * `solution_of` is directional and the kinds tell us which
@@ -1356,7 +1356,7 @@ async fn classify_one_pair(
     //     (theory -> practice). Same override-from-kinds logic;
     //     drop if neither side fits the theory/practice pattern.
     //   * `prerequisite_of` is directional with no kind-based
-    //     gate -- both sides are typically lecture / reading.
+    //     gate; both sides are typically lecture / reading.
     //     Trust the model's a/b pick.
     let theory = ["lecture", "lecture_transcript", "reading"];
     let practice = ["tutorial_exercise", "assignment_brief", "lab_brief", "exam"];
@@ -1375,7 +1375,7 @@ async fn classify_one_pair(
                 (p.b_id, p.a_id)
             } else {
                 tracing::info!(
-                    "linker: dropping solution_of {}<->{} -- neither side has kind=sample_solution",
+                    "linker: dropping solution_of {}<->{}; neither side has kind=sample_solution",
                     p.a_id,
                     p.b_id,
                 );
@@ -1393,7 +1393,7 @@ async fn classify_one_pair(
                 (p.b_id, p.a_id)
             } else {
                 tracing::info!(
-                    "linker: dropping applied_in {}<->{} -- kinds don't fit theory->practice (a={}, b={})",
+                    "linker: dropping applied_in {}<->{}; kinds don't fit theory->practice (a={}, b={})",
                     p.a_id,
                     p.b_id,
                     p.a_kind,

@@ -58,7 +58,7 @@ impl UserRole {
     }
 
     /// Clamp this role to <= Teacher. Used by auth.rs to demote a stored
-    /// Admin row when the eppn is no longer in `MINERVA_ADMINS` -- the env
+    /// Admin row when the eppn is no longer in `MINERVA_ADMINS`; the env
     /// is the source of truth for admins, and a stale stored role would
     /// otherwise outlive the env removal forever.
     pub fn clamp_below_admin(self) -> Self {

@@ -137,7 +137,7 @@ async fn submit_transcript(
             .map_err(|e| AppError::Internal(format!("failed to write transcript: {}", e)))?;
 
         // Update DB: new filename, mime type, size, reset to pending.
-        // The classifier never sees filenames -- it decides
+        // The classifier never sees filenames; it decides
         // lecture_transcript vs lecture from the actual content (a VTT
         // transcript is recognisable by its disfluencies and lack of
         // structure). So we just swap .url for .txt without injecting
@@ -192,7 +192,7 @@ async fn submit_transcript(
     }
 }
 
-// -- Play designations (discovery) --
+//; Play designations (discovery) --
 
 #[derive(Serialize)]
 struct PlayDesignationServiceInfo {
@@ -300,8 +300,8 @@ fn sanitize_url_filename(raw: &str) -> Result<String, AppError> {
 ///
 /// Dedup key is the `source_url` column (enforced atomically by a partial
 /// unique index on `(course_id, source_url)`). If a document with the same
-/// origin URL already exists -- regardless of its current status or mime_type
-/// (a successful transcript fetch rewrites mime_type to text/plain) -- return
+/// origin URL already exists; regardless of its current status or mime_type
+/// (a successful transcript fetch rewrites mime_type to text/plain); return
 /// it with `created=false`.
 async fn create_url_document(
     State(state): State<AppState>,
@@ -403,7 +403,7 @@ async fn create_url_document(
     }))
 }
 
-// -- Play course catalog --
+//; Play course catalog --
 
 #[derive(Deserialize)]
 struct PlayCourseEntry {

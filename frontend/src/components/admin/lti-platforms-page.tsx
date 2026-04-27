@@ -272,7 +272,7 @@ function PlatformRow({
   const { t } = useTranslation("admin")
   const [open, setOpen] = useState(false)
   // Bindings fetched lazily so the list view stays cheap when there are many
-  // platforms -- admins typically only inspect one at a time.
+  // platforms; admins typically only inspect one at a time.
   const { data: bindings, isLoading } = useQuery({
     ...adminLtiPlatformBindingsQuery(platform.id),
     enabled: open,

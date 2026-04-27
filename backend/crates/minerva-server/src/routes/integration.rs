@@ -95,7 +95,7 @@ async fn authenticate_for_course(
     Ok(())
 }
 
-// -- Responses --
+//; Responses --
 
 #[derive(Serialize)]
 struct CourseInfo {
@@ -113,7 +113,7 @@ struct UserInfo {
     created: bool,
 }
 
-// -- Handlers --
+//; Handlers --
 
 /// List courses the API key has access to (i.e. the key's course).
 async fn list_courses(
@@ -374,7 +374,7 @@ async fn upload_document(
     }))
 }
 
-// -- Embed tokens --
+//; Embed tokens --
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -534,7 +534,7 @@ fn enforce_eppn_domain(
         return Ok(());
     };
     if domains.is_empty() {
-        // Treat an empty array as "no restriction" -- see migration comment.
+        // Treat an empty array as "no restriction"; see migration comment.
         return Ok(());
     }
     // `@domain` suffix, not `domain` substring, so `@evil-dsv.su.se` doesn't
@@ -551,7 +551,7 @@ fn enforce_eppn_domain(
 #[derive(Deserialize)]
 struct SiteCoursesForUserRequest {
     /// Caller-supplied eppn (e.g. the Moodle user's username). Lowercased
-    /// before lookup -- matches the rest of the codebase.
+    /// before lookup; matches the rest of the codebase.
     eppn: String,
 }
 
@@ -571,7 +571,7 @@ struct SiteCoursesForUserResponse {
     courses: Vec<SiteCourseInfo>,
 }
 
-/// List courses the given user can mint an api_key for -- i.e. courses they
+/// List courses the given user can mint an api_key for; i.e. courses they
 /// own or teach. Strict (not ta) so the provisioning surface matches
 /// `/courses/{id}/api-keys` (owner/admin only in the UI).
 async fn site_courses_for_user(
@@ -628,7 +628,7 @@ struct SiteProvisionRequest {
     /// api-keys list). Typically the Moodle course fullname.
     name: String,
     /// Minerva course the key should be scoped to. Caller should have picked
-    /// this from `site_courses_for_user` -- we re-verify ownership anyway.
+    /// this from `site_courses_for_user`; we re-verify ownership anyway.
     minerva_course_id: Uuid,
 }
 
@@ -671,7 +671,7 @@ async fn site_provision_course_key(
 
     // Admin, owner, or strict-teacher can provision. Mirrors the
     // /courses/{id}/api-keys POST rules (owner/admin) but also lets a
-    // co-teacher provision for a course they teach -- they already have
+    // co-teacher provision for a course they teach; they already have
     // teacher-level trust on that course.
     let is_admin = user.role == "admin";
     let is_owner = course.owner_id == user.id;

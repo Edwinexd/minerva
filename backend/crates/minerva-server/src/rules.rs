@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 
 /// Attribute names admins may reference in rule conditions. Mirrors the
 /// Shibboleth headers we read in auth.rs. The frontend equivalent is
-/// `ROLE_RULE_ATTRIBUTES` in `frontend/src/lib/types.ts` -- keep them in
+/// `ROLE_RULE_ATTRIBUTES` in `frontend/src/lib/types.ts`; keep them in
 /// sync (or hop both behind a generated schema if this grows).
 pub const SUPPORTED_ATTRIBUTES: &[&str] = &[
     "eppn",
@@ -23,7 +23,7 @@ pub const SUPPORTED_ATTRIBUTES: &[&str] = &[
 /// Pre-compiled rule, ready for eval. Built from DB rows by
 /// `RuleCache::reload` so each request avoids per-rule SQL + per-condition
 /// `Regex::new`. Disabled rules and rules with no conditions are dropped at
-/// compile time -- if it's in the cache it's a candidate to fire.
+/// compile time; if it's in the cache it's a candidate to fire.
 #[derive(Debug, Clone)]
 pub struct CompiledRule {
     pub target_role: UserRole,
@@ -52,7 +52,7 @@ impl CompiledCondition {
         // Negated operators require the attribute to be PRESENT (see
         // CompiledCondition variant docs). Otherwise an external user with
         // no `affiliation` header would match `affiliation not_contains
-        // alumni -> teacher` simply by lacking affiliation -- definitely
+        // alumni -> teacher` simply by lacking affiliation; definitely
         // not the admin's intent.
         let Some(header_value) = attrs.get(self.attribute()).map(String::as_str) else {
             return false;
@@ -68,7 +68,7 @@ impl CompiledCondition {
 
 /// In-memory cache of compiled rules. Loaded once at startup and refreshed
 /// after every admin mutation (rule create/update/delete + condition
-/// create/delete) -- see `routes/admin.rs`. Reads are O(rules*conds) over
+/// create/delete); see `routes/admin.rs`. Reads are O(rules*conds) over
 /// already-compiled regexes; writes are rare. We hand out an Arc snapshot
 /// so the auth middleware can drop the read lock immediately.
 pub struct RuleCache {
@@ -92,7 +92,7 @@ impl RuleCache {
         Ok(())
     }
 
-    /// Cheap snapshot for read paths -- clones an Arc, doesn't lock for
+    /// Cheap snapshot for read paths; clones an Arc, doesn't lock for
     /// the duration of evaluation.
     pub async fn snapshot(&self) -> Arc<Vec<CompiledRule>> {
         self.inner.read().await.clone()
@@ -152,7 +152,7 @@ async fn compile_from_db(db: &PgPool) -> Result<Vec<CompiledRule>, sqlx::Error> 
         .into_iter()
         .filter_map(|r| {
             let conditions = by_rule.remove(&r.id).unwrap_or_default();
-            // Drop empty-condition rules at compile time -- they could only
+            // Drop empty-condition rules at compile time; they could only
             // ever match-everything and we'd rather they no-op silently.
             if conditions.is_empty() {
                 return None;
@@ -167,7 +167,7 @@ async fn compile_from_db(db: &PgPool) -> Result<Vec<CompiledRule>, sqlx::Error> 
 
 /// Returns the highest-ranked target_role across all rules whose
 /// conditions ALL hold against `attrs`. Returns None if no rule matches.
-/// Empty-condition rules never match -- otherwise `iter().all()` on an
+/// Empty-condition rules never match; otherwise `iter().all()` on an
 /// empty slice would return true and the rule would silently promote
 /// every user. The cache layer also filters these out at compile time;
 /// this is belt + braces.
@@ -255,7 +255,7 @@ mod tests {
             ),
             Some(UserRole::Teacher),
         );
-        // Substring match is rejected -- "student@su.se" is NOT a member of
+        // Substring match is rejected; "student@su.se" is NOT a member of
         // the single-element list "prefix-student@su.se".
         assert_eq!(
             evaluate(&[r], &attrs(&[("affiliation", "prefix-student@su.se")])),
@@ -295,7 +295,7 @@ mod tests {
     }
 
     // (Disabled-rule and empty-condition handling now happens at the
-    // RuleCache::compile_from_db layer -- those rules never enter the
+    // RuleCache::compile_from_db layer; those rules never enter the
     // CompiledRule slice. The defensive empty-condition skip in
     // `evaluate` is there too, but isn't worth a unit test on its own.)
 

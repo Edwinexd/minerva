@@ -1,4 +1,4 @@
-//! Document-kind classification -- the "course knowledge graph V1".
+//! Document-kind classification; the "course knowledge graph V1".
 //!
 //! Pipeline:
 //! 1. After text extraction, the worker calls

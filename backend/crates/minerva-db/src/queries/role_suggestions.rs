@@ -31,7 +31,7 @@ pub struct PendingSuggestionWithUser {
 }
 
 /// Insert a pending suggestion. A prior suggestion for the same
-/// (course, user, role) -- pending, approved, or declined -- is left
+/// (course, user, role); pending, approved, or declined; is left
 /// untouched: declined stays declined forever, approved has already been
 /// acted on, and a duplicate pending row would just be noise.
 ///
@@ -124,7 +124,7 @@ pub async fn find_pending_by_id(
 }
 
 /// Mark the suggestion as approved. The caller is responsible for bumping
-/// the course_members row -- keeping those as two explicit steps makes the
+/// the course_members row; keeping those as two explicit steps makes the
 /// route handler's authorisation boundary obvious.
 pub async fn mark_approved(db: &PgPool, id: Uuid, resolved_by: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(

@@ -6,7 +6,7 @@
 //! here?" helpers we actually call.
 //!
 //! Flag-name constants live here so a typo in one call site can't
-//! desync from another -- everywhere that gates on a flag goes
+//! desync from another; everywhere that gates on a flag goes
 //! through the same `&'static str`.
 //!
 //! Default policy: opt-in features default to FALSE so an unset row
@@ -36,7 +36,7 @@ pub const FLAG_EXTRACTION_GUARD: &str = "extraction_guard";
 /// surfaced to the student in a non-blocking right-rail panel
 /// alongside per-turn analysis history. Designed to nudge
 /// students toward more intentional prompting without gating the
-/// inference path -- the analysis call runs in parallel with the
+/// inference path; the analysis call runs in parallel with the
 /// generation strategy and never blocks the assistant reply.
 /// See `crate::classification::aegis` for the analyzer.
 pub const FLAG_AEGIS: &str = "aegis";
@@ -49,7 +49,7 @@ pub const ALL_FLAGS: &[&str] = &[FLAG_COURSE_KG, FLAG_EXTRACTION_GUARD, FLAG_AEG
 /// True iff the KG bundle is enabled for this course. Resolution:
 /// course-scoped row -> global row -> default (FALSE).
 ///
-/// Errors are logged and treated as "not enabled" -- the safer
+/// Errors are logged and treated as "not enabled"; the safer
 /// choice when the DB is flaky, since failing closed avoids
 /// emitting half-classified state, mark_dirty noise, etc.
 pub async fn course_kg_enabled(db: &PgPool, course_id: Uuid) -> bool {
@@ -100,7 +100,7 @@ pub async fn extraction_guard_enabled(db: &PgPool, course_id: Uuid) -> bool {
 
 /// True iff aegis prompt-coaching is enabled for this course.
 /// Resolution: course-scoped row -> global row -> default
-/// (FALSE). Errors are logged and treated as "not enabled" -- the
+/// (FALSE). Errors are logged and treated as "not enabled"; the
 /// analyzer runs on every user turn so a flaky DB shouldn't slow
 /// down the chat path with retries; falling closed reverts to
 /// pre-aegis behaviour transparently.

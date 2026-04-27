@@ -3,7 +3,7 @@
 -- HMAC primitive itself is covered by test_hmac.lua against RFC vectors).
 --
 -- We also exercise interop with the Rust producer via a separately-
--- generated fixture (apache/test/fixture.txt) when present -- the CI
+-- generated fixture (apache/test/fixture.txt) when present; the CI
 -- workflow regenerates that fixture using the Rust mint helper before
 -- running this test, so a Lua/Rust format drift fails CI.
 --
@@ -19,7 +19,7 @@ local function check(name, ok, detail)
     if ok then
         print("ok   " .. name)
     else
-        print("FAIL " .. name .. (detail and ("  -- " .. detail) or ""))
+        print("FAIL " .. name .. (detail and (": " .. detail) or ""))
         failures = failures + 1
     end
 end
@@ -122,7 +122,8 @@ do
 end
 
 do
-    local tok = mint(SECRET, "x", "alice@su.se", nil, FUTURE) -- no ext: prefix
+    -- no ext: prefix
+    local tok = mint(SECRET, "x", "alice@su.se", nil, FUTURE)
     local _, err = m.verify_token(SECRET, tok)
     check("non-ext eppn -> bad_eppn", err == "bad_eppn", err)
 end
@@ -148,7 +149,7 @@ if f then
             and claims.display_name == fix_display,
         err or (claims and (claims.eppn .. " jti=" .. claims.jti)))
 else
-    print("skip fixture -- " .. fixture_path .. " not present (run gen_fixture)")
+    print("skip fixture: " .. fixture_path .. " not present (run gen_fixture)")
 end
 
 if failures > 0 then

@@ -99,6 +99,6 @@
   },
   "site_integration": {
     "invalid_domain": "\"{{domain}}\" is not a valid eppn domain. Use bare hostnames like dsv.su.se.",
-    "user_not_found": "No Minerva user with eppn \"{{eppn}}\" -- they must log into Minerva at least once before being linked."
+    "user_not_found": "No Minerva user with eppn \"{{eppn}}\"; they must log into Minerva at least once before being linked."
   }
 }

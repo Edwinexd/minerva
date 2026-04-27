@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 /// Result of a single classification call. Strings (not enums) so this
-/// crate doesn't need to know the closed set of valid kinds -- that's
+/// crate doesn't need to know the closed set of valid kinds; that's
 /// validated at the DB CHECK constraint and at the route handlers.
 #[derive(Debug, Clone)]
 pub struct ClassifiedKind {

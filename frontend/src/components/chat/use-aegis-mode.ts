@@ -2,7 +2,7 @@
  * Shared `AegisMode` state hook.
  *
  * Owns the single source of truth for the student's self-declared
- * subject expertise -- consumed by the panel (renders the toggle
+ * subject expertise; consumed by the panel (renders the toggle
  * badge) AND by the parent chat pages (ships the value as `mode`
  * on every `/aegis/analyze` request so the server-side rubric
  * calibrates accordingly).
@@ -31,7 +31,7 @@ function readStored(): AegisMode {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (raw === "beginner" || raw === "expert") return raw
   } catch {
-    // Storage unavailable (private mode, quota, etc) -- fall through.
+    // Storage unavailable (private mode, quota, etc); fall through.
   }
   return DEFAULT_MODE
 }
@@ -41,7 +41,7 @@ function writeStored(mode: AegisMode): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, mode)
   } catch {
-    // ignore -- the hook still works in-memory for this tab.
+    // ignore; the hook still works in-memory for this tab.
   }
 }
 

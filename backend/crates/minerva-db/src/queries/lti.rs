@@ -1,7 +1,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-// -- Registration rows (course-scoped LTI connections) --
+//; Registration rows (course-scoped LTI connections) --
 
 #[derive(Debug)]
 pub struct RegistrationRow {
@@ -104,7 +104,7 @@ pub async fn delete_registration(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Er
     Ok(result.rows_affected() > 0)
 }
 
-// -- Platform rows (site-level LTI connections, admin-managed) --
+//; Platform rows (site-level LTI connections, admin-managed) --
 
 #[derive(Debug)]
 pub struct PlatformRow {
@@ -205,7 +205,7 @@ pub async fn delete_platform(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error>
     Ok(result.rows_affected() > 0)
 }
 
-// -- Course binding rows (per-context links for site-level platforms) --
+//; Course binding rows (per-context links for site-level platforms) --
 
 #[derive(Debug)]
 pub struct BindingRow {
@@ -285,7 +285,7 @@ pub async fn delete_binding(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> 
     Ok(result.rows_affected() > 0)
 }
 
-// -- Launch state rows --
+//; Launch state rows --
 
 #[derive(Debug)]
 pub struct LaunchRow {

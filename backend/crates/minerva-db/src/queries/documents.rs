@@ -39,7 +39,7 @@ pub struct DocumentRow {
 
 // Note: sqlx::query_as! macros require literal SQL strings, so the column
 // list is repeated below. When adding a new column, update every `SELECT …`
-// and `RETURNING …` site in this file -- the compile-time check will catch
+// and `RETURNING …` site in this file; the compile-time check will catch
 // the row struct vs query column mismatch but won't catch a column missing
 // from a SELECT that still happens to compile.
 
@@ -279,7 +279,7 @@ pub async fn reset_stale_processing_older_than(
 // ── Classification helpers ─────────────────────────────────────────
 
 /// Persist a new auto-classification result. No-ops when the row is locked
-/// by a teacher -- defense in depth on top of the application-layer check
+/// by a teacher; defense in depth on top of the application-layer check
 /// in the worker. Returns true iff a row was actually updated.
 pub async fn set_classification(
     db: &PgPool,
@@ -309,7 +309,7 @@ pub async fn set_classification(
 /// Set a kind manually and lock it against future auto-classification.
 /// Clears confidence/rationale (they're only meaningful for auto-classified
 /// rows). The CHECK constraint will reject invalid `kind` values at the DB
-/// level -- we re-validate in the route handler too.
+/// level; we re-validate in the route handler too.
 pub async fn set_kind_locked(db: &PgPool, doc_id: Uuid, kind: &str) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"UPDATE documents
@@ -328,7 +328,7 @@ pub async fn set_kind_locked(db: &PgPool, doc_id: Uuid, kind: &str) -> Result<bo
 }
 
 /// Clear the teacher lock so the next reclassification pass can overwrite
-/// the kind. Does not change the current kind value -- operator can call
+/// the kind. Does not change the current kind value; operator can call
 /// reclassify afterwards if they want a fresh run.
 pub async fn clear_kind_lock(db: &PgPool, doc_id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
@@ -362,7 +362,7 @@ pub async fn doc_ids_with_kind(
 
 /// IDs of docs in a course whose classification has not yet completed
 /// (`classified_at IS NULL`). The chat-time filter excludes their chunks
-/// from the prompt context -- defensive: we'd rather give a slightly worse
+/// from the prompt context; defensive: we'd rather give a slightly worse
 /// answer for the ~30s after upload than risk leaking an unclassified
 /// sample-solution into context.
 pub async fn unclassified_doc_ids(
@@ -414,7 +414,7 @@ pub struct ClassificationStats {
 }
 
 /// Persist a doc's mean-pooled embedding. Called from the pipeline
-/// once all chunk embeddings are known. Idempotent -- the linker may
+/// once all chunk embeddings are known. Idempotent; the linker may
 /// also lazily fill this in for older docs.
 pub async fn set_pooled_embedding(
     db: &PgPool,

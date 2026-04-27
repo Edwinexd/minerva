@@ -64,7 +64,7 @@ async fn get_course_usage(
 /// Per-category token-usage breakdown for the KG / extraction-guard
 /// pipeline. Window defaults to the last 30 days; the dashboard
 /// shows totals + per-(category, model) split. Distinct from
-/// `/usage` (which tracks per-student chat tokens) -- KG operations
+/// `/usage` (which tracks per-student chat tokens); KG operations
 /// burn tokens course-wide for things the teacher / system did, not
 /// the students.
 #[derive(Serialize)]

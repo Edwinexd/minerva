@@ -17,7 +17,7 @@ pub struct CourseRow {
     pub embedding_provider: String,
     pub embedding_model: String,
     /// Bumped on every embedding model/provider rotation. Used by the
-    /// pipeline to pick a versioned Qdrant collection name -- legacy
+    /// pipeline to pick a versioned Qdrant collection name; legacy
     /// version=1 maps to `course_{id}` for backward compatibility,
     /// version>=2 maps to `course_{id}_v{n}`. See
     /// `minerva-ingest::pipeline::collection_name`.
@@ -35,7 +35,7 @@ pub struct CreateCourse {
     pub daily_token_limit: i64,
     /// When `Some`, the new course is created with this embedding model
     /// instead of the SQL column DEFAULT. Used to honor the
-    /// admin-managed `embedding_models.is_default` row -- which lives
+    /// admin-managed `embedding_models.is_default` row; which lives
     /// in a separate table and so can't be wired through the ALTER
     /// COLUMN DEFAULT machinery. `None` keeps the original behaviour
     /// (column DEFAULT applies) so legacy callers and tests don't have
@@ -241,14 +241,14 @@ pub struct RotateEmbeddingOutcome {
 /// 1. `UPDATE courses SET embedding_provider, embedding_model,
 ///    embedding_version = embedding_version + 1`. The bumped version
 ///    triggers a fresh Qdrant collection on the next ingest, leaving
-///    the previous collection intact (lazy migration -- old vectors
+///    the previous collection intact (lazy migration; old vectors
 ///    aren't deleted, just orphaned, so a teacher who rotates by
 ///    mistake can be rolled back manually).
 /// 2. Re-queue every document in the course: `status = 'pending'`,
 ///    clear `chunk_count`, `processed_at`, `error_msg`,
 ///    `pooled_embedding`, and `processing_started_at`. Classification
 ///    state (`kind`, `kind_confidence`, `kind_rationale`,
-///    `classified_at`, `kind_locked_by_teacher`) is preserved -- the
+///    `classified_at`, `kind_locked_by_teacher`) is preserved; the
 ///    embedding model has no bearing on document kind.
 ///
 /// Both steps run in a single transaction so partial-rotate states
@@ -283,13 +283,13 @@ pub async fn rotate_embedding(
     //   * `ready` docs need fresh embeddings.
     //   * `failed` docs deserve another shot under the new model.
     //   * `unsupported` docs stay unsupported (text extractor doesn't
-    //     change with embedding model) -- the worker re-checks the
+    //     change with embedding model); the worker re-checks the
     //     extension and flips them back to `unsupported` quickly.
     //   * `awaiting_transcript` docs are URL stubs the transcript job
     //     will refill; a status flip here doesn't lose the URL.
     //   * `processing` docs were claimed by the previous-model
     //     worker; resetting them is safe because the upsert went
-    //     into the OLD collection -- which we no longer point at.
+    //     into the OLD collection; which we no longer point at.
     let requeued_documents = sqlx::query_scalar!(
         r#"WITH updated AS (
                UPDATE documents

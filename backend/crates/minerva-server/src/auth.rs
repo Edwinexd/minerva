@@ -35,7 +35,7 @@ pub(crate) fn user_from_row(row: minerva_db::queries::users::UserRow) -> User {
 
 /// Cookie attributes for clearing the external-auth cookie. Sent on 401
 /// responses for revoked/expired ext: tokens to break the front-end's
-/// reload-on-401 retry loop -- otherwise the browser keeps re-presenting
+/// reload-on-401 retry loop; otherwise the browser keeps re-presenting
 /// the bad cookie and getting another 401.
 const CLEAR_EXT_COOKIE: &str = "minerva_ext=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
 
@@ -159,7 +159,7 @@ fn collect_rule_attrs(
 }
 
 /// 401 response that also clears `minerva_ext`. Used when the cookie is
-/// present but the backing invite is gone/revoked/expired -- next request
+/// present but the backing invite is gone/revoked/expired; next request
 /// from the frontend's reload retry will not carry the bad cookie, so the
 /// loop terminates (the user falls through to the Shib path).
 fn unauthorized_clear_ext_cookie() -> Response {
@@ -190,11 +190,11 @@ async fn upsert_user(
 
     let dev_teacher = state.config.dev_mode && eppn.starts_with("teacher");
     let rule_role = if is_admin || dev_teacher || role_locked {
-        // Skip the rule eval -- the higher-precedence branches in
+        // Skip the rule eval; the higher-precedence branches in
         // decide_role will win regardless.
         None
     } else {
-        // Cheap Arc snapshot -- read lock dropped before evaluate. Rules
+        // Cheap Arc snapshot; read lock dropped before evaluate. Rules
         // are pre-compiled (regexes included) by RuleCache.
         let snapshot = state.rules.snapshot().await;
         rules::evaluate(&snapshot, attrs)
@@ -325,7 +325,7 @@ mod tests {
             UserRole::Teacher,
         );
         // Active admin (env still has them) keeps Admin via the early
-        // is_admin branch -- the clamp on existing_role is irrelevant.
+        // is_admin branch; the clamp on existing_role is irrelevant.
         assert_eq!(
             decide_role(true, false, false, Some(UserRole::Admin), None),
             UserRole::Admin,

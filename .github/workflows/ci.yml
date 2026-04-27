@@ -149,3 +149,24 @@ jobs:
             echo "::error::Emdashes found! Use a semicolon, colon, or rephrase the sentence instead."
             exit 1
           fi
+
+      - name: Check for space-dash-dash-space
+        run: |
+          # Banned because LLMs reach for this as an em-dash workaround.
+          # Requires a non-whitespace char before the space-dash-dash-space on
+          # the same line: that carve-out keeps genuine indented SQL/Lua
+          # comments legal while inline comments after code, mid-prose dashes,
+          # and string-literal occurrences still fail.
+          # YAML/lockfiles/vendored deps are excluded; YAML carves out cargo
+          # CLI invocations that legitimately use the end-of-options separator.
+          # Pattern uses hex escapes so this workflow itself is clean.
+          # Mirrors the pre-commit hook (ban-double-dash) so any file the hook
+          # scans is also scanned in CI.
+          mapfile -t FILES < <(git ls-files | grep -vE '(\.lock$|\.ya?ml$|^frontend/node_modules/|^backend/target/|/dist/|\.gen\.)')
+          # Perl exits 1 when at least one match was printed; let bash see that
+          # exit code directly. `set -e` is on by default in `run:` blocks, so
+          # a non-zero exit fails the step.
+          if ! perl -ne 'BEGIN { $rc = 0 } if (/\S.*\x20--\x20/) { print STDERR "$ARGV:$.: $_"; $rc = 1 } END { exit $rc }' "${FILES[@]}"; then
+            echo "::error::space-dash-dash-space found! Use a semicolon, colon, or rephrase. Inline SQL comments must move to their own line."
+            exit 1
+          fi

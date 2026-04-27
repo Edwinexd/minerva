@@ -63,7 +63,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let mut rag_injected = false;
     // Populated inside the `RagArrived` branch below (the only path
     // where we have signals + context to evaluate). Stays None for
-    // the no-RAG completion path -- nothing to guard against when
+    // the no-RAG completion path; nothing to guard against when
     // the model never saw assignment material.
     let mut guard_decision: Option<super::extraction_guard::GuardDecision> = None;
 
@@ -99,7 +99,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
             // Kind-aware partition before showing anything to the
             // model or to the client. Skipped entirely when the KG
-            // feature flag is off for this course -- partition_chunks
+            // feature flag is off for this course; partition_chunks
             // sees `kg_enabled=false` and returns every chunk as
             // context with no signals, and we don't run the
             // adversarial filter (which is part of the same KG
@@ -115,7 +115,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             let mut rag = common::partition_chunks(rag_chunks, &unclassified, ctx.kg_enabled);
 
             // Adversarial pre-retrieval check on context chunks
-            // (gated on kg_enabled -- it's defence in depth on top
+            // (gated on kg_enabled; it's defence in depth on top
             // of the per-doc kind classifier, so it only matters
             // when classification is on at all).
             if ctx.kg_enabled {
@@ -132,7 +132,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             // Graph-aware enrichment: pull representative chunks
             // from each top hit's KG partners (part_of_unit / theory
             // -> applied_in dst). Adds material the embedding search
-            // alone might have missed -- e.g. a student asking about
+            // alone might have missed; e.g. a student asking about
             // a concept matches the lecture, the graph adds the
             // lecture's tutorial / section summary as supporting
             // context. Gated on kg_enabled; the helper itself is a

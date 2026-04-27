@@ -2,9 +2,9 @@
 //! `20260426000003_feature_flags.sql` for the schema and resolution
 //! semantics. Two layers in this module:
 //!
-//!   1. `set` / `delete` / `list_*` -- raw CRUD that the admin routes
+//!   1. `set` / `delete` / `list_*`; raw CRUD that the admin routes
 //!      surface to the operator.
-//!   2. `is_enabled_for_course` / `is_enabled_for_user` -- application
+//!   2. `is_enabled_for_course` / `is_enabled_for_user`; application
 //!      helpers that resolve a flag against the documented order
 //!      (course/user > global > compiled-in default).
 //!
@@ -57,7 +57,7 @@ pub async fn set(
     let (course_id, user_id) = scope.as_pair();
     // We can't use a single `ON CONFLICT (flag, course_id, user_id)`
     // because the unique constraint is split across three partial
-    // indexes (one per scope shape). Branch in Rust instead -- this
+    // indexes (one per scope shape). Branch in Rust instead; this
     // is plenty fast for an admin-rate operation and keeps the SQL
     // honest.
     match scope {

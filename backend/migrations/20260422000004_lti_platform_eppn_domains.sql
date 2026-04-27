@@ -6,7 +6,7 @@
 -- "no restriction" (backwards compatible with existing lti_platforms rows
 -- minted earlier on this branch). Non-empty means the eppn resolved from
 -- the launch JWT must end with `@<d>` for some `d` in the list. Per-course
--- `lti_registrations` are not scoped here -- they're 1:1 with a Minerva
+-- `lti_registrations` are not scoped here; they're 1:1 with a Minerva
 -- course so the blast radius of a misclaim is already limited to that
 -- teacher's own course.
 ALTER TABLE lti_platforms

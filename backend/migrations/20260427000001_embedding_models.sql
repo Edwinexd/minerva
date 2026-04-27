@@ -4,7 +4,7 @@
 -- the runtime knows how to load (i.e. "code exists for these"). This
 -- table is a *policy* layer on top: only enabled rows show up in the
 -- teacher's per-course config dropdown. Disabling a model removes it
--- from the picker but does NOT touch existing courses on it -- those
+-- from the picker but does NOT touch existing courses on it; those
 -- keep working until an admin explicitly force-migrates them via the
 -- existing `rotate_embedding` path on `PUT /courses/{id}`.
 --

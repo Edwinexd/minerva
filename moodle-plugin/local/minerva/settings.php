@@ -42,7 +42,7 @@ if ($hassiteconfig) {
     ));
 
     // Optional site-level integration key: when set, teachers no longer need
-    // to visit Minerva to create an API key before linking a course -- the
+    // to visit Minerva to create an API key before linking a course; the
     // plugin calls /api/integration/site/provision on their behalf and
     // stores the resulting per-course key. Admins mint this in the Minerva
     // "Plugin Integrations" admin page. Leave blank to keep the legacy

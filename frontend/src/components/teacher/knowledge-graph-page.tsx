@@ -92,7 +92,7 @@ export function KnowledgeGraphPage({
   // "Linking..." pill: visible when there's outstanding linker
   // work for this course (course queued for sweep, or cached pair
   // decisions whose endpoints have moved past their snapshot).
-  // Driven by the per-course graph query's polling refetch -- the
+  // Driven by the per-course graph query's polling refetch; the
   // pill self-clears the moment the next sweep finishes. We don't
   // surface a count: an honest count would require running the
   // candidate generator, which is the linker's job. The previous
@@ -199,10 +199,10 @@ function colorFor(kind: string | null | undefined) {
 }
 
 const EDGE_COLOR = {
-  solution_of: "#dc2626",       // red    -- solution -> assessment (directional)
-  part_of_unit: "#6b7280",      // grey   -- same-unit cluster (undirected)
-  prerequisite_of: "#7c3aed",   // violet -- A teaches concepts B builds on (directional)
-  applied_in: "#0ea5e9",        // sky    -- theory -> practice (directional)
+  solution_of: "#dc2626",       // red   ; solution -> assessment (directional)
+  part_of_unit: "#6b7280",      // grey  ; same-unit cluster (undirected)
+  prerequisite_of: "#7c3aed",   // violet; A teaches concepts B builds on (directional)
+  applied_in: "#0ea5e9",        // sky   ; theory -> practice (directional)
 } as const
 
 // Whether each edge kind is directional. Drives arrowhead rendering
@@ -214,7 +214,7 @@ const EDGE_DIRECTIONAL: Record<keyof typeof EDGE_COLOR, boolean> = {
   applied_in: true,
 }
 
-const REJECTED_EDGE_COLOR = "#fbbf24" // amber-400 -- visually distinct from edge kinds
+const REJECTED_EDGE_COLOR = "#fbbf24" // amber-400; visually distinct from edge kinds
 
 function Legend() {
   const { t } = useTranslation("teacher")
@@ -497,7 +497,7 @@ function FilteredGraphView({
   )
 
   // If after filtering there are still nodes visible, show the
-  // graph. Otherwise fall back to the empty state -- typically this
+  // graph. Otherwise fall back to the empty state; typically this
   // means the teacher filtered down to zero nodes.
   const subgraph: KnowledgeGraph = {
     nodes: filteredNodes,

@@ -14,7 +14,7 @@
   },
   "integrationKeys": {
     "createTitle": "Mint a site integration key",
-    "createDescription": "Issue a site-level bearer token for the Moodle / Canvas plugin. The plugin uses it to provision per-course API keys on behalf of teachers -- it cannot access course data itself. One key per LMS instance is usually enough.",
+    "createDescription": "Issue a site-level bearer token for the Moodle / Canvas plugin. The plugin uses it to provision per-course API keys on behalf of teachers; it cannot access course data itself. One key per LMS instance is usually enough.",
     "form": {
       "name": "Name",
       "namePlaceholder": "e.g. Moodle DSV prod",

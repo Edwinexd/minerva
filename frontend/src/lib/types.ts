@@ -199,7 +199,7 @@ export interface ConversationDetail {
   feedback: MessageFeedback[]
   /**
    * Extraction-guard flag log. Empty for non-teacher viewers (the
-   * backend gates this for privacy -- a student viewing their own
+   * backend gates this for privacy; a student viewing their own
    * conversation doesn't need to see "you tripped the guard at
    * turn 3" metadata; the rewrite already surfaced the visible
    * policy note to them). Ordered oldest-first, aligned to user
@@ -223,14 +223,14 @@ export interface ConversationDetail {
  * `chat::AegisAnalysisPayload`.
  *
  * Used in two places:
- *   * Live -- returned by `POST /aegis/analyze` while the student
+ *   * Live; returned by `POST /aegis/analyze` while the student
  *     types and on Send (drives the right-rail panel + the
  *     just-in-time intercept dialog).
- *   * Persisted -- attached to `ConversationDetail.prompt_analyses`
+ *   * Persisted; attached to `ConversationDetail.prompt_analyses`
  *     for the History list.
  *
  * `id` and `created_at` are present on persisted rows from the
- * conversation-detail route and absent on live verdicts -- both
+ * conversation-detail route and absent on live verdicts; both
  * fields are typed optional so one shape covers both.
  */
 export interface PromptAnalysis {
@@ -244,7 +244,7 @@ export interface PromptAnalysis {
    * affirmation rather than nothing.
    */
   suggestions: AegisSuggestion[]
-  /** "beginner" | "expert" -- which calibration produced this verdict. */
+  /** "beginner" | "expert"; which calibration produced this verdict. */
   mode: "beginner" | "expert"
   /** Set on persisted rows; undefined on live verdicts. */
   created_at?: string
@@ -591,7 +591,7 @@ export interface Document {
   uploaded_by: string
   created_at: string
   processed_at: string | null
-  // Course knowledge graph V1 -- nullable until classifier runs.
+  // Course knowledge graph V1; nullable until classifier runs.
   kind: DocumentKind | null
   kind_confidence: number | null
   kind_rationale: string | null

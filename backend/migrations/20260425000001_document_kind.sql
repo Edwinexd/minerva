@@ -2,7 +2,7 @@
 --
 -- `kind` is set by an LLM classifier at ingest time (or backfill), and may
 -- be overridden by a teacher. When `kind_locked_by_teacher = TRUE`, the
--- classifier never overwrites it -- both the ingest hook and the
+-- classifier never overwrites it; both the ingest hook and the
 -- `documents::set_classification` query enforce this.
 --
 -- Behavior wired up in the application layer:

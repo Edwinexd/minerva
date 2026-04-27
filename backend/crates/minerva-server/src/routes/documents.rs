@@ -104,7 +104,7 @@ async fn list_documents(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<DocumentResponse>>, AppError> {
-    // Verify access -- owner, admin, teacher, and TA can read the document list.
+    // Verify access; owner, admin, teacher, and TA can read the document list.
     let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
@@ -388,7 +388,7 @@ async fn delete_document(
         return Err(AppError::NotFound);
     }
 
-    // Delete vectors from Qdrant first -- if this fails we can retry safely
+    // Delete vectors from Qdrant first; if this fails we can retry safely
     // without leaving orphaned vectors behind.
     let collection_name =
         minerva_ingest::pipeline::collection_name(course_id, course.embedding_version);
@@ -417,7 +417,7 @@ async fn delete_document(
     // Delete from DB
     minerva_db::queries::documents::delete(&state.db, doc_id).await?;
 
-    // Delete file from disk -- try common extensions since we don't store the ext in DB.
+    // Delete file from disk; try common extensions since we don't store the ext in DB.
     for ext in &["pdf", "docx", "doc", "pptx", "ppt", "txt", "html", "url"] {
         let file_path = format!(
             "{}/{}/{}.{}",
@@ -595,7 +595,7 @@ pub fn extension_from_filename(filename: &str) -> &str {
 
 // ── Course-knowledge-graph V1 endpoints ────────────────────────────
 //
-// Auth: same pattern as `patch_document` -- course owner OR admin OR a
+// Auth: same pattern as `patch_document`; course owner OR admin OR a
 // teacher of the course. We don't allow students or TAs to flip a
 // document's classification.
 
@@ -619,7 +619,7 @@ async fn require_course_teacher(
 
 /// Gate every KG-related endpoint on the `course_kg` feature flag.
 /// Returns 404 (not 403) when off so a non-KG course "looks like"
-/// the feature simply doesn't exist -- no surface for student or
+/// the feature simply doesn't exist; no surface for student or
 /// teacher fishing.
 async fn require_kg_enabled(state: &AppState, course_id: Uuid) -> Result<(), AppError> {
     if crate::feature_flags::course_kg_enabled(&state.db, course_id).await {
@@ -705,7 +705,7 @@ struct ReclassifyResponse {
 /// locked by a teacher (returns `locked: true` so the UI can surface
 /// "unlock first").
 ///
-/// Marks the course dirty for the relink sweeper -- a single doc's
+/// Marks the course dirty for the relink sweeper; a single doc's
 /// kind change can shift its `solution_of` / `part_of_unit` edges, so
 /// the graph needs refreshing. Debounced (default 60s) so a teacher
 /// rapid-fire reclassifying several docs only triggers one linker call.
@@ -746,7 +746,7 @@ struct SetKindBody {
 
 /// Manually set a document's kind and lock it against future
 /// auto-classification. If the new kind is `sample_solution`, also
-/// purge any embedded chunks from Qdrant -- otherwise stale vectors
+/// purge any embedded chunks from Qdrant; otherwise stale vectors
 /// would still be retrievable even though the doc is now flagged.
 async fn set_document_kind(
     State(state): State<AppState>,
@@ -826,7 +826,7 @@ async fn set_document_kind(
 }
 
 /// Clear the teacher lock so future re-classifications can overwrite
-/// the kind. Doesn't trigger a re-run -- the teacher can press
+/// the kind. Doesn't trigger a re-run; the teacher can press
 /// re-classify after if they want.
 async fn clear_kind_lock(
     State(state): State<AppState>,
@@ -919,13 +919,13 @@ pub(crate) async fn relink_course(state: &AppState, course_id: Uuid) -> Result<u
     // pair, so we don't wipe-and-rewrite here. A pair whose endpoints
     // haven't been re-classified since its prior decision keeps both
     // its cache row AND its existing document_relations edge (if any)
-    // -- no LLM call, no DB churn.
+    //; no LLM call, no DB churn.
     let result = crate::classification::linker::link_course(&ctx, course_id, &docs)
         .await
         .map_err(AppError::Internal)?;
 
     tracing::info!(
-        "relink: course {} considered {} doc(s) -- {} cached, {} re-evaluated, {} live edge(s)",
+        "relink: course {} considered {} doc(s); {} cached, {} re-evaluated, {} live edge(s)",
         course_id,
         result.considered,
         result.cached_hits,
@@ -982,7 +982,7 @@ struct GraphResponse {
     /// embedding-similarity candidate generator, which is precisely
     /// what the linker does on the next tick. The previous count
     /// summed `stale_decisions` (pairs) and `new_doc_count` (docs
-    /// that had never been on either side of a cached pair) -- the
+    /// that had never been on either side of a cached pair); the
     /// latter went permanently positive for any classified doc whose
     /// nearest neighbour was below `MIN_EMBEDDING_SIMILARITY`, so the
     /// counter never cleared. Both bugs disappear once we stop
@@ -1032,7 +1032,7 @@ async fn get_knowledge_graph(
 
     // "Linking pending" indicator. True iff EITHER:
     //   * the course is in `relink_queue` (a mark_dirty has fired
-    //     since the last sweep drain -- the sweep is about to run),
+    //     since the last sweep drain; the sweep is about to run),
     //   * OR there are cached pair decisions whose endpoint
     //     `classified_at` no longer matches (work the next sweep
     //     will redo).

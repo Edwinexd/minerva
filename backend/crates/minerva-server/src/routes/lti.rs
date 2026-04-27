@@ -1,24 +1,24 @@
 //! LTI 1.3 Tool Provider endpoints.
 //!
 //! Public endpoints (no Shibboleth / API key auth), mounted at /lti:
-//!   GET/POST /lti/login   -- OIDC third-party initiated login
-//!   POST     /lti/launch  -- Validate id_token, create session, redirect to embed
-//!   GET      /lti/jwks    -- Serve tool public keys
+//!   GET/POST /lti/login  ; OIDC third-party initiated login
+//!   POST     /lti/launch ; Validate id_token, create session, redirect to embed
+//!   GET      /lti/jwks   ; Serve tool public keys
 //!
 //! Public API endpoints (also unauthenticated; mounted at /api/lti):
-//!   GET      /api/lti/bind -- Read bind-token, return pickable courses (frontend-driven)
-//!   POST     /api/lti/bind -- Create a course binding, issue embed token
+//!   GET      /api/lti/bind; Read bind-token, return pickable courses (frontend-driven)
+//!   POST     /api/lti/bind; Create a course binding, issue embed token
 //!
 //! Course-level endpoints (behind auth_middleware, course teacher/owner):
-//!   GET    /courses/{course_id}/lti          -- List LTI registrations
-//!   POST   /courses/{course_id}/lti          -- Register LTI connection
-//!   DELETE /courses/{course_id}/lti/{id}     -- Remove registration
+//!   GET    /courses/{course_id}/lti         ; List LTI registrations
+//!   POST   /courses/{course_id}/lti         ; Register LTI connection
+//!   DELETE /courses/{course_id}/lti/{id}    ; Remove registration
 //!
 //! Admin endpoints (behind auth_middleware, admin only):
-//!   GET    /admin/lti/platforms              -- List site-level platforms
-//!   POST   /admin/lti/platforms              -- Create site-level platform
-//!   DELETE /admin/lti/platforms/{id}         -- Remove site-level platform
-//!   GET    /admin/lti/setup                  -- Moodle/Canvas admin copy-paste config
+//!   GET    /admin/lti/platforms             ; List site-level platforms
+//!   POST   /admin/lti/platforms             ; Create site-level platform
+//!   DELETE /admin/lti/platforms/{id}        ; Remove site-level platform
+//!   GET    /admin/lti/setup                 ; Moodle/Canvas admin copy-paste config
 
 use axum::extract::{Path, Query, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -101,7 +101,7 @@ struct LoginInitiationParams {
     lti_deployment_id: Option<String>,
 }
 
-/// GET /lti/login -- Moodle redirects here with query params.
+/// GET /lti/login; Moodle redirects here with query params.
 async fn login_initiation_get(
     State(state): State<AppState>,
     Query(params): Query<LoginInitiationParams>,
@@ -109,7 +109,7 @@ async fn login_initiation_get(
     do_login_initiation(state, params).await
 }
 
-/// POST /lti/login -- Moodle may POST form-encoded params instead.
+/// POST /lti/login; Moodle may POST form-encoded params instead.
 async fn login_initiation_post(
     State(state): State<AppState>,
     Form(params): Form<LoginInitiationParams>,
@@ -343,7 +343,7 @@ async fn handle_launch(
 
     // 6. Find or create the user.
     //    Reuses an existing Shib user's record if present; does NOT modify
-    //    their role or display name -- LTI should not alter existing accounts.
+    //    their role or display name; LTI should not alter existing accounts.
     let (user, _) = minerva_db::queries::users::find_or_create_by_eppn(
         &state.db,
         &eppn,
@@ -534,13 +534,13 @@ async fn jwks(State(state): State<AppState>) -> Json<serde_json::Value> {
 }
 
 async fn icon_svg() -> Response {
-    // Kept in sync with frontend/public/favicon.svg -- update both when the brand changes.
+    // Kept in sync with frontend/public/favicon.svg; update both when the brand changes.
     const SVG: &str = include_str!("../../assets/favicon.svg");
     ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], SVG).into_response()
 }
 
 // Moodle 4 CSS-masks SVG activity icons with the theme accent color, so a branded
-// SVG renders as a flat blob. PNGs bypass that treatment -- advertise this one to Moodle.
+// SVG renders as a flat blob. PNGs bypass that treatment; advertise this one to Moodle.
 async fn icon_png() -> Response {
     const PNG: &[u8] = include_bytes!("../../assets/favicon.png");
     ([(axum::http::header::CONTENT_TYPE, "image/png")], PNG).into_response()
@@ -550,7 +550,7 @@ async fn icon_png() -> Response {
 // Course-level: LTI setup + registration management
 // ---------------------------------------------------------------------------
 
-/// GET /courses/{course_id}/lti/setup -- returns everything the teacher needs
+/// GET /courses/{course_id}/lti/setup; returns everything the teacher needs
 /// to configure Moodle BEFORE creating a registration in Minerva.
 async fn lti_setup(
     State(state): State<AppState>,
@@ -581,7 +581,7 @@ fn build_setup_response(base_url: &str) -> LtiSetupResponse {
             format!("Set Initiate login URL to: {}", config.initiate_login_url),
             format!("Set Redirection URI(s) to: {}", config.redirection_uris),
             format!(
-                "Under Custom parameters, add: {} -- this links Moodle users to their Minerva identity. Without it, students launched from Moodle will be separate users from those who log in directly.",
+                "Under Custom parameters, add: {}; this links Moodle users to their Minerva identity. Without it, students launched from Moodle will be separate users from those who log in directly.",
                 config.custom_parameters,
             ),
             format!(
@@ -667,11 +667,11 @@ struct CreateRegistrationRequest {
     issuer: String,
     client_id: String,
     deployment_id: Option<String>,
-    /// Optional -- defaults to {issuer}/mod/lti/auth.php
+    /// Optional; defaults to {issuer}/mod/lti/auth.php
     auth_login_url: Option<String>,
-    /// Optional -- defaults to {issuer}/mod/lti/token.php
+    /// Optional; defaults to {issuer}/mod/lti/token.php
     auth_token_url: Option<String>,
-    /// Optional -- defaults to {issuer}/mod/lti/certs.php
+    /// Optional; defaults to {issuer}/mod/lti/certs.php
     platform_jwks_url: Option<String>,
 }
 
@@ -698,7 +698,7 @@ async fn create_registration(
         .unwrap_or_else(|| format!("{}/mod/lti/certs.php", issuer));
 
     // A per-course registration can't share (issuer, client_id) with a
-    // site-level platform -- the login handler can only dispatch to one, and
+    // site-level platform; the login handler can only dispatch to one, and
     // silently preferring one path would surprise the other side's admin.
     if minerva_db::queries::lti::find_platform_by_issuer(&state.db, issuer, &body.client_id)
         .await?
@@ -774,7 +774,7 @@ async fn require_course_teacher(
         return Ok(());
     }
 
-    // LTI registrations are a teacher-only operation -- TAs are excluded.
+    // LTI registrations are a teacher-only operation; TAs are excluded.
     let is_teacher =
         minerva_db::queries::courses::is_course_teacher_strict(&state.db, course_id, user.id)
             .await?;
@@ -935,7 +935,7 @@ struct BindInfoCourse {
     name: String,
 }
 
-/// GET /lti/bind?token=... -- returns enough for the frontend to show the
+/// GET /lti/bind?token=...; returns enough for the frontend to show the
 /// picker. Not authenticated by Shibboleth; the token itself is the auth.
 async fn bind_info(
     State(state): State<AppState>,
@@ -948,7 +948,7 @@ async fn bind_info(
         .ok_or_else(|| AppError::bad_request("lti.platform_not_found"))?;
 
     // Admins can bind anything. Teachers see their owned + co-taught
-    // courses. Students/unknown users get an empty list -- the UI then
+    // courses. Students/unknown users get an empty list; the UI then
     // shows a "ask your teacher to launch this once" message.
     let user = minerva_db::queries::users::find_by_id(&state.db, payload.user_id)
         .await?
@@ -992,7 +992,7 @@ struct BindCompleteResponse {
     redirect_url: String,
 }
 
-/// POST /lti/bind -- creates the (platform, context) → course binding and
+/// POST /lti/bind; creates the (platform, context) → course binding and
 /// returns an embed URL the frontend should redirect to. Returns JSON (not
 /// HTML) because the call is XHR from the bind picker page; the frontend
 /// performs the redirect itself.
@@ -1091,7 +1091,7 @@ fn require_admin(user: &User) -> Result<(), AppError> {
     Ok(())
 }
 
-/// GET /admin/lti/setup -- the same Moodle/Canvas tool config hints the
+/// GET /admin/lti/setup; the same Moodle/Canvas tool config hints the
 /// per-course flow offers, but for the site admin. Exposes tool URLs and the
 /// recommended custom parameter (user_eppn) to copy into "Manage tools".
 async fn admin_lti_setup(
@@ -1121,7 +1121,7 @@ fn build_admin_setup_response(base_url: &str) -> LtiSetupResponse {
                 "Under 'Show more...', set Icon URL to: {}",
                 config.icon_url,
             ),
-            "Save. Moodle will show the tool's registration details -- copy the Platform ID (issuer), Client ID, Deployment ID, and the platform endpoints.".into(),
+            "Save. Moodle will show the tool's registration details; copy the Platform ID (issuer), Client ID, Deployment ID, and the platform endpoints.".into(),
             "Back in Minerva, create an LTI platform with those values. After that, teachers can add Minerva to any Moodle course and will be asked (on first launch) which Minerva course to bind to.".into(),
         ],
         moodle_tool_config: config,

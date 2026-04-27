@@ -74,7 +74,7 @@ export interface AdminEmbeddingModel {
   enabled: boolean
   // True for the single model new courses are created with. Set via
   // `PUT /admin/embedding-models/default` with `{model}` in the body.
-  // Existing courses are not touched when the default flips -- only
+  // Existing courses are not touched when the default flips; only
   // future POST /courses calls pick up the new value.
   is_default: boolean
   // Number of active local-provider courses currently using this
@@ -101,7 +101,7 @@ export const adminEmbeddingModelsQuery = queryOptions({
 })
 
 /// Public picker feed for the per-course teacher dropdown. Auth-gated
-/// (any logged-in user can fetch it -- the list itself is non-secret),
+/// (any logged-in user can fetch it; the list itself is non-secret),
 /// returns only `enabled` catalog entries with their dimensions and
 /// latest benchmark. Replaces the previous hardcoded model list in
 /// the teacher config page.
@@ -224,7 +224,7 @@ export const canvasFilesQuery = (courseId: string, connectionId: string) =>
 /**
  * Per-course KG / extraction-guard token spend, broken out per
  * (category, model) for the last 30 days. Distinct from the
- * existing per-student chat-token tracking -- this is the cost the
+ * existing per-student chat-token tracking; this is the cost the
  * course itself burned on classifier / linker / adversarial filter
  * / extraction guard. Teacher / owner / admin only.
  */
@@ -313,7 +313,7 @@ export interface KnowledgeGraph {
   nodes: KnowledgeGraphNode[]
   edges: KnowledgeGraphEdge[]
   edges_computed: boolean
-  /// True iff the linker has work waiting -- either the course is
+  /// True iff the linker has work waiting; either the course is
   /// queued for a relink sweep, or there are cached pair decisions
   /// whose endpoints have been re-classified since. Drives the
   /// "Linking..." pill on the graph viewer.

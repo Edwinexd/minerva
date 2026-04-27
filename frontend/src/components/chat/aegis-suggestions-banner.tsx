@@ -1,25 +1,25 @@
 /**
  * Above-the-input banner that surfaces Aegis suggestions for the
  * student's current draft. Replaces the previous inline amber
- * sentence under the Send button -- the same information now sits
+ * sentence under the Send button; the same information now sits
  * visibly above the input where Slack/iMessage place "replying to"
  * or "attached file" chips, so the student SEES it without having
  * to glance away from the input.
  *
  * Three visual states:
- *   * `idle`     -- suggestions exist for the draft. Soft amber
+ *   * `idle`    ; suggestions exist for the draft. Soft amber
  *                   tile, "Aegis has N ideas" header, "Some ideas"
  *                   button on the right, dismiss X. Never blocks
  *                   the send.
- *   * `blocked`  -- the student pressed Send and got soft-blocked.
+ *   * `blocked` ; the student pressed Send and got soft-blocked.
  *                   Same tile but a touch more prominent (rose
  *                   border) and the secondary text changes to
  *                   "Press Send again to send as-is".
- *   * `working`  -- "Some ideas" is in flight. Button shows
+ *   * `working` ; "Some ideas" is in flight. Button shows
  *                   "Rewriting..." + disabled. Reverts to idle on
  *                   completion.
  *
- * The dismiss X collapses the banner for THIS draft only -- new
+ * The dismiss X collapses the banner for THIS draft only; new
  * input regenerates a fresh verdict and the banner can return.
  */
 import { useTranslation } from "react-i18next"
@@ -37,7 +37,7 @@ interface AegisSuggestionsBannerProps {
   blocked: boolean
   /** True while a rewrite request is in flight. */
   working: boolean
-  /** Click "Some ideas" -- triggers POST /aegis/rewrite + auto-send. */
+  /** Click "Some ideas"; triggers POST /aegis/rewrite + auto-send. */
   onUseIdeas: () => void
   /** Collapse the banner for the current draft. */
   onDismiss: () => void

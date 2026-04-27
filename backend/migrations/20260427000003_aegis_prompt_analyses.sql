@@ -5,7 +5,7 @@
 -- One row per user message at most; the analyzer is best-effort
 -- (soft-fails on transport / JSON / DB errors) so messages without a
 -- corresponding row simply render no panel content for that turn.
--- The chat path itself never waits on this table -- failure here
+-- The chat path itself never waits on this table; failure here
 -- doesn't block inference.
 --
 -- Scores are 0..=10 inclusive (CHECK below). The five dimensions

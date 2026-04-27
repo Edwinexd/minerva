@@ -72,7 +72,7 @@ class link_course_form extends \moodleform {
     private ?array $sitecourses = null;
 
     /**
-     * Site-integration-mode error surfaced on the form -- e.g. the teacher's
+     * Site-integration-mode error surfaced on the form; e.g. the teacher's
      * eppn isn't known to Minerva yet, or the site key is invalid.
      *
      * @var string|null

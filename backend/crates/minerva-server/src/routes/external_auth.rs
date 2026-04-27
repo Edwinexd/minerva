@@ -9,7 +9,7 @@
 //! Apache (mod_lua) validates the cookie's HMAC + expiry on every request
 //! and injects `eppn`, `displayName`, and `X-Minerva-Ext-Jti` headers. The
 //! backend's `auth_middleware` reads `eppn` (same path as Shib users) and
-//! additionally looks up the JTI to enforce per-invite revocation -- so
+//! additionally looks up the JTI to enforce per-invite revocation; so
 //! an admin can kill a single invite without rotating the shared secret.
 //!
 //! Tokens are signed with the global `MINERVA_HMAC_SECRET` (shared with
@@ -205,7 +205,7 @@ async fn callback(
 
     // Cookie max-age is set to the JWT's remaining lifetime so browsers drop
     // it around the same time Apache stops accepting it. We don't extract the
-    // exact remaining seconds here -- the verify endpoint is the source of
+    // exact remaining seconds here; the verify endpoint is the source of
     // truth on expiry, so a slight cookie/token mismatch is harmless.
     let cookie_value = format!(
         "{name}={value}; Path=/; Max-Age={max_age}; HttpOnly; Secure; SameSite=Lax",

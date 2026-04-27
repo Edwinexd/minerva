@@ -49,14 +49,14 @@ pub fn router() -> Router<AppState> {
             put(set_feedback),
         )
         // Aegis live analyzer. Called from the frontend on debounced
-        // input changes -- the panel updates BEFORE the user hits Send.
+        // input changes; the panel updates BEFORE the user hits Send.
         // No persistence happens here; the verdict the student
         // ultimately accepts gets persisted via the send-message body.
         .route("/aegis/analyze", post(analyze_prompt_route))
         // Aegis rewrite: takes the student's draft + the suggestions
         // already produced for it and asks the model to rewrite the
         // draft incorporating them. Drives the panel's "Some ideas"
-        // button -- one-click revision with auto-send.
+        // button; one-click revision with auto-send.
         .route("/aegis/rewrite", post(rewrite_prompt_route))
 }
 
@@ -161,7 +161,7 @@ struct MessageFeedbackResponse {
 ///     AND on Send to drive the just-in-time intercept).
 ///   * **Client -> server** as the optional `prompt_analysis`
 ///     field on `POST /conversations/.../message` (the verdict the
-///     student saw at submit -- persisted server-side and surfaced
+///     student saw at submit; persisted server-side and surfaced
 ///     as the History row for that turn).
 ///
 /// Round-tripping the same struct keeps the live-vs-persisted
@@ -216,7 +216,7 @@ impl AegisAnalysisPayload {
             // Cap at 3 here too (the analyzer's system prompt says
             // 0..=3, but Cerebras strict-mode schemas don't accept
             // `maxItems` so we enforce in code). Persistence path
-            // truncates again at insert -- belt-and-braces.
+            // truncates again at insert; belt-and-braces.
             suggestions: v
                 .suggestions
                 .into_iter()
@@ -247,7 +247,7 @@ pub(crate) struct PromptAnalysisResponse {
     /// 0..=3 suggestions, oldest-most-relevant-first. Deserialised
     /// out of the DB's JSONB column.
     pub(crate) suggestions: Vec<AegisSuggestionPayload>,
-    /// "beginner" | "expert" -- which calibration the analyzer was
+    /// "beginner" | "expert"; which calibration the analyzer was
     /// running under for this row.
     pub(crate) mode: String,
     pub(crate) created_at: chrono::DateTime<chrono::Utc>,
@@ -280,7 +280,7 @@ fn prompt_analysis_response_from_row(
 
 /// Load aegis prompt analyses for a conversation and convert them
 /// to the shared wire shape. Soft-fails to an empty Vec on DB error
-/// (logged at warn) -- the Feedback panel just renders nothing for
+/// (logged at warn); the Feedback panel just renders nothing for
 /// that conversation rather than 500-ing the whole detail load.
 ///
 /// Shared between the Shibboleth chat detail route and the embed
@@ -409,7 +409,7 @@ async fn list_all_conversations(
 /// Per-conversation flag-kind map for the teacher conversation
 /// list page. Returns only the distinct flag *kinds* (e.g.
 /// "extraction_attempt") attached to each conversation, not the
-/// full flag rows -- the list view only needs to know which
+/// full flag rows; the list view only needs to know which
 /// badges to render. Detailed per-turn flag data is fetched on
 /// demand via `get_conversation`. Teacher/admin only.
 async fn list_flag_kinds(
@@ -798,7 +798,7 @@ async fn popular_topics(
 /// Shibboleth route reuses it for feedback pseudonymization downstream).
 /// The rule is: owner of the conv, teacher/admin on the course, or the
 /// conv is pinned by a teacher (which makes it readable by every course
-/// member). Mismatched `course_id` is reported as 404 -- not 403 --
+/// member). Mismatched `course_id` is reported as 404; not 403 --
 /// so a teacher of course A can't probe for cids in course B.
 ///
 /// Shared between the Shibboleth and embed routes; the embed
@@ -841,7 +841,7 @@ async fn get_conversation(
         minerva_db::queries::message_feedback::list_for_conversation(&state.db, cid).await?;
     // Conversation flags are teacher-only by policy: a student
     // shouldn't see "you tripped the extraction guard at turn 3"
-    // metadata about themselves -- the rewrite already surfaces
+    // metadata about themselves; the rewrite already surfaces
     // the visible policy note to them. Empty Vec for non-teacher
     // viewers so the response shape stays stable for the typed
     // frontend client.
@@ -945,7 +945,7 @@ struct SendMessageRequest {
     /// alongside the message so the History panel persists what
     /// the student actually saw. None when aegis is off for the
     /// course OR the user typed and sent inside the debounce window
-    /// (no analysis ever produced); both are valid -- the History
+    /// (no analysis ever produced); both are valid; the History
     /// row simply doesn't appear for that turn.
     #[serde(default)]
     prompt_analysis: Option<AegisAnalysisPayload>,
@@ -975,7 +975,7 @@ pub(crate) struct AnalyzePromptRequest {
 }
 
 /// Wire shape for `AegisMode`. `serde` reads this as the lower-cased
-/// strings the frontend ships -- `"beginner"` / `"expert"` -- and
+/// strings the frontend ships; `"beginner"` / `"expert"`; and
 /// rejects anything else at deserialise time. Default is Beginner
 /// so missing-field / older-client requests stay on the lenient
 /// rubric (see `AnalyzePromptRequest::mode`). Serialize is needed
@@ -1061,7 +1061,7 @@ pub(crate) async fn analyze_prompt_for_user(
         Ok(v) => v,
         Err(reason) => {
             // Upstream failure (Cerebras 4xx/5xx, malformed
-            // response, etc.) -- bubble up as 500 so the frontend
+            // response, etc.); bubble up as 500 so the frontend
             // and observability layer see a real failure rather
             // than the previous misleading 200+null. The detailed
             // reason rides into the log line via `Internal`'s
@@ -1342,7 +1342,7 @@ pub(super) async fn run_chat_message(
     // Aegis: persist the verdict the student had on screen when
     // they pressed Send so it appears in the History panel for
     // this conversation. The analysis itself was produced earlier
-    // by `POST /aegis/analyze` (live, no persist) -- the frontend
+    // by `POST /aegis/analyze` (live, no persist); the frontend
     // caches it and ships it here, atomic with the message body.
     //
     // We persist iff the flag is on AND the client supplied a

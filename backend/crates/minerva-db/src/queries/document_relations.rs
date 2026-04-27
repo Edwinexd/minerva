@@ -3,12 +3,12 @@
 //!
 //! Two related state slices live here:
 //!
-//! 1. `document_relations` -- the live edge set the linker rewrites on
+//! 1. `document_relations`; the live edge set the linker rewrites on
 //!    every pass. Each row also carries a `rejected_by_teacher` flag
 //!    so the graph viewer can hide an edge a teacher vetoed without
 //!    losing the audit trail.
 //!
-//! 2. `rejected_edge_pairs` -- a separate veto list keyed by the
+//! 2. `rejected_edge_pairs`; a separate veto list keyed by the
 //!    (src, dst, relation) triple. The linker reads this BEFORE
 //!    proposing edges so a rejected pair never re-appears in the
 //!    output, even if the model would otherwise re-suggest it. We
@@ -39,7 +39,7 @@ pub struct DocumentRelationRow {
 }
 
 /// Insert or update a single edge. Idempotent on
-/// `(src_doc_id, dst_doc_id, relation)` -- re-running the linker just
+/// `(src_doc_id, dst_doc_id, relation)`; re-running the linker just
 /// refreshes confidence/rationale rather than duplicating rows.
 pub async fn upsert(
     db: &PgPool,
@@ -101,7 +101,7 @@ pub async fn list_by_course(
 /// cleans its edges; this is just for full re-link.
 ///
 /// Note: this does NOT touch `rejected_edge_pairs`. Teacher vetoes
-/// must survive a relink -- otherwise the next pass would re-propose
+/// must survive a relink; otherwise the next pass would re-propose
 /// every rejected edge.
 #[allow(dead_code)]
 pub async fn delete_by_course(db: &PgPool, course_id: Uuid) -> Result<u64, sqlx::Error> {
@@ -173,7 +173,7 @@ pub async fn delete_below_confidence(
 ///     content into context unsolicited.
 ///
 /// Rejected edges (`document_relations.rejected_by_teacher`) are
-/// excluded -- a teacher veto on an edge means it shouldn't be
+/// excluded; a teacher veto on an edge means it shouldn't be
 /// part of the inference signal either.
 ///
 /// Returned map keys are normalised: each input doc id appears as
@@ -239,7 +239,7 @@ pub async fn unit_partners_for_docs(
 /// transcripts) are connected to via `applied_in` source edges,
 /// filtered to assignment-bearing kinds. Used by the chat path's
 /// extraction-guard to decide which assignments are "in proximity"
-/// when retrieval surfaced lecture content -- a student asking
+/// when retrieval surfaced lecture content; a student asking
 /// about a lecture that's applied_in to assignment X is implicitly
 /// near X for the purposes of multi-turn extraction signals.
 ///

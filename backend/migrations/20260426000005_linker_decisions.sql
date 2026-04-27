@@ -2,11 +2,11 @@
 --
 -- Without this, every relink re-asks gpt-oss-120b about every
 -- candidate pair in the course, even when neither endpoint has
--- changed since last evaluation -- expensive in tokens and
+-- changed since last evaluation; expensive in tokens and
 -- pointless (the answer doesn't change without input changing).
 --
 -- This table records what the model decided for every pair we've
--- ever asked about, INCLUDING "none" (no relation) -- which the
+-- ever asked about, INCLUDING "none" (no relation); which the
 -- positive-only `document_relations` table has no way to
 -- represent. The linker reads cached decisions BEFORE deciding
 -- whether to call the LLM:
@@ -25,7 +25,7 @@
 --     decision's `relation` column captures the canonical relation
 --     (or NULL = "none"); for directional relations (solution_of,
 --     applied_in, prerequisite_of) the actual src/dst lives on the
---     document_relations row, not here -- this table is purely a
+--     document_relations row, not here; this table is purely a
 --     "did we ask about this pair, what was the answer" log.
 --   * `a_classified_at` / `b_classified_at` are snapshots of the
 --     two docs' classified_at at decision time. The cache is
@@ -33,7 +33,7 @@
 --   * Cascading deletes: removing a doc cascades to remove its
 --     decisions (FK ON DELETE CASCADE), so a doc-delete naturally
 --     re-triggers LLM evaluation for any new pairs that involved
---     it -- which is fine because new candidates won't include
+--     it; which is fine because new candidates won't include
 --     that doc anyway.
 
 CREATE TABLE linker_decisions (
@@ -43,11 +43,11 @@ CREATE TABLE linker_decisions (
     decided_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     a_classified_at  TIMESTAMPTZ,
     b_classified_at  TIMESTAMPTZ,
-    -- Canonical decision string. NULL means the model said "no
-    -- relation" / "none" -- recorded so we don't re-ask. Non-NULL
-    -- values mirror the document_relations.relation enum.
+   ; Canonical decision string. NULL means the model said "no
+   ; relation" / "none"; recorded so we don't re-ask. Non-NULL
+   ; values mirror the document_relations.relation enum.
     relation         TEXT,
-    -- Confidence the model assigned. NULL when relation IS NULL.
+   ; Confidence the model assigned. NULL when relation IS NULL.
     confidence       REAL,
     PRIMARY KEY (a_doc_id, b_doc_id),
     CHECK (a_doc_id < b_doc_id),

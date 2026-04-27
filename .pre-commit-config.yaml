@@ -22,6 +22,27 @@ repos:
         types: [text]
         exclude: (\.lock|node_modules|target|dist|\.gen\.)
 
+      - id: ban-double-dash
+        name: ban space-dash-dash-space
+        # Banned because LLMs reach for it as an em-dash workaround, which
+        # is just as much of an LLM tell as the em dash itself.
+        #
+        # Pattern: a line containing space-dash-dash-space, BUT only if some
+        # non-whitespace char appears before the dashes on the same line.
+        # That carve-out keeps genuine indented SQL/Lua comments (e.g.
+        # four-space-indented dash-dash-foo) legal while still catching inline
+        # comments after code, mid-prose dashes inside comments, and any
+        # space-dash-dash-space inside string literals.
+        # Forms still allowed: postfix decrement, double-dash flags, etc.
+        # (anything without spaces around the dashes).
+        # YAML is excluded because cargo/CI invocations legitimately use the
+        # end-of-options separator.
+        # Hex escape for the space char keeps this hook config itself clean.
+        entry: 'perl -ne ''if (/\S.*\x20--\x20/) { print STDERR "$ARGV:$.: $_"; $found = 1 } END { exit($found ? 1 : 0) }'''
+        language: system
+        types: [text]
+        exclude: (\.lock|\.ya?ml$|node_modules|target|dist|\.gen\.)
+
       - id: tsc-check
         name: tsc check
         entry: bash -c 'cd frontend && npx tsc -b'

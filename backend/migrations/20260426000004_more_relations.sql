@@ -9,11 +9,11 @@
 --
 -- New relations:
 --
---   * `prerequisite_of(src, dst)` -- src introduces concepts dst
+--   * `prerequisite_of(src, dst)`; src introduces concepts dst
 --     builds on. Directional. Use for foundational lecture/reading
 --     that a later lecture/exercise/assessment relies on.
 --
---   * `applied_in(src, dst)` -- theoretical content (lecture,
+--   * `applied_in(src, dst)`; theoretical content (lecture,
 --     reading, lecture_transcript) is APPLIED in a practical doc
 --     (tutorial_exercise, assignment_brief, lab_brief, exam).
 --     Directional from theory to practice. Lets the chat path

@@ -82,7 +82,7 @@ pub async fn get_user_daily_tokens(
 /// contribution to any owner's aggregate cap for the rest of UTC today.
 ///
 /// Destructive: today's audit trail for this user is lost. That is the
-/// point -- we use DELETE rather than a zero-update so the subsequent
+/// point; we use DELETE rather than a zero-update so the subsequent
 /// `record_usage` upsert starts from a clean row. Historical rows
 /// (`date < CURRENT_DATE`) are untouched. Returns the number of rows
 /// deleted so the caller can surface "no usage today" to the UI.

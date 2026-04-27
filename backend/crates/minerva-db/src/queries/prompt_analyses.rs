@@ -5,17 +5,17 @@
 //! The row carries an opaque JSONB array of suggestions so adding,
 //! reordering, or renaming a suggestion field never forces a
 //! migration. The Rust side validates shape at insert by going
-//! through `serde` -- the column is `NOT NULL` with default `[]`
+//! through `serde`; the column is `NOT NULL` with default `[]`
 //! so reads are total and "no suggestions to make" reads back
 //! identically to "the analyzer found nothing worth saying".
 //!
 //! Two layers like every other queries module:
 //!
-//!   1. `insert` -- the route writes one row when the user sends a
+//!   1. `insert`; the route writes one row when the user sends a
 //!      message AND had a non-empty live verdict cached client-
 //!      side. Idempotent under `(message_id)` UNIQUE: a retry after
 //!      a transient failure replaces the previous row.
-//!   2. `list_for_conversation` -- the chat detail route pulls
+//!   2. `list_for_conversation`; the chat detail route pulls
 //!      every analysis for a conversation in one query so the
 //!      Feedback panel's history list comes from the same payload
 //!      the messages do.
@@ -33,7 +33,7 @@ pub struct PromptAnalysisRow {
     /// schema evolution (add a `severity`, etc.) doesn't ripple
     /// into this crate.
     pub suggestions: serde_json::Value,
-    /// `"beginner"` or `"expert"` -- enforced by CHECK constraint
+    /// `"beginner"` or `"expert"`; enforced by CHECK constraint
     /// at the table level. Persisted so a History row can carry
     /// the calibration label it was generated under.
     pub mode: String,
@@ -55,7 +55,7 @@ pub struct PromptAnalysisInsert<'a> {
 
 /// Insert (or replace, on retry) one analysis row. ON CONFLICT
 /// (message_id) DO UPDATE so a transient analyzer retry doesn't
-/// trip the UNIQUE constraint -- the latest verdict for a turn is
+/// trip the UNIQUE constraint; the latest verdict for a turn is
 /// what the panel shows.
 pub async fn insert(
     db: &PgPool,

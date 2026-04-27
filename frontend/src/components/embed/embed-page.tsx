@@ -18,7 +18,7 @@ import { useAegisMode } from "@/components/chat/use-aegis-mode"
 import { useAegisPanelVisible } from "@/components/chat/use-aegis-panel-visible"
 import type { PromptAnalysis, TeacherNote } from "@/lib/types"
 
-// -- Types for embed API responses --
+//; Types for embed API responses --
 
 interface EmbedCourse {
   id: string
@@ -71,7 +71,7 @@ interface EmbedConversationDetail {
   notes: TeacherNote[]
   /**
    * Aegis prompt-coaching analyses, one per scored user turn. Same
-   * shape as the Shibboleth route -- empty when aegis is off for
+   * shape as the Shibboleth route; empty when aegis is off for
    * the course or every turn so far soft-failed.
    */
   prompt_analyses: PromptAnalysis[]
@@ -121,7 +121,7 @@ async function embedPost<T>(path: string, token: string, body?: unknown): Promis
   return res.json()
 }
 
-// -- Main page --
+//; Main page --
 
 export function EmbedPage({ useParams }: { useParams: () => { courseId: string } }) {
   const { t } = useTranslation("auth")
@@ -148,7 +148,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   useDocumentTitle(course ? tCommon("pageTitles.embed", { course: course.name }) : null)
 
   // Load course, user, conversations, and any teacher-pinned chats on
-  // mount. Pinned failures are tolerated -- the rest of the page still
+  // mount. Pinned failures are tolerated; the rest of the page still
   // works without them.
   useEffect(() => {
     if (!token) {
@@ -177,7 +177,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
           setActiveConvId(convs[0].id)
         } else if (pins.length > 0) {
           // Land on a pinned chat if the user has nothing of their own
-          // -- otherwise the pane would be empty even though the
+          //; otherwise the pane would be empty even though the
           // teacher highlighted something.
           setActiveConvId(pins[0].id)
         }
@@ -338,7 +338,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   )
 }
 
-// -- Chat window --
+//; Chat window --
 
 function EmbedChatWindow({
   courseId,
@@ -380,7 +380,7 @@ function EmbedChatWindow({
   const [messages, setMessages] = useState<EmbedMessage[]>([])
   const [notes, setNotes] = useState<TeacherNote[]>([])
   // Aegis analyses live in component state alongside `messages`
-  // because the embed view doesn't run on React Query -- we hand-
+  // because the embed view doesn't run on React Query; we hand-
   // load conversation detail on every conversation change. Same
   // soft-fail-to-empty fallback the route uses on the server side.
   const [promptAnalyses, setPromptAnalyses] = useState<PromptAnalysis[]>([])
@@ -390,7 +390,7 @@ function EmbedChatWindow({
   const { send, reset, setError } = stream
 
   // Subject-expertise mode shared with the panel toggle (see
-  // chat-page for the rationale). Read-only here -- the setter
+  // chat-page for the rationale). Read-only here; the setter
   // is the panel's concern.
   const [aegisMode] = useAegisMode()
   const [panelVisible, setPanelVisible] = useAegisPanelVisible()
@@ -598,7 +598,7 @@ function EmbedChatWindow({
   const sendNeedsConfirm =
     confirmDraftSend !== null && confirmDraftSend === input
 
-  // Banner state -- mirrors chat-page. The rewrite call uses the
+  // Banner state; mirrors chat-page. The rewrite call uses the
   // embed-token-in-body auth flow rather than cookies + dev-user.
   const [bannerDismissedFor, setBannerDismissedFor] = useState<string | null>(
     null,

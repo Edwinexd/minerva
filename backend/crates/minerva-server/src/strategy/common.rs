@@ -15,7 +15,7 @@ use crate::error::AppError;
 /// assignment-kind signal is considered tangential and the refusal
 /// addendum is NOT appended. Tuned so a student's question that
 /// glances on a topic word from an assignment doesn't trigger the
-/// refusal -- only a substantive overlap with the brief itself does.
+/// refusal; only a substantive overlap with the brief itself does.
 ///
 /// Calibrated against typical Qdrant cosine scores for course content:
 /// dense paraphrases of an assignment question score ~0.7+; tangential
@@ -61,13 +61,13 @@ impl RagChunk {
 
 /// Result of a RAG lookup, partitioned by intended use.
 ///
-/// * `context` -- chunk text gets pasted into the system prompt under
+/// * `context`; chunk text gets pasted into the system prompt under
 ///   `## Course materials`. These are the kinds that legitimately help
 ///   the model answer a student's question (lecture / reading / syllabus).
-/// * `signals` -- chunks from `assignment_brief`/`lab_brief`/`exam` docs.
+/// * `signals`; chunks from `assignment_brief`/`lab_brief`/`exam` docs.
 ///   Their *existence* (and the matched filenames) is information we
 ///   forward to the prompt as a refusal signal, but the chunk **text**
-///   never lands in context -- otherwise the model would just read the
+///   never lands in context; otherwise the model would just read the
 ///   assignment statement and solve it.
 #[derive(Debug, Clone, Default)]
 pub struct RagResult {
@@ -78,7 +78,7 @@ pub struct RagResult {
 impl RagResult {
     /// All chunks (context first, then signals), used for the
     /// chunks-displayed-to-client list. Signal chunks still appear in the
-    /// "sources" UI -- students should see *that* an assignment matched,
+    /// "sources" UI; students should see *that* an assignment matched,
     /// just not the brief's text in the model's reply.
     pub fn all(&self) -> Vec<RagChunk> {
         let mut out = Vec::with_capacity(self.context.len() + self.signals.len());
@@ -129,7 +129,7 @@ pub fn payload_int(
 
 /// Parse a scored point into a RagChunk. Returns None if the required `text`
 /// field is missing. `kind` may be absent on old points written before the
-/// classifier was wired in -- those fall through to the unclassified
+/// classifier was wired in; those fall through to the unclassified
 /// safety filter in `partition_chunks`.
 pub fn scored_point_to_rag_chunk(point: &ScoredPoint) -> Option<RagChunk> {
     let text = payload_string(&point.payload, "text")?;
@@ -144,7 +144,7 @@ pub fn scored_point_to_rag_chunk(point: &ScoredPoint) -> Option<RagChunk> {
 
 /// Split chunks into prompt-context vs detection-signal buckets, dropping
 /// stale `sample_solution` chunks defensively (those shouldn't have been
-/// embedded in the first place -- the worker short-circuits -- but we
+/// embedded in the first place; the worker short-circuits; but we
 /// double-check in case data pre-dates the classifier rollout).
 ///
 /// `unclassified_doc_ids` are docs whose classifier hasn't run yet: their
@@ -228,7 +228,7 @@ pub async fn embedding_search(
     let vector = if embedding_provider == "local" {
         // Apply the model's query-side prefix (e.g. `query: ` for
         // arctic-m-v2.0). No-op for models without one. Documents in
-        // the collection are *not* prefixed -- see
+        // the collection are *not* prefixed; see
         // `fastembed_embedder::query_prefix_for_model`.
         let formatted_query =
             minerva_ingest::fastembed_embedder::format_query_for_model(embedding_model, query);
@@ -343,7 +343,7 @@ pub async fn cerebras_request_with_retry_to(
 
 /// Pull `(prompt_tokens, completion_tokens)` out of a parsed
 /// Cerebras chat-completions response payload. Returns `None`
-/// when the usage block is missing or malformed -- callers should
+/// when the usage block is missing or malformed; callers should
 /// just skip token recording in that case (we never block a chat
 /// path because tracking failed).
 pub fn extract_cerebras_usage(payload: &serde_json::Value) -> Option<(i32, i32)> {
@@ -354,7 +354,7 @@ pub fn extract_cerebras_usage(payload: &serde_json::Value) -> Option<(i32, i32)>
 }
 
 /// Convenience wrapper: pull usage out of `payload` and record a
-/// `course_token_usage` row. Best-effort -- logs a warning on
+/// `course_token_usage` row. Best-effort; logs a warning on
 /// either missing-usage or DB error and returns silently. Used
 /// from every classification call site so they don't all repeat
 /// the same boilerplate.
@@ -394,7 +394,7 @@ pub async fn record_cerebras_usage(
 
 /// Build the system prompt with optional RAG chunks.
 /// When chunks are empty (e.g. parallel phase 1), uses a generic prompt
-/// that doesn't tell the model to refuse -- since context may arrive later.
+/// that doesn't tell the model to refuse; since context may arrive later.
 ///
 /// `signal_chunks` are matches against assignment_brief/lab_brief/exam
 /// docs. They never contribute *text* to the prompt; instead, when
@@ -511,7 +511,7 @@ pub fn build_system_prompt_with_signals(
         let joined = filenames.join(", ");
         prompt.push_str(&ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE.replace("{filenames}", &joined));
     } else if !signal_chunks.is_empty() {
-        // Tangential assignment match -- log so we can calibrate the
+        // Tangential assignment match; log so we can calibrate the
         // threshold against real traffic. Not visible to the student.
         let scores: Vec<f32> = signal_chunks.iter().map(|c| c.score).collect();
         tracing::debug!(
@@ -527,7 +527,7 @@ pub fn build_system_prompt_with_signals(
 
 /// Maximum number of source docs we expand via the KG. Picking the
 /// top few hits and following their graph edges keeps prompt growth
-/// bounded -- a long-tail of low-similarity chunks dragging in extra
+/// bounded; a long-tail of low-similarity chunks dragging in extra
 /// material would dilute the signal.
 const GRAPH_EXPAND_SOURCE_DOCS: usize = 3;
 
@@ -551,10 +551,10 @@ const GRAPH_EXPAND_TOTAL_CHUNKS: usize = 4;
 ///   * Every partner doc is already represented in `base_context`
 ///     (the embedding search already pulled it in).
 ///   * The course has KG disabled at the feature-flag layer
-///     (caller's responsibility -- this fn doesn't re-check).
+///     (caller's responsibility; this fn doesn't re-check).
 ///
 /// Errors at any sub-step (DB outage, Qdrant search failure) are
-/// logged at warn and treated as "no expansion" -- the chat path
+/// logged at warn and treated as "no expansion"; the chat path
 /// continues with the unexpanded context. Better to answer with
 /// less material than refuse to answer because graph lookup hiccupped.
 #[allow(clippy::too_many_arguments)]
@@ -664,7 +664,7 @@ pub async fn expand_context_via_graph(
     };
 
     // Per-partner filtered Qdrant search: top-1 chunk for the query
-    // restricted to that doc. Sequential is fine -- expansion is
+    // restricted to that doc. Sequential is fine; expansion is
     // tiny (<= GRAPH_EXPAND_TOTAL_CHUNKS calls) and Qdrant is fast.
     let mut expanded: Vec<RagChunk> = Vec::with_capacity(expansion_targets.len());
     for target_doc_id in expansion_targets {
@@ -699,7 +699,7 @@ pub async fn expand_context_via_graph(
     }
     if !expanded.is_empty() {
         tracing::info!(
-            "graph_expand: course {} -- added {} chunk(s) from {} partner doc(s)",
+            "graph_expand: course {}; added {} chunk(s) from {} partner doc(s)",
             course_id,
             expanded.len(),
             expanded.len(),
@@ -1097,7 +1097,7 @@ mod tests {
 
     #[test]
     fn partition_quarantines_unknown_kind() {
-        // Unknown-kind doc shouldn't reach context OR signals -- the
+        // Unknown-kind doc shouldn't reach context OR signals; the
         // teacher must promote it to a real kind first.
         let chunks = vec![
             chunk("d1", "lecture.pdf", "Lecture content", Some("lecture")),

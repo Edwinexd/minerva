@@ -29,7 +29,7 @@ pub struct BackfillProgress {
 }
 
 /// Shared progress tracker for the admin classification backfill.
-/// Exposed via a Mutex for cheap atomic updates -- there's only ever
+/// Exposed via a Mutex for cheap atomic updates; there's only ever
 /// one backfill task running at a time and the contention is the
 /// admin page's polling refetch.
 #[derive(Default)]
@@ -127,7 +127,7 @@ impl AppState {
         // `embedding_models` table. Existing rows are left alone (so an
         // admin's runtime toggle survives restarts); newly-added catalog
         // entries land disabled so they never auto-appear in the
-        // teacher picker -- the admin opts in deliberately. See
+        // teacher picker; the admin opts in deliberately. See
         // migration `20260427000001_embedding_models.sql` for the
         // initial-policy reasoning.
         for (model, _dims) in minerva_ingest::pipeline::VALID_LOCAL_MODELS {

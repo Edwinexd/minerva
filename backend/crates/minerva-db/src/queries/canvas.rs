@@ -1,7 +1,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-// -- Canvas connection rows --
+//; Canvas connection rows --
 
 #[derive(Debug)]
 pub struct ConnectionRow {
@@ -122,7 +122,7 @@ pub async fn find_due_for_auto_sync(
     .await
 }
 
-// -- Sync log rows --
+//; Sync log rows --
 
 #[derive(Debug, Clone)]
 pub struct SyncLogRow {

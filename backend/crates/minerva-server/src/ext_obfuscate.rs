@@ -1,7 +1,7 @@
 //! Deterministic identity pseudonymization for external viewers.
 //!
 //! When the requester is an `ext:` user they should not see real names or
-//! eppns of other non-admin users -- external collaborators are granted
+//! eppns of other non-admin users; external collaborators are granted
 //! narrow access and the rest of the user population is off-limits.
 //! Identities are replaced with two-word passphrases ("Wombling Wombat",
 //! `wombling.wombat@domain`) derived from a hash of the target eppn, so
@@ -13,7 +13,7 @@
 //! eppn the attempt counter is bumped and the RNG reseeded. No DB table
 //! is involved; the map is rebuilt per-request from `users.list_all`.
 //! Adding a new user can shift the pseudonym of later-sorting colliding
-//! users -- acceptable, since the alternative is persisting assignments.
+//! users; acceptable, since the alternative is persisting assignments.
 //!
 //! Admins and the viewer themselves are passed through unchanged so the
 //! UI can still render "signed in as ..." and surface admin contacts.

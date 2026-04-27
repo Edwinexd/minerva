@@ -2,12 +2,12 @@
 //!
 //! Two things live here:
 //!
-//! 1. `conversation_flags` (CRUD) -- append-only record of judgements
+//! 1. `conversation_flags` (CRUD); append-only record of judgements
 //!    the chat path made about a conversation (currently just
 //!    `extraction_attempt`, but the schema is generic). The teacher
 //!    dashboard reads this to render badges + per-turn breakdowns.
 //!
-//! 2. `kg_state` accessors on the `conversations` table -- a JSONB
+//! 2. `kg_state` accessors on the `conversations` table; a JSONB
 //!    blob the chat path mutates per turn (sliding window of which
 //!    assignments have been near, whether the extraction guard's
 //!    hard constraint is currently active, etc.). Kept here rather
@@ -32,7 +32,7 @@ pub struct ConversationFlagRow {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Append a flag to a conversation. Always inserts a new row -- we
+/// Append a flag to a conversation. Always inserts a new row; we
 /// keep history rather than upsert, so the dashboard can show the
 /// trail of judgements over time. Idempotency, when needed, is the
 /// caller's responsibility (e.g. don't fire on every duplicate
@@ -80,7 +80,7 @@ pub async fn list_for_conversation(
     .await
 }
 
-/// Distinct flag-name set for a course's conversations -- powers the
+/// Distinct flag-name set for a course's conversations; powers the
 /// "this conversation has been flagged" badge in the conversation
 /// list. Returned as a HashMap so the route handler can do O(1)
 /// lookups when rendering each list row.
@@ -123,7 +123,7 @@ pub async fn get_kg_state(
 }
 
 /// Replace the kg_state blob. Caller is responsible for round-tripping
-/// (read, mutate, write) -- the chat path holds the conversation
+/// (read, mutate, write); the chat path holds the conversation
 /// effectively single-writer per turn so we don't need optimistic-
 /// concurrency machinery here.
 pub async fn set_kg_state(

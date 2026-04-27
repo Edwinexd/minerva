@@ -6,7 +6,7 @@
 -- adding a new boolean column per concern.
 --
 -- The teacher dashboard joins on `conversation_id` to render badges
--- and the per-turn breakdown -- nothing in the schema is specific
+-- and the per-turn breakdown; nothing in the schema is specific
 -- to the extraction case.
 --
 -- `metadata JSONB` is the wiggle room: each flag kind owns its own
@@ -18,22 +18,22 @@
 CREATE TABLE conversation_flags (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    -- Stable string identifier. The application picks from a small
-    -- set of known values (currently just 'extraction_attempt'); a
-    -- future flag adds a new const, no schema change required.
+   ; Stable string identifier. The application picks from a small
+   ; set of known values (currently just 'extraction_attempt'); a
+   ; future flag adds a new const, no schema change required.
     flag            TEXT NOT NULL,
-    -- 1-based turn index this flag is attached to. Nullable for
-    -- conversation-level flags (e.g. "this conversation is tagged
-    -- as suspicious overall"). We don't enforce a FK to
-    -- conversation_messages because messages are sometimes
-    -- deleted / regenerated and we want flags to outlive that.
+   ; 1-based turn index this flag is attached to. Nullable for
+   ; conversation-level flags (e.g. "this conversation is tagged
+   ; as suspicious overall"). We don't enforce a FK to
+   ; conversation_messages because messages are sometimes
+   ; deleted / regenerated and we want flags to outlive that.
     turn_index      INT,
-    -- Short human-readable explanation, intended for the teacher
-    -- dashboard hover.
+   ; Short human-readable explanation, intended for the teacher
+   ; dashboard hover.
     rationale       TEXT,
-    -- Flag-specific structured data. For extraction_attempt:
-    --   { "matched_assignment_doc_ids": [...], "intent_verdict": ...,
-    --     "output_check_verdict": ..., "rewrote_response": bool }
+   ; Flag-specific structured data. For extraction_attempt:
+   ;   { "matched_assignment_doc_ids": [...], "intent_verdict": ...,
+   ;     "output_check_verdict": ..., "rewrote_response": bool }
     metadata        JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -3,7 +3,7 @@
  *
  * Watches a chat input string and (when aegis is enabled for the
  * course) calls `POST /aegis/analyze` on a debounce so the right-rail
- * Feedback panel updates while the student is typing -- BEFORE they
+ * Feedback panel updates while the student is typing; BEFORE they
  * press Send. The verdict the student ultimately accepts is what
  * gets persisted; cached locally so the chat-page can ship it
  * alongside the message body.
@@ -18,11 +18,11 @@
  * verdict win the race.
  *
  * Cost shaping:
- *   * `DEBOUNCE_MS` -- pause length before we hit the analyzer.
+ *   * `DEBOUNCE_MS`; pause length before we hit the analyzer.
  *     Too short and a steady typer burns LLM calls per word; too
  *     long and the panel feels stuck. 1s sits in the sweet spot
  *     against typical SU keyboard cadence.
- *   * `MIN_LENGTH` -- inputs shorter than this are too tiny to score
+ *   * `MIN_LENGTH`; inputs shorter than this are too tiny to score
  *     meaningfully. The analyzer would just say "missing constraints"
  *     for every two-word query, which is noise.
  *   * Skip when content is unchanged from the last analyzed value --
@@ -139,7 +139,7 @@ export function useAegisLiveAnalyzer(
         })
         .catch((e) => {
           if (controller.signal.aborted) return
-          // Network errors are non-fatal -- the panel just shows
+          // Network errors are non-fatal; the panel just shows
           // the previous verdict (or empty state). We don't surface
           // them since the analyzer is advisory; the user's send
           // path is unaffected.
@@ -153,7 +153,7 @@ export function useAegisLiveAnalyzer(
     return () => {
       clearTimeout(handle)
     }
-    // `analysis` deliberately omitted -- the effect's job is to
+    // `analysis` deliberately omitted; the effect's job is to
     // react to INPUT changes, not to its own setAnalysis writes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, aegisEnabled, doFetch])
@@ -181,7 +181,7 @@ export function useAegisLiveAnalyzer(
     const trimmed = content.trim()
     if (trimmed.length < MIN_LENGTH) return null
     // If the cache already matches this exact content AND we're
-    // not currently mid-flight, short-circuit -- no point burning
+    // not currently mid-flight, short-circuit; no point burning
     // a second LLM call on the same draft just because the user
     // pressed Send a second after the debounce already settled.
     if (!pending && trimmed === lastAnalyzed.current && analysis !== null) {

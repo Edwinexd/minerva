@@ -22,7 +22,7 @@
 -- The pure-Lua helpers (sha256, hmac_sha256, b64url_decode, parse_token,
 -- verify_token) are exposed via the returned `_M` table so the test
 -- harness in apache/test/ can exercise them outside Apache. mod_lua
--- discards the return value of the loaded script -- the real entry
+-- discards the return value of the loaded script; the real entry
 -- point is `check_ext_auth`, defined as a global below.
 
 -- `apache2` is a pre-injected global in mod_lua; outside Apache (test
@@ -212,7 +212,7 @@ local function verify_token(secret, cookie_value, now)
     if not raw or raw == "" then return nil, "malformed" end
 
     -- Token format: jti:eppn_b64:display_b64:exp_ts:hex_sig
-    -- (eppn is base64-encoded inside because it contains `:` -- see Rust
+    -- (eppn is base64-encoded inside because it contains `:`; see Rust
     --  external_auth::mint_token for the matching producer.)
     local jti, eppn_b64, display_b64, exp_ts, sig =
         raw:match("^([^:]+):([^:]+):([^:]*):([^:]+):([^:]+)$")

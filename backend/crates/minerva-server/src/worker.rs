@@ -2,14 +2,14 @@
 //!
 //! Instead of spawning an unbounded `tokio::spawn` per upload, documents are
 //! inserted as `pending` and this worker polls the `documents` table using
-//! `SELECT ... FOR UPDATE SKIP LOCKED` -- a standard Postgres job-queue pattern.
+//! `SELECT ... FOR UPDATE SKIP LOCKED`; a standard Postgres job-queue pattern.
 //!
 //! Concurrency is bounded by a semaphore so we never overwhelm the embedding
 //! API, Qdrant, or server memory when a teacher syncs a large course at once.
 //!
 //! Stuck-doc recovery has two tiers:
 //! * Startup: `reset_stale_processing` unconditionally resets anything left
-//!   in `processing` -- covers crashes/OOMs that skipped graceful shutdown.
+//!   in `processing`; covers crashes/OOMs that skipped graceful shutdown.
 //! * Periodic sweep: `reset_stale_processing_older_than(STALE_THRESHOLD_SECS)`
 //!   handles docs wedged by a silent task panic inside a still-running pod.
 
@@ -28,7 +28,7 @@ use crate::state::AppState;
 /// an empty kind (which `process_document` interprets as "don't stamp
 /// a kind into Qdrant payload" and `set_classification` ignores).
 /// Lets us keep `process_document`'s signature unchanged whether or
-/// not KG is enabled -- the gating decision lives entirely in the
+/// not KG is enabled; the gating decision lives entirely in the
 /// worker, not in the ingest crate.
 struct NoopClassifier;
 
@@ -73,7 +73,7 @@ const CANVAS_AUTO_SYNC_CHECK_INTERVAL: std::time::Duration =
 /// then enters a loop that claims pending documents and processes them with
 /// bounded concurrency.
 ///
-/// Also spawns the relink sweeper -- the debounced background task that
+/// Also spawns the relink sweeper; the debounced background task that
 /// drains the per-course dirty queue and re-runs the cross-doc linker.
 /// Sibling task to the document worker because both have the same
 /// "background sweep over course-scoped state" shape.
@@ -176,7 +176,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
 
         // Classifiers live for the lifetime of the worker and are
         // shared across spawned per-document tasks via Arc. One
-        // reqwest::Client per worker is fine -- Cerebras requests are
+        // reqwest::Client per worker is fine; Cerebras requests are
         // cheap and the client owns a connection pool.
         //
         // We hold both a real classifier and a no-op so we can pick
@@ -355,7 +355,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
                             // fresh after every ingest. Bursty Moodle
                             // syncs coalesce into a single linker
                             // call thanks to the debounce window in
-                            // RelinkScheduler -- with a hard cap so a
+                            // RelinkScheduler; with a hard cap so a
                             // long sustained burst still fires the
                             // linker within MAX_PENDING_AGE.
                             //
@@ -365,7 +365,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
                             if kg_on {
                                 scheduler.mark_dirty(course_id_for_relink).await;
                                 tracing::info!(
-                                    "worker: marked course {} dirty after doc {} ingest -- linker will fire on next sweep tick",
+                                    "worker: marked course {} dirty after doc {} ingest; linker will fire on next sweep tick",
                                     course_id_for_relink,
                                     doc.id,
                                 );

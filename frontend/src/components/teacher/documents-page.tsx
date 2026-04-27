@@ -43,7 +43,7 @@ function formatBytes(bytes: number): string {
 
 /// Per-kind tint for the kind badge. Soft Tailwind palette so the
 /// teacher gets a glanceable color signal without anything looking
-/// like an error -- previously assignment_brief used the destructive
+/// like an error; previously assignment_brief used the destructive
 /// (red) variant and read as a system error rather than a category.
 ///
 /// Picked to coordinate with the graph viewer's KIND_COLORS (same
@@ -122,7 +122,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   const canMutate = course?.my_role !== "ta"
   // Per-course feature flag. When KG is off the kind badge, the
   // edit-kind dialog, the bulk re-classify button, and the locked
-  // pencil-icon all collapse out of the row -- matches the backend
+  // pencil-icon all collapse out of the row; matches the backend
   // which 404s the KG endpoints in the same case.
   const kgEnabled = course?.feature_flags?.course_kg === true
   const queryClient = useQueryClient()
@@ -290,7 +290,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
 
   // Bulk reclassify the currently-selected documents. We loop the
   // existing per-doc endpoint rather than introducing a new bulk
-  // endpoint -- it's the same code path the dialog's "Re-classify"
+  // endpoint; it's the same code path the dialog's "Re-classify"
   // button uses, so behaviour stays consistent (locked rows skip,
   // failures are reported individually). Each docId is fired in
   // parallel with bounded concurrency via Promise.allSettled, then
@@ -298,7 +298,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   const bulkReclassifyMutation = useMutation({
     mutationFn: async (docIds: string[]) => {
       const docsById = new Map(documents?.map((d) => [d.id, d]) ?? [])
-      // Drop locked rows up front -- the per-doc endpoint silently
+      // Drop locked rows up front; the per-doc endpoint silently
       // returns `{locked: true}` for them, which we'd otherwise count
       // as a success and confuse the teacher.
       const eligible = docIds.filter(
@@ -531,7 +531,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
               </div>
               <div className="flex items-center gap-2">
                 {/*
-                  Single clickable kind badge -- opens the edit dialog
+                  Single clickable kind badge; opens the edit dialog
                   where the teacher can override, re-classify, or
                   unlock. Tooltip surfaces rationale + confidence so
                   there's still a hover-to-inspect path without

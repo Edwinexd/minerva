@@ -6,7 +6,7 @@
 //!
 //! Two entry points the strategies call:
 //!
-//! 1. `evaluate_for_turn` -- runs after RAG retrieval, before
+//! 1. `evaluate_for_turn`; runs after RAG retrieval, before
 //!    generation. Resolves whether the extraction guard is enabled
 //!    for this course, runs the intent classifier, computes
 //!    "assignments near this turn" from RAG signals + KG
@@ -14,7 +14,7 @@
 //!    `kg_state`, and decides whether the constraint is active for
 //!    this turn. Persists the updated `kg_state`.
 //!
-//! 2. `intercept_reply` -- runs after generation, with the full
+//! 2. `intercept_reply`; runs after generation, with the full
 //!    assistant text. Idempotent no-op when the guard wasn't
 //!    enabled or the constraint isn't active. When active: runs
 //!    the output-side solution check; if it trips, generates a
@@ -25,7 +25,7 @@
 //!
 //! Engagement detection (which would lift the constraint when the
 //! student writes their own code or answers a Socratic question)
-//! is NOT in this commit -- it lands in the next one along with
+//! is NOT in this commit; it lands in the next one along with
 //! the dashboard frontend.
 
 use std::collections::HashSet;
@@ -58,7 +58,7 @@ use crate::strategy::common::RagChunk;
 pub const INTENT_DETECTED_FLAG: &str = "extraction_intent_detected";
 
 /// Constraint flipped from off to on this turn. Cause may be
-/// intent OR proximity OR both -- the metadata records which.
+/// intent OR proximity OR both; the metadata records which.
 /// This is the "the guard is now constraining this conversation"
 /// event the teacher dashboard primarily badges.
 pub const CONSTRAINT_ACTIVATED_FLAG: &str = "extraction_constraint_activated";
@@ -77,7 +77,7 @@ pub const REWROTE_FLAG: &str = "extraction_rewrote";
 /// the conversation to bracket the lifecycle.
 pub const CONSTRAINT_LIFTED_FLAG: &str = "extraction_constraint_lifted";
 
-/// Engagement classifier said `engaged = false` -- the student
+/// Engagement classifier said `engaged = false`; the student
 /// didn't take the Socratic bait. Constraint stays on. Logged so
 /// the teacher can see how many refusals it took before the
 /// constraint either lifted or the conversation ended.
@@ -85,7 +85,7 @@ pub const ENGAGEMENT_REFUSED_FLAG: &str = "extraction_engagement_refused";
 
 /// How many recent turns to keep in `kg_state.recent_turns` for the
 /// multi-turn proximity check. 5 matches the spec
-/// (Q3.2 -- sliding window).
+/// (Q3.2; sliding window).
 const RECENT_TURNS_WINDOW: usize = 5;
 
 /// Multi-turn proximity threshold: if the same assignment appears
@@ -102,7 +102,7 @@ const PROXIMITY_THRESHOLD: usize = 2;
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct KgState {
     /// True iff the extraction guard is currently constraining the
-    /// conversation -- next turn's generation will be subject to
+    /// conversation; next turn's generation will be subject to
     /// the output-side check unless engagement lifts it.
     #[serde(default)]
     pub constraint_active: bool,
@@ -141,7 +141,7 @@ pub struct GuardDecision {
     /// align flags to messages.
     pub turn_index: i32,
     /// Pre-generation classifier verdict. Always populated when the
-    /// guard ran -- soft-fail elsewhere returns
+    /// guard ran; soft-fail elsewhere returns
     /// `is_extraction = false`.
     pub intent: IntentVerdict,
     /// Whether the constraint applies to *this* turn's generation.
@@ -154,7 +154,7 @@ pub struct GuardDecision {
     /// asked. Drawn from `rag_signals` + the in-scope assignment
     /// docs' representative text.
     pub assignment_excerpts: Vec<String>,
-    /// Assignment doc ids relevant to this turn -- used by the
+    /// Assignment doc ids relevant to this turn; used by the
     /// flag-row metadata so the dashboard knows which assignments
     /// the guard tagged.
     pub in_scope_assignment_doc_ids: Vec<Uuid>,
@@ -166,7 +166,7 @@ pub struct GuardDecision {
 /// finishes and before generation starts. Returns `None` when the
 /// extraction_guard feature flag is OFF for this course (the chat
 /// path skips the rest of the integration in that case). Returns
-/// `Some(decision)` otherwise -- the decision encodes whether the
+/// `Some(decision)` otherwise; the decision encodes whether the
 /// constraint is active for this turn.
 ///
 /// Side effects: persists the updated `kg_state` (sliding-window
@@ -323,7 +323,7 @@ pub async fn evaluate_for_turn(
             state.constraint_lifted_at_turn = Some(turn_index);
             // Log the lift so the dashboard can show the
             // lifecycle (activated at turn X, lifted at turn Y).
-            // Best-effort -- log and move on if it fails.
+            // Best-effort; log and move on if it fails.
             let metadata = serde_json::json!({
                 "engagement": {
                     "engaged": true,
@@ -353,7 +353,7 @@ pub async fn evaluate_for_turn(
             // can see how many refusals it took before either a
             // lift or the conversation ending. Per the on-
             // transitions policy: only logged when constraint
-            // was active going in -- we don't log "engaged" for
+            // was active going in; we don't log "engaged" for
             // turns where the constraint was off (those would be
             // noise).
             let metadata = serde_json::json!({
@@ -500,7 +500,7 @@ pub async fn evaluate_for_turn(
 }
 
 /// Phase 2: post-generation interception. Returns the text that
-/// should ultimately land in `conversations.messages` -- either the
+/// should ultimately land in `conversations.messages`; either the
 /// original assistant reply (when the guard wasn't enabled, the
 /// constraint wasn't active, or the output check passed) or a
 /// Socratic rewrite (when the output check tripped).
@@ -685,7 +685,7 @@ fn push_turn(state: &mut KgState, turn_idx: i32, assignments_near: &[Uuid]) {
 fn proximity_threshold_tripped(state: &KgState) -> bool {
     let mut counts: std::collections::HashMap<Uuid, usize> = std::collections::HashMap::new();
     for t in &state.recent_turns {
-        // Distinct per turn -- a single turn can't count twice.
+        // Distinct per turn; a single turn can't count twice.
         let mut seen: HashSet<Uuid> = HashSet::new();
         for a in &t.assignments_near {
             if seen.insert(*a) {
@@ -759,7 +759,7 @@ mod tests {
     #[test]
     fn proximity_dedups_within_a_single_turn() {
         // A single turn listing the same assignment twice (paranoia
-        // -- the producer doesn't actually do this, but the counter
+        //; the producer doesn't actually do this, but the counter
         // shouldn't be fooled).
         let s = KgState {
             recent_turns: vec![turn(1, &[1, 1])],

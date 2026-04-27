@@ -1,6 +1,6 @@
 //! Persistent debounced per-course relink queue.
 //!
-//! Every time a document's classification changes -- worker auto-classify
+//! Every time a document's classification changes; worker auto-classify
 //! after ingest, single-doc reclassify endpoint, teacher kind override --
 //! the course gets marked dirty. A background sweep loop running inside
 //! `worker::start` drains due courses every `SWEEP_INTERVAL` seconds and
@@ -15,7 +15,7 @@
 //! pushed `due_at` forward to `now + RELINK_DEBOUNCE` on every mark.
 //! That meant a slow Moodle sync (one doc every ~20-30s for 50 docs)
 //! kept resetting the timer indefinitely and the linker NEVER fired
-//! during the burst -- the user-reported "auto-ingest doesn't update
+//! during the burst; the user-reported "auto-ingest doesn't update
 //! the graph" bug. We now cap the wait at `first_marked_at +
 //! MAX_PENDING_AGE` so even a sustained burst guarantees a relink
 //! within ~5 minutes of the first mark.
@@ -67,7 +67,7 @@ impl RelinkScheduler {
     }
 
     /// Mark a course dirty. The actual linker call fires after
-    /// `RELINK_DEBOUNCE` of quiescence -- i.e. no further marks --
+    /// `RELINK_DEBOUNCE` of quiescence; i.e. no further marks --
     /// OR `MAX_PENDING_AGE` after the FIRST mark, whichever comes
     /// first. The cap is what makes long bursts not starve the linker.
     pub async fn mark_dirty(&self, course_id: Uuid) {
@@ -80,7 +80,7 @@ impl RelinkScheduler {
         .await
         {
             tracing::warn!(
-                "relink_scheduler: mark_dirty({}) failed: {} -- linker will not run",
+                "relink_scheduler: mark_dirty({}) failed: {}; linker will not run",
                 course_id,
                 e
             );

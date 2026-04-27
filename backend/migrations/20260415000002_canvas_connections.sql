@@ -6,9 +6,12 @@ CREATE TABLE canvas_connections (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     course_id       UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     name            TEXT NOT NULL,
-    canvas_base_url TEXT NOT NULL,           -- e.g. https://canvas.instructure.com
-    canvas_api_token TEXT NOT NULL,          -- Canvas personal access token
-    canvas_course_id TEXT NOT NULL,          -- Canvas course ID (numeric string)
+    -- e.g. https://canvas.instructure.com
+    canvas_base_url TEXT NOT NULL,
+    -- Canvas personal access token
+    canvas_api_token TEXT NOT NULL,
+    -- Canvas course ID (numeric string)
+    canvas_course_id TEXT NOT NULL,
     auto_sync       BOOLEAN NOT NULL DEFAULT false,
     created_by      UUID NOT NULL REFERENCES users(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -21,7 +24,8 @@ CREATE TABLE canvas_connections (
 CREATE TABLE canvas_sync_log (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     connection_id       UUID NOT NULL REFERENCES canvas_connections(id) ON DELETE CASCADE,
-    canvas_file_id      TEXT NOT NULL,          -- Canvas file ID
+    -- Canvas file ID
+    canvas_file_id      TEXT NOT NULL,
     filename            TEXT NOT NULL,
     content_type        TEXT,
     minerva_document_id UUID REFERENCES documents(id) ON DELETE SET NULL,

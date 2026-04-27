@@ -77,7 +77,7 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   // signal is true:
   //   1. Unaddressed student downvotes (existing behaviour).
   //   2. The extraction guard fired in a way that warrants a
-  //      teacher's attention -- i.e. the constraint activated, or
+  //      teacher's attention; i.e. the constraint activated, or
   //      the assistant text got rewritten. Other guard flags
   //      (intent_detected, engagement_refused, constraint_lifted)
   //      are trace events that don't themselves require review.
@@ -413,7 +413,7 @@ function FeedbackBadges({ feedback }: { feedback: MessageFeedback[] }) {
  *     constraint just activated, or the assistant text was
  *     rewritten because the output check tripped.
  *   - green: a lift event (engagement was detected and the
- *     constraint relaxed -- positive outcome).
+ *     constraint relaxed; positive outcome).
  *   - muted/neutral: trace events (intent classifier said yes,
  *     student refused engagement). Useful for the lifecycle
  *     timeline but not themselves a "look at this" signal.
@@ -530,7 +530,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
   // turn index (= count of user messages up to and including this
   // one). Backend flags carry the same index, so this gives us a
   // direct join between flags and the assistant reply that closed
-  // the turn -- which is the message the badge attaches to in the
+  // the turn; which is the message the badge attaches to in the
   // UI.
   const turnByMessageId = new Map<string, number>()
   let turnCounter = 0
@@ -587,7 +587,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
         const hasDownFeedback = msgFeedback.some((f) => f.rating === "down")
         // Flags align to the user-message-indexed turn. We attach
         // them to the assistant reply that closed the turn (the
-        // visible "this answer was modified" UX) -- showing them
+        // visible "this answer was modified" UX); showing them
         // on the user message would be wrong UX (the user message
         // wasn't itself altered).
         const turnIdx = turnByMessageId.get(msg.id)

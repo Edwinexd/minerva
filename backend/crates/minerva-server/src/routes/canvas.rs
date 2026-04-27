@@ -2,8 +2,8 @@
 //!
 //! Two discovery sources are queried in parallel because Canvas courses
 //! commonly hide the Files tab from students while keeping Modules public:
-//!   - `/api/v1/courses/{id}/files`     -- flat file listing (may 403)
-//!   - `/api/v1/courses/{id}/modules`   -- module tree; items are
+//!   - `/api/v1/courses/{id}/files`    ; flat file listing (may 403)
+//!   - `/api/v1/courses/{id}/modules`  ; module tree; items are
 //!     File / Page / ExternalUrl / (SubHeader etc. ignored)
 //!
 //! Each failing source surfaces as a warning rather than killing the sync,
@@ -17,11 +17,11 @@
 //! and stay skip-once unless the underlying `source_url` changes.
 //!
 //! Course-level endpoints (behind auth_middleware, course teacher/owner):
-//!   GET    /courses/{course_id}/canvas                      -- List connections
-//!   POST   /courses/{course_id}/canvas                      -- Create connection
-//!   DELETE /courses/{course_id}/canvas/{connection_id}       -- Remove connection
-//!   POST   /courses/{course_id}/canvas/{connection_id}/sync  -- Trigger sync
-//!   GET    /courses/{course_id}/canvas/{connection_id}/files -- Preview items
+//!   GET    /courses/{course_id}/canvas                     ; List connections
+//!   POST   /courses/{course_id}/canvas                     ; Create connection
+//!   DELETE /courses/{course_id}/canvas/{connection_id}      ; Remove connection
+//!   POST   /courses/{course_id}/canvas/{connection_id}/sync ; Trigger sync
+//!   GET    /courses/{course_id}/canvas/{connection_id}/files; Preview items
 
 use axum::extract::{Path, State};
 use axum::routing::{delete, get, patch, post};
@@ -287,14 +287,14 @@ enum ItemKind {
 
 #[derive(Debug, Clone)]
 struct DiscoveredItem {
-    /// canvas_sync_log.canvas_file_id -- prefixed identity key.
+    /// canvas_sync_log.canvas_file_id; prefixed identity key.
     key: String,
     kind: ItemKind,
     display_name: String,
     content_type: Option<String>,
     size_hint: i64,
     updated_at: Option<DateTime<Utc>>,
-    /// Seen in {"files_api","modules"} -- drives the preview "origin" chips.
+    /// Seen in {"files_api","modules"}; drives the preview "origin" chips.
     sources: BTreeSet<&'static str>,
     // File-only
     file: Option<CanvasFile>,
@@ -430,7 +430,7 @@ async fn discover_items(
                                 });
                             entry.sources.insert("modules");
                         }
-                        _ => {} // SubHeader / Assignment / Quiz / Discussion / ExternalTool -- ignored
+                        _ => {} // SubHeader / Assignment / Quiz / Discussion / ExternalTool; ignored
                     }
                 }
             }
@@ -858,7 +858,7 @@ fn needs_resync(
 async fn purge_chunks(state: &AppState, course_id: Uuid, doc_id: Uuid) -> Result<(), AppError> {
     // Look up the live collection name from the course's
     // embedding_version. Canvas resync runs on a sweeper, not the
-    // hot chat path, so the extra DB roundtrip is fine -- and it's
+    // hot chat path, so the extra DB roundtrip is fine; and it's
     // the only safe option since `purge_chunks` is invoked from
     // multiple call sites (file vs page replace) without a course
     // row in scope.

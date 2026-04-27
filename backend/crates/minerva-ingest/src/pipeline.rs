@@ -69,7 +69,7 @@ pub fn extract_document_text(file_path: &Path) -> Result<String, String> {
 ///
 /// `version=1` returns the legacy `course_{id}` name so existing
 /// production collections keep working without a Qdrant data move.
-/// `version>=2` returns `course_{id}_v{version}` -- a fresh
+/// `version>=2` returns `course_{id}_v{version}`; a fresh
 /// collection that the lazy-migration path writes to once a teacher
 /// switches embedding model.
 ///
@@ -124,7 +124,7 @@ pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "local"];
 /// `custom_model_spec` arm for the user-defined path) in
 /// `fastembed_embedder.rs`, and consider whether it's small enough to
 /// warm up at boot (`STARTUP_BENCHMARK_MODELS` below). If unsure, leave
-/// it out of startup -- admins can run `POST /api/admin/embedding-benchmark`
+/// it out of startup; admins can run `POST /api/admin/embedding-benchmark`
 /// to benchmark on demand without OOMing the box.
 pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
     // English-only, original set kept for backwards compatibility with
@@ -162,7 +162,7 @@ pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
 /// Arctic-m-v2.0 is in the warm set despite its ~311 MB int8 footprint
 /// because (a) it's the multilingual default we now recommend for new
 /// SU/DSV courses and (b) on first benchmark its session takes 30-60 s
-/// to materialize from the freshly-downloaded ONNX -- warming at boot
+/// to materialize from the freshly-downloaded ONNX; warming at boot
 /// shifts that cost off the first teacher's "Run benchmark" click.
 ///
 /// `BAAI/bge-base-en-v1.5` is intentionally not warmed: it's English-
@@ -273,7 +273,7 @@ pub async fn process_document(
         });
     }
 
-    // 2. Classify. Errors here are not fatal -- we still ingest the doc as
+    // 2. Classify. Errors here are not fatal; we still ingest the doc as
     // unclassified. The chat-time filter excludes unclassified docs from
     // prompt context, so leaking is bounded; teacher can also re-trigger
     // classification from the UI.
@@ -311,7 +311,7 @@ pub async fn process_document(
     };
 
     // 3. Chunk. We chunk EVEN sample_solution docs (which won't be
-    // indexed in Qdrant) -- we still need their embedding for the
+    // indexed in Qdrant); we still need their embedding for the
     // knowledge-graph linker so a sample_solution can find its
     // assignment partner via embedding similarity, not just
     // filenames.
@@ -361,7 +361,7 @@ pub async fn process_document(
 
     // Compute chunk embeddings under whichever provider this course
     // uses. We KEEP the embedding vectors in memory after upsert so
-    // we can mean-pool them for the doc-level KG embedding -- one
+    // we can mean-pool them for the doc-level KG embedding; one
     // pass over the data instead of re-fetching from Qdrant later.
     let (chunk_embeddings, embedding_tokens): (Vec<Vec<f32>>, i64) = match embedding_provider {
         "local" => {
@@ -460,7 +460,7 @@ pub async fn process_document(
     }
 
     // 6. Update status. sample_solution gets chunk_count=0 since no
-    // chunks landed in Qdrant -- the teacher UI / RAG retrieval keys
+    // chunks landed in Qdrant; the teacher UI / RAG retrieval keys
     // off this to know there's nothing searchable.
     let chunk_count = if is_sample_solution {
         0
@@ -599,7 +599,7 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
                     return Err(format!("qdrant collection creation failed: {}", e));
                 }
                 tracing::info!(
-                    "qdrant: collection {} created concurrently by another worker -- verifying dims",
+                    "qdrant: collection {} created concurrently by another worker; verifying dims",
                     name
                 );
             }
@@ -638,7 +638,7 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
     Ok(())
 }
 
-/// Idempotent keyword payload index on `document_id` -- the field we filter
+/// Idempotent keyword payload index on `document_id`; the field we filter
 /// on when deleting or scrolling chunks for a single document. Without it
 /// those operations do a full collection scan.
 ///

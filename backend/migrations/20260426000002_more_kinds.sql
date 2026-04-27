@@ -1,7 +1,7 @@
 -- Two more kinds the V1 enum was missing once we tested against real DSV
 -- courses:
 --
--- * `tutorial_exercise` -- Swedish "övning". Practice/exercise material
+-- * `tutorial_exercise`; Swedish "övning". Practice/exercise material
 --   that students work through but is NOT graded. Distinct from
 --   `assignment_brief` (graded mandatory work). The chat path treats
 --   tutorials as regular context (lecture-like) since there's no
@@ -9,7 +9,7 @@
 --   classification preserves the semantic distinction for teachers
 --   browsing the graph and deciding what to expose.
 --
--- * `lecture_transcript` -- auto-generated transcript from a lecture
+-- * `lecture_transcript`; auto-generated transcript from a lecture
 --   recording (play.dsv.su.se via the transcript pipeline). Lecture
 --   content semantically, but messy / unstructured / lower-quality
 --   text than slides or notes. Worth distinguishing so a teacher

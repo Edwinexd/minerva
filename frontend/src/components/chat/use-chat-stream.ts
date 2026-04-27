@@ -6,7 +6,7 @@
  *                        terminated by either an `error` event or stream EOF.
  *
  * The caller supplies the actual `fetch` invocation (the URL and body
- * shape differ between the two routes -- the regular route takes the
+ * shape differ between the two routes; the regular route takes the
  * token via cookie, the embed route ships it in the request body).
  *
  * Returns a snapshot of the stream state plus `send` / `reset` actions
@@ -37,7 +37,7 @@ export interface ChatStreamActions {
    * the server emitted an `error` event or the fetch threw.
    *
    * `onEvent` (optional) is called for every `data:` event that is
-   * neither a `token` nor an `error` -- the hook stays unaware of
+   * neither a `token` nor an `error`; the hook stays unaware of
    * domain-specific events like `conversation_created`.
    */
   send: (

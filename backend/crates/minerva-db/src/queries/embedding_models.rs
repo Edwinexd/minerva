@@ -6,7 +6,7 @@
 //! the runtime *can* load (code, dimensions, Qdrant collection sizing
 //! all depend on it). This table is the *policy* layer on top: only
 //! `enabled = TRUE` rows show up in the picker. Disabling a model never
-//! touches existing courses already on it -- the admin still has to
+//! touches existing courses already on it; the admin still has to
 //! force-migrate per course via `rotate_embedding`.
 
 use sqlx::PgPool;
@@ -54,7 +54,7 @@ pub async fn find(db: &PgPool, model: &str) -> Result<Option<EmbeddingModelRow>,
 
 /// Cheap scalar lookup used by the course PUT validator. Returns
 /// `Ok(false)` for a model that isn't even registered (treats unknown
-/// as disabled -- the route layer separately rejects with the
+/// as disabled; the route layer separately rejects with the
 /// `local_embedding_model_invalid` code so the admin/teacher message
 /// is still useful).
 pub async fn is_enabled(db: &PgPool, model: &str) -> Result<bool, sqlx::Error> {
@@ -104,7 +104,7 @@ pub async fn current_default(db: &PgPool) -> Result<Option<String>, sqlx::Error>
 /// unique index never sees two `TRUE` rows mid-flip.
 ///
 /// The target must already exist in the table and must be
-/// `enabled = TRUE` -- a disabled default is a contradiction (the
+/// `enabled = TRUE`; a disabled default is a contradiction (the
 /// picker would refuse to surface it). Returns the updated row, or a
 /// typed error so the admin route can map "missing" -> 404 and
 /// "disabled" -> 400 without parsing SQL strings.

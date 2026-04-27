@@ -84,7 +84,7 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
   // Tab visibility is the union of role gating and feature-flag
   // gating. KG-only tabs (knowledge-graph today) hide automatically
   // when the course doesn't have the `course_kg` flag flipped on by
-  // an admin -- matches the backend, which 404s those endpoints in
+  // an admin; matches the backend, which 404s those endpoints in
   // the same case.
   const kgEnabled = course?.feature_flags?.course_kg === true
   const baseTabs = course?.my_role === "ta"

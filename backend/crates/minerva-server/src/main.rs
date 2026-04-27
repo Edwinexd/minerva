@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Benchmark FastEmbed models in the background (doesn't block startup).
     // Only the small ONNX models in `STARTUP_BENCHMARK_MODELS` are warmed
-    // here -- loading every entry in `VALID_LOCAL_MODELS` (which now
+    // here; loading every entry in `VALID_LOCAL_MODELS` (which now
     // includes Qwen3 0.6B, bge-m3, e5-large, etc.) would OOM-kill the
     // pod. Heavier candidates are benchmarked on demand via the admin
     // `POST /admin/embedding-benchmark` endpoint.
@@ -126,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
 
 /// Walk every `course_*` collection and idempotently add the `document_id`
 /// payload index. Existing indexes return an error from Qdrant which we
-/// log and ignore -- the goal is to bring older deployments up to speed
+/// log and ignore; the goal is to bring older deployments up to speed
 /// without requiring a manual migration step.
 async fn backfill_document_id_indexes(qdrant: &qdrant_client::Qdrant) {
     let collections = match qdrant.list_collections().await {

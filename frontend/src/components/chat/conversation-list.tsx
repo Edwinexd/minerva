@@ -67,7 +67,7 @@ export function ConversationList({
   labels: ConversationListLabels
 }) {
   // Don't list a teacher-pinned chat twice if the viewer is also its
-  // owner -- their copy already appears in the top section.
+  // owner; their copy already appears in the top section.
   const sidebarPinned = (pinned ?? []).filter(
     (p) => !conversations?.some((c) => c.id === p.id),
   )

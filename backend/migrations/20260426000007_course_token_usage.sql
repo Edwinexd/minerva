@@ -10,10 +10,10 @@
 --   * extraction_guard
 --
 -- Embeddings (OpenAI / fastembed) are deliberately NOT tracked here
--- -- pocket change relative to LLM calls and not attributed to a
+--; pocket change relative to LLM calls and not attributed to a
 -- specific Cerebras-style API.
 --
--- No spending limits in this iteration -- the dashboard surfaces
+-- No spending limits in this iteration; the dashboard surfaces
 -- usage so teachers / admins can see what's burning tokens, but
 -- nothing 429s on threshold. Limits can be added later by joining
 -- against a per-course / per-category cap table.
@@ -22,10 +22,10 @@ CREATE TABLE course_token_usage (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     category TEXT NOT NULL,
-    -- The actual model name the call ran against (e.g.
-    -- 'gpt-oss-120b', 'llama3.1-8b'). Lets the dashboard show
-    -- model mix per category and helps when we tune which
-    -- operations should run on which size.
+   ; The actual model name the call ran against (e.g.
+   ; 'gpt-oss-120b', 'llama3.1-8b'). Lets the dashboard show
+   ; model mix per category and helps when we tune which
+   ; operations should run on which size.
     model TEXT NOT NULL,
     prompt_tokens INTEGER NOT NULL DEFAULT 0,
     completion_tokens INTEGER NOT NULL DEFAULT 0,

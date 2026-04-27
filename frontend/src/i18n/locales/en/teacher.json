@@ -182,7 +182,7 @@
       "extraction_constraint_activated": "Extraction guard activated",
       "extraction_rewrote": "Response rewritten by guard",
       "extraction_engagement_refused": "Student didn't engage with Socratic prompt",
-      "extraction_constraint_lifted": "Engagement detected -- constraint lifted"
+      "extraction_constraint_lifted": "Engagement detected; constraint lifted"
     }
   },
   "kgTokenUsage": {
@@ -276,7 +276,7 @@
     "pendingTitle": "The linker is catching up on recent ingest / re-classify activity. The graph will update on its own within ~30 seconds.",
     "noDocuments": "No documents in this course yet.",
     "notBuiltYet": "No edges have been computed yet.",
-    "pipelinePending": "No edges yet -- the linker runs automatically a few seconds after each ingest. Hold tight or check the server logs.",
+    "pipelinePending": "No edges yet; the linker runs automatically a few seconds after each ingest. Hold tight or check the server logs.",
     "noEdges": "The linker found no confident relationships between docs in this course.",
     "edgeListTitle_one": "{{count}} edge (click to expand)",
     "edgeListTitle_other": "{{count}} edges (click to expand)",

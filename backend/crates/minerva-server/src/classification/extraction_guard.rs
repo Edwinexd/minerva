@@ -6,7 +6,7 @@
 //! 1. `classify_intent`: per-turn pre-generation classifier. Looks
 //!    at the last several user messages and decides whether the
 //!    current turn is a literal pasted-assignment-extraction
-//!    attempt. Strict by design -- per the operational policy, the
+//!    attempt. Strict by design; per the operational policy, the
 //!    only cases we lock down are the ones that are already
 //!    academic-dishonesty-by-the-rules; legitimate study questions
 //!    should always pass through, even ones that look code-y.
@@ -25,7 +25,7 @@
 //! All three run on the chat hot path. Intent + output check
 //! keep latency bounded with tight `max_completion_tokens` and
 //! `temperature: 0.0`. Soft-fail throughout: a transient
-//! Cerebras hiccup never blocks a chat turn -- worst case we
+//! Cerebras hiccup never blocks a chat turn; worst case we
 //! treat the verdict as "not extraction" / "not solution" and
 //! continue. (We previously sent `reasoning_effort: "low"` here
 //! too; Cerebras now hard-rejects that parameter on llama3.1-8b
@@ -61,7 +61,7 @@ use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
 /// outputs + temperature 0 keep it on rails.
 const GUARD_CLASSIFIER_MODEL: &str = "llama3.1-8b";
 
-/// Larger model for the rewrite path only -- runs rarely (only
+/// Larger model for the rewrite path only; runs rarely (only
 /// when the output check trips) and produces text the student
 /// reads, so quality matters.
 const GUARD_REWRITE_MODEL: &str = "gpt-oss-120b";
@@ -92,7 +92,7 @@ const INTENT_SYSTEM_PROMPT: &str = r#"You are an academic-integrity check on a s
 You will read the last few turns of the student's side of the conversation and decide ONE thing: did the student literally paste an assignment problem statement and ask the model to produce the implementation / solution / code that answers it?
 
 Reply YES only when ALL of these hold:
-- The student's input includes verbatim or near-verbatim assignment text -- numbered tasks, "your task is", "implement X that does Y", grading criteria, deadlines, structured problem statement.
+- The student's input includes verbatim or near-verbatim assignment text; numbered tasks, "your task is", "implement X that does Y", grading criteria, deadlines, structured problem statement.
 - AND the student's actual ask is to produce the code / answer for that pasted problem (e.g. "do this", "solve this", "write the code", "implement this", "give me the solution", or implicit by absence of any other question).
 
 Reply NO for everything else, including:
@@ -101,7 +101,7 @@ Reply NO for everything else, including:
 - Asking about a function from the standard library
 - Pasting the student's OWN code and asking for help debugging
 - Asking how to approach a problem in general terms (without pasting the problem)
-- Even "implement bubble sort" alone -- this is a textbook reference problem, not a pasted assignment unless the assignment text is also there.
+- Even "implement bubble sort" alone; this is a textbook reference problem, not a pasted assignment unless the assignment text is also there.
 - Multi-turn conversations that drift toward implementation but never include a pasted assignment.
 
 The bar is HIGH and STRICT. False positives (calling a legit study question extraction) are worse than false negatives. We are enforcing what is already defined as academic dishonesty in the course rules; we are NOT making the AI more conservative than its baseline.
@@ -117,7 +117,7 @@ No prose."#;
 /// Run the intent classifier. `recent_user_messages` is the trail
 /// of the student's last few messages (oldest first); the last
 /// element is the current turn's input. The classifier only sees
-/// student messages -- assistant content is irrelevant for "is
+/// student messages; assistant content is irrelevant for "is
 /// the student trying to extract".
 pub async fn classify_intent(
     http: &reqwest::Client,
@@ -362,7 +362,7 @@ Output a single short message that:
 - Asks ONE specific Socratic question that pushes the student to think about the next step.
 - Does NOT include the original implementation, even partially.
 - May reference the high-level concept involved without spelling out the algorithm.
-- Stays in the same language as the student wrote (likely Swedish or English -- match it).
+- Stays in the same language as the student wrote (likely Swedish or English; match it).
 
 Output ONLY the message text. No JSON, no markdown headers, no explanation of what you did. Just the question."#;
 
@@ -440,7 +440,7 @@ const ENGAGEMENT_SYSTEM_PROMPT: &str = r#"You judge whether a student is activel
 Context: the tutor previously refused to give a complete answer to what looked like a pasted assignment, and instead asked the student a Socratic question or pushed them to think. You are reading the student's NEXT message and deciding whether they took the bait.
 
 Reply true (engaged) when the student's message does ANY of:
-- Includes their own code attempt (even if buggy / partial / wrong) -- a fenced code block, a function definition, a snippet they wrote.
+- Includes their own code attempt (even if buggy / partial / wrong); a fenced code block, a function definition, a snippet they wrote.
 - Describes their own approach in their own words (pseudo-code, plan, reasoning).
 - Answers the tutor's Socratic question with a substantive opinion / guess / reasoning, not a deflection.
 - Asks a focused conceptual follow-up that shows they tried to understand ("why does X happen here", "is the pattern Y the right one for this", "I think we should do Z, is that right").
@@ -452,7 +452,7 @@ Reply false (not engaged, still extracting) when the student:
 - Says they don't know / asks the tutor to do it for them with no attempt of their own.
 - Sends a one-word "yes" / "ok" / "do it" with no substance.
 
-The default when uncertain is true (engaged): we'd rather lift the constraint and risk a slip than keep pestering a student who is actually working. The output check still runs every turn -- if they slip back into extraction, the constraint will re-trip on its own.
+The default when uncertain is true (engaged): we'd rather lift the constraint and risk a slip than keep pestering a student who is actually working. The output check still runs every turn; if they slip back into extraction, the constraint will re-trip on its own.
 
 Output JSON only:
 {
@@ -482,7 +482,7 @@ pub async fn classify_engagement(
     new_student_message: &str,
 ) -> EngagementVerdict {
     // Cheap heuristic: a fenced code block in the new message is a
-    // strong "engaged" signal -- the student is showing their own
+    // strong "engaged" signal; the student is showing their own
     // work. Skip the LLM call entirely in that case to save latency.
     if new_student_message.contains("```") {
         return EngagementVerdict {
@@ -581,7 +581,7 @@ pub async fn classify_engagement(
     };
     EngagementVerdict {
         // Default-engaged is the safe fallback when the field is
-        // missing -- matches the "default engaged" policy.
+        // missing; matches the "default engaged" policy.
         engaged: parsed["engaged"].as_bool().unwrap_or(true),
         rationale: parsed["rationale"].as_str().unwrap_or_default().to_string(),
     }
@@ -642,7 +642,7 @@ mod tests {
 
     #[tokio::test]
     async fn engagement_short_circuits_on_code_block() {
-        // A fenced code block is the cheap "engaged" signal -- we
+        // A fenced code block is the cheap "engaged" signal; we
         // never even hit the LLM. Verifies that path returns true
         // without an API key.
         let http = reqwest::Client::new();

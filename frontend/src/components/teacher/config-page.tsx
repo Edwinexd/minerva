@@ -61,7 +61,7 @@ export function ConfigPage({ useParams }: { useParams: () => { courseId: string 
 /**
  * Per-course KG / extraction-guard token-spend card. One row per
  * (category, model) over the last 30 days, plus a totals line.
- * No spending limits enforced -- this is observability only --
+ * No spending limits enforced; this is observability only --
  * but the data feeds straight from `course_token_usage`, so once
  * we add limits it'll be the same numbers shown here.
  */
@@ -173,7 +173,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   const { data: modelsData } = useQuery(modelsQuery)
   // Backend filters this list to admin-enabled catalog rows. If an
   // admin disabled the model this course is currently on, it won't be
-  // here -- we patch the current course's model back into the option
+  // here; we patch the current course's model back into the option
   // list below so the teacher still sees what they're using rather
   // than an empty trigger. They can save unrelated config without
   // re-picking; only an actual model *change* hits the
@@ -226,7 +226,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   // The backend only rotates when provider or model differ from the
   // currently-persisted values, so mirror that condition here. A
   // provider switch to "openai" canonicalizes the model server-side
-  // (text-embedding-3-small) -- treat that as a rotation too because
+  // (text-embedding-3-small); treat that as a rotation too because
   // the persisted model name will change even if the dropdown didn't.
   const willRotate =
     embeddingProvider !== course.embedding_provider ||
@@ -384,7 +384,7 @@ function CourseConfigForm({ course }: { course: Course }) {
                     // Build the picker option set from the public
                     // /embedding-models feed (admin-enabled only) and
                     // patch in the course's currently-saved model if
-                    // it's not in that list -- happens when an admin
+                    // it's not in that list; happens when an admin
                     // has since disabled the model the course is on.
                     // Without the patch the Select trigger renders
                     // blank, which looks broken even though the value

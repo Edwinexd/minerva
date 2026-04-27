@@ -110,7 +110,7 @@ async fn update_user_role(
     }
 
     // Sets role_manually_set=true so subsequent rule evaluations leave the
-    // user alone -- admin choice wins until they call /role-lock DELETE.
+    // user alone; admin choice wins until they call /role-lock DELETE.
     let updated = minerva_db::queries::users::update_role(&state.db, id, &body.role).await?;
     if !updated {
         return Err(AppError::NotFound);
@@ -198,7 +198,7 @@ async fn update_owner_daily_token_limit(
 /// Zeroes out today's token usage for a user so both their per-course
 /// student cap and their contribution to any owner aggregate cap reset
 /// immediately, without waiting for UTC midnight. Implemented as a DELETE
-/// of today's `usage_daily` rows -- `record_usage` upserts, so the next
+/// of today's `usage_daily` rows; `record_usage` upserts, so the next
 /// request just re-creates the row from zero.
 async fn reset_user_daily_usage(
     State(state): State<AppState>,
@@ -207,7 +207,7 @@ async fn reset_user_daily_usage(
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_admin(&user)?;
 
-    // 404 if the user doesn't exist -- otherwise we'd silently return
+    // 404 if the user doesn't exist; otherwise we'd silently return
     // `rows_deleted: 0` for a bad UUID, which hides typos.
     if minerva_db::queries::users::find_by_id(&state.db, id)
         .await?
@@ -295,7 +295,7 @@ fn default_true() -> bool {
 }
 
 fn validate_target_role(role: &str) -> Result<(), AppError> {
-    // Admin promotion via rules is intentionally disallowed -- admins must
+    // Admin promotion via rules is intentionally disallowed; admins must
     // be in MINERVA_ADMINS so the env stays the source of truth.
     if role != "teacher" && role != "student" {
         return Err(AppError::bad_request("admin.target_role_invalid"));
@@ -601,7 +601,7 @@ async fn backfill_classifications(
 // switch the admin can flip per course) so adding a new flag
 // later is just appending to `feature_flags::ALL_FLAGS` and the UI
 // renders an extra row. The admin UI submits the FULL desired flag
-// state on PUT, mirroring how /admin/users/{id}/role works -- avoids
+// state on PUT, mirroring how /admin/users/{id}/role works; avoids
 // drift between an in-memory list and a stale DB row.
 
 #[derive(Serialize)]
@@ -668,7 +668,7 @@ async fn get_course_feature_flags(
 #[derive(Deserialize)]
 struct SetCourseFeatureFlagsRequest {
     /// Map of flag-name -> desired state. Flags not in the map are
-    /// left untouched -- admin can selectively patch by sending only
+    /// left untouched; admin can selectively patch by sending only
     /// the changed entries.
     ///
     /// To revert a course back to the global default, set the value
@@ -753,7 +753,7 @@ struct EmbeddingModelEntry {
     /// runs them on demand.
     benchmark: Option<minerva_ingest::fastembed_embedder::BenchmarkResult>,
     /// True if this model is in the boot warmup set. The admin UI
-    /// uses this purely as a hint -- nothing depends on it server-side.
+    /// uses this purely as a hint; nothing depends on it server-side.
     warmed_at_startup: bool,
     /// Admin-managed picker policy. When false, teachers can't pick
     /// this model in the per-course config dropdown; courses already
@@ -768,7 +768,7 @@ struct EmbeddingModelEntry {
     /// How many courses currently have this model selected. Surfaced so
     /// the admin can see the impact of disabling before they do it.
     /// Counted against `courses` filtered to `embedding_provider='local'`
-    /// + `active=true` -- archived courses don't count.
+    /// + `active=true`; archived courses don't count.
     courses_using: i64,
 }
 
@@ -870,7 +870,7 @@ struct UpdateEmbeddingModelResponse {
 ///
 /// Disabling a model only affects future picker decisions: courses
 /// already using it keep working until an admin force-migrates them
-/// (which is just `PUT /courses/{id}` with a different model -- admins
+/// (which is just `PUT /courses/{id}` with a different model; admins
 /// bypass the enabled check there). Returns 404 for ids the catalog
 /// doesn't know about; 500 for ids that are catalog members but
 /// missing the policy row (indicates a startup-sync bug, not a
@@ -934,7 +934,7 @@ struct SetDefaultEmbeddingModelResponse {
 /// cleared and the new default is set in a single transaction so the
 /// partial unique index never sees two `TRUE` rows.
 ///
-/// Existing courses are not touched -- they keep whatever embedding
+/// Existing courses are not touched; they keep whatever embedding
 /// model they were created with. This endpoint only affects the model
 /// inserted by future `POST /courses` calls.
 async fn set_default_embedding_model(

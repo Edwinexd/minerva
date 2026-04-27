@@ -16,7 +16,11 @@ RAG platform for educational use at DSV, Stockholm University. Teachers upload c
 - **Auth**: Shibboleth (SAML) primary; HMAC-signed external-auth invites validated entirely inside Apache via `mod_lua`; attribute-based role auto-promotion rules.
 - **Privacy & i18n**: pseudonymisation for `ext:` users, in-app data-handling ack, English + Swedish, WCAG 2.1 AA fixes.
 
-Architecture and pipeline diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## Architecture
+
+![System overview](docs/diagrams/system-overview.svg)
+
+Detail figures for the document-ingest and chat/RAG pipelines (including the FLARE multi-turn loop): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Screenshots
 

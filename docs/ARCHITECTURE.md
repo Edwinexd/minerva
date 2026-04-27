@@ -35,15 +35,19 @@ decisions.
 
 ![Chat pipeline](diagrams/chat-pipeline.svg)
 
-Three strategies share retrieval, KG expansion, and the extraction-guard
-layers; they differ in *when* retrieval happens relative to generation:
+All three strategies share the same retrieval -> KG expansion -> prompt
+assembly -> LLM core. They differ only in *when* retrieval happens relative
+to generation:
 
 - **simple**: retrieve once, then generate.
 - **parallel**: start streaming the LLM and run retrieval concurrently;
-  splice context as soon as it lands.
-- **FLARE**: multi-turn loop. Stream a sentence, score logprobs; if a
-  token is low-confidence, use the partial sentence as a re-retrieval query
-  and resume generation. Iteration is capped per response.
+  splice context in as soon as it lands.
+- **FLARE**: per-sentence feedback loop *during* generation. The LLM streams
+  a sentence; if any token is low-confidence, the partial sentence is fed
+  back as the next retrieval query and generation resumes against the
+  augmented context. Iteration is capped per response (the dashed blue
+  arrow in the diagram). FLARE doesn't precede the regular pipeline; it
+  loops inside it.
 
 Classifiers run on `llama3.1-8b` for latency; the Socratic rewriter on
 `gpt-oss-120b`. Every classifier decision is appended to

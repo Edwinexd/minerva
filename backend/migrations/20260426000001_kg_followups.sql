@@ -14,13 +14,13 @@
 
 CREATE TABLE IF NOT EXISTS relink_queue (
     course_id        UUID PRIMARY KEY REFERENCES courses(id) ON DELETE CASCADE,
-   ; Wall-clock instant the course was first marked dirty since its
-   ; last successful relink. Used to cap how far the debounce pushes
-   ; due_at into the future.
+    -- Wall-clock instant the course was first marked dirty since its
+    -- last successful relink. Used to cap how far the debounce pushes
+    -- due_at into the future.
     first_marked_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-   ; Earliest moment the linker may run for this course. Pushed back
-   ; by mark_dirty up to a hard cap of first_marked_at + MAX_PENDING_AGE
-   ; so a sustained burst doesn't starve the linker.
+    -- Earliest moment the linker may run for this course. Pushed back
+    -- by mark_dirty up to a hard cap of first_marked_at + MAX_PENDING_AGE
+    -- so a sustained burst doesn't starve the linker.
     due_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -31,10 +31,10 @@ CREATE INDEX IF NOT EXISTS relink_queue_due_at_idx ON relink_queue (due_at);
 -- signals across reruns without persisting them somewhere stable.
 --
 -- Two parts:
---   1. `document_relations.rejected_by_teacher`; keeps a row visible
+--   1. `document_relations.rejected_by_teacher` -- keeps a row visible
 --      to admins/audit even after the linker would have cleaned it up,
 --      and tells the graph viewer to hide it.
---   2. `rejected_edge_pairs`; a separate table keyed by the
+--   2. `rejected_edge_pairs` -- a separate table keyed by the
 --      DIRECTIONAL pair + relation, so the next linker pass can SKIP
 --      proposing the pair entirely. Directional matters for solution_of
 --      (src and dst aren't interchangeable) but for part_of_unit we

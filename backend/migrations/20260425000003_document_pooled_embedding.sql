@@ -3,7 +3,7 @@
 --
 -- The pooled embedding is the mean of all chunk embeddings for the
 -- document under whatever embedding model the course is configured
--- with. Stored as REAL[] (postgres array of floats); pgvector is
+-- with. Stored as REAL[] (postgres array of floats) -- pgvector is
 -- not installed in this deployment and we don't need DB-side
 -- similarity search; the linker computes pairwise cosine in memory.
 --

@@ -10,7 +10,7 @@
 -- This migration moves the choice into `embedding_models` so admins
 -- can flip it from the UI:
 --   * `is_default` is the new authoritative flag. Exactly one row may
---     have `is_default = TRUE`; enforced by a partial unique index
+--     have `is_default = TRUE` -- enforced by a partial unique index
 --     since postgres doesn't support `CHECK (...)` against an aggregate
 --     count.
 --   * The course-create path reads this flag (with the SQL DEFAULT as
@@ -21,7 +21,7 @@
 --     chosen row. Models that aren't enabled can't be set as default.
 --
 -- The seed picks `all-MiniLM-L6-v2` as the initial default because
--- that's what the SQL DEFAULT has been pointing at since launch; no
+-- that's what the SQL DEFAULT has been pointing at since launch -- no
 -- behavioural change for existing prod, just a lift-and-shift of the
 -- choice into a row that admins can rewrite.
 

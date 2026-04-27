@@ -11,7 +11,7 @@
 -- specificity -> clarity, alternatives -> examples,
 -- clarification -> clarity). The DB layer doesn't enforce kind
 -- since the JSONB column is opaque, so the rename only matters on
--- read; the frontend treats unknown kinds via an i18n
+-- read -- the frontend treats unknown kinds via an i18n
 -- defaultValue fallback, so old rows render as their literal
 -- string ("context") instead of breaking. We could rewrite old
 -- rows to the new vocabulary, but the persisted rows are a

@@ -12,6 +12,21 @@ repos:
 
   - repo: local
     hooks:
+      - id: migrations-immutable
+        name: migrations are immutable once committed
+        # Migration files in backend/migrations/ are content-hashed by sqlx
+        # and checked against `_sqlx_migrations` on every app startup.
+        # Editing one after it has been applied to a deployed database
+        # breaks the next rollout (sqlx refuses to start with "migration N
+        # was previously applied but has been modified"). The correct fix
+        # is always additive: write a new migration. This hook blocks any
+        # modification to existing migration files; only newly-added (A)
+        # files pass.
+        entry: bash scripts/check-migrations-immutable.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: ban-emdashes
         name: ban emdashes
         # Uses perl for portability: BSD grep on macOS has no -P, and `bash -c '...' "$@"`
@@ -20,7 +35,11 @@ repos:
         entry: 'perl -ne ''if (/\xe2\x80\x94/) { print STDERR "$ARGV:$.: $_"; $found = 1 } END { exit($found ? 1 : 0) }'''
         language: system
         types: [text]
-        exclude: (\.lock|node_modules|target|dist|\.gen\.)
+        # backend/migrations/ is excluded because migrations are immutable
+        # once applied (see `migrations-immutable` above); pre-existing
+        # emdashes in historical migration files cannot be cleaned up
+        # without breaking every deployed DBs sqlx checksum check.
+        exclude: (\.lock|node_modules|target|dist|\.gen\.|^backend/migrations/.*\.sql$)
 
       - id: ban-double-dash
         name: ban space-dash-dash-space
@@ -37,11 +56,14 @@ repos:
         # (anything without spaces around the dashes).
         # YAML is excluded because cargo/CI invocations legitimately use the
         # end-of-options separator.
+        # backend/migrations/ is excluded for the same reason as
+        # ban-emdashes: applied migrations are content-hashed and immutable,
+        # so historical occurrences cannot be retro-cleaned.
         # Hex escape for the space char keeps this hook config itself clean.
         entry: 'perl -ne ''if (/\S.*\x20--\x20/) { print STDERR "$ARGV:$.: $_"; $found = 1 } END { exit($found ? 1 : 0) }'''
         language: system
         types: [text]
-        exclude: (\.lock|\.ya?ml$|node_modules|target|dist|\.gen\.)
+        exclude: (\.lock|\.ya?ml$|node_modules|target|dist|\.gen\.|^backend/migrations/.*\.sql$)
 
       - id: tsc-check
         name: tsc check

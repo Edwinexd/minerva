@@ -161,7 +161,13 @@ jobs:
 
       - name: Check for emdashes
         run: |
-          if grep -rn $'\xe2\x80\x94' --include='*.rs' --include='*.ts' --include='*.tsx' --include='*.toml' --include='*.yml' --include='*.yaml' --include='*.md' --include='*.sql' --include='*.php' .; then
+          # backend/migrations/ is excluded: applied migrations are
+          # content-hashed by sqlx (see migrations-immutable hook), so
+          # historical occurrences cannot be retro-cleaned.
+          mapfile -t FILES < <(git ls-files \
+            '*.rs' '*.ts' '*.tsx' '*.toml' '*.yml' '*.yaml' '*.md' '*.sql' '*.php' \
+            | grep -vE '^backend/migrations/.*\.sql$')
+          if grep -n $'\xe2\x80\x94' "${FILES[@]}"; then
             echo "::error::Emdashes found! Use a semicolon, colon, or rephrase the sentence instead."
             exit 1
           fi
@@ -178,7 +184,10 @@ jobs:
           # Pattern uses hex escapes so this workflow itself is clean.
           # Mirrors the pre-commit hook (ban-double-dash) so any file the hook
           # scans is also scanned in CI.
-          mapfile -t FILES < <(git ls-files | grep -vE '(\.lock$|\.ya?ml$|^frontend/node_modules/|^backend/target/|/dist/|\.gen\.)')
+          # backend/migrations/ is excluded for the same reason as the
+          # emdash check above: applied migrations are content-hashed and
+          # immutable, so historical occurrences cannot be retro-cleaned.
+          mapfile -t FILES < <(git ls-files | grep -vE '(\.lock$|\.ya?ml$|^frontend/node_modules/|^backend/target/|/dist/|\.gen\.|^backend/migrations/.*\.sql$)')
           # Perl exits 1 when at least one match was printed; let bash see that
           # exit code directly. `set -e` is on by default in `run:` blocks, so
           # a non-zero exit fails the step.
@@ -186,3 +195,21 @@ jobs:
             echo "::error::space-dash-dash-space found! Use a semicolon, colon, or rephrase. Inline SQL comments must move to their own line."
             exit 1
           fi
+
+  migrations-immutable:
+    name: Migrations are immutable once committed
+    # Blocks any PR or push that modifies an existing
+    # backend/migrations/*.sql file relative to the SHA pinned in
+    # .migrations-immutable-baseline. Net-new migrations (files that
+    # don't exist at the baseline) are always allowed. Mirrors the
+    # `migrations-immutable` pre-commit hook so a contributor who skips
+    # pre-commit is still caught here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Need full history so the baseline SHA is reachable.
+          fetch-depth: 0
+
+      - name: Check
+        run: bash scripts/check-migrations-immutable.sh

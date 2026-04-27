@@ -11,7 +11,7 @@
 --
 -- Constraints:
 --   * Both docs must live in the same course (enforced by the linker
---     query, not the schema; a CHECK across two foreign rows would
+--     query, not the schema -- a CHECK across two foreign rows would
 --     need a trigger, and the application-side guard is sufficient).
 --   * (src_doc_id, dst_doc_id, relation) is unique so re-running the
 --     linker is idempotent: ON CONFLICT updates confidence/rationale.

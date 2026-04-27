@@ -109,11 +109,29 @@ pub struct AppState {
     /// `Some(_)` while one is running and for the cycle after it
     /// finishes. See `crate::routes::admin::backfill_classifications`.
     pub backfill_tracker: Arc<BackfillTracker>,
+    /// Eureka concept-graph runtime (LLM + embedder + extractor).
+    /// Only populated when both the `eureka` cargo feature is on AND
+    /// the relevant env vars resolve to non-empty values; admin
+    /// endpoints return 503 when this is `None`. See
+    /// `crate::eureka_runtime`.
+    #[cfg(feature = "eureka")]
+    pub eureka: Option<Arc<crate::eureka_runtime::EurekaContext>>,
 }
 
 impl AppState {
     pub async fn new(config: &Config) -> anyhow::Result<Self> {
         let db = minerva_db::postgres::create_pool(&config.database_url).await?;
+
+        // Apply eureka-2's own migrations (eureka_graphs, eureka_concepts,
+        // etc.). Namespaced under `eureka_*` so they coexist with Minerva's
+        // schema. Safe to run on every startup; sqlx::migrate handles
+        // already-applied migrations idempotently.
+        #[cfg(feature = "eureka")]
+        {
+            minerva_eureka::apply_migrations(&db).await?;
+            tracing::info!("eureka: migrations applied");
+        }
+
         let qdrant = minerva_db::qdrant::create_client(&config.qdrant_url)
             .await
             .map_err(|e| anyhow::anyhow!("qdrant connection failed: {}", e))?;
@@ -143,6 +161,9 @@ impl AppState {
 
         let rules = Arc::new(RuleCache::load(&db).await?);
 
+        #[cfg(feature = "eureka")]
+        let eureka = crate::eureka_runtime::EurekaContext::from_env(config).map(Arc::new);
+
         Ok(Self {
             db: db.clone(),
             qdrant: Arc::new(qdrant),
@@ -153,6 +174,8 @@ impl AppState {
             rules,
             relink_scheduler: Arc::new(RelinkScheduler::new(db)),
             backfill_tracker: Arc::new(BackfillTracker::default()),
+            #[cfg(feature = "eureka")]
+            eureka,
         })
     }
 }

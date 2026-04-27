@@ -15,28 +15,39 @@
 //!    `courses.concept_graph_enabled` boolean, so individual courses
 //!    can opt in even after the feature has shipped.
 //!
-//! v0.1 of this crate is scaffolding: it re-exports the eureka-2 surface
-//! and exposes a [`namespace_for_course`] helper so that all callers
-//! agree on how a Minerva course maps to an eureka graph identifier.
-//! Routes, ingestion hooks, and migrations land in subsequent commits.
+//! v0.2 of this crate exposes the eureka-2 surface and the helpers
+//! Minerva needs to keep route, ingest, and admin code paths in sync
+//! on graph identifiers.
 
 pub use eureka_2;
 pub use eureka_2::MIGRATOR as EUREKA_MIGRATOR;
 
+use uuid::Uuid;
+
 /// Compute the eureka-2 graph namespace for a Minerva course.
 ///
 /// `eureka-2` keys graphs by `(namespace, name)`; Minerva uses
-/// `minerva:course` as the namespace and the stringified course id as
-/// the graph name. Centralising this mapping avoids divergent strings
+/// `minerva:course` as the namespace and the course's UUID as the
+/// graph name. Centralising this mapping avoids divergent strings
 /// across ingest, query, and admin code paths.
 #[must_use]
 pub fn namespace_for_course() -> &'static str {
     "minerva:course"
 }
 
-/// Compute the eureka-2 graph name for a Minerva course id.
+/// Compute the eureka-2 graph name for a Minerva course id (i64).
 #[must_use]
 pub fn graph_name_for_course(course_id: i64) -> String {
+    course_id.to_string()
+}
+
+/// Compute the eureka-2 graph name for a Minerva course UUID.
+///
+/// Minerva's `courses.id` is a UUID; eureka-2 graph names are arbitrary
+/// strings. Using the UUID's hyphenated string form keeps the mapping
+/// stable across restarts and human-readable in logs / GraphML exports.
+#[must_use]
+pub fn graph_name_for_course_uuid(course_id: Uuid) -> String {
     course_id.to_string()
 }
 

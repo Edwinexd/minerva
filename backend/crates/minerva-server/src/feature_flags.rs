@@ -41,10 +41,24 @@ pub const FLAG_EXTRACTION_GUARD: &str = "extraction_guard";
 /// See `crate::classification::aegis` for the analyzer.
 pub const FLAG_AEGIS: &str = "aegis";
 
+/// Concept knowledge graph (eureka-2). Distinct from `course_kg`,
+/// which is the document-level relation graph. When on for a
+/// course, admins can run per-document concept extraction via the
+/// `minerva-eureka` integration crate; the resulting concept graph
+/// (vertices, edges, supports) is admin-viewable and the eureka
+/// migrations are applied on app startup. Toggling off does not
+/// drop the persisted graph; it just hides the admin endpoints.
+pub const FLAG_CONCEPT_GRAPH: &str = "concept_graph";
+
 /// All flags the application currently knows about. The admin UI
 /// uses this to enumerate available toggles per course; new flags
 /// must be added here AND have a `pub const` above.
-pub const ALL_FLAGS: &[&str] = &[FLAG_COURSE_KG, FLAG_EXTRACTION_GUARD, FLAG_AEGIS];
+pub const ALL_FLAGS: &[&str] = &[
+    FLAG_COURSE_KG,
+    FLAG_EXTRACTION_GUARD,
+    FLAG_AEGIS,
+    FLAG_CONCEPT_GRAPH,
+];
 
 /// True iff the KG bundle is enabled for this course. Resolution:
 /// course-scoped row -> global row -> default (FALSE).
@@ -114,6 +128,32 @@ pub async fn aegis_enabled(db: &PgPool, course_id: Uuid) -> bool {
         Err(e) => {
             tracing::warn!(
                 "feature_flags: aegis lookup for course {} failed ({}); treating as disabled",
+                course_id,
+                e,
+            );
+            false
+        }
+    }
+}
+
+/// True iff the eureka concept-graph integration is enabled for
+/// this course. Same resolution + fail-closed semantics as
+/// `course_kg_enabled`. Gates the admin endpoints in
+/// `routes::admin::concept_graph` and any future read-side
+/// integrations.
+pub async fn concept_graph_enabled(db: &PgPool, course_id: Uuid) -> bool {
+    match minerva_db::queries::feature_flags::is_enabled_for_course(
+        db,
+        FLAG_CONCEPT_GRAPH,
+        course_id,
+        false,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "feature_flags: concept_graph lookup for course {} failed ({}); treating as disabled",
                 course_id,
                 e,
             );

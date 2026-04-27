@@ -29,6 +29,7 @@ import { TeacherNoteInline } from "./teacher-note-inline"
 import { useChatStream } from "./use-chat-stream"
 import { AegisFeedbackPanel } from "./aegis-feedback-panel"
 import { AegisShieldFilled } from "@/components/icons/aegis-shield-filled"
+import { AegisSuggestionsBanner } from "./aegis-suggestions-banner"
 import { useAegisLiveAnalyzer } from "./use-aegis-live-analyzer"
 import { useAegisMode } from "./use-aegis-mode"
 import { useAegisPanelVisible } from "./use-aegis-panel-visible"
@@ -440,6 +441,78 @@ function ChatWindow({
   const sendNeedsConfirm =
     confirmDraftSend !== null && confirmDraftSend === input
 
+  // Banner state ("Aegis has N ideas" tile above the input). The
+  // banner shows whenever the live verdict has suggestions for the
+  // current draft AND the student hasn't dismissed it for THIS
+  // draft. New input regenerates suggestions and clears the
+  // dismissal so the banner can return.
+  const [bannerDismissedFor, setBannerDismissedFor] = useState<string | null>(
+    null,
+  )
+  const [rewriting, setRewriting] = useState(false)
+  useEffect(() => {
+    if (bannerDismissedFor !== null && bannerDismissedFor !== input) {
+      setBannerDismissedFor(null)
+    }
+  }, [input, bannerDismissedFor])
+  const liveSuggestions = liveAnalyzer.analysis?.suggestions ?? []
+  const showBanner =
+    aegisEnabled &&
+    liveSuggestions.length > 0 &&
+    bannerDismissedFor !== input
+
+  /**
+   * "Some ideas" handler. POSTs the current draft + cached
+   * suggestions to /aegis/rewrite, replaces the input with the
+   * returned revision, and dispatches a Send. We bypass the
+   * soft-block (the rewrite already incorporates the suggestions,
+   * so re-blocking would loop) by setting confirmDraftSend to
+   * the rewritten content before dispatching.
+   */
+  const handleUseIdeas = async () => {
+    if (rewriting) return
+    const draft = input
+    if (!draft.trim() || liveSuggestions.length === 0) return
+    setRewriting(true)
+    try {
+      const devUser = localStorage.getItem("minerva-dev-user")
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      }
+      if (devUser) headers["X-Dev-User"] = devUser
+      const res = await fetch(
+        `/api/courses/${courseId}/aegis/rewrite`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            content: draft,
+            suggestions: liveSuggestions,
+            mode: aegisMode,
+          }),
+        },
+      )
+      if (!res.ok) {
+        // Soft fail -- leave the original input in place so the
+        // student can still send. A 5xx logs the upstream error
+        // server-side; we don't surface it (the rewrite is
+        // optional).
+        console.warn("aegis rewrite failed:", res.status)
+        return
+      }
+      const body = (await res.json()) as { content: string }
+      const rewritten = body.content?.trim() ?? ""
+      if (!rewritten) return
+      setInput(rewritten)
+      setConfirmDraftSend(rewritten) // pre-confirm so the next dispatch isn't blocked
+      dispatchSend(rewritten)
+    } catch (e) {
+      console.warn("aegis rewrite error:", e)
+    } finally {
+      setRewriting(false)
+    }
+  }
+
   const bubbleLabels: ChatBubbleLabels = {
     sourceCount: (count) => t("message.source", { count }),
     unknownSource: t("message.unknownSource"),
@@ -510,6 +583,15 @@ function ChatWindow({
               }}
             />
           )}
+          {showBanner && (
+            <AegisSuggestionsBanner
+              suggestionCount={liveSuggestions.length}
+              blocked={sendNeedsConfirm}
+              working={rewriting}
+              onUseIdeas={handleUseIdeas}
+              onDismiss={() => setBannerDismissedFor(input)}
+            />
+          )}
           <form onSubmit={handleSubmit} className="flex gap-2">
             <Input
               value={input}
@@ -535,21 +617,6 @@ function ChatWindow({
                   : t("chat.send")}
             </Button>
           </form>
-          {/*
-            Inline confirm note. Shown ONLY after the student tried
-            to send a draft Aegis had suggestions for; tells them
-            what happened and how to proceed without grabbing focus
-            or trapping them in a modal.
-          */}
-          {confirmDraftSend !== null && confirmDraftSend === input && (
-            <p
-              className="text-xs text-amber-700 dark:text-amber-300 text-center"
-              role="status"
-              aria-live="polite"
-            >
-              {t("aegis.sendBlockedNote")}
-            </p>
-          )}
           <p className="text-xs text-muted-foreground text-center">
             {t("chat.disclaimerBefore")}
             <Link to="/data-handling" className="underline hover:text-foreground">{t("chat.dataHandlingLink")}</Link>

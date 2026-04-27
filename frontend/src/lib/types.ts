@@ -252,17 +252,22 @@ export interface PromptAnalysis {
 
 export interface AegisSuggestion {
   /**
-   * Short tag the panel uses for grouping / iconography. The
-   * analyzer is constrained server-side to one of:
-   *   * "context"
-   *   * "constraints"
-   *   * "specificity"
-   *   * "alternatives"
-   *   * "clarification"
-   * but the type stays `string` so a server-side enum extension
-   * doesn't force a frontend release.
+   * Short tag the panel uses for grouping / iconography. Mapped
+   * to the literature rubric (Clarity / Rationale / Audience /
+   * Format / Tasks / Instruction / Examples / Constraints). The
+   * type stays `string` so a server-side enum extension doesn't
+   * force a frontend release; unknown kinds fall back to the raw
+   * string via i18next's `defaultValue`.
    */
   kind: string
+  /**
+   * Importance: "high" | "medium" | "low". Drives the panel
+   * card's per-suggestion colour (rose / amber / sky) so the
+   * student sees which suggestions move the needle vs which are
+   * polish. Old persisted rows without this field render as
+   * "medium" via the migration backfill.
+   */
+  severity: string
   /** Single-sentence actionable improvement, second-person. */
   text: string
 }

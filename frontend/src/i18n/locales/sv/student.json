@@ -62,7 +62,6 @@
     "hidePanel": "Dölj Aegis-panelen",
     "showPanel": "Visa Aegis-panelen",
     "sendAsIs": "Skicka som det är",
-    "sendBlockedNote": "Aegis har förslag för den här prompten - se panelen. Tryck på Skicka igen för att skicka som det är.",
     "emptyTitle": "Börja skriva för förslag",
     "emptyBody": "Medan du skriver en prompt ger Aegis idéer för hur den kan bli skarpare. Återkopplingen är rådgivande och blockerar aldrig ditt meddelande.",
     "pendingTitle": "Läser ditt utkast…",
@@ -76,11 +75,23 @@
     "historyLooksGood": "Skickad utan förslag.",
     "historyLooksGoodTag": "ok",
     "kinds": {
-      "context": "kontext",
-      "constraints": "ramar",
-      "specificity": "specificitet",
-      "alternatives": "alternativ",
-      "clarification": "förtydligande"
+      "clarity": "tydlighet",
+      "rationale": "syfte",
+      "audience": "målgrupp",
+      "format": "format",
+      "tasks": "deluppgifter",
+      "instruction": "instruktion",
+      "examples": "exempel",
+      "constraints": "ramar"
+    },
+    "banner": {
+      "title_one": "Aegis har 1 idé för din prompt",
+      "title_other": "Aegis har {{count}} idéer för din prompt",
+      "idleHint": "Ta en titt i panelen, eller låt Aegis väva in dem åt dig.",
+      "blockedHint": "Tryck på Skicka igen för att skicka som det är, eller använd förslagen nedan.",
+      "useIdeas": "Använd idéerna",
+      "working": "Skriver om…",
+      "dismiss": "Avfärda"
     },
     "intercept": {
       "title": "Aegis har ett par idéer först",

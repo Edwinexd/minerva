@@ -21,8 +21,9 @@ use crate::error::AppError;
 use crate::ext_obfuscate::{self, Pseudonymizer};
 use crate::routes::chat::{
     analyze_prompt_for_user, fetch_conversation_for_view, list_pinned_conversations_for,
-    load_prompt_analyses_for_conversation, AegisAnalysisPayload, AegisModeWire,
-    ConversationWithUserResponse, PromptAnalysisResponse,
+    load_prompt_analyses_for_conversation, rewrite_prompt_for_user, AegisAnalysisPayload,
+    AegisModeWire, AegisRewriteResponse, AegisSuggestionPayload, ConversationWithUserResponse,
+    PromptAnalysisResponse,
 };
 use crate::routes::courses::{resolve_course_flags, CourseFeatureFlagsView};
 use crate::routes::integration::verify_embed_token;
@@ -57,6 +58,10 @@ pub fn router() -> Router<AppState> {
         // both -- the only difference here is the embed-token auth
         // flow + token in the body.
         .route("/course/{course_id}/aegis/analyze", post(analyze_prompt))
+        // Mirrors the Shibboleth aegis rewrite route. Used by the
+        // panel's "Some ideas" button to revise a draft with the
+        // suggestions baked in.
+        .route("/course/{course_id}/aegis/rewrite", post(rewrite_prompt))
 }
 
 /// All embed endpoints require `?token=...` query param.
@@ -395,6 +400,34 @@ async fn analyze_prompt(
     )
     .await?;
     Ok(Json(verdict))
+}
+
+#[derive(Deserialize)]
+struct RewritePromptRequest {
+    content: String,
+    token: String,
+    #[serde(default)]
+    suggestions: Vec<AegisSuggestionPayload>,
+    #[serde(default)]
+    mode: AegisModeWire,
+}
+
+/// Embed-side wrapper around `chat::rewrite_prompt_for_user`.
+/// Same shared helper, embed-token auth via the body.
+async fn rewrite_prompt(
+    State(state): State<AppState>,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<RewritePromptRequest>,
+) -> Result<Json<AegisRewriteResponse>, AppError> {
+    let (resolved_course_id, _user_id) =
+        verify_embed_token(&state.config.hmac_secret, &body.token)?;
+    if resolved_course_id != course_id {
+        return Err(AppError::Forbidden);
+    }
+    let resp =
+        rewrite_prompt_for_user(&state, course_id, body.content, body.suggestions, body.mode)
+            .await?;
+    Ok(Json(resp))
 }
 
 /// Token-auth path used by both message-streaming endpoints. Token lives

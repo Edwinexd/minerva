@@ -242,8 +242,14 @@ function PlaceholderCard({ kind }: { kind: "pending" | "empty" }) {
 
 /**
  * One suggestion. The kind tag is rendered as a small badge -- it
- * gives the student a sense of WHAT category of improvement this is
- * (context, constraints, etc.) before they read the body.
+ * gives the student a sense of WHAT category of improvement this
+ * is (clarity, rationale, etc.) before they read the body. The
+ * card itself is tinted by severity:
+ *   * `high`   -> rose  (must fix to get a useful answer)
+ *   * `medium` -> amber (would meaningfully sharpen the answer)
+ *   * `low`    -> sky   (polish; nice-to-have)
+ * Unknown severities (legacy rows, unrecognised values) render as
+ * a neutral border so the row still parses visually.
  */
 export function SuggestionRow({
   suggestion,
@@ -252,14 +258,33 @@ export function SuggestionRow({
 }) {
   const { t } = useTranslation("student")
   // Localise the kind tag if we know it, else show the raw string.
-  // The analyzer is server-constrained but this lets a server-side
-  // enum extension still render reasonably without a frontend ship.
   const kindLabel = t(`aegis.kinds.${suggestion.kind}`, {
     defaultValue: suggestion.kind,
   })
+  const severity = suggestion.severity as "high" | "medium" | "low" | string
+  const cardClass = cn(
+    "rounded border p-3 space-y-2",
+    severity === "high" &&
+      "border-rose-300 bg-rose-50/60 dark:bg-rose-950/30 dark:border-rose-800",
+    severity === "medium" &&
+      "border-amber-300 bg-amber-50/60 dark:bg-amber-950/30 dark:border-amber-800",
+    severity === "low" &&
+      "border-sky-300 bg-sky-50/60 dark:bg-sky-950/30 dark:border-sky-800",
+  )
+  // Same palette logic for the kind badge so the eye groups the
+  // tag with its card.
+  const kindBadgeClass = cn(
+    "text-[10px] uppercase tracking-wide",
+    severity === "high" &&
+      "bg-rose-100 text-rose-900 dark:bg-rose-900/50 dark:text-rose-100 border-rose-300/40",
+    severity === "medium" &&
+      "bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100 border-amber-300/40",
+    severity === "low" &&
+      "bg-sky-100 text-sky-900 dark:bg-sky-900/50 dark:text-sky-100 border-sky-300/40",
+  )
   return (
-    <div className="rounded border p-3 space-y-2">
-      <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+    <div className={cardClass}>
+      <Badge variant="secondary" className={kindBadgeClass}>
         {kindLabel}
       </Badge>
       <p className="text-sm leading-snug">{suggestion.text}</p>

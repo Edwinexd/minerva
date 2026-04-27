@@ -12,6 +12,7 @@ import { TeacherNoteInline } from "@/components/chat/teacher-note-inline"
 import { useChatStream } from "@/components/chat/use-chat-stream"
 import { AegisFeedbackPanel } from "@/components/chat/aegis-feedback-panel"
 import { AegisShieldFilled } from "@/components/icons/aegis-shield-filled"
+import { AegisSuggestionsBanner } from "@/components/chat/aegis-suggestions-banner"
 import { useAegisLiveAnalyzer } from "@/components/chat/use-aegis-live-analyzer"
 import { useAegisMode } from "@/components/chat/use-aegis-mode"
 import { useAegisPanelVisible } from "@/components/chat/use-aegis-panel-visible"
@@ -597,6 +598,56 @@ function EmbedChatWindow({
   const sendNeedsConfirm =
     confirmDraftSend !== null && confirmDraftSend === input
 
+  // Banner state -- mirrors chat-page. The rewrite call uses the
+  // embed-token-in-body auth flow rather than cookies + dev-user.
+  const [bannerDismissedFor, setBannerDismissedFor] = useState<string | null>(
+    null,
+  )
+  const [rewriting, setRewriting] = useState(false)
+  useEffect(() => {
+    if (bannerDismissedFor !== null && bannerDismissedFor !== input) {
+      setBannerDismissedFor(null)
+    }
+  }, [input, bannerDismissedFor])
+  const liveSuggestions = liveAnalyzer.analysis?.suggestions ?? []
+  const showBanner =
+    aegisEnabled &&
+    liveSuggestions.length > 0 &&
+    bannerDismissedFor !== input
+
+  const handleUseIdeas = async () => {
+    if (rewriting) return
+    const draft = input
+    if (!draft.trim() || liveSuggestions.length === 0) return
+    setRewriting(true)
+    try {
+      const res = await fetch(`/api/embed/course/${courseId}/aegis/rewrite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: draft,
+          token,
+          suggestions: liveSuggestions,
+          mode: aegisMode,
+        }),
+      })
+      if (!res.ok) {
+        console.warn("aegis rewrite failed:", res.status)
+        return
+      }
+      const body = (await res.json()) as { content: string }
+      const rewritten = body.content?.trim() ?? ""
+      if (!rewritten) return
+      setInput(rewritten)
+      setConfirmDraftSend(rewritten)
+      dispatchSend(rewritten)
+    } catch (e) {
+      console.warn("aegis rewrite error:", e)
+    } finally {
+      setRewriting(false)
+    }
+  }
+
   const bubbleLabels: ChatBubbleLabels = {
     sourceCount: (count) => t("embed.sources", { count }),
     unknownSource: t("embed.unknownSource"),
@@ -646,6 +697,15 @@ function EmbedChatWindow({
       {!readOnly && (
         <div className="p-4 border-t space-y-2">
           {needsPrivacyAck && <PrivacyAckBanner onAcknowledge={onAcknowledgePrivacy} />}
+          {showBanner && (
+            <AegisSuggestionsBanner
+              suggestionCount={liveSuggestions.length}
+              blocked={sendNeedsConfirm}
+              working={rewriting}
+              onUseIdeas={handleUseIdeas}
+              onDismiss={() => setBannerDismissedFor(input)}
+            />
+          )}
           <form onSubmit={handleSubmit} className="flex gap-2">
             <Input
               value={input}
@@ -671,15 +731,6 @@ function EmbedChatWindow({
                   : t("embed.send")}
             </Button>
           </form>
-          {sendNeedsConfirm && (
-            <p
-              className="text-xs text-amber-700 dark:text-amber-300 text-center"
-              role="status"
-              aria-live="polite"
-            >
-              {tStudent("aegis.sendBlockedNote")}
-            </p>
-          )}
           <p className="text-xs text-muted-foreground text-center">
             {t("embed.disclosurePrefix")}
             <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">{t("embed.disclosureLink")}</a>

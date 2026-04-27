@@ -53,6 +53,11 @@ pub fn router() -> Router<AppState> {
         // No persistence happens here; the verdict the student
         // ultimately accepts gets persisted via the send-message body.
         .route("/aegis/analyze", post(analyze_prompt_route))
+        // Aegis rewrite: takes the student's draft + the suggestions
+        // already produced for it and asks the model to rewrite the
+        // draft incorporating them. Drives the panel's "Some ideas"
+        // button -- one-click revision with auto-send.
+        .route("/aegis/rewrite", post(rewrite_prompt_route))
 }
 
 #[derive(Serialize)]
@@ -190,11 +195,17 @@ pub(crate) struct AegisAnalysisPayload {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct AegisSuggestionPayload {
-    /// Short tag the panel uses for grouping / iconography:
-    /// "context" | "constraints" | "specificity" | "alternatives"
-    /// | "clarification". Free-form string in the wire shape so
-    /// the server can add categories without a frontend release.
+    /// Short tag the panel uses for grouping / iconography. The
+    /// analyzer's JSON-schema enum is one of:
+    /// "clarity" | "rationale" | "audience" | "format" | "tasks"
+    /// | "instruction" | "examples" | "constraints". Free-form
+    /// `String` in the wire shape so server-side enum extensions
+    /// don't force a frontend release.
     pub kind: String,
+    /// Importance: "high" | "medium" | "low". Drives the panel's
+    /// per-card colour so the student sees which suggestions move
+    /// the needle vs which are polish.
+    pub severity: String,
     /// Single-sentence actionable improvement, second-person.
     pub text: String,
 }
@@ -212,6 +223,7 @@ impl AegisAnalysisPayload {
                 .take(3)
                 .map(|s| AegisSuggestionPayload {
                     kind: s.kind,
+                    severity: s.severity,
                     text: s.text,
                 })
                 .collect(),
@@ -1087,6 +1099,88 @@ async fn analyze_prompt_route(
     )
     .await?;
     Ok(Json(verdict))
+}
+
+#[derive(Serialize)]
+pub(crate) struct AegisRewriteResponse {
+    /// The rewritten draft, ready to drop straight into the chat input.
+    pub content: String,
+}
+
+/// Request body for the rewrite route.
+#[derive(Deserialize)]
+pub(crate) struct RewritePromptRequest {
+    /// The student's current draft.
+    pub content: String,
+    /// The suggestions Aegis already produced for this draft. The
+    /// frontend ships them back so the rewrite call doesn't have to
+    /// re-analyze (saves an LLM call); the rewrite then incorporates
+    /// these specific suggestions verbatim.
+    #[serde(default)]
+    pub suggestions: Vec<AegisSuggestionPayload>,
+    /// Subject-expertise mode. Calibrates the rewrite's register
+    /// (beginner stays casual; expert stays terse).
+    #[serde(default)]
+    pub mode: AegisModeWire,
+}
+
+/// Shared rewrite pipeline. Caller is responsible for proving the
+/// user has access to `course_id`. Returns a 500 (`AppError::Internal`)
+/// on upstream failure so the frontend can surface a real error
+/// rather than silently failing back to the original draft.
+pub(crate) async fn rewrite_prompt_for_user(
+    state: &AppState,
+    course_id: Uuid,
+    content: String,
+    suggestions: Vec<AegisSuggestionPayload>,
+    mode: AegisModeWire,
+) -> Result<AegisRewriteResponse, AppError> {
+    if !crate::feature_flags::aegis_enabled(&state.db, course_id).await {
+        // Aegis off -> rewrite makes no sense to expose. 404 reads
+        // cleaner than 400 here since the route conceptually
+        // doesn't exist for this course.
+        return Err(AppError::NotFound);
+    }
+    // Map wire-shape suggestions to the analyzer's internal struct
+    // for the LLM call. The two structs are field-identical; the
+    // explicit map keeps the layers decoupled in case one shape
+    // grows fields the other shouldn't see.
+    let analyzer_suggestions: Vec<crate::classification::aegis::AegisSuggestion> = suggestions
+        .into_iter()
+        .map(|s| crate::classification::aegis::AegisSuggestion {
+            kind: s.kind,
+            severity: s.severity,
+            text: s.text,
+        })
+        .collect();
+
+    match crate::classification::aegis::rewrite_prompt(
+        &state.http_client,
+        &state.config.cerebras_api_key,
+        &state.db,
+        course_id,
+        &content,
+        &analyzer_suggestions,
+        mode.into_internal(),
+    )
+    .await
+    {
+        Ok(rewritten) => Ok(AegisRewriteResponse { content: rewritten }),
+        Err(reason) => Err(AppError::Internal(format!("aegis rewrite: {reason}"))),
+    }
+}
+
+async fn rewrite_prompt_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<RewritePromptRequest>,
+) -> Result<Json<AegisRewriteResponse>, AppError> {
+    verify_course_access(&state, course_id, user.id).await?;
+    let resp =
+        rewrite_prompt_for_user(&state, course_id, body.content, body.suggestions, body.mode)
+            .await?;
+    Ok(Json(resp))
 }
 
 async fn send_message(

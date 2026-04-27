@@ -55,7 +55,9 @@
   },
   "aegis": {
     "panelTitle": "Återkoppling",
-    "modeBadge": "Expert",
+    "modeBeginner": "Nybörjare",
+    "modeExpert": "Expert",
+    "modeToggleHint": "Klicka för att byta detaljnivå",
     "qualityHigh": "Hög promptkvalitet",
     "qualityMedium": "Medelhög promptkvalitet",
     "qualityLow": "Låg promptkvalitet",

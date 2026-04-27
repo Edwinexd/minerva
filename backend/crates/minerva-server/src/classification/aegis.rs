@@ -146,10 +146,15 @@ pub async fn analyze_prompt(
         "trail_oldest_first": trail.join("\n\n"),
     });
 
+    // NOTE: llama3.1-8b on Cerebras returns 400 Bad Request when
+    // `reasoning_effort` is in the body ("wrong_api_format" -- the
+    // parameter is reserved for the gpt-oss reasoning models). It
+    // used to be silently accepted; the API got stricter at some
+    // point. We're already on the cheapest/fastest non-reasoning
+    // model so the parameter is meaningless here regardless.
     let body = serde_json::json!({
         "model": AEGIS_MODEL,
         "temperature": 0.0,
-        "reasoning_effort": "low",
         "max_completion_tokens": AEGIS_MAX_TOKENS,
         "messages": [
             { "role": "system", "content": AEGIS_SYSTEM_PROMPT },

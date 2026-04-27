@@ -22,12 +22,15 @@
 //!    visible policy note (per UX spec b: explicit note that we
 //!    intercepted, not silent swap).
 //!
-//! All three run on the chat hot path. Intent + output check use
-//! `reasoning_effort: low` and tight `max_completion_tokens` to
-//! keep latency bounded. Soft-fail throughout: a transient
+//! All three run on the chat hot path. Intent + output check
+//! keep latency bounded with tight `max_completion_tokens` and
+//! `temperature: 0.0`. Soft-fail throughout: a transient
 //! Cerebras hiccup never blocks a chat turn -- worst case we
 //! treat the verdict as "not extraction" / "not solution" and
-//! continue.
+//! continue. (We previously sent `reasoning_effort: "low"` here
+//! too; Cerebras now hard-rejects that parameter on llama3.1-8b
+//! with a 400, and it never did anything for non-reasoning
+//! models anyway.)
 
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -55,7 +58,7 @@ use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
 
 /// Tiny model for the always-on / conditional binary classifiers.
 /// Cheapest in the Cerebras catalog. JSON-schema-constrained
-/// outputs and `reasoning_effort: low` keep it on rails.
+/// outputs + temperature 0 keep it on rails.
 const GUARD_CLASSIFIER_MODEL: &str = "llama3.1-8b";
 
 /// Larger model for the rewrite path only -- runs rarely (only
@@ -151,7 +154,6 @@ pub async fn classify_intent(
     let body = serde_json::json!({
         "model": GUARD_CLASSIFIER_MODEL,
         "temperature": 0.0,
-        "reasoning_effort": "low",
         "max_completion_tokens": INTENT_MAX_TOKENS,
         "messages": [
             { "role": "system", "content": INTENT_SYSTEM_PROMPT },
@@ -280,7 +282,6 @@ pub async fn check_output_for_solution(
     let body = serde_json::json!({
         "model": GUARD_CLASSIFIER_MODEL,
         "temperature": 0.0,
-        "reasoning_effort": "low",
         "max_completion_tokens": OUTPUT_CHECK_MAX_TOKENS,
         "messages": [
             { "role": "system", "content": OUTPUT_CHECK_SYSTEM_PROMPT },
@@ -509,7 +510,6 @@ pub async fn classify_engagement(
     let body = serde_json::json!({
         "model": GUARD_CLASSIFIER_MODEL,
         "temperature": 0.0,
-        "reasoning_effort": "low",
         "max_completion_tokens": OUTPUT_CHECK_MAX_TOKENS,
         "messages": [
             { "role": "system", "content": ENGAGEMENT_SYSTEM_PROMPT },

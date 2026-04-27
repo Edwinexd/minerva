@@ -29,10 +29,53 @@
  * isn't yet in `analyses`, which keeps the panel from blanking
  * during the brief window between SSE arrival and refetch.
  */
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { PromptAnalysis } from "@/lib/types"
+
+/**
+ * Progressive-disclosure mode (Shen & Tamkin 2026 reference; the
+ * project description's "B. Progressive Disclosure" requirement).
+ *
+ *   * `beginner` -- single quality banner with one concrete
+ *     suggestion. Less to read; less likely to feel condescending
+ *     or overwhelming for a student new to prompting. The default
+ *     since most users land here first.
+ *   * `expert`   -- adds the three-dimensional Prompt Analysis
+ *     section so a power user can see the full reasoning critique.
+ *
+ * Persisted in localStorage so the student's preference rides
+ * along across sessions on the same device. Course-agnostic --
+ * the choice is about the student's own comfort level, not
+ * tied to any particular course.
+ */
+type AegisMode = "beginner" | "expert"
+const MODE_STORAGE_KEY = "minerva.aegis.mode"
+const DEFAULT_MODE: AegisMode = "beginner"
+
+function readStoredMode(): AegisMode {
+  if (typeof window === "undefined") return DEFAULT_MODE
+  try {
+    const raw = window.localStorage.getItem(MODE_STORAGE_KEY)
+    if (raw === "beginner" || raw === "expert") return raw
+  } catch {
+    // Storage unavailable (private mode, quota, etc) -- fall through
+    // to the default. The toggle still works in-session; it just
+    // won't persist across reloads.
+  }
+  return DEFAULT_MODE
+}
+
+function writeStoredMode(mode: AegisMode): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(MODE_STORAGE_KEY, mode)
+  } catch {
+    // ignore -- see readStoredMode comment.
+  }
+}
 
 interface AegisFeedbackPanelProps {
   /** All analyses fetched with the conversation detail. Oldest first. */
@@ -101,10 +144,39 @@ export function AegisFeedbackPanel({
 }: AegisFeedbackPanelProps) {
   const { t, i18n } = useTranslation("student")
 
-  // Latest analysis = explicit `latest` (live SSE event) > newest
-  // entry from `analyses` (conversation detail). The merge order
-  // matters: a freshly arrived SSE row should win over the cached
-  // detail's last entry until the next refetch settles.
+  // Mode = the progressive-disclosure level. Initial read happens
+  // synchronously off localStorage so the panel doesn't flash the
+  // default mode for one frame before switching to the persisted
+  // one. Subsequent toggles via the badge update both state and
+  // storage in lockstep.
+  const [mode, setMode] = useState<AegisMode>(() => readStoredMode())
+  const toggleMode = () => {
+    setMode((prev) => {
+      const next: AegisMode = prev === "beginner" ? "expert" : "beginner"
+      writeStoredMode(next)
+      return next
+    })
+  }
+  // Cross-tab sync: if the student opens two chats and flips the
+  // toggle in one, the other should update without a reload. The
+  // storage event only fires for OTHER tabs (not the one that
+  // wrote), so this can't loop with the writeStoredMode above.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== MODE_STORAGE_KEY) return
+      if (e.newValue === "beginner" || e.newValue === "expert") {
+        setMode(e.newValue)
+      }
+    }
+    window.addEventListener("storage", onStorage)
+    return () => window.removeEventListener("storage", onStorage)
+  }, [])
+
+  // Latest analysis = explicit `latest` (live verdict from the
+  // analyzer endpoint) > newest entry from `analyses` (conversation
+  // detail). The merge order matters: a fresh live verdict should
+  // win over the persisted history's last entry while the student
+  // is still typing.
   const fallbackLatest = analyses.length > 0 ? analyses[analyses.length - 1] : null
   const current = latest ?? fallbackLatest
 
@@ -121,14 +193,45 @@ export function AegisFeedbackPanel({
         <h2 className="text-lg font-semibold">
           {t("aegis.panelTitle")}
         </h2>
-        <Badge variant="outline" className="text-xs">
-          {t("aegis.modeBadge")}
-        </Badge>
+        {/*
+          The badge doubles as the mode toggle. We render it as a
+          Badge wrapped by a button so the visual stays identical
+          to the figma's static "Expert" pill while the click
+          target is a real semantic button (keyboard-accessible,
+          announced as a button by screen readers). Aria-pressed
+          communicates the toggle state.
+        */}
+        <button
+          type="button"
+          onClick={toggleMode}
+          className="rounded-4xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          aria-pressed={mode === "expert"}
+          title={t("aegis.modeToggleHint")}
+        >
+          <Badge
+            variant={mode === "expert" ? "default" : "outline"}
+            className="text-xs cursor-pointer"
+          >
+            {mode === "expert"
+              ? t("aegis.modeExpert")
+              : t("aegis.modeBeginner")}
+          </Badge>
+        </button>
       </div>
 
       <QualityCard analysis={current} pending={pending} />
 
-      {current && <PromptAnalysisSection analysis={current} />}
+      {/*
+        Beginner mode hides the dimensional callouts: the brief's
+        progressive-disclosure split is "simple suggestions" vs
+        "full reasoning critique", and the Quality card already
+        carries the simple suggestion (its missing_constraint line).
+        Expert mode adds the structural / terminology / constraint
+        breakdown for a fuller critique. History stays on for both
+        since past scores aren't really "advanced" -- they're just
+        reference.
+      */}
+      {current && mode === "expert" && <PromptAnalysisSection analysis={current} />}
 
       {historyEntries.length > 0 && (
         <HistorySection

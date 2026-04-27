@@ -55,7 +55,9 @@
   },
   "aegis": {
     "panelTitle": "Feedback",
-    "modeBadge": "Expert",
+    "modeBeginner": "Beginner",
+    "modeExpert": "Expert",
+    "modeToggleHint": "Click to switch detail level",
     "qualityHigh": "Great Prompt Quality",
     "qualityMedium": "Medium Prompt Quality",
     "qualityLow": "Low Prompt Quality",

@@ -626,34 +626,55 @@ function ChatWindow({
       )}
       </div>
       {aegisEnabled && panelVisible && (
-        // Right rail. Hidden on narrower screens since the chat
-        // column needs the room first; the panel is purely
-        // advisory so dropping it on small viewports is fine.
-        <aside className="hidden lg:flex w-80 shrink-0 flex-col border-l">
-          <AegisFeedbackPanel
-            analyses={promptAnalyses}
-            latest={liveAnalyzer.analysis}
-            pending={liveAnalyzer.pending}
-            onHide={() => setPanelVisible(false)}
+        <>
+          {/*
+            Below-lg backdrop. The panel renders as a fixed
+            drawer at those sizes so the chat column keeps the
+            room until the student opens it explicitly; the
+            backdrop dismisses on tap, mirroring the
+            conversations sidebar's mobile behaviour.
+          */}
+          <div
+            className="lg:hidden fixed inset-0 z-30 bg-background/60"
+            onClick={() => setPanelVisible(false)}
+            aria-hidden="true"
           />
-        </aside>
+          {/*
+            Right-rail Aegis panel. Two layouts driven off the
+            same element so the visible/dismissed state stays
+            consistent across breakpoints:
+              * lg+   -> in-flow column to the right of the chat.
+              * <lg   -> fixed drawer from the right edge.
+            The panel's own X (onHide) closes both forms.
+          */}
+          <aside
+            className="fixed inset-y-0 right-0 z-40 w-80 max-w-[90vw] bg-background border-l flex flex-col py-3 pr-3 lg:static lg:inset-auto lg:z-auto lg:w-80 lg:max-w-none lg:shrink-0 lg:py-0 lg:pr-0 lg:bg-transparent"
+          >
+            <AegisFeedbackPanel
+              analyses={promptAnalyses}
+              latest={liveAnalyzer.analysis}
+              pending={liveAnalyzer.pending}
+              onHide={() => setPanelVisible(false)}
+            />
+          </aside>
+        </>
       )}
       {aegisEnabled && !panelVisible && (
-        // Floating "bring Aegis back" button when the student has
-        // dismissed the panel. The colored Aegis tile is the
-        // affordance -- same iconography the panel header uses,
-        // so the connection between the button and the dismissed
-        // panel is obvious. lg+ only since the panel itself only
-        // shows lg+; on smaller viewports the panel doesn't render
-        // and there's nothing to un-hide.
+        // "Bring Aegis back" pill. Renders at every breakpoint
+        // now that the panel itself adapts (drawer below lg,
+        // in-flow rail at lg+) -- a tablet user has the same
+        // affordance as a desktop one. Pill chrome (bg, border,
+        // shadow, label) so it reads as a real button rather
+        // than a decorative icon floating in the chat column.
         <button
           type="button"
           onClick={() => setPanelVisible(true)}
-          className="hidden lg:flex absolute top-2 right-2 z-10 items-center justify-center rounded-md hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="absolute top-2 right-2 z-20 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           title={t("aegis.showPanel")}
           aria-label={t("aegis.showPanel")}
         >
-          <AegisShieldFilled size={28} className="rounded-md shadow-sm" />
+          <AegisShieldFilled size={16} className="rounded-sm shrink-0" />
+          <span>{t("aegis.showPanelButton")}</span>
         </button>
       )}
     </div>

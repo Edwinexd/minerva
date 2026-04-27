@@ -61,6 +61,7 @@
     "checking": "Checking…",
     "hidePanel": "Hide Aegis panel",
     "showPanel": "Show Aegis panel",
+    "showPanelButton": "Aegis",
     "sendAsIs": "Send as-is",
     "emptyTitle": "Start typing for suggestions",
     "emptyBody": "As you draft a prompt, Aegis offers ideas for how it could be sharper. Feedback is advisory and never blocks your message.",

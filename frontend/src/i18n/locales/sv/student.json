@@ -61,6 +61,7 @@
     "checking": "Kontrollerar…",
     "hidePanel": "Dölj Aegis-panelen",
     "showPanel": "Visa Aegis-panelen",
+    "showPanelButton": "Aegis",
     "sendAsIs": "Skicka som det är",
     "emptyTitle": "Börja skriva för förslag",
     "emptyBody": "Medan du skriver en prompt ger Aegis idéer för hur den kan bli skarpare. Återkopplingen är rådgivande och blockerar aldrig ditt meddelande.",

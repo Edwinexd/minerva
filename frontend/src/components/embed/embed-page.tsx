@@ -740,29 +740,54 @@ function EmbedChatWindow({
       )}
       </div>
       {aegisEnabled && panelVisible && (
-        // Right-rail Feedback panel. The embed canvas is typically
-        // narrower than the Shibboleth chat, so the breakpoint is
-        // tighter (md vs lg) -- on a small iframe the panel just
-        // hides and the chat keeps the room. Same component as the
-        // Shibboleth route to keep visual + behavioural parity.
-        <aside className="hidden md:flex w-72 shrink-0 flex-col border-l">
-          <AegisFeedbackPanel
-            analyses={promptAnalyses}
-            latest={liveAnalyzer.analysis}
-            pending={liveAnalyzer.pending}
-            onHide={() => setPanelVisible(false)}
+        <>
+          {/*
+            Below-md backdrop for the drawer. The embed iframe is
+            typically narrower than the Shibboleth chat, so the
+            in-flow rail switches to a drawer earlier (md vs lg
+            on chat-page).
+          */}
+          <div
+            className="md:hidden fixed inset-0 z-30 bg-background/60"
+            onClick={() => setPanelVisible(false)}
+            aria-hidden="true"
           />
-        </aside>
+          {/*
+            Right-rail Feedback panel. Two layouts driven off the
+            same element:
+              * md+   -> in-flow column to the right of the chat.
+              * <md   -> fixed drawer from the right edge.
+            Same component as the Shibboleth route to keep visual
+            + behavioural parity; only the breakpoint differs
+            (the iframe canvas can't spare 320px below md).
+          */}
+          <aside
+            className="fixed inset-y-0 right-0 z-40 w-72 max-w-[90vw] bg-background border-l flex flex-col py-3 pr-3 md:static md:inset-auto md:z-auto md:w-72 md:max-w-none md:shrink-0 md:py-0 md:pr-0 md:bg-transparent"
+          >
+            <AegisFeedbackPanel
+              analyses={promptAnalyses}
+              latest={liveAnalyzer.analysis}
+              pending={liveAnalyzer.pending}
+              onHide={() => setPanelVisible(false)}
+            />
+          </aside>
+        </>
       )}
       {aegisEnabled && !panelVisible && (
+        // "Bring Aegis back" pill. Renders at every breakpoint --
+        // the panel adapts (drawer below md, in-flow rail at md+)
+        // so a phone-width iframe student has the same affordance
+        // as a desktop one. Pill chrome (bg, border, shadow,
+        // label) so it reads as a real button.
         <button
           type="button"
           onClick={() => setPanelVisible(true)}
-          className="hidden md:flex absolute top-2 right-2 z-10 items-center justify-center rounded-md hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="absolute top-2 right-2 z-20 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           title={tStudent("aegis.showPanel")}
           aria-label={tStudent("aegis.showPanel")}
         >
-          <AegisShieldFilled size={28} className="rounded-md shadow-sm" />
+          <AegisShieldFilled size={16} className="rounded-sm shrink-0" />
+          <span>{tStudent("aegis.showPanelButton")}</span>
         </button>
       )}
     </div>

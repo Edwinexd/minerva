@@ -87,8 +87,8 @@
     "banner": {
       "title_one": "Aegis har 1 idé för din prompt",
       "title_other": "Aegis har {{count}} idéer för din prompt",
-      "idleHint": "Ta en titt i panelen, eller låt Aegis väva in dem åt dig.",
-      "blockedHint": "Tryck på Skicka igen för att skicka som det är, eller använd förslagen nedan.",
+      "idleHint": "Se panelen för detaljerna, eller tryck på Använd idéerna för att väva in dem.",
+      "blockedHint": "Tryck på Skicka igen för att skicka som det är, eller tryck på Använd idéerna.",
       "useIdeas": "Använd idéerna",
       "working": "Skriver om…",
       "dismiss": "Avfärda"

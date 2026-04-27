@@ -87,8 +87,8 @@
     "banner": {
       "title_one": "Aegis has 1 idea for your prompt",
       "title_other": "Aegis has {{count}} ideas for your prompt",
-      "idleHint": "Take a look in the panel, or let Aegis fold them in for you.",
-      "blockedHint": "Press Send again to send as-is, or use the ideas below.",
+      "idleHint": "See the panel for the details, or tap Use ideas to fold them in.",
+      "blockedHint": "Press Send again to send as-is, or tap Use ideas to apply them.",
       "useIdeas": "Use ideas",
       "working": "Rewriting…",
       "dismiss": "Dismiss"

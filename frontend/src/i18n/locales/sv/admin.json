@@ -185,11 +185,13 @@
     "featureRevertToDefault": "Återställ till global standard",
     "featureFlagLabel": {
       "course_kg": "Kunskapsgraf för kurs",
-      "extraction_guard": "Skydd mot uppgiftslösning"
+      "extraction_guard": "Skydd mot uppgiftslösning",
+      "aegis": "Aegis promptcoachning"
     },
     "featureFlagDescription": {
       "course_kg": "Klassificering per dokument, tvärdokumentlänkare, grafvisare, vägrasinstruktion vid uppgiftsmatch och per-chunk-skyddsfilter. Avstängd som standard medan vi kalibrerar.",
-      "extraction_guard": "Avsiktsklassificerare före generering + lösningsdetektor på utdatasidan + sokratisk omformulerare, plus uppgiftsnärhetsspårning över flera turer. Fångar fallet \"studenten klistrar in uppgift och frågar efter kod\" och avbryter svaret med en sokratisk fråga. Oberoende av course_kg så att admins kan piloter separat."
+      "extraction_guard": "Avsiktsklassificerare före generering + lösningsdetektor på utdatasidan + sokratisk omformulerare, plus uppgiftsnärhetsspårning över flera turer. Fångar fallet \"studenten klistrar in uppgift och frågar efter kod\" och avbryter svaret med en sokratisk fråga. Oberoende av course_kg så att admins kan piloter separat.",
+      "aegis": "Sidopanel med promptcoachning. Varje studentprompt poängsätts på fem dimensioner (tydlighet, kontext, ramar, resonemangskrav, kritiskt tänkande) plus tre korta kommentarer (strukturell tydlighet, terminologi, saknad ram). Icke-blockerande: analysen körs parallellt med assistentens svar och studenten kan ignorera återkopplingen fritt."
     }
   },
   "rules": {

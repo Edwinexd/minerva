@@ -53,6 +53,41 @@
       "other": "Other"
     }
   },
+  "aegis": {
+    "panelTitle": "Feedback",
+    "modeBadge": "Expert",
+    "qualityHigh": "Great Prompt Quality",
+    "qualityMedium": "Medium Prompt Quality",
+    "qualityLow": "Low Prompt Quality",
+    "emptyTitle": "No feedback yet",
+    "emptyBody": "Send a prompt and Aegis will rate it on five dimensions and suggest one concrete improvement. Feedback is advisory and never blocks your message.",
+    "pendingTitle": "Scoring your prompt…",
+    "pendingBody": "Aegis is reading your prompt and will surface the analysis when it's done. Your message is already on its way to the assistant.",
+    "analysisHeader": "Prompt Analysis",
+    "structuralClarityHeading": "Structural clarity is {{label}}",
+    "terminologyHeading": "Terminology Specificity",
+    "missingConstraintHeading": "Missing Constraint",
+    "historyHeader": "History",
+    "historyToday": "Today",
+    "historyYesterday": "Yesterday",
+    "labels": {
+      "structural_clarity": {
+        "strong": "strong",
+        "okay": "okay",
+        "weak": "weak"
+      },
+      "terminology": {
+        "specific": "specific",
+        "loose": "loose",
+        "missing": "missing"
+      },
+      "missing_constraint": {
+        "well_constrained": "well constrained",
+        "minor_gaps": "minor gaps",
+        "needs_constraints": "needs constraints"
+      }
+    }
+  },
   "privacy": {
     "bannerText": "Before sending messages, please review how Minerva handles your data.",
     "reviewButton": "Review & agree",

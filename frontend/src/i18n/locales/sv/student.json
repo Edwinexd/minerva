@@ -53,6 +53,41 @@
       "other": "Annat"
     }
   },
+  "aegis": {
+    "panelTitle": "Återkoppling",
+    "modeBadge": "Expert",
+    "qualityHigh": "Hög promptkvalitet",
+    "qualityMedium": "Medelhög promptkvalitet",
+    "qualityLow": "Låg promptkvalitet",
+    "emptyTitle": "Ingen återkoppling än",
+    "emptyBody": "Skicka en prompt så betygsätter Aegis den på fem dimensioner och föreslår en konkret förbättring. Återkopplingen är rådgivande och blockerar aldrig ditt meddelande.",
+    "pendingTitle": "Bedömer din prompt…",
+    "pendingBody": "Aegis läser din prompt och visar analysen när den är klar. Ditt meddelande är redan på väg till assistenten.",
+    "analysisHeader": "Promptanalys",
+    "structuralClarityHeading": "Strukturell tydlighet är {{label}}",
+    "terminologyHeading": "Terminologisk specificitet",
+    "missingConstraintHeading": "Saknad ram",
+    "historyHeader": "Historik",
+    "historyToday": "Idag",
+    "historyYesterday": "Igår",
+    "labels": {
+      "structural_clarity": {
+        "strong": "stark",
+        "okay": "ok",
+        "weak": "svag"
+      },
+      "terminology": {
+        "specific": "specifik",
+        "loose": "lös",
+        "missing": "saknas"
+      },
+      "missing_constraint": {
+        "well_constrained": "väl avgränsad",
+        "minor_gaps": "mindre luckor",
+        "needs_constraints": "behöver ramar"
+      }
+    }
+  },
   "privacy": {
     "bannerText": "Innan du skickar meddelanden, läs hur Minerva hanterar dina data.",
     "reviewButton": "Läs & godkänn",

@@ -10,7 +10,8 @@ import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
 import { ConversationList } from "@/components/chat/conversation-list"
 import { TeacherNoteInline } from "@/components/chat/teacher-note-inline"
 import { useChatStream } from "@/components/chat/use-chat-stream"
-import type { TeacherNote } from "@/lib/types"
+import { AegisFeedbackPanel } from "@/components/chat/aegis-feedback-panel"
+import type { PromptAnalysis, TeacherNote } from "@/lib/types"
 
 // -- Types for embed API responses --
 
@@ -18,6 +19,16 @@ interface EmbedCourse {
   id: string
   name: string
   description: string | null
+  /**
+   * Per-course feature flags resolved server-side. Mirrors the
+   * Shibboleth `Course.feature_flags` shape so the iframe can gate
+   * the same UI affordances (currently the aegis Feedback panel)
+   * without redefining the type.
+   */
+  feature_flags: {
+    course_kg: boolean
+    aegis: boolean
+  }
 }
 
 interface EmbedConversation {
@@ -53,6 +64,12 @@ interface EmbedMessage {
 interface EmbedConversationDetail {
   messages: EmbedMessage[]
   notes: TeacherNote[]
+  /**
+   * Aegis prompt-coaching analyses, one per scored user turn. Same
+   * shape as the Shibboleth route -- empty when aegis is off for
+   * the course or every turn so far soft-failed.
+   */
+  prompt_analyses: PromptAnalysis[]
 }
 
 interface EmbedMe {
@@ -309,6 +326,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
           needsPrivacyAck={needsPrivacyAck}
           onAcknowledgePrivacy={acknowledgePrivacy}
           readOnly={isPinnedView}
+          aegisEnabled={course?.feature_flags?.aegis === true}
         />
       </div>
     </div>
@@ -326,6 +344,7 @@ function EmbedChatWindow({
   needsPrivacyAck,
   onAcknowledgePrivacy,
   readOnly = false,
+  aegisEnabled = false,
 }: {
   courseId: string
   conversationId: string | null
@@ -340,10 +359,25 @@ function EmbedChatWindow({
    * does for shared pinned views.
    */
   readOnly?: boolean
+  /**
+   * When true, the chat lays out as [transcript, feedback panel]
+   * and SSE `prompt_analysis` events are surfaced into the panel.
+   * Resolved upstream from `course.feature_flags.aegis` so the
+   * panel auto-hides on courses where the admin hasn't opted in.
+   */
+  aegisEnabled?: boolean
 }) {
   const { t } = useTranslation("auth")
   const [messages, setMessages] = useState<EmbedMessage[]>([])
   const [notes, setNotes] = useState<TeacherNote[]>([])
+  // Aegis analyses live in component state alongside `messages`
+  // because the embed view doesn't run on React Query -- we hand-
+  // load conversation detail on every conversation change. Same
+  // soft-fail-to-empty fallback the route uses on the server side.
+  const [promptAnalyses, setPromptAnalyses] = useState<PromptAnalysis[]>([])
+  // SSE-delivered "live" analysis. Held until the next conversation-
+  // detail reload picks it up; mirrors the chat-page implementation.
+  const [liveAnalysis, setLiveAnalysis] = useState<PromptAnalysis | null>(null)
   const [loading, setLoading] = useState(true)
   const [input, setInput] = useState("")
   const stream = useChatStream(t("embed.unknownError"))
@@ -356,10 +390,12 @@ function EmbedChatWindow({
     let cancelled = false
     reset()
     setInput("")
+    setLiveAnalysis(null)
 
     if (conversationId === null) {
       setMessages([])
       setNotes([])
+      setPromptAnalyses([])
       setLoading(false)
       return
     }
@@ -370,6 +406,7 @@ function EmbedChatWindow({
         if (!cancelled) {
           setMessages(data.messages)
           setNotes(data.notes ?? [])
+          setPromptAnalyses(data.prompt_analyses ?? [])
           setLoading(false)
         }
       })
@@ -385,6 +422,17 @@ function EmbedChatWindow({
     // them would refire this on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId, conversationId, token, t])
+
+  // Drop the live (SSE-delivered) analysis once the canonical row
+  // arrives via the conversation-detail reload. Compares on
+  // `message_id` so a soft-fail/retry that produces a fresh
+  // analysis row still resolves cleanly.
+  useEffect(() => {
+    if (!liveAnalysis) return
+    if (promptAnalyses.some((a) => a.message_id === liveAnalysis.message_id)) {
+      setLiveAnalysis(null)
+    }
+  }, [promptAnalyses, liveAnalysis])
 
   // Index notes the same way the regular chat page does: per-message
   // notes render right after that bubble; conversation-level notes
@@ -432,6 +480,13 @@ function EmbedChatWindow({
       (data) => {
         if (data.type === "conversation_created" && typeof data.id === "string") {
           landedConvId = data.id
+        } else if (data.type === "prompt_analysis") {
+          // Aegis side-channel event, identical to the Shibboleth
+          // chat path: stash the live verdict so the panel updates
+          // before the conversation-detail reload below settles.
+          if (typeof data.message_id === "string") {
+            setLiveAnalysis(data as unknown as PromptAnalysis)
+          }
         }
       },
     )
@@ -445,6 +500,7 @@ function EmbedChatWindow({
         )
         setMessages(data.messages)
         setNotes(data.notes ?? [])
+        setPromptAnalyses(data.prompt_analyses ?? [])
       } catch {
         // Silent
       }
@@ -476,7 +532,8 @@ function EmbedChatWindow({
   }
 
   return (
-    <>
+    <div className="flex flex-1 min-h-0 gap-2">
+      <div className="flex-1 flex flex-col min-w-0">
       <div className="flex-1 overflow-y-auto px-4">
         <ChatTranscript<EmbedMessage>
           messages={messages}
@@ -534,6 +591,21 @@ function EmbedChatWindow({
           </p>
         </div>
       )}
-    </>
+      </div>
+      {aegisEnabled && conversationId !== null && (
+        // Right-rail Feedback panel. The embed canvas is typically
+        // narrower than the Shibboleth chat, so the breakpoint is
+        // tighter (md vs lg) -- on a small iframe the panel just
+        // hides and the chat keeps the room. Same component as the
+        // Shibboleth route to keep visual + behavioural parity.
+        <aside className="hidden md:flex w-72 shrink-0 flex-col border-l">
+          <AegisFeedbackPanel
+            analyses={promptAnalyses}
+            latest={liveAnalysis}
+            pending={stream.streaming && liveAnalysis === null}
+          />
+        </aside>
+      )}
+    </div>
   )
 }

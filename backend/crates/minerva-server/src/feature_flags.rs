@@ -30,10 +30,21 @@ pub const FLAG_COURSE_KG: &str = "course_kg";
 /// once the guard stabilises).
 pub const FLAG_EXTRACTION_GUARD: &str = "extraction_guard";
 
+/// Aegis: prompt-coaching feedback panel. When on, every user
+/// turn is scored by a small LLM along five dimensions (clarity,
+/// context, constraints, reasoning demand, critical thinking) and
+/// surfaced to the student in a non-blocking right-rail panel
+/// alongside per-turn analysis history. Designed to nudge
+/// students toward more intentional prompting without gating the
+/// inference path -- the analysis call runs in parallel with the
+/// generation strategy and never blocks the assistant reply.
+/// See `crate::classification::aegis` for the analyzer.
+pub const FLAG_AEGIS: &str = "aegis";
+
 /// All flags the application currently knows about. The admin UI
 /// uses this to enumerate available toggles per course; new flags
 /// must be added here AND have a `pub const` above.
-pub const ALL_FLAGS: &[&str] = &[FLAG_COURSE_KG, FLAG_EXTRACTION_GUARD];
+pub const ALL_FLAGS: &[&str] = &[FLAG_COURSE_KG, FLAG_EXTRACTION_GUARD, FLAG_AEGIS];
 
 /// True iff the KG bundle is enabled for this course. Resolution:
 /// course-scoped row -> global row -> default (FALSE).
@@ -79,6 +90,30 @@ pub async fn extraction_guard_enabled(db: &PgPool, course_id: Uuid) -> bool {
         Err(e) => {
             tracing::warn!(
                 "feature_flags: extraction_guard lookup for course {} failed ({}); treating as disabled",
+                course_id,
+                e,
+            );
+            false
+        }
+    }
+}
+
+/// True iff aegis prompt-coaching is enabled for this course.
+/// Resolution: course-scoped row -> global row -> default
+/// (FALSE). Errors are logged and treated as "not enabled" -- the
+/// analyzer runs on every user turn so a flaky DB shouldn't slow
+/// down the chat path with retries; falling closed reverts to
+/// pre-aegis behaviour transparently.
+pub async fn aegis_enabled(db: &PgPool, course_id: Uuid) -> bool {
+    match minerva_db::queries::feature_flags::is_enabled_for_course(
+        db, FLAG_AEGIS, course_id, false,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "feature_flags: aegis lookup for course {} failed ({}); treating as disabled",
                 course_id,
                 e,
             );

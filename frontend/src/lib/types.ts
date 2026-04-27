@@ -52,6 +52,13 @@ export interface CourseFeatureFlags {
    * chunk filter. Off by default until an admin opts the course in.
    */
   course_kg: boolean
+  /**
+   * Aegis prompt-coaching feedback panel. When TRUE the chat page
+   * renders a third right-side column with per-prompt scoring and
+   * history. Resolves through the same path as `course_kg`
+   * (course-scoped row > global > default false).
+   */
+  aegis: boolean
 }
 
 export interface AdminUser {
@@ -199,6 +206,42 @@ export interface ConversationDetail {
    * messages via `turn_index`.
    */
   flags: ConversationFlag[]
+  /**
+   * Aegis prompt-coaching analyses, one per user message that the
+   * analyzer scored. Empty when aegis is off for the course or
+   * every turn so far soft-failed. Ordered oldest-first to align
+   * with `messages`.
+   */
+  prompt_analyses: PromptAnalysis[]
+}
+
+/**
+ * One scored user prompt produced by the aegis analyzer. Mirrors
+ * the backend `prompt_analyses` row 1:1; consumed by the right-rail
+ * Feedback panel which renders the latest entry's scores + the
+ * full per-turn history.
+ */
+export interface PromptAnalysis {
+  id: string
+  message_id: string
+  /** 0..=10 inclusive. Analyzer-weighted, NOT a server-side mean. */
+  overall_score: number
+  clarity_score: number
+  context_score: number
+  constraints_score: number
+  reasoning_demand_score: number
+  critical_thinking_score: number
+  /** "strong" | "okay" | "weak" -- short tag rendered with the rationale. */
+  structural_clarity_label: string
+  /** One-sentence rationale, ≤ 25 words. May be empty when nothing to say. */
+  structural_clarity_feedback: string
+  /** "specific" | "loose" | "missing". */
+  terminology_label: string
+  terminology_feedback: string
+  /** "well_constrained" | "minor_gaps" | "needs_constraints". */
+  missing_constraint_label: string
+  missing_constraint_feedback: string
+  created_at: string
 }
 
 export interface ConversationFlag {

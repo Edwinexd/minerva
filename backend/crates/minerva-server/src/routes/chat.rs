@@ -144,6 +144,85 @@ struct MessageFeedbackResponse {
     user_display_name: Option<String>,
 }
 
+/// Aegis prompt analysis for a single user message. Sent over the
+/// chat detail endpoint so the right-rail Feedback panel can
+/// render history + per-turn scores in one payload. Empty array
+/// when aegis is off for the course or all turns soft-failed.
+///
+/// Shared with the embed route via `pub(crate)` so the iframe-side
+/// frontend gets the same shape without redefining the wire type.
+#[derive(Serialize)]
+pub(crate) struct PromptAnalysisResponse {
+    pub(crate) id: Uuid,
+    pub(crate) message_id: Uuid,
+    pub(crate) overall_score: i32,
+    pub(crate) clarity_score: i32,
+    pub(crate) context_score: i32,
+    pub(crate) constraints_score: i32,
+    pub(crate) reasoning_demand_score: i32,
+    pub(crate) critical_thinking_score: i32,
+    pub(crate) structural_clarity_label: String,
+    pub(crate) structural_clarity_feedback: String,
+    pub(crate) terminology_label: String,
+    pub(crate) terminology_feedback: String,
+    pub(crate) missing_constraint_label: String,
+    pub(crate) missing_constraint_feedback: String,
+    pub(crate) created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Shared DB-row -> wire-type mapper. Inline-able in either route
+/// but exists as a function so the field list lives in one place;
+/// adding a new column to the analyses table only forces an edit
+/// here, not at every detail-route call site.
+fn prompt_analysis_response_from_row(
+    row: minerva_db::queries::prompt_analyses::PromptAnalysisRow,
+) -> PromptAnalysisResponse {
+    PromptAnalysisResponse {
+        id: row.id,
+        message_id: row.message_id,
+        overall_score: row.overall_score,
+        clarity_score: row.clarity_score,
+        context_score: row.context_score,
+        constraints_score: row.constraints_score,
+        reasoning_demand_score: row.reasoning_demand_score,
+        critical_thinking_score: row.critical_thinking_score,
+        structural_clarity_label: row.structural_clarity_label,
+        structural_clarity_feedback: row.structural_clarity_feedback,
+        terminology_label: row.terminology_label,
+        terminology_feedback: row.terminology_feedback,
+        missing_constraint_label: row.missing_constraint_label,
+        missing_constraint_feedback: row.missing_constraint_feedback,
+        created_at: row.created_at,
+    }
+}
+
+/// Load aegis prompt analyses for a conversation and convert them
+/// to the shared wire shape. Soft-fails to an empty Vec on DB error
+/// (logged at warn) -- the Feedback panel just renders nothing for
+/// that conversation rather than 500-ing the whole detail load.
+///
+/// Shared between the Shibboleth chat detail route and the embed
+/// route so both surface identical payloads to their panels.
+pub(crate) async fn load_prompt_analyses_for_conversation(
+    db: &sqlx::PgPool,
+    cid: Uuid,
+) -> Vec<PromptAnalysisResponse> {
+    match minerva_db::queries::prompt_analyses::list_for_conversation(db, cid).await {
+        Ok(rows) => rows
+            .into_iter()
+            .map(prompt_analysis_response_from_row)
+            .collect(),
+        Err(e) => {
+            tracing::warn!(
+                "aegis: list_for_conversation failed for {}: {}; rendering empty",
+                cid,
+                e,
+            );
+            Vec::new()
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct ConversationFlagResponse {
     id: Uuid,
@@ -175,6 +254,11 @@ struct ConversationDetailResponse {
     /// and per-turn detail. Ordered oldest-first to match message
     /// order; same shape as `list_for_conversation` returns.
     flags: Vec<ConversationFlagResponse>,
+    /// Aegis prompt-coaching scores, one per user message that the
+    /// analyzer successfully scored. Empty when the `aegis` flag
+    /// is off for the course (no rows ever get written) or every
+    /// turn so far soft-failed. Ordered oldest-first.
+    prompt_analyses: Vec<PromptAnalysisResponse>,
 }
 
 async fn list_conversations(
@@ -686,6 +770,11 @@ async fn get_conversation(
     } else {
         Vec::new()
     };
+
+    // Aegis prompt analyses. Visible to whoever can see the
+    // conversation (owner + teacher); the shared loader handles
+    // soft-fail-to-empty so a DB hiccup doesn't 500 the detail.
+    let prompt_analyses = load_prompt_analyses_for_conversation(&state.db, cid).await;
     let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
 
     // Hide eppn/display_name from non-teachers viewing other students' feedback
@@ -761,6 +850,7 @@ async fn get_conversation(
                 created_at: f.created_at,
             })
             .collect(),
+        prompt_analyses,
     }))
 }
 
@@ -916,6 +1006,92 @@ pub(super) async fn run_chat_message(
     // partition call and guarantees a stable view across the run --
     // an admin flipping the flag mid-conversation won't half-apply.
     let kg_enabled = crate::feature_flags::course_kg_enabled(&state.db, course_id).await;
+
+    // Aegis prompt-coaching: if the flag is on for this course,
+    // race a small analyzer call against the generation strategy
+    // and surface the verdict to the client as a side-channel SSE
+    // event. The analyzer runs in its OWN spawn so its latency is
+    // entirely off the critical path -- the assistant reply
+    // streams whether or not aegis returns. Soft-fail throughout
+    // (no panel content for that turn on any error).
+    if crate::feature_flags::aegis_enabled(&state.db, course_id).await {
+        // Pull the most recent user turns out of history (which
+        // already includes the turn we just inserted, since the
+        // `list_messages` call above ran after the insert). The
+        // analyzer wants oldest-first, current-turn last; that
+        // matches `list_messages`'s natural order so a simple
+        // filter does it.
+        let recent_user_messages: Vec<String> = history
+            .iter()
+            .filter(|m| m.role == "user")
+            .map(|m| m.content.clone())
+            .collect();
+
+        let aegis_db = state.db.clone();
+        let aegis_http = state.http_client.clone();
+        let aegis_api_key = state.config.cerebras_api_key.clone();
+        let aegis_tx = tx.clone();
+        let aegis_user_msg_id = user_msg_id;
+        let aegis_course_id = course_id;
+        let aegis_conversation_id = conv_id;
+        tokio::spawn(async move {
+            let Some(verdict) = crate::classification::aegis::analyze_prompt(
+                &aegis_http,
+                &aegis_api_key,
+                &aegis_db,
+                aegis_course_id,
+                &recent_user_messages,
+            )
+            .await
+            else {
+                return;
+            };
+
+            // Persist before emitting so a refetch of the
+            // conversation detail (e.g. user navigates away and
+            // back mid-stream) shows the same data the panel
+            // received over SSE.
+            if let Err(e) = minerva_db::queries::prompt_analyses::insert(
+                &aegis_db,
+                verdict.as_insert(aegis_user_msg_id),
+            )
+            .await
+            {
+                tracing::warn!(
+                    "aegis: prompt_analyses insert failed (conv={}, msg={}): {}",
+                    aegis_conversation_id,
+                    aegis_user_msg_id,
+                    e,
+                );
+                // Even if persist failed we still want the panel
+                // to update for THIS session; fall through to emit.
+            }
+
+            let event_payload = serde_json::json!({
+                "type": "prompt_analysis",
+                "message_id": aegis_user_msg_id,
+                "overall_score": verdict.overall_score,
+                "clarity_score": verdict.clarity_score,
+                "context_score": verdict.context_score,
+                "constraints_score": verdict.constraints_score,
+                "reasoning_demand_score": verdict.reasoning_demand_score,
+                "critical_thinking_score": verdict.critical_thinking_score,
+                "structural_clarity_label": verdict.structural_clarity_label,
+                "structural_clarity_feedback": verdict.structural_clarity_feedback,
+                "terminology_label": verdict.terminology_label,
+                "terminology_feedback": verdict.terminology_feedback,
+                "missing_constraint_label": verdict.missing_constraint_label,
+                "missing_constraint_feedback": verdict.missing_constraint_feedback,
+            });
+            // Best-effort send. If the client disconnected mid-stream the
+            // strategy will have closed the receiver and this will error;
+            // we swallow that since the row is already persisted and a
+            // reconnect will fetch it via conversation detail.
+            let _ = aegis_tx
+                .send(Ok(Event::default().data(event_payload.to_string())))
+                .await;
+        });
+    }
 
     let ctx = strategy::GenerationContext {
         course_name: course.name,

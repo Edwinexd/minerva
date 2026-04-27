@@ -14,6 +14,7 @@ pub mod lti;
 pub mod message_feedback;
 pub mod play_course_catalog;
 pub mod play_designations;
+pub mod prompt_analyses;
 pub mod relink_queue;
 pub mod role_rules;
 pub mod role_suggestions;

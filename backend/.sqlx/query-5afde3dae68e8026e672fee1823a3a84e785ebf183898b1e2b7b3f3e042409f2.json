@@ -1,0 +1,125 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO prompt_analyses (\n            message_id, overall_score, clarity_score, context_score,\n            constraints_score, reasoning_demand_score, critical_thinking_score,\n            structural_clarity_label, structural_clarity_feedback,\n            terminology_label, terminology_feedback,\n            missing_constraint_label, missing_constraint_feedback,\n            model_used\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)\n        ON CONFLICT (message_id) DO UPDATE SET\n            overall_score = EXCLUDED.overall_score,\n            clarity_score = EXCLUDED.clarity_score,\n            context_score = EXCLUDED.context_score,\n            constraints_score = EXCLUDED.constraints_score,\n            reasoning_demand_score = EXCLUDED.reasoning_demand_score,\n            critical_thinking_score = EXCLUDED.critical_thinking_score,\n            structural_clarity_label = EXCLUDED.structural_clarity_label,\n            structural_clarity_feedback = EXCLUDED.structural_clarity_feedback,\n            terminology_label = EXCLUDED.terminology_label,\n            terminology_feedback = EXCLUDED.terminology_feedback,\n            missing_constraint_label = EXCLUDED.missing_constraint_label,\n            missing_constraint_feedback = EXCLUDED.missing_constraint_feedback,\n            model_used = EXCLUDED.model_used\n        RETURNING\n            id, message_id, overall_score, clarity_score, context_score,\n            constraints_score, reasoning_demand_score, critical_thinking_score,\n            structural_clarity_label, structural_clarity_feedback,\n            terminology_label, terminology_feedback,\n            missing_constraint_label, missing_constraint_feedback,\n            model_used, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "overall_score",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "clarity_score",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "context_score",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "constraints_score",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "reasoning_demand_score",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "critical_thinking_score",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "structural_clarity_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "structural_clarity_feedback",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "terminology_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "terminology_feedback",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "missing_constraint_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "missing_constraint_feedback",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "model_used",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5afde3dae68e8026e672fee1823a3a84e785ebf183898b1e2b7b3f3e042409f2"
+}

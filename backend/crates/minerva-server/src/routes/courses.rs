@@ -83,9 +83,20 @@ struct CourseResponse {
     feature_flags: CourseFeatureFlagsView,
 }
 
+/// Per-course feature-flag snapshot, resolved through the runtime
+/// flag path (course row > global > compiled-in default). Shared
+/// between the Shibboleth `/courses/{id}` route and the embed
+/// `/embed/course/{id}` route -- both surface the same shape so the
+/// frontend can gate UI uniformly regardless of how the user
+/// reached the chat. Add new flags here AND in `resolve_course_flags`.
 #[derive(Serialize, Default)]
-struct CourseFeatureFlagsView {
-    course_kg: bool,
+pub(crate) struct CourseFeatureFlagsView {
+    pub(crate) course_kg: bool,
+    /// Aegis prompt-coaching feedback panel. When TRUE the chat UI
+    /// renders a third right-side column with the per-prompt
+    /// scoring + history. Resolves through the same path as
+    /// `course_kg` (course row -> global -> default false).
+    pub(crate) aegis: bool,
 }
 
 impl CourseResponse {
@@ -121,10 +132,15 @@ impl CourseResponse {
 
 /// Resolve every course-scoped feature flag for the response. Single
 /// place to extend when new flags land -- callers don't have to know
-/// the flag list.
-async fn resolve_course_flags(db: &sqlx::PgPool, course_id: Uuid) -> CourseFeatureFlagsView {
+/// the flag list. Shared with the embed route so its course response
+/// stays in lockstep without each consumer duplicating the resolver.
+pub(crate) async fn resolve_course_flags(
+    db: &sqlx::PgPool,
+    course_id: Uuid,
+) -> CourseFeatureFlagsView {
     CourseFeatureFlagsView {
         course_kg: crate::feature_flags::course_kg_enabled(db, course_id).await,
+        aegis: crate::feature_flags::aegis_enabled(db, course_id).await,
     }
 }
 

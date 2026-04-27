@@ -12,8 +12,13 @@ import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Menu, X } from "lucide-react"
-import React, { useEffect, useState } from "react"
-import type { Message, MessageFeedback, TeacherNote } from "@/lib/types"
+import React, { useEffect, useMemo, useState } from "react"
+import type {
+  Message,
+  MessageFeedback,
+  PromptAnalysis,
+  TeacherNote,
+} from "@/lib/types"
 import { FeedbackControls } from "@/components/message-feedback"
 import { PrivacyAckBanner } from "@/components/privacy-ack"
 import { useDocumentTitle } from "@/lib/use-document-title"
@@ -22,6 +27,7 @@ import type { ChatBubbleLabels } from "./chat-bubble"
 import { ConversationList } from "./conversation-list"
 import { TeacherNoteInline } from "./teacher-note-inline"
 import { useChatStream } from "./use-chat-stream"
+import { AegisFeedbackPanel } from "./aegis-feedback-panel"
 
 export function ChatRouteComponent({
   useParams,
@@ -151,6 +157,7 @@ function ChatPage({
           courseId={courseId}
           conversationId={conversationId}
           readOnly={isPinnedView}
+          aegisEnabled={course?.feature_flags?.aegis === true}
         />
       </div>
     </div>
@@ -161,10 +168,18 @@ function ChatWindow({
   courseId,
   conversationId,
   readOnly = false,
+  aegisEnabled = false,
 }: {
   courseId: string
   conversationId: string | null
   readOnly?: boolean
+  /**
+   * When true, the chat lays out as [transcript, feedback panel]
+   * and SSE `prompt_analysis` events are surfaced into the panel.
+   * Resolved upstream from `course.feature_flags.aegis` so the
+   * panel auto-hides on courses where the admin hasn't opted in.
+   */
+  aegisEnabled?: boolean
 }) {
   const navigate = useNavigate()
   const { t } = useTranslation("student")
@@ -175,9 +190,23 @@ function ChatWindow({
   const messages = data?.messages
   const notes = data?.notes || []
   const feedback = data?.feedback || []
+  // Memoise so the array identity is stable across renders --
+  // the cleanup effect below depends on this list, and a fresh
+  // `[]` literal each render would refire the effect every time.
+  const promptAnalyses = useMemo(
+    () => data?.prompt_analyses ?? [],
+    [data?.prompt_analyses],
+  )
   const { data: user } = useQuery(userQuery)
   const needsPrivacyAck = !!user && !user.privacy_acknowledged_at
   const queryClient = useQueryClient()
+  // Hold the latest SSE-delivered analysis until the conversation
+  // detail refetch settles. Without this the panel would flash
+  // empty for the gap between the SSE event arriving and the
+  // detail refetch returning -- particularly noticeable on slow
+  // networks where the assistant's full reply may finish before
+  // the refetch does.
+  const [liveAnalysis, setLiveAnalysis] = useState<PromptAnalysis | null>(null)
 
   // Build a map of message_id -> the current user's feedback row (if any)
   // so each ChatBubble knows whether to render thumbs as selected.
@@ -208,11 +237,26 @@ function ChatWindow({
   useEffect(() => {
     reset()
     setInput("")
+    setLiveAnalysis(null)
     // `reset` from useChatStream is stable enough; including it would
     // refire the wipe on every render and clobber an in-flight stream
     // for the new id.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId])
+
+  // Drop the live (SSE-delivered) analysis as soon as the
+  // conversation detail refetch returns it -- the canonical row is
+  // now in the React Query cache and `liveAnalysis` would just
+  // shadow an identical entry. Compares on `message_id` rather
+  // than `id` so a soft-fail/retry that produces a fresh analysis
+  // row id still resolves cleanly.
+  useEffect(() => {
+    if (!liveAnalysis) return
+    const settled = promptAnalyses.some(
+      (a) => a.message_id === liveAnalysis.message_id,
+    )
+    if (settled) setLiveAnalysis(null)
+  }, [promptAnalyses, liveAnalysis])
 
   /**
    * Returns the conversation id this send landed in (the existing one
@@ -247,6 +291,15 @@ function ChatWindow({
       (data) => {
         if (data.type === "conversation_created" && typeof data.id === "string") {
           landedConvId = data.id
+        } else if (data.type === "prompt_analysis") {
+          // Aegis side-channel event. Cast here is narrow: the
+          // server-emitted shape matches `PromptAnalysis` field-for-
+          // field (see backend `PromptAnalysisResponse`), and we
+          // only commit it to state if the message_id is a string
+          // -- a defensive guard against the SSE protocol drifting.
+          if (typeof data.message_id === "string") {
+            setLiveAnalysis(data as unknown as PromptAnalysis)
+          }
         }
       },
     )
@@ -292,7 +345,8 @@ function ChatWindow({
   }
 
   return (
-    <>
+    <div className="flex flex-1 min-h-0 gap-4">
+      <div className="flex-1 flex flex-col min-w-0">
       <div className="flex-1 overflow-y-auto pr-4">
         <ChatTranscript<Message>
           messages={messages}
@@ -370,7 +424,19 @@ function ChatWindow({
           </p>
         </div>
       )}
-    </>
+      </div>
+      {aegisEnabled && conversationId !== null && (
+        // Right rail. Hidden on narrower screens since the chat
+        // column needs the room first; the panel is purely
+        // advisory so dropping it on small viewports is fine.
+        <aside className="hidden lg:flex w-80 shrink-0 flex-col border-l">
+          <AegisFeedbackPanel
+            analyses={promptAnalyses}
+            latest={liveAnalysis}
+            pending={stream.streaming && liveAnalysis === null}
+          />
+        </aside>
+      )}
+    </div>
   )
 }
-

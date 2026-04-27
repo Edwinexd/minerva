@@ -20,8 +20,10 @@ use crate::auth::user_from_row;
 use crate::error::AppError;
 use crate::ext_obfuscate::{self, Pseudonymizer};
 use crate::routes::chat::{
-    fetch_conversation_for_view, list_pinned_conversations_for, ConversationWithUserResponse,
+    fetch_conversation_for_view, list_pinned_conversations_for,
+    load_prompt_analyses_for_conversation, ConversationWithUserResponse, PromptAnalysisResponse,
 };
+use crate::routes::courses::{resolve_course_flags, CourseFeatureFlagsView};
 use crate::routes::integration::verify_embed_token;
 use crate::state::AppState;
 
@@ -78,6 +80,12 @@ struct CourseResponse {
     id: Uuid,
     name: String,
     description: Option<String>,
+    /// Per-course feature flags resolved through the same path the
+    /// runtime uses. Lets the iframe-side frontend gate the aegis
+    /// Feedback panel (and any future flags) without an extra
+    /// round-trip. Same shape as the Shibboleth `/courses/{id}`
+    /// route via `crate::routes::courses::CourseFeatureFlagsView`.
+    feature_flags: CourseFeatureFlagsView,
 }
 
 #[derive(Serialize)]
@@ -115,6 +123,12 @@ struct TeacherNoteResponse {
 struct ConversationDetailResponse {
     messages: Vec<MessageResponse>,
     notes: Vec<TeacherNoteResponse>,
+    /// Aegis prompt-coaching analyses for this conversation, in the
+    /// same shape as the Shibboleth route. Empty when aegis is off
+    /// for the course or every turn so far soft-failed. Reuses the
+    /// shared `PromptAnalysisResponse` so a schema change touches
+    /// one place.
+    prompt_analyses: Vec<PromptAnalysisResponse>,
 }
 
 #[derive(Serialize)]
@@ -176,10 +190,12 @@ async fn get_course(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    let feature_flags = resolve_course_flags(&state.db, course.id).await;
     Ok(Json(CourseResponse {
         id: course.id,
         name: course.name,
         description: course.description,
+        feature_flags,
     }))
 }
 
@@ -250,6 +266,9 @@ async fn get_conversation(
     // embed view has to surface them too. Author display name goes through
     // the same `ext:` pseudonymizer as the Shibboleth route.
     let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;
+    // Aegis prompt analyses use the shared loader so this stays in
+    // lockstep with the Shibboleth route's payload shape.
+    let prompt_analyses = load_prompt_analyses_for_conversation(&state.db, cid).await;
     let ps = Pseudonymizer::for_viewer(&state.db, &viewer, &state.config.hmac_secret).await?;
 
     Ok(Json(ConversationDetailResponse {
@@ -281,6 +300,7 @@ async fn get_conversation(
                 }
             })
             .collect(),
+        prompt_analyses,
     }))
 }
 

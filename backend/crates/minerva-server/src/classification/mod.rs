@@ -18,6 +18,7 @@
 //! `unclassified_doc_ids` filters in `strategy::common`.
 
 pub mod adversarial;
+pub mod aegis;
 pub mod document;
 pub mod extraction_guard;
 pub mod linker;

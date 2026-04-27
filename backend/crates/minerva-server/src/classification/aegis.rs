@@ -33,12 +33,13 @@ use uuid::Uuid;
 
 use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_AEGIS;
-use minerva_db::queries::prompt_analyses::PromptAnalysisInsert;
 
-/// Tiny model -- runs on every chat turn when the flag is on, so
-/// latency is the headline number. The schema-constrained output
-/// keeps llama3.1-8b on rails for the JSON shape we want.
-const AEGIS_MODEL: &str = "llama3.1-8b";
+/// Tiny model -- runs on every debounced keystroke when the flag
+/// is on, so latency is the headline number. The schema-constrained
+/// output keeps llama3.1-8b on rails for the JSON shape we want.
+/// `pub` so the route layer can stamp `model_used` on persisted
+/// rows from the same constant the analyzer actually called.
+pub const AEGIS_MODEL: &str = "llama3.1-8b";
 
 /// Cap on the analyzer's reply. The JSON has 6 ints + 3 short
 /// label strings + 3 one-sentence feedback strings -- fits in 350
@@ -78,9 +79,11 @@ Tone: constructive partner, not condescending teacher. Offer one concrete improv
 
 Output JSON only, matching the schema. No prose."#;
 
-/// Result of one analyzer run. Mirrors the row shape we'll persist
-/// (minus DB-managed columns) so the call site can hand it straight
-/// to `prompt_analyses::insert` after wrapping in `PromptAnalysisInsert`.
+/// Result of one analyzer run. The route layer wraps this in
+/// `AegisAnalysisPayload` for the wire format and for DB insertion;
+/// keeping the analyzer's own type field-for-field identical to that
+/// payload would tangle the LLM-call concern with the wire/DB
+/// concerns. The route conversion handles that mapping.
 #[derive(Debug, Clone)]
 pub struct AegisVerdict {
     pub overall_score: i32,
@@ -95,29 +98,6 @@ pub struct AegisVerdict {
     pub terminology_feedback: String,
     pub missing_constraint_label: String,
     pub missing_constraint_feedback: String,
-}
-
-impl AegisVerdict {
-    /// Hand off to the DB layer. Borrows so the strings live as long
-    /// as the verdict; the insert call uses the borrowed slices.
-    pub fn as_insert(&self, message_id: Uuid) -> PromptAnalysisInsert<'_> {
-        PromptAnalysisInsert {
-            message_id,
-            overall_score: self.overall_score,
-            clarity_score: self.clarity_score,
-            context_score: self.context_score,
-            constraints_score: self.constraints_score,
-            reasoning_demand_score: self.reasoning_demand_score,
-            critical_thinking_score: self.critical_thinking_score,
-            structural_clarity_label: &self.structural_clarity_label,
-            structural_clarity_feedback: &self.structural_clarity_feedback,
-            terminology_label: &self.terminology_label,
-            terminology_feedback: &self.terminology_feedback,
-            missing_constraint_label: &self.missing_constraint_label,
-            missing_constraint_feedback: &self.missing_constraint_feedback,
-            model_used: AEGIS_MODEL,
-        }
-    }
 }
 
 /// Run the analyzer. `recent_user_messages` is the trail of the

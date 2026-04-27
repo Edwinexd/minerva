@@ -48,6 +48,11 @@ pub fn router() -> Router<AppState> {
             "/conversations/{cid}/messages/{message_id}/feedback",
             put(set_feedback),
         )
+        // Aegis live analyzer. Called from the frontend on debounced
+        // input changes -- the panel updates BEFORE the user hits Send.
+        // No persistence happens here; the verdict the student
+        // ultimately accepts gets persisted via the send-message body.
+        .route("/aegis/analyze", post(analyze_prompt_route))
 }
 
 #[derive(Serialize)]
@@ -142,6 +147,88 @@ struct MessageFeedbackResponse {
     updated_at: chrono::DateTime<chrono::Utc>,
     user_eppn: Option<String>,
     user_display_name: Option<String>,
+}
+
+/// Wire shape for an aegis verdict that flows in BOTH directions:
+///
+///   * **Server -> client** as the body of `POST /aegis/analyze`
+///     (the live analyzer the frontend hits on debounced input).
+///   * **Client -> server** as the optional `prompt_analysis`
+///     field on `POST /conversations/.../message` (the verdict the
+///     student had on screen when they pressed Send -- persisted
+///     server-side and surfaced as the History row for that turn).
+///
+/// Round-tripping the same struct keeps the live-vs-persisted
+/// payloads byte-identical so the panel's typing-mode and
+/// history-mode rendering can share a code path.
+///
+/// We intentionally TRUST the client-supplied verdict on send.
+/// Re-running the analyzer at send time would double the cost per
+/// turn, and the student is the only one who reads their own panel
+/// so a manipulated score only fools themselves; teacher dashboards
+/// can re-derive truth from `course_token_usage` (category=aegis).
+/// The DB CHECK constraints (`overall_score BETWEEN 0 AND 10`,
+/// etc.) clamp obviously-bad payloads at insert.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct AegisAnalysisPayload {
+    pub overall_score: i32,
+    pub clarity_score: i32,
+    pub context_score: i32,
+    pub constraints_score: i32,
+    pub reasoning_demand_score: i32,
+    pub critical_thinking_score: i32,
+    pub structural_clarity_label: String,
+    pub structural_clarity_feedback: String,
+    pub terminology_label: String,
+    pub terminology_feedback: String,
+    pub missing_constraint_label: String,
+    pub missing_constraint_feedback: String,
+}
+
+impl AegisAnalysisPayload {
+    fn from_verdict(v: crate::classification::aegis::AegisVerdict) -> Self {
+        Self {
+            overall_score: v.overall_score,
+            clarity_score: v.clarity_score,
+            context_score: v.context_score,
+            constraints_score: v.constraints_score,
+            reasoning_demand_score: v.reasoning_demand_score,
+            critical_thinking_score: v.critical_thinking_score,
+            structural_clarity_label: v.structural_clarity_label,
+            structural_clarity_feedback: v.structural_clarity_feedback,
+            terminology_label: v.terminology_label,
+            terminology_feedback: v.terminology_feedback,
+            missing_constraint_label: v.missing_constraint_label,
+            missing_constraint_feedback: v.missing_constraint_feedback,
+        }
+    }
+
+    /// Hand off to the DB layer, attaching to the freshly-inserted
+    /// user message. Borrows so the strings live as long as `self`;
+    /// the model_used column gets the const we used in the analyzer
+    /// (clients don't pick that even though they could lie about
+    /// scores -- it's an audit field).
+    fn as_insert(
+        &self,
+        message_id: Uuid,
+    ) -> minerva_db::queries::prompt_analyses::PromptAnalysisInsert<'_> {
+        minerva_db::queries::prompt_analyses::PromptAnalysisInsert {
+            message_id,
+            overall_score: self.overall_score.clamp(0, 10),
+            clarity_score: self.clarity_score.clamp(0, 10),
+            context_score: self.context_score.clamp(0, 10),
+            constraints_score: self.constraints_score.clamp(0, 10),
+            reasoning_demand_score: self.reasoning_demand_score.clamp(0, 10),
+            critical_thinking_score: self.critical_thinking_score.clamp(0, 10),
+            structural_clarity_label: &self.structural_clarity_label,
+            structural_clarity_feedback: &self.structural_clarity_feedback,
+            terminology_label: &self.terminology_label,
+            terminology_feedback: &self.terminology_feedback,
+            missing_constraint_label: &self.missing_constraint_label,
+            missing_constraint_feedback: &self.missing_constraint_feedback,
+            model_used: crate::classification::aegis::AEGIS_MODEL,
+        }
+    }
 }
 
 /// Aegis prompt analysis for a single user message. Sent over the
@@ -857,6 +944,115 @@ async fn get_conversation(
 #[derive(Deserialize)]
 struct SendMessageRequest {
     content: String,
+    /// Aegis verdict the student had on screen when they pressed
+    /// Send. The frontend hits `POST /aegis/analyze` on debounced
+    /// input and caches the latest verdict here, then ships it
+    /// alongside the message so the History panel persists what
+    /// the student actually saw. None when aegis is off for the
+    /// course OR the user typed and sent inside the debounce window
+    /// (no analysis ever produced); both are valid -- the History
+    /// row simply doesn't appear for that turn.
+    #[serde(default)]
+    prompt_analysis: Option<AegisAnalysisPayload>,
+}
+
+/// Request body for the live aegis analyzer.
+#[derive(Deserialize)]
+struct AnalyzePromptRequest {
+    /// The prompt the student is currently typing. Empty / very
+    /// short bodies are filtered server-side (the analyzer needs
+    /// at least a few words to say anything useful).
+    content: String,
+    /// Optional conversation context. When provided, the analyzer
+    /// gets the prior user turns of that conversation as context
+    /// so a short follow-up like "explain that further" reads as
+    /// well-grounded rather than missing-context.
+    #[serde(default)]
+    conversation_id: Option<Uuid>,
+}
+
+/// Shared aegis-analyze pipeline used by both the Shibboleth and
+/// embed routes. Caller is responsible for proving the user has
+/// access to `course_id`; this helper trusts that and only handles
+/// the flag check, the conversation scoping for context, and the
+/// analyzer call.
+///
+/// Returns `Ok(None)` when:
+///   * aegis is disabled for the course (the panel hides anyway)
+///   * the analyzer soft-failed (transport / parse error)
+///   * the prompt is too short for the analyzer to act on
+///
+/// `Err(AppError::NotFound)` / `Err(AppError::Forbidden)` only when
+/// the supplied conversation_id is cross-course or non-owner --
+/// mirrors `run_chat_message`'s IDOR guard.
+pub(crate) async fn analyze_prompt_for_user(
+    state: &AppState,
+    course_id: Uuid,
+    user_id: Uuid,
+    content: String,
+    conversation_id: Option<Uuid>,
+) -> Result<Option<AegisAnalysisPayload>, AppError> {
+    if !crate::feature_flags::aegis_enabled(&state.db, course_id).await {
+        return Ok(None);
+    }
+
+    // Build the trail oldest-first, current-turn-LAST. When a
+    // conversation_id is given, scope-check it before pulling
+    // history so a cross-course / cross-user id can't leak prior
+    // turns through the analyzer's prompt.
+    let mut trail: Vec<String> = Vec::new();
+    if let Some(cid) = conversation_id {
+        let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if conv.course_id != course_id {
+            return Err(AppError::NotFound);
+        }
+        if conv.user_id != user_id {
+            return Err(AppError::Forbidden);
+        }
+        let history = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
+        for m in history {
+            if m.role == "user" {
+                trail.push(m.content);
+            }
+        }
+    }
+    trail.push(content);
+
+    let verdict = crate::classification::aegis::analyze_prompt(
+        &state.http_client,
+        &state.config.cerebras_api_key,
+        &state.db,
+        course_id,
+        &trail,
+    )
+    .await;
+
+    Ok(verdict.map(AegisAnalysisPayload::from_verdict))
+}
+
+/// Live aegis analyzer endpoint (Shibboleth flow). Returns the
+/// verdict synchronously so the panel can render before the user
+/// clicks Send. The shape (`Option<AegisAnalysisPayload>`) matches
+/// what the History list carries so panel rendering is uniform
+/// between live-typing and persisted-history modes.
+async fn analyze_prompt_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<AnalyzePromptRequest>,
+) -> Result<Json<Option<AegisAnalysisPayload>>, AppError> {
+    verify_course_access(&state, course_id, user.id).await?;
+    let verdict = analyze_prompt_for_user(
+        &state,
+        course_id,
+        user.id,
+        body.content,
+        body.conversation_id,
+    )
+    .await?;
+    Ok(Json(verdict))
 }
 
 async fn send_message(
@@ -873,6 +1069,7 @@ async fn send_message(
         user.privacy_acknowledged_at,
         Some(cid),
         body.content,
+        body.prompt_analysis,
     )
     .await
 }
@@ -891,6 +1088,7 @@ async fn start_conversation(
         user.privacy_acknowledged_at,
         None,
         body.content,
+        body.prompt_analysis,
     )
     .await
 }
@@ -907,6 +1105,11 @@ async fn start_conversation(
 /// generation keeps clients out of the trust boundary for resource
 /// identifiers and means a rejected first message leaves no orphan
 /// "Untitled, 0 msgs" row.
+/// `prompt_analysis`: aegis verdict the student had on screen when
+/// they pressed Send (cached client-side from the live
+/// `/aegis/analyze` endpoint). None = no live analysis to persist;
+/// History row for this turn simply doesn't appear, which is correct
+/// behaviour for "user typed-and-sent inside the debounce window".
 pub(super) async fn run_chat_message(
     state: &AppState,
     course: minerva_db::queries::courses::CourseRow,
@@ -914,6 +1117,7 @@ pub(super) async fn run_chat_message(
     user_privacy_acknowledged_at: Option<chrono::DateTime<chrono::Utc>>,
     cid: Option<Uuid>,
     user_content: String,
+    prompt_analysis: Option<AegisAnalysisPayload>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course_id = course.id;
 
@@ -1007,90 +1211,37 @@ pub(super) async fn run_chat_message(
     // an admin flipping the flag mid-conversation won't half-apply.
     let kg_enabled = crate::feature_flags::course_kg_enabled(&state.db, course_id).await;
 
-    // Aegis prompt-coaching: if the flag is on for this course,
-    // race a small analyzer call against the generation strategy
-    // and surface the verdict to the client as a side-channel SSE
-    // event. The analyzer runs in its OWN spawn so its latency is
-    // entirely off the critical path -- the assistant reply
-    // streams whether or not aegis returns. Soft-fail throughout
-    // (no panel content for that turn on any error).
-    if crate::feature_flags::aegis_enabled(&state.db, course_id).await {
-        // Pull the most recent user turns out of history (which
-        // already includes the turn we just inserted, since the
-        // `list_messages` call above ran after the insert). The
-        // analyzer wants oldest-first, current-turn last; that
-        // matches `list_messages`'s natural order so a simple
-        // filter does it.
-        let recent_user_messages: Vec<String> = history
-            .iter()
-            .filter(|m| m.role == "user")
-            .map(|m| m.content.clone())
-            .collect();
-
-        let aegis_db = state.db.clone();
-        let aegis_http = state.http_client.clone();
-        let aegis_api_key = state.config.cerebras_api_key.clone();
-        let aegis_tx = tx.clone();
-        let aegis_user_msg_id = user_msg_id;
-        let aegis_course_id = course_id;
-        let aegis_conversation_id = conv_id;
-        tokio::spawn(async move {
-            let Some(verdict) = crate::classification::aegis::analyze_prompt(
-                &aegis_http,
-                &aegis_api_key,
-                &aegis_db,
-                aegis_course_id,
-                &recent_user_messages,
-            )
-            .await
-            else {
-                return;
-            };
-
-            // Persist before emitting so a refetch of the
-            // conversation detail (e.g. user navigates away and
-            // back mid-stream) shows the same data the panel
-            // received over SSE.
+    // Aegis: persist the verdict the student had on screen when
+    // they pressed Send so it appears in the History panel for
+    // this conversation. The analysis itself was produced earlier
+    // by `POST /aegis/analyze` (live, no persist) -- the frontend
+    // caches it and ships it here, atomic with the message body.
+    //
+    // We persist iff the flag is on AND the client supplied a
+    // verdict. Skipping the flag check would let a client write
+    // rows for courses where aegis is meant to be invisible; the
+    // CHECK constraints + the read-side flag gate make this
+    // double-belt-and-braces.
+    //
+    // Soft-fail: a DB hiccup logs at warn and drops the row.
+    // The student already saw the panel during typing; missing
+    // a History entry is the right failure mode.
+    if let Some(analysis) = prompt_analysis {
+        if crate::feature_flags::aegis_enabled(&state.db, course_id).await {
             if let Err(e) = minerva_db::queries::prompt_analyses::insert(
-                &aegis_db,
-                verdict.as_insert(aegis_user_msg_id),
+                &state.db,
+                analysis.as_insert(user_msg_id),
             )
             .await
             {
                 tracing::warn!(
                     "aegis: prompt_analyses insert failed (conv={}, msg={}): {}",
-                    aegis_conversation_id,
-                    aegis_user_msg_id,
+                    conv_id,
+                    user_msg_id,
                     e,
                 );
-                // Even if persist failed we still want the panel
-                // to update for THIS session; fall through to emit.
             }
-
-            let event_payload = serde_json::json!({
-                "type": "prompt_analysis",
-                "message_id": aegis_user_msg_id,
-                "overall_score": verdict.overall_score,
-                "clarity_score": verdict.clarity_score,
-                "context_score": verdict.context_score,
-                "constraints_score": verdict.constraints_score,
-                "reasoning_demand_score": verdict.reasoning_demand_score,
-                "critical_thinking_score": verdict.critical_thinking_score,
-                "structural_clarity_label": verdict.structural_clarity_label,
-                "structural_clarity_feedback": verdict.structural_clarity_feedback,
-                "terminology_label": verdict.terminology_label,
-                "terminology_feedback": verdict.terminology_feedback,
-                "missing_constraint_label": verdict.missing_constraint_label,
-                "missing_constraint_feedback": verdict.missing_constraint_feedback,
-            });
-            // Best-effort send. If the client disconnected mid-stream the
-            // strategy will have closed the receiver and this will error;
-            // we swallow that since the row is already persisted and a
-            // reconnect will fetch it via conversation detail.
-            let _ = aegis_tx
-                .send(Ok(Event::default().data(event_payload.to_string())))
-                .await;
-        });
+        }
     }
 
     let ctx = strategy::GenerationContext {

@@ -20,8 +20,9 @@ use crate::auth::user_from_row;
 use crate::error::AppError;
 use crate::ext_obfuscate::{self, Pseudonymizer};
 use crate::routes::chat::{
-    fetch_conversation_for_view, list_pinned_conversations_for,
-    load_prompt_analyses_for_conversation, ConversationWithUserResponse, PromptAnalysisResponse,
+    analyze_prompt_for_user, fetch_conversation_for_view, list_pinned_conversations_for,
+    load_prompt_analyses_for_conversation, AegisAnalysisPayload, ConversationWithUserResponse,
+    PromptAnalysisResponse,
 };
 use crate::routes::courses::{resolve_course_flags, CourseFeatureFlagsView};
 use crate::routes::integration::verify_embed_token;
@@ -51,6 +52,11 @@ pub fn router() -> Router<AppState> {
             "/course/{course_id}/acknowledge-privacy",
             post(acknowledge_privacy),
         )
+        // Mirrors the Shibboleth chat router's live aegis analyzer
+        // endpoint. Same `analyze_prompt_for_user` helper backs
+        // both -- the only difference here is the embed-token auth
+        // flow + token in the body.
+        .route("/course/{course_id}/aegis/analyze", post(analyze_prompt))
 }
 
 /// All embed endpoints require `?token=...` query param.
@@ -308,6 +314,12 @@ async fn get_conversation(
 struct SendMessageRequest {
     content: String,
     token: String,
+    /// Aegis verdict the student had on screen when they pressed
+    /// Send. Same field the Shibboleth route accepts; persisted
+    /// linked to the new message_id for the History panel. None =
+    /// no live analysis (debounce window, or aegis off for course).
+    #[serde(default)]
+    prompt_analysis: Option<AegisAnalysisPayload>,
 }
 
 async fn send_message(
@@ -324,6 +336,7 @@ async fn send_message(
         privacy_acked_at,
         Some(cid),
         body.content,
+        body.prompt_analysis,
     )
     .await
 }
@@ -342,8 +355,41 @@ async fn start_conversation(
         privacy_acked_at,
         None,
         body.content,
+        body.prompt_analysis,
     )
     .await
+}
+
+#[derive(Deserialize)]
+struct AnalyzePromptRequest {
+    content: String,
+    token: String,
+    #[serde(default)]
+    conversation_id: Option<Uuid>,
+}
+
+/// Embed-side wrapper around `chat::analyze_prompt_for_user`.
+/// Auth flow differs (embed token in body); the analysis logic
+/// itself is the shared helper, so the verdict shape and behaviour
+/// stay in lockstep with the Shibboleth route.
+async fn analyze_prompt(
+    State(state): State<AppState>,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<AnalyzePromptRequest>,
+) -> Result<Json<Option<AegisAnalysisPayload>>, AppError> {
+    let (resolved_course_id, user_id) = verify_embed_token(&state.config.hmac_secret, &body.token)?;
+    if resolved_course_id != course_id {
+        return Err(AppError::Forbidden);
+    }
+    let verdict = analyze_prompt_for_user(
+        &state,
+        course_id,
+        user_id,
+        body.content,
+        body.conversation_id,
+    )
+    .await?;
+    Ok(Json(verdict))
 }
 
 /// Token-auth path used by both message-streaming endpoints. Token lives

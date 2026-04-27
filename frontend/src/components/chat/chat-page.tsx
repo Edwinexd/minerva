@@ -28,6 +28,7 @@ import { ConversationList } from "./conversation-list"
 import { TeacherNoteInline } from "./teacher-note-inline"
 import { useChatStream } from "./use-chat-stream"
 import { AegisFeedbackPanel } from "./aegis-feedback-panel"
+import { AegisInterceptDialog } from "./aegis-intercept-dialog"
 import { useAegisLiveAnalyzer } from "./use-aegis-live-analyzer"
 import { useAegisMode } from "./use-aegis-mode"
 
@@ -348,12 +349,17 @@ function ChatWindow({
     return ok ? landedConvId : null
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim() || stream.streaming) return
-    const msg = input
-    setInput("")
+  // Just-in-time intercept state. When the student presses Send
+  // AND the cached live verdict has suggestions, we hold the
+  // pending message text here and show the dialog. Either button
+  // resolves it. This is the "before showing answer" feedback
+  // path the project brief calls for -- the message hasn't been
+  // sent to inference yet at this point.
+  const [pendingSendMsg, setPendingSendMsg] = useState<string | null>(null)
+  const interceptOpen = pendingSendMsg !== null
 
+  const dispatchSend = (msg: string) => {
+    setInput("")
     ;(async () => {
       const landedConvId = await sendMessage(msg, conversationId)
       if (landedConvId && conversationId === null) {
@@ -364,6 +370,40 @@ function ChatWindow({
         })
       }
     })()
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim() || stream.streaming) return
+    const msg = input
+
+    // If the live analyzer has cached non-empty suggestions for the
+    // current draft, intercept the Send and let the student decide
+    // whether to revise or push through. Skip when:
+    //   * no live verdict yet (analyzer hasn't finished, or aegis
+    //     is off for the course) -- never block a student waiting
+    //     on a network round-trip
+    //   * verdict has zero suggestions ("looks good")
+    const live = liveAnalyzer.analysis
+    if (live && live.suggestions.length > 0) {
+      setPendingSendMsg(msg)
+      return
+    }
+
+    dispatchSend(msg)
+  }
+
+  const handleRevise = () => {
+    setPendingSendMsg(null)
+    // Don't clear `input` -- the whole point is the student edits
+    // their draft. Don't clear the live verdict either; the panel
+    // still shows the relevant suggestions while they edit.
+  }
+
+  const handleSendAnyway = () => {
+    const msg = pendingSendMsg
+    setPendingSendMsg(null)
+    if (msg !== null) dispatchSend(msg)
   }
 
   const bubbleLabels: ChatBubbleLabels = {
@@ -474,6 +514,12 @@ function ChatWindow({
           />
         </aside>
       )}
+      <AegisInterceptDialog
+        open={interceptOpen}
+        suggestions={liveAnalyzer.analysis?.suggestions ?? []}
+        onRevise={handleRevise}
+        onSendAnyway={handleSendAnyway}
+      />
     </div>
   )
 }

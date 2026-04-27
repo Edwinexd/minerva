@@ -1,79 +1,58 @@
 /**
  * Right-rail Feedback panel for the Aegis prompt-coaching feature.
  *
- * Renders three sections in vertical order, mirroring the figma mockup:
+ * Shows actionable SUGGESTIONS for the student's current draft -- not
+ * scores, not a rubric. Per the project brief and Herodotou et al.
+ * (2025), grading a student's prompt risks exactly the condescending
+ * tone we are trying to avoid; we surface concrete improvements
+ * instead and let the student decide what (if anything) to act on.
  *
- *   1. **Quality banner** -- one of high / medium / low, colour-coded.
- *      Driven by `analysis.overall_score` (0..=10) using a fixed
- *      threshold split. The "Low" banner reuses the same red shell
- *      as the figma's "Test why it's bad" empty-prompt example so we
- *      don't need separate styling for short or low-effort prompts.
+ * Three sections in vertical order:
  *
- *   2. **Prompt Analysis** -- three short callouts (structural
- *      clarity, terminology specificity, missing constraint). Each
- *      pulls its label + one-sentence rationale from the analysis
- *      row directly; the panel doesn't reformat or summarise.
+ *   1. **Suggestions for the current draft** -- 0..=3 short tagged
+ *      sentences ("you could say what you've already tried"). Empty
+ *      = a small "looks good" affirmation rather than a blank slot.
  *
- *   3. **History** -- every prior user-turn analysis on this
- *      conversation, newest first, with a date-coarsening header
- *      ("Today" / "Yesterday" / explicit date) and the overall
- *      score formatted as `N.M` (always one-decimal so 9 reads as
- *      `9.0`, matching the figma style).
+ *   2. **Mode toggle** -- Beginner / Expert badge. Drives the
+ *      analyzer's calibration (separate hook -- `useAegisMode`); the
+ *      panel just renders the toggle UI.
  *
- * The panel is a pure view -- no fetching of its own. The chat
- * page hands it `analyses` (from the conversation detail query)
- * and `latest` (the in-flight analysis received over SSE during
- * the current send, which lives outside the React Query cache
- * until the conversation detail refetches). When `latest` is
- * present we render IT as the primary panel content even if it
- * isn't yet in `analyses`, which keeps the panel from blanking
- * during the brief window between SSE arrival and refetch.
+ *   3. **History** -- past prompts in this conversation that had
+ *      suggestions, newest first. Collapsed to one-liner each.
+ *
+ * Pure view -- no fetching of its own. Receives `analyses` (history,
+ * from conversation detail) and `latest` (the live verdict for the
+ * draft the student is currently composing) from the parent chat
+ * page; the parent owns the analyzer call.
  */
 import { useTranslation } from "react-i18next"
 import { Badge } from "@/components/ui/badge"
 import { AegisShield } from "@/components/icons/aegis-shield"
 import { cn } from "@/lib/utils"
-import type { PromptAnalysis } from "@/lib/types"
+import type { AegisSuggestion, PromptAnalysis } from "@/lib/types"
 import { useAegisMode } from "./use-aegis-mode"
 
 interface AegisFeedbackPanelProps {
-  /** All analyses fetched with the conversation detail. Oldest first. */
+  /** All persisted analyses for this conversation. Oldest first. */
   analyses: PromptAnalysis[]
   /**
-   * Optional in-flight analysis received over SSE while the conversation
-   * detail query hasn't yet refetched. Takes precedence over `analyses`
-   * for the "latest" slot so the panel never flashes blank between SSE
-   * arrival and the refetch settling.
+   * Live verdict for the student's CURRENT draft (the prompt they
+   * are typing right now, not yet sent). Drives the Suggestions
+   * section. Null when the analyzer hasn't fired yet OR the input
+   * is below the live-analyzer's MIN_LENGTH OR aegis is off.
    */
   latest: PromptAnalysis | null
   /**
-   * True while the user's message is in-flight and we expect an
-   * analysis to arrive shortly. Drives the "Scoring your prompt…"
-   * placeholder so the panel doesn't look broken during the round-trip.
+   * True while the live analyzer's request is in flight. Renders
+   * the "thinking..." placeholder so the panel doesn't look frozen
+   * during the round-trip.
    */
   pending: boolean
 }
 
-const HIGH_THRESHOLD = 8
-const MEDIUM_THRESHOLD = 5
-
-type Quality = "high" | "medium" | "low"
-
-function classifyQuality(score: number): Quality {
-  if (score >= HIGH_THRESHOLD) return "high"
-  if (score >= MEDIUM_THRESHOLD) return "medium"
-  return "low"
-}
-
-/** Format `8` as `8.0`, `9.2` as `9.2`. Matches the figma's history column. */
-function formatScore(score: number): string {
-  return score.toFixed(1)
-}
-
 /**
  * Coarsen `iso` to one of "Today" / "Yesterday" / a localised date.
- * Used as the header for groups of historical analyses; the figma's
- * "3:42 PM TODAY" / "YESTERDAY" / "MARCH 23" pattern.
+ * Used as the header for groups of historical analyses.
  */
 function dateGroupLabel(
   iso: string,
@@ -102,27 +81,21 @@ export function AegisFeedbackPanel({
   pending,
 }: AegisFeedbackPanelProps) {
   const { t, i18n } = useTranslation("student")
-
-  // Subject-expertise mode. The toggle here is the SAME storage-
-  // backed state the parent chat page reads to decide which `mode`
-  // to ship on each `/aegis/analyze` request -- so flipping the
-  // badge re-calibrates the next analyzer call automatically, no
-  // prop wiring needed.
   const [mode, setMode] = useAegisMode()
   const toggleMode = () =>
     setMode(mode === "beginner" ? "expert" : "beginner")
 
-  // Latest analysis = explicit `latest` (live verdict from the
-  // analyzer endpoint) > newest entry from `analyses` (conversation
-  // detail). The merge order matters: a fresh live verdict should
-  // win over the persisted history's last entry while the student
-  // is still typing.
+  // What we render in the "current" slot. Live verdict wins; if the
+  // student isn't currently typing (no live verdict, no pending
+  // call) we fall back to the most recent persisted entry so the
+  // panel isn't blank between turns.
   const fallbackLatest = analyses.length > 0 ? analyses[analyses.length - 1] : null
   const current = latest ?? fallbackLatest
 
-  // History section: every entry except the one we're showing as
-  // "current". Newest first to match the figma's reverse-chrono
-  // history list.
+  // History = every persisted analysis except the one we're showing
+  // as "current". Reversed for newest-first display. Persisted rows
+  // with empty suggestion lists are still kept (a "looks good" turn
+  // is still useful context for the student).
   const historyEntries: PromptAnalysis[] = [...analyses]
     .filter((a) => a.message_id !== current?.message_id)
     .reverse()
@@ -135,13 +108,11 @@ export function AegisFeedbackPanel({
           {t("aegis.panelTitle")}
         </h2>
         {/*
-          The badge doubles as the mode toggle. Rendered as a
-          Badge wrapped by a button so the visual stays identical
-          to the figma pill while the click target is a real
-          semantic button (keyboard-accessible, announced as a
-          button by screen readers). aria-pressed communicates
-          the toggle state. Tooltip explains it's about the
-          student's subject expertise, not UI density.
+          Mode toggle. Renders as a Badge inside a button so the
+          visual matches the figma pill while the click target is a
+          real semantic button (keyboard-accessible, announced as a
+          toggle). Tooltip explains the actual meaning -- subject
+          expertise, not UI density.
         */}
         <button
           type="button"
@@ -161,9 +132,7 @@ export function AegisFeedbackPanel({
         </button>
       </div>
 
-      <QualityCard analysis={current} pending={pending} />
-
-      {current && <PromptAnalysisSection analysis={current} />}
+      <CurrentSection analysis={current} pending={pending} />
 
       {historyEntries.length > 0 && (
         <HistorySection
@@ -177,7 +146,17 @@ export function AegisFeedbackPanel({
   )
 }
 
-function QualityCard({
+/**
+ * Renders the "for your current draft" slot. Three exclusive states:
+ *
+ *   * No analysis at all (student hasn't typed enough yet, or aegis
+ *     just turned on) -> empty-state copy explaining what the panel
+ *     does without claiming anything specific.
+ *   * Pending (live request in flight) -> a "thinking..." placeholder.
+ *   * Have an analysis -> either the suggestion list, or the
+ *     "looks good" affirmation when there are no suggestions.
+ */
+function CurrentSection({
   analysis,
   pending,
 }: {
@@ -188,123 +167,78 @@ function QualityCard({
 
   if (!analysis) {
     if (pending) {
-      return (
-        <div className="rounded-md border border-dashed p-4 space-y-1">
-          <div className="text-sm font-medium text-muted-foreground">
-            {t("aegis.pendingTitle")}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {t("aegis.pendingBody")}
-          </p>
-        </div>
-      )
+      return <PlaceholderCard kind="pending" />
     }
+    return <PlaceholderCard kind="empty" />
+  }
+
+  if (analysis.suggestions.length === 0) {
     return (
-      <div className="rounded-md border border-dashed p-4 space-y-1">
-        <div className="text-sm font-medium">{t("aegis.emptyTitle")}</div>
-        <p className="text-xs text-muted-foreground">{t("aegis.emptyBody")}</p>
+      <div className="rounded-md border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 dark:border-emerald-800 p-4 space-y-1">
+        <div className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">
+          {t("aegis.looksGoodTitle")}
+        </div>
+        <p className="text-xs text-foreground/80">
+          {t("aegis.looksGoodBody")}
+        </p>
       </div>
     )
   }
 
-  const quality = classifyQuality(analysis.overall_score)
-  // Quality classes match the mockup's coloured banners: green
-  // (high), amber (medium), red (low). Tailwind's emerald/amber/red
-  // 100/300 + 800 family gives roughly the figma's saturation
-  // without inventing custom palette tokens.
-  const qualityClass = cn(
-    "rounded-md border p-4 space-y-1",
-    quality === "high" &&
-      "border-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 dark:border-emerald-800",
-    quality === "medium" &&
-      "border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800",
-    quality === "low" &&
-      "border-rose-300 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-800",
-  )
-  const titleClass = cn(
-    "text-sm font-semibold",
-    quality === "high" && "text-emerald-900 dark:text-emerald-200",
-    quality === "medium" && "text-amber-900 dark:text-amber-200",
-    quality === "low" && "text-rose-900 dark:text-rose-200",
-  )
-  const titleKey =
-    quality === "high"
-      ? "aegis.qualityHigh"
-      : quality === "medium"
-        ? "aegis.qualityMedium"
-        : "aegis.qualityLow"
-
   return (
-    <div className={qualityClass} data-testid="aegis-quality-card">
-      <div className="flex items-center justify-between">
-        <div className={titleClass}>{t(titleKey)}</div>
-        <div className={cn("text-sm font-bold tabular-nums", titleClass)}>
-          {formatScore(analysis.overall_score)}
-        </div>
-      </div>
-      {analysis.missing_constraint_feedback && (
-        <p className="text-xs leading-snug text-foreground/90">
-          {analysis.missing_constraint_feedback}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function PromptAnalysisSection({ analysis }: { analysis: PromptAnalysis }) {
-  const { t } = useTranslation("student")
-
-  // Resolve the localised label for each callout, falling back to
-  // the raw analyzer string if the model coined a label outside
-  // the documented enum -- preferable to rendering an empty
-  // `_LABEL_` translation token in the middle of the heading.
-  const structuralLabel =
-    t(`aegis.labels.structural_clarity.${analysis.structural_clarity_label}`, {
-      defaultValue: analysis.structural_clarity_label,
-    })
-  const terminologyLabel = t(
-    `aegis.labels.terminology.${analysis.terminology_label}`,
-    { defaultValue: analysis.terminology_label },
-  )
-  const missingConstraintLabel = t(
-    `aegis.labels.missing_constraint.${analysis.missing_constraint_label}`,
-    { defaultValue: analysis.missing_constraint_label },
-  )
-
-  return (
-    <section className="space-y-3">
+    <section className="space-y-2">
       <div className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
-        {t("aegis.analysisHeader")}
+        {t("aegis.suggestionsHeader")}
       </div>
-      <Callout
-        heading={t("aegis.structuralClarityHeading", {
-          label: structuralLabel,
-        })}
-        body={analysis.structural_clarity_feedback}
-      />
-      <Callout
-        heading={`${t("aegis.terminologyHeading")}${
-          terminologyLabel ? ` -${terminologyLabel}` : ""
-        }`}
-        body={analysis.terminology_feedback}
-      />
-      <Callout
-        heading={`${t("aegis.missingConstraintHeading")}${
-          missingConstraintLabel ? ` -${missingConstraintLabel}` : ""
-        }`}
-        body={analysis.missing_constraint_feedback}
-      />
+      {analysis.suggestions.map((s, i) => (
+        <SuggestionRow key={i} suggestion={s} />
+      ))}
     </section>
   )
 }
 
-function Callout({ heading, body }: { heading: string; body: string }) {
+function PlaceholderCard({ kind }: { kind: "pending" | "empty" }) {
+  const { t } = useTranslation("student")
+  const titleKey = kind === "pending" ? "aegis.pendingTitle" : "aegis.emptyTitle"
+  const bodyKey = kind === "pending" ? "aegis.pendingBody" : "aegis.emptyBody"
   return (
-    <div className="space-y-1">
-      <div className="text-sm font-medium">{heading}</div>
-      {body && (
-        <p className="text-xs leading-snug text-muted-foreground">{body}</p>
-      )}
+    <div className="rounded-md border border-dashed p-4 space-y-1">
+      <div
+        className={cn(
+          "text-sm font-medium",
+          kind === "pending" && "text-muted-foreground",
+        )}
+      >
+        {t(titleKey)}
+      </div>
+      <p className="text-xs text-muted-foreground">{t(bodyKey)}</p>
+    </div>
+  )
+}
+
+/**
+ * One suggestion. The kind tag is rendered as a small badge -- it
+ * gives the student a sense of WHAT category of improvement this is
+ * (context, constraints, etc.) before they read the body.
+ */
+export function SuggestionRow({
+  suggestion,
+}: {
+  suggestion: AegisSuggestion
+}) {
+  const { t } = useTranslation("student")
+  // Localise the kind tag if we know it, else show the raw string.
+  // The analyzer is server-constrained but this lets a server-side
+  // enum extension still render reasonably without a frontend ship.
+  const kindLabel = t(`aegis.kinds.${suggestion.kind}`, {
+    defaultValue: suggestion.kind,
+  })
+  return (
+    <div className="rounded border p-3 space-y-2">
+      <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+        {kindLabel}
+      </Badge>
+      <p className="text-sm leading-snug">{suggestion.text}</p>
     </div>
   )
 }
@@ -322,11 +256,10 @@ function HistorySection({
 }) {
   const { t } = useTranslation("student")
 
-  // Group consecutive entries with the same date label into one
-  // header. Re-uses dateGroupLabel for both the comparison key and
-  // the visible string so they can never drift.
+  // Group consecutive entries with the same date label.
   const groups: { label: string; items: PromptAnalysis[] }[] = []
   for (const entry of entries) {
+    if (!entry.created_at) continue // live entries (shouldn't appear in history)
     const label = dateGroupLabel(
       entry.created_at,
       todayLabel,
@@ -361,33 +294,27 @@ function HistorySection({
 }
 
 function HistoryRow({ analysis }: { analysis: PromptAnalysis }) {
-  const quality = classifyQuality(analysis.overall_score)
-  const scoreClass = cn(
-    "text-xs font-bold tabular-nums px-2 py-1 rounded",
-    quality === "high" &&
-      "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200",
-    quality === "medium" &&
-      "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
-    quality === "low" &&
-      "bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-200",
-  )
-  // Headline = whichever feedback string the analyzer produced
-  // first that is non-empty. The figma's history rows show a
-  // short snippet of the prompt itself, but we don't ship the
-  // user-message text into the analysis row (it's already on
-  // the messages table); the missing-constraint feedback is
-  // typically the most actionable one-liner so it doubles as a
-  // recap for the row.
-  const recap =
-    analysis.missing_constraint_feedback ||
-    analysis.structural_clarity_feedback ||
-    analysis.terminology_feedback
+  const { t } = useTranslation("student")
+  // Headline: top suggestion's text, or a "looks good" pill when
+  // the persisted row had no suggestions. Either way the row stays
+  // a single line so a long history doesn't dominate the rail.
+  const headline =
+    analysis.suggestions[0]?.text ?? t("aegis.historyLooksGood")
+  const tag =
+    analysis.suggestions[0]?.kind ?? "ok"
   return (
-    <div className="flex items-start justify-between gap-2 rounded border p-2">
+    <div className="flex items-start gap-2 rounded border p-2">
+      <Badge
+        variant={analysis.suggestions.length > 0 ? "secondary" : "outline"}
+        className="text-[9px] uppercase tracking-wide shrink-0"
+      >
+        {analysis.suggestions.length > 0
+          ? t(`aegis.kinds.${tag}`, { defaultValue: tag })
+          : t("aegis.historyLooksGoodTag")}
+      </Badge>
       <p className="text-xs text-muted-foreground line-clamp-2 flex-1">
-        {recap || "-"}
+        {headline}
       </p>
-      <span className={scoreClass}>{formatScore(analysis.overall_score)}</span>
     </div>
   )
 }

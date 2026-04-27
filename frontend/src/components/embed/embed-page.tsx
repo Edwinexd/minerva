@@ -11,6 +11,7 @@ import { ConversationList } from "@/components/chat/conversation-list"
 import { TeacherNoteInline } from "@/components/chat/teacher-note-inline"
 import { useChatStream } from "@/components/chat/use-chat-stream"
 import { AegisFeedbackPanel } from "@/components/chat/aegis-feedback-panel"
+import { AegisInterceptDialog } from "@/components/chat/aegis-intercept-dialog"
 import { useAegisLiveAnalyzer } from "@/components/chat/use-aegis-live-analyzer"
 import { useAegisMode } from "@/components/chat/use-aegis-mode"
 import type { PromptAnalysis, TeacherNote } from "@/lib/types"
@@ -537,18 +538,43 @@ function EmbedChatWindow({
     return ok ? landedConvId : null
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim() || stream.streaming) return
-    const msg = input
-    setInput("")
+  // Just-in-time intercept state. Mirrors chat-page's flow: when
+  // the live verdict has cached suggestions for the current draft,
+  // we hold the pending message and show the dialog rather than
+  // sending immediately. Either button resolves it.
+  const [pendingSendMsg, setPendingSendMsg] = useState<string | null>(null)
+  const interceptOpen = pendingSendMsg !== null
 
+  const dispatchSend = (msg: string) => {
+    setInput("")
     ;(async () => {
       const landedConvId = await sendMessage(msg, conversationId)
       if (landedConvId && conversationId === null) {
         onConversationCreated(landedConvId)
       }
     })()
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim() || stream.streaming) return
+    const msg = input
+
+    const live = liveAnalyzer.analysis
+    if (live && live.suggestions.length > 0) {
+      setPendingSendMsg(msg)
+      return
+    }
+    dispatchSend(msg)
+  }
+
+  const handleRevise = () => {
+    setPendingSendMsg(null)
+  }
+  const handleSendAnyway = () => {
+    const msg = pendingSendMsg
+    setPendingSendMsg(null)
+    if (msg !== null) dispatchSend(msg)
   }
 
   const bubbleLabels: ChatBubbleLabels = {
@@ -637,6 +663,12 @@ function EmbedChatWindow({
           />
         </aside>
       )}
+      <AegisInterceptDialog
+        open={interceptOpen}
+        suggestions={liveAnalyzer.analysis?.suggestions ?? []}
+        onRevise={handleRevise}
+        onSendAnyway={handleSendAnyway}
+      />
     </div>
   )
 }

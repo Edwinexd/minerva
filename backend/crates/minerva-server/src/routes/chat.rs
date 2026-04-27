@@ -152,89 +152,74 @@ struct MessageFeedbackResponse {
 /// Wire shape for an aegis verdict that flows in BOTH directions:
 ///
 ///   * **Server -> client** as the body of `POST /aegis/analyze`
-///     (the live analyzer the frontend hits on debounced input).
+///     (the live analyzer the frontend hits on debounced input
+///     AND on Send to drive the just-in-time intercept).
 ///   * **Client -> server** as the optional `prompt_analysis`
 ///     field on `POST /conversations/.../message` (the verdict the
-///     student had on screen when they pressed Send -- persisted
-///     server-side and surfaced as the History row for that turn).
+///     student saw at submit -- persisted server-side and surfaced
+///     as the History row for that turn).
 ///
 /// Round-tripping the same struct keeps the live-vs-persisted
 /// payloads byte-identical so the panel's typing-mode and
-/// history-mode rendering can share a code path.
+/// history-mode rendering share one code path.
 ///
-/// We intentionally TRUST the client-supplied verdict on send.
-/// Re-running the analyzer at send time would double the cost per
-/// turn, and the student is the only one who reads their own panel
-/// so a manipulated score only fools themselves; teacher dashboards
+/// We trust the client-supplied verdict on send. Re-running the
+/// analyzer at send time would double cost per turn, and the
+/// student is the only one who reads their own panel so a
+/// manipulated payload only fools themselves; teacher dashboards
 /// can re-derive truth from `course_token_usage` (category=aegis).
-/// The DB CHECK constraints (`overall_score BETWEEN 0 AND 10`,
-/// etc.) clamp obviously-bad payloads at insert.
+/// We DO clamp the suggestion array to 3 items at insert time --
+/// the analyzer's schema enforces it, but defending against a
+/// hand-crafted body costs nothing.
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct AegisAnalysisPayload {
-    pub overall_score: i32,
-    pub clarity_score: i32,
-    pub context_score: i32,
-    pub constraints_score: i32,
-    pub reasoning_demand_score: i32,
-    pub critical_thinking_score: i32,
-    pub structural_clarity_label: String,
-    pub structural_clarity_feedback: String,
-    pub terminology_label: String,
-    pub terminology_feedback: String,
-    pub missing_constraint_label: String,
-    pub missing_constraint_feedback: String,
+    /// 0..=3 suggestions. Empty = "looks good, no changes needed";
+    /// the panel renders an affirmation rather than nothing in that
+    /// case. Each suggestion is a tagged single-sentence
+    /// improvement.
+    pub suggestions: Vec<AegisSuggestionPayload>,
+    /// Calibration the analyzer was running under for this verdict
+    /// ("beginner" | "expert"). Persisted on the History row so
+    /// future UI can label "this analysis was made when you said
+    /// you were a beginner" if useful. Defaults to `Beginner` so a
+    /// missing-field client (older frontend) reads as the lenient
+    /// rubric.
+    #[serde(default)]
+    pub mode: AegisModeWire,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct AegisSuggestionPayload {
+    /// Short tag the panel uses for grouping / iconography:
+    /// "context" | "constraints" | "specificity" | "alternatives"
+    /// | "clarification". Free-form string in the wire shape so
+    /// the server can add categories without a frontend release.
+    pub kind: String,
+    /// Single-sentence actionable improvement, second-person.
+    pub text: String,
 }
 
 impl AegisAnalysisPayload {
-    fn from_verdict(v: crate::classification::aegis::AegisVerdict) -> Self {
+    fn from_verdict(v: crate::classification::aegis::AegisVerdict, mode: AegisModeWire) -> Self {
         Self {
-            overall_score: v.overall_score,
-            clarity_score: v.clarity_score,
-            context_score: v.context_score,
-            constraints_score: v.constraints_score,
-            reasoning_demand_score: v.reasoning_demand_score,
-            critical_thinking_score: v.critical_thinking_score,
-            structural_clarity_label: v.structural_clarity_label,
-            structural_clarity_feedback: v.structural_clarity_feedback,
-            terminology_label: v.terminology_label,
-            terminology_feedback: v.terminology_feedback,
-            missing_constraint_label: v.missing_constraint_label,
-            missing_constraint_feedback: v.missing_constraint_feedback,
-        }
-    }
-
-    /// Hand off to the DB layer, attaching to the freshly-inserted
-    /// user message. Borrows so the strings live as long as `self`;
-    /// the model_used column gets the const we used in the analyzer
-    /// (clients don't pick that even though they could lie about
-    /// scores -- it's an audit field).
-    fn as_insert(
-        &self,
-        message_id: Uuid,
-    ) -> minerva_db::queries::prompt_analyses::PromptAnalysisInsert<'_> {
-        minerva_db::queries::prompt_analyses::PromptAnalysisInsert {
-            message_id,
-            overall_score: self.overall_score.clamp(0, 10),
-            clarity_score: self.clarity_score.clamp(0, 10),
-            context_score: self.context_score.clamp(0, 10),
-            constraints_score: self.constraints_score.clamp(0, 10),
-            reasoning_demand_score: self.reasoning_demand_score.clamp(0, 10),
-            critical_thinking_score: self.critical_thinking_score.clamp(0, 10),
-            structural_clarity_label: &self.structural_clarity_label,
-            structural_clarity_feedback: &self.structural_clarity_feedback,
-            terminology_label: &self.terminology_label,
-            terminology_feedback: &self.terminology_feedback,
-            missing_constraint_label: &self.missing_constraint_label,
-            missing_constraint_feedback: &self.missing_constraint_feedback,
-            model_used: crate::classification::aegis::AEGIS_MODEL,
+            suggestions: v
+                .suggestions
+                .into_iter()
+                .map(|s| AegisSuggestionPayload {
+                    kind: s.kind,
+                    text: s.text,
+                })
+                .collect(),
+            mode,
         }
     }
 }
 
 /// Aegis prompt analysis for a single user message. Sent over the
-/// chat detail endpoint so the right-rail Feedback panel can
-/// render history + per-turn scores in one payload. Empty array
-/// when aegis is off for the course or all turns soft-failed.
+/// chat detail endpoint so the right-rail Feedback panel's history
+/// list comes from the same payload the messages do. Empty
+/// vec when aegis is off for the course or every turn so far had
+/// nothing worth suggesting.
 ///
 /// Shared with the embed route via `pub(crate)` so the iframe-side
 /// frontend gets the same shape without redefining the wire type.
@@ -242,43 +227,36 @@ impl AegisAnalysisPayload {
 pub(crate) struct PromptAnalysisResponse {
     pub(crate) id: Uuid,
     pub(crate) message_id: Uuid,
-    pub(crate) overall_score: i32,
-    pub(crate) clarity_score: i32,
-    pub(crate) context_score: i32,
-    pub(crate) constraints_score: i32,
-    pub(crate) reasoning_demand_score: i32,
-    pub(crate) critical_thinking_score: i32,
-    pub(crate) structural_clarity_label: String,
-    pub(crate) structural_clarity_feedback: String,
-    pub(crate) terminology_label: String,
-    pub(crate) terminology_feedback: String,
-    pub(crate) missing_constraint_label: String,
-    pub(crate) missing_constraint_feedback: String,
+    /// 0..=3 suggestions, oldest-most-relevant-first. Deserialised
+    /// out of the DB's JSONB column.
+    pub(crate) suggestions: Vec<AegisSuggestionPayload>,
+    /// "beginner" | "expert" -- which calibration the analyzer was
+    /// running under for this row.
+    pub(crate) mode: String,
     pub(crate) created_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Shared DB-row -> wire-type mapper. Inline-able in either route
-/// but exists as a function so the field list lives in one place;
-/// adding a new column to the analyses table only forces an edit
-/// here, not at every detail-route call site.
+/// Shared DB-row -> wire-type mapper. JSONB column is opaque in the
+/// DB layer; we deserialise here. A malformed row (e.g. someone
+/// hand-edited the table) renders with an empty suggestion list
+/// rather than 500-ing the whole conversation detail.
 fn prompt_analysis_response_from_row(
     row: minerva_db::queries::prompt_analyses::PromptAnalysisRow,
 ) -> PromptAnalysisResponse {
+    let suggestions: Vec<AegisSuggestionPayload> = serde_json::from_value(row.suggestions)
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                "aegis: prompt_analyses.suggestions JSONB malformed for id={}: {}; rendering empty",
+                row.id,
+                e,
+            );
+            Vec::new()
+        });
     PromptAnalysisResponse {
         id: row.id,
         message_id: row.message_id,
-        overall_score: row.overall_score,
-        clarity_score: row.clarity_score,
-        context_score: row.context_score,
-        constraints_score: row.constraints_score,
-        reasoning_demand_score: row.reasoning_demand_score,
-        critical_thinking_score: row.critical_thinking_score,
-        structural_clarity_label: row.structural_clarity_label,
-        structural_clarity_feedback: row.structural_clarity_feedback,
-        terminology_label: row.terminology_label,
-        terminology_feedback: row.terminology_feedback,
-        missing_constraint_label: row.missing_constraint_label,
-        missing_constraint_feedback: row.missing_constraint_feedback,
+        suggestions,
+        mode: row.mode,
         created_at: row.created_at,
     }
 }
@@ -983,8 +961,10 @@ pub(crate) struct AnalyzePromptRequest {
 /// strings the frontend ships -- `"beginner"` / `"expert"` -- and
 /// rejects anything else at deserialise time. Default is Beginner
 /// so missing-field / older-client requests stay on the lenient
-/// rubric (see `AnalyzePromptRequest::mode`).
-#[derive(Deserialize, Default, Clone, Copy)]
+/// rubric (see `AnalyzePromptRequest::mode`). Serialize is needed
+/// because the field round-trips through `AegisAnalysisPayload`
+/// (server-to-client on /aegis/analyze, client-to-server on send).
+#[derive(Serialize, Deserialize, Default, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum AegisModeWire {
     #[default]
@@ -1061,7 +1041,11 @@ pub(crate) async fn analyze_prompt_for_user(
     )
     .await;
 
-    Ok(verdict.map(AegisAnalysisPayload::from_verdict))
+    // Stamp the mode the analyzer ran under so the client (and
+    // any persisted History row downstream) carries the calibration
+    // label. We trust the request's `mode` here since it's the
+    // value the analyzer just used.
+    Ok(verdict.map(|v| AegisAnalysisPayload::from_verdict(v, mode)))
 }
 
 /// Live aegis analyzer endpoint (Shibboleth flow). Returns the
@@ -1261,18 +1245,44 @@ pub(super) async fn run_chat_message(
     // a History entry is the right failure mode.
     if let Some(analysis) = prompt_analysis {
         if crate::feature_flags::aegis_enabled(&state.db, course_id).await {
-            if let Err(e) = minerva_db::queries::prompt_analyses::insert(
-                &state.db,
-                analysis.as_insert(user_msg_id),
-            )
-            .await
-            {
-                tracing::warn!(
-                    "aegis: prompt_analyses insert failed (conv={}, msg={}): {}",
-                    conv_id,
-                    user_msg_id,
-                    e,
-                );
+            // Trim to the same 3-suggestion ceiling the analyzer
+            // schema enforces, in case a hand-crafted body exceeds.
+            let mut suggestions = analysis.suggestions;
+            suggestions.truncate(3);
+            // Serialise once for the JSONB column. Failure here is
+            // theoretical (the struct derives Serialize) but we
+            // log+drop rather than panic to keep the message-send
+            // hot path bulletproof.
+            match serde_json::to_value(&suggestions) {
+                Ok(suggestions_json) => {
+                    let mode_str = analysis.mode.into_internal().as_str();
+                    if let Err(e) = minerva_db::queries::prompt_analyses::insert(
+                        &state.db,
+                        minerva_db::queries::prompt_analyses::PromptAnalysisInsert {
+                            message_id: user_msg_id,
+                            suggestions: &suggestions_json,
+                            mode: mode_str,
+                            model_used: crate::classification::aegis::AEGIS_MODEL,
+                        },
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            "aegis: prompt_analyses insert failed (conv={}, msg={}): {}",
+                            conv_id,
+                            user_msg_id,
+                            e,
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "aegis: prompt_analyses serialise failed (conv={}, msg={}): {}",
+                        conv_id,
+                        user_msg_id,
+                        e,
+                    );
+                }
             }
         }
     }

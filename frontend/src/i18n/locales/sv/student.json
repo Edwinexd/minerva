@@ -58,36 +58,30 @@
     "modeBeginner": "Nybörjare",
     "modeExpert": "Expert",
     "modeToggleHint": "Hur väl kan du ämnet? Nybörjare: Aegis är generös med jargong och kontext. Expert: Aegis förväntar sig precisa termer, uttalade ramar och vad du har provat. Klicka för att växla.",
-    "qualityHigh": "Hög promptkvalitet",
-    "qualityMedium": "Medelhög promptkvalitet",
-    "qualityLow": "Låg promptkvalitet",
-    "emptyTitle": "Börja skriva för återkoppling",
-    "emptyBody": "När du skriver en prompt betygsätter Aegis den på fem dimensioner och föreslår en konkret förbättring. Återkopplingen är rådgivande och blockerar aldrig ditt meddelande.",
-    "pendingTitle": "Bedömer ditt utkast…",
-    "pendingBody": "Aegis läser ditt utkast. Analysen uppdateras strax efter att du slutat skriva; du kan skicka när som helst, oavsett betyg.",
-    "analysisHeader": "Promptanalys",
-    "structuralClarityHeading": "Strukturell tydlighet är {{label}}",
-    "terminologyHeading": "Terminologisk specificitet",
-    "missingConstraintHeading": "Saknad ram",
+    "emptyTitle": "Börja skriva för förslag",
+    "emptyBody": "Medan du skriver en prompt ger Aegis idéer för hur den kan bli skarpare. Återkopplingen är rådgivande och blockerar aldrig ditt meddelande.",
+    "pendingTitle": "Läser ditt utkast…",
+    "pendingBody": "Aegis kollar ditt utkast efter idéer. Förslag dyker upp strax efter att du slutat skriva; du kan skicka när som helst.",
+    "looksGoodTitle": "Ditt utkast ser bra ut",
+    "looksGoodBody": "Aegis hittade inget uppenbart att föreslå. Skicka när du är redo.",
+    "suggestionsHeader": "Idéer för ditt utkast",
     "historyHeader": "Historik",
     "historyToday": "Idag",
     "historyYesterday": "Igår",
-    "labels": {
-      "structural_clarity": {
-        "strong": "stark",
-        "okay": "ok",
-        "weak": "svag"
-      },
-      "terminology": {
-        "specific": "specifik",
-        "loose": "lös",
-        "missing": "saknas"
-      },
-      "missing_constraint": {
-        "well_constrained": "väl avgränsad",
-        "minor_gaps": "mindre luckor",
-        "needs_constraints": "behöver ramar"
-      }
+    "historyLooksGood": "Skickad utan förslag.",
+    "historyLooksGoodTag": "ok",
+    "kinds": {
+      "context": "kontext",
+      "constraints": "ramar",
+      "specificity": "specificitet",
+      "alternatives": "alternativ",
+      "clarification": "förtydligande"
+    },
+    "intercept": {
+      "title": "Aegis har ett par idéer först",
+      "body": "Ta en titt innan du skickar. Du kan revidera ditt utkast eller skicka som det är.",
+      "revise": "Låt mig revidera",
+      "sendAnyway": "Skicka som det är"
     }
   },
   "privacy": {

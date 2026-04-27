@@ -216,32 +216,55 @@ export interface ConversationDetail {
 }
 
 /**
- * One scored user prompt produced by the aegis analyzer. Mirrors
- * the backend `prompt_analyses` row 1:1; consumed by the right-rail
- * Feedback panel which renders the latest entry's scores + the
- * full per-turn history.
+ * One aegis verdict for a user prompt. The analyzer produces 0..=3
+ * actionable suggestions (NOT scores) about how to improve the
+ * draft; an empty array is a legitimate "looks good, nothing to
+ * suggest" signal. Mirrors the backend wire shape from
+ * `chat::AegisAnalysisPayload`.
+ *
+ * Used in two places:
+ *   * Live -- returned by `POST /aegis/analyze` while the student
+ *     types and on Send (drives the right-rail panel + the
+ *     just-in-time intercept dialog).
+ *   * Persisted -- attached to `ConversationDetail.prompt_analyses`
+ *     for the History list.
+ *
+ * `id` and `created_at` are present on persisted rows from the
+ * conversation-detail route and absent on live verdicts -- both
+ * fields are typed optional so one shape covers both.
  */
 export interface PromptAnalysis {
-  id: string
-  message_id: string
-  /** 0..=10 inclusive. Analyzer-weighted, NOT a server-side mean. */
-  overall_score: number
-  clarity_score: number
-  context_score: number
-  constraints_score: number
-  reasoning_demand_score: number
-  critical_thinking_score: number
-  /** "strong" | "okay" | "weak" -- short tag rendered with the rationale. */
-  structural_clarity_label: string
-  /** One-sentence rationale, ≤ 25 words. May be empty when nothing to say. */
-  structural_clarity_feedback: string
-  /** "specific" | "loose" | "missing". */
-  terminology_label: string
-  terminology_feedback: string
-  /** "well_constrained" | "minor_gaps" | "needs_constraints". */
-  missing_constraint_label: string
-  missing_constraint_feedback: string
-  created_at: string
+  /** Set on persisted rows; undefined on live verdicts. */
+  id?: string
+  /** Set on persisted rows; undefined on live verdicts. */
+  message_id?: string
+  /**
+   * 0..=3 suggestions, most-impactful first. Empty = the analyzer
+   * found nothing worth suggesting; the panel renders an
+   * affirmation rather than nothing.
+   */
+  suggestions: AegisSuggestion[]
+  /** "beginner" | "expert" -- which calibration produced this verdict. */
+  mode: "beginner" | "expert"
+  /** Set on persisted rows; undefined on live verdicts. */
+  created_at?: string
+}
+
+export interface AegisSuggestion {
+  /**
+   * Short tag the panel uses for grouping / iconography. The
+   * analyzer is constrained server-side to one of:
+   *   * "context"
+   *   * "constraints"
+   *   * "specificity"
+   *   * "alternatives"
+   *   * "clarification"
+   * but the type stays `string` so a server-side enum extension
+   * doesn't force a frontend release.
+   */
+  kind: string
+  /** Single-sentence actionable improvement, second-person. */
+  text: string
 }
 
 export interface ConversationFlag {

@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO prompt_analyses (message_id, suggestions, mode, model_used)\n        VALUES ($1, $2, $3, $4)\n        ON CONFLICT (message_id) DO UPDATE SET\n            suggestions = EXCLUDED.suggestions,\n            mode = EXCLUDED.mode,\n            model_used = EXCLUDED.model_used\n        RETURNING id, message_id, suggestions, mode, model_used, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "suggestions",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "mode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "model_used",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1fc409de06d50ff78e41e1f7eef596c1ea1f364c453fe5f72184826213ce6a3d"
+}

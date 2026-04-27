@@ -58,36 +58,30 @@
     "modeBeginner": "Beginner",
     "modeExpert": "Expert",
     "modeToggleHint": "How well do you know this subject? Beginner: Aegis goes lenient on jargon and context. Expert: Aegis expects precise terms, named constraints, and what you've already tried. Click to toggle.",
-    "qualityHigh": "Great Prompt Quality",
-    "qualityMedium": "Medium Prompt Quality",
-    "qualityLow": "Low Prompt Quality",
-    "emptyTitle": "Start typing for feedback",
-    "emptyBody": "As you type a prompt, Aegis will rate it on five dimensions and suggest one concrete improvement. Feedback is advisory and never blocks your message.",
-    "pendingTitle": "Scoring your prompt…",
-    "pendingBody": "Aegis is reading your draft. The analysis updates a moment after you stop typing; you can send any time, regardless of the score.",
-    "analysisHeader": "Prompt Analysis",
-    "structuralClarityHeading": "Structural clarity is {{label}}",
-    "terminologyHeading": "Terminology Specificity",
-    "missingConstraintHeading": "Missing Constraint",
+    "emptyTitle": "Start typing for suggestions",
+    "emptyBody": "As you draft a prompt, Aegis offers ideas for how it could be sharper. Feedback is advisory and never blocks your message.",
+    "pendingTitle": "Reading your draft…",
+    "pendingBody": "Aegis is checking your draft for ideas. Suggestions appear a moment after you stop typing; you can send at any time.",
+    "looksGoodTitle": "Your draft looks good",
+    "looksGoodBody": "Aegis didn't find anything obvious to suggest. Send when you're ready.",
+    "suggestionsHeader": "Ideas for your draft",
     "historyHeader": "History",
     "historyToday": "Today",
     "historyYesterday": "Yesterday",
-    "labels": {
-      "structural_clarity": {
-        "strong": "strong",
-        "okay": "okay",
-        "weak": "weak"
-      },
-      "terminology": {
-        "specific": "specific",
-        "loose": "loose",
-        "missing": "missing"
-      },
-      "missing_constraint": {
-        "well_constrained": "well constrained",
-        "minor_gaps": "minor gaps",
-        "needs_constraints": "needs constraints"
-      }
+    "historyLooksGood": "Sent without suggestions.",
+    "historyLooksGoodTag": "ok",
+    "kinds": {
+      "context": "context",
+      "constraints": "constraints",
+      "specificity": "specificity",
+      "alternatives": "alternatives",
+      "clarification": "clarification"
+    },
+    "intercept": {
+      "title": "Aegis has a couple of ideas first",
+      "body": "Take a look before you send. You can revise your draft, or send it as-is.",
+      "revise": "Let me revise",
+      "sendAnyway": "Send as-is"
     }
   },
   "privacy": {

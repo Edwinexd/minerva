@@ -202,9 +202,14 @@ pub(crate) struct AegisSuggestionPayload {
 impl AegisAnalysisPayload {
     fn from_verdict(v: crate::classification::aegis::AegisVerdict, mode: AegisModeWire) -> Self {
         Self {
+            // Cap at 3 here too (the analyzer's system prompt says
+            // 0..=3, but Cerebras strict-mode schemas don't accept
+            // `maxItems` so we enforce in code). Persistence path
+            // truncates again at insert -- belt-and-braces.
             suggestions: v
                 .suggestions
                 .into_iter()
+                .take(3)
                 .map(|s| AegisSuggestionPayload {
                     kind: s.kind,
                     text: s.text,
@@ -1031,7 +1036,7 @@ pub(crate) async fn analyze_prompt_for_user(
     }
     trail.push(content);
 
-    let verdict = crate::classification::aegis::analyze_prompt(
+    let verdict = match crate::classification::aegis::analyze_prompt(
         &state.http_client,
         &state.config.cerebras_api_key,
         &state.db,
@@ -1039,7 +1044,19 @@ pub(crate) async fn analyze_prompt_for_user(
         &trail,
         mode.into_internal(),
     )
-    .await;
+    .await
+    {
+        Ok(v) => v,
+        Err(reason) => {
+            // Upstream failure (Cerebras 4xx/5xx, malformed
+            // response, etc.) -- bubble up as 500 so the frontend
+            // and observability layer see a real failure rather
+            // than the previous misleading 200+null. The detailed
+            // reason rides into the log line via `Internal`'s
+            // logging path; the client gets a generic 500 body.
+            return Err(AppError::Internal(format!("aegis analyze: {reason}")));
+        }
+    };
 
     // Stamp the mode the analyzer ran under so the client (and
     // any persisted History row downstream) carries the calibration

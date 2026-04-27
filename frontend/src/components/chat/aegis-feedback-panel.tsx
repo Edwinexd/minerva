@@ -25,8 +25,10 @@
  * draft the student is currently composing) from the parent chat
  * page; the parent owns the analyzer call.
  */
+import { X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { AegisShield } from "@/components/icons/aegis-shield"
 import { cn } from "@/lib/utils"
 import type { AegisSuggestion, PromptAnalysis } from "@/lib/types"
@@ -48,6 +50,13 @@ interface AegisFeedbackPanelProps {
    * during the round-trip.
    */
   pending: boolean
+  /**
+   * Called when the student dismisses the panel via the header X.
+   * Caller persists the choice (typically via `useAegisPanelVisible`)
+   * and stops rendering this component until the student
+   * un-dismisses it via the chat-side "show" affordance.
+   */
+  onHide: () => void
 }
 
 /**
@@ -79,6 +88,7 @@ export function AegisFeedbackPanel({
   analyses,
   latest,
   pending,
+  onHide,
 }: AegisFeedbackPanelProps) {
   const { t, i18n } = useTranslation("student")
   const [mode, setMode] = useAegisMode()
@@ -102,34 +112,47 @@ export function AegisFeedbackPanel({
 
   return (
     <div className="flex flex-col h-full overflow-y-auto pl-4 gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <AegisShield size={18} className="text-primary" aria-hidden="true" />
-          {t("aegis.panelTitle")}
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold flex items-center gap-2 min-w-0">
+          <AegisShield size={18} className="text-primary shrink-0" aria-hidden="true" />
+          <span className="truncate">{t("aegis.panelTitle")}</span>
         </h2>
-        {/*
-          Mode toggle. Renders as a Badge inside a button so the
-          visual matches the figma pill while the click target is a
-          real semantic button (keyboard-accessible, announced as a
-          toggle). Tooltip explains the actual meaning -- subject
-          expertise, not UI density.
-        */}
-        <button
-          type="button"
-          onClick={toggleMode}
-          className="rounded-4xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          aria-pressed={mode === "expert"}
-          title={t("aegis.modeToggleHint")}
-        >
-          <Badge
-            variant={mode === "expert" ? "default" : "outline"}
-            className="text-xs cursor-pointer"
+        <div className="flex items-center gap-1 shrink-0">
+          {/*
+            Mode toggle. Renders as a Badge inside a button so the
+            visual matches the figma pill while the click target is
+            a real semantic button (keyboard-accessible, announced
+            as a toggle). Tooltip explains the actual meaning --
+            subject expertise, not UI density.
+          */}
+          <button
+            type="button"
+            onClick={toggleMode}
+            className="rounded-4xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            aria-pressed={mode === "expert"}
+            title={t("aegis.modeToggleHint")}
           >
-            {mode === "expert"
-              ? t("aegis.modeExpert")
-              : t("aegis.modeBeginner")}
-          </Badge>
-        </button>
+            <Badge
+              variant={mode === "expert" ? "default" : "outline"}
+              className="text-xs cursor-pointer"
+            >
+              {mode === "expert"
+                ? t("aegis.modeExpert")
+                : t("aegis.modeBeginner")}
+            </Badge>
+          </button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onHide}
+            aria-label={t("aegis.hidePanel")}
+            title={t("aegis.hidePanel")}
+            className="h-7 w-7 p-0"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <CurrentSection analysis={current} pending={pending} />

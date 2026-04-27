@@ -10,10 +10,12 @@ import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
 import { ConversationList } from "@/components/chat/conversation-list"
 import { TeacherNoteInline } from "@/components/chat/teacher-note-inline"
 import { useChatStream } from "@/components/chat/use-chat-stream"
+import { Sparkles } from "lucide-react"
 import { AegisFeedbackPanel } from "@/components/chat/aegis-feedback-panel"
 import { AegisInterceptDialog } from "@/components/chat/aegis-intercept-dialog"
 import { useAegisLiveAnalyzer } from "@/components/chat/use-aegis-live-analyzer"
 import { useAegisMode } from "@/components/chat/use-aegis-mode"
+import { useAegisPanelVisible } from "@/components/chat/use-aegis-panel-visible"
 import type { PromptAnalysis, TeacherNote } from "@/lib/types"
 
 // -- Types for embed API responses --
@@ -371,6 +373,10 @@ function EmbedChatWindow({
   aegisEnabled?: boolean
 }) {
   const { t } = useTranslation("auth")
+  // Aegis strings live in the student namespace (the panel itself
+  // reads them too). The embed view borrows them rather than
+  // duplicating the i18n surface for one set of buttons.
+  const { t: tStudent } = useTranslation("student")
   const [messages, setMessages] = useState<EmbedMessage[]>([])
   const [notes, setNotes] = useState<TeacherNote[]>([])
   // Aegis analyses live in component state alongside `messages`
@@ -387,6 +393,7 @@ function EmbedChatWindow({
   // chat-page for the rationale). Read-only here -- the setter
   // is the panel's concern.
   const [aegisMode] = useAegisMode()
+  const [panelVisible, setPanelVisible] = useAegisPanelVisible()
 
   // Live aegis analyzer. Auth flow differs from the Shibboleth
   // chat: the embed token rides in the request body alongside the
@@ -555,15 +562,24 @@ function EmbedChatWindow({
     })()
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [submitChecking, setSubmitChecking] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || stream.streaming) return
+    if (!input.trim() || stream.streaming || submitChecking) return
     const msg = input
 
-    const live = liveAnalyzer.analysis
-    if (live && live.suggestions.length > 0) {
-      setPendingSendMsg(msg)
-      return
+    // Same just-in-time gate as the Shibboleth chat page: force a
+    // fresh analyze call before the send so the intercept fires for
+    // fast typers who'd otherwise slip through the debounce window.
+    if (aegisEnabled) {
+      setSubmitChecking(true)
+      const verdict = await liveAnalyzer.analyzeNow(msg)
+      setSubmitChecking(false)
+      if (verdict && verdict.suggestions.length > 0) {
+        setPendingSendMsg(msg)
+        return
+      }
     }
     dispatchSend(msg)
   }
@@ -586,7 +602,7 @@ function EmbedChatWindow({
   }
 
   return (
-    <div className="flex flex-1 min-h-0 gap-2">
+    <div className="relative flex flex-1 min-h-0 gap-2">
       <div className="flex-1 flex flex-col min-w-0">
       <div className="flex-1 overflow-y-auto px-4">
         <ChatTranscript<EmbedMessage>
@@ -634,8 +650,16 @@ function EmbedChatWindow({
               disabled={stream.streaming || needsPrivacyAck}
               className="flex-1"
             />
-            <Button type="submit" disabled={stream.streaming || !input.trim() || needsPrivacyAck}>
-              {t("embed.send")}
+            <Button
+              type="submit"
+              disabled={
+                stream.streaming ||
+                !input.trim() ||
+                needsPrivacyAck ||
+                submitChecking
+              }
+            >
+              {submitChecking ? tStudent("aegis.checking") : t("embed.send")}
             </Button>
           </form>
           <p className="text-xs text-muted-foreground text-center">
@@ -660,8 +684,23 @@ function EmbedChatWindow({
             analyses={promptAnalyses}
             latest={liveAnalyzer.analysis}
             pending={liveAnalyzer.pending}
+            onHide={() => setPanelVisible(false)}
           />
         </aside>
+      )}
+      {aegisEnabled && !panelVisible && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setPanelVisible(true)}
+          className="hidden md:flex absolute top-2 right-2 items-center gap-1.5 z-10"
+          title={tStudent("aegis.showPanel")}
+          aria-label={tStudent("aegis.showPanel")}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          {tStudent("aegis.showPanelShort")}
+        </Button>
       )}
       <AegisInterceptDialog
         open={interceptOpen}

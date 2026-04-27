@@ -154,9 +154,24 @@ pub struct AegisVerdict {
 
 /// Run the analyzer. `recent_user_messages` is the trail of the
 /// student's last few prompts (oldest first); the LAST element is
-/// the current draft. `mode` calibrates the rubric. Soft-fails
-/// to `None` on every error path; callers treat that as "no panel
-/// content for this turn".
+/// the current draft. `mode` calibrates the rubric.
+///
+/// Three return shapes:
+///
+///   * `Ok(None)` -- legitimate "nothing to score" cases (no
+///     CEREBRAS_API_KEY in dev, empty/whitespace draft). The
+///     analyze route maps this to a 200 + JSON `null`; the panel
+///     just stays in its empty state.
+///   * `Ok(Some(verdict))` -- analyzer ran. `verdict.suggestions`
+///     may legitimately be empty (the analyzer thought the draft
+///     looked fine); that's NOT an error and the panel renders a
+///     "looks good" affirmation. 200 + JSON object.
+///   * `Err(reason)` -- upstream failure (Cerebras 4xx/5xx,
+///     malformed JSON, suggestions array malformed). The route
+///     maps this to a 500 so the frontend / observability layer
+///     sees the failure as a failure and not as a "nothing to
+///     suggest". Reason string carries the upstream error verbatim
+///     for the log line.
 pub async fn analyze_prompt(
     http: &reqwest::Client,
     api_key: &str,
@@ -164,14 +179,16 @@ pub async fn analyze_prompt(
     course_id: Uuid,
     recent_user_messages: &[String],
     mode: AegisMode,
-) -> Option<AegisVerdict> {
+) -> Result<Option<AegisVerdict>, String> {
     if api_key.is_empty() {
         // Dev / test path without CEREBRAS_API_KEY.
-        return None;
+        return Ok(None);
     }
-    let current = recent_user_messages.last()?;
+    let Some(current) = recent_user_messages.last() else {
+        return Ok(None);
+    };
     if current.trim().is_empty() {
-        return None;
+        return Ok(None);
     }
 
     // Build the trail compactly. Numbered, oldest first; the
@@ -214,6 +231,14 @@ pub async fn analyze_prompt(
             { "role": "system", "content": system_prompt },
             { "role": "user", "content": user_payload.to_string() },
         ],
+        // Cerebras' strict-mode JSON schemas reject `maxItems` at
+        // request time (400 wrong_api_format). The 0..=3 ceiling
+        // is therefore enforced two other ways:
+        //   * the system prompt explicitly says "produce 0..=3
+        //     suggestions"
+        //   * the route layer truncates to 3 at insert time
+        //     (`run_chat_message`'s persistence block)
+        // so a model that overshoots gets capped before display.
         "response_format": {
             "type": "json_schema",
             "json_schema": {
@@ -226,7 +251,6 @@ pub async fn analyze_prompt(
                     "properties": {
                         "suggestions": {
                             "type": "array",
-                            "maxItems": 3,
                             "items": {
                                 "type": "object",
                                 "additionalProperties": false,
@@ -255,15 +279,15 @@ pub async fn analyze_prompt(
     let response = match cerebras_request_with_retry(http, api_key, &body).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!("aegis: request failed (soft-fail): {}", e);
-            return None;
+            tracing::warn!("aegis: request failed: {}", e);
+            return Err(format!("cerebras request failed: {e}"));
         }
     };
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("aegis: response not JSON (soft-fail): {}", e);
-            return None;
+            tracing::warn!("aegis: response not JSON: {}", e);
+            return Err(format!("cerebras response not JSON: {e}"));
         }
     };
     record_cerebras_usage(db, course_id, CATEGORY_AEGIS, AEGIS_MODEL, &payload).await;
@@ -274,8 +298,8 @@ pub async fn analyze_prompt(
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("aegis: verdict not parseable JSON (soft-fail): {}", e);
-            return None;
+            tracing::warn!("aegis: verdict not parseable JSON: {}", e);
+            return Err(format!("verdict not parseable JSON: {e}"));
         }
     };
 
@@ -283,9 +307,9 @@ pub async fn analyze_prompt(
         match serde_json::from_value(parsed["suggestions"].clone()) {
             Ok(v) => v,
             Err(e) => {
-                tracing::warn!("aegis: suggestions array malformed (soft-fail): {}", e);
-                return None;
+                tracing::warn!("aegis: suggestions array malformed: {}", e);
+                return Err(format!("suggestions array malformed: {e}"));
             }
         };
-    Some(AegisVerdict { suggestions })
+    Ok(Some(AegisVerdict { suggestions }))
 }

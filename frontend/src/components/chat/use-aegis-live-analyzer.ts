@@ -43,6 +43,17 @@ export interface AegisLiveAnalyzerState {
   reset: () => void
   /** Hand back the current verdict so the caller can ship it with send(). */
   consume: () => PromptAnalysis | null
+  /**
+   * Force an immediate analyze call against the current input value,
+   * cancelling any pending debounce or in-flight call. Used by the
+   * Send-button handler so the just-in-time intercept reflects the
+   * student's actual final draft, not whatever the debounced cache
+   * happens to hold (which may be stale or null when they typed and
+   * sent within the debounce window). Returns the verdict (or null
+   * on soft-fail / aegis-off / empty input). Updates `analysis` and
+   * `pending` in lockstep so the panel reflects the call.
+   */
+  analyzeNow: (content: string) => Promise<PromptAnalysis | null>
 }
 
 /**
@@ -163,5 +174,39 @@ export function useAegisLiveAnalyzer(
     return v
   }
 
-  return { analysis, pending, reset, consume }
+  const analyzeNow = async (
+    content: string,
+  ): Promise<PromptAnalysis | null> => {
+    if (!aegisEnabled) return null
+    const trimmed = content.trim()
+    if (trimmed.length < MIN_LENGTH) return null
+    // If the cache already matches this exact content AND we're
+    // not currently mid-flight, short-circuit -- no point burning
+    // a second LLM call on the same draft just because the user
+    // pressed Send a second after the debounce already settled.
+    if (!pending && trimmed === lastAnalyzed.current && analysis !== null) {
+      return analysis
+    }
+    // Otherwise fire fresh; abort any in-flight or pending call
+    // first so this one wins the race.
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setPending(true)
+    try {
+      const result = await doFetch(trimmed, controller.signal)
+      if (controller.signal.aborted) return null
+      lastAnalyzed.current = trimmed
+      setAnalysis(result)
+      return result
+    } catch (e) {
+      if (controller.signal.aborted) return null
+      console.warn("aegis live analyzer (immediate):", e)
+      return null
+    } finally {
+      if (!controller.signal.aborted) setPending(false)
+    }
+  }
+
+  return { analysis, pending, reset, consume, analyzeNow }
 }

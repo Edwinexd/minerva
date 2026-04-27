@@ -27,10 +27,12 @@ import type { ChatBubbleLabels } from "./chat-bubble"
 import { ConversationList } from "./conversation-list"
 import { TeacherNoteInline } from "./teacher-note-inline"
 import { useChatStream } from "./use-chat-stream"
+import { Sparkles } from "lucide-react"
 import { AegisFeedbackPanel } from "./aegis-feedback-panel"
 import { AegisInterceptDialog } from "./aegis-intercept-dialog"
 import { useAegisLiveAnalyzer } from "./use-aegis-live-analyzer"
 import { useAegisMode } from "./use-aegis-mode"
+import { useAegisPanelVisible } from "./use-aegis-panel-visible"
 
 export function ChatRouteComponent({
   useParams,
@@ -222,6 +224,11 @@ function ChatWindow({
   // any prop wiring. We only need the value here -- the setter
   // lives in the panel.
   const [aegisMode] = useAegisMode()
+  // Whether the right-rail panel is currently expanded. Storage-
+  // backed so dismissing it persists across reloads. The X on the
+  // panel header writes false; the "Show suggestions" button in
+  // the chat column writes true.
+  const [panelVisible, setPanelVisible] = useAegisPanelVisible()
 
   // Live aegis analyzer: hits the backend on debounced input
   // changes so the right-rail panel reflects the prompt the
@@ -372,22 +379,31 @@ function ChatWindow({
     })()
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // True while an on-Send analyzer call is in flight. Disables the
+  // Send button + shows the spinner so the student knows the request
+  // hasn't been dropped while we wait for suggestions to arrive.
+  // Bounded by the analyzer's 250-500ms latency in practice.
+  const [submitChecking, setSubmitChecking] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || stream.streaming) return
+    if (!input.trim() || stream.streaming || submitChecking) return
     const msg = input
 
-    // If the live analyzer has cached non-empty suggestions for the
-    // current draft, intercept the Send and let the student decide
-    // whether to revise or push through. Skip when:
-    //   * no live verdict yet (analyzer hasn't finished, or aegis
-    //     is off for the course) -- never block a student waiting
-    //     on a network round-trip
-    //   * verdict has zero suggestions ("looks good")
-    const live = liveAnalyzer.analysis
-    if (live && live.suggestions.length > 0) {
-      setPendingSendMsg(msg)
-      return
+    // Just-in-time analyze on Send. Forces a fresh call (or reuses
+    // the cache if it matches the exact current draft); then gates
+    // the dialog on the result. This is what makes the just-in-time
+    // loop actually work for fast typers -- without it, anyone who
+    // pressed Send inside the 1s debounce window saw their prompt
+    // go through with no intercept.
+    if (aegisEnabled) {
+      setSubmitChecking(true)
+      const verdict = await liveAnalyzer.analyzeNow(msg)
+      setSubmitChecking(false)
+      if (verdict && verdict.suggestions.length > 0) {
+        setPendingSendMsg(msg)
+        return
+      }
     }
 
     dispatchSend(msg)
@@ -419,7 +435,7 @@ function ChatWindow({
   }
 
   return (
-    <div className="flex flex-1 min-h-0 gap-4">
+    <div className="relative flex flex-1 min-h-0 gap-4">
       <div className="flex-1 flex flex-col min-w-0">
       <div className="flex-1 overflow-y-auto pr-4">
         <ChatTranscript<Message>
@@ -486,9 +502,14 @@ function ChatWindow({
             />
             <Button
               type="submit"
-              disabled={stream.streaming || !input.trim() || needsPrivacyAck}
+              disabled={
+                stream.streaming ||
+                !input.trim() ||
+                needsPrivacyAck ||
+                submitChecking
+              }
             >
-              {t("chat.send")}
+              {submitChecking ? t("aegis.checking") : t("chat.send")}
             </Button>
           </form>
           <p className="text-xs text-muted-foreground text-center">
@@ -499,7 +520,7 @@ function ChatWindow({
         </div>
       )}
       </div>
-      {aegisEnabled && (
+      {aegisEnabled && panelVisible && (
         // Right rail. Hidden on narrower screens since the chat
         // column needs the room first; the panel is purely
         // advisory so dropping it on small viewports is fine.
@@ -511,8 +532,29 @@ function ChatWindow({
             analyses={promptAnalyses}
             latest={liveAnalyzer.analysis}
             pending={liveAnalyzer.pending}
+            onHide={() => setPanelVisible(false)}
           />
         </aside>
+      )}
+      {aegisEnabled && !panelVisible && (
+        // Compact "show feedback" affordance when the student has
+        // dismissed the panel. Sits as a tiny floating button in
+        // the top-right of the chat area so it's never lost. lg+
+        // only since the panel itself only shows lg+; on smaller
+        // viewports the panel doesn't render and there's nothing
+        // to un-hide.
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setPanelVisible(true)}
+          className="hidden lg:flex absolute top-2 right-2 items-center gap-1.5 z-10"
+          title={t("aegis.showPanel")}
+          aria-label={t("aegis.showPanel")}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          {t("aegis.showPanelShort")}
+        </Button>
       )}
       <AegisInterceptDialog
         open={interceptOpen}

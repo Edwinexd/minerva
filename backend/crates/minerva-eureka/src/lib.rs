@@ -57,6 +57,21 @@ pub fn graph_name_for_course_uuid(course_id: Uuid) -> String {
 /// namespaced under the `eureka_` table prefix and won't collide with
 /// Minerva's tables. Returns immediately if the migrations have already
 /// been applied.
+///
+/// `ignore_missing = true` is required because eureka-2's migrator
+/// shares the `_sqlx_migrations` table with Minerva's main migrator;
+/// without the flag, eureka-2's `run()` errors with "migration N was
+/// previously applied but is missing in the resolved migrations" the
+/// moment it sees any of Minerva's pre-existing rows. We rebuild a
+/// fresh `Migrator` here (sqlx's `set_ignore_missing` takes `&mut
+/// self`, but eureka-2 exposes its migrator as a static) by cloning
+/// the migration list out of `EUREKA_MIGRATOR` and setting the flag.
 pub async fn apply_migrations(pool: &sqlx::PgPool) -> Result<(), sqlx::migrate::MigrateError> {
-    EUREKA_MIGRATOR.run(pool).await
+    let migrator = sqlx::migrate::Migrator {
+        migrations: EUREKA_MIGRATOR.migrations.clone(),
+        ignore_missing: true,
+        locking: EUREKA_MIGRATOR.locking,
+        no_tx: EUREKA_MIGRATOR.no_tx,
+    };
+    migrator.run(pool).await
 }

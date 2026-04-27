@@ -154,8 +154,21 @@
       "created": "Created",
       "embedding": "Embedding",
       "features": "Features",
+      "conceptGraph": "Concept graph",
       "settings": "Settings"
     },
+    "conceptGraphButton": "Open",
+    "conceptGraphButtonDisabled": "Off",
+    "conceptGraphDisabledTitle": "Toggle the concept_graph feature flag on for this course to enable extraction.",
+    "conceptGraphDialogTitle": "Concept graph for {{course}}",
+    "conceptGraphDialogDescription": "Per-document concept extraction via eureka-2. Running extraction is sequential across the course's ready documents and may take a few minutes for large courses.",
+    "conceptGraphExtractRun": "Run extraction",
+    "conceptGraphExtractRunning": "Extracting...",
+    "conceptGraphRunSummary": "{{processed}} documents processed, {{skipped}} skipped, {{concepts}} new concepts, {{edges}} new edges, {{errors}} errors.",
+    "conceptGraphCounts": "{{concepts}} concepts, {{edges}} edges",
+    "conceptGraphDegrees": "in {{in}} / out {{out}}",
+    "conceptGraphEmpty": "No concepts persisted yet. Run extraction to populate this graph.",
+    "conceptGraphClose": "Close",
     "migrateButton": "Migrate",
     "migrateButtonTitle": "Force-migrate this course onto a different embedding provider/model. Re-queues every document for re-embedding.",
     "migrateDialogTitle": "Migrate \"{{course}}\" to a different embedding model",
@@ -186,12 +199,14 @@
     "featureFlagLabel": {
       "course_kg": "Course knowledge graph",
       "extraction_guard": "Extraction guard",
-      "aegis": "Aegis prompt coaching"
+      "aegis": "Aegis prompt coaching",
+      "concept_graph": "Concept knowledge graph"
     },
     "featureFlagDescription": {
       "course_kg": "Per-document kind classification, cross-document linker, knowledge-graph viewer, assignment-refusal addendum, and per-chunk adversarial filter. Off by default while we calibrate.",
       "extraction_guard": "Pre-generation intent classifier + output-side solution detector + Socratic rewriter, plus multi-turn assignment-proximity tracking. Catches the 'student pasted assignment, asks for code' case and intercepts the response with a Socratic question. Independent of course_kg so admins can pilot separately.",
-      "aegis": "Right-side prompt-coaching panel. Every user turn is scored on five dimensions (clarity, context, constraints, reasoning demand, critical thinking) plus three short callouts (structural clarity, terminology, missing constraint). Non-blocking by design - the analyzer races the assistant reply and the student can ignore the feedback freely."
+      "aegis": "Right-side prompt-coaching panel. Every user turn is scored on five dimensions (clarity, context, constraints, reasoning demand, critical thinking) plus three short callouts (structural clarity, terminology, missing constraint). Non-blocking by design - the analyzer races the assistant reply and the student can ignore the feedback freely.",
+      "concept_graph": "Eureka-2 concept graph: per-document LLM extraction of domain concepts and directed relations, persisted with document-level provenance and cosine/structural/community dedup. Distinct from the course knowledge graph (which is at document granularity). When on, admins can run extraction and view the graph; toggling off hides the admin endpoints but preserves the persisted graph."
     }
   },
   "rules": {

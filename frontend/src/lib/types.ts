@@ -59,6 +59,14 @@ export interface CourseFeatureFlags {
    * (course-scoped row > global > default false).
    */
   aegis: boolean
+  /**
+   * Concept knowledge graph (eureka-2): per-document concept and
+   * relation extraction, persisted as an admin-viewable graph.
+   * Distinct from `course_kg`, which is the document-level graph.
+   * Off by default; admins flip per course to expose the concept
+   * graph viewer and the extract/run-dedup actions.
+   */
+  concept_graph: boolean
 }
 
 export interface AdminUser {

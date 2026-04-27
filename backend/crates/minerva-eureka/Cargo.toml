@@ -24,4 +24,5 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 async-trait = "0.1"

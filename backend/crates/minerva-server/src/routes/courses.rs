@@ -97,6 +97,11 @@ pub(crate) struct CourseFeatureFlagsView {
     /// scoring + history. Resolves through the same path as
     /// `course_kg` (course row -> global -> default false).
     pub(crate) aegis: bool,
+    /// Concept knowledge graph (eureka-2). When TRUE the admin UI
+    /// surfaces concept-graph extraction + viewer for the course;
+    /// distinct from `course_kg` (the document-level graph).
+    /// Resolves through the same path as the others.
+    pub(crate) concept_graph: bool,
 }
 
 impl CourseResponse {
@@ -141,6 +146,7 @@ pub(crate) async fn resolve_course_flags(
     CourseFeatureFlagsView {
         course_kg: crate::feature_flags::course_kg_enabled(db, course_id).await,
         aegis: crate::feature_flags::aegis_enabled(db, course_id).await,
+        concept_graph: crate::feature_flags::concept_graph_enabled(db, course_id).await,
     }
 }
 

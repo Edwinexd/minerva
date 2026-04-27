@@ -154,8 +154,21 @@
       "created": "Skapad",
       "embedding": "Embedding",
       "features": "Funktioner",
+      "conceptGraph": "Begreppsgraf",
       "settings": "Inställningar"
     },
+    "conceptGraphButton": "Öppna",
+    "conceptGraphButtonDisabled": "Av",
+    "conceptGraphDisabledTitle": "Slå på funktionsflaggan concept_graph för kursen för att aktivera extrahering.",
+    "conceptGraphDialogTitle": "Begreppsgraf för {{course}}",
+    "conceptGraphDialogDescription": "Begreppsutvinning per dokument via eureka-2. Körningen är sekventiell över kursens färdiga dokument och kan ta några minuter för stora kurser.",
+    "conceptGraphExtractRun": "Kör extrahering",
+    "conceptGraphExtractRunning": "Extraherar...",
+    "conceptGraphRunSummary": "{{processed}} dokument bearbetade, {{skipped}} hoppade över, {{concepts}} nya begrepp, {{edges}} nya kanter, {{errors}} fel.",
+    "conceptGraphCounts": "{{concepts}} begrepp, {{edges}} kanter",
+    "conceptGraphDegrees": "in {{in}} / ut {{out}}",
+    "conceptGraphEmpty": "Inga begrepp sparade ännu. Kör extrahering för att fylla grafen.",
+    "conceptGraphClose": "Stäng",
     "migrateButton": "Migrera",
     "migrateButtonTitle": "Tvångsmigrera kursen till en annan embedding-leverantör/modell. Köar om alla dokument för ny embedding.",
     "migrateDialogTitle": "Migrera \"{{course}}\" till en annan embedding-modell",
@@ -186,12 +199,14 @@
     "featureFlagLabel": {
       "course_kg": "Kunskapsgraf för kurs",
       "extraction_guard": "Skydd mot uppgiftslösning",
-      "aegis": "Aegis promptcoachning"
+      "aegis": "Aegis promptcoachning",
+      "concept_graph": "Begreppsgraf"
     },
     "featureFlagDescription": {
       "course_kg": "Klassificering per dokument, tvärdokumentlänkare, grafvisare, vägrasinstruktion vid uppgiftsmatch och per-chunk-skyddsfilter. Avstängd som standard medan vi kalibrerar.",
       "extraction_guard": "Avsiktsklassificerare före generering + lösningsdetektor på utdatasidan + sokratisk omformulerare, plus uppgiftsnärhetsspårning över flera turer. Fångar fallet \"studenten klistrar in uppgift och frågar efter kod\" och avbryter svaret med en sokratisk fråga. Oberoende av course_kg så att admins kan piloter separat.",
-      "aegis": "Sidopanel med promptcoachning. Varje studentprompt poängsätts på fem dimensioner (tydlighet, kontext, ramar, resonemangskrav, kritiskt tänkande) plus tre korta kommentarer (strukturell tydlighet, terminologi, saknad ram). Icke-blockerande: analysen körs parallellt med assistentens svar och studenten kan ignorera återkopplingen fritt."
+      "aegis": "Sidopanel med promptcoachning. Varje studentprompt poängsätts på fem dimensioner (tydlighet, kontext, ramar, resonemangskrav, kritiskt tänkande) plus tre korta kommentarer (strukturell tydlighet, terminologi, saknad ram). Icke-blockerande: analysen körs parallellt med assistentens svar och studenten kan ignorera återkopplingen fritt.",
+      "concept_graph": "Eureka-2 begreppsgraf: LLM-extrahering per dokument av domänbegrepp och riktade relationer, sparat med dokumentnivå-spårning och cosin/strukturell/community-dedup. Skiljer sig från kursens kunskapsgraf (som är på dokumentnivå). När den är på kan admins köra extraktion och visa grafen; avstängning döljer admin-endpointsen men bevarar den sparade grafen."
     }
   },
   "rules": {

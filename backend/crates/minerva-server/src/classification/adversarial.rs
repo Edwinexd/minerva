@@ -10,8 +10,8 @@
 //! catches per-chunk leaks within otherwise-safe documents.
 //!
 //! Cost / latency budget:
-//! * Per-chunk: one cheap gpt-oss-120b call, very low effort, ~100 tokens
-//!   in / 5 tokens out, target round-trip ~150-250ms each.
+//! * Per-chunk: one cheap llama3.1-8b call, ~100 tokens in / 5 tokens
+//!   out, target round-trip ~150-250ms each.
 //! * The strategy fans out concurrently across all retrieved chunks via
 //!   `futures::future::join_all`, so total wall-clock is roughly the
 //!   slowest single call (not the sum).
@@ -67,11 +67,15 @@ pub fn snapshot_stats() -> AdversarialStats {
 }
 
 /// Cerebras model used for the per-chunk check. Binary
-/// classification with a 4-token output cap and `reasoning_effort:
-/// low`; exactly the kind of small-model task where llama3.1-8b
-/// is the right tool. Cheaper, faster (matters here: this filter
-/// runs per-chunk and fans out across all retrieved chunks every
-/// chat turn, against an 800ms total budget).
+/// classification with a 4-token output cap; exactly the kind of
+/// small-model task where llama3.1-8b is the right tool. Cheaper,
+/// faster (matters here: this filter runs per-chunk and fans out
+/// across all retrieved chunks every chat turn, against an 800ms
+/// total budget). The body deliberately omits `reasoning_effort`:
+/// the parameter is gpt-oss-only and Cerebras 400s the request
+/// when llama sees it; the previous body included it and was
+/// silently failing on every call (4xx -> Err -> fail-open without
+/// recording usage, so the dashboard didn't even surface the calls).
 const ADVERSARIAL_MODEL: &str = "llama3.1-8b";
 
 /// Total wall-clock budget for the whole filter (across all chunks
@@ -107,7 +111,6 @@ async fn is_solution_chunk(
     let body = serde_json::json!({
         "model": ADVERSARIAL_MODEL,
         "temperature": 0.0,
-        "reasoning_effort": "low",
         "max_tokens": 4,
         "messages": [
             { "role": "system", "content": ADVERSARIAL_SYSTEM_PROMPT },

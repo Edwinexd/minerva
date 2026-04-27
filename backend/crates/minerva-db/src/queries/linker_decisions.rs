@@ -1,6 +1,6 @@
 //! Per-pair LLM decision cache for the cross-doc linker.
 //!
-//! The linker calls gpt-oss-120b once per candidate pair to label
+//! The linker calls llama3.1-8b once per candidate pair to label
 //! the relation. Without a cache, every relink (triggered by every
 //! ingest) re-asks the model about every pair, even when nothing
 //! has changed. This table records every decision the model has

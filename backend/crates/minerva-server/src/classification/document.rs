@@ -1,4 +1,4 @@
-//! Cerebras gpt-oss-120b-backed document classifier.
+//! Cerebras llama3.1-8b-backed document classifier.
 
 use async_trait::async_trait;
 use minerva_ingest::classifier::{ClassifiedKind, Classifier};
@@ -10,13 +10,15 @@ use super::types::{DocumentKind, ALL_KINDS};
 use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
 
-/// Cerebras model name for ingest-time classification work. Open-weights
-/// gpt-oss-120b; strong instruction-following, reasoning_effort
-/// supported, structured outputs supported.
-const CLASSIFIER_MODEL: &str = "gpt-oss-120b";
-
-/// Confidence below this triggers a retry with reasoning_effort = "high".
-const RETRY_CONFIDENCE_THRESHOLD: f32 = 0.6;
+/// Cerebras model name for ingest-time classification work. We migrated
+/// off gpt-oss-120b for the document classifier on the same reasoning as
+/// the extraction-guard binary classifiers: a JSON-schema-constrained
+/// 9-way label is well within llama3.1-8b's range, and the prompt-token
+/// cost across a course's documents is the dominant ingest-time spend.
+/// llama3.1-8b doesn't accept `reasoning_effort` (Cerebras 400s the
+/// param), so we drop it from the body; structured outputs +
+/// `temperature: 0` are the rails that keep the JSON shape correct.
+const CLASSIFIER_MODEL: &str = "llama3.1-8b";
 
 /// Soft cap on excerpt length sent to the model. Head/tail split so
 /// the model sees both the introductory framing and any "submit /
@@ -27,11 +29,13 @@ const RETRY_CONFIDENCE_THRESHOLD: f32 = 0.6;
 /// of classifications. 9-class doc classification rarely needs more
 /// than the first 2-3 pages plus the footer to make a confident call:
 /// the discriminating signal (numbered tasks, "submit by", "frivillig",
-/// "worked solution", "syllabus / schedule") shows up early. The few
-/// docs that genuinely need more context will fall below the
-/// confidence threshold and pick up `reasoning_effort=high` on the
-/// retry, which is fine; that path stays cheap because it happens
-/// rarely now that flags don't trigger retries.
+/// "worked solution", "syllabus / schedule") shows up early. Low-
+/// confidence outputs flow through to the teacher unchanged; they show
+/// up in the UI alongside `suspicious_flags` so a human can intervene.
+/// (We previously did a high-effort retry here when confidence dropped
+/// below 0.6; that lever depended on `reasoning_effort=high`, which
+/// llama3.1-8b doesn't accept, and a deterministic re-call at
+/// temperature 0 would just return the same answer.)
 const MAX_EXCERPT_CHARS: usize = 10_000;
 const HEAD_FRACTION: f64 = 0.85;
 
@@ -53,7 +57,6 @@ impl CerebrasClassifier {
         course_id: Uuid,
         mime_type: &str,
         excerpt: &str,
-        reasoning_effort: &str,
     ) -> Result<ClassifiedKind, String> {
         // Filename is intentionally NOT in the prompt; see the
         // CLASSIFIER_USER_TEMPLATE doc comment. Classifier must decide
@@ -62,13 +65,13 @@ impl CerebrasClassifier {
             .replace("{mime_type}", mime_type)
             .replace("{excerpt}", excerpt);
 
-        // Cerebras supports OpenAI-style `response_format: json_schema`,
-        // and the gpt-oss family additionally accepts `reasoning_effort`.
-        // Schema mirrors prompts.rs's contract.
+        // Cerebras supports OpenAI-style `response_format: json_schema`
+        // on llama3.1-8b. `reasoning_effort` is gpt-oss-only and gets
+        // 400'd here, so it's omitted. Schema mirrors prompts.rs's
+        // contract.
         let body = serde_json::json!({
             "model": CLASSIFIER_MODEL,
             "temperature": 0.0,
-            "reasoning_effort": reasoning_effort,
             "messages": [
                 { "role": "system", "content": CLASSIFIER_SYSTEM_PROMPT },
                 { "role": "user", "content": user },
@@ -102,9 +105,11 @@ impl CerebrasClassifier {
             .await
             .map_err(|e| format!("classifier: response not JSON: {e}"))?;
 
-        // Best-effort token-spend bookkeeping. Both the low-effort
-        // and high-effort retry calls land here; the dashboard
-        // sums them as one bucket per (category, model).
+        // Best-effort token-spend bookkeeping. The dashboard buckets
+        // by (category, model); a future migration back to a multi-
+        // model classifier (e.g. gpt-oss-120b fallback for low-
+        // confidence cases) would automatically split into separate
+        // rows.
         record_cerebras_usage(
             &self.db,
             course_id,
@@ -163,45 +168,18 @@ impl Classifier for CerebrasClassifier {
 
         let excerpt = truncate_for_classification(text);
 
-        // First pass; cheap, low effort.
-        let initial = self
-            .call(course_id, mime_type, &excerpt, "low")
+        // Single pass on llama3.1-8b. Earlier versions did a second
+        // high-effort retry when confidence < 0.6, on the basis that
+        // `reasoning_effort=high` would coax a stronger answer out of
+        // gpt-oss-120b. llama3.1-8b doesn't accept the parameter, and
+        // re-calling at temperature 0 returns the same JSON, so the
+        // retry would just double-charge the course for an identical
+        // verdict. Low-confidence outputs flow through with their
+        // `suspicious_flags`; the teacher dashboard surfaces both so
+        // a human can step in when the model is unsure.
+        self.call(course_id, mime_type, &excerpt)
             .await
-            .map_err(|e| format!("classifier: low-effort call failed: {e}"))?;
-
-        // Retry on UNCERTAINTY only; i.e. low confidence. Earlier
-        // versions also retried whenever `suspicious_flags` was
-        // non-empty, but the system prompt actively encourages flags
-        // as a UI hint ("might_be_solution",
-        // "ambiguous_between_assignment_and_lab",
-        // "language_mixed_swedish_english"); so flags fired on
-        // most nuanced docs and the second high-effort call doubled
-        // the classifier's token spend without correspondingly
-        // changing the kind decision. Flags now flow through to the
-        // teacher unchanged; only confidence drives retries.
-        if initial.confidence >= RETRY_CONFIDENCE_THRESHOLD {
-            return Ok(initial);
-        }
-
-        tracing::info!(
-            "classifier: re-running {} with reasoning_effort=high (initial: kind={} confidence={:.2} flags={:?})",
-            filename,
-            initial.kind,
-            initial.confidence,
-            initial.suspicious_flags,
-        );
-
-        match self.call(course_id, mime_type, &excerpt, "high").await {
-            Ok(refined) => Ok(refined),
-            Err(e) => {
-                tracing::warn!(
-                    "classifier: high-effort retry failed for {} ({}); keeping low-effort result",
-                    filename,
-                    e,
-                );
-                Ok(initial)
-            }
-        }
+            .map_err(|e| format!("classifier: call failed: {e}"))
     }
 }
 

@@ -4,11 +4,13 @@
 //! 1. After text extraction, the worker calls
 //!    [`document::CerebrasClassifier`] (which implements
 //!    `minerva_ingest::classifier::Classifier`).
-//! 2. The classifier asks gpt-oss-120b on Cerebras to label the doc as one
+//! 2. The classifier asks llama3.1-8b on Cerebras to label the doc as one
 //!    of [`types::DocumentKind`], returning JSON via Cerebras structured
 //!    outputs.
-//! 3. Low-confidence or suspicious-flag results get re-run with
-//!    `reasoning_effort: "high"`.
+//! 3. Low-confidence and suspicious-flag results flow through to the
+//!    teacher dashboard; we previously did a high-effort retry on
+//!    gpt-oss-120b but llama3.1-8b doesn't support `reasoning_effort`
+//!    and a temperature-0 re-call would just return the same JSON.
 //! 4. The result is persisted by
 //!    [`minerva_db::queries::documents::set_classification`] which is a
 //!    no-op when the row is locked by a teacher.

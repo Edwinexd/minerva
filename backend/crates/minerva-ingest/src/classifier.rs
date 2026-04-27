@@ -1,6 +1,6 @@
 //! Trait abstraction for document-kind classification.
 //!
-//! The actual classifier (calls Cerebras gpt-oss-120b) lives in
+//! The actual classifier (calls Cerebras llama3.1-8b) lives in
 //! `minerva-server`, which depends on this crate. We can't reach back
 //! across that dependency edge, so the pipeline takes a `&dyn Classifier`
 //! and the concrete impl is supplied by the worker at the top level.

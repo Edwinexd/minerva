@@ -2,11 +2,11 @@
 
 RAG platform for educational use at DSV, Stockholm University. Teachers upload course materials; students get an AI assistant grounded in those documents, with safeguards designed to support learning.
 
-![Course list](docs/screenshots/01-home-courses.svg)
+![Course list](docs/screenshots/01-home-courses.png)
 
 ## Features
 
-- **Three RAG strategies**: `simple`, `parallel` (stream while retrieving), `FLARE` (logprob-triggered mid-stream retrieval).
+- **Three RAG strategies**: `simple`, `parallel` (stream while retrieving), `FLARE` (multi-turn, logprob-triggered mid-stream retrieval).
 - **Course knowledge graph**: documents are auto-classified (lecture, transcript, exercise, solution, ...) and cross-linked with `part_of_unit` / `solution_of` / `prerequisite_of` / `applied_in` edges. Retrieval expands top-k along the graph.
 - **Extraction guard ("Aegis")**: per-turn intent + per-chunk output classifiers (`llama3.1-8b`), Socratic rewriter (`gpt-oss-120b`), teacher-facing review queue.
 - **Pluggable embeddings**: admin-managed catalog (Snowflake arctic-embed, BGE, BAAI, GTE, mxbai, EmbeddingGemma, multilingual-e5, Qwen3-Embedding, OpenAI). Per-course rotation via lazy re-embed against versioned Qdrant collections.
@@ -16,32 +16,16 @@ RAG platform for educational use at DSV, Stockholm University. Teachers upload c
 - **Auth**: Shibboleth (SAML) primary; HMAC-signed external-auth invites validated entirely inside Apache via `mod_lua`; attribute-based role auto-promotion rules.
 - **Privacy & i18n**: pseudonymisation for `ext:` users, in-app data-handling ack, English + Swedish, WCAG 2.1 AA fixes.
 
-## Architecture
-
-![System overview](docs/diagrams/system-overview.svg)
-
-Apache unsets identity headers `early` outside of `mod_shib` / Lua paths. LMS, iframe, and service-account routes carry their own bearer-token or HMAC-signed-token middleware (see [Auth surfaces](#auth-surfaces)).
-
-### Document ingest
-
-![Ingest pipeline](docs/diagrams/ingest-pipeline.svg)
-
-The kind classifier runs *before* chunking, so assignments and solutions can be excluded from prompt context. Embeddings are written to a per-course Qdrant collection versioned by `(course_id, embedding_model)`; re-embedding under a new model is lazy and the old version stays live until rotation finishes. The KG linker reads excerpts and embeddings from Qdrant and caches per-pair decisions.
-
-### Chat / RAG
-
-![Chat pipeline](docs/diagrams/chat-pipeline.svg)
-
-Classifiers run on `llama3.1-8b` for latency; the Socratic rewriter on `gpt-oss-120b` for prose quality. Every classifier decision is appended to `conversation_flags` so teachers can audit activations from the "Needs Review" tab.
+Architecture and pipeline diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Screenshots
 
 | | |
 |---|---|
-| ![Course list](docs/screenshots/01-home-courses.svg) | ![Chat](docs/screenshots/02-chat-new.svg) |
-| ![Teacher config](docs/screenshots/03-teacher-course-config.svg) | ![Embedding catalog](docs/screenshots/04-admin-system-embedding.svg) |
-| ![Admin courses](docs/screenshots/05-admin-courses.svg) | ![Admin users](docs/screenshots/06-admin-users.svg) |
-| ![Role rules](docs/screenshots/07-admin-rules.svg) | ![Acknowledgements](docs/screenshots/08-acknowledgements.svg) |
+| ![Course list](docs/screenshots/01-home-courses.png) | ![Chat](docs/screenshots/02-chat-new.png) |
+| ![Teacher config](docs/screenshots/03-teacher-course-config.png) | ![Embedding catalog](docs/screenshots/04-admin-system-embedding.png) |
+| ![Admin courses](docs/screenshots/05-admin-courses.png) | ![Admin users](docs/screenshots/06-admin-users.png) |
+| ![Role rules](docs/screenshots/07-admin-rules.png) | ![Acknowledgements](docs/screenshots/08-acknowledgements.png) |
 
 Regenerate with `docs/screenshots/regenerate.mjs` (see [docs/screenshots/README.md](docs/screenshots/README.md)).
 

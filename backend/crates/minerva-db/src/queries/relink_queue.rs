@@ -101,3 +101,20 @@ pub async fn pending_count(db: &PgPool) -> Result<i64, sqlx::Error> {
         .await?;
     Ok(row)
 }
+
+/// Is this course currently queued for a relink? Surfaced to the
+/// graph-viewer endpoint so the UI can show a "Linking..." indicator
+/// while the sweep catches up. A row is present iff `mark_dirty` (or
+/// `mark_dirty_immediate`) has fired for the course since the last
+/// successful drain by `take_due`.
+pub async fn is_queued(db: &PgPool, course_id: Uuid) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM relink_queue WHERE course_id = $1
+           ) AS "exists!""#,
+        course_id,
+    )
+    .fetch_one(db)
+    .await?;
+    Ok(row)
+}

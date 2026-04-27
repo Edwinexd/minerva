@@ -313,12 +313,11 @@ export interface KnowledgeGraph {
   nodes: KnowledgeGraphNode[]
   edges: KnowledgeGraphEdge[]
   edges_computed: boolean
-  /// Cached pair decisions whose endpoints have been re-classified
-  /// since -- the linker will re-evaluate these on its next sweep.
-  pending_pairs: number
-  /// Classified docs that have never appeared in any cached pair
-  /// yet (a brand-new upload between two relink sweeps).
-  new_doc_count: number
+  /// True iff the linker has work waiting -- either the course is
+  /// queued for a relink sweep, or there are cached pair decisions
+  /// whose endpoints have been re-classified since. Drives the
+  /// "Linking..." pill on the graph viewer.
+  linker_pending: boolean
 }
 
 export const courseKnowledgeGraphQuery = (courseId: string) =>

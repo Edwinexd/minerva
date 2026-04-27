@@ -972,19 +972,22 @@ struct GraphResponse {
     /// The UI uses this to show "Build the graph" call-to-action vs
     /// rendering the viewer.
     edges_computed: bool,
-    /// Re-link status for the UI's "pending" pill. Three states:
-    ///   * pending_pairs > 0 OR new_doc_count > 0 :
-    ///     the linker has work to do. Shows a "linking N pair(s)"
-    ///     indicator until the next sweep tick clears it.
-    ///   * else: graph is up to date with current doc state.
+    /// Re-link status for the UI's "Linking..." pill. `true` iff the
+    /// course is currently queued for a relink sweep OR there are
+    /// cached pair decisions whose endpoints have moved past their
+    /// snapshot timestamps (i.e. the next sweep has real work to do).
     ///
-    /// `pending_pairs` counts cached decisions whose endpoints have
-    /// since been re-classified (cache stale). `new_doc_count` counts
-    /// classified docs that have NEVER been seen by the linker (never
-    /// participated in a cached pair) -- a fresh upload before the
-    /// next relink fires.
-    pending_pairs: i64,
-    new_doc_count: i64,
+    /// Deliberately a bool, not a count: an honest count of "pairs
+    /// the linker is about to re-evaluate" requires running the
+    /// embedding-similarity candidate generator, which is precisely
+    /// what the linker does on the next tick. The previous count
+    /// summed `stale_decisions` (pairs) and `new_doc_count` (docs
+    /// that had never been on either side of a cached pair) -- the
+    /// latter went permanently positive for any classified doc whose
+    /// nearest neighbour was below `MIN_EMBEDDING_SIMILARITY`, so the
+    /// counter never cleared. Both bugs disappear once we stop
+    /// trying to invent a number.
+    linker_pending: bool,
 }
 
 /// Knowledge-graph view for a single course: every doc as a node
@@ -1027,37 +1030,28 @@ async fn get_knowledge_graph(
         })
         .collect();
 
-    // Compute the "linking pending" signals for the UI. Cheap
-    // queries -- one COUNT(*) each, no joins beyond the cache table
-    // and the docs row.
-    let pending_pairs =
+    // "Linking pending" indicator. True iff EITHER:
+    //   * the course is in `relink_queue` (a mark_dirty has fired
+    //     since the last sweep drain -- the sweep is about to run),
+    //   * OR there are cached pair decisions whose endpoint
+    //     `classified_at` no longer matches (work the next sweep
+    //     will redo).
+    // Both signals come from authoritative tables. Two cheap
+    // queries; no docs join required.
+    let queued = minerva_db::queries::relink_queue::is_queued(&state.db, course_id)
+        .await
+        .unwrap_or(false);
+    let stale_pairs =
         minerva_db::queries::linker_decisions::stale_decisions_for_course(&state.db, course_id)
             .await
             .unwrap_or(0);
-    // Classified docs that have never been on either side of a
-    // cached pair: a brand-new upload between two relink sweeps.
-    let new_doc_count: i64 = sqlx::query_scalar!(
-        r#"SELECT COUNT(*) AS "count!"
-           FROM documents d
-           WHERE d.course_id = $1
-             AND d.classified_at IS NOT NULL
-             AND NOT EXISTS (
-                 SELECT 1 FROM linker_decisions ld
-                 WHERE ld.course_id = $1
-                   AND (ld.a_doc_id = d.id OR ld.b_doc_id = d.id)
-             )"#,
-        course_id,
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
+    let linker_pending = queued || stale_pairs > 0;
 
     Ok(Json(GraphResponse {
         nodes,
         edges,
         edges_computed,
-        pending_pairs,
-        new_doc_count,
+        linker_pending,
     }))
 }
 

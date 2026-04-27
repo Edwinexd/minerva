@@ -390,6 +390,86 @@ pub async fn link_course(
         true
     });
 
+    // Built once, used by the kind-compat prefilter below AND the
+    // cache lookup further down. Cheap (HashMap of references into
+    // `truncated`).
+    let docs_by_id: HashMap<Uuid, &&DocumentRow> = truncated.iter().map(|d| (d.id, d)).collect();
+
+    // Kind-compatibility prefilter. For pairs where both kinds are
+    // structurally low-signal (`unknown`: classifier had no signal,
+    // typically a URL stub or unparseable PDF; `syllabus`: course
+    // overview / admin doc that doesn't slot into any of the four
+    // edge types in any useful way), no relation in our taxonomy
+    // applies. Calling the LLM on these has been a tax we paid for
+    // structural noise -- a course with N URL-only docs that all
+    // classify as `unknown` produces O(N^2) high-similarity pairs
+    // that the model dutifully labels `none` at full prompt cost.
+    //
+    // Auto-none these locally and pin a `none` cache row with the
+    // current classified_at snapshot, so subsequent sweeps short-
+    // circuit through the cache lookup below. The pair re-enters
+    // candidates only if a kind moves (e.g. teacher relabels an
+    // `unknown` to a real kind), at which point classified_at
+    // changes and the cache row is invalidated.
+    const AUTO_NONE_KINDS: &[&str] = &["unknown", "syllabus"];
+    let mut auto_none_pairs: Vec<(Uuid, Uuid)> = Vec::new();
+    candidates.retain(|pair| {
+        let key = if pair.0 < pair.1 {
+            (pair.0, pair.1)
+        } else {
+            (pair.1, pair.0)
+        };
+        let (Some(da), Some(db_doc)) = (docs_by_id.get(&key.0), docs_by_id.get(&key.1)) else {
+            return true;
+        };
+        let ka = da.kind.as_deref().unwrap_or("unknown");
+        let kb = db_doc.kind.as_deref().unwrap_or("unknown");
+        if AUTO_NONE_KINDS.contains(&ka) && AUTO_NONE_KINDS.contains(&kb) {
+            auto_none_pairs.push(key);
+            return false;
+        }
+        true
+    });
+    if !auto_none_pairs.is_empty() {
+        tracing::info!(
+            "linker: course {} -- {} pair(s) auto-none'd by kind prefilter (both kinds in {{unknown, syllabus}}), no LLM call",
+            course_id,
+            auto_none_pairs.len(),
+        );
+        for key in &auto_none_pairs {
+            let (Some(da), Some(db_doc)) = (docs_by_id.get(&key.0), docs_by_id.get(&key.1)) else {
+                continue;
+            };
+            // Drop any prior edge for the unordered pair (handles
+            // the kind-changed-from-real-to-unknown direction --
+            // an old solution_of edge gets cleared when the doc is
+            // relabelled `unknown`).
+            let _ = minerva_db::queries::document_relations::delete_relations_for_pair(
+                ctx.db, key.0, key.1,
+            )
+            .await;
+            if let Err(e) = minerva_db::queries::linker_decisions::upsert(
+                ctx.db,
+                course_id,
+                key.0,
+                key.1,
+                da.classified_at,
+                db_doc.classified_at,
+                None, // relation = none
+                None, // confidence = N/A
+            )
+            .await
+            {
+                tracing::warn!(
+                    "linker: failed to write auto-none cache row for {:?}<->{:?}: {}",
+                    key.0,
+                    key.1,
+                    e
+                );
+            }
+        }
+    }
+
     if candidates.is_empty() {
         // Even if there are no fresh candidates, count what's
         // already in the table for the response.
@@ -421,7 +501,6 @@ pub async fn link_course(
             );
             HashMap::new()
         });
-    let docs_by_id: HashMap<Uuid, &&DocumentRow> = truncated.iter().map(|d| (d.id, d)).collect();
     let mut fresh_candidates: HashSet<(Uuid, Uuid)> = HashSet::new();
     let mut cached_hits: usize = 0;
     for pair in &candidates {

@@ -18,11 +18,21 @@ const CLASSIFIER_MODEL: &str = "gpt-oss-120b";
 /// Confidence below this triggers a retry with reasoning_effort = "high".
 const RETRY_CONFIDENCE_THRESHOLD: f32 = 0.6;
 
-/// Soft cap on excerpt length sent to the model. gpt-oss-120b has a 128K
-/// context window; we leave plenty of room for the schema + prompt and
-/// keep tokens cheap. Head/tail split so the model sees both the
-/// introductory framing and any "submit / due / answer" footer.
-const MAX_EXCERPT_CHARS: usize = 60_000;
+/// Soft cap on excerpt length sent to the model. Head/tail split so
+/// the model sees both the introductory framing and any "submit /
+/// due / answer" footer.
+///
+/// Tightened from 60K to 10K (chars, ~2.5K tokens) after the
+/// dashboard surfaced 5-6K avg prompt tokens per call across hundreds
+/// of classifications. 9-class doc classification rarely needs more
+/// than the first 2-3 pages plus the footer to make a confident call:
+/// the discriminating signal (numbered tasks, "submit by", "frivillig",
+/// "worked solution", "syllabus / schedule") shows up early. The few
+/// docs that genuinely need more context will fall below the
+/// confidence threshold and pick up `reasoning_effort=high` on the
+/// retry, which is fine -- that path stays cheap because it happens
+/// rarely now that flags don't trigger retries.
+const MAX_EXCERPT_CHARS: usize = 10_000;
 const HEAD_FRACTION: f64 = 0.85;
 
 pub struct CerebrasClassifier {
@@ -159,10 +169,17 @@ impl Classifier for CerebrasClassifier {
             .await
             .map_err(|e| format!("classifier: low-effort call failed: {e}"))?;
 
-        let needs_retry =
-            initial.confidence < RETRY_CONFIDENCE_THRESHOLD || !initial.suspicious_flags.is_empty();
-
-        if !needs_retry {
+        // Retry on UNCERTAINTY only -- i.e. low confidence. Earlier
+        // versions also retried whenever `suspicious_flags` was
+        // non-empty, but the system prompt actively encourages flags
+        // as a UI hint ("might_be_solution",
+        // "ambiguous_between_assignment_and_lab",
+        // "language_mixed_swedish_english") -- so flags fired on
+        // most nuanced docs and the second high-effort call doubled
+        // the classifier's token spend without correspondingly
+        // changing the kind decision. Flags now flow through to the
+        // teacher unchanged; only confidence drives retries.
+        if initial.confidence >= RETRY_CONFIDENCE_THRESHOLD {
             return Ok(initial);
         }
 

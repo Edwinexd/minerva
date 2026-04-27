@@ -89,13 +89,18 @@ export function KnowledgeGraphPage({
   // tucking one in here trains teachers to think the graph is stale
   // by default. Export is the one manual action that stays.
 
-  // "Linking pending" pill: visible when there's outstanding linker
-  // work for this course (recently-classified docs with stale cache
-  // entries, or brand-new docs the linker hasn't seen yet). Driven
-  // by the per-course graph query's polling refetch -- the pill
-  // self-clears the moment the next sweep finishes.
-  const pendingCount =
-    (data?.pending_pairs ?? 0) + (data?.new_doc_count ?? 0)
+  // "Linking..." pill: visible when there's outstanding linker
+  // work for this course (course queued for sweep, or cached pair
+  // decisions whose endpoints have moved past their snapshot).
+  // Driven by the per-course graph query's polling refetch -- the
+  // pill self-clears the moment the next sweep finishes. We don't
+  // surface a count: an honest count would require running the
+  // candidate generator, which is the linker's job. The previous
+  // count summed pairs and docs as if they were the same unit AND
+  // included docs that could never enter the cache (no neighbour
+  // above the embedding-similarity floor), so it ticked up on
+  // every isolated upload and never came back down.
+  const linkerPending = data?.linker_pending ?? false
 
   return (
     <Card>
@@ -104,13 +109,13 @@ export function KnowledgeGraphPage({
           <div>
             <CardTitle className="flex items-center gap-2">
               {t("knowledgeGraph.title")}
-              {pendingCount > 0 && (
+              {linkerPending && (
                 <Badge
                   variant="outline"
                   className="border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
                   title={t("knowledgeGraph.pendingTitle")}
                 >
-                  {t("knowledgeGraph.pending", { count: pendingCount })}
+                  {t("knowledgeGraph.pending")}
                 </Badge>
               )}
             </CardTitle>
@@ -498,11 +503,10 @@ function FilteredGraphView({
     nodes: filteredNodes,
     edges: filteredEdges,
     edges_computed: data.edges_computed,
-    // Carry these through so any consumer of the subgraph (currently
-    // none, but the export also reads from `data` directly) sees a
-    // complete shape.
-    pending_pairs: data.pending_pairs,
-    new_doc_count: data.new_doc_count,
+    // Carry through so any consumer of the subgraph (currently none,
+    // but the export also reads from `data` directly) sees a complete
+    // shape.
+    linker_pending: data.linker_pending,
   }
 
   if (filteredNodes.length === 0) {

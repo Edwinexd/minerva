@@ -12,7 +12,6 @@ import { TeacherNoteInline } from "@/components/chat/teacher-note-inline"
 import { useChatStream } from "@/components/chat/use-chat-stream"
 import { Sparkles } from "lucide-react"
 import { AegisFeedbackPanel } from "@/components/chat/aegis-feedback-panel"
-import { AegisInterceptDialog } from "@/components/chat/aegis-intercept-dialog"
 import { useAegisLiveAnalyzer } from "@/components/chat/use-aegis-live-analyzer"
 import { useAegisMode } from "@/components/chat/use-aegis-mode"
 import { useAegisPanelVisible } from "@/components/chat/use-aegis-panel-visible"
@@ -545,15 +544,24 @@ function EmbedChatWindow({
     return ok ? landedConvId : null
   }
 
-  // Just-in-time intercept state. Mirrors chat-page's flow: when
-  // the live verdict has cached suggestions for the current draft,
-  // we hold the pending message and show the dialog rather than
-  // sending immediately. Either button resolves it.
-  const [pendingSendMsg, setPendingSendMsg] = useState<string | null>(null)
-  const interceptOpen = pendingSendMsg !== null
+  // Soft-block intercept (matches chat-page). The analyzer runs on
+  // Send so fast typers who press Enter before the debounce fires
+  // still get a chance to see suggestions; if any come back, the
+  // Send button re-labels to "Send as-is" and a small inline note
+  // appears. Pressing Send again with the same draft dispatches.
+  // Resets when the input changes or after a successful send.
+  const [confirmDraftSend, setConfirmDraftSend] = useState<string | null>(null)
+  const [submitChecking, setSubmitChecking] = useState(false)
+
+  useEffect(() => {
+    if (confirmDraftSend !== null && confirmDraftSend !== input) {
+      setConfirmDraftSend(null)
+    }
+  }, [input, confirmDraftSend])
 
   const dispatchSend = (msg: string) => {
     setInput("")
+    setConfirmDraftSend(null)
     ;(async () => {
       const landedConvId = await sendMessage(msg, conversationId)
       if (landedConvId && conversationId === null) {
@@ -562,36 +570,32 @@ function EmbedChatWindow({
     })()
   }
 
-  const [submitChecking, setSubmitChecking] = useState(false)
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || stream.streaming || submitChecking) return
     const msg = input
 
-    // Same just-in-time gate as the Shibboleth chat page: force a
-    // fresh analyze call before the send so the intercept fires for
-    // fast typers who'd otherwise slip through the debounce window.
-    if (aegisEnabled) {
-      setSubmitChecking(true)
-      const verdict = await liveAnalyzer.analyzeNow(msg)
-      setSubmitChecking(false)
-      if (verdict && verdict.suggestions.length > 0) {
-        setPendingSendMsg(msg)
-        return
-      }
+    if (confirmDraftSend === msg) {
+      dispatchSend(msg)
+      return
+    }
+    if (!aegisEnabled) {
+      dispatchSend(msg)
+      return
+    }
+
+    setSubmitChecking(true)
+    const verdict = await liveAnalyzer.analyzeNow(msg)
+    setSubmitChecking(false)
+    if (verdict && verdict.suggestions.length > 0) {
+      setConfirmDraftSend(msg)
+      return
     }
     dispatchSend(msg)
   }
 
-  const handleRevise = () => {
-    setPendingSendMsg(null)
-  }
-  const handleSendAnyway = () => {
-    const msg = pendingSendMsg
-    setPendingSendMsg(null)
-    if (msg !== null) dispatchSend(msg)
-  }
+  const sendNeedsConfirm =
+    confirmDraftSend !== null && confirmDraftSend === input
 
   const bubbleLabels: ChatBubbleLabels = {
     sourceCount: (count) => t("embed.sources", { count }),
@@ -652,6 +656,7 @@ function EmbedChatWindow({
             />
             <Button
               type="submit"
+              variant={sendNeedsConfirm ? "outline" : "default"}
               disabled={
                 stream.streaming ||
                 !input.trim() ||
@@ -659,9 +664,22 @@ function EmbedChatWindow({
                 submitChecking
               }
             >
-              {submitChecking ? tStudent("aegis.checking") : t("embed.send")}
+              {submitChecking
+                ? tStudent("aegis.checking")
+                : sendNeedsConfirm
+                  ? tStudent("aegis.sendAsIs")
+                  : t("embed.send")}
             </Button>
           </form>
+          {sendNeedsConfirm && (
+            <p
+              className="text-xs text-amber-700 dark:text-amber-300 text-center"
+              role="status"
+              aria-live="polite"
+            >
+              {tStudent("aegis.sendBlockedNote")}
+            </p>
+          )}
           <p className="text-xs text-muted-foreground text-center">
             {t("embed.disclosurePrefix")}
             <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">{t("embed.disclosureLink")}</a>
@@ -702,12 +720,6 @@ function EmbedChatWindow({
           {tStudent("aegis.showPanelShort")}
         </Button>
       )}
-      <AegisInterceptDialog
-        open={interceptOpen}
-        suggestions={liveAnalyzer.analysis?.suggestions ?? []}
-        onRevise={handleRevise}
-        onSendAnyway={handleSendAnyway}
-      />
     </div>
   )
 }

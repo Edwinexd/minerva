@@ -29,7 +29,6 @@ import { TeacherNoteInline } from "./teacher-note-inline"
 import { useChatStream } from "./use-chat-stream"
 import { Sparkles } from "lucide-react"
 import { AegisFeedbackPanel } from "./aegis-feedback-panel"
-import { AegisInterceptDialog } from "./aegis-intercept-dialog"
 import { useAegisLiveAnalyzer } from "./use-aegis-live-analyzer"
 import { useAegisMode } from "./use-aegis-mode"
 import { useAegisPanelVisible } from "./use-aegis-panel-visible"
@@ -356,17 +355,36 @@ function ChatWindow({
     return ok ? landedConvId : null
   }
 
-  // Just-in-time intercept state. When the student presses Send
-  // AND the cached live verdict has suggestions, we hold the
-  // pending message text here and show the dialog. Either button
-  // resolves it. This is the "before showing answer" feedback
-  // path the project brief calls for -- the message hasn't been
-  // sent to inference yet at this point.
-  const [pendingSendMsg, setPendingSendMsg] = useState<string | null>(null)
-  const interceptOpen = pendingSendMsg !== null
+  // Soft-block state for the just-in-time intercept. When the
+  // student presses Send AND aegis returns non-empty suggestions
+  // for the current draft, we DON'T dispatch -- we set
+  // `confirmDraftSend` to the draft string so the next press of
+  // Send (with the same content) goes through. The Send button
+  // re-labels to "Send as-is" + a small inline note appears under
+  // the input. The right-rail panel is already showing the
+  // suggestions, no popup, no modal.
+  //
+  // The analyzer runs on Send (`analyzeNow`) so a fast typer who
+  // presses Enter inside the 1s debounce window still gets the
+  // chance to see suggestions. `analyzeNow` short-circuits when
+  // the cache already matches the exact input -- no second LLM
+  // call for slow typers.
+  //
+  // Resets when the student edits the input or after a successful
+  // send (so the same draft text typed-and-sent two turns later
+  // gets a fresh analyzer pass).
+  const [confirmDraftSend, setConfirmDraftSend] = useState<string | null>(null)
+  const [submitChecking, setSubmitChecking] = useState(false)
+
+  useEffect(() => {
+    if (confirmDraftSend !== null && confirmDraftSend !== input) {
+      setConfirmDraftSend(null)
+    }
+  }, [input, confirmDraftSend])
 
   const dispatchSend = (msg: string) => {
     setInput("")
+    setConfirmDraftSend(null)
     ;(async () => {
       const landedConvId = await sendMessage(msg, conversationId)
       if (landedConvId && conversationId === null) {
@@ -379,48 +397,49 @@ function ChatWindow({
     })()
   }
 
-  // True while an on-Send analyzer call is in flight. Disables the
-  // Send button + shows the spinner so the student knows the request
-  // hasn't been dropped while we wait for suggestions to arrive.
-  // Bounded by the analyzer's 250-500ms latency in practice.
-  const [submitChecking, setSubmitChecking] = useState(false)
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || stream.streaming || submitChecking) return
     const msg = input
 
-    // Just-in-time analyze on Send. Forces a fresh call (or reuses
-    // the cache if it matches the exact current draft); then gates
-    // the dialog on the result. This is what makes the just-in-time
-    // loop actually work for fast typers -- without it, anyone who
-    // pressed Send inside the 1s debounce window saw their prompt
-    // go through with no intercept.
-    if (aegisEnabled) {
-      setSubmitChecking(true)
-      const verdict = await liveAnalyzer.analyzeNow(msg)
-      setSubmitChecking(false)
-      if (verdict && verdict.suggestions.length > 0) {
-        setPendingSendMsg(msg)
-        return
-      }
+    // Second press of Send for the same draft we already
+    // soft-blocked on -- the student saw the suggestions, decided
+    // to send anyway. Dispatch immediately, no second analyzer
+    // call (the verdict's already cached + visible).
+    if (confirmDraftSend === msg) {
+      dispatchSend(msg)
+      return
     }
 
+    // Aegis disabled for the course -> straight send, no checking.
+    if (!aegisEnabled) {
+      dispatchSend(msg)
+      return
+    }
+
+    // First Send press with aegis on. Fire (or reuse cached)
+    // analyzer. `analyzeNow` short-circuits if the cache already
+    // matches `msg`, so a debounced verdict from earlier doesn't
+    // cost a second LLM call. Otherwise we wait the ~250-500ms
+    // analyzer round-trip with the button showing "Checking...".
+    setSubmitChecking(true)
+    const verdict = await liveAnalyzer.analyzeNow(msg)
+    setSubmitChecking(false)
+
+    if (verdict && verdict.suggestions.length > 0) {
+      // Suggestions present -> soft-block. The student sees them
+      // in the right rail; pressing Send again with the same draft
+      // dispatches.
+      setConfirmDraftSend(msg)
+      return
+    }
+
+    // No suggestions (or analyzer soft-failed / aegis off) -> send.
     dispatchSend(msg)
   }
 
-  const handleRevise = () => {
-    setPendingSendMsg(null)
-    // Don't clear `input` -- the whole point is the student edits
-    // their draft. Don't clear the live verdict either; the panel
-    // still shows the relevant suggestions while they edit.
-  }
-
-  const handleSendAnyway = () => {
-    const msg = pendingSendMsg
-    setPendingSendMsg(null)
-    if (msg !== null) dispatchSend(msg)
-  }
+  const sendNeedsConfirm =
+    confirmDraftSend !== null && confirmDraftSend === input
 
   const bubbleLabels: ChatBubbleLabels = {
     sourceCount: (count) => t("message.source", { count }),
@@ -502,6 +521,7 @@ function ChatWindow({
             />
             <Button
               type="submit"
+              variant={sendNeedsConfirm ? "outline" : "default"}
               disabled={
                 stream.streaming ||
                 !input.trim() ||
@@ -509,9 +529,28 @@ function ChatWindow({
                 submitChecking
               }
             >
-              {submitChecking ? t("aegis.checking") : t("chat.send")}
+              {submitChecking
+                ? t("aegis.checking")
+                : sendNeedsConfirm
+                  ? t("aegis.sendAsIs")
+                  : t("chat.send")}
             </Button>
           </form>
+          {/*
+            Inline confirm note. Shown ONLY after the student tried
+            to send a draft Aegis had suggestions for; tells them
+            what happened and how to proceed without grabbing focus
+            or trapping them in a modal.
+          */}
+          {confirmDraftSend !== null && confirmDraftSend === input && (
+            <p
+              className="text-xs text-amber-700 dark:text-amber-300 text-center"
+              role="status"
+              aria-live="polite"
+            >
+              {t("aegis.sendBlockedNote")}
+            </p>
+          )}
           <p className="text-xs text-muted-foreground text-center">
             {t("chat.disclaimerBefore")}
             <Link to="/data-handling" className="underline hover:text-foreground">{t("chat.dataHandlingLink")}</Link>
@@ -556,12 +595,6 @@ function ChatWindow({
           {t("aegis.showPanelShort")}
         </Button>
       )}
-      <AegisInterceptDialog
-        open={interceptOpen}
-        suggestions={liveAnalyzer.analysis?.suggestions ?? []}
-        onRevise={handleRevise}
-        onSendAnyway={handleSendAnyway}
-      />
     </div>
   )
 }

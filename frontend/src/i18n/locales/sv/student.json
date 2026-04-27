@@ -62,6 +62,8 @@
     "showPanel": "Visa återkopplingspanelen",
     "showPanelShort": "Förslag",
     "checking": "Kontrollerar…",
+    "sendAsIs": "Skicka som det är",
+    "sendBlockedNote": "Aegis har förslag för den här prompten - se panelen. Tryck på Skicka igen för att skicka som det är.",
     "emptyTitle": "Börja skriva för förslag",
     "emptyBody": "Medan du skriver en prompt ger Aegis idéer för hur den kan bli skarpare. Återkopplingen är rådgivande och blockerar aldrig ditt meddelande.",
     "pendingTitle": "Läser ditt utkast…",

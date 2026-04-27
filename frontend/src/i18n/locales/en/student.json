@@ -62,6 +62,8 @@
     "showPanel": "Show feedback panel",
     "showPanelShort": "Suggestions",
     "checking": "Checking…",
+    "sendAsIs": "Send as-is",
+    "sendBlockedNote": "Aegis has suggestions for this prompt - see the panel. Press Send again to send as-is.",
     "emptyTitle": "Start typing for suggestions",
     "emptyBody": "As you draft a prompt, Aegis offers ideas for how it could be sharper. Feedback is advisory and never blocks your message.",
     "pendingTitle": "Reading your draft…",

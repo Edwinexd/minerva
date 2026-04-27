@@ -18,19 +18,19 @@ RAG platform for educational use at DSV, Stockholm University. Teachers upload c
 
 ## Architecture
 
-![System overview](docs/diagrams/system-overview.svg)
+![System overview](docs/diagrams/system-overview.png)
 
 Apache unsets identity headers `early` outside of `mod_shib` / Lua paths. LMS, iframe, and service-account routes carry their own bearer-token or HMAC-signed-token middleware (see [Auth surfaces](#auth-surfaces)).
 
 ### Document ingest
 
-![Ingest pipeline](docs/diagrams/ingest-pipeline.svg)
+![Ingest pipeline](docs/diagrams/ingest-pipeline.png)
 
 The kind classifier runs *before* chunking, so assignments and solutions can be excluded from prompt context. Embeddings are written to a per-course Qdrant collection versioned by `(course_id, embedding_model)`; re-embedding under a new model is lazy and the old version stays live until rotation finishes. The KG linker reads excerpts and embeddings from Qdrant and caches per-pair decisions.
 
 ### Chat / RAG
 
-![Chat pipeline](docs/diagrams/chat-pipeline.svg)
+![Chat pipeline](docs/diagrams/chat-pipeline.png)
 
 Classifiers run on `llama3.1-8b` for latency; the Socratic rewriter on `gpt-oss-120b` for prose quality. Every classifier decision is appended to `conversation_flags` so teachers can audit activations from the "Needs Review" tab.
 

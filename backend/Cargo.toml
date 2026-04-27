@@ -4,7 +4,12 @@ members = [
     "crates/minerva-core",
     "crates/minerva-ingest",
     "crates/minerva-db",
+    "crates/minerva-eureka",
 ]
+# `vendor/eureka-2` is a release-artifact tarball, not a Minerva-owned crate;
+# the path dep from `minerva-eureka` resolves it but we exclude it from the
+# workspace so its lints / lockfile / version don't bleed in.
+exclude = ["vendor/eureka-2"]
 resolver = "2"
 
 [workspace.dependencies]

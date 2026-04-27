@@ -14,16 +14,22 @@ COPY backend/crates/minerva-core/Cargo.toml crates/minerva-core/Cargo.toml
 COPY backend/crates/minerva-db/Cargo.toml crates/minerva-db/Cargo.toml
 COPY backend/crates/minerva-ingest/Cargo.toml crates/minerva-ingest/Cargo.toml
 COPY backend/crates/minerva-server/Cargo.toml crates/minerva-server/Cargo.toml
-RUN mkdir -p crates/minerva-core/src crates/minerva-db/src crates/minerva-ingest/src crates/minerva-server/src && \
+COPY backend/crates/minerva-eureka/Cargo.toml crates/minerva-eureka/Cargo.toml
+# Vendored eureka-2 release artifact (populated by scripts/fetch-eureka.sh
+# in CI). Path-dep'd by minerva-eureka; copied here so Phase 1 can compile
+# and cache it as a transitive dependency before Phase 2 brings the rest
+# of the workspace source in.
+COPY backend/vendor/eureka-2 vendor/eureka-2
+RUN mkdir -p crates/minerva-core/src crates/minerva-db/src crates/minerva-ingest/src crates/minerva-server/src crates/minerva-eureka/src && \
     echo "fn main() {}" > crates/minerva-server/src/main.rs && \
-    touch crates/minerva-core/src/lib.rs crates/minerva-db/src/lib.rs crates/minerva-ingest/src/lib.rs && \
-    cargo build --release && \
-    rm -rf crates/*/src
+    touch crates/minerva-core/src/lib.rs crates/minerva-db/src/lib.rs crates/minerva-ingest/src/lib.rs crates/minerva-eureka/src/lib.rs && \
+    cargo build --release -p minerva-server --features eureka && \
+    rm -rf crates/minerva-core/src crates/minerva-db/src crates/minerva-ingest/src crates/minerva-server/src crates/minerva-eureka/src
 
 # Phase 2: build actual code (deps cached)
 COPY backend/ .
 ENV SQLX_OFFLINE=true
-RUN touch crates/*/src/*.rs && cargo build --release
+RUN touch crates/*/src/*.rs && cargo build --release -p minerva-server --features eureka
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y poppler-utils ca-certificates libssl3 && apt-get clean && rm -r /var/lib/apt/lists/*

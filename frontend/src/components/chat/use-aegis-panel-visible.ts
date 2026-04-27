@@ -11,12 +11,12 @@
  * The course-level `aegisEnabled` flag still gates whether the panel
  * exists at all -- this hook only controls visibility WHEN the
  * feature is on. A student who finds the panel distracting can
- * dismiss it; a "Show suggestions" affordance in the chat brings
- * it back when wanted.
+ * dismiss it; a small "Aegis" button in the chat brings it back
+ * when wanted.
  *
  * Default is visible: a student opting into a course with aegis on
- * should see the panel by default (otherwise the feature is invisible
- * and never gets discovered).
+ * should see the panel by default (otherwise the feature is
+ * invisible and never gets discovered).
  */
 import { useEffect, useState } from "react"
 

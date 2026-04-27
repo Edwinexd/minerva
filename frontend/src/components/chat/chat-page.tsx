@@ -27,8 +27,8 @@ import type { ChatBubbleLabels } from "./chat-bubble"
 import { ConversationList } from "./conversation-list"
 import { TeacherNoteInline } from "./teacher-note-inline"
 import { useChatStream } from "./use-chat-stream"
-import { Sparkles } from "lucide-react"
 import { AegisFeedbackPanel } from "./aegis-feedback-panel"
+import { AegisShieldFilled } from "@/components/icons/aegis-shield-filled"
 import { useAegisLiveAnalyzer } from "./use-aegis-live-analyzer"
 import { useAegisMode } from "./use-aegis-mode"
 import { useAegisPanelVisible } from "./use-aegis-panel-visible"
@@ -223,10 +223,9 @@ function ChatWindow({
   // any prop wiring. We only need the value here -- the setter
   // lives in the panel.
   const [aegisMode] = useAegisMode()
-  // Whether the right-rail panel is currently expanded. Storage-
-  // backed so dismissing it persists across reloads. The X on the
-  // panel header writes false; the "Show suggestions" button in
-  // the chat column writes true.
+  // Storage-backed; the X on the panel header writes false, the
+  // floating Aegis logo button below brings it back. Default true
+  // so a course with aegis on shows the feature by default.
   const [panelVisible, setPanelVisible] = useAegisPanelVisible()
 
   // Live aegis analyzer: hits the backend on debounced input
@@ -563,9 +562,6 @@ function ChatWindow({
         // Right rail. Hidden on narrower screens since the chat
         // column needs the room first; the panel is purely
         // advisory so dropping it on small viewports is fine.
-        // Visible even on a brand-new (null) conversation so the
-        // student sees feedback for their first prompt before
-        // sending it.
         <aside className="hidden lg:flex w-80 shrink-0 flex-col border-l">
           <AegisFeedbackPanel
             analyses={promptAnalyses}
@@ -576,24 +572,22 @@ function ChatWindow({
         </aside>
       )}
       {aegisEnabled && !panelVisible && (
-        // Compact "show feedback" affordance when the student has
-        // dismissed the panel. Sits as a tiny floating button in
-        // the top-right of the chat area so it's never lost. lg+
-        // only since the panel itself only shows lg+; on smaller
-        // viewports the panel doesn't render and there's nothing
-        // to un-hide.
-        <Button
+        // Floating "bring Aegis back" button when the student has
+        // dismissed the panel. The colored Aegis tile is the
+        // affordance -- same iconography the panel header uses,
+        // so the connection between the button and the dismissed
+        // panel is obvious. lg+ only since the panel itself only
+        // shows lg+; on smaller viewports the panel doesn't render
+        // and there's nothing to un-hide.
+        <button
           type="button"
-          variant="outline"
-          size="sm"
           onClick={() => setPanelVisible(true)}
-          className="hidden lg:flex absolute top-2 right-2 items-center gap-1.5 z-10"
+          className="hidden lg:flex absolute top-2 right-2 z-10 items-center justify-center rounded-md hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           title={t("aegis.showPanel")}
           aria-label={t("aegis.showPanel")}
         >
-          <Sparkles className="w-3.5 h-3.5" />
-          {t("aegis.showPanelShort")}
-        </Button>
+          <AegisShieldFilled size={28} className="rounded-md shadow-sm" />
+        </button>
       )}
     </div>
   )

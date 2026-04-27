@@ -10,8 +10,8 @@ import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
 import { ConversationList } from "@/components/chat/conversation-list"
 import { TeacherNoteInline } from "@/components/chat/teacher-note-inline"
 import { useChatStream } from "@/components/chat/use-chat-stream"
-import { Sparkles } from "lucide-react"
 import { AegisFeedbackPanel } from "@/components/chat/aegis-feedback-panel"
+import { AegisShieldFilled } from "@/components/icons/aegis-shield-filled"
 import { useAegisLiveAnalyzer } from "@/components/chat/use-aegis-live-analyzer"
 import { useAegisMode } from "@/components/chat/use-aegis-mode"
 import { useAegisPanelVisible } from "@/components/chat/use-aegis-panel-visible"
@@ -688,15 +688,12 @@ function EmbedChatWindow({
         </div>
       )}
       </div>
-      {aegisEnabled && (
+      {aegisEnabled && panelVisible && (
         // Right-rail Feedback panel. The embed canvas is typically
         // narrower than the Shibboleth chat, so the breakpoint is
         // tighter (md vs lg) -- on a small iframe the panel just
         // hides and the chat keeps the room. Same component as the
         // Shibboleth route to keep visual + behavioural parity.
-        // Visible even on a brand-new (null) conversation so the
-        // student sees feedback for their first prompt before
-        // sending it.
         <aside className="hidden md:flex w-72 shrink-0 flex-col border-l">
           <AegisFeedbackPanel
             analyses={promptAnalyses}
@@ -707,18 +704,15 @@ function EmbedChatWindow({
         </aside>
       )}
       {aegisEnabled && !panelVisible && (
-        <Button
+        <button
           type="button"
-          variant="outline"
-          size="sm"
           onClick={() => setPanelVisible(true)}
-          className="hidden md:flex absolute top-2 right-2 items-center gap-1.5 z-10"
+          className="hidden md:flex absolute top-2 right-2 z-10 items-center justify-center rounded-md hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           title={tStudent("aegis.showPanel")}
           aria-label={tStudent("aegis.showPanel")}
         >
-          <Sparkles className="w-3.5 h-3.5" />
-          {tStudent("aegis.showPanelShort")}
-        </Button>
+          <AegisShieldFilled size={28} className="rounded-md shadow-sm" />
+        </button>
       )}
     </div>
   )

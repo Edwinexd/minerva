@@ -29,53 +29,12 @@
  * isn't yet in `analyses`, which keeps the panel from blanking
  * during the brief window between SSE arrival and refetch.
  */
-import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Badge } from "@/components/ui/badge"
+import { AegisShield } from "@/components/icons/aegis-shield"
 import { cn } from "@/lib/utils"
 import type { PromptAnalysis } from "@/lib/types"
-
-/**
- * Progressive-disclosure mode (Shen & Tamkin 2026 reference; the
- * project description's "B. Progressive Disclosure" requirement).
- *
- *   * `beginner` -- single quality banner with one concrete
- *     suggestion. Less to read; less likely to feel condescending
- *     or overwhelming for a student new to prompting. The default
- *     since most users land here first.
- *   * `expert`   -- adds the three-dimensional Prompt Analysis
- *     section so a power user can see the full reasoning critique.
- *
- * Persisted in localStorage so the student's preference rides
- * along across sessions on the same device. Course-agnostic --
- * the choice is about the student's own comfort level, not
- * tied to any particular course.
- */
-type AegisMode = "beginner" | "expert"
-const MODE_STORAGE_KEY = "minerva.aegis.mode"
-const DEFAULT_MODE: AegisMode = "beginner"
-
-function readStoredMode(): AegisMode {
-  if (typeof window === "undefined") return DEFAULT_MODE
-  try {
-    const raw = window.localStorage.getItem(MODE_STORAGE_KEY)
-    if (raw === "beginner" || raw === "expert") return raw
-  } catch {
-    // Storage unavailable (private mode, quota, etc) -- fall through
-    // to the default. The toggle still works in-session; it just
-    // won't persist across reloads.
-  }
-  return DEFAULT_MODE
-}
-
-function writeStoredMode(mode: AegisMode): void {
-  if (typeof window === "undefined") return
-  try {
-    window.localStorage.setItem(MODE_STORAGE_KEY, mode)
-  } catch {
-    // ignore -- see readStoredMode comment.
-  }
-}
+import { useAegisMode } from "./use-aegis-mode"
 
 interface AegisFeedbackPanelProps {
   /** All analyses fetched with the conversation detail. Oldest first. */
@@ -144,33 +103,14 @@ export function AegisFeedbackPanel({
 }: AegisFeedbackPanelProps) {
   const { t, i18n } = useTranslation("student")
 
-  // Mode = the progressive-disclosure level. Initial read happens
-  // synchronously off localStorage so the panel doesn't flash the
-  // default mode for one frame before switching to the persisted
-  // one. Subsequent toggles via the badge update both state and
-  // storage in lockstep.
-  const [mode, setMode] = useState<AegisMode>(() => readStoredMode())
-  const toggleMode = () => {
-    setMode((prev) => {
-      const next: AegisMode = prev === "beginner" ? "expert" : "beginner"
-      writeStoredMode(next)
-      return next
-    })
-  }
-  // Cross-tab sync: if the student opens two chats and flips the
-  // toggle in one, the other should update without a reload. The
-  // storage event only fires for OTHER tabs (not the one that
-  // wrote), so this can't loop with the writeStoredMode above.
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== MODE_STORAGE_KEY) return
-      if (e.newValue === "beginner" || e.newValue === "expert") {
-        setMode(e.newValue)
-      }
-    }
-    window.addEventListener("storage", onStorage)
-    return () => window.removeEventListener("storage", onStorage)
-  }, [])
+  // Subject-expertise mode. The toggle here is the SAME storage-
+  // backed state the parent chat page reads to decide which `mode`
+  // to ship on each `/aegis/analyze` request -- so flipping the
+  // badge re-calibrates the next analyzer call automatically, no
+  // prop wiring needed.
+  const [mode, setMode] = useAegisMode()
+  const toggleMode = () =>
+    setMode(mode === "beginner" ? "expert" : "beginner")
 
   // Latest analysis = explicit `latest` (live verdict from the
   // analyzer endpoint) > newest entry from `analyses` (conversation
@@ -190,16 +130,18 @@ export function AegisFeedbackPanel({
   return (
     <div className="flex flex-col h-full overflow-y-auto pl-4 gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <AegisShield size={18} className="text-primary" aria-hidden="true" />
           {t("aegis.panelTitle")}
         </h2>
         {/*
-          The badge doubles as the mode toggle. We render it as a
+          The badge doubles as the mode toggle. Rendered as a
           Badge wrapped by a button so the visual stays identical
-          to the figma's static "Expert" pill while the click
-          target is a real semantic button (keyboard-accessible,
-          announced as a button by screen readers). Aria-pressed
-          communicates the toggle state.
+          to the figma pill while the click target is a real
+          semantic button (keyboard-accessible, announced as a
+          button by screen readers). aria-pressed communicates
+          the toggle state. Tooltip explains it's about the
+          student's subject expertise, not UI density.
         */}
         <button
           type="button"
@@ -221,17 +163,7 @@ export function AegisFeedbackPanel({
 
       <QualityCard analysis={current} pending={pending} />
 
-      {/*
-        Beginner mode hides the dimensional callouts: the brief's
-        progressive-disclosure split is "simple suggestions" vs
-        "full reasoning critique", and the Quality card already
-        carries the simple suggestion (its missing_constraint line).
-        Expert mode adds the structural / terminology / constraint
-        breakdown for a fuller critique. History stays on for both
-        since past scores aren't really "advanced" -- they're just
-        reference.
-      */}
-      {current && mode === "expert" && <PromptAnalysisSection analysis={current} />}
+      {current && <PromptAnalysisSection analysis={current} />}
 
       {historyEntries.length > 0 && (
         <HistorySection

@@ -29,6 +29,7 @@ import { TeacherNoteInline } from "./teacher-note-inline"
 import { useChatStream } from "./use-chat-stream"
 import { AegisFeedbackPanel } from "./aegis-feedback-panel"
 import { useAegisLiveAnalyzer } from "./use-aegis-live-analyzer"
+import { useAegisMode } from "./use-aegis-mode"
 
 export function ChatRouteComponent({
   useParams,
@@ -214,6 +215,13 @@ function ChatWindow({
   const stream = useChatStream(t("chat.unknownError"))
   const { send, reset } = stream
 
+  // Subject-expertise mode (Beginner/Expert). Read from the same
+  // storage-backed hook the panel's toggle writes to, so flipping
+  // the badge automatically affects the NEXT analyze call without
+  // any prop wiring. We only need the value here -- the setter
+  // lives in the panel.
+  const [aegisMode] = useAegisMode()
+
   // Live aegis analyzer: hits the backend on debounced input
   // changes so the right-rail panel reflects the prompt the
   // student is currently composing -- BEFORE they hit Send.
@@ -235,6 +243,7 @@ function ChatWindow({
         body: JSON.stringify({
           content,
           conversation_id: conversationId,
+          mode: aegisMode,
         }),
         signal,
       })
@@ -243,7 +252,7 @@ function ChatWindow({
       // the analyzer soft-failed. JSON parse handles both shapes.
       return (await res.json()) as PromptAnalysis | null
     },
-    [courseId, conversationId],
+    [courseId, conversationId, aegisMode],
   )
   const liveAnalyzer = useAegisLiveAnalyzer(
     input,

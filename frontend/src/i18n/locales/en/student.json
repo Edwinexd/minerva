@@ -57,7 +57,7 @@
     "panelTitle": "Feedback",
     "modeBeginner": "Beginner",
     "modeExpert": "Expert",
-    "modeToggleHint": "Click to switch detail level",
+    "modeToggleHint": "How well do you know this subject? Beginner: Aegis goes lenient on jargon and context. Expert: Aegis expects precise terms, named constraints, and what you've already tried. Click to toggle.",
     "qualityHigh": "Great Prompt Quality",
     "qualityMedium": "Medium Prompt Quality",
     "qualityLow": "Low Prompt Quality",

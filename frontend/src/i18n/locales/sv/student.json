@@ -57,7 +57,7 @@
     "panelTitle": "Återkoppling",
     "modeBeginner": "Nybörjare",
     "modeExpert": "Expert",
-    "modeToggleHint": "Klicka för att byta detaljnivå",
+    "modeToggleHint": "Hur väl kan du ämnet? Nybörjare: Aegis är generös med jargong och kontext. Expert: Aegis förväntar sig precisa termer, uttalade ramar och vad du har provat. Klicka för att växla.",
     "qualityHigh": "Hög promptkvalitet",
     "qualityMedium": "Medelhög promptkvalitet",
     "qualityLow": "Låg promptkvalitet",

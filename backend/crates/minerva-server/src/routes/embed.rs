@@ -21,8 +21,8 @@ use crate::error::AppError;
 use crate::ext_obfuscate::{self, Pseudonymizer};
 use crate::routes::chat::{
     analyze_prompt_for_user, fetch_conversation_for_view, list_pinned_conversations_for,
-    load_prompt_analyses_for_conversation, AegisAnalysisPayload, ConversationWithUserResponse,
-    PromptAnalysisResponse,
+    load_prompt_analyses_for_conversation, AegisAnalysisPayload, AegisModeWire,
+    ConversationWithUserResponse, PromptAnalysisResponse,
 };
 use crate::routes::courses::{resolve_course_flags, CourseFeatureFlagsView};
 use crate::routes::integration::verify_embed_token;
@@ -366,6 +366,10 @@ struct AnalyzePromptRequest {
     token: String,
     #[serde(default)]
     conversation_id: Option<Uuid>,
+    /// Mirrors `chat::AnalyzePromptRequest::mode`. Defaults to
+    /// Beginner so missing-field requests get the lenient grade.
+    #[serde(default)]
+    mode: AegisModeWire,
 }
 
 /// Embed-side wrapper around `chat::analyze_prompt_for_user`.
@@ -387,6 +391,7 @@ async fn analyze_prompt(
         user_id,
         body.content,
         body.conversation_id,
+        body.mode,
     )
     .await?;
     Ok(Json(verdict))

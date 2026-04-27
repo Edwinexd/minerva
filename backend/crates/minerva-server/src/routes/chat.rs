@@ -958,17 +958,47 @@ struct SendMessageRequest {
 
 /// Request body for the live aegis analyzer.
 #[derive(Deserialize)]
-struct AnalyzePromptRequest {
+pub(crate) struct AnalyzePromptRequest {
     /// The prompt the student is currently typing. Empty / very
     /// short bodies are filtered server-side (the analyzer needs
     /// at least a few words to say anything useful).
-    content: String,
+    pub content: String,
     /// Optional conversation context. When provided, the analyzer
     /// gets the prior user turns of that conversation as context
     /// so a short follow-up like "explain that further" reads as
     /// well-grounded rather than missing-context.
     #[serde(default)]
-    conversation_id: Option<Uuid>,
+    pub conversation_id: Option<Uuid>,
+    /// Student's self-declared subject expertise. Calibrates the
+    /// rubric server-side: a beginner gets graded leniently on
+    /// terminology / pre-loaded context, an expert gets held to
+    /// a higher bar for the same prompt. Passed verbatim from the
+    /// frontend's panel toggle. Defaults to `Beginner` so a request
+    /// from an older client (no field) gets the more lenient grade.
+    #[serde(default)]
+    pub mode: AegisModeWire,
+}
+
+/// Wire shape for `AegisMode`. `serde` reads this as the lower-cased
+/// strings the frontend ships -- `"beginner"` / `"expert"` -- and
+/// rejects anything else at deserialise time. Default is Beginner
+/// so missing-field / older-client requests stay on the lenient
+/// rubric (see `AnalyzePromptRequest::mode`).
+#[derive(Deserialize, Default, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum AegisModeWire {
+    #[default]
+    Beginner,
+    Expert,
+}
+
+impl AegisModeWire {
+    pub(crate) fn into_internal(self) -> crate::classification::aegis::AegisMode {
+        match self {
+            AegisModeWire::Beginner => crate::classification::aegis::AegisMode::Beginner,
+            AegisModeWire::Expert => crate::classification::aegis::AegisMode::Expert,
+        }
+    }
 }
 
 /// Shared aegis-analyze pipeline used by both the Shibboleth and
@@ -991,6 +1021,7 @@ pub(crate) async fn analyze_prompt_for_user(
     user_id: Uuid,
     content: String,
     conversation_id: Option<Uuid>,
+    mode: AegisModeWire,
 ) -> Result<Option<AegisAnalysisPayload>, AppError> {
     if !crate::feature_flags::aegis_enabled(&state.db, course_id).await {
         return Ok(None);
@@ -1026,6 +1057,7 @@ pub(crate) async fn analyze_prompt_for_user(
         &state.db,
         course_id,
         &trail,
+        mode.into_internal(),
     )
     .await;
 
@@ -1050,6 +1082,7 @@ async fn analyze_prompt_route(
         user.id,
         body.content,
         body.conversation_id,
+        body.mode,
     )
     .await?;
     Ok(Json(verdict))

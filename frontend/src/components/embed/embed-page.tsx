@@ -12,6 +12,7 @@ import { TeacherNoteInline } from "@/components/chat/teacher-note-inline"
 import { useChatStream } from "@/components/chat/use-chat-stream"
 import { AegisFeedbackPanel } from "@/components/chat/aegis-feedback-panel"
 import { useAegisLiveAnalyzer } from "@/components/chat/use-aegis-live-analyzer"
+import { useAegisMode } from "@/components/chat/use-aegis-mode"
 import type { PromptAnalysis, TeacherNote } from "@/lib/types"
 
 // -- Types for embed API responses --
@@ -381,6 +382,11 @@ function EmbedChatWindow({
   const stream = useChatStream(t("embed.unknownError"))
   const { send, reset, setError } = stream
 
+  // Subject-expertise mode shared with the panel toggle (see
+  // chat-page for the rationale). Read-only here -- the setter
+  // is the panel's concern.
+  const [aegisMode] = useAegisMode()
+
   // Live aegis analyzer. Auth flow differs from the Shibboleth
   // chat: the embed token rides in the request body alongside the
   // content, since iframes can't ship cookies cross-origin and
@@ -398,13 +404,14 @@ function EmbedChatWindow({
           content,
           token,
           conversation_id: conversationId,
+          mode: aegisMode,
         }),
         signal,
       })
       if (!res.ok) return null
       return (await res.json()) as PromptAnalysis | null
     },
-    [courseId, conversationId, token],
+    [courseId, conversationId, token, aegisMode],
   )
   const liveAnalyzer = useAegisLiveAnalyzer(
     input,

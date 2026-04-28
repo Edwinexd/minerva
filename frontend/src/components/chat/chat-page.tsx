@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Menu, X } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import type {
+  AegisSuggestion,
   Message,
   MessageFeedback,
   PromptAnalysis,
@@ -462,17 +463,28 @@ function ChatWindow({
     bannerDismissedFor !== input
 
   /**
-   * "Some ideas" handler. POSTs the current draft + cached
-   * suggestions to /aegis/rewrite, replaces the input with the
-   * returned revision, and dispatches a Send. We bypass the
-   * soft-block (the rewrite already incorporates the suggestions,
-   * so re-blocking would loop) by setting confirmDraftSend to
-   * the rewritten content before dispatching.
+   * Preview handler. POSTs the current draft + the selected
+   * subset of suggestions to /aegis/rewrite and returns the
+   * rewritten draft text for the banner to display read-only.
+   *
+   * Critically, this DOES NOT replace the input or dispatch a
+   * send; the student decides next, by either applying the
+   * preview or discarding it. The previous "Use ideas" button
+   * silently auto-sent the rewrite, which pilot users found
+   * disempowering ("I don't know what got sent"). The new flow
+   * keeps the student in the loop.
+   *
+   * A `null` return tells the banner the preview failed; it
+   * clears any stale preview and the student can retry. We
+   * intentionally don't surface a toast; the failure is rare,
+   * the banner stays usable, and the original draft is intact.
    */
-  const handleUseIdeas = async () => {
-    if (rewriting) return
+  const handlePreviewIdeas = async (
+    selected: AegisSuggestion[],
+  ): Promise<string | null> => {
+    if (rewriting) return null
     const draft = input
-    if (!draft.trim() || liveSuggestions.length === 0) return
+    if (!draft.trim() || selected.length === 0) return null
     setRewriting(true)
     try {
       const devUser = localStorage.getItem("minerva-dev-user")
@@ -487,30 +499,42 @@ function ChatWindow({
           headers,
           body: JSON.stringify({
             content: draft,
-            suggestions: liveSuggestions,
+            suggestions: selected,
             mode: aegisMode,
           }),
         },
       )
       if (!res.ok) {
-        // Soft fail; leave the original input in place so the
-        // student can still send. A 5xx logs the upstream error
-        // server-side; we don't surface it (the rewrite is
-        // optional).
         console.warn("aegis rewrite failed:", res.status)
-        return
+        return null
       }
       const body = (await res.json()) as { content: string }
       const rewritten = body.content?.trim() ?? ""
-      if (!rewritten) return
-      setInput(rewritten)
-      setConfirmDraftSend(rewritten) // pre-confirm so the next dispatch isn't blocked
-      dispatchSend(rewritten)
+      return rewritten || null
     } catch (e) {
       console.warn("aegis rewrite error:", e)
+      return null
     } finally {
       setRewriting(false)
     }
+  }
+
+  /**
+   * Apply a previewed rewrite to the input box. The student still
+   * has to press Send themselves; that is the point. We pre-confirm
+   * the soft-block for THIS exact text so the next Send press goes
+   * straight through (the student already engaged with the
+   * suggestions via the preview, so a second soft-block would be
+   * busywork). The new analyze run that fires on the rewritten
+   * input is still allowed to surface fresh suggestions if it
+   * finds any; that's the right thing for genuinely new ideas, but
+   * the same-text Send-as-is path is kept frictionless.
+   */
+  const handleApplyRewrite = (rewritten: string) => {
+    if (!rewritten.trim()) return
+    setInput(rewritten)
+    setConfirmDraftSend(rewritten)
+    setBannerDismissedFor(rewritten)
   }
 
   const bubbleLabels: ChatBubbleLabels = {
@@ -585,10 +609,11 @@ function ChatWindow({
           )}
           {showBanner && (
             <AegisSuggestionsBanner
-              suggestionCount={liveSuggestions.length}
+              suggestions={liveSuggestions}
               blocked={sendNeedsConfirm}
               working={rewriting}
-              onUseIdeas={handleUseIdeas}
+              onPreview={handlePreviewIdeas}
+              onApply={handleApplyRewrite}
               onDismiss={() => setBannerDismissedFor(input)}
             />
           )}

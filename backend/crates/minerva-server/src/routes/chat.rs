@@ -173,15 +173,15 @@ struct MessageFeedbackResponse {
 /// student is the only one who reads their own panel so a
 /// manipulated payload only fools themselves; teacher dashboards
 /// can re-derive truth from `course_token_usage` (category=aegis).
-/// We DO clamp the suggestion array to 3 items at insert time --
-/// the analyzer's schema enforces it, but defending against a
-/// hand-crafted body costs nothing.
+/// We DO clamp the suggestion array to AEGIS_SUGGESTIONS_MAX items
+/// at insert time; the analyzer's schema enforces it, but
+/// defending against a hand-crafted body costs nothing.
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct AegisAnalysisPayload {
-    /// 0..=3 suggestions. Empty = "looks good, no changes needed";
-    /// the panel renders an affirmation rather than nothing in that
-    /// case. Each suggestion is a tagged single-sentence
-    /// improvement.
+    /// 0..=AEGIS_SUGGESTIONS_MAX suggestions. Empty = "looks good,
+    /// no changes needed"; the panel renders an affirmation rather
+    /// than nothing in that case. Each suggestion is a tagged
+    /// single-sentence improvement plus a longer explanation.
     pub suggestions: Vec<AegisSuggestionPayload>,
     /// Calibration the analyzer was running under for this verdict
     /// ("beginner" | "expert"). Persisted on the History row so
@@ -206,25 +206,35 @@ pub(crate) struct AegisSuggestionPayload {
     /// per-card colour so the student sees which suggestions move
     /// the needle vs which are polish.
     pub severity: String,
-    /// Single-sentence actionable improvement, second-person.
+    /// Single-sentence actionable improvement, second-person. The
+    /// panel's collapsed default; one-liner.
     pub text: String,
+    /// One to two sentences expanding on WHY the fix matters and
+    /// what the student should consider when applying it. The
+    /// panel reveals this on click-to-expand. `#[serde(default)]`
+    /// keeps deserialisation forward-compatible with persisted
+    /// rows from before the field landed (they decode to "").
+    #[serde(default)]
+    pub explanation: String,
 }
 
 impl AegisAnalysisPayload {
     fn from_verdict(v: crate::classification::aegis::AegisVerdict, mode: AegisModeWire) -> Self {
         Self {
-            // Cap at 3 here too (the analyzer's system prompt says
-            // 0..=3, but Cerebras strict-mode schemas don't accept
-            // `maxItems` so we enforce in code). Persistence path
-            // truncates again at insert; belt-and-braces.
+            // Cap here too (the analyzer's system prompt says
+            // 0..=AEGIS_SUGGESTIONS_MAX, but Cerebras strict-mode
+            // schemas don't accept `maxItems` so we enforce in
+            // code). Persistence path truncates again at insert;
+            // belt-and-braces.
             suggestions: v
                 .suggestions
                 .into_iter()
-                .take(3)
+                .take(crate::classification::aegis::AEGIS_SUGGESTIONS_MAX)
                 .map(|s| AegisSuggestionPayload {
                     kind: s.kind,
                     severity: s.severity,
                     text: s.text,
+                    explanation: s.explanation,
                 })
                 .collect(),
             mode,
@@ -244,8 +254,11 @@ impl AegisAnalysisPayload {
 pub(crate) struct PromptAnalysisResponse {
     pub(crate) id: Uuid,
     pub(crate) message_id: Uuid,
-    /// 0..=3 suggestions, oldest-most-relevant-first. Deserialised
-    /// out of the DB's JSONB column.
+    /// 0..=AEGIS_SUGGESTIONS_MAX suggestions,
+    /// oldest-most-relevant-first. Deserialised out of the DB's
+    /// JSONB column. Pre-explanation rows decode with empty
+    /// `explanation` strings via `#[serde(default)]` on the
+    /// payload struct.
     pub(crate) suggestions: Vec<AegisSuggestionPayload>,
     /// "beginner" | "expert"; which calibration the analyzer was
     /// running under for this row.
@@ -1151,6 +1164,7 @@ pub(crate) async fn rewrite_prompt_for_user(
             kind: s.kind,
             severity: s.severity,
             text: s.text,
+            explanation: s.explanation,
         })
         .collect();
 
@@ -1356,10 +1370,10 @@ pub(super) async fn run_chat_message(
     // a History entry is the right failure mode.
     if let Some(analysis) = prompt_analysis {
         if crate::feature_flags::aegis_enabled(&state.db, course_id).await {
-            // Trim to the same 3-suggestion ceiling the analyzer
-            // schema enforces, in case a hand-crafted body exceeds.
+            // Trim to the same ceiling the analyzer schema
+            // enforces, in case a hand-crafted body exceeds.
             let mut suggestions = analysis.suggestions;
-            suggestions.truncate(3);
+            suggestions.truncate(crate::classification::aegis::AEGIS_SUGGESTIONS_MAX);
             // Serialise once for the JSONB column. Failure here is
             // theoretical (the struct derives Serialize) but we
             // log+drop rather than panic to keep the message-send

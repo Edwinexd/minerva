@@ -2,8 +2,14 @@
 //!
 //! When the `aegis` feature flag is on for a course, every
 //! debounced keystroke (and every Send) fires a single Cerebras
-//! call that examines the student's draft and returns 0..=3
+//! call that examines the student's draft and returns 0..=2
 //! actionable suggestions for how to improve it.
+//!
+//! We cap at TWO suggestions, not three, because pilot feedback
+//! made it loud and clear that one short prompt yielding three
+//! ideas reads as overwhelming; the user feels graded rather than
+//! coached. Two leaves room for a primary fix plus an optional
+//! follow-on without crowding the panel.
 //!
 //! We deliberately do NOT score the prompt. The brief is explicit
 //! about tone; a partner offering ideas, not a grader handing out
@@ -22,6 +28,11 @@
 //!   * `text` ; single-sentence actionable improvement, written
 //!     in the second person ("you might..."), no markdown, no
 //!     leading bullet.
+//!   * `explanation` ; one to two sentences elaborating WHY the
+//!     fix matters and what the student should consider when
+//!     applying it. Hidden behind a click-to-expand on the panel
+//!     so the default view stays low-noise; the student opts in
+//!     to the longer "more info" content per suggestion.
 //!
 //! Empty suggestion array = "the prompt is fine, no suggestions".
 //! The panel renders a small "looks good" affirmation rather than
@@ -50,9 +61,17 @@ use minerva_db::queries::course_token_usage::CATEGORY_AEGIS;
 /// `model_used` on persisted rows.
 pub const AEGIS_MODEL: &str = "llama3.1-8b";
 
-/// Cap on the analyzer's reply. Three suggestions @ ~30 words each
-/// + a few JSON envelope tokens fits in 256 with margin.
-const AEGIS_MAX_TOKENS: usize = 384;
+/// Cap on the analyzer's reply. Two suggestions @ ~25 words each
+/// for `text` + ~50 words each for `explanation` + JSON envelope
+/// tokens fits in ~480 with margin.
+const AEGIS_MAX_TOKENS: usize = 512;
+
+/// Hard ceiling on suggestion count. The system prompt asks for
+/// 0..=2; the route layer + the `from_verdict` mapper truncate at
+/// the same number. Two channels enforcing the same number keeps
+/// a model that overshoots from leaking more than this many
+/// suggestions through to the panel.
+pub const AEGIS_SUGGESTIONS_MAX: usize = 2;
 
 /// How many previous user turns we feed to the analyzer for context.
 /// Five is enough that "explain that further" reads as well-grounded
@@ -61,7 +80,7 @@ const HISTORY_TURNS: usize = 5;
 
 const AEGIS_SYSTEM_PROMPT_BASE: &str = r#"You are Aegis, a prompt-coaching assistant for university students using a course-aware tutoring chatbot. You help the student write better prompts by offering concrete suggestions, never by grading them.
 
-You will read the student's current draft (and a short trail of their recent prior prompts in the same conversation, for context). Your job is to produce 0..=3 suggestions for how the student could improve THIS draft before sending it.
+You will read the student's current draft (and a short trail of their recent prior prompts in the same conversation, for context). Your job is to produce 0..=2 suggestions for how the student could improve THIS draft before sending it. Two is the hard ceiling; pilot users found three suggestions overwhelming and reported feeling graded rather than coached. When in doubt, return ONE.
 
 The rubric you check the draft against is grounded in the CLEAR prompt-engineering framework (Concise, Logical, Explicit, Adaptive, Reflective) and the standard prompt-design rubric. Each `kind` below maps to one rubric dimension:
 
@@ -80,12 +99,18 @@ Each suggestion you produce ALSO carries a `severity`:
 * `medium`; Useful sharpening; the answer would be substantially better with this change but the chatbot can still produce something reasonable without it.
 * `low`   ; Polish; nice-to-have, would unlock a slightly better answer.
 
+Each suggestion has TWO text fields:
+
+* `text`        ; the headline; one short sentence in the second person ("you could...", "consider...") naming the concrete action. ≤ 25 words. This is what the student sees first; treat it as the actionable bottom line.
+* `explanation` ; one to two short sentences expanding on WHY this fix matters for THIS specific draft and what the student should think about when applying it. Reference details from the draft itself rather than restating the rubric. ≤ 50 words. The panel hides this behind a click-to-expand; the student opts into reading it when they want the longer reasoning.
+
 Hard rules:
 * Do NOT answer the prompt. Do NOT critique the chatbot's reply. Your only output is suggestions about the prompt itself.
 * Do NOT score, rank, or grade the prompt. No numbers, no rubric points, no "your prompt is X/10".
 * If the draft is already clear and the student has been thoughtful, return an EMPTY suggestion list. Inventing suggestions for the sake of having something to say is the condescending failure mode we explicitly avoid.
-* Each suggestion is a single sentence in the second person ("you could...", "consider..."). No leading bullets, no markdown, ≤ 30 words.
-* Order suggestions most-impactful first. Prefer ONE strong suggestion over three weak ones. Never produce two suggestions of the same `kind` in one response.
+* Every suggestion must be tied to a concrete detail of THIS draft. Generic prompt-engineering tips that could attach to any prompt are not allowed; if you can't point at the specific phrase or gap that triggered the suggestion, drop it.
+* Order suggestions most-impactful first. Prefer ONE strong suggestion over two weak ones; the system asks for at most TWO and ZERO is a perfectly valid answer. Never produce two suggestions of the same `kind` in one response.
+* When the draft is genuinely ambiguous between two or three plausible interpretations, prefer phrasing the suggestion as a clarifying question back to the student ("Did you mean X, or Y?") rather than a directive; the student picks.
 
 Tone: constructive partner, not condescending teacher. Encouraging, never moralising. Never lecture, never refuse. The student decides whether to act on your feedback; this is non-blocking advice.
 
@@ -116,7 +141,7 @@ NEVER suggest these to a beginner:
 * `constraints`; specifying versions, tools, frameworks is jargon-heavy.
 * `rationale`; don't ask them to articulate why they want to know something simple.
 
-When you DO suggest, only pick `clarity` or `instruction`, severity `high` (since by definition you're only firing when the prompt is genuinely too vague to act on). Write the suggestion warmly and give the student a verbatim-fillable example.
+When you DO suggest, only pick `clarity` or `instruction`, severity `high` (since by definition you're only firing when the prompt is genuinely too vague to act on). Write `text` warmly and give the student a verbatim-fillable example. Write `explanation` as a single warm sentence telling the student why a few extra words helps the chatbot help them; never a lecture.
 
 Examples that should return []:
 - "How does recursion work?"
@@ -126,8 +151,8 @@ Examples that should return []:
 - "I'm stuck on the sorting assignment"
 
 Examples that warrant ONE suggestion:
-- "this" -> [{kind: "clarity", severity: "high", text: "Could you describe what 'this' refers to? For example: 'this code I just wrote' or 'the topic from the last lecture'."}]
-- "help" -> [{kind: "instruction", severity: "high", text: "What part are you stuck on? Even a few words helps; like 'I don't get how loops work' or 'my code throws an error'."}]"#;
+- "this" -> [{kind: "clarity", severity: "high", text: "Could you describe what 'this' refers to? For example: 'this code I just wrote' or 'the topic from the last lecture'.", explanation: "On its own 'this' could mean a dozen things and the chatbot would have to guess. A handful of extra words and it can answer your real question instead."}]
+- "help" -> [{kind: "instruction", severity: "high", text: "What part are you stuck on? Even a few words helps; like 'I don't get how loops work' or 'my code throws an error'.", explanation: "The clearer the symptom you describe, the faster the chatbot can zero in. Naming the topic or pasting the error is usually enough."}]"#;
 
 const AEGIS_EXPERT_ADDENDUM: &str = r#"
 
@@ -145,14 +170,16 @@ Hold the bar peer-to-peer high. Use the full literature rubric:
 * `examples` (severity: low-medium); one or two examples (of what they've tried, of similar problems) sharpen the response.
 * `constraints` (severity: medium-high); explicit version / tool / scope / "without using X" / word limit.
 
-When you DO suggest something, write it directly and tersely; terminology IS expected here. Don't soften with "you could maybe" or "perhaps consider". Use the imperative or near-imperative ("Name the specific X.", "Add what you tried.", "Specify which Y.").
+When you DO suggest something, write `text` directly and tersely; terminology IS expected here. Don't soften with "you could maybe" or "perhaps consider". Use the imperative or near-imperative ("Name the specific X.", "Add what you tried.", "Specify which Y."). Write `explanation` as one or two compact sentences naming the failure mode the fix avoids; assume domain literacy, skip the prompt-engineering theory.
+
+You may produce up to TWO suggestions, but the cap is a ceiling not a target. Two is appropriate when there are two genuinely independent gaps worth surfacing; if one fix would carry the most weight and a second feels like a stretch, return just the one.
 
 Examples that should return [] (rare):
 - "Why does Python's GIL prevent CPU-bound multithreading from scaling, and how does multiprocessing sidestep it for tasks that release the GIL inside C extensions?"
 
 Examples that warrant suggestions:
-- "How to make Python faster?" -> [{kind: "rationale", severity: "high", text: "Name what's slow and how you measured it. CPU-bound vs I/O-bound has completely different fixes."}, {kind: "constraints", severity: "medium", text: "Pin the Python version; 3.11+ has substantial perf changes that change the right answer."}]
-- "Tell me about decorators" -> [{kind: "audience", severity: "medium", text: "Say what you already know about decorators; syntax-level vs semantics vs typical use cases dictate a very different answer."}, {kind: "format", severity: "low", text: "Specify the depth: a one-paragraph mental model, a worked example, or a reference list of common patterns."}]"#;
+- "How to make Python faster?" -> [{kind: "rationale", severity: "high", text: "Name what's slow and how you measured it. CPU-bound vs I/O-bound has completely different fixes.", explanation: "Without the bottleneck named, any answer is a guess across vectorisation, multiprocessing, JIT, and I/O batching. A single profiler line collapses the search space."}, {kind: "constraints", severity: "medium", text: "Pin the Python version; 3.11+ has substantial perf changes that change the right answer.", explanation: "The 3.11 specialising adaptive interpreter and 3.12 PEP 703 work shift which optimisations matter; advice that lands for 3.9 can be irrelevant on 3.12."}]
+- "Tell me about decorators" -> [{kind: "audience", severity: "medium", text: "Say what you already know about decorators; syntax-level vs semantics vs typical use cases dictate a very different answer.", explanation: "An answer aimed at someone who has never seen `@functools.wraps` looks completely unlike one aimed at someone implementing parameterised class decorators. Flagging your level avoids the wrong target."}]"#;
 
 const AEGIS_OUTPUT_FOOTER: &str = r#"
 
@@ -200,8 +227,17 @@ pub struct AegisSuggestion {
     /// per-card colour (rose / amber / sky) so the student sees
     /// which suggestions move the needle vs which are polish.
     pub severity: String,
-    /// One-sentence actionable improvement.
+    /// Headline; the one-sentence actionable improvement the panel
+    /// shows by default. Kept terse on purpose so the collapsed
+    /// suggestion row stays a one-liner.
     pub text: String,
+    /// One to two sentences expanding on WHY the fix matters for
+    /// the specific draft and what the student should consider
+    /// when applying it. Hidden behind click-to-expand on the
+    /// panel; defaults to empty for old persisted rows that
+    /// pre-date this field.
+    #[serde(default)]
+    pub explanation: String,
 }
 
 /// Result of one analyzer run. Empty `suggestions` means the
@@ -293,12 +329,13 @@ pub async fn analyze_prompt(
             { "role": "user", "content": user_payload.to_string() },
         ],
         // Cerebras' strict-mode JSON schemas reject `maxItems` at
-        // request time (400 wrong_api_format). The 0..=3 ceiling
+        // request time (400 wrong_api_format). The 0..=2 ceiling
         // is therefore enforced two other ways:
-        //   * the system prompt explicitly says "produce 0..=3
+        //   * the system prompt explicitly says "produce 0..=2
         //     suggestions"
-        //   * the route layer truncates to 3 at insert time
-        //     (`run_chat_message`'s persistence block)
+        //   * the route layer truncates to AEGIS_SUGGESTIONS_MAX
+        //     at insert time (`run_chat_message`'s persistence
+        //     block) and at the analyze response edge.
         // so a model that overshoots gets capped before display.
         "response_format": {
             "type": "json_schema",
@@ -315,7 +352,7 @@ pub async fn analyze_prompt(
                             "items": {
                                 "type": "object",
                                 "additionalProperties": false,
-                                "required": ["kind", "severity", "text"],
+                                "required": ["kind", "severity", "text", "explanation"],
                                 "properties": {
                                     "kind": {
                                         "type": "string",
@@ -334,7 +371,8 @@ pub async fn analyze_prompt(
                                         "type": "string",
                                         "enum": ["high", "medium", "low"]
                                     },
-                                    "text": { "type": "string" }
+                                    "text": { "type": "string" },
+                                    "explanation": { "type": "string" }
                                 }
                             }
                         }
@@ -396,11 +434,14 @@ pub async fn analyze_prompt(
 // upstream failure the route returns 500 and the frontend keeps
 // the student's original draft.
 
-const AEGIS_REWRITE_SYSTEM_PROMPT: &str = r#"You are Aegis, the prompt-coaching assistant. The student has a draft prompt and you previously produced a small list of suggestions for it. Your job now is to rewrite the draft so it incorporates ALL the suggestions, then return the rewritten prompt.
+const AEGIS_REWRITE_SYSTEM_PROMPT: &str = r#"You are Aegis, the prompt-coaching assistant. The student has a draft prompt and selected a subset of the suggestions you previously produced for it. Your job now is to rewrite the draft so it incorporates EVERY suggestion in the list you are given (and only those), then return the rewritten prompt.
+
+Each suggestion in the input has a `text` (the headline action) and an `explanation` (the longer reasoning the student saw on click-to-expand). Use both when shaping the rewrite: the `text` tells you WHAT to weave in, the `explanation` clarifies the intent so you don't misread the headline.
 
 Hard rules:
 * Preserve the student's voice, intent, scope, level of formality, and what they actually want to know. You are revising their draft, not replacing it with your own question.
 * Do NOT add information that is not implied by the original draft + the suggestions. If a suggestion says "name the version", do not invent which version they mean; write a placeholder like "(I'm using Python 3.X)" so they can edit, OR rewrite as "(specify which Python version you're using)".
+* Only fold in the suggestions in the list. Suggestions that were produced earlier but are NOT in the list are ones the student deliberately skipped; ignore them.
 * Do NOT answer the question. The output is a PROMPT the student will then send to the chatbot, not an answer to the prompt.
 * Do NOT include preamble, headings, "Here is the rewrite:", quote marks, or any wrapping. Output is the prompt and only the prompt, ready to drop into the chat input.
 * Keep the prompt natural and concise. If the original was one sentence, the rewrite should usually still be one or two sentences; not a multi-paragraph essay just because the suggestions added structure.

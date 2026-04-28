@@ -247,9 +247,13 @@ export interface PromptAnalysis {
   /** Set on persisted rows; undefined on live verdicts. */
   message_id?: string
   /**
-   * 0..=3 suggestions, most-impactful first. Empty = the analyzer
+   * 0..=2 suggestions, most-impactful first. Empty = the analyzer
    * found nothing worth suggesting; the panel renders an
    * affirmation rather than nothing.
+   *
+   * The cap dropped from 3 to 2 in the post-pilot rework: testers
+   * reported three ideas for one prompt felt overwhelming and
+   * read as grading rather than coaching.
    */
   suggestions: AegisSuggestion[]
   /** "beginner" | "expert"; which calibration produced this verdict. */
@@ -278,6 +282,14 @@ export interface AegisSuggestion {
   severity: string
   /** Single-sentence actionable improvement, second-person. */
   text: string
+  /**
+   * One to two sentences expanding on WHY the fix matters and what
+   * the student should consider when applying it. Hidden behind
+   * click-to-expand on the panel; the collapsed default just shows
+   * `text`. Optional because persisted rows from before the field
+   * landed deserialise without it.
+   */
+  explanation?: string
 }
 
 export interface ConversationFlag {

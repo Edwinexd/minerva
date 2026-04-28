@@ -16,7 +16,7 @@ import { AegisSuggestionsBanner } from "@/components/chat/aegis-suggestions-bann
 import { useAegisLiveAnalyzer } from "@/components/chat/use-aegis-live-analyzer"
 import { useAegisMode } from "@/components/chat/use-aegis-mode"
 import { useAegisPanelVisible } from "@/components/chat/use-aegis-panel-visible"
-import type { PromptAnalysis, TeacherNote } from "@/lib/types"
+import type { AegisSuggestion, PromptAnalysis, TeacherNote } from "@/lib/types"
 
 //; Types for embed API responses --
 
@@ -615,10 +615,17 @@ function EmbedChatWindow({
     liveSuggestions.length > 0 &&
     bannerDismissedFor !== input
 
-  const handleUseIdeas = async () => {
-    if (rewriting) return
+  // Preview-and-apply flow mirrors chat-page; see the long
+  // commentary there for the rationale (TL;DR: pilot users
+  // disliked the auto-rewrite-and-send "Use ideas" button; this
+  // flow returns control by previewing the rewrite read-only and
+  // letting the student apply it to the input themselves).
+  const handlePreviewIdeas = async (
+    selected: AegisSuggestion[],
+  ): Promise<string | null> => {
+    if (rewriting) return null
     const draft = input
-    if (!draft.trim() || liveSuggestions.length === 0) return
+    if (!draft.trim() || selected.length === 0) return null
     setRewriting(true)
     try {
       const res = await fetch(`/api/embed/course/${courseId}/aegis/rewrite`, {
@@ -627,25 +634,30 @@ function EmbedChatWindow({
         body: JSON.stringify({
           content: draft,
           token,
-          suggestions: liveSuggestions,
+          suggestions: selected,
           mode: aegisMode,
         }),
       })
       if (!res.ok) {
         console.warn("aegis rewrite failed:", res.status)
-        return
+        return null
       }
       const body = (await res.json()) as { content: string }
       const rewritten = body.content?.trim() ?? ""
-      if (!rewritten) return
-      setInput(rewritten)
-      setConfirmDraftSend(rewritten)
-      dispatchSend(rewritten)
+      return rewritten || null
     } catch (e) {
       console.warn("aegis rewrite error:", e)
+      return null
     } finally {
       setRewriting(false)
     }
+  }
+
+  const handleApplyRewrite = (rewritten: string) => {
+    if (!rewritten.trim()) return
+    setInput(rewritten)
+    setConfirmDraftSend(rewritten)
+    setBannerDismissedFor(rewritten)
   }
 
   const bubbleLabels: ChatBubbleLabels = {
@@ -699,10 +711,11 @@ function EmbedChatWindow({
           {needsPrivacyAck && <PrivacyAckBanner onAcknowledge={onAcknowledgePrivacy} />}
           {showBanner && (
             <AegisSuggestionsBanner
-              suggestionCount={liveSuggestions.length}
+              suggestions={liveSuggestions}
               blocked={sendNeedsConfirm}
               working={rewriting}
-              onUseIdeas={handleUseIdeas}
+              onPreview={handlePreviewIdeas}
+              onApply={handleApplyRewrite}
               onDismiss={() => setBannerDismissedFor(input)}
             />
           )}

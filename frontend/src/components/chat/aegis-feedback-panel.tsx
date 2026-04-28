@@ -25,7 +25,8 @@
  * draft the student is currently composing) from the parent chat
  * page; the parent owns the analyzer call.
  */
-import { X } from "lucide-react"
+import { ChevronDown, X } from "lucide-react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -250,6 +251,13 @@ function PlaceholderCard({ kind }: { kind: "pending" | "empty" }) {
  *   * `low`    -> sky   (polish; nice-to-have)
  * Unknown severities (legacy rows, unrecognised values) render as
  * a neutral border so the row still parses visually.
+ *
+ * The card itself is a button: clicking it toggles a longer
+ * `explanation` paragraph below the headline. Default is collapsed
+ * so the panel stays low-noise; the student opts into the longer
+ * "why this matters" reasoning per suggestion. Suggestions with
+ * no `explanation` (e.g. persisted rows from before the field
+ * landed) are static and have no chevron.
  */
 export function SuggestionRow({
   suggestion,
@@ -257,19 +265,24 @@ export function SuggestionRow({
   suggestion: AegisSuggestion
 }) {
   const { t } = useTranslation("student")
+  const [expanded, setExpanded] = useState(false)
+  const explanation = suggestion.explanation?.trim() ?? ""
+  const expandable = explanation.length > 0
   // Localise the kind tag if we know it, else show the raw string.
   const kindLabel = t(`aegis.kinds.${suggestion.kind}`, {
     defaultValue: suggestion.kind,
   })
   const severity = suggestion.severity as "high" | "medium" | "low" | string
   const cardClass = cn(
-    "rounded border p-3 space-y-2",
+    "w-full text-left rounded border p-3 space-y-2 transition-colors",
     severity === "high" &&
       "border-rose-300 bg-rose-50/60 dark:bg-rose-950/30 dark:border-rose-800",
     severity === "medium" &&
       "border-amber-300 bg-amber-50/60 dark:bg-amber-950/30 dark:border-amber-800",
     severity === "low" &&
       "border-sky-300 bg-sky-50/60 dark:bg-sky-950/30 dark:border-sky-800",
+    expandable &&
+      "cursor-pointer hover:brightness-[0.98] dark:hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
   )
   // Same palette logic for the kind badge so the eye groups the
   // tag with its card.
@@ -282,13 +295,52 @@ export function SuggestionRow({
     severity === "low" &&
       "bg-sky-100 text-sky-900 dark:bg-sky-900/50 dark:text-sky-100 border-sky-300/40",
   )
+
+  // Static (no explanation) -> render as a div; no click target,
+  // no chevron, no aria-expanded. Keeps the row honest about what
+  // it actually offers when the analyzer didn't ship the field.
+  if (!expandable) {
+    return (
+      <div className={cardClass}>
+        <Badge variant="secondary" className={kindBadgeClass}>
+          {kindLabel}
+        </Badge>
+        <p className="text-sm leading-snug">{suggestion.text}</p>
+      </div>
+    )
+  }
+
   return (
-    <div className={cardClass}>
-      <Badge variant="secondary" className={kindBadgeClass}>
-        {kindLabel}
-      </Badge>
+    <button
+      type="button"
+      onClick={() => setExpanded((v) => !v)}
+      aria-expanded={expanded}
+      className={cardClass}
+      title={
+        expanded
+          ? t("aegis.suggestionCollapseHint")
+          : t("aegis.suggestionExpandHint")
+      }
+    >
+      <div className="flex items-start gap-2">
+        <Badge variant="secondary" className={kindBadgeClass}>
+          {kindLabel}
+        </Badge>
+        <ChevronDown
+          aria-hidden="true"
+          className={cn(
+            "ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            expanded && "rotate-180",
+          )}
+        />
+      </div>
       <p className="text-sm leading-snug">{suggestion.text}</p>
-    </div>
+      {expanded && (
+        <p className="text-xs leading-relaxed text-muted-foreground border-t pt-2 mt-1">
+          {explanation}
+        </p>
+      )}
+    </button>
   )
 }
 

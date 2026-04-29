@@ -101,7 +101,12 @@
       "applyToDraft": "Apply to my draft",
       "cancel": "Cancel",
       "working": "Rewriting…",
-      "dismiss": "Dismiss"
+      "dismiss": "Dismiss",
+      "answerLabel": "Your answer",
+      "answerPlaceholder": "Pick an option…",
+      "customAnswer": "Other / write your own…",
+      "customAnswerPlaceholder": "Type your answer…",
+      "previewNeedsAnswers": "Pick an answer for each idea before previewing the rewrite."
     },
     "intercept": {
       "title": "Aegis has a couple of ideas first",

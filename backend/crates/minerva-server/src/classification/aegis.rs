@@ -61,10 +61,24 @@ use minerva_db::queries::course_token_usage::CATEGORY_AEGIS;
 /// `model_used` on persisted rows.
 pub const AEGIS_MODEL: &str = "llama3.1-8b";
 
+/// Larger model for the rewrite path only; runs rarely (only when
+/// the student opens the Review tray, picks answers, and clicks
+/// Preview) and produces text the student reads, so quality
+/// matters. Mirrors `extraction_guard`'s split: cheap llama on the
+/// hot path, gpt-oss-120b on the student-facing rewrite. Pilot
+/// users complained the llama rewrite read like a placeholder
+/// ("specify what you mean and explain what you're trying to
+/// achieve, such as..."); gpt-oss has the headroom to actually
+/// weave the student's selected answers into a clean revision.
+pub const AEGIS_REWRITE_MODEL: &str = "gpt-oss-120b";
+
 /// Cap on the analyzer's reply. Two suggestions @ ~25 words each
-/// for `text` + ~50 words each for `explanation` + JSON envelope
-/// tokens fits in ~480 with margin.
-const AEGIS_MAX_TOKENS: usize = 512;
+/// for `text` + ~50 words each for `explanation` + 3-4 short
+/// answer options each + JSON envelope tokens. Bumped from 512
+/// once the `options` field landed; the per-suggestion options
+/// add ~50-80 tokens and the previous cap was clipping the
+/// second suggestion's options array on dense drafts.
+const AEGIS_MAX_TOKENS: usize = 768;
 
 /// Hard ceiling on suggestion count. The system prompt asks for
 /// 0..=2; the route layer + the `from_verdict` mapper truncate at
@@ -99,10 +113,11 @@ Each suggestion you produce ALSO carries a `severity`:
 * `medium`; Useful sharpening; the answer would be substantially better with this change but the chatbot can still produce something reasonable without it.
 * `low`   ; Polish; nice-to-have, would unlock a slightly better answer.
 
-Each suggestion has TWO text fields:
+Each suggestion has THREE student-visible fields:
 
 * `text`        ; the headline; one short sentence in the second person ("you could...", "consider...") naming the concrete action. ≤ 25 words. This is what the student sees first; treat it as the actionable bottom line.
 * `explanation` ; one to two short sentences expanding on WHY this fix matters for THIS specific draft and what the student should think about when applying it. Reference details from the draft itself rather than restating the rubric. ≤ 50 words. The panel hides this behind a click-to-expand; the student opts into reading it when they want the longer reasoning.
+* `options`     ; an array of 3 to 4 plausible, MUTUALLY DISTINCT answers a student might pick to satisfy the suggestion. The frontend renders these as a dropdown next to the suggestion; the student picks one (or types their own via a "Custom" entry) and that selection is what the rewrite step weaves into the revised prompt. Each option must be a SHORT, CONCRETE, FILL-IN-THE-BLANK answer the student could actually mean (≤ 12 words; written first-person where natural; complete enough to drop into the rewrite). Cover materially different intents (do not give four near-paraphrases of the same answer) so the dropdown is a real choice. Never include "Other" / "Custom" / "I don't know"; the frontend handles those itself. If the suggestion is genuinely a clarification question (e.g. "what do you mean by 'live on'?"), the options ARE the candidate clarifications. If the suggestion asks the student to add information they alone know (e.g. "what version are you using?"), the options are the most-likely-from-context candidates plus a placeholder phrasing they could edit.
 
 Hard rules:
 * Do NOT answer the prompt. Do NOT critique the chatbot's reply. Your only output is suggestions about the prompt itself.
@@ -141,7 +156,7 @@ NEVER suggest these to a beginner:
 * `constraints`; specifying versions, tools, frameworks is jargon-heavy.
 * `rationale`; don't ask them to articulate why they want to know something simple.
 
-When you DO suggest, only pick `clarity` or `instruction`, severity `high` (since by definition you're only firing when the prompt is genuinely too vague to act on). Write `text` warmly and give the student a verbatim-fillable example. Write `explanation` as a single warm sentence telling the student why a few extra words helps the chatbot help them; never a lecture.
+When you DO suggest, only pick `clarity` or `instruction`, severity `high` (since by definition you're only firing when the prompt is genuinely too vague to act on). Write `text` warmly and give the student a verbatim-fillable example. Write `explanation` as a single warm sentence telling the student why a few extra words helps the chatbot help them; never a lecture. For `options`, give 3-4 short warm answers a beginner could realistically mean; first-person ("I want to..."), no jargon, the kind of thing the student would actually say if asked.
 
 Examples that should return []:
 - "How does recursion work?"
@@ -151,8 +166,8 @@ Examples that should return []:
 - "I'm stuck on the sorting assignment"
 
 Examples that warrant ONE suggestion:
-- "this" -> [{kind: "clarity", severity: "high", text: "Could you describe what 'this' refers to? For example: 'this code I just wrote' or 'the topic from the last lecture'.", explanation: "On its own 'this' could mean a dozen things and the chatbot would have to guess. A handful of extra words and it can answer your real question instead."}]
-- "help" -> [{kind: "instruction", severity: "high", text: "What part are you stuck on? Even a few words helps; like 'I don't get how loops work' or 'my code throws an error'.", explanation: "The clearer the symptom you describe, the faster the chatbot can zero in. Naming the topic or pasting the error is usually enough."}]"#;
+- "this" -> [{kind: "clarity", severity: "high", text: "Could you describe what 'this' refers to? For example: 'this code I just wrote' or 'the topic from the last lecture'.", explanation: "On its own 'this' could mean a dozen things and the chatbot would have to guess. A handful of extra words and it can answer your real question instead.", options: ["the code I just wrote", "the topic from the last lecture", "the error message I'm getting", "the assignment description"]}]
+- "help" -> [{kind: "instruction", severity: "high", text: "What part are you stuck on? Even a few words helps; like 'I don't get how loops work' or 'my code throws an error'.", explanation: "The clearer the symptom you describe, the faster the chatbot can zero in. Naming the topic or pasting the error is usually enough.", options: ["my code throws an error I don't understand", "I don't know where to start", "I don't get the underlying concept yet", "my output isn't what I expected"]}]"#;
 
 const AEGIS_EXPERT_ADDENDUM: &str = r#"
 
@@ -170,7 +185,7 @@ Hold the bar peer-to-peer high. Use the full literature rubric:
 * `examples` (severity: low-medium); one or two examples (of what they've tried, of similar problems) sharpen the response.
 * `constraints` (severity: medium-high); explicit version / tool / scope / "without using X" / word limit.
 
-When you DO suggest something, write `text` directly and tersely; terminology IS expected here. Don't soften with "you could maybe" or "perhaps consider". Use the imperative or near-imperative ("Name the specific X.", "Add what you tried.", "Specify which Y."). Write `explanation` as one or two compact sentences naming the failure mode the fix avoids; assume domain literacy, skip the prompt-engineering theory.
+When you DO suggest something, write `text` directly and tersely; terminology IS expected here. Don't soften with "you could maybe" or "perhaps consider". Use the imperative or near-imperative ("Name the specific X.", "Add what you tried.", "Specify which Y."). Write `explanation` as one or two compact sentences naming the failure mode the fix avoids; assume domain literacy, skip the prompt-engineering theory. For `options`, give 3-4 terse, technically precise candidate answers that exhaust the most plausible peer-level intents; written like a peer would say it, jargon allowed, ≤ 12 words each. The student should be able to pick one and have it slot directly into the rewrite without softening.
 
 You may produce up to TWO suggestions, but the cap is a ceiling not a target. Two is appropriate when there are two genuinely independent gaps worth surfacing; if one fix would carry the most weight and a second feels like a stretch, return just the one.
 
@@ -178,8 +193,8 @@ Examples that should return [] (rare):
 - "Why does Python's GIL prevent CPU-bound multithreading from scaling, and how does multiprocessing sidestep it for tasks that release the GIL inside C extensions?"
 
 Examples that warrant suggestions:
-- "How to make Python faster?" -> [{kind: "rationale", severity: "high", text: "Name what's slow and how you measured it. CPU-bound vs I/O-bound has completely different fixes.", explanation: "Without the bottleneck named, any answer is a guess across vectorisation, multiprocessing, JIT, and I/O batching. A single profiler line collapses the search space."}, {kind: "constraints", severity: "medium", text: "Pin the Python version; 3.11+ has substantial perf changes that change the right answer.", explanation: "The 3.11 specialising adaptive interpreter and 3.12 PEP 703 work shift which optimisations matter; advice that lands for 3.9 can be irrelevant on 3.12."}]
-- "Tell me about decorators" -> [{kind: "audience", severity: "medium", text: "Say what you already know about decorators; syntax-level vs semantics vs typical use cases dictate a very different answer.", explanation: "An answer aimed at someone who has never seen `@functools.wraps` looks completely unlike one aimed at someone implementing parameterised class decorators. Flagging your level avoids the wrong target."}]"#;
+- "How to make Python faster?" -> [{kind: "rationale", severity: "high", text: "Name what's slow and how you measured it. CPU-bound vs I/O-bound has completely different fixes.", explanation: "Without the bottleneck named, any answer is a guess across vectorisation, multiprocessing, JIT, and I/O batching. A single profiler line collapses the search space.", options: ["a hot loop dominating cProfile output", "I/O-bound network calls in a tight loop", "memory pressure / GC stalls under load", "startup time / cold imports"]}, {kind: "constraints", severity: "medium", text: "Pin the Python version; 3.11+ has substantial perf changes that change the right answer.", explanation: "The 3.11 specialising adaptive interpreter and 3.12 PEP 703 work shift which optimisations matter; advice that lands for 3.9 can be irrelevant on 3.12.", options: ["CPython 3.12", "CPython 3.11", "CPython 3.10 or earlier", "PyPy"]}]
+- "Tell me about decorators" -> [{kind: "audience", severity: "medium", text: "Say what you already know about decorators; syntax-level vs semantics vs typical use cases dictate a very different answer.", explanation: "An answer aimed at someone who has never seen `@functools.wraps` looks completely unlike one aimed at someone implementing parameterised class decorators. Flagging your level avoids the wrong target.", options: ["never used them, just heard the name", "I use `@staticmethod` / `@property` but not custom ones", "I write basic decorators with `functools.wraps`", "I write parameterised / class decorators"]}]"#;
 
 const AEGIS_OUTPUT_FOOTER: &str = r#"
 
@@ -238,6 +253,25 @@ pub struct AegisSuggestion {
     /// pre-date this field.
     #[serde(default)]
     pub explanation: String,
+    /// 3-4 plausible answers the student might pick to satisfy
+    /// the suggestion. The frontend renders these as a dropdown
+    /// next to the suggestion (plus an "Other..." entry that opens
+    /// a free-text input); the chosen value rides into `answer`
+    /// when the rewrite call fires. Defaults to empty for old
+    /// persisted rows that pre-date this field; the frontend
+    /// renders the free-text input only in that case so historical
+    /// suggestions stay reviewable.
+    #[serde(default)]
+    pub options: Vec<String>,
+    /// The student's chosen answer for this suggestion, populated
+    /// by the rewrite request body (the analyzer never sets this).
+    /// `Option<String>` not `String` so the round-trip from analyzer
+    /// JSON skips the field cleanly; serialised to the rewrite
+    /// model's user payload so it can weave the answer in verbatim.
+    /// Skipped on serialisation when None so the analyzer's
+    /// schema-strict request body never sees a stray null.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
 }
 
 /// Result of one analyzer run. Empty `suggestions` means the
@@ -352,7 +386,13 @@ pub async fn analyze_prompt(
                             "items": {
                                 "type": "object",
                                 "additionalProperties": false,
-                                "required": ["kind", "severity", "text", "explanation"],
+                                "required": [
+                                    "kind",
+                                    "severity",
+                                    "text",
+                                    "explanation",
+                                    "options",
+                                ],
                                 "properties": {
                                     "kind": {
                                         "type": "string",
@@ -372,7 +412,24 @@ pub async fn analyze_prompt(
                                         "enum": ["high", "medium", "low"]
                                     },
                                     "text": { "type": "string" },
-                                    "explanation": { "type": "string" }
+                                    "explanation": { "type": "string" },
+                                    // 3-4 short candidate answers the
+                                    // frontend renders as a dropdown.
+                                    // Cerebras strict-mode rejects
+                                    // `minItems`/`maxItems` (see the
+                                    // long comment above on the
+                                    // suggestions array cap), so the
+                                    // 3-4 ceiling is enforced by the
+                                    // system prompt. The frontend
+                                    // also tolerates an empty array
+                                    // (only the "Other..." text input
+                                    // shows in that case) so a model
+                                    // that returns 0 still degrades
+                                    // gracefully rather than blocking.
+                                    "options": {
+                                        "type": "array",
+                                        "items": { "type": "string" }
+                                    }
                                 }
                             }
                         }
@@ -434,13 +491,20 @@ pub async fn analyze_prompt(
 // upstream failure the route returns 500 and the frontend keeps
 // the student's original draft.
 
-const AEGIS_REWRITE_SYSTEM_PROMPT: &str = r#"You are Aegis, the prompt-coaching assistant. The student has a draft prompt and selected a subset of the suggestions you previously produced for it. Your job now is to rewrite the draft so it incorporates EVERY suggestion in the list you are given (and only those), then return the rewritten prompt.
+const AEGIS_REWRITE_SYSTEM_PROMPT: &str = r#"You are Aegis, the prompt-coaching assistant. The student has a draft prompt and, for each suggestion you previously produced, picked an `answer` from the dropdown the frontend showed (or typed their own answer in the "Other..." field). Your job now is to rewrite the draft so it incorporates EVERY suggestion in the list you are given (and only those), using the student's `answer` for each as the actual content to weave in.
 
-Each suggestion in the input has a `text` (the headline action) and an `explanation` (the longer reasoning the student saw on click-to-expand). Use both when shaping the rewrite: the `text` tells you WHAT to weave in, the `explanation` clarifies the intent so you don't misread the headline.
+Each suggestion in the input has:
+* `text`         ; the headline action (what to weave in).
+* `explanation`  ; the longer reasoning the student saw on click-to-expand. Background only; do NOT quote it back into the rewrite.
+* `options`      ; the dropdown's candidate answers as you originally produced them. Background only; the student already picked.
+* `answer`       ; the answer the student CHOSE for this suggestion. THIS is the content you fold into the rewrite. If `answer` is missing or empty (rare; older clients), fall back to a tasteful placeholder phrasing as before.
+
+Treat `answer` as the source of truth for the suggestion's content. If the suggestion was "specify what you mean by 'live on'" and `answer` is "live permanently as a colony", the rewrite should literally say "permanently as a colony" (or natural-language equivalent) where the original said "live on"; not "specify what you mean by living on Mars".
 
 Hard rules:
 * Preserve the student's voice, intent, scope, level of formality, and what they actually want to know. You are revising their draft, not replacing it with your own question.
-* Do NOT add information that is not implied by the original draft + the suggestions. If a suggestion says "name the version", do not invent which version they mean; write a placeholder like "(I'm using Python 3.X)" so they can edit, OR rewrite as "(specify which Python version you're using)".
+* Use each suggestion's `answer` verbatim where it slots in cleanly, or paraphrased only as much as grammar / flow requires. Never replace an answer with a placeholder when an answer was provided.
+* Do NOT add information that is not in the original draft + the answers. If `answer` is missing for a suggestion (older client), write a placeholder like "(I'm using Python 3.X)" so the student can fill it in; otherwise fold the answer in directly.
 * Only fold in the suggestions in the list. Suggestions that were produced earlier but are NOT in the list are ones the student deliberately skipped; ignore them.
 * Do NOT answer the question. The output is a PROMPT the student will then send to the chatbot, not an answer to the prompt.
 * Do NOT include preamble, headings, "Here is the rewrite:", quote marks, or any wrapping. Output is the prompt and only the prompt, ready to drop into the chat input.
@@ -483,15 +547,28 @@ pub async fn rewrite_prompt(
     let system_prompt = format!("{}{}", AEGIS_REWRITE_SYSTEM_PROMPT, mode.addendum(),);
 
     // Hand the model the original + suggestions in a structured
-    // user payload so it can't confuse one for the other.
+    // user payload so it can't confuse one for the other. Each
+    // suggestion's `answer` (the student's dropdown selection)
+    // serialises in via `AegisSuggestion`'s serde derive; missing
+    // answers serialise out as absent fields (Option<String> +
+    // skip_serializing_if), which the system prompt handles via
+    // its placeholder rule.
     let user_payload = serde_json::json!({
         "original_draft": original,
         "suggestions": suggestions,
     });
 
+    // gpt-oss-120b here, not the analyzer's llama. The rewrite is
+    // student-facing prose where quality matters; gpt-oss has the
+    // headroom to actually weave selected answers into a clean
+    // revision, where llama tended to hedge with placeholder
+    // phrasing. `reasoning_effort: "low"` mirrors extraction_guard's
+    // rewrite path; gpt-oss accepts it (llama does not) and keeps
+    // latency in the ~1s range we want for the Preview round-trip.
     let body = serde_json::json!({
-        "model": AEGIS_MODEL,
+        "model": AEGIS_REWRITE_MODEL,
         "temperature": 0.2,
+        "reasoning_effort": "low",
         "max_completion_tokens": AEGIS_REWRITE_MAX_TOKENS,
         "messages": [
             { "role": "system", "content": system_prompt },
@@ -513,7 +590,7 @@ pub async fn rewrite_prompt(
             return Err(format!("cerebras response not JSON: {e}"));
         }
     };
-    record_cerebras_usage(db, course_id, CATEGORY_AEGIS, AEGIS_MODEL, &payload).await;
+    record_cerebras_usage(db, course_id, CATEGORY_AEGIS, AEGIS_REWRITE_MODEL, &payload).await;
 
     let rewritten = payload["choices"][0]["message"]["content"]
         .as_str()

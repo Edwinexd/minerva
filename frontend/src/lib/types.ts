@@ -290,6 +290,23 @@ export interface AegisSuggestion {
    * landed deserialise without it.
    */
   explanation?: string
+  /**
+   * 3-4 candidate dropdown answers the analyzer produced. The
+   * Review tray renders these as a `<Select>` (plus a trailing
+   * "Other..." entry that opens a free-text input); the student's
+   * pick rides into `answer` on the rewrite request. Optional and
+   * defaults to empty for persisted rows from before the field
+   * landed; the tray shows only the free-text input in that case
+   * so historical suggestions stay reviewable.
+   */
+  options?: string[]
+  /**
+   * The student's chosen answer for this suggestion, set only on
+   * the rewrite request body (the analyzer never returns it). The
+   * banner tracks a per-suggestion answer in component state and
+   * stamps it onto each suggestion when it calls `/aegis/rewrite`.
+   */
+  answer?: string
 }
 
 export interface ConversationFlag {

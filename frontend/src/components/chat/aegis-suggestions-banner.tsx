@@ -44,9 +44,26 @@ import { ChevronDown, Wand2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { AegisShieldFilled } from "@/components/icons/aegis-shield-filled"
 import { cn } from "@/lib/utils"
 import type { AegisSuggestion } from "@/lib/types"
+
+// Sentinel SelectItem `value` that means "the student wants to type
+// a custom answer instead of picking from the dropdown". We store
+// the actual answer in component state alongside; the Select's
+// `value` prop only echoes this sentinel back so the trigger row
+// labels itself "Other..." while the free-text input is on screen.
+// Picked over an empty string because BaseUI's Select treats `""` as
+// "no selection" and would visually clear the dropdown.
+const CUSTOM_ANSWER_SENTINEL = "__aegis_custom__"
 
 interface AegisSuggestionsBannerProps {
   /**
@@ -61,11 +78,14 @@ interface AegisSuggestionsBannerProps {
   working: boolean
   /**
    * Ask the parent to call the rewrite endpoint with the chosen
-   * subset. Resolves to the rewritten draft text, or null on
+   * subset. Each suggestion is shipped with its `answer` field
+   * already stamped from the dropdown selection (or the "Other..."
+   * free-text input); the rewrite system prompt expects that field
+   * present. Resolves to the rewritten draft text, or null on
    * failure (parent decides how to surface that; we just clear
    * any stale preview).
    */
-  onPreview: (selected: AegisSuggestion[]) => Promise<string | null>
+  onPreview: (selectedWithAnswers: AegisSuggestion[]) => Promise<string | null>
   /**
    * Replace the chat input with `rewritten`. Does NOT trigger a
    * Send; the student presses Send themselves on the next pass.
@@ -96,6 +116,22 @@ export function AegisSuggestionsBanner({
   )
   const [preview, setPreview] = useState<string | null>(null)
 
+  // Per-suggestion answer state. Two parallel maps keyed by the
+  // suggestion's index in the current verdict:
+  //   * `answers` ; the actual answer the student picked or typed,
+  //     trimmed at preview time. Empty / missing means "no answer
+  //     yet"; the Preview button stays disabled until every
+  //     CHECKED suggestion has one.
+  //   * `customMode` ; whether the student picked the "Other..."
+  //     entry from the dropdown. When true the row swaps the
+  //     dropdown's regular options for a free-text Input, and the
+  //     dropdown trigger labels itself "Other...". We track this
+  //     separately from `answers` because the same string could
+  //     legitimately be one of the dropdown options OR a custom
+  //     entry; the toggle disambiguates.
+  const [answers, setAnswers] = useState<Record<number, string>>({})
+  const [customMode, setCustomMode] = useState<Set<number>>(() => new Set())
+
   // When the suggestions array identity changes, re-init the
   // selection (default all checked) and drop any preview. We use
   // a stable JSON key over kind+text so flipping selections inside
@@ -108,6 +144,8 @@ export function AegisSuggestionsBanner({
   )
   useEffect(() => {
     setSelected(new Set(suggestions.map((_, i) => i)))
+    setAnswers({})
+    setCustomMode(new Set())
     setPreview(null)
     setExpanded(false)
     // Re-run only on the structural signature, not on parent re-renders.
@@ -138,9 +176,67 @@ export function AegisSuggestionsBanner({
     setPreview(null)
   }
 
+  // Dropdown change. `value` is either one of the suggestion's
+  // options or the CUSTOM_ANSWER_SENTINEL. The latter flips the row
+  // into custom-text mode and clears any prior canned answer so the
+  // free-text input starts empty. Editing an answer also drops any
+  // stale preview, same logic as toggling the checkbox.
+  const setSelectAnswer = (i: number, value: string) => {
+    if (value === CUSTOM_ANSWER_SENTINEL) {
+      setCustomMode((prev) => {
+        const next = new Set(prev)
+        next.add(i)
+        return next
+      })
+      setAnswers((prev) => ({ ...prev, [i]: "" }))
+    } else {
+      setCustomMode((prev) => {
+        if (!prev.has(i)) return prev
+        const next = new Set(prev)
+        next.delete(i)
+        return next
+      })
+      setAnswers((prev) => ({ ...prev, [i]: value }))
+    }
+    setPreview(null)
+  }
+
+  // Free-text input change while the row is in custom-text mode.
+  // Just updates `answers[i]`; `customMode` stays true until the
+  // student picks a regular option from the dropdown.
+  const setCustomAnswer = (i: number, value: string) => {
+    setAnswers((prev) => ({ ...prev, [i]: value }))
+    setPreview(null)
+  }
+
+  // Preview is gated on EVERY checked suggestion having a non-empty
+  // answer. Without this the rewrite call would land for some
+  // suggestions with `answer: ""`, fall back to the system-prompt's
+  // placeholder branch, and produce exactly the "specify what you
+  // mean and explain..." filler the dropdowns are meant to replace.
+  const allCheckedAnswered = useMemo(() => {
+    for (const i of selected) {
+      const a = answers[i]?.trim() ?? ""
+      if (a.length === 0) return false
+    }
+    return true
+  }, [selected, answers])
+
   const handlePreviewClick = async () => {
-    if (working || selected.size === 0) return
-    const chosen = suggestions.filter((_, i) => selected.has(i))
+    if (working || selected.size === 0 || !allCheckedAnswered) return
+    // Stamp each checked suggestion with its answer (trimmed) before
+    // shipping. Order matches the original suggestion order so the
+    // model sees context-stable indices if it cares. Empty trimmed
+    // answers (shouldn't happen given the gate above; defensive)
+    // ship the suggestion without an `answer` field so the rewrite
+    // system prompt's placeholder branch fires for that one row
+    // instead of stamping `answer: ""`.
+    const chosen: AegisSuggestion[] = []
+    suggestions.forEach((s, i) => {
+      if (!selected.has(i)) return
+      const a = (answers[i] ?? "").trim()
+      chosen.push(a ? { ...s, answer: a } : s)
+    })
     const rewritten = await onPreview(chosen)
     setPreview(rewritten ?? null)
   }
@@ -216,6 +312,19 @@ export function AegisSuggestionsBanner({
                 defaultValue: s.kind,
               })
               const id = `aegis-suggestion-${i}`
+              const opts = s.options ?? []
+              const isChecked = selected.has(i)
+              const isCustom = customMode.has(i)
+              const currentAnswer = answers[i] ?? ""
+              // Dropdown current value:
+              //   * custom mode  ; the sentinel ("Other..." trigger label)
+              //   * picked one   ; the option string itself
+              //   * neither      ; undefined, so the placeholder shows
+              const selectValue = isCustom
+                ? CUSTOM_ANSWER_SENTINEL
+                : opts.includes(currentAnswer)
+                  ? currentAnswer
+                  : undefined
               return (
                 <li
                   key={`${i}-${s.kind}`}
@@ -223,28 +332,88 @@ export function AegisSuggestionsBanner({
                 >
                   <Checkbox
                     id={id}
-                    checked={selected.has(i)}
+                    checked={isChecked}
                     onCheckedChange={() => toggle(i)}
                     className="mt-0.5"
                     disabled={working}
                   />
-                  <label
-                    htmlFor={id}
-                    className="flex-1 min-w-0 cursor-pointer space-y-1"
-                  >
-                    <Badge
-                      variant="secondary"
-                      className="text-[10px] uppercase tracking-wide"
+                  <div className="flex-1 min-w-0 space-y-2">
+                    {/* Label + headline + explanation. The label
+                        targets the checkbox; clicking the headline
+                        text still toggles the suggestion. The
+                        dropdown / input below sit OUTSIDE the
+                        label so a click on them doesn't toggle
+                        the checkbox. */}
+                    <label
+                      htmlFor={id}
+                      className="block cursor-pointer space-y-1"
                     >
-                      {kindLabel}
-                    </Badge>
-                    <p className="text-sm leading-snug">{s.text}</p>
-                    {s.explanation && (
-                      <p className="text-xs leading-relaxed text-muted-foreground">
-                        {s.explanation}
-                      </p>
-                    )}
-                  </label>
+                      <Badge
+                        variant="secondary"
+                        className="text-[10px] uppercase tracking-wide"
+                      >
+                        {kindLabel}
+                      </Badge>
+                      <p className="text-sm leading-snug">{s.text}</p>
+                      {s.explanation && (
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                          {s.explanation}
+                        </p>
+                      )}
+                    </label>
+                    {/* Answer row. Disabled when the suggestion is
+                        unchecked (the rewrite won't fold it in
+                        anyway) or while a rewrite is in flight.
+                        Hidden entirely if the suggestion has zero
+                        options AND we're not in custom mode; the
+                        free-text fallback handles legacy persisted
+                        rows that pre-date the field. */}
+                    <div className="space-y-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t("aegis.banner.answerLabel")}
+                      </div>
+                      {opts.length > 0 ? (
+                        <Select
+                          value={selectValue}
+                          onValueChange={(v) =>
+                            v && setSelectAnswer(i, v as string)
+                          }
+                          disabled={working || !isChecked}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue
+                              placeholder={t(
+                                "aegis.banner.answerPlaceholder",
+                              )}
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {opts.map((opt, oi) => (
+                              <SelectItem key={oi} value={opt}>
+                                {opt}
+                              </SelectItem>
+                            ))}
+                            <SelectItem value={CUSTOM_ANSWER_SENTINEL}>
+                              {t("aegis.banner.customAnswer")}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : null}
+                      {(isCustom || opts.length === 0) && (
+                        <Input
+                          value={currentAnswer}
+                          onChange={(e) =>
+                            setCustomAnswer(i, e.target.value)
+                          }
+                          placeholder={t(
+                            "aegis.banner.customAnswerPlaceholder",
+                          )}
+                          disabled={working || !isChecked}
+                          aria-label={t("aegis.banner.answerLabel")}
+                        />
+                      )}
+                    </div>
+                  </div>
                 </li>
               )
             })}
@@ -280,29 +449,38 @@ export function AegisSuggestionsBanner({
               </div>
             </div>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="default"
-                onClick={handlePreviewClick}
-                disabled={working || selected.size === 0}
-                className="gap-1.5"
-              >
-                <Wand2 className="w-3.5 h-3.5" />
-                {working
-                  ? t("aegis.banner.working")
-                  : t("aegis.banner.preview")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => setExpanded(false)}
-                disabled={working}
-              >
-                {t("aegis.banner.cancel")}
-              </Button>
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="default"
+                  onClick={handlePreviewClick}
+                  disabled={
+                    working || selected.size === 0 || !allCheckedAnswered
+                  }
+                  className="gap-1.5"
+                >
+                  <Wand2 className="w-3.5 h-3.5" />
+                  {working
+                    ? t("aegis.banner.working")
+                    : t("aegis.banner.preview")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setExpanded(false)}
+                  disabled={working}
+                >
+                  {t("aegis.banner.cancel")}
+                </Button>
+              </div>
+              {!allCheckedAnswered && selected.size > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {t("aegis.banner.previewNeedsAnswers")}
+                </p>
+              )}
             </div>
           )}
         </div>

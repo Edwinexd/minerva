@@ -101,7 +101,12 @@
       "applyToDraft": "Använd i mitt utkast",
       "cancel": "Avbryt",
       "working": "Skriver om…",
-      "dismiss": "Avfärda"
+      "dismiss": "Avfärda",
+      "answerLabel": "Ditt svar",
+      "answerPlaceholder": "Välj ett alternativ…",
+      "customAnswer": "Annat / skriv eget…",
+      "customAnswerPlaceholder": "Skriv ditt svar…",
+      "previewNeedsAnswers": "Välj ett svar för varje idé innan du förhandsgranskar omskrivningen."
     },
     "intercept": {
       "title": "Aegis har ett par idéer först",

@@ -216,6 +216,25 @@ pub(crate) struct AegisSuggestionPayload {
     /// rows from before the field landed (they decode to "").
     #[serde(default)]
     pub explanation: String,
+    /// 3-4 dropdown options the analyzer produced. Frontend renders
+    /// these as a `<Select>` next to the suggestion (plus an
+    /// "Other..." entry that opens a free-text input); the chosen
+    /// value rides into `answer` on the rewrite request.
+    /// `#[serde(default)]` so persisted rows from before the field
+    /// landed deserialise with an empty vec; the frontend renders
+    /// only the free-text input in that case.
+    #[serde(default)]
+    pub options: Vec<String>,
+    /// On the rewrite request body: the student's chosen answer
+    /// for this suggestion (verbatim from the dropdown selection,
+    /// or whatever they typed in the "Other..." input). Absent on
+    /// analyzer responses and persisted rows; the rewrite system
+    /// prompt falls back to a placeholder when missing. Skipped
+    /// on serialisation when None so the analyzer-shape JSON we
+    /// echo back from `/aegis/analyze` doesn't include a stray
+    /// null field old clients won't recognise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
 }
 
 impl AegisAnalysisPayload {
@@ -235,6 +254,11 @@ impl AegisAnalysisPayload {
                     severity: s.severity,
                     text: s.text,
                     explanation: s.explanation,
+                    options: s.options,
+                    // The analyzer never produces `answer`; it's
+                    // populated only by the rewrite request body
+                    // when the student picks from the dropdown.
+                    answer: None,
                 })
                 .collect(),
             mode,
@@ -1157,7 +1181,11 @@ pub(crate) async fn rewrite_prompt_for_user(
     // Map wire-shape suggestions to the analyzer's internal struct
     // for the LLM call. The two structs are field-identical; the
     // explicit map keeps the layers decoupled in case one shape
-    // grows fields the other shouldn't see.
+    // grows fields the other shouldn't see. `answer` rides through
+    // here so the rewrite system prompt can weave the student's
+    // dropdown selection into the revised draft directly; an
+    // absent answer (older client) leaves the field None and the
+    // system prompt falls back to a placeholder phrasing.
     let analyzer_suggestions: Vec<crate::classification::aegis::AegisSuggestion> = suggestions
         .into_iter()
         .map(|s| crate::classification::aegis::AegisSuggestion {
@@ -1165,6 +1193,8 @@ pub(crate) async fn rewrite_prompt_for_user(
             severity: s.severity,
             text: s.text,
             explanation: s.explanation,
+            options: s.options,
+            answer: s.answer,
         })
         .collect();
 

@@ -719,6 +719,31 @@ function EmbedChatWindow({
               onDismiss={() => setBannerDismissedFor(input)}
             />
           )}
+          {aegisEnabled && !showBanner && (
+            // Persistent status row above the input, present whenever
+            // aegis is on and the suggestions banner isn't taking the
+            // slot. Three states (pending / clean verdict / idle) so
+            // the iframe student sees a clear "aegis is on" signal at
+            // all times, including before the analyzer has anything
+            // to say. See chat-page.tsx for the full rationale.
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+            >
+              <AegisShieldFilled
+                className={`w-4 h-4 shrink-0 ${liveAnalyzer.pending ? "animate-pulse" : ""}`}
+              />
+              <span>
+                {liveAnalyzer.pending
+                  ? tStudent("aegis.pendingTitle")
+                  : liveAnalyzer.analysis &&
+                      liveAnalyzer.analysis.suggestions.length === 0
+                    ? tStudent("aegis.looksGoodTitle")
+                    : tStudent("aegis.emptyTitle")}
+              </span>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="flex gap-2">
             <Input
               value={input}

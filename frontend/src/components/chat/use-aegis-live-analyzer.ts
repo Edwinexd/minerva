@@ -86,6 +86,19 @@ export function useAegisLiveAnalyzer(
   // re-render with the same `input` doesn't refire the analyzer.
   const lastAnalyzed = useRef<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Handle for the queued debounce timeout, so `analyzeNow` can cancel
+  // it before it fires. Without this, a setTimeout queued by typing
+  // would still fire ~1s later and abort an in-flight `analyzeNow`
+  // call (its first action is `abortRef.current?.abort()`), causing
+  // the just-in-time intercept on Send to return null and the message
+  // to slip through ungated.
+  const debounceHandleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // True while a Send-driven `analyzeNow` is awaiting its doFetch.
+  // The debounce setTimeout checks this and skips when set, so a
+  // *new* debounce fired by typing AFTER clicking Send (which the
+  // setTimeout-handle clear above can't reach) still can't abort
+  // the in-flight analyzeNow controller.
+  const analyzeNowInFlight = useRef(false)
 
   // Conversation switch (or initial mount with a different
   // resetKey) wipes everything: cached verdict, in-flight request,
@@ -94,6 +107,11 @@ export function useAegisLiveAnalyzer(
   useEffect(() => {
     abortRef.current?.abort()
     abortRef.current = null
+    if (debounceHandleRef.current) {
+      clearTimeout(debounceHandleRef.current)
+      debounceHandleRef.current = null
+    }
+    analyzeNowInFlight.current = false
     lastAnalyzed.current = null
     setAnalysis(null)
     setPending(false)
@@ -124,7 +142,14 @@ export function useAegisLiveAnalyzer(
 
     if (trimmed === lastAnalyzed.current) return
 
-    const handle = setTimeout(() => {
+    debounceHandleRef.current = setTimeout(() => {
+      debounceHandleRef.current = null
+      // If a Send-driven analyzeNow is currently awaiting, leave it
+      // alone; aborting its controller here is exactly the race
+      // that lets ungated messages through. The user pressed Send,
+      // analyzeNow is racing to deliver a verdict; the panel will
+      // pick up its result via setAnalysis.
+      if (analyzeNowInFlight.current) return
       // Fresh AbortController per fire; cancels whatever's still
       // in flight from the previous debounce tick.
       abortRef.current?.abort()
@@ -151,7 +176,10 @@ export function useAegisLiveAnalyzer(
     }, DEBOUNCE_MS)
 
     return () => {
-      clearTimeout(handle)
+      if (debounceHandleRef.current) {
+        clearTimeout(debounceHandleRef.current)
+        debounceHandleRef.current = null
+      }
     }
     // `analysis` deliberately omitted; the effect's job is to
     // react to INPUT changes, not to its own setAnalysis writes.
@@ -187,11 +215,22 @@ export function useAegisLiveAnalyzer(
     if (!pending && trimmed === lastAnalyzed.current && analysis !== null) {
       return analysis
     }
+    // Cancel any queued debounce timeout BEFORE we install our own
+    // controller. Without this, a setTimeout the user's typing put
+    // on the queue would fire ~1s later, call abortRef.current?.abort()
+    // (which is now OUR controller), and short-circuit the doFetch
+    // below to a null verdict; exactly the race that lets a Send
+    // through ungated when feedback isn't ready yet.
+    if (debounceHandleRef.current) {
+      clearTimeout(debounceHandleRef.current)
+      debounceHandleRef.current = null
+    }
     // Otherwise fire fresh; abort any in-flight or pending call
     // first so this one wins the race.
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
+    analyzeNowInFlight.current = true
     setPending(true)
     try {
       const result = await doFetch(trimmed, controller.signal)
@@ -204,6 +243,7 @@ export function useAegisLiveAnalyzer(
       console.warn("aegis live analyzer (immediate):", e)
       return null
     } finally {
+      analyzeNowInFlight.current = false
       if (!controller.signal.aborted) setPending(false)
     }
   }

@@ -617,6 +617,38 @@ function ChatWindow({
               onDismiss={() => setBannerDismissedFor(input)}
             />
           )}
+          {aegisEnabled && !showBanner && (
+            // Persistent status row above the input, present whenever
+            // aegis is on for the course and the suggestions banner
+            // isn't taking the slot. Three states, mirroring the
+            // right-rail panel so a student with the panel hidden
+            // still has a clear "is aegis doing something?" signal:
+            //   * pending          ; "Reading your draft..." (pulse)
+            //   * verdict, empty   ; "Your draft looks good"
+            //   * idle / pre-draft ; "Start typing for suggestions"
+            // The pending branch covers BOTH the typing-debounce
+            // check AND the just-in-time analyzeNow intercept on
+            // Send, so the student never wonders "did my Send go
+            // through?" while the analyzer is still racing to
+            // deliver a verdict.
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+            >
+              <AegisShieldFilled
+                className={`w-4 h-4 shrink-0 ${liveAnalyzer.pending ? "animate-pulse" : ""}`}
+              />
+              <span>
+                {liveAnalyzer.pending
+                  ? t("aegis.pendingTitle")
+                  : liveAnalyzer.analysis &&
+                      liveAnalyzer.analysis.suggestions.length === 0
+                    ? t("aegis.looksGoodTitle")
+                    : t("aegis.emptyTitle")}
+              </span>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="flex gap-2">
             <Input
               value={input}

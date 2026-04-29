@@ -534,12 +534,25 @@ function ChatWindow({
    * input is still allowed to surface fresh suggestions if it
    * finds any; that's the right thing for genuinely new ideas, but
    * the same-text Send-as-is path is kept frictionless.
+   *
+   * `liveAnalyzer.reset()` here clears the cached old verdict so
+   * the banner doesn't briefly flash the previous draft's
+   * suggestions while the new analyze call is in flight (~400ms).
+   * Without it, showBanner would stay true on the rewritten input
+   * with stale `analysis.suggestions` until the new verdict lands;
+   * with it, the banner naturally hides during the wait and
+   * reappears (still expanded if the student had the tray open) if
+   * the new verdict has anything to say. This replaces the older
+   * `setBannerDismissedFor(rewritten)` belt-and-braces dismiss,
+   * which had the side-effect of suppressing the banner even when
+   * the new verdict had genuinely new suggestions; pilot users
+   * found that "auto-collapse on apply" confusing.
    */
   const handleApplyRewrite = (rewritten: string) => {
     if (!rewritten.trim()) return
     setInput(rewritten)
     setConfirmDraftSend(rewritten)
-    setBannerDismissedFor(rewritten)
+    liveAnalyzer.reset()
   }
 
   const bubbleLabels: ChatBubbleLabels = {

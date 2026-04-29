@@ -147,7 +147,14 @@ export function AegisSuggestionsBanner({
     setAnswers({})
     setCustomMode(new Set())
     setPreview(null)
-    setExpanded(false)
+    // `expanded` is deliberately NOT reset here. If the student
+    // already had the tray open and a new verdict lands (e.g. they
+    // applied a rewrite, the input changed, and aegis returned a
+    // fresh set of suggestions), keeping the tray expanded lets
+    // them iterate without re-clicking Review every cycle. Fresh
+    // banner mounts still start collapsed via useState's initial
+    // value; this only protects an already-open tray from snapping
+    // shut on every analyzer turn.
     // Re-run only on the structural signature, not on parent re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sigKey])
@@ -244,10 +251,12 @@ export function AegisSuggestionsBanner({
   const handleApplyClick = () => {
     if (!preview) return
     onApply(preview)
-    // Parent will hide / replace the banner naturally on the
-    // next render; collapse here so the tray doesn't flash open
-    // for the rewritten input's own (likely empty) verdict.
-    setExpanded(false)
+    // Drop the preview so the tray returns to the dropdown view
+    // for the next cycle. We deliberately leave `expanded` alone:
+    // the parent's onApply resets the analyzer cache so the banner
+    // naturally hides until the next verdict lands, at which point
+    // the still-expanded tray surfaces the new suggestions in the
+    // same shape the student already had open.
     setPreview(null)
   }
 

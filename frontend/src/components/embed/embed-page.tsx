@@ -661,7 +661,14 @@ function EmbedChatWindow({
     if (!rewritten.trim()) return
     setInput(rewritten)
     setConfirmDraftSend(rewritten)
-    setBannerDismissedFor(rewritten)
+    // Drop the cached old verdict so the banner hides naturally
+    // during the ~400ms wait for the rewritten input's own analyze
+    // call rather than briefly flashing the previous draft's
+    // suggestions. Replaces the older `setBannerDismissedFor` call
+    // here which suppressed the banner past apply even when the
+    // new verdict had genuinely new ideas; see the chat-page
+    // counterpart for the full rationale.
+    liveAnalyzer.reset()
   }
 
   const bubbleLabels: ChatBubbleLabels = {

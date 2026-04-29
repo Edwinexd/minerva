@@ -425,7 +425,11 @@ function EmbedChatWindow({
     input,
     aegisEnabled,
     fetchLiveAnalysis,
-    `${courseId}:${conversationId ?? "new"}`,
+    // Mode is in the resetKey so toggling Beginner/Expert wipes
+    // the cached verdict; otherwise the analyzer's draft-match
+    // short-circuit would serve the previous mode's result. See
+    // the chat-page comment for the full rationale.
+    `${courseId}:${conversationId ?? "new"}:${aegisMode}`,
   )
 
   // Load messages when conversation changes. When conversationId is null,

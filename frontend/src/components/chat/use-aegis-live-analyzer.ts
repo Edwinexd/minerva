@@ -20,18 +20,20 @@
  * Cost shaping:
  *   * `DEBOUNCE_MS`; pause length before we hit the analyzer.
  *     Too short and a steady typer burns LLM calls per word; too
- *     long and the panel feels stuck. 1s sits in the sweet spot
- *     against typical SU keyboard cadence.
+ *     long and the panel feels stuck. 400ms is short enough that
+ *     a student who finishes their thought sees feedback almost
+ *     immediately, but long enough to coalesce intra-word pauses
+ *     so we don't fire mid-sentence.
  *   * `MIN_LENGTH`; inputs shorter than this are too tiny to score
  *     meaningfully. The analyzer would just say "missing constraints"
  *     for every two-word query, which is noise.
- *   * Skip when content is unchanged from the last analyzed value --
+ *   * Skip when content is unchanged from the last analyzed value;
  *     a render that doesn't actually edit the input shouldn't refire.
  */
 import { useEffect, useRef, useState } from "react"
 import type { PromptAnalysis } from "@/lib/types"
 
-const DEBOUNCE_MS = 1000
+const DEBOUNCE_MS = 400
 const MIN_LENGTH = 8
 
 export interface AegisLiveAnalyzerState {

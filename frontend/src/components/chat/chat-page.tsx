@@ -266,10 +266,15 @@ function ChatWindow({
     input,
     aegisEnabled,
     fetchLiveAnalysis,
-    // resetKey: conversation switches AND course changes both
-    // wipe the cached verdict. Concatenated so distinct courses
-    // can't ever share a cached verdict.
-    `${courseId}:${conversationId ?? "new"}`,
+    // resetKey: conversation switches, course changes, AND mode
+    // toggles all wipe the cached verdict. Mode is in the key
+    // because the analyzer's `lastAnalyzed`/`analysis` short-circuit
+    // would otherwise serve a Beginner verdict to a student who
+    // just toggled to Expert (same draft text, cached result), and
+    // the just-in-time analyzeNow on Send would do the same. Bumping
+    // resetKey on mode change forces a fresh analyze with the new
+    // calibration.
+    `${courseId}:${conversationId ?? "new"}:${aegisMode}`,
   )
 
   // Index notes by message_id for inline display

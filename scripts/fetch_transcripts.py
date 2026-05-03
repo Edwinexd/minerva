@@ -14,7 +14,7 @@ import sys
 from urllib.parse import parse_qs, urlparse
 
 import requests
-from dsv_wrapper import PlayClient
+from dsv_wrapper import PlayClient, TranscriptNotReadyError
 
 PLAY_PRESENTATION_URL = "https://play.dsv.su.se/presentation/{id}"
 
@@ -204,14 +204,14 @@ def fetch_pending_transcripts(
 
         try:
             transcript = client.get_transcript_text(presentation_id)
+        except TranscriptNotReadyError as e:
+            # Recording exists but video encoding and/or auto-captioning
+            # hasn't finished yet. Leave the doc in awaiting_transcript so
+            # the next hourly run retries once Play finishes processing.
+            print(f"  [{filename}] Not ready yet, will retry next run: {e}")
+            continue
         except Exception as e:
             error_msg = str(e)
-            # "has no subtitles" is transient: DSV Play often auto-captions
-            # within a day or two of upload. Leave in awaiting_transcript
-            # so the next hourly run retries.
-            if "has no subtitles" in error_msg:
-                print(f"  [{filename}] No subtitles yet, will retry next run.")
-                continue
             print(f"  [{filename}] Failed: {error_msg}")
             resp = requests.post(
                 f"{api_url}/api/service/documents/{doc_id}/transcript",

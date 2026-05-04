@@ -14,7 +14,7 @@ import sys
 from urllib.parse import parse_qs, urlparse
 
 import requests
-from dsv_wrapper import PlayClient, TranscriptNotReadyError
+from dsv_wrapper import PlayClient, PresentationNotReadyError
 
 PLAY_PRESENTATION_URL = "https://play.dsv.su.se/presentation/{id}"
 
@@ -204,10 +204,13 @@ def fetch_pending_transcripts(
 
         try:
             transcript = client.get_transcript_text(presentation_id)
-        except TranscriptNotReadyError as e:
-            # Recording exists but video encoding and/or auto-captioning
-            # hasn't finished yet. Leave the doc in awaiting_transcript so
-            # the next hourly run retries once Play finishes processing.
+        except PresentationNotReadyError as e:
+            # Either the recording itself is still being processed (non-dict
+            # /presentation/{uuid} envelope) or the video is ready but
+            # captions haven't been generated yet. Both are transient; leave
+            # the doc in awaiting_transcript so the next hourly run retries
+            # once Play finishes processing. PresentationNotReadyError is
+            # the parent of TranscriptNotReadyError, so it covers both.
             print(f"  [{filename}] Not ready yet, will retry next run: {e}")
             continue
         except Exception as e:

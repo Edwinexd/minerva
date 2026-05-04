@@ -54,7 +54,7 @@
     }
   },
   "aegis": {
-    "panelTitle": "Feedback",
+    "panelTitle": "History",
     "modeBeginner": "Beginner",
     "modeExpert": "Expert",
     "modeToggleHint": "How well do you know this subject? Beginner: Aegis goes lenient on jargon and context. Expert: Aegis expects precise terms, named constraints, and what you've already tried. Click to toggle.",
@@ -64,12 +64,8 @@
     "showPanelButton": "Aegis",
     "sendAsIs": "Send as-is",
     "emptyTitle": "Start typing for suggestions",
-    "emptyBody": "As you draft a prompt, Aegis offers ideas for how it could be sharper. Feedback is advisory and never blocks your message.",
     "pendingTitle": "Reading your draft…",
-    "pendingBody": "Aegis is checking your draft for ideas. Suggestions appear a moment after you stop typing; you can send at any time.",
     "looksGoodTitle": "Your draft looks good",
-    "looksGoodBody": "Aegis didn't find anything obvious to suggest. Send when you're ready.",
-    "suggestionsHeader": "Ideas for your draft",
     "suggestionExpandHint": "Show why this matters",
     "suggestionCollapseHint": "Hide the explanation",
     "historyHeader": "History",
@@ -77,6 +73,8 @@
     "historyYesterday": "Yesterday",
     "historyLooksGood": "Sent without suggestions.",
     "historyLooksGoodTag": "ok",
+    "historyEmptyTitle": "No history yet",
+    "historyEmptyBody": "Once you send a prompt, the suggestions Aegis showed for it will appear here so you can look back at them.",
     "kinds": {
       "clarity": "clarity",
       "rationale": "rationale",

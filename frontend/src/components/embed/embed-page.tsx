@@ -815,8 +815,6 @@ function EmbedChatWindow({
           >
             <AegisFeedbackPanel
               analyses={promptAnalyses}
-              latest={liveAnalyzer.analysis}
-              pending={liveAnalyzer.pending}
               onHide={() => setPanelVisible(false)}
             />
           </aside>

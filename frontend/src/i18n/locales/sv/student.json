@@ -54,7 +54,7 @@
     }
   },
   "aegis": {
-    "panelTitle": "Återkoppling",
+    "panelTitle": "Historik",
     "modeBeginner": "Nybörjare",
     "modeExpert": "Expert",
     "modeToggleHint": "Hur väl kan du ämnet? Nybörjare: Aegis är generös med jargong och kontext. Expert: Aegis förväntar sig precisa termer, uttalade ramar och vad du har provat. Klicka för att växla.",
@@ -64,12 +64,8 @@
     "showPanelButton": "Aegis",
     "sendAsIs": "Skicka som det är",
     "emptyTitle": "Börja skriva för förslag",
-    "emptyBody": "Medan du skriver en prompt ger Aegis idéer för hur den kan bli skarpare. Återkopplingen är rådgivande och blockerar aldrig ditt meddelande.",
     "pendingTitle": "Läser ditt utkast…",
-    "pendingBody": "Aegis kollar ditt utkast efter idéer. Förslag dyker upp strax efter att du slutat skriva; du kan skicka när som helst.",
     "looksGoodTitle": "Ditt utkast ser bra ut",
-    "looksGoodBody": "Aegis hittade inget uppenbart att föreslå. Skicka när du är redo.",
-    "suggestionsHeader": "Idéer för ditt utkast",
     "suggestionExpandHint": "Visa varför det här spelar roll",
     "suggestionCollapseHint": "Dölj förklaringen",
     "historyHeader": "Historik",
@@ -77,6 +73,8 @@
     "historyYesterday": "Igår",
     "historyLooksGood": "Skickad utan förslag.",
     "historyLooksGoodTag": "ok",
+    "historyEmptyTitle": "Ingen historik än",
+    "historyEmptyBody": "När du skickar en prompt dyker förslagen Aegis visade för den upp här så du kan gå tillbaka till dem.",
     "kinds": {
       "clarity": "tydlighet",
       "rationale": "syfte",

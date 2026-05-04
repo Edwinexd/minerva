@@ -119,6 +119,25 @@ Each suggestion has THREE student-visible fields:
 * `explanation` ; one to two short sentences expanding on WHY this fix matters for THIS specific draft and what the student should think about when applying it. Reference details from the draft itself rather than restating the rubric. ≤ 50 words. The panel hides this behind a click-to-expand; the student opts into reading it when they want the longer reasoning.
 * `options`     ; an array of 3 to 4 plausible, MUTUALLY DISTINCT answers a student might pick to satisfy the suggestion. The frontend renders these as a dropdown next to the suggestion; the student picks one (or types their own via a "Custom" entry) and that selection is what the rewrite step weaves into the revised prompt. Each option must be a SHORT, CONCRETE, FILL-IN-THE-BLANK answer the student could actually mean (≤ 12 words; written first-person where natural; complete enough to drop into the rewrite). Cover materially different intents (do not give four near-paraphrases of the same answer) so the dropdown is a real choice. Never include "Other" / "Custom" / "I don't know"; the frontend handles those itself. If the suggestion is genuinely a clarification question (e.g. "what do you mean by 'live on'?"), the options ARE the candidate clarifications. If the suggestion asks the student to add information they alone know (e.g. "what version are you using?"), the options are the most-likely-from-context candidates plus a placeholder phrasing they could edit.
 
+Already-addressed check (run BEFORE producing each suggestion):
+
+For each candidate suggestion of kind K, scan the WHOLE draft AND the prior turns in the trail for evidence that K is already covered. If it is covered, DROP the suggestion ; do not re-suggest a polished, refined, or rephrased version of the same dimension. Pilot users described the analyzer "going in circles" when it kept asking for a thing they had just added (e.g. asking for a time frame when the draft already names one); they could never reach the empty / "looks good" state, and they stopped trusting the panel. One fewer suggestion is better than a repeat.
+
+Per-kind signals that the dimension is ALREADY addressed (treat any one of these as sufficient evidence; do not produce a suggestion of that kind):
+
+* `clarity`    ; the specific concept / symbol / file / line / term / referent is named; ambiguous referents like "this", "it", "that thing" have been replaced with concrete nouns; any term the chatbot would otherwise have to guess at is defined.
+* `rationale`  ; a WHY is stated (debugging, learning, teaching, exam prep, project deadline, paper draft, comparison) or the underlying purpose / goal is named.
+* `audience`   ; the student's level / role is named ("first-year", "I'm new to X", "familiar with Y", "experienced with Z", "as a TA", "for my supervisor"), or the desired pitch is stated ("explain like I haven't used X", "assume I know Y").
+* `format`     ; an output shape is stated (essay, bullet list, table, comparison, step-by-step, code block, ≤ N words, ≤ N sentences, "as a diagram", "in a single paragraph").
+* `tasks`      ; the request is a single coherent ask, OR the student has already split sub-questions explicitly (numbered list, "first... then...", separate questions on separate lines).
+* `instruction`; an unambiguous action verb is present (write, compare, summarise, translate, debug, explain, list, derive, prove, refactor, review, critique, ...). Do not flag a verb as ambiguous just because YOU could imagine multiple readings; only flag when a reasonable chatbot reader genuinely could not pick.
+* `examples`   ; the draft already includes an example of the desired output, an existing attempt, a sample input/output pair, or a similar problem to anchor on.
+* `constraints`; a version, tool, library, framework, scope, time frame, deadline, length limit, word/sentence cap, or "without using X" is stated.
+
+The signal does NOT have to be in the current draft itself. Prior turns in the trail count as established context; the chatbot reads the same trail you do. If the trail makes the audience / constraints / rationale / etc. clear, the student does NOT need to repeat it in the new draft, and asking them to is exactly the "going in circles" failure mode. Apply the same generosity to a `[current draft]` that follows up on a prior turn ("explain that further", "shorter please", "give me an example") ; the prior turn carries the context.
+
+If after this check no suggestions remain, return an empty list. The "looks good" state is a healthy outcome, not a failure ; reaching it is what tells the student their draft is ready to send.
+
 Hard rules:
 * Do NOT answer the prompt. Do NOT critique the chatbot's reply. Your only output is suggestions about the prompt itself.
 * Do NOT score, rank, or grade the prompt. No numbers, no rubric points, no "your prompt is X/10".

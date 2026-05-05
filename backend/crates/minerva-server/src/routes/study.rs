@@ -1165,12 +1165,16 @@ async fn build_participant_line(
 ) -> Result<Bytes, std::io::Error> {
     let user_id = participant.user_id;
 
-    // User identity (real eppn + display, no pseudonymisation).
-    let user = match minerva_db::queries::users::find_by_id(db, user_id).await {
-        Ok(Some(u)) => Some(u),
-        Ok(None) => None,
-        Err(e) => return Ok(json_err_line(participant_id, &format!("user lookup: {e}"))),
-    };
+    // Pseudonymised export: the only identifier we emit is the
+    // sequential `participant_id` (assigned at export time, ordered by
+    // `consented_at`). NEVER emit the participant's eppn or display
+    // name in the JSONL; the consent screen promises anonymisation
+    // and the live admin participants table is the canonical place
+    // to look up which person corresponds to which participant_id
+    // (admins-only, behind the same auth as the export itself).
+    //
+    // The internal `user_id` UUID is used below to fetch responses
+    // and conversations, but never serialised into the line.
 
     // Pre + post survey responses, joined to question prompts.
     let pre_responses = match pre_survey_id {
@@ -1272,11 +1276,6 @@ async fn build_participant_line(
 
     let line = json!({
         "participant_id": participant_id,
-        "user": user.map(|u| json!({
-            "id": u.id,
-            "eppn": u.eppn,
-            "display_name": u.display_name,
-        })),
         "study_course": study_course_meta,
         "stage": participant.stage,
         "consented_at": participant.consented_at,

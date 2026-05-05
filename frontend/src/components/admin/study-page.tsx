@@ -9,6 +9,7 @@ import {
 } from "@/lib/queries"
 import type {
   AdminStudyConfig,
+  AdminStudyConfigPutBody,
   AdminStudyQuestionConfig,
   AdminStudyTask,
 } from "@/lib/queries"
@@ -135,7 +136,10 @@ function ConfigPanel({ courseId }: { courseId: string }) {
   }
 
   const mutation = useMutation({
-    mutationFn: (body: AdminStudyConfig) =>
+    // Note the request type is asymmetric with the response: PUT
+    // takes bare question arrays, GET returns survey objects with
+    // metadata. See `AdminStudyConfigPutBody`.
+    mutationFn: (body: AdminStudyConfigPutBody) =>
       api.put<AdminStudyConfig>(`/admin/study/courses/${courseId}/config`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -215,27 +219,17 @@ function ConfigPanel({ courseId }: { courseId: string }) {
   }
 
   const onSave = () => {
-    // Surveys are sent as the edited question lists; the backend's
-    // PUT endpoint replaces both surveys atomically (transactional
-    // delete-then-insert), so this is a full overwrite, not a patch.
-    // Existing responses for unchanged question_ids are preserved
-    // because the DB matches by survey row, not by question UUID.
+    // Backend PUT shape: bare question arrays, not survey-config
+    // objects. Replaces consent / thank-you / tasks / both surveys
+    // atomically (transactional delete-then-insert per survey).
     mutation.mutate({
-      ...data,
       consent_html: consentHtml ?? "",
       thank_you_html: thankYouHtml ?? "",
       number_of_tasks: numberOfTasks,
+      completion_gate_kind: data.completion_gate_kind,
       tasks,
-      pre_survey: {
-        kind: "pre",
-        questions: preQuestions,
-        response_count: data.pre_survey?.response_count ?? 0,
-      },
-      post_survey: {
-        kind: "post",
-        questions: postQuestions,
-        response_count: data.post_survey?.response_count ?? 0,
-      },
+      pre_survey: preQuestions,
+      post_survey: postQuestions,
     })
   }
 

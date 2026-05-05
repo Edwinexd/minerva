@@ -412,6 +412,23 @@ export interface AdminStudySurveyConfig {
   response_count: number
 }
 
+/// Body for PUT /admin/study/courses/{id}/config. Asymmetric with
+/// `AdminStudyConfig`: GET returns surveys as `{kind, questions,
+/// response_count}` objects (so the UI can show the response count
+/// and the kind label); PUT expects bare `questions[]` arrays
+/// because the kind is implied by which key (`pre_survey` /
+/// `post_survey`) the array sits under, and `response_count` is
+/// derived server-side, not editable.
+export interface AdminStudyConfigPutBody {
+  number_of_tasks: number
+  completion_gate_kind: string
+  consent_html: string
+  thank_you_html: string
+  tasks: AdminStudyTask[]
+  pre_survey: AdminStudyQuestionConfig[]
+  post_survey: AdminStudyQuestionConfig[]
+}
+
 export interface AdminStudyQuestionConfig {
   kind: "likert" | "free_text" | "section_heading"
   prompt: string

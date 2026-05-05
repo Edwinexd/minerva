@@ -14,8 +14,13 @@
       "apiKeys": "API Keys",
       "playDesignations": "Play Designations",
       "rag": "RAG Debug",
+      "study": "Study",
       "usage": "Usage"
     }
+  },
+  "study": {
+    "flagOffTitle": "Study mode isn't enabled for this course.",
+    "flagOffBody": "Ask a platform admin to flip the `study_mode` feature flag on under Admin > Course Management > Features. Once enabled, the consent screen, surveys, and per-task chat pipeline will replace the regular conversation list for course members."
   },
   "shared": {
     "loading": "Loading...",

@@ -34,6 +34,7 @@ import { Route as CourseCourseIdNewRouteImport } from "./routes/course/$courseId
 import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
 import { Route as TeacherCoursesCourseIdIndexRouteImport } from "./routes/teacher/courses.$courseId/index"
 import { Route as TeacherCoursesCourseIdUsageRouteImport } from "./routes/teacher/courses.$courseId/usage"
+import { Route as TeacherCoursesCourseIdStudyRouteImport } from "./routes/teacher/courses.$courseId/study"
 import { Route as TeacherCoursesCourseIdRagRouteImport } from "./routes/teacher/courses.$courseId/rag"
 import { Route as TeacherCoursesCourseIdPlayDesignationsRouteImport } from "./routes/teacher/courses.$courseId/play-designations"
 import { Route as TeacherCoursesCourseIdMembersRouteImport } from "./routes/teacher/courses.$courseId/members"
@@ -174,6 +175,12 @@ const TeacherCoursesCourseIdUsageRoute =
     path: "/usage",
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
+const TeacherCoursesCourseIdStudyRoute =
+  TeacherCoursesCourseIdStudyRouteImport.update({
+    id: "/study",
+    path: "/study",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
 const TeacherCoursesCourseIdRagRoute =
   TeacherCoursesCourseIdRagRouteImport.update({
     id: "/rag",
@@ -276,6 +283,7 @@ export interface FileRoutesByFullPath {
   "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
   "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
   "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
+  "/teacher/courses/$courseId/study": typeof TeacherCoursesCourseIdStudyRoute
   "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
   "/teacher/courses/$courseId/": typeof TeacherCoursesCourseIdIndexRoute
 }
@@ -312,6 +320,7 @@ export interface FileRoutesByTo {
   "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
   "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
   "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
+  "/teacher/courses/$courseId/study": typeof TeacherCoursesCourseIdStudyRoute
   "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdIndexRoute
 }
@@ -351,6 +360,7 @@ export interface FileRoutesById {
   "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
   "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
   "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
+  "/teacher/courses/$courseId/study": typeof TeacherCoursesCourseIdStudyRoute
   "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
   "/teacher/courses/$courseId/": typeof TeacherCoursesCourseIdIndexRoute
 }
@@ -391,6 +401,7 @@ export interface FileRouteTypes {
     | "/teacher/courses/$courseId/members"
     | "/teacher/courses/$courseId/play-designations"
     | "/teacher/courses/$courseId/rag"
+    | "/teacher/courses/$courseId/study"
     | "/teacher/courses/$courseId/usage"
     | "/teacher/courses/$courseId/"
   fileRoutesByTo: FileRoutesByTo
@@ -427,6 +438,7 @@ export interface FileRouteTypes {
     | "/teacher/courses/$courseId/members"
     | "/teacher/courses/$courseId/play-designations"
     | "/teacher/courses/$courseId/rag"
+    | "/teacher/courses/$courseId/study"
     | "/teacher/courses/$courseId/usage"
     | "/teacher/courses/$courseId"
   id:
@@ -465,6 +477,7 @@ export interface FileRouteTypes {
     | "/teacher/courses/$courseId/members"
     | "/teacher/courses/$courseId/play-designations"
     | "/teacher/courses/$courseId/rag"
+    | "/teacher/courses/$courseId/study"
     | "/teacher/courses/$courseId/usage"
     | "/teacher/courses/$courseId/"
   fileRoutesById: FileRoutesById
@@ -662,6 +675,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof TeacherCoursesCourseIdUsageRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
+    "/teacher/courses/$courseId/study": {
+      id: "/teacher/courses/$courseId/study"
+      path: "/study"
+      fullPath: "/teacher/courses/$courseId/study"
+      preLoaderRoute: typeof TeacherCoursesCourseIdStudyRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
     "/teacher/courses/$courseId/rag": {
       id: "/teacher/courses/$courseId/rag"
       path: "/rag"
@@ -782,6 +802,7 @@ interface TeacherCoursesCourseIdRouteChildren {
   TeacherCoursesCourseIdMembersRoute: typeof TeacherCoursesCourseIdMembersRoute
   TeacherCoursesCourseIdPlayDesignationsRoute: typeof TeacherCoursesCourseIdPlayDesignationsRoute
   TeacherCoursesCourseIdRagRoute: typeof TeacherCoursesCourseIdRagRoute
+  TeacherCoursesCourseIdStudyRoute: typeof TeacherCoursesCourseIdStudyRoute
   TeacherCoursesCourseIdUsageRoute: typeof TeacherCoursesCourseIdUsageRoute
   TeacherCoursesCourseIdIndexRoute: typeof TeacherCoursesCourseIdIndexRoute
 }
@@ -802,6 +823,7 @@ const TeacherCoursesCourseIdRouteChildren: TeacherCoursesCourseIdRouteChildren =
     TeacherCoursesCourseIdPlayDesignationsRoute:
       TeacherCoursesCourseIdPlayDesignationsRoute,
     TeacherCoursesCourseIdRagRoute: TeacherCoursesCourseIdRagRoute,
+    TeacherCoursesCourseIdStudyRoute: TeacherCoursesCourseIdStudyRoute,
     TeacherCoursesCourseIdUsageRoute: TeacherCoursesCourseIdUsageRoute,
     TeacherCoursesCourseIdIndexRoute: TeacherCoursesCourseIdIndexRoute,
   }

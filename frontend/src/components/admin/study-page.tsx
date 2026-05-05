@@ -106,7 +106,17 @@ export function AdminStudyPanel() {
   )
 }
 
-function ConfigPanel({ courseId }: { courseId: string }) {
+// Exported so the per-course teacher view (`/teacher/courses/$id/study`)
+// can reuse the same editor without duplicating the form logic. Pass
+// `canSeed={false}` from the teacher view to hide the DM2731 preset
+// loader (admin-only operation).
+export function ConfigPanel({
+  courseId,
+  canSeed = true,
+}: {
+  courseId: string
+  canSeed?: boolean
+}) {
   const { t } = useTranslation("admin")
   const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
@@ -245,41 +255,43 @@ function ConfigPanel({ courseId }: { courseId: string }) {
           </div>
         )}
 
-        <div className="rounded-md border border-dashed p-3 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium">{t("study.seedDm2731Title")}</p>
-              <p className="text-xs text-muted-foreground">
-                {t("study.seedDm2731Description")}
-              </p>
+        {canSeed && (
+          <div className="rounded-md border border-dashed p-3 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium">{t("study.seedDm2731Title")}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t("study.seedDm2731Description")}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (
+                    data.has_in_flight_participants ||
+                    (preQuestions && preQuestions.length > 0) ||
+                    (postQuestions && postQuestions.length > 0) ||
+                    (tasks && tasks.length > 0)
+                  ) {
+                    if (!window.confirm(t("study.seedDm2731Confirm"))) return
+                  }
+                  seedMutation.mutate()
+                }}
+                disabled={seedMutation.isPending}
+              >
+                {seedMutation.isPending
+                  ? t("study.seedDm2731Loading")
+                  : t("study.seedDm2731Button")}
+              </Button>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (
-                  data.has_in_flight_participants ||
-                  (preQuestions && preQuestions.length > 0) ||
-                  (postQuestions && postQuestions.length > 0) ||
-                  (tasks && tasks.length > 0)
-                ) {
-                  if (!window.confirm(t("study.seedDm2731Confirm"))) return
-                }
-                seedMutation.mutate()
-              }}
-              disabled={seedMutation.isPending}
-            >
-              {seedMutation.isPending
-                ? t("study.seedDm2731Loading")
-                : t("study.seedDm2731Button")}
-            </Button>
+            {seedMutation.error !== null && (
+              <p role="alert" className="text-sm text-destructive">
+                {formatError(seedMutation.error)}
+              </p>
+            )}
           </div>
-          {seedMutation.error !== null && (
-            <p role="alert" className="text-sm text-destructive">
-              {formatError(seedMutation.error)}
-            </p>
-          )}
-        </div>
+        )}
 
         <div className="space-y-2">
           <label className="text-sm font-medium">
@@ -661,7 +673,8 @@ function SurveyEditor({
   )
 }
 
-function ParticipantsPanel({ courseId }: { courseId: string }) {
+// Exported for the per-course teacher view, same rationale as ConfigPanel.
+export function ParticipantsPanel({ courseId }: { courseId: string }) {
   const { t } = useTranslation("admin")
   const formatError = useApiErrorMessage()
   const { data, isLoading, error } = useQuery(

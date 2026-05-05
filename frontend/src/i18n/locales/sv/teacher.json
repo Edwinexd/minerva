@@ -14,8 +14,13 @@
       "apiKeys": "API-nycklar",
       "playDesignations": "Play-beteckningar",
       "rag": "RAG-felsökning",
+      "study": "Studie",
       "usage": "Användning"
     }
+  },
+  "study": {
+    "flagOffTitle": "Studieläge är inte aktiverat för den här kursen.",
+    "flagOffBody": "Be en plattformsadmin att slå på funktionsflaggan `study_mode` under Admin > Kurshantering > Funktioner. När det är på ersätts den vanliga konversationslistan med samtyckesskärmen, enkäterna och uppgiftspipelinen för kursmedlemmarna."
   },
   "shared": {
     "loading": "Laddar...",

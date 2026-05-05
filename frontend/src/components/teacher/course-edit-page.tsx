@@ -26,6 +26,7 @@ const TAB_VALUES = [
   "api-keys",
   "play-designations",
   "rag",
+  "study",
   "usage",
 ] as const
 
@@ -41,6 +42,7 @@ const TAB_LABEL_KEYS: Record<(typeof TAB_VALUES)[number], string> = {
   "api-keys": "layout.tabs.apiKeys",
   "play-designations": "layout.tabs.playDesignations",
   "rag": "layout.tabs.rag",
+  "study": "layout.tabs.study",
   "usage": "layout.tabs.usage",
 }
 
@@ -58,17 +60,20 @@ const TAB_ROUTES = {
   "api-keys": "/teacher/courses/$courseId/api-keys",
   "play-designations": "/teacher/courses/$courseId/play-designations",
   "rag": "/teacher/courses/$courseId/rag",
+  "study": "/teacher/courses/$courseId/study",
   "usage": "/teacher/courses/$courseId/usage",
 } as const satisfies Record<TabValue, string>
 
 // Tabs that TAs cannot see: invite/LTI/API keys/play designations are
 // teacher-only operations enforced server-side; hide them in the UI too.
+// `study` is also teacher-only (study config + per-participant data).
 const TA_HIDDEN_TABS = new Set<string>([
   "invite",
   "lti",
   "canvas",
   "api-keys",
   "play-designations",
+  "study",
 ])
 
 export function CourseEditPage({ useParams }: { useParams: () => { courseId: string } }) {
@@ -87,12 +92,18 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
   // an admin; matches the backend, which 404s those endpoints in
   // the same case.
   const kgEnabled = course?.feature_flags?.course_kg === true
+  const studyEnabled = course?.feature_flags?.study_mode === true
   const baseTabs = course?.my_role === "ta"
     ? TAB_VALUES.filter((v) => !TA_HIDDEN_TABS.has(v))
     : TAB_VALUES
-  const visibleTabValues = baseTabs.filter(
-    (v) => kgEnabled || v !== "knowledge-graph",
-  )
+  const visibleTabValues = baseTabs
+    .filter((v) => kgEnabled || v !== "knowledge-graph")
+    // Study tab is per-course feature-gated AND TA-hidden; surveys
+    // and per-participant transcripts are sensitive enough that
+    // "teacher" is the right floor (matches the backend gate in
+    // `routes::study::require_course_owner_teacher_or_admin`).
+    .filter((v) => studyEnabled || v !== "study")
+    .filter((v) => course?.my_role !== "ta" || v !== "study")
   const validTabs = new Set<string>(visibleTabValues)
 
   const lastSegment = location.pathname.split("/").pop() || ""

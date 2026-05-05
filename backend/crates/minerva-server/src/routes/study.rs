@@ -151,6 +151,33 @@ fn require_admin(user: &User) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Owner / strict-teacher / platform-admin gate for the per-course
+/// study management endpoints (config GET/PUT, participants list,
+/// JSONL export). TAs are deliberately excluded: surveys + per-
+/// participant transcripts are sensitive enough that "teacher" is
+/// the right floor. The seed-preset endpoint stays admin-only
+/// (one-shot destructive overwrite, easier to audit centrally).
+async fn require_course_owner_teacher_or_admin(
+    state: &AppState,
+    course_id: Uuid,
+    user: &User,
+) -> Result<(), AppError> {
+    if user.role.is_admin() {
+        return Ok(());
+    }
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if course.owner_id == user.id {
+        return Ok(());
+    }
+    if minerva_db::queries::courses::is_course_teacher_strict(&state.db, course_id, user.id).await?
+    {
+        return Ok(());
+    }
+    Err(AppError::Forbidden)
+}
+
 // ---------------------------------------------------------------------------
 // GET /state
 // ---------------------------------------------------------------------------
@@ -783,7 +810,7 @@ async fn admin_get_config(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<AdminConfigResponse>, AppError> {
-    require_admin(&user)?;
+    require_course_owner_teacher_or_admin(&state, course_id, &user).await?;
 
     // Bootstrap-tolerant: if the admin enabled the `study_mode` flag
     // for a course that doesn't yet have a `study_courses` row (the
@@ -894,7 +921,7 @@ async fn admin_put_config(
     Path(course_id): Path<Uuid>,
     Json(body): Json<AdminPutConfigRequest>,
 ) -> Result<Json<AdminConfigResponse>, AppError> {
-    require_admin(&user)?;
+    require_course_owner_teacher_or_admin(&state, course_id, &user).await?;
 
     if body.number_of_tasks <= 0 {
         return Err(AppError::bad_request("study.number_of_tasks_invalid"));
@@ -1043,7 +1070,7 @@ async fn admin_list_participants(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<AdminParticipantRow>>, AppError> {
-    require_admin(&user)?;
+    require_course_owner_teacher_or_admin(&state, course_id, &user).await?;
     // Bypass `ext_obfuscate` deliberately; the admin researcher needs
     // real identifiers to reconcile against their participant roster
     // and to revoke / reach out to specific people. The export route
@@ -1091,7 +1118,7 @@ async fn admin_export_jsonl(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Response, AppError> {
-    require_admin(&user)?;
+    require_course_owner_teacher_or_admin(&state, course_id, &user).await?;
 
     // We pre-fetch the participant list (ordered) so we can assign
     // participant_id deterministically. The per-participant fan-out

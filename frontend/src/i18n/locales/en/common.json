@@ -17,6 +17,7 @@
       "externalInvites": "External invites",
       "lti": "LTI",
       "integrations": "Integrations",
+      "study": "Study mode",
       "system": "System"
     },
     "teacherCourse": "Teacher: {{course}}",

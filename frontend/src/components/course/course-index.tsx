@@ -1,14 +1,26 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
-import { conversationsQuery } from "@/lib/queries"
+import { conversationsQuery, courseQuery } from "@/lib/queries"
 import { Skeleton } from "@/components/ui/skeleton"
 
 export function CourseIndex({ useParams }: { useParams: () => { courseId: string } }) {
   const { courseId } = useParams()
   const navigate = useNavigate()
+  // Course load is the gate for the study-mode redirect: when the
+  // course's `study_mode` flag is on, members never see the
+  // conversation list; they're sent into the research pipeline at
+  // `/course/{id}/study`. Resolve before falling through to the
+  // regular new-or-resume conversation logic.
+  const { data: course } = useQuery(courseQuery(courseId))
   const { data: conversations, isLoading } = useQuery(conversationsQuery(courseId))
 
-  if (conversations && conversations.length > 0) {
+  if (course?.feature_flags?.study_mode === true) {
+    navigate({
+      to: "/course/$courseId/study",
+      params: { courseId },
+      replace: true,
+    })
+  } else if (conversations && conversations.length > 0) {
     navigate({
       to: "/course/$courseId/$conversationId",
       params: { courseId, conversationId: conversations[0].id },

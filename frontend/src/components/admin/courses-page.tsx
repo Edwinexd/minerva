@@ -50,6 +50,7 @@ const KNOWN_FEATURE_FLAGS = [
   "extraction_guard",
   "aegis",
   "concept_graph",
+  "study_mode",
 ] as const
 type FeatureFlagName = (typeof KNOWN_FEATURE_FLAGS)[number]
 

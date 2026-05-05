@@ -8,6 +8,7 @@ import enAdmin from "./locales/en/admin.json"
 import enTeacher from "./locales/en/teacher.json"
 import enStudent from "./locales/en/student.json"
 import enAuth from "./locales/en/auth.json"
+import enStudy from "./locales/en/study.json"
 
 import svCommon from "./locales/sv/common.json"
 import svErrors from "./locales/sv/errors.json"
@@ -15,6 +16,7 @@ import svAdmin from "./locales/sv/admin.json"
 import svTeacher from "./locales/sv/teacher.json"
 import svStudent from "./locales/sv/student.json"
 import svAuth from "./locales/sv/auth.json"
+import svStudy from "./locales/sv/study.json"
 
 export const LANGUAGE_STORAGE_KEY = "minerva-language"
 export const SUPPORTED_LANGUAGES = ["en", "sv"] as const
@@ -27,7 +29,7 @@ void i18n
     fallbackLng: "en",
     supportedLngs: SUPPORTED_LANGUAGES as readonly string[],
     nonExplicitSupportedLngs: true,
-    ns: ["common", "errors", "admin", "teacher", "student", "auth"],
+    ns: ["common", "errors", "admin", "teacher", "student", "auth", "study"],
     defaultNS: "common",
     interpolation: { escapeValue: false },
     detection: {
@@ -43,6 +45,7 @@ void i18n
         teacher: enTeacher,
         student: enStudent,
         auth: enAuth,
+        study: enStudy,
       },
       sv: {
         common: svCommon,
@@ -51,6 +54,7 @@ void i18n
         teacher: svTeacher,
         student: svStudent,
         auth: svAuth,
+        study: svStudy,
       },
     },
   })

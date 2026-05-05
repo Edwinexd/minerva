@@ -10,6 +10,31 @@
   "privacy": {
     "not_acknowledged": "Du måste godkänna integritetsmeddelandet innan du kan använda chatten."
   },
+  "study": {
+    "locked_out": "Du har slutfört studien; kursen är nu skrivskyddad för dig.",
+    "consent_required": "Du måste samtycka innan du kan fortsätta.",
+    "invalid_stage": "Den här åtgärden är inte tillgänglig i ditt nuvarande steg. Uppdatera sidan och försök igen.",
+    "no_participant_state": "Vi kunde inte hitta din studiepost. Uppdatera sidan och försök igen.",
+    "task_index_invalid": "Den uppgiften finns inte i den här studien.",
+    "gate_not_met": "Skicka minst ett meddelande innan du markerar uppgiften som klar.",
+    "survey_kind_invalid": "Okänd enkättyp.",
+    "survey_not_configured": "Forskaren har inte publicerat den här enkäten ännu.",
+    "unknown_question": "Ett av svaren pekar på en fråga vi inte känner igen.",
+    "likert_value_required": "Välj ett värde för betygsfrågan.",
+    "likert_out_of_range": "Välj ett värde inom det tillåtna intervallet.",
+    "free_text_required": "Skriv ett svar på den öppna frågan.",
+    "likert_bounds_required": "Likert-frågor behöver ett min- och maxvärde.",
+    "likert_bounds_invalid": "Likert-max måste vara större än min.",
+    "free_text_must_not_have_likert_fields": "Frågor med fritext kan inte ha Likert-gränser.",
+    "question_kind_invalid": "Frågetyp måste vara 'likert' eller 'free_text'.",
+    "question_prompt_required": "Varje fråga behöver en frågetext.",
+    "number_of_tasks_invalid": "Antal uppgifter måste vara minst 1.",
+    "tasks_count_mismatch": "Antalet inskickade uppgifter matchar inte det inställda antalet.",
+    "task_index_must_be_dense": "Uppgifterna måste numreras 0, 1, 2, ... utan luckor.",
+    "task_fields_required": "Varje uppgift behöver en titel och beskrivning.",
+    "completion_gate_kind_invalid": "Avslutningsvillkoret stöds inte.",
+    "section_heading_must_be_optional": "Sektionsrubriker kan inte markeras som obligatoriska."
+  },
   "doc": {
     "no_file": "Ingen fil bifogad.",
     "multipart_error": "Uppladdningen misslyckades: {{detail}}",

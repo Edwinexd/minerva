@@ -9,6 +9,7 @@
       "externalInvites": "External Invites",
       "lti": "LTI",
       "integrations": "Plugin Integrations",
+      "study": "Study Mode",
       "system": "System"
     }
   },
@@ -187,13 +188,75 @@
       "course_kg": "Course knowledge graph",
       "extraction_guard": "Extraction guard",
       "aegis": "Aegis prompt coaching",
-      "concept_graph": "Concept knowledge graph"
+      "concept_graph": "Concept knowledge graph",
+      "study_mode": "Study mode (research evaluation)"
     },
     "featureFlagDescription": {
       "course_kg": "Per-document kind classification, cross-document linker, knowledge-graph viewer, assignment-refusal addendum, and per-chunk adversarial filter. Off by default while we calibrate.",
       "extraction_guard": "Pre-generation intent classifier + output-side solution detector + Socratic rewriter, plus multi-turn assignment-proximity tracking. Catches the 'student pasted assignment, asks for code' case and intercepts the response with a Socratic question. Independent of course_kg so admins can pilot separately.",
       "aegis": "Right-side prompt-coaching panel. Every user turn is scored on five dimensions (clarity, context, constraints, reasoning demand, critical thinking) plus three short callouts (structural clarity, terminology, missing constraint). Non-blocking by design - the analyzer races the assistant reply and the student can ignore the feedback freely.",
-      "concept_graph": "Eureka-2 concept graph: per-document LLM extraction of domain concepts and directed relations, persisted with document-level provenance and cosine/structural/community dedup. Distinct from the course knowledge graph (which is at document granularity). When on, admins can run extraction and view the graph; toggling off hides the admin endpoints but preserves the persisted graph."
+      "concept_graph": "Eureka-2 concept graph: per-document LLM extraction of domain concepts and directed relations, persisted with document-level provenance and cosine/structural/community dedup. Distinct from the course knowledge graph (which is at document granularity). When on, admins can run extraction and view the graph; toggling off hides the admin endpoints but preserves the persisted graph.",
+      "study_mode": "Turns the course into a research-evaluation pipeline (consent screen, pre-survey, N hardcoded tasks, post-survey, thank-you + lockout). Forces Aegis on for the duration regardless of the per-course aegis flag. Configure consent text, tasks, and surveys via the Study Mode admin tab; participants see the pipeline instead of the regular conversation list."
+    }
+  },
+  "study": {
+    "title": "Study mode configuration",
+    "intro": "Pick a course (study mode flag must be enabled in Course Management).",
+    "coursePlaceholder": "Select a study course",
+    "noCoursesEnabled": "No courses currently have the `study_mode` feature flag enabled. Toggle it on under Course Management first.",
+    "configTitle": "Configuration",
+    "inFlightWarning": "Some participants are already past consent. Edits to tasks or surveys may invalidate their data.",
+    "consentLabel": "Consent screen text",
+    "consentPlaceholder": "Markdown. Rendered above the consent checkbox on the participant's first visit.",
+    "thankYouLabel": "Thank-you screen text",
+    "thankYouPlaceholder": "Markdown. Shown after the post-survey, before the lockout banner.",
+    "markdownHelp": "Markdown is supported (headings, links, lists).",
+    "tasksLabel": "Tasks ({{count}})",
+    "addTask": "Add task",
+    "removeTask": "Remove",
+    "taskBadge": "#{{n}}",
+    "taskTitlePlaceholder": "Short title shown in the task banner",
+    "taskDescriptionPlaceholder": "Full prompt shown to the participant",
+    "preSurveyLabel": "Pre-task survey",
+    "postSurveyLabel": "Post-task survey",
+    "responseCount": "{{count}} responses",
+    "surveyHasResponsesWarning": "Participants have already submitted responses. Editing or removing existing questions will leave their answers orphaned (and CASCADE-deleted if you remove a question outright). Consider only adding new questions while a study is live.",
+    "noQuestionsYet": "No questions yet. Add one below.",
+    "questionPromptPlaceholder": "The question or section heading text shown to the participant",
+    "likertMin": "Min value",
+    "likertMax": "Max value",
+    "likertMinLabel": "Min label",
+    "likertMaxLabel": "Max label",
+    "likertMinPlaceholder": "e.g. Strongly disagree",
+    "likertMaxPlaceholder": "e.g. Strongly agree",
+    "requiredLabel": "Required",
+    "killOnValueLabel": "Withdraw on value (optional)",
+    "killOnValuePlaceholder": "Leave blank for no withdrawal",
+    "killOnValueHelp": "If the participant picks this Likert value, the pipeline jumps straight to Done (lockout). Use for GDPR-style consent questions where 'No' should withdraw cleanly.",
+    "addLikert": "Add Likert question",
+    "addFreeText": "Add free-text question",
+    "addSectionHeading": "Add section heading",
+    "removeQuestion": "Remove",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "questionKind": {
+      "likert": "Likert scale",
+      "free_text": "Free text",
+      "section_heading": "Section heading"
+    },
+    "save": "Save changes",
+    "saving": "Saving...",
+    "participantsTitle": "Participants",
+    "downloadJsonl": "Download JSONL export",
+    "noParticipants": "No participants have started the study yet.",
+    "cols": {
+      "participant": "Participant",
+      "stage": "Stage",
+      "task": "Task",
+      "consented": "Consented",
+      "preCompleted": "Pre done",
+      "postCompleted": "Post done",
+      "lockedOut": "Locked out"
     }
   },
   "rules": {

@@ -9,6 +9,7 @@
       "externalInvites": "Externa inbjudningar",
       "lti": "LTI",
       "integrations": "Plugin-integrationer",
+      "study": "Studieläge",
       "system": "System"
     }
   },
@@ -187,13 +188,75 @@
       "course_kg": "Kunskapsgraf för kurs",
       "extraction_guard": "Skydd mot uppgiftslösning",
       "aegis": "Aegis promptcoachning",
-      "concept_graph": "Begreppsgraf"
+      "concept_graph": "Begreppsgraf",
+      "study_mode": "Studieläge (forskningsutvärdering)"
     },
     "featureFlagDescription": {
       "course_kg": "Klassificering per dokument, tvärdokumentlänkare, grafvisare, vägrasinstruktion vid uppgiftsmatch och per-chunk-skyddsfilter. Avstängd som standard medan vi kalibrerar.",
       "extraction_guard": "Avsiktsklassificerare före generering + lösningsdetektor på utdatasidan + sokratisk omformulerare, plus uppgiftsnärhetsspårning över flera turer. Fångar fallet \"studenten klistrar in uppgift och frågar efter kod\" och avbryter svaret med en sokratisk fråga. Oberoende av course_kg så att admins kan piloter separat.",
       "aegis": "Sidopanel med promptcoachning. Varje studentprompt poängsätts på fem dimensioner (tydlighet, kontext, ramar, resonemangskrav, kritiskt tänkande) plus tre korta kommentarer (strukturell tydlighet, terminologi, saknad ram). Icke-blockerande: analysen körs parallellt med assistentens svar och studenten kan ignorera återkopplingen fritt.",
-      "concept_graph": "Eureka-2 begreppsgraf: LLM-extrahering per dokument av domänbegrepp och riktade relationer, sparat med dokumentnivå-spårning och cosin/strukturell/community-dedup. Skiljer sig från kursens kunskapsgraf (som är på dokumentnivå). När den är på kan admins köra extraktion och visa grafen; avstängning döljer admin-endpointsen men bevarar den sparade grafen."
+      "concept_graph": "Eureka-2 begreppsgraf: LLM-extrahering per dokument av domänbegrepp och riktade relationer, sparat med dokumentnivå-spårning och cosin/strukturell/community-dedup. Skiljer sig från kursens kunskapsgraf (som är på dokumentnivå). När den är på kan admins köra extraktion och visa grafen; avstängning döljer admin-endpointsen men bevarar den sparade grafen.",
+      "study_mode": "Förvandlar kursen till en forskningsutvärderingspipeline (samtyckesskärm, förenkät, N förkonfigurerade uppgifter, eftersändningsenkät, tackskärm + utestängning). Tvingar Aegis på under hela studien oavsett kursens egen aegis-flagga. Konfigurera samtyckestext, uppgifter och enkäter via admin-sidan för Studiekonfiguration; deltagarna ser pipelinen istället för den vanliga konversationslistan."
+    }
+  },
+  "study": {
+    "title": "Konfiguration av studieläge",
+    "intro": "Välj en kurs (studieläge måste vara påslaget i Kurshantering).",
+    "coursePlaceholder": "Välj en studiekurs",
+    "noCoursesEnabled": "Inga kurser har för närvarande funktionsflaggan `study_mode` aktiverad. Slå på den under Kurshantering först.",
+    "configTitle": "Konfiguration",
+    "inFlightWarning": "Vissa deltagare har redan passerat samtycket. Ändringar i uppgifter eller enkäter kan göra deras data ogiltiga.",
+    "consentLabel": "Samtyckesskärmens text",
+    "consentPlaceholder": "Markdown. Visas ovanför samtyckesrutan vid deltagarens första besök.",
+    "thankYouLabel": "Tackskärmens text",
+    "thankYouPlaceholder": "Markdown. Visas efter eftersändningsenkäten, före utestängningsmeddelandet.",
+    "markdownHelp": "Markdown stöds (rubriker, länkar, listor).",
+    "tasksLabel": "Uppgifter ({{count}})",
+    "addTask": "Lägg till uppgift",
+    "removeTask": "Ta bort",
+    "taskBadge": "#{{n}}",
+    "taskTitlePlaceholder": "Kort titel som visas i uppgiftsbannern",
+    "taskDescriptionPlaceholder": "Hela uppgiftstexten som visas för deltagaren",
+    "preSurveyLabel": "Förenkät",
+    "postSurveyLabel": "Eftersändningsenkät",
+    "responseCount": "{{count}} svar",
+    "surveyHasResponsesWarning": "Deltagare har redan skickat in svar. Att redigera eller ta bort befintliga frågor lämnar deras svar utan koppling (och CASCADE-raderas om du tar bort frågan helt). Överväg att bara lägga till nya frågor medan en studie pågår.",
+    "noQuestionsYet": "Inga frågor ännu. Lägg till en nedan.",
+    "questionPromptPlaceholder": "Frågetexten eller sektionsrubriken som visas för deltagaren",
+    "likertMin": "Minvärde",
+    "likertMax": "Maxvärde",
+    "likertMinLabel": "Min-etikett",
+    "likertMaxLabel": "Max-etikett",
+    "likertMinPlaceholder": "t.ex. Instämmer inte alls",
+    "likertMaxPlaceholder": "t.ex. Instämmer helt",
+    "requiredLabel": "Obligatorisk",
+    "killOnValueLabel": "Avbryt vid värde (valfri)",
+    "killOnValuePlaceholder": "Lämna tomt för att inte avbryta",
+    "killOnValueHelp": "Om deltagaren väljer det här Likert-värdet hoppar pipelinen direkt till Klar (utestängning). Används för GDPR-liknande samtyckesfrågor där 'Nej' ska avbryta studien rent.",
+    "addLikert": "Lägg till Likert-fråga",
+    "addFreeText": "Lägg till fritextfråga",
+    "addSectionHeading": "Lägg till sektionsrubrik",
+    "removeQuestion": "Ta bort",
+    "moveUp": "Flytta upp",
+    "moveDown": "Flytta ner",
+    "questionKind": {
+      "likert": "Likert-skala",
+      "free_text": "Fritext",
+      "section_heading": "Sektionsrubrik"
+    },
+    "save": "Spara ändringar",
+    "saving": "Sparar...",
+    "participantsTitle": "Deltagare",
+    "downloadJsonl": "Ladda ner JSONL-export",
+    "noParticipants": "Inga deltagare har påbörjat studien ännu.",
+    "cols": {
+      "participant": "Deltagare",
+      "stage": "Steg",
+      "task": "Uppgift",
+      "consented": "Samtyckte",
+      "preCompleted": "För klar",
+      "postCompleted": "Efter klar",
+      "lockedOut": "Utestängd"
     }
   },
   "rules": {

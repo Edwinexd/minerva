@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM study_survey_questions WHERE survey_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "66f34a2508b6b338e838fcf47819f9a2abfb0c2bd9f72611e58894f4054f411d"
+}

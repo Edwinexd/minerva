@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pa.message_id, pa.suggestions, pa.mode, pa.model_used, pa.created_at\n        FROM prompt_analyses pa\n        JOIN messages m ON m.id = pa.message_id\n        WHERE m.conversation_id = $1\n        ORDER BY pa.created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "suggestions",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "mode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "model_used",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9000633ed80f825fea2f277bb915602f3cb3389086e7a6938e6d375d766d45c9"
+}

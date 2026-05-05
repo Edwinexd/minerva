@@ -17,6 +17,7 @@
       "externalInvites": "Externa inbjudningar",
       "lti": "LTI",
       "integrations": "Integrationer",
+      "study": "Studieläge",
       "system": "System"
     },
     "teacherCourse": "Lärare: {{course}}",

@@ -1,0 +1,43 @@
+{
+  "loading": "Loading study...",
+  "loadFailed": "Couldn't load the study. Refresh to try again.",
+  "consent": {
+    "title": "Consent to participate",
+    "checkboxLabel": "I have read the information above and consent to participate.",
+    "submitButton": "I consent",
+    "submittingButton": "Saving...",
+    "missingHtml": "The researcher hasn't published a consent text yet."
+  },
+  "preSurvey": {
+    "title": "Pre-task questionnaire",
+    "description": "Please answer the following before starting the tasks."
+  },
+  "postSurvey": {
+    "title": "Post-task questionnaire",
+    "description": "A few final questions about your experience."
+  },
+  "survey": {
+    "submitButton": "Continue",
+    "submittingButton": "Saving...",
+    "freeTextPlaceholder": "Your answer",
+    "optionalLabel": "optional",
+    "likertSelected": "Selected: {{value}}",
+    "likertSelectAria": "{{prompt}} (rate from {{min}} to {{max}})",
+    "validation": {
+      "incomplete": "Please answer every question before continuing.",
+      "outOfRange": "Pick a value within the allowed range."
+    }
+  },
+  "task": {
+    "banner": "Task {{current}} of {{total}}",
+    "doneButton": "I'm done with this task",
+    "doneSubmittingButton": "Saving...",
+    "gateNotMet": "Send at least one message before marking the task as done.",
+    "missingTask": "The researcher hasn't configured this task yet."
+  },
+  "thankYou": {
+    "title": "Thank you for participating",
+    "fallbackBody": "Your responses have been recorded. You can close this tab.",
+    "lockoutNotice": "The course is now read-only for you."
+  }
+}

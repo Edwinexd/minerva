@@ -1,0 +1,103 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO study_survey_questions (survey_id, ord, kind, prompt, likert_min, likert_max, likert_min_label, likert_max_label, is_required, kill_on_value)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n            RETURNING id, survey_id, ord, kind, prompt, likert_min, likert_max, likert_min_label, likert_max_label, is_required, kill_on_value, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "survey_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "ord",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "prompt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "likert_min",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "likert_max",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "likert_min_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "likert_max_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "is_required",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "kill_on_value",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Text",
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "afb19476edc8abb9ca47f24f0f290114996be431591a0320bd6a2f50ec211595"
+}

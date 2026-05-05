@@ -1,0 +1,1300 @@
+//! Study mode: research-evaluation pipeline endpoints.
+//!
+//! Two routers:
+//!
+//! * `router()` is participant-facing, mounted at
+//!   `/api/courses/{course_id}/study`. Drives the linear pipeline:
+//!   state, consent, pre-survey, N tasks, post-survey, done. All
+//!   endpoints require course membership AND that study mode is
+//!   enabled for the course; otherwise 404 (we don't want to leak
+//!   that the routes exist for non-study courses).
+//! * `admin_router()` is admin-only, mounted at `/api/admin`. Lets
+//!   the researcher edit the per-course study config (consent copy,
+//!   task list, surveys), view participant progress, and download
+//!   the JSONL export.
+//!
+//! Lockout: `ensure_not_locked_out` is the helper called by other
+//! routes (chat send-message in particular) to refuse a participant
+//! who has already finished the post-survey. The participant-facing
+//! `GET /state` route is the one mutation-free endpoint that survives
+//! the lockout, so the frontend can render the thank-you screen.
+
+use axum::body::{Body, Bytes};
+use axum::extract::{Extension, Path, State};
+use axum::http::{header, HeaderValue};
+use axum::response::Response;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use futures::{stream, StreamExt};
+use minerva_core::models::User;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use uuid::Uuid;
+
+use crate::error::AppError;
+use crate::feature_flags;
+use crate::state::AppState;
+
+// ---------------------------------------------------------------------------
+// Routers
+// ---------------------------------------------------------------------------
+
+/// Participant-facing routes, mounted at `/api/courses/{course_id}/study`.
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/state", get(get_state))
+        .route("/consent", post(post_consent))
+        .route("/survey/{kind}", get(get_survey).post(post_survey))
+        .route("/task/{task_index}/start", post(start_task))
+        .route("/task/{task_index}/done", post(finish_task))
+}
+
+/// Admin-only config + progress + export routes. Mounted at
+/// `/api/admin`. Routes here all 403 for non-admins.
+pub fn admin_router() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/study/courses/{course_id}/config",
+            get(admin_get_config).put(admin_put_config),
+        )
+        .route(
+            "/study/courses/{course_id}/participants",
+            get(admin_list_participants),
+        )
+        .route(
+            "/study/courses/{course_id}/export.jsonl",
+            get(admin_export_jsonl),
+        )
+}
+
+// ---------------------------------------------------------------------------
+// Lockout helper (used by chat::send_message and elsewhere)
+// ---------------------------------------------------------------------------
+
+/// Refuses with `StudyLockedOut` (423) iff (course, user) is in a
+/// study course AND the participant has finished the post-survey.
+/// No-op for non-study courses, non-members, and admins not enrolled
+/// as participants. Cheap enough to call on every chat send: one
+/// flag lookup + one participant_state lookup, both indexed.
+pub(crate) async fn ensure_not_locked_out(
+    state: &AppState,
+    course_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if !feature_flags::study_mode_enabled(&state.db, course_id).await {
+        return Ok(());
+    }
+    let Some(participant) =
+        minerva_db::queries::study::get_state(&state.db, course_id, user_id).await?
+    else {
+        return Ok(());
+    };
+    if participant.stage == "done" {
+        return Err(AppError::StudyLockedOut);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Common gating
+// ---------------------------------------------------------------------------
+
+/// Resolve the per-course study config OR refuse with 404 if the
+/// course isn't actually in study mode. We treat "flag off" the same
+/// as "no config row" because either alone is enough to make the
+/// pipeline inert; the participant routes shouldn't behave
+/// differently between them.
+async fn require_study_course(
+    state: &AppState,
+    course_id: Uuid,
+) -> Result<minerva_db::queries::study::StudyCourseRow, AppError> {
+    if !feature_flags::study_mode_enabled(&state.db, course_id).await {
+        return Err(AppError::NotFound);
+    }
+    minerva_db::queries::study::get_study_course(&state.db, course_id)
+        .await?
+        .ok_or_else(|| {
+            // Flag on but no config row: misconfiguration. Surface as
+            // 500 so the admin notices, rather than 404 which would
+            // hide the inconsistency.
+            AppError::Internal(format!(
+                "study mode enabled for course {} but no study_courses row exists",
+                course_id
+            ))
+        })
+}
+
+/// Reject if the caller is not a member of the course. Admins who
+/// aren't enrolled as participants get the same treatment because
+/// participant-facing routes mutate participant state; admins use
+/// the admin_router for everything they need.
+async fn require_course_member(
+    state: &AppState,
+    course_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    let role = minerva_db::queries::courses::get_member_role(&state.db, course_id, user_id).await?;
+    if role.is_none() {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+fn require_admin(user: &User) -> Result<(), AppError> {
+    if !user.role.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// GET /state
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct StateResponse {
+    stage: String,
+    current_task_index: i32,
+    number_of_tasks: i32,
+    completion_gate_kind: String,
+    consent_html: String,
+    thank_you_html: String,
+    consented_at: Option<chrono::DateTime<chrono::Utc>>,
+    pre_survey_completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    post_survey_completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    locked_out_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// If `stage == "task"`, the task body to render. Null at every
+    /// other stage so the frontend doesn't have to special-case the
+    /// transition windows.
+    current_task: Option<TaskView>,
+    /// If `stage == "task"`, the per-task conversation_id (created on
+    /// first /task/{i}/start hit and persisted thereafter), else null.
+    current_task_conversation_id: Option<Uuid>,
+}
+
+#[derive(Serialize)]
+struct TaskView {
+    task_index: i32,
+    title: String,
+    description: String,
+}
+
+async fn get_state(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<StateResponse>, AppError> {
+    let study = require_study_course(&state, course_id).await?;
+    require_course_member(&state, course_id, user.id).await?;
+
+    let participant =
+        minerva_db::queries::study::get_or_init_state(&state.db, course_id, user.id).await?;
+
+    let (current_task, current_task_conversation_id) = if participant.stage == "task" {
+        let task = minerva_db::queries::study::get_task(
+            &state.db,
+            course_id,
+            participant.current_task_index,
+        )
+        .await?;
+        let conv = minerva_db::queries::study::list_task_conversations_for_user(
+            &state.db, course_id, user.id,
+        )
+        .await?
+        .into_iter()
+        .find(|r| r.task_index == participant.current_task_index)
+        .map(|r| r.conversation_id);
+        (
+            task.map(|t| TaskView {
+                task_index: t.task_index,
+                title: t.title,
+                description: t.description,
+            }),
+            conv,
+        )
+    } else {
+        (None, None)
+    };
+
+    Ok(Json(StateResponse {
+        stage: participant.stage,
+        current_task_index: participant.current_task_index,
+        number_of_tasks: study.number_of_tasks,
+        completion_gate_kind: study.completion_gate_kind,
+        consent_html: study.consent_html,
+        thank_you_html: study.thank_you_html,
+        consented_at: participant.consented_at,
+        pre_survey_completed_at: participant.pre_survey_completed_at,
+        post_survey_completed_at: participant.post_survey_completed_at,
+        locked_out_at: participant.locked_out_at,
+        current_task,
+        current_task_conversation_id,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// POST /consent
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct ConsentRequest {
+    /// Must be `true`; sent as an explicit body field so a stray POST
+    /// with an empty body can never bypass the consent screen.
+    consent_given: bool,
+}
+
+async fn post_consent(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<ConsentRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_study_course(&state, course_id).await?;
+    require_course_member(&state, course_id, user.id).await?;
+    ensure_not_locked_out(&state, course_id, user.id).await?;
+
+    if !body.consent_given {
+        return Err(AppError::bad_request("study.consent_required"));
+    }
+    minerva_db::queries::study::get_or_init_state(&state.db, course_id, user.id).await?;
+    let row = minerva_db::queries::study::record_consent(&state.db, course_id, user.id).await?;
+    Ok(Json(serde_json::json!({ "stage": row.stage })))
+}
+
+// ---------------------------------------------------------------------------
+// GET /survey/{kind}, POST /survey/{kind}
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct SurveyResponse {
+    kind: String,
+    questions: Vec<SurveyQuestionView>,
+    /// Existing answers, keyed by question_id, so the participant can
+    /// resume a half-filled survey after a tab close. Empty on first
+    /// load. The frontend matches by id rather than position so a
+    /// future re-order doesn't smear answers.
+    existing: Vec<SurveyAnswerView>,
+}
+
+#[derive(Serialize)]
+struct SurveyQuestionView {
+    id: Uuid,
+    ord: i32,
+    /// One of: `likert`, `free_text`, `section_heading`. The frontend
+    /// renders `section_heading` as a divider/heading and never
+    /// requests an answer for it.
+    kind: String,
+    prompt: String,
+    likert_min: Option<i32>,
+    likert_max: Option<i32>,
+    likert_min_label: Option<String>,
+    likert_max_label: Option<String>,
+    /// FALSE -> participant may submit without answering. Always
+    /// FALSE for `section_heading`.
+    is_required: bool,
+    /// Likert-only: when this value is answered, the route
+    /// short-circuits to `done` (lockout) instead of advancing to
+    /// the next stage. NULL means no kill switch. The frontend
+    /// renders the question normally; the lockout happens
+    /// server-side after submission.
+    kill_on_value: Option<i32>,
+}
+
+#[derive(Serialize)]
+struct SurveyAnswerView {
+    question_id: Uuid,
+    likert_value: Option<i32>,
+    free_text_value: Option<String>,
+}
+
+fn validate_survey_kind(kind: &str) -> Result<(), AppError> {
+    match kind {
+        "pre" | "post" => Ok(()),
+        _ => Err(AppError::bad_request("study.survey_kind_invalid")),
+    }
+}
+
+async fn get_survey(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, kind)): Path<(Uuid, String)>,
+) -> Result<Json<SurveyResponse>, AppError> {
+    require_study_course(&state, course_id).await?;
+    require_course_member(&state, course_id, user.id).await?;
+    validate_survey_kind(&kind)?;
+
+    let bundle = minerva_db::queries::study::get_survey_with_questions(&state.db, course_id, &kind)
+        .await?
+        .ok_or_else(|| AppError::bad_request("study.survey_not_configured"))?;
+
+    let existing =
+        minerva_db::queries::study::list_user_responses(&state.db, bundle.survey.id, user.id)
+            .await?;
+
+    Ok(Json(SurveyResponse {
+        kind,
+        questions: bundle
+            .questions
+            .into_iter()
+            .map(|q| SurveyQuestionView {
+                id: q.id,
+                ord: q.ord,
+                kind: q.kind,
+                prompt: q.prompt,
+                likert_min: q.likert_min,
+                likert_max: q.likert_max,
+                likert_min_label: q.likert_min_label,
+                likert_max_label: q.likert_max_label,
+                is_required: q.is_required,
+                kill_on_value: q.kill_on_value,
+            })
+            .collect(),
+        existing: existing
+            .into_iter()
+            .map(|r| SurveyAnswerView {
+                question_id: r.question_id,
+                likert_value: r.likert_value,
+                free_text_value: r.free_text_value,
+            })
+            .collect(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct SubmitSurveyRequest {
+    answers: Vec<SubmitSurveyAnswer>,
+}
+
+#[derive(Deserialize)]
+struct SubmitSurveyAnswer {
+    question_id: Uuid,
+    likert_value: Option<i32>,
+    free_text_value: Option<String>,
+}
+
+async fn post_survey(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, kind)): Path<(Uuid, String)>,
+    Json(body): Json<SubmitSurveyRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_study_course(&state, course_id).await?;
+    require_course_member(&state, course_id, user.id).await?;
+    ensure_not_locked_out(&state, course_id, user.id).await?;
+    validate_survey_kind(&kind)?;
+
+    // Stage check: pre-survey only valid in `pre_survey` stage; post-
+    // survey only valid in `post_survey` stage. A late re-submit (e.g.
+    // user clicks back) is rejected so we don't accidentally rewind
+    // the pipeline state by re-running the advance.
+    let participant = minerva_db::queries::study::get_state(&state.db, course_id, user.id)
+        .await?
+        .ok_or_else(|| AppError::bad_request("study.no_participant_state"))?;
+    let expected_stage = match kind.as_str() {
+        "pre" => "pre_survey",
+        "post" => "post_survey",
+        _ => unreachable!("validate_survey_kind already checked"),
+    };
+    if participant.stage != expected_stage {
+        return Err(AppError::bad_request("study.invalid_stage"));
+    }
+
+    let bundle = minerva_db::queries::study::get_survey_with_questions(&state.db, course_id, &kind)
+        .await?
+        .ok_or_else(|| AppError::bad_request("study.survey_not_configured"))?;
+
+    // Validate every answer matches a known question of the right
+    // kind, with the right value column populated. Cheap to do up
+    // front; the DB CHECK constraints would catch mistakes too but
+    // would surface as a generic 500.
+    let mut question_lookup: std::collections::HashMap<
+        Uuid,
+        &minerva_db::queries::study::StudySurveyQuestionRow,
+    > = std::collections::HashMap::with_capacity(bundle.questions.len());
+    for q in &bundle.questions {
+        question_lookup.insert(q.id, q);
+    }
+
+    let mut inputs = Vec::with_capacity(body.answers.len());
+    for a in body.answers {
+        let q = question_lookup
+            .get(&a.question_id)
+            .ok_or_else(|| AppError::bad_request("study.unknown_question"))?;
+        match q.kind.as_str() {
+            "likert" => {
+                // Optional likert can be omitted; treat
+                // `likert_value: None` as "no answer" rather than an
+                // error so the frontend doesn't have to filter
+                // unanswered optionals out of the body.
+                let Some(v) = a.likert_value else {
+                    if q.is_required {
+                        return Err(AppError::bad_request("study.likert_value_required"));
+                    }
+                    continue;
+                };
+                let (min, max) = match (q.likert_min, q.likert_max) {
+                    (Some(min), Some(max)) => (min, max),
+                    _ => {
+                        return Err(AppError::Internal(
+                            "likert question missing min/max bounds".into(),
+                        ))
+                    }
+                };
+                if v < min || v > max {
+                    return Err(AppError::bad_request("study.likert_out_of_range"));
+                }
+                inputs.push(minerva_db::queries::study::SurveyResponseInput {
+                    question_id: a.question_id,
+                    likert_value: Some(v),
+                    free_text_value: None,
+                });
+            }
+            "free_text" => {
+                let trimmed = a
+                    .free_text_value
+                    .as_ref()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                let Some(txt) = trimmed else {
+                    if q.is_required {
+                        return Err(AppError::bad_request("study.free_text_required"));
+                    }
+                    continue;
+                };
+                inputs.push(minerva_db::queries::study::SurveyResponseInput {
+                    question_id: a.question_id,
+                    likert_value: None,
+                    free_text_value: Some(txt),
+                });
+            }
+            "section_heading" => {
+                // Display-only; client should never POST an answer
+                // for a heading. Silently ignore if it does.
+                continue;
+            }
+            _ => return Err(AppError::Internal("unknown survey question kind".into())),
+        }
+    }
+
+    // Required-question completeness check. We can't infer this from
+    // the body alone (clients should send `null`s for omitted
+    // optionals, but a client bug could just elide them); walk every
+    // required question and confirm we either staged an input or the
+    // matching input was an explicit-null optional.
+    let staged_question_ids: std::collections::HashSet<Uuid> =
+        inputs.iter().map(|i| i.question_id).collect();
+    for q in &bundle.questions {
+        if !q.is_required {
+            continue;
+        }
+        if q.kind == "section_heading" {
+            continue;
+        }
+        if !staged_question_ids.contains(&q.id) {
+            return Err(AppError::bad_request(match q.kind.as_str() {
+                "likert" => "study.likert_value_required",
+                "free_text" => "study.free_text_required",
+                _ => "study.unknown_question",
+            }));
+        }
+    }
+
+    minerva_db::queries::study::submit_survey_responses(
+        &state.db,
+        bundle.survey.id,
+        user.id,
+        &inputs,
+    )
+    .await?;
+
+    // Kill-switch evaluation. If any answered likert question
+    // matches its `kill_on_value`, the participant is short-
+    // circuited straight to `done` regardless of which survey
+    // they were on. This is the GDPR-withdraw path: the participant
+    // selected "no, do not save my data", so we stop the pipeline
+    // and the lockout middleware blocks any further interaction
+    // with the chat path.
+    let killed = inputs.iter().any(|input| {
+        let Some(v) = input.likert_value else {
+            return false;
+        };
+        let Some(q) = question_lookup.get(&input.question_id) else {
+            return false;
+        };
+        q.kill_on_value == Some(v)
+    });
+
+    let advanced = if killed {
+        // We have to walk through the existing stage-machine path
+        // because `advance_to_done` only accepts `post_survey ->
+        // done` transitions. For the pre-survey kill case we need
+        // to nudge the participant through the intermediate stages
+        // so the timestamps make sense in the export. Pragmatic
+        // workaround: bump them stage-by-stage. Two extra UPDATEs
+        // is fine for a kill-switch path.
+        if matches!(kind.as_str(), "pre") {
+            // pre_survey -> task -> post_survey -> done. Advance
+            // through the stages so the FSM stays consistent;
+            // `current_task_index` ends up at 0 which is harmless
+            // because `stage = 'done'` is what the lockout
+            // middleware reads.
+            let _ =
+                minerva_db::queries::study::advance_to_first_task(&state.db, course_id, user.id)
+                    .await?;
+            let _ = minerva_db::queries::study::advance_after_task(
+                &state.db,
+                course_id,
+                user.id,
+                0,
+                study_for_kill_switch_total_tasks(&state, course_id).await?,
+            )
+            .await?;
+        }
+        minerva_db::queries::study::advance_to_done(&state.db, course_id, user.id).await?
+    } else {
+        match kind.as_str() {
+            "pre" => {
+                minerva_db::queries::study::advance_to_first_task(&state.db, course_id, user.id)
+                    .await?
+            }
+            "post" => {
+                minerva_db::queries::study::advance_to_done(&state.db, course_id, user.id).await?
+            }
+            _ => unreachable!(),
+        }
+    };
+
+    Ok(Json(
+        serde_json::json!({ "stage": advanced.stage, "current_task_index": advanced.current_task_index }),
+    ))
+}
+
+/// Helper used only by the kill-switch path: returns the configured
+/// `number_of_tasks` for a course. We need it to walk the stage
+/// FSM through `advance_after_task` (which expects the task total
+/// so it can decide whether to land at `task` or `post_survey`).
+async fn study_for_kill_switch_total_tasks(
+    state: &AppState,
+    course_id: Uuid,
+) -> Result<i32, AppError> {
+    let study = minerva_db::queries::study::get_study_course(&state.db, course_id)
+        .await?
+        .ok_or_else(|| {
+            AppError::Internal(format!("study config missing for course {}", course_id))
+        })?;
+    Ok(study.number_of_tasks)
+}
+
+// ---------------------------------------------------------------------------
+// POST /task/{i}/start
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct StartTaskResponse {
+    task_index: i32,
+    conversation_id: Uuid,
+}
+
+async fn start_task(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, task_index)): Path<(Uuid, i32)>,
+) -> Result<Json<StartTaskResponse>, AppError> {
+    let study = require_study_course(&state, course_id).await?;
+    require_course_member(&state, course_id, user.id).await?;
+    ensure_not_locked_out(&state, course_id, user.id).await?;
+
+    if task_index < 0 || task_index >= study.number_of_tasks {
+        return Err(AppError::bad_request("study.task_index_invalid"));
+    }
+
+    let participant = minerva_db::queries::study::get_state(&state.db, course_id, user.id)
+        .await?
+        .ok_or_else(|| AppError::bad_request("study.no_participant_state"))?;
+
+    // Only the current task slot is startable. We don't let participants
+    // jump ahead or revisit completed tasks; the resume use case (tab
+    // close mid-task) is handled by re-fetching the SAME task_index,
+    // which works because get_or_create_task_conversation is idempotent.
+    if participant.stage != "task" || participant.current_task_index != task_index {
+        return Err(AppError::bad_request("study.invalid_stage"));
+    }
+
+    let row = minerva_db::queries::study::get_or_create_task_conversation(
+        &state.db, course_id, user.id, task_index,
+    )
+    .await?;
+
+    Ok(Json(StartTaskResponse {
+        task_index: row.task_index,
+        conversation_id: row.conversation_id,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// POST /task/{i}/done
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct FinishTaskResponse {
+    stage: String,
+    current_task_index: i32,
+    /// Convenience: if the participant just finished the last task,
+    /// this is true; the frontend uses it to switch immediately to
+    /// the post-survey screen rather than waiting for the next /state
+    /// poll.
+    is_last_task: bool,
+}
+
+async fn finish_task(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, task_index)): Path<(Uuid, i32)>,
+) -> Result<Json<FinishTaskResponse>, AppError> {
+    let study = require_study_course(&state, course_id).await?;
+    require_course_member(&state, course_id, user.id).await?;
+    ensure_not_locked_out(&state, course_id, user.id).await?;
+
+    if task_index < 0 || task_index >= study.number_of_tasks {
+        return Err(AppError::bad_request("study.task_index_invalid"));
+    }
+
+    let participant = minerva_db::queries::study::get_state(&state.db, course_id, user.id)
+        .await?
+        .ok_or_else(|| AppError::bad_request("study.no_participant_state"))?;
+    if participant.stage != "task" || participant.current_task_index != task_index {
+        return Err(AppError::bad_request("study.invalid_stage"));
+    }
+
+    // Gate evaluation. Currently only `messages_only` is supported;
+    // the column is kept on `study_courses` so other gates can be
+    // added later without a migration.
+    let task_conv = minerva_db::queries::study::get_or_create_task_conversation(
+        &state.db, course_id, user.id, task_index,
+    )
+    .await?;
+    match study.completion_gate_kind.as_str() {
+        "messages_only" => {
+            let n = minerva_db::queries::study::count_user_messages_in_conversation(
+                &state.db,
+                task_conv.conversation_id,
+            )
+            .await?;
+            if n < 1 {
+                return Err(AppError::bad_request("study.gate_not_met"));
+            }
+        }
+        other => {
+            return Err(AppError::Internal(format!(
+                "unsupported completion_gate_kind {other:?}",
+            )));
+        }
+    }
+
+    minerva_db::queries::study::mark_task_done(&state.db, course_id, user.id, task_index).await?;
+    let advanced = minerva_db::queries::study::advance_after_task(
+        &state.db,
+        course_id,
+        user.id,
+        task_index,
+        study.number_of_tasks,
+    )
+    .await?
+    .ok_or_else(|| {
+        // The state changed under us between the gate check and the
+        // advance; ask the client to refetch /state and try again.
+        AppError::bad_request("study.invalid_stage")
+    })?;
+
+    Ok(Json(FinishTaskResponse {
+        stage: advanced.stage,
+        current_task_index: advanced.current_task_index,
+        is_last_task: task_index + 1 >= study.number_of_tasks,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Admin: GET / PUT /admin/study/courses/{course_id}/config
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct AdminConfigResponse {
+    course_id: Uuid,
+    number_of_tasks: i32,
+    completion_gate_kind: String,
+    consent_html: String,
+    thank_you_html: String,
+    tasks: Vec<AdminTaskView>,
+    pre_survey: Option<AdminSurveyView>,
+    post_survey: Option<AdminSurveyView>,
+    /// True iff any participant is past `consent` stage. The admin UI
+    /// uses this to warn before destructive task / question edits;
+    /// editing config mid-study is allowed (sometimes you have to fix
+    /// a typo) but the warning makes the trade-off explicit.
+    has_in_flight_participants: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AdminTaskView {
+    task_index: i32,
+    title: String,
+    description: String,
+}
+
+#[derive(Serialize)]
+struct AdminSurveyView {
+    kind: String,
+    questions: Vec<AdminSurveyQuestionView>,
+    response_count: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AdminSurveyQuestionView {
+    /// `likert`, `free_text`, or `section_heading`.
+    kind: String,
+    prompt: String,
+    likert_min: Option<i32>,
+    likert_max: Option<i32>,
+    likert_min_label: Option<String>,
+    likert_max_label: Option<String>,
+    /// Defaults to TRUE for backwards compatibility when the admin
+    /// UI omits the field on existing rows. Section-headings must
+    /// always be FALSE.
+    #[serde(default = "default_true")]
+    is_required: bool,
+    /// Likert-only kill switch; see SurveyQuestionView. NULL means
+    /// no kill switch. Admin UI doesn't surface this for the
+    /// current eval; the seed script sets it directly for the
+    /// GDPR consent question.
+    #[serde(default)]
+    kill_on_value: Option<i32>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+async fn admin_get_config(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<AdminConfigResponse>, AppError> {
+    require_admin(&user)?;
+
+    let study = minerva_db::queries::study::get_study_course(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let tasks = minerva_db::queries::study::list_tasks(&state.db, course_id).await?;
+    let pre =
+        minerva_db::queries::study::get_survey_with_questions(&state.db, course_id, "pre").await?;
+    let post =
+        minerva_db::queries::study::get_survey_with_questions(&state.db, course_id, "post").await?;
+
+    // "In flight" = any participant past consent stage. The
+    // consent-only count is fine to edit through; once someone has
+    // started the pre-survey a config change risks silently
+    // invalidating their data.
+    let participants =
+        minerva_db::queries::study::list_participants_with_stages(&state.db, course_id).await?;
+    let has_in_flight_participants = participants.iter().any(|p| p.stage != "consent");
+
+    let map_survey =
+        |sw: minerva_db::queries::study::SurveyWithQuestions, count: i64| AdminSurveyView {
+            kind: sw.survey.kind,
+            questions: sw
+                .questions
+                .into_iter()
+                .map(|q| AdminSurveyQuestionView {
+                    kind: q.kind,
+                    prompt: q.prompt,
+                    likert_min: q.likert_min,
+                    likert_max: q.likert_max,
+                    likert_min_label: q.likert_min_label,
+                    likert_max_label: q.likert_max_label,
+                    is_required: q.is_required,
+                    kill_on_value: q.kill_on_value,
+                })
+                .collect(),
+            response_count: count,
+        };
+
+    let pre_view = if let Some(sw) = pre {
+        let n = minerva_db::queries::study::count_survey_responses(&state.db, sw.survey.id).await?;
+        Some(map_survey(sw, n))
+    } else {
+        None
+    };
+    let post_view = if let Some(sw) = post {
+        let n = minerva_db::queries::study::count_survey_responses(&state.db, sw.survey.id).await?;
+        Some(map_survey(sw, n))
+    } else {
+        None
+    };
+
+    Ok(Json(AdminConfigResponse {
+        course_id: study.course_id,
+        number_of_tasks: study.number_of_tasks,
+        completion_gate_kind: study.completion_gate_kind,
+        consent_html: study.consent_html,
+        thank_you_html: study.thank_you_html,
+        tasks: tasks
+            .into_iter()
+            .map(|t| AdminTaskView {
+                task_index: t.task_index,
+                title: t.title,
+                description: t.description,
+            })
+            .collect(),
+        pre_survey: pre_view,
+        post_survey: post_view,
+        has_in_flight_participants,
+    }))
+}
+
+#[derive(Deserialize)]
+struct AdminPutConfigRequest {
+    number_of_tasks: i32,
+    completion_gate_kind: String,
+    consent_html: String,
+    thank_you_html: String,
+    tasks: Vec<AdminTaskView>,
+    pre_survey: Vec<AdminSurveyQuestionView>,
+    post_survey: Vec<AdminSurveyQuestionView>,
+}
+
+async fn admin_put_config(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<AdminPutConfigRequest>,
+) -> Result<Json<AdminConfigResponse>, AppError> {
+    require_admin(&user)?;
+
+    if body.number_of_tasks <= 0 {
+        return Err(AppError::bad_request("study.number_of_tasks_invalid"));
+    }
+    if body.tasks.len() != body.number_of_tasks as usize {
+        return Err(AppError::bad_request("study.tasks_count_mismatch"));
+    }
+    // Tasks must be supplied in 0..N order without gaps; the DB has a
+    // UNIQUE on (course_id, task_index) but doesn't enforce density.
+    for (i, t) in body.tasks.iter().enumerate() {
+        if t.task_index != i as i32 {
+            return Err(AppError::bad_request("study.task_index_must_be_dense"));
+        }
+        if t.title.trim().is_empty() || t.description.trim().is_empty() {
+            return Err(AppError::bad_request("study.task_fields_required"));
+        }
+    }
+    if body.completion_gate_kind != "messages_only" {
+        return Err(AppError::bad_request("study.completion_gate_kind_invalid"));
+    }
+    validate_survey_question_inputs(&body.pre_survey)?;
+    validate_survey_question_inputs(&body.post_survey)?;
+
+    minerva_db::queries::study::upsert_study_course(
+        &state.db,
+        course_id,
+        body.number_of_tasks,
+        &body.completion_gate_kind,
+        &body.consent_html,
+        &body.thank_you_html,
+    )
+    .await?;
+
+    let task_inputs: Vec<(i32, String, String)> = body
+        .tasks
+        .into_iter()
+        .map(|t| (t.task_index, t.title, t.description))
+        .collect();
+    minerva_db::queries::study::replace_tasks(&state.db, course_id, &task_inputs).await?;
+
+    minerva_db::queries::study::replace_survey(
+        &state.db,
+        course_id,
+        "pre",
+        &to_survey_inputs(body.pre_survey),
+    )
+    .await?;
+    minerva_db::queries::study::replace_survey(
+        &state.db,
+        course_id,
+        "post",
+        &to_survey_inputs(body.post_survey),
+    )
+    .await?;
+
+    admin_get_config(State(state), Extension(user), Path(course_id)).await
+}
+
+fn validate_survey_question_inputs(qs: &[AdminSurveyQuestionView]) -> Result<(), AppError> {
+    for q in qs {
+        if q.prompt.trim().is_empty() {
+            return Err(AppError::bad_request("study.question_prompt_required"));
+        }
+        match q.kind.as_str() {
+            "likert" => {
+                let (min, max) = match (q.likert_min, q.likert_max) {
+                    (Some(min), Some(max)) => (min, max),
+                    _ => return Err(AppError::bad_request("study.likert_bounds_required")),
+                };
+                if max <= min {
+                    return Err(AppError::bad_request("study.likert_bounds_invalid"));
+                }
+            }
+            "free_text" => {
+                if q.likert_min.is_some()
+                    || q.likert_max.is_some()
+                    || q.likert_min_label.is_some()
+                    || q.likert_max_label.is_some()
+                {
+                    return Err(AppError::bad_request(
+                        "study.free_text_must_not_have_likert_fields",
+                    ));
+                }
+            }
+            "section_heading" => {
+                if q.likert_min.is_some()
+                    || q.likert_max.is_some()
+                    || q.likert_min_label.is_some()
+                    || q.likert_max_label.is_some()
+                {
+                    return Err(AppError::bad_request(
+                        "study.free_text_must_not_have_likert_fields",
+                    ));
+                }
+                if q.is_required {
+                    // The DB CHECK enforces this anyway; reject with
+                    // a clearer error code rather than letting the
+                    // 500-Database surface.
+                    return Err(AppError::bad_request(
+                        "study.section_heading_must_be_optional",
+                    ));
+                }
+            }
+            _ => return Err(AppError::bad_request("study.question_kind_invalid")),
+        }
+    }
+    Ok(())
+}
+
+fn to_survey_inputs(
+    qs: Vec<AdminSurveyQuestionView>,
+) -> Vec<minerva_db::queries::study::SurveyQuestionInput> {
+    qs.into_iter()
+        .map(|q| minerva_db::queries::study::SurveyQuestionInput {
+            kind: q.kind,
+            prompt: q.prompt,
+            likert_min: q.likert_min,
+            likert_max: q.likert_max,
+            likert_min_label: q.likert_min_label,
+            likert_max_label: q.likert_max_label,
+            is_required: q.is_required,
+            kill_on_value: q.kill_on_value,
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Admin: GET /admin/study/courses/{course_id}/participants
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct AdminParticipantRow {
+    user_id: Uuid,
+    eppn: Option<String>,
+    display_name: Option<String>,
+    stage: String,
+    current_task_index: i32,
+    consented_at: Option<chrono::DateTime<chrono::Utc>>,
+    pre_survey_completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    post_survey_completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    locked_out_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+async fn admin_list_participants(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<Vec<AdminParticipantRow>>, AppError> {
+    require_admin(&user)?;
+    // Bypass `ext_obfuscate` deliberately; the admin researcher needs
+    // real identifiers to reconcile against their participant roster
+    // and to revoke / reach out to specific people. The export route
+    // (Phase 5) does the same.
+    let rows =
+        minerva_db::queries::study::list_participants_with_stages(&state.db, course_id).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| AdminParticipantRow {
+                user_id: r.user_id,
+                eppn: r.eppn,
+                display_name: r.display_name,
+                stage: r.stage,
+                current_task_index: r.current_task_index,
+                consented_at: r.consented_at,
+                pre_survey_completed_at: r.pre_survey_completed_at,
+                post_survey_completed_at: r.post_survey_completed_at,
+                locked_out_at: r.locked_out_at,
+            })
+            .collect(),
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Admin: GET /admin/study/courses/{course_id}/export.jsonl  (Phase 5)
+// ---------------------------------------------------------------------------
+
+/// Streaming NDJSON export. One JSON object per line, one line per
+/// participant who has at least consented. `participant_id` is
+/// assigned at export time as the index in `consented_at ASC` order
+/// (1-based for human-readability) and is NOT persisted;
+/// re-exporting after a new participant consents is stable for the
+/// existing rows because order doesn't change for already-consented
+/// participants.
+///
+/// Bypasses `ext_obfuscate` deliberately: researchers need real
+/// eppns + display names so they can reconcile the JSONL against
+/// their participant roster. Admins-only.
+///
+/// Streamed line-by-line (one per participant) so a course with
+/// hundreds of participants doesn't OOM the backend by buffering
+/// the whole array in memory.
+async fn admin_export_jsonl(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Response, AppError> {
+    require_admin(&user)?;
+
+    // We pre-fetch the participant list (ordered) so we can assign
+    // participant_id deterministically. The per-participant fan-out
+    // queries happen inside the stream, one participant at a time.
+    let participants =
+        minerva_db::queries::study::list_participants_for_export(&state.db, course_id).await?;
+
+    let study = minerva_db::queries::study::get_study_course(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let pre_survey =
+        minerva_db::queries::study::get_survey_with_questions(&state.db, course_id, "pre").await?;
+    let post_survey =
+        minerva_db::queries::study::get_survey_with_questions(&state.db, course_id, "post").await?;
+
+    let db = state.db.clone();
+    let line_stream =
+        stream::iter(participants.into_iter().enumerate()).then(move |(idx, participant)| {
+            let db = db.clone();
+            let pre_survey_id = pre_survey.as_ref().map(|s| s.survey.id);
+            let post_survey_id = post_survey.as_ref().map(|s| s.survey.id);
+            let study_course_meta = json!({
+                "course_id": study.course_id,
+                "number_of_tasks": study.number_of_tasks,
+                "completion_gate_kind": study.completion_gate_kind.clone(),
+            });
+            async move {
+                build_participant_line(
+                    &db,
+                    idx + 1,
+                    &participant,
+                    pre_survey_id,
+                    post_survey_id,
+                    &study_course_meta,
+                )
+                .await
+            }
+        });
+
+    let body = Body::from_stream(line_stream);
+    let mut response = Response::new(body);
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/x-ndjson"),
+    );
+    let filename = format!("study-{course_id}.jsonl");
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+            .map_err(|_| AppError::Internal("bad filename header".into()))?,
+    );
+    Ok(response)
+}
+
+/// Builds one NDJSON line for one participant. Fan-out queries
+/// happen here (per-participant tasks + their messages + their
+/// aegis analyses + survey responses).
+///
+/// Returns `Result<String, std::io::Error>` because that's what
+/// `Body::from_stream` expects; on a per-row DB error we emit a
+/// `{"error": "..."}` line so the export doesn't abort midway and
+/// the researcher can see which participant failed.
+async fn build_participant_line(
+    db: &sqlx::PgPool,
+    participant_id: usize,
+    participant: &minerva_db::queries::study::StudyParticipantStateRow,
+    pre_survey_id: Option<Uuid>,
+    post_survey_id: Option<Uuid>,
+    study_course_meta: &serde_json::Value,
+) -> Result<Bytes, std::io::Error> {
+    let user_id = participant.user_id;
+
+    // User identity (real eppn + display, no pseudonymisation).
+    let user = match minerva_db::queries::users::find_by_id(db, user_id).await {
+        Ok(Some(u)) => Some(u),
+        Ok(None) => None,
+        Err(e) => return Ok(json_err_line(participant_id, &format!("user lookup: {e}"))),
+    };
+
+    // Pre + post survey responses, joined to question prompts.
+    let pre_responses = match pre_survey_id {
+        Some(sid) => {
+            match minerva_db::queries::study::export_responses_for_user_in_survey(db, sid, user_id)
+                .await
+            {
+                Ok(rs) => rs,
+                Err(e) => return Ok(json_err_line(participant_id, &format!("pre survey: {e}"))),
+            }
+        }
+        None => vec![],
+    };
+    let post_responses = match post_survey_id {
+        Some(sid) => {
+            match minerva_db::queries::study::export_responses_for_user_in_survey(db, sid, user_id)
+                .await
+            {
+                Ok(rs) => rs,
+                Err(e) => return Ok(json_err_line(participant_id, &format!("post survey: {e}"))),
+            }
+        }
+        None => vec![],
+    };
+
+    // Per-task conversations + their messages + Aegis analyses.
+    let task_conversations = match minerva_db::queries::study::list_task_conversations_for_user(
+        db,
+        participant.course_id,
+        user_id,
+    )
+    .await
+    {
+        Ok(tcs) => tcs,
+        Err(e) => return Ok(json_err_line(participant_id, &format!("task convs: {e}"))),
+    };
+
+    let mut tasks_json = Vec::with_capacity(task_conversations.len());
+    for tc in &task_conversations {
+        let messages = match minerva_db::queries::study::export_messages_for_conversation(
+            db,
+            tc.conversation_id,
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                return Ok(json_err_line(
+                    participant_id,
+                    &format!("messages for task {}: {e}", tc.task_index),
+                ))
+            }
+        };
+        let analyses = match minerva_db::queries::study::export_prompt_analyses_for_conversation(
+            db,
+            tc.conversation_id,
+        )
+        .await
+        {
+            Ok(a) => a,
+            Err(e) => {
+                return Ok(json_err_line(
+                    participant_id,
+                    &format!("analyses for task {}: {e}", tc.task_index),
+                ))
+            }
+        };
+        tasks_json.push(json!({
+            "task_index": tc.task_index,
+            "conversation_id": tc.conversation_id,
+            "started_at": tc.started_at,
+            "marked_done_at": tc.marked_done_at,
+            "messages": messages
+                .into_iter()
+                .map(|m| json!({
+                    "id": m.id,
+                    "role": m.role,
+                    "content": m.content,
+                    "model_used": m.model_used,
+                    "tokens_prompt": m.tokens_prompt,
+                    "tokens_completion": m.tokens_completion,
+                    "generation_ms": m.generation_ms,
+                    "retrieval_count": m.retrieval_count,
+                    "created_at": m.created_at,
+                }))
+                .collect::<Vec<_>>(),
+            "aegis_prompt_analyses": analyses
+                .into_iter()
+                .map(|a| json!({
+                    "message_id": a.message_id,
+                    "suggestions": a.suggestions,
+                    "mode": a.mode,
+                    "model_used": a.model_used,
+                    "created_at": a.created_at,
+                }))
+                .collect::<Vec<_>>(),
+        }));
+    }
+
+    let line = json!({
+        "participant_id": participant_id,
+        "user": user.map(|u| json!({
+            "id": u.id,
+            "eppn": u.eppn,
+            "display_name": u.display_name,
+        })),
+        "study_course": study_course_meta,
+        "stage": participant.stage,
+        "consented_at": participant.consented_at,
+        "pre_survey_completed_at": participant.pre_survey_completed_at,
+        "post_survey_completed_at": participant.post_survey_completed_at,
+        "locked_out_at": participant.locked_out_at,
+        "pre_survey_responses": pre_responses
+            .into_iter()
+            .map(serialize_response)
+            .collect::<Vec<_>>(),
+        "post_survey_responses": post_responses
+            .into_iter()
+            .map(serialize_response)
+            .collect::<Vec<_>>(),
+        "tasks": tasks_json,
+    });
+
+    let mut s = serde_json::to_string(&line).unwrap_or_else(|e| {
+        format!("{{\"participant_id\":{participant_id},\"error\":\"serialize: {e}\"}}")
+    });
+    s.push('\n');
+    Ok(Bytes::from(s))
+}
+
+fn serialize_response(r: minerva_db::queries::study::ExportSurveyResponseRow) -> serde_json::Value {
+    json!({
+        "question_id": r.question_id,
+        "question_ord": r.question_ord,
+        "question_prompt": r.question_prompt,
+        "question_kind": r.question_kind,
+        "likert_value": r.likert_value,
+        "free_text_value": r.free_text_value,
+        "submitted_at": r.submitted_at,
+    })
+}
+
+fn json_err_line(participant_id: usize, msg: &str) -> Bytes {
+    let mut s = serde_json::to_string(&json!({
+        "participant_id": participant_id,
+        "error": msg,
+    }))
+    .unwrap_or_else(|_| {
+        format!("{{\"participant_id\":{participant_id},\"error\":\"unprintable\"}}")
+    });
+    s.push('\n');
+    Bytes::from(s)
+}

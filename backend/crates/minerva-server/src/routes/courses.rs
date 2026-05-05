@@ -102,6 +102,13 @@ pub(crate) struct CourseFeatureFlagsView {
     /// distinct from `course_kg` (the document-level graph).
     /// Resolves through the same path as the others.
     pub(crate) concept_graph: bool,
+    /// Study mode. When TRUE the frontend redirects course members
+    /// into the research-evaluation pipeline (consent -> pre-survey
+    /// -> N tasks -> post-survey -> thank-you + lockout) instead of
+    /// the regular conversation list. Resolves through the same
+    /// course-row > global > default-false path. See
+    /// `crate::routes::study` and `crate::feature_flags::FLAG_STUDY_MODE`.
+    pub(crate) study_mode: bool,
 }
 
 impl CourseResponse {
@@ -147,6 +154,7 @@ pub(crate) async fn resolve_course_flags(
         course_kg: crate::feature_flags::course_kg_enabled(db, course_id).await,
         aegis: crate::feature_flags::aegis_enabled(db, course_id).await,
         concept_graph: crate::feature_flags::concept_graph_enabled(db, course_id).await,
+        study_mode: crate::feature_flags::study_mode_enabled(db, course_id).await,
     }
 }
 

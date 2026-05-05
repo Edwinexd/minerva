@@ -10,6 +10,31 @@
   "privacy": {
     "not_acknowledged": "You must acknowledge the privacy notice before using chat."
   },
+  "study": {
+    "locked_out": "You've completed this study; the course is now read-only for you.",
+    "consent_required": "You need to consent before continuing.",
+    "invalid_stage": "This action isn't available at your current step. Refresh and try again.",
+    "no_participant_state": "We couldn't find your study record. Refresh and try again.",
+    "task_index_invalid": "That task doesn't exist for this study.",
+    "gate_not_met": "Send at least one chat message before marking the task as done.",
+    "survey_kind_invalid": "Unknown survey kind.",
+    "survey_not_configured": "The researcher hasn't published this survey yet.",
+    "unknown_question": "One of the answers points at a question we don't recognise.",
+    "likert_value_required": "Pick a value for the rating question.",
+    "likert_out_of_range": "Pick a value within the allowed range.",
+    "free_text_required": "Please write an answer for the open-ended question.",
+    "likert_bounds_required": "Likert questions need a minimum and maximum value.",
+    "likert_bounds_invalid": "Likert maximum must be greater than the minimum.",
+    "free_text_must_not_have_likert_fields": "Free-text questions can't have Likert bounds.",
+    "question_kind_invalid": "Question kind must be 'likert' or 'free_text'.",
+    "question_prompt_required": "Each question needs a prompt.",
+    "number_of_tasks_invalid": "Number of tasks must be at least 1.",
+    "tasks_count_mismatch": "The number of tasks supplied doesn't match the configured count.",
+    "task_index_must_be_dense": "Tasks must be numbered 0, 1, 2, ... without gaps.",
+    "task_fields_required": "Each task needs a title and description.",
+    "completion_gate_kind_invalid": "Completion gate kind isn't supported.",
+    "section_heading_must_be_optional": "Section headings can't be marked as required."
+  },
   "doc": {
     "no_file": "No file provided.",
     "multipart_error": "Upload failed: {{detail}}",

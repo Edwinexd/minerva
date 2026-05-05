@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            r.question_id,\n            q.prompt AS question_prompt,\n            q.kind   AS question_kind,\n            q.ord    AS question_ord,\n            r.likert_value,\n            r.free_text_value,\n            r.submitted_at\n        FROM study_survey_responses r\n        JOIN study_survey_questions q ON q.id = r.question_id\n        WHERE r.survey_id = $1 AND r.user_id = $2\n        ORDER BY q.ord ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "question_prompt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "question_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "question_ord",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "likert_value",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "free_text_value",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "submitted_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "67578d6f305c07b4b3e170765ba5930d6620c9baaeb30afde3ddc4663c2e8540"
+}

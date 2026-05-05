@@ -1345,6 +1345,11 @@ async fn send_message(
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course = verify_course_access(&state, course_id, user.id).await?;
+    // Study-mode lockout: a participant who has finished the post-survey
+    // can no longer send messages. No-op for non-study courses and for
+    // members who haven't entered the pipeline yet. Cheap (one indexed
+    // lookup) and runs before any LLM work.
+    crate::routes::study::ensure_not_locked_out(&state, course_id, user.id).await?;
     run_chat_message(
         &state,
         course,
@@ -1364,6 +1369,7 @@ async fn start_conversation(
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course = verify_course_access(&state, course_id, user.id).await?;
+    crate::routes::study::ensure_not_locked_out(&state, course_id, user.id).await?;
     run_chat_message(
         &state,
         course,

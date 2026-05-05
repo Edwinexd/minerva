@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.user_id, u.eppn AS \"eppn?\", u.display_name, s.stage, s.current_task_index,\n            s.consented_at, s.pre_survey_completed_at, s.post_survey_completed_at, s.locked_out_at\n        FROM study_participant_state s\n        JOIN users u ON u.id = s.user_id\n        WHERE s.course_id = $1\n        ORDER BY s.consented_at ASC NULLS LAST, s.created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "eppn?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "stage",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "current_task_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "consented_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "pre_survey_completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "post_survey_completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "locked_out_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "c1e3a01afde687ed5af306595e60b851e3a77b2690e8e632cafced812eb2205d"
+}

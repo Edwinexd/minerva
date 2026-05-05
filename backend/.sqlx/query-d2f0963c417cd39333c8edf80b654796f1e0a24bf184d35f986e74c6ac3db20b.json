@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT course_id, number_of_tasks, completion_gate_kind, consent_html, thank_you_html, created_at, updated_at\n        FROM study_courses\n        WHERE course_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "number_of_tasks",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "completion_gate_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "consent_html",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "thank_you_html",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d2f0963c417cd39333c8edf80b654796f1e0a24bf184d35f986e74c6ac3db20b"
+}

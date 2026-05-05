@@ -18,6 +18,7 @@ const TAB_VALUES = [
   "external-invites",
   "lti",
   "integrations",
+  "study",
   "system",
 ] as const
 
@@ -33,6 +34,7 @@ const TAB_ROUTES = {
   "external-invites": "/admin/external-invites",
   lti: "/admin/lti",
   integrations: "/admin/integrations",
+  study: "/admin/study",
   system: "/admin/system",
 } as const satisfies Record<TabValue, string>
 
@@ -44,6 +46,7 @@ const TAB_LABEL_KEYS: Record<TabValue, string> = {
   "external-invites": "layout.tabs.externalInvites",
   lti: "layout.tabs.lti",
   integrations: "layout.tabs.integrations",
+  study: "layout.tabs.study",
   system: "layout.tabs.system",
 }
 
@@ -55,6 +58,7 @@ const TAB_TITLE_KEYS: Record<TabValue, string> = {
   "external-invites": "pageTitles.adminTab.externalInvites",
   lti: "pageTitles.adminTab.lti",
   integrations: "pageTitles.adminTab.integrations",
+  study: "pageTitles.adminTab.study",
   system: "pageTitles.adminTab.system",
 }
 

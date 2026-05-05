@@ -170,7 +170,13 @@ function ChatPage({
   )
 }
 
-function ChatWindow({
+// Exported so the study mode's `<TaskRunner>` can reuse the full
+// chat UX (transcript + composer + Aegis panel) without dragging
+// in the conversation-list sidebar that ChatPage wraps it with.
+// Study mode pins a per-task conversation_id and forces aegisEnabled
+// true, so passing those through is enough; no other study-specific
+// branching lives in here.
+export function ChatWindow({
   courseId,
   conversationId,
   readOnly = false,

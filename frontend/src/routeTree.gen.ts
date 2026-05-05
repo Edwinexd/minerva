@@ -21,6 +21,7 @@ import { Route as EmbedCourseIdRouteImport } from "./routes/embed/$courseId"
 import { Route as AdminUsersRouteImport } from "./routes/admin/users"
 import { Route as AdminUsageRouteImport } from "./routes/admin/usage"
 import { Route as AdminSystemRouteImport } from "./routes/admin/system"
+import { Route as AdminStudyRouteImport } from "./routes/admin/study"
 import { Route as AdminRulesRouteImport } from "./routes/admin/rules"
 import { Route as AdminLtiRouteImport } from "./routes/admin/lti"
 import { Route as AdminIntegrationsRouteImport } from "./routes/admin/integrations"
@@ -28,6 +29,7 @@ import { Route as AdminExternalInvitesRouteImport } from "./routes/admin/externa
 import { Route as AdminCoursesRouteImport } from "./routes/admin/courses"
 import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
 import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
+import { Route as CourseCourseIdStudyRouteImport } from "./routes/course/$courseId/study"
 import { Route as CourseCourseIdNewRouteImport } from "./routes/course/$courseId/new"
 import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
 import { Route as TeacherCoursesCourseIdIndexRouteImport } from "./routes/teacher/courses.$courseId/index"
@@ -104,6 +106,11 @@ const AdminSystemRoute = AdminSystemRouteImport.update({
   path: "/system",
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminStudyRoute = AdminStudyRouteImport.update({
+  id: "/study",
+  path: "/study",
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminRulesRoute = AdminRulesRouteImport.update({
   id: "/rules",
   path: "/rules",
@@ -137,6 +144,11 @@ const CourseCourseIdIndexRoute = CourseCourseIdIndexRouteImport.update({
 const TeacherCoursesCourseIdRoute = TeacherCoursesCourseIdRouteImport.update({
   id: "/teacher/courses/$courseId",
   path: "/teacher/courses/$courseId",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CourseCourseIdStudyRoute = CourseCourseIdStudyRouteImport.update({
+  id: "/course/$courseId/study",
+  path: "/course/$courseId/study",
   getParentRoute: () => rootRouteImport,
 } as any)
 const CourseCourseIdNewRoute = CourseCourseIdNewRouteImport.update({
@@ -239,6 +251,7 @@ export interface FileRoutesByFullPath {
   "/admin/integrations": typeof AdminIntegrationsRoute
   "/admin/lti": typeof AdminLtiRoute
   "/admin/rules": typeof AdminRulesRoute
+  "/admin/study": typeof AdminStudyRoute
   "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRoute
@@ -249,6 +262,7 @@ export interface FileRoutesByFullPath {
   "/teacher/": typeof TeacherIndexRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
+  "/course/$courseId/study": typeof CourseCourseIdStudyRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
@@ -274,6 +288,7 @@ export interface FileRoutesByTo {
   "/admin/integrations": typeof AdminIntegrationsRoute
   "/admin/lti": typeof AdminLtiRoute
   "/admin/rules": typeof AdminRulesRoute
+  "/admin/study": typeof AdminStudyRoute
   "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRoute
@@ -284,6 +299,7 @@ export interface FileRoutesByTo {
   "/teacher": typeof TeacherIndexRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
+  "/course/$courseId/study": typeof CourseCourseIdStudyRoute
   "/course/$courseId": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
   "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
@@ -310,6 +326,7 @@ export interface FileRoutesById {
   "/admin/integrations": typeof AdminIntegrationsRoute
   "/admin/lti": typeof AdminLtiRoute
   "/admin/rules": typeof AdminRulesRoute
+  "/admin/study": typeof AdminStudyRoute
   "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRoute
@@ -320,6 +337,7 @@ export interface FileRoutesById {
   "/teacher/": typeof TeacherIndexRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
+  "/course/$courseId/study": typeof CourseCourseIdStudyRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
@@ -348,6 +366,7 @@ export interface FileRouteTypes {
     | "/admin/integrations"
     | "/admin/lti"
     | "/admin/rules"
+    | "/admin/study"
     | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
@@ -358,6 +377,7 @@ export interface FileRouteTypes {
     | "/teacher/"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
+    | "/course/$courseId/study"
     | "/teacher/courses/$courseId"
     | "/course/$courseId/"
     | "/teacher/courses/$courseId/api-keys"
@@ -383,6 +403,7 @@ export interface FileRouteTypes {
     | "/admin/integrations"
     | "/admin/lti"
     | "/admin/rules"
+    | "/admin/study"
     | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
@@ -393,6 +414,7 @@ export interface FileRouteTypes {
     | "/teacher"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
+    | "/course/$courseId/study"
     | "/course/$courseId"
     | "/teacher/courses/$courseId/api-keys"
     | "/teacher/courses/$courseId/canvas"
@@ -418,6 +440,7 @@ export interface FileRouteTypes {
     | "/admin/integrations"
     | "/admin/lti"
     | "/admin/rules"
+    | "/admin/study"
     | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
@@ -428,6 +451,7 @@ export interface FileRouteTypes {
     | "/teacher/"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
+    | "/course/$courseId/study"
     | "/teacher/courses/$courseId"
     | "/course/$courseId/"
     | "/teacher/courses/$courseId/api-keys"
@@ -456,6 +480,7 @@ export interface RootRouteChildren {
   TeacherIndexRoute: typeof TeacherIndexRoute
   CourseCourseIdConversationIdRoute: typeof CourseCourseIdConversationIdRoute
   CourseCourseIdNewRoute: typeof CourseCourseIdNewRoute
+  CourseCourseIdStudyRoute: typeof CourseCourseIdStudyRoute
   TeacherCoursesCourseIdRoute: typeof TeacherCoursesCourseIdRouteWithChildren
   CourseCourseIdIndexRoute: typeof CourseCourseIdIndexRoute
 }
@@ -546,6 +571,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminSystemRouteImport
       parentRoute: typeof AdminRoute
     }
+    "/admin/study": {
+      id: "/admin/study"
+      path: "/study"
+      fullPath: "/admin/study"
+      preLoaderRoute: typeof AdminStudyRouteImport
+      parentRoute: typeof AdminRoute
+    }
     "/admin/rules": {
       id: "/admin/rules"
       path: "/rules"
@@ -593,6 +625,13 @@ declare module "@tanstack/react-router" {
       path: "/teacher/courses/$courseId"
       fullPath: "/teacher/courses/$courseId"
       preLoaderRoute: typeof TeacherCoursesCourseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/course/$courseId/study": {
+      id: "/course/$courseId/study"
+      path: "/course/$courseId/study"
+      fullPath: "/course/$courseId/study"
+      preLoaderRoute: typeof CourseCourseIdStudyRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/course/$courseId/new": {
@@ -709,6 +748,7 @@ interface AdminRouteChildren {
   AdminIntegrationsRoute: typeof AdminIntegrationsRoute
   AdminLtiRoute: typeof AdminLtiRoute
   AdminRulesRoute: typeof AdminRulesRoute
+  AdminStudyRoute: typeof AdminStudyRoute
   AdminSystemRoute: typeof AdminSystemRoute
   AdminUsageRoute: typeof AdminUsageRoute
   AdminUsersRoute: typeof AdminUsersRoute
@@ -721,6 +761,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminIntegrationsRoute: AdminIntegrationsRoute,
   AdminLtiRoute: AdminLtiRoute,
   AdminRulesRoute: AdminRulesRoute,
+  AdminStudyRoute: AdminStudyRoute,
   AdminSystemRoute: AdminSystemRoute,
   AdminUsageRoute: AdminUsageRoute,
   AdminUsersRoute: AdminUsersRoute,
@@ -781,6 +822,7 @@ const rootRouteChildren: RootRouteChildren = {
   TeacherIndexRoute: TeacherIndexRoute,
   CourseCourseIdConversationIdRoute: CourseCourseIdConversationIdRoute,
   CourseCourseIdNewRoute: CourseCourseIdNewRoute,
+  CourseCourseIdStudyRoute: CourseCourseIdStudyRoute,
   TeacherCoursesCourseIdRoute: TeacherCoursesCourseIdRouteWithChildren,
   CourseCourseIdIndexRoute: CourseCourseIdIndexRoute,
 }

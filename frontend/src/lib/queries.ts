@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -357,4 +357,104 @@ export const adminLtiPlatformBindingsQuery = (platformId: string) =>
     queryKey: ["admin", "lti", "platforms", platformId, "bindings"],
     queryFn: () =>
       api.get<LtiPlatformBinding[]>(`/admin/lti/platforms/${platformId}/bindings`),
+  })
+
+// ── Study mode ─────────────────────────────────────────────────────
+
+/// Participant pipeline state for one (course, viewer). Returned by
+/// `GET /api/courses/{id}/study/state`. The study landing route
+/// dispatches on `stage`. The route handler lazily inserts the
+/// `study_participant_state` row on first hit, so a fresh course
+/// member always lands in `consent`.
+export const studyStateQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "study", "state"],
+    queryFn: () => api.get<StudyState>(`/courses/${courseId}/study/state`),
+    /// Don't cache aggressively: the participant moves between
+    /// stages by mutation, and stale state would mean the wrong
+    /// component renders for one tick.
+    staleTime: 0,
+  })
+
+export const studySurveyQuery = (courseId: string, kind: "pre" | "post") =>
+  queryOptions({
+    queryKey: ["courses", courseId, "study", "survey", kind],
+    queryFn: () => api.get<StudySurvey>(`/courses/${courseId}/study/survey/${kind}`),
+  })
+
+// ── Admin study config ─────────────────────────────────────────────
+
+/// Full per-course study configuration as returned by
+/// `GET /api/admin/study/courses/{id}/config`. The PUT endpoint
+/// accepts the same shape (minus `course_id`, `has_in_flight_participants`,
+/// `pre_survey.response_count`, `post_survey.response_count`).
+export interface AdminStudyConfig {
+  course_id: string
+  number_of_tasks: number
+  completion_gate_kind: string
+  consent_html: string
+  thank_you_html: string
+  tasks: AdminStudyTask[]
+  pre_survey: AdminStudySurveyConfig | null
+  post_survey: AdminStudySurveyConfig | null
+  has_in_flight_participants: boolean
+}
+
+export interface AdminStudyTask {
+  task_index: number
+  title: string
+  description: string
+}
+
+export interface AdminStudySurveyConfig {
+  kind: string
+  questions: AdminStudyQuestionConfig[]
+  response_count: number
+}
+
+export interface AdminStudyQuestionConfig {
+  kind: "likert" | "free_text" | "section_heading"
+  prompt: string
+  likert_min: number | null
+  likert_max: number | null
+  likert_min_label: string | null
+  likert_max_label: string | null
+  is_required: boolean
+  kill_on_value: number | null
+}
+
+export const adminStudyConfigQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["admin", "study", "courses", courseId, "config"],
+    queryFn: () =>
+      api.get<AdminStudyConfig>(`/admin/study/courses/${courseId}/config`),
+  })
+
+/// Per-participant progress for the admin "Participants" panel.
+/// Researcher uses this to spot stalls and to reach individual
+/// participants by eppn for follow-up. Real eppns + display names
+/// (no pseudonymisation) so the export's `participant_id`-only
+/// transcripts can be reconciled against the live roster.
+export interface AdminStudyParticipantRow {
+  user_id: string
+  eppn: string | null
+  display_name: string | null
+  stage: string
+  current_task_index: number
+  consented_at: string | null
+  pre_survey_completed_at: string | null
+  post_survey_completed_at: string | null
+  locked_out_at: string | null
+}
+
+export const adminStudyParticipantsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["admin", "study", "courses", courseId, "participants"],
+    queryFn: () =>
+      api.get<AdminStudyParticipantRow[]>(
+        `/admin/study/courses/${courseId}/participants`,
+      ),
+    /// Stale-while-revalidate is fine for this; the operator
+    /// expects fresh-ish data but not realtime.
+    staleTime: 10_000,
   })

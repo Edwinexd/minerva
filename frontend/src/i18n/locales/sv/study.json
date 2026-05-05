@@ -1,0 +1,43 @@
+{
+  "loading": "Laddar studien...",
+  "loadFailed": "Kunde inte ladda studien. Uppdatera sidan för att försöka igen.",
+  "consent": {
+    "title": "Samtycke att delta",
+    "checkboxLabel": "Jag har läst informationen ovan och samtycker till att delta.",
+    "submitButton": "Jag samtycker",
+    "submittingButton": "Sparar...",
+    "missingHtml": "Forskaren har inte publicerat någon samtyckestext ännu."
+  },
+  "preSurvey": {
+    "title": "Enkät före uppgifterna",
+    "description": "Vänligen besvara följande innan du börjar med uppgifterna."
+  },
+  "postSurvey": {
+    "title": "Enkät efter uppgifterna",
+    "description": "Några avslutande frågor om din upplevelse."
+  },
+  "survey": {
+    "submitButton": "Fortsätt",
+    "submittingButton": "Sparar...",
+    "freeTextPlaceholder": "Ditt svar",
+    "optionalLabel": "valfritt",
+    "likertSelected": "Valt: {{value}}",
+    "likertSelectAria": "{{prompt}} (gradera från {{min}} till {{max}})",
+    "validation": {
+      "incomplete": "Vänligen besvara alla frågor innan du fortsätter.",
+      "outOfRange": "Välj ett värde inom det tillåtna intervallet."
+    }
+  },
+  "task": {
+    "banner": "Uppgift {{current}} av {{total}}",
+    "doneButton": "Jag är klar med uppgiften",
+    "doneSubmittingButton": "Sparar...",
+    "gateNotMet": "Skicka minst ett meddelande innan du markerar uppgiften som klar.",
+    "missingTask": "Forskaren har inte konfigurerat den här uppgiften ännu."
+  },
+  "thankYou": {
+    "title": "Tack för ditt deltagande",
+    "fallbackBody": "Dina svar har sparats. Du kan stänga fliken.",
+    "lockoutNotice": "Kursen är nu skrivskyddad för dig."
+  }
+}

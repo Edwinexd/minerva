@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, survey_id, ord, kind, prompt, likert_min, likert_max, likert_min_label, likert_max_label, is_required, kill_on_value, created_at, updated_at\n        FROM study_survey_questions\n        WHERE survey_id = $1\n        ORDER BY ord ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "survey_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "ord",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "prompt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "likert_min",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "likert_max",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "likert_min_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "likert_max_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "is_required",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "kill_on_value",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "05275365dd19d3cee5febb0c9ce6f1ff1111aae4fc045f44f4affd0e4c906a8d"
+}

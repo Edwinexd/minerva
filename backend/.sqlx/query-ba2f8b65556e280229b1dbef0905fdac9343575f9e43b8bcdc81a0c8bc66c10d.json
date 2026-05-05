@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, role, content, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, created_at\n        FROM messages\n        WHERE conversation_id = $1\n        ORDER BY created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "model_used",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "tokens_prompt",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "tokens_completion",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "generation_ms",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "retrieval_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "ba2f8b65556e280229b1dbef0905fdac9343575f9e43b8bcdc81a0c8bc66c10d"
+}

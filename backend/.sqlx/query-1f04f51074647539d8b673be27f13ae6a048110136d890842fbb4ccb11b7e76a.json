@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO study_survey_responses (survey_id, user_id, question_id, likert_value, free_text_value)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (survey_id, user_id, question_id) DO UPDATE SET\n                likert_value = EXCLUDED.likert_value,\n                free_text_value = EXCLUDED.free_text_value,\n                submitted_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f04f51074647539d8b673be27f13ae6a048110136d890842fbb4ccb11b7e76a"
+}

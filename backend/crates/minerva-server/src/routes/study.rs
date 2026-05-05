@@ -65,6 +65,10 @@ pub fn admin_router() -> Router<AppState> {
             "/study/courses/{course_id}/export.jsonl",
             get(admin_export_jsonl),
         )
+        .route(
+            "/study/courses/{course_id}/seed-dm2731",
+            post(admin_seed_dm2731),
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -1298,3 +1302,247 @@ fn json_err_line(participant_id: usize, msg: &str) -> Bytes {
     s.push('\n');
     Bytes::from(s)
 }
+
+// ---------------------------------------------------------------------------
+// Admin: POST /admin/study/courses/{course_id}/seed-dm2731
+// ---------------------------------------------------------------------------
+
+/// One-shot seed for the AI for Learning DM2731 / Aegis evaluation.
+///
+/// Idempotent: each call is the same delete-then-insert that
+/// `admin_put_config` performs (transactional per-survey + per-task
+/// list), so re-running just brings the course back to the canonical
+/// content. Useful for pre-launch dry runs and for resetting a test
+/// course mid-development. Refuses if any participant has progressed
+/// past `consent` so a careless click during a live study can't blow
+/// away participants' in-flight surveys (responses CASCADE-delete
+/// when their question rows are replaced).
+///
+/// Researcher can edit any field via the regular admin editor after
+/// seeding; this just removes the "type 17 questions in by hand"
+/// step. The content lives in Rust rather than a SQL/JSON file so
+/// it ships with every deploy and survives a fresh DB reset without
+/// needing a separate apply step.
+async fn admin_seed_dm2731(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<AdminConfigResponse>, AppError> {
+    require_admin(&user)?;
+
+    // Refuse if anyone is mid-study; replacing the question rows
+    // would CASCADE-delete their responses.
+    let participants =
+        minerva_db::queries::study::list_participants_with_stages(&state.db, course_id).await?;
+    if participants.iter().any(|p| p.stage != "consent") {
+        return Err(AppError::bad_request("study.seed_blocked_in_flight"));
+    }
+
+    let body = dm2731_preset();
+
+    // Delegate to the same path the editor's Save button uses, so
+    // the validation + transaction story is identical (no parallel
+    // code path that could drift).
+    minerva_db::queries::study::upsert_study_course(
+        &state.db,
+        course_id,
+        body.number_of_tasks,
+        &body.completion_gate_kind,
+        &body.consent_html,
+        &body.thank_you_html,
+    )
+    .await?;
+
+    let task_inputs: Vec<(i32, String, String)> = body
+        .tasks
+        .into_iter()
+        .map(|t| (t.task_index, t.title, t.description))
+        .collect();
+    minerva_db::queries::study::replace_tasks(&state.db, course_id, &task_inputs).await?;
+
+    minerva_db::queries::study::replace_survey(
+        &state.db,
+        course_id,
+        "pre",
+        &to_survey_inputs(body.pre_survey),
+    )
+    .await?;
+    minerva_db::queries::study::replace_survey(
+        &state.db,
+        course_id,
+        "post",
+        &to_survey_inputs(body.post_survey),
+    )
+    .await?;
+
+    admin_get_config(State(state), Extension(user), Path(course_id)).await
+}
+
+/// AdminPutConfigRequest payload for the DM2731 / Aegis evaluation.
+/// Survey content is from the researcher; the typo on the "I felt
+/// engaged when using Aegis" question (both endpoints labelled
+/// "Strongly agree" in the source) is corrected here to disagree -> agree.
+fn dm2731_preset() -> AdminPutConfigRequest {
+    AdminPutConfigRequest {
+        number_of_tasks: 1,
+        completion_gate_kind: "messages_only".into(),
+        consent_html: DM2731_CONSENT.into(),
+        thank_you_html: DM2731_THANKS.into(),
+        tasks: vec![AdminTaskView {
+            task_index: 0,
+            title: "Mars habitability prompt".into(),
+            description: "Your task is to create a prompt that helps you understand what environmental and technological challenges must be addressed for humans to live on Mars.".into(),
+        }],
+        pre_survey: dm2731_pre_survey(),
+        post_survey: dm2731_post_survey(),
+    }
+}
+
+fn dm2731_pre_survey() -> Vec<AdminSurveyQuestionView> {
+    vec![
+        free_text("How old are you? (e.g. 23)", true),
+        likert(
+            "How often do you use Generative AI?",
+            1,
+            10,
+            "Never",
+            "Every hour awake",
+            true,
+            None,
+        ),
+        free_text("How do you use Generative AI?", true),
+        likert(
+            "Are you okay with us saving this information according to the General Data Protection Regulation (GDPR)?",
+            1,
+            2,
+            "No",
+            "Yes",
+            true,
+            // 1 = "No"; selecting it short-circuits the participant
+            // straight to `done` (lockout) without further data
+            // collection. See `kill_on_value` in
+            // migration 20260505000008.
+            Some(1),
+        ),
+    ]
+}
+
+fn dm2731_post_survey() -> Vec<AdminSurveyQuestionView> {
+    let sus_endpoints = ("Strongly disagree", "Strongly agree");
+    let sus = |prompt: &str| likert(prompt, 1, 5, sus_endpoints.0, sus_endpoints.1, true, None);
+    vec![
+        section_heading(
+            "Please rank these according to your experience with the User Interface.",
+        ),
+        sus("I think that I would like to use this system frequently."),
+        sus("I found the system unnecessarily complex."),
+        sus("I thought the system was easy to use."),
+        sus("I think that I would need the support of a technical person to be able to use this system."),
+        sus("I found the various functions in this system were well integrated."),
+        sus("I thought there was too much inconsistency in this system."),
+        sus("I would imagine that most people would learn to use this system very quickly."),
+        sus("I found the system very cumbersome to use."),
+        sus("I felt very confident using the system."),
+        sus("I needed to learn a lot of things before I could get going with this system."),
+        section_heading(
+            "USER INTERFACE - Please rank these according to your experience with the User Interface of Aegis (not Minerva).",
+        ),
+        sus("The interface was easy to understand."),
+        sus("Aegis motivated me to achieve my goal."),
+        // The user's transcription of this one had both endpoints
+        // labelled "Strongly agree" (obvious typo); restored to
+        // disagree -> agree to match the rest.
+        sus("I felt engaged when using Aegis."),
+        free_text("How did using Aegis affect your prompting?", true),
+        // Final question explicitly optional (no asterisk in source).
+        free_text("Anything you would like to add about your experience?", false),
+    ]
+}
+
+fn likert(
+    prompt: &str,
+    min: i32,
+    max: i32,
+    min_label: &str,
+    max_label: &str,
+    is_required: bool,
+    kill_on_value: Option<i32>,
+) -> AdminSurveyQuestionView {
+    AdminSurveyQuestionView {
+        kind: "likert".into(),
+        prompt: prompt.into(),
+        likert_min: Some(min),
+        likert_max: Some(max),
+        likert_min_label: Some(min_label.into()),
+        likert_max_label: Some(max_label.into()),
+        is_required,
+        kill_on_value,
+    }
+}
+
+fn free_text(prompt: &str, is_required: bool) -> AdminSurveyQuestionView {
+    AdminSurveyQuestionView {
+        kind: "free_text".into(),
+        prompt: prompt.into(),
+        likert_min: None,
+        likert_max: None,
+        likert_min_label: None,
+        likert_max_label: None,
+        is_required,
+        kill_on_value: None,
+    }
+}
+
+fn section_heading(prompt: &str) -> AdminSurveyQuestionView {
+    AdminSurveyQuestionView {
+        kind: "section_heading".into(),
+        prompt: prompt.into(),
+        likert_min: None,
+        likert_max: None,
+        likert_min_label: None,
+        likert_max_label: None,
+        // DB CHECK enforces section_heading => is_required = false.
+        is_required: false,
+        kill_on_value: None,
+    }
+}
+
+const DM2731_CONSENT: &str = r#"# Consent to Participate in a User Study
+
+You are invited to take part in a research study conducted as part of the
+course **AI for Learning DM2731**. The purpose of this study is to explore
+how prompt coaching affects student prompting behaviour. Please read the
+following information carefully. Feel free to ask any questions you have
+before agreeing to take part in the study.
+
+In this study, you will complete a task in a chat interface. Before we
+start we will collect basic demographic information and your previous
+experience with LLM. The conversation you have with the LLM will be
+recorded as well as your responses to a short questionnaire.
+
+All collected data will be anonymized, securely stored, and used only for
+the purposes of this study. The data will be deleted upon completion of
+the project.
+
+Participation is entirely voluntary. You have the right to withdraw
+whenever you want, without providing a reason. The full study is expected
+to take approximately 30 minutes.
+
+If you have any questions before or during the study, feel free to ask
+the researchers. You can always contact us at:
+**edwinsu@dsv.su.se**, **edwinsu@kth.se**, **khogb@kth.se**
+
+## Consent
+
+By ticking the box below and pressing "I consent", I confirm that I have
+read and understood the information above and voluntarily agree to
+participate in this study.
+"#;
+
+const DM2731_THANKS: &str = r#"# Thank you for your participation!
+
+Your responses and conversation log have been recorded. The researchers
+will reach out via your DSV/KTH email if any follow-up is needed.
+
+You can close this tab.
+"#;

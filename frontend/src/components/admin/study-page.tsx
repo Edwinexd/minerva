@@ -145,6 +145,33 @@ function ConfigPanel({ courseId }: { courseId: string }) {
     },
   })
 
+  // One-shot DM2731 / Aegis preset loader. POSTs to a backend route
+  // that has the canonical content baked into Rust; on success we
+  // refetch the config and the local edit state re-hydrates from
+  // the new server values, so the user sees the seeded content
+  // immediately without a page reload.
+  const seedMutation = useMutation({
+    mutationFn: () =>
+      api.post<AdminStudyConfig>(
+        `/admin/study/courses/${courseId}/seed-dm2731`,
+        {},
+      ),
+    onSuccess: () => {
+      // Reset the local edit cursor so the next render hydrates
+      // from the freshly returned config rather than overlaying
+      // the just-seeded values with stale local edits.
+      setConsentHtml(null)
+      setThankYouHtml(null)
+      setNumberOfTasks(null)
+      setTasks(null)
+      setPreQuestions(null)
+      setPostQuestions(null)
+      queryClient.invalidateQueries({
+        queryKey: ["admin", "study", "courses", courseId, "config"],
+      })
+    },
+  })
+
   if (isLoading) return <Skeleton className="h-64 w-full" />
   if (
     error ||
@@ -223,6 +250,42 @@ function ConfigPanel({ courseId }: { courseId: string }) {
             {t("study.inFlightWarning")}
           </div>
         )}
+
+        <div className="rounded-md border border-dashed p-3 space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium">{t("study.seedDm2731Title")}</p>
+              <p className="text-xs text-muted-foreground">
+                {t("study.seedDm2731Description")}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (
+                  data.has_in_flight_participants ||
+                  (preQuestions && preQuestions.length > 0) ||
+                  (postQuestions && postQuestions.length > 0) ||
+                  (tasks && tasks.length > 0)
+                ) {
+                  if (!window.confirm(t("study.seedDm2731Confirm"))) return
+                }
+                seedMutation.mutate()
+              }}
+              disabled={seedMutation.isPending}
+            >
+              {seedMutation.isPending
+                ? t("study.seedDm2731Loading")
+                : t("study.seedDm2731Button")}
+            </Button>
+          </div>
+          {seedMutation.error !== null && (
+            <p role="alert" className="text-sm text-destructive">
+              {formatError(seedMutation.error)}
+            </p>
+          )}
+        </div>
 
         <div className="space-y-2">
           <label className="text-sm font-medium">

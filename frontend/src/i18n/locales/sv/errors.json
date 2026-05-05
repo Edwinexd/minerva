@@ -33,7 +33,8 @@
     "task_index_must_be_dense": "Uppgifterna måste numreras 0, 1, 2, ... utan luckor.",
     "task_fields_required": "Varje uppgift behöver en titel och beskrivning.",
     "completion_gate_kind_invalid": "Avslutningsvillkoret stöds inte.",
-    "section_heading_must_be_optional": "Sektionsrubriker kan inte markeras som obligatoriska."
+    "section_heading_must_be_optional": "Sektionsrubriker kan inte markeras som obligatoriska.",
+    "seed_blocked_in_flight": "Vissa deltagare har redan passerat samtycket; en ny seed skulle radera deras pågående svar. Avsluta eller återställ studien först."
   },
   "doc": {
     "no_file": "Ingen fil bifogad.",

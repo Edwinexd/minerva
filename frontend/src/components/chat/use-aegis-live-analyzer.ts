@@ -136,21 +136,30 @@ export function useAegisLiveAnalyzer(
   // Track the last input we actually fired against so an unrelated
   // re-render with the same `input` doesn't refire the analyzer.
   const lastAnalyzed = useRef<string | null>(null)
-  // Accumulated coaching memory for the current draft session. Maps
-  // suggestion `kind` -> the latest suggestion of that kind we've
-  // seen across iterations. The values get shipped to the server on
-  // every fire as `previous_suggestions` so the already-addressed
-  // check sees the FULL history of dimensions Aegis has coached on,
-  // not just whatever happened to be in the most recent verdict.
-  // Map (not array) so we naturally dedupe by kind; insertion order
-  // is preserved by JS Map semantics, oldest kind first.
+  // Accumulated coaching memory for the current draft session.
+  // Append-only array of every suggestion the analyzer has produced
+  // across every iteration of this draft, oldest-first. Shipped to
+  // the server on every fire as `previous_suggestions` so the
+  // already-addressed check sees the FULL history, not just whatever
+  // happened to be in the most recent verdict.
+  //
+  // We deliberately do NOT dedupe by `kind`. Multiple iterations
+  // that all surface `clarity` with different texts ("specify the
+  // referent", "name the symbol", "what does 'this' refer to")
+  // ARE legitimately different coaching moments and the model
+  // benefits from seeing the full sequence ; collapsing them down
+  // to "kind: clarity" once would lose the signal that the analyzer
+  // has been hammering the same dimension over and over and should
+  // stop. We DO dedupe on exact `(kind, text)` match so a sticky
+  // LLM that returns identical output two iterations in a row
+  // doesn't bloat the bullet list.
   //
   // Why not state: this is read inside a closure that the debounce
   // setTimeout captures. Putting it in useState would either need
   // us to read fresh-state-from-a-ref-anyway, or accept stale
   // captures from a slow render. Using a ref is the simpler path
-  // given we never render this map.
-  const accumulatedRef = useRef<Map<string, AegisSuggestion>>(new Map())
+  // given we never render this list.
+  const accumulatedRef = useRef<AegisSuggestion[]>([])
   // Bumps on session-end events (conversation switch, MIN_LENGTH
   // wipe, Send-driven consume). In-flight calls capture this at
   // fire time; if the value has moved by the time the response
@@ -197,7 +206,7 @@ export function useAegisLiveAnalyzer(
     }
     analyzeNowInFlight.current = false
     lastAnalyzed.current = null
-    accumulatedRef.current = new Map()
+    accumulatedRef.current = []
     setAnalysis(null)
     setPending(false)
   }, [resetKey])
@@ -224,7 +233,7 @@ export function useAegisLiveAnalyzer(
       sessionRef.current++
       abortRef.current?.abort()
       abortRef.current = null
-      accumulatedRef.current = new Map()
+      accumulatedRef.current = []
       if (analysis !== null) setAnalysis(null)
       lastAnalyzed.current = null
       setPending(false)
@@ -260,24 +269,31 @@ export function useAegisLiveAnalyzer(
       // ago's `clarity` may have dropped out of the visible verdict
       // because the analyzer moved on to `constraints`, but the
       // student has already been coached on it and we don't want
-      // it re-raised.
-      const previousSuggestions = Array.from(
-        accumulatedRef.current.values(),
-      )
+      // it re-raised. Slice (not direct ref) so a result that
+      // arrives during the request can't mutate what was sent.
+      const previousSuggestions = accumulatedRef.current.slice()
       doFetch(trimmed, previousSuggestions, controller.signal)
         .then((result) => {
           // Session-end event since we fired? Drop the result
           // entirely (no merge, no display).
           if (sessionRef.current !== mySession) return
-          // Merge the result's suggestions into the accumulator
+          // Append the result's suggestions to the accumulator
           // unconditionally on session match. Even if this isn't
           // the latest-generation result (a newer call has fired
-          // since), the kinds it raised are still valid coaching
-          // memory for this draft session and need to ride into
-          // the next request's previous_suggestions.
+          // since), the suggestions it raised are still valid
+          // coaching memory for this draft session and need to
+          // ride into the next request's previous_suggestions.
+          // Dedupe only on exact (kind, text) match so a sticky
+          // LLM that returns the same suggestion across iterations
+          // doesn't bloat the bullet list, but genuinely different
+          // texts of the same kind all stay (see the field's main
+          // doc-comment for the rationale).
           if (result) {
             for (const s of result.suggestions) {
-              accumulatedRef.current.set(s.kind, s)
+              const exists = accumulatedRef.current.some(
+                (a) => a.kind === s.kind && a.text === s.text,
+              )
+              if (!exists) accumulatedRef.current.push(s)
             }
           }
           // Display only the LATEST generation. An older call
@@ -346,7 +362,7 @@ export function useAegisLiveAnalyzer(
   const consume = (): PromptAnalysis | null => {
     const v = analysis
     sessionRef.current++
-    accumulatedRef.current = new Map()
+    accumulatedRef.current = []
     setAnalysis(null)
     return v
   }
@@ -381,9 +397,7 @@ export function useAegisLiveAnalyzer(
     abortRef.current = controller
     analyzeNowInFlight.current = true
     setPending(true)
-    const previousSuggestions = Array.from(
-      accumulatedRef.current.values(),
-    )
+    const previousSuggestions = accumulatedRef.current.slice()
     try {
       const result = await doFetch(
         trimmed,
@@ -393,7 +407,10 @@ export function useAegisLiveAnalyzer(
       if (sessionRef.current !== mySession) return null
       if (result) {
         for (const s of result.suggestions) {
-          accumulatedRef.current.set(s.kind, s)
+          const exists = accumulatedRef.current.some(
+            (a) => a.kind === s.kind && a.text === s.text,
+          )
+          if (!exists) accumulatedRef.current.push(s)
         }
       }
       if (myGen === generationRef.current) {

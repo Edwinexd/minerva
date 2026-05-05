@@ -245,6 +245,54 @@ function LikertScale({
   const max = question.likert_max ?? 5
   const ticks: number[] = []
   for (let i = min; i <= max; i++) ticks.push(i)
+
+  // Two-button Likerts (typically yes/no consent questions modeled
+  // as min=1 max=2 with No/Yes labels) render as wide labeled
+  // buttons rather than two tiny "1"/"2" tiles with floating
+  // labels off to the sides. Anything with 3+ ticks keeps the
+  // numeric scale layout because endpoints-only labels are the
+  // standard Likert convention there.
+  const isBinary = ticks.length === 2
+
+  if (isBinary) {
+    const labels: Record<number, string> = {
+      [min]: question.likert_min_label ?? String(min),
+      [max]: question.likert_max_label ?? String(max),
+    }
+    return (
+      <div
+        role="radiogroup"
+        aria-label={t("survey.likertSelectAria", {
+          prompt: question.prompt,
+          min,
+          max,
+        })}
+        className="grid grid-cols-2 gap-2"
+      >
+        {ticks.map((v) => (
+          <label
+            key={v}
+            className={`flex h-12 cursor-pointer items-center justify-center rounded-md border px-4 text-sm font-medium transition-colors ${
+              value === v
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background hover:bg-muted"
+            } ${disabled ? "opacity-50 pointer-events-none" : ""}`}
+          >
+            <input
+              type="radio"
+              name={`likert-${question.id}`}
+              className="sr-only"
+              checked={value === v}
+              onChange={() => onChange(v)}
+              disabled={disabled}
+            />
+            {labels[v]}
+          </label>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div
       role="radiogroup"

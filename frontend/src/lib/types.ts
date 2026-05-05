@@ -258,6 +258,17 @@ export interface PromptAnalysis {
   suggestions: AegisSuggestion[]
   /** "beginner" | "expert"; which calibration produced this verdict. */
   mode: "beginner" | "expert"
+  /**
+   * Cerebras model that produced the verdict. The first fire of a
+   * fresh draft runs on the cheap model; from the second fire
+   * onward (once the analyzer has at least one verdict for this
+   * draft) the server escalates to a higher-quality model that
+   * follows the already-addressed-check section reliably. Echoed
+   * back with the message body on Send so the persisted History
+   * row reflects the actual runtime model. Optional for backward
+   * compatibility with persisted rows from before the field landed.
+   */
+  model_used?: string
   /** Set on persisted rows; undefined on live verdicts. */
   created_at?: string
 }

@@ -54,15 +54,28 @@ use uuid::Uuid;
 use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_AEGIS;
 
-/// Tiny model; runs on every debounced keystroke + every Send
-/// when the flag is on. Latency is the headline number. The
-/// schema-constrained output keeps llama3.1-8b on rails for the
-/// JSON shape we want. `pub` so the route layer can stamp
-/// `model_used` on persisted rows.
+/// First-fire analyzer model. Tiny, cheap, low-latency. Runs on
+/// the very first debounced fire of a fresh draft (no live-iteration
+/// history yet); the schema-constrained output keeps llama3.1-8b on
+/// rails for the JSON shape we want.
 pub const AEGIS_MODEL: &str = "llama3.1-8b";
 
-/// Larger model for the rewrite path only; runs rarely (only when
-/// the student opens the Review tray, picks answers, and clicks
+/// Follow-up analyzer model. Used the moment the trail's current
+/// draft carries any prior_suggestions ; i.e. the second debounced
+/// fire onward, once the student has actually started iterating.
+/// Bigger / better at instruction-following so the
+/// already-addressed-check section is honoured (llama3.1-8b
+/// repeatedly re-raised kinds it had been told to drop, which is
+/// exactly the failure mode the check is supposed to prevent ; and
+/// the server-side filter then ate every kind, leaving the panel
+/// empty even when there was a genuinely new dimension to coach
+/// on). Latency is higher but the call only fires after the user
+/// has already paused to read the first verdict, so the perceived
+/// speed cost is tolerable.
+pub const AEGIS_FOLLOWUP_MODEL: &str = "gpt-oss-120b";
+
+/// Larger model for the rewrite path. Runs rarely (only when the
+/// student opens the Review tray, picks answers, and clicks
 /// Preview) and produces text the student reads, so quality
 /// matters. Mirrors `extraction_guard`'s split: cheap llama on the
 /// hot path, gpt-oss-120b on the student-facing rewrite. Pilot
@@ -70,6 +83,8 @@ pub const AEGIS_MODEL: &str = "llama3.1-8b";
 /// ("specify what you mean and explain what you're trying to
 /// achieve, such as..."); gpt-oss has the headroom to actually
 /// weave the student's selected answers into a clean revision.
+/// Same string as `AEGIS_FOLLOWUP_MODEL` today; kept as a separate
+/// constant so the rewrite path can move independently.
 pub const AEGIS_REWRITE_MODEL: &str = "gpt-oss-120b";
 
 /// Cap on the analyzer's reply. Two suggestions @ ~25 words each
@@ -321,6 +336,13 @@ pub struct AegisSuggestion {
 #[derive(Debug, Clone)]
 pub struct AegisVerdict {
     pub suggestions: Vec<AegisSuggestion>,
+    /// Which Cerebras model actually produced this verdict. Either
+    /// `AEGIS_MODEL` (first-fire, cheap) or `AEGIS_FOLLOWUP_MODEL`
+    /// (post-first-iteration, higher-quality). The route layer
+    /// stamps it on the persisted `prompt_analyses.model_used` so
+    /// the History row reflects what actually ran rather than a
+    /// hard-coded constant.
+    pub model_used: &'static str,
 }
 
 /// One entry in the trail handed to the analyzer. The LAST entry is
@@ -504,8 +526,27 @@ pub async fn analyze_prompt(
         AEGIS_OUTPUT_FOOTER,
     );
 
-    let body = serde_json::json!({
-        "model": AEGIS_MODEL,
+    // Pick the model. Cold-start drafts (no live-iteration history
+    // on the current entry) get the cheap llama; once the student
+    // has seen at least one verdict and we're on the second fire+,
+    // escalate to gpt-oss-120b. The bigger model honours the
+    // already-addressed-check section reliably; llama did not, and
+    // the server-side filter we added below ate every kind it
+    // re-raised, leaving the panel empty even when there was a
+    // genuinely new dimension to coach on. Reading the current
+    // draft entry's prior_suggestions is the cleanest signal that
+    // we're past the first round of THIS draft (cross-message
+    // context alone doesn't trigger the swap; the user explicitly
+    // wanted "after first round" to mean per-draft).
+    let use_followup = !current.prior_suggestions.is_empty();
+    let model_used = if use_followup {
+        AEGIS_FOLLOWUP_MODEL
+    } else {
+        AEGIS_MODEL
+    };
+
+    let mut body = serde_json::json!({
+        "model": model_used,
         "temperature": 0.0,
         "max_completion_tokens": AEGIS_MAX_TOKENS,
         "messages": [
@@ -589,6 +630,14 @@ pub async fn analyze_prompt(
         }
     });
 
+    // gpt-oss accepts `reasoning_effort`; llama does not. We keep
+    // it on `low` for the analyzer the same way the rewrite path
+    // does, so latency stays in the ~1s range we want for the live
+    // panel update rather than the multi-second high-effort range.
+    if use_followup {
+        body["reasoning_effort"] = serde_json::Value::String("low".to_string());
+    }
+
     let response = match cerebras_request_with_retry(http, api_key, &body).await {
         Ok(r) => r,
         Err(e) => {
@@ -603,7 +652,7 @@ pub async fn analyze_prompt(
             return Err(format!("cerebras response not JSON: {e}"));
         }
     };
-    record_cerebras_usage(db, course_id, CATEGORY_AEGIS, AEGIS_MODEL, &payload).await;
+    record_cerebras_usage(db, course_id, CATEGORY_AEGIS, model_used, &payload).await;
 
     let raw = payload["choices"][0]["message"]["content"]
         .as_str()
@@ -663,6 +712,7 @@ pub async fn analyze_prompt(
 
     Ok(Some(AegisVerdict {
         suggestions: filtered,
+        model_used,
     }))
 }
 

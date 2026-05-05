@@ -191,6 +191,20 @@ pub(crate) struct AegisAnalysisPayload {
     /// rubric.
     #[serde(default)]
     pub mode: AegisModeWire,
+    /// Cerebras model that produced this verdict. Either
+    /// `AEGIS_MODEL` (first-fire on a fresh draft) or
+    /// `AEGIS_FOLLOWUP_MODEL` (follow-up fires once the analyzer
+    /// has produced at least one verdict for the current draft).
+    /// Round-trips through the frontend on Send so the persisted
+    /// `prompt_analyses.model_used` stamps the actual runtime model
+    /// rather than a hard-coded constant. Defaults to `AEGIS_MODEL`
+    /// for older clients that don't ship the field.
+    #[serde(default = "default_model_used")]
+    pub model_used: String,
+}
+
+fn default_model_used() -> String {
+    crate::classification::aegis::AEGIS_MODEL.to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -239,6 +253,7 @@ pub(crate) struct AegisSuggestionPayload {
 
 impl AegisAnalysisPayload {
     fn from_verdict(v: crate::classification::aegis::AegisVerdict, mode: AegisModeWire) -> Self {
+        let model_used = v.model_used.to_string();
         Self {
             // Cap here too (the analyzer's system prompt says
             // 0..=AEGIS_SUGGESTIONS_MAX, but Cerebras strict-mode
@@ -262,6 +277,7 @@ impl AegisAnalysisPayload {
                 })
                 .collect(),
             mode,
+            model_used,
         }
     }
 }
@@ -1512,7 +1528,7 @@ pub(super) async fn run_chat_message(
                             message_id: user_msg_id,
                             suggestions: &suggestions_json,
                             mode: mode_str,
-                            model_used: crate::classification::aegis::AEGIS_MODEL,
+                            model_used: &analysis.model_used,
                         },
                     )
                     .await

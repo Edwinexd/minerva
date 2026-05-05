@@ -277,17 +277,20 @@ export function useAegisLiveAnalyzer(
           // Session-end event since we fired? Drop the result
           // entirely (no merge, no display).
           if (sessionRef.current !== mySession) return
-          // Append the result's suggestions to the accumulator
-          // unconditionally on session match. Even if this isn't
-          // the latest-generation result (a newer call has fired
-          // since), the suggestions it raised are still valid
-          // coaching memory for this draft session and need to
-          // ride into the next request's previous_suggestions.
-          // Dedupe only on exact (kind, text) match so a sticky
-          // LLM that returns the same suggestion across iterations
-          // doesn't bloat the bullet list, but genuinely different
-          // texts of the same kind all stay (see the field's main
-          // doc-comment for the rationale).
+          // Only the LATEST generation makes it past this gate.
+          // Older in-flight calls landing after a newer one
+          // shouldn't overwrite the panel AND shouldn't pollute
+          // the accumulator either. Pilot users were explicit:
+          // accumulate only what the user actually SAW. A verdict
+          // that landed after a newer one already replaced it on
+          // the panel was never displayed, so the student wasn't
+          // coached on it; suppressing it from the accumulator
+          // keeps "previously coached" honest. The trade-off is
+          // we drop a few suggestions on a fast typer who fires
+          // multiple debounced calls, but those suggestions
+          // weren't shown to them anyway, so they don't belong in
+          // the already-addressed memory.
+          if (myGen !== generationRef.current) return
           if (result) {
             for (const s of result.suggestions) {
               const exists = accumulatedRef.current.some(
@@ -296,13 +299,8 @@ export function useAegisLiveAnalyzer(
               if (!exists) accumulatedRef.current.push(s)
             }
           }
-          // Display only the LATEST generation. An older call
-          // landing after a newer one would otherwise overwrite
-          // the panel with stale content.
-          if (myGen === generationRef.current) {
-            lastAnalyzed.current = trimmed
-            setAnalysis(result)
-          }
+          lastAnalyzed.current = trimmed
+          setAnalysis(result)
         })
         .catch((e) => {
           if (controller.signal.aborted) return
@@ -405,6 +403,11 @@ export function useAegisLiveAnalyzer(
         controller.signal,
       )
       if (sessionRef.current !== mySession) return null
+      // Only accumulate + display when this is still the latest
+      // generation; an older analyzeNow that lost a race shouldn't
+      // pollute coaching memory the student never saw. Same rule
+      // as the debounce path.
+      if (myGen !== generationRef.current) return result
       if (result) {
         for (const s of result.suggestions) {
           const exists = accumulatedRef.current.some(
@@ -413,10 +416,8 @@ export function useAegisLiveAnalyzer(
           if (!exists) accumulatedRef.current.push(s)
         }
       }
-      if (myGen === generationRef.current) {
-        lastAnalyzed.current = trimmed
-        setAnalysis(result)
-      }
+      lastAnalyzed.current = trimmed
+      setAnalysis(result)
       return result
     } catch (e) {
       if (controller.signal.aborted) return null

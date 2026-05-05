@@ -1228,6 +1228,20 @@ async fn build_participant_line(
                 ))
             }
         };
+        let iterations = match minerva_db::queries::aegis_iterations::list_for_conversation(
+            db,
+            tc.conversation_id,
+        )
+        .await
+        {
+            Ok(rs) => rs,
+            Err(e) => {
+                return Ok(json_err_line(
+                    participant_id,
+                    &format!("aegis iterations for task {}: {e}", tc.task_index),
+                ))
+            }
+        };
         let analyses = match minerva_db::queries::study::export_prompt_analyses_for_conversation(
             db,
             tc.conversation_id,
@@ -1269,6 +1283,25 @@ async fn build_participant_line(
                     "mode": a.mode,
                     "model_used": a.model_used,
                     "created_at": a.created_at,
+                }))
+                .collect::<Vec<_>>(),
+            // Live iteration history: every debounced analyze call
+            // the participant's drafting triggered. Ordered oldest
+            // first; the participant's at-send draft is the
+            // last user message in `messages`, and the corresponding
+            // at-send verdict is in `aegis_prompt_analyses` (joined
+            // by message_id). Iterations BETWEEN are visible only
+            // here, which is the whole point of this stream for an
+            // Aegis evaluation.
+            "aegis_live_iterations": iterations
+                .into_iter()
+                .map(|it| json!({
+                    "id": it.id,
+                    "draft_text": it.draft_text,
+                    "suggestions": it.suggestions,
+                    "mode": it.mode,
+                    "model_used": it.model_used,
+                    "created_at": it.created_at,
                 }))
                 .collect::<Vec<_>>(),
         }));

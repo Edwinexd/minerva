@@ -1093,6 +1093,12 @@ pub(crate) async fn analyze_prompt_for_user(
         return Ok(None);
     }
 
+    // Hold on to the draft text + conversation id so we can persist
+    // the iteration row at the end without having to re-fetch
+    // anything. `content` is moved into the trail below; clone now
+    // (cheap; drafts are short).
+    let iteration_draft = conversation_id.map(|cid| (cid, content.clone()));
+
     // Build the trail oldest-first, current-turn-LAST. When a
     // conversation_id is given, scope-check it before pulling
     // history so a cross-course / cross-user id can't leak prior
@@ -1221,7 +1227,49 @@ pub(crate) async fn analyze_prompt_for_user(
     // any persisted History row downstream) carries the calibration
     // label. We trust the request's `mode` here since it's the
     // value the analyzer just used.
-    Ok(verdict.map(|v| AegisAnalysisPayload::from_verdict(v, mode)))
+    let payload = verdict.map(|v| AegisAnalysisPayload::from_verdict(v, mode));
+
+    // Persist a live-iteration row for the study export. Gates:
+    //   1. The frontend supplied a conversation_id (anonymous
+    //      pre-conversation analyzers don't fit any conversation
+    //      and have no participant to associate with).
+    //   2. The course is in study_mode (non-study aegis users
+    //      haven't consented to keystroke-level draft capture).
+    //   3. The analyzer returned a verdict (None means soft-failed
+    //      upstream; nothing useful to log).
+    //
+    // Best-effort: a DB error here must not break the analyze
+    // path, since the chat UI shows the live verdict regardless.
+    // Logged at warn so we notice if the table starts dropping
+    // writes silently.
+    if let (Some((cid, draft)), Some(p)) = (iteration_draft, payload.as_ref()) {
+        if crate::feature_flags::study_mode_enabled(&state.db, course_id).await {
+            let mode_str = serde_json::to_value(p.mode)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| "beginner".to_string());
+            let suggestions_json = serde_json::to_value(&p.suggestions)
+                .unwrap_or(serde_json::Value::Array(Vec::new()));
+            if let Err(e) = minerva_db::queries::aegis_iterations::insert(
+                &state.db,
+                cid,
+                &draft,
+                &suggestions_json,
+                &mode_str,
+                &p.model_used,
+            )
+            .await
+            {
+                tracing::warn!(
+                    "aegis_iterations.insert failed for conversation {}: {}",
+                    cid,
+                    e,
+                );
+            }
+        }
+    }
+
+    Ok(payload)
 }
 
 /// Live aegis analyzer endpoint (Shibboleth flow). Returns the

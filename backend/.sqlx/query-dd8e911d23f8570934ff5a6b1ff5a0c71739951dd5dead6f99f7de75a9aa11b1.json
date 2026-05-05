@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, conversation_id, draft_text, suggestions, mode, model_used, created_at\n        FROM aegis_iterations\n        WHERE conversation_id = $1\n        ORDER BY created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "conversation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "draft_text",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "suggestions",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "mode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "model_used",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dd8e911d23f8570934ff5a6b1ff5a0c71739951dd5dead6f99f7de75a9aa11b1"
+}

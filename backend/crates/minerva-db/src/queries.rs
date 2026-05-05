@@ -1,3 +1,4 @@
+pub mod aegis_iterations;
 pub mod api_keys;
 pub mod canvas;
 pub mod conversation_flags;

@@ -88,8 +88,14 @@ export interface AegisLiveAnalyzerState {
  *                      drops below MIN_LENGTH (a delete-back-to-empty
  *                      means the student is starting a fresh draft);
  *                      the conversation switches (resetKey changes);
- *                      `reset()` is called explicitly; or `consume()`
- *                      ships the verdict with a successful Send.
+ *                      or `consume()` ships the verdict with a
+ *                      successful Send. Note that `reset()` itself
+ *                      does NOT wipe the accumulator ; the rewrite-
+ *                      apply path calls reset() to clear the stale
+ *                      verdict during the new analyze call's
+ *                      ~400ms wait, but the rewrite is still part
+ *                      of the same draft session and accumulated
+ *                      coaching must survive it.
  * @param resetKey      changes when the conversation context flips
  *                      (e.g. user switched conversations). Bumping
  *                      this clears the cached analysis AND the
@@ -261,18 +267,25 @@ export function useAegisLiveAnalyzer(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, aegisEnabled, doFetch])
 
-  // Stable callbacks. Both consumers wipe local state and the
-  // accumulator (a successful Send or explicit reset both end the
-  // current draft session, so accumulated coaching memory must
-  // not bleed into the next one). Only `reset` also nulls
-  // `lastAnalyzed`; `consume` retains it so the same analysis isn't
-  // re-fetched on the next keystroke when the input string hasn't
-  // actually changed yet.
+  // Stable callbacks. Both consumers wipe local state but only
+  // `reset` also nulls `lastAnalyzed`; `consume` retains it so
+  // the same analysis isn't re-fetched on the next keystroke
+  // when the input string hasn't actually changed yet.
+  //
+  // `reset()` deliberately does NOT wipe the accumulator: it's
+  // called by the rewrite-apply path (chat-page + embed-page) to
+  // clear the stale verdict during the ~400ms wait for the
+  // rewritten input's own analyze call, but the rewrite is just
+  // AI-assisted iteration on the SAME draft session ; coaching
+  // memory must survive. The accumulator gets wiped on the
+  // genuine end-of-session events instead: `consume()` (Send went
+  // through), the `resetKey` effect (conversation switch), and
+  // the MIN_LENGTH branch in the input effect (delete-back-to-
+  // empty signals a fresh draft).
   const reset = () => {
     abortRef.current?.abort()
     abortRef.current = null
     lastAnalyzed.current = null
-    accumulatedRef.current = new Map()
     setAnalysis(null)
   }
   const consume = (): PromptAnalysis | null => {

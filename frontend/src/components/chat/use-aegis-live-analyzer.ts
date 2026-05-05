@@ -69,20 +69,33 @@ export interface AegisLiveAnalyzerState {
  *                      content for this turn".
  *
  *                      The hook hands `previousSuggestions` to every
- *                      doFetch call; those are the suggestions from
- *                      the LATEST cached verdict (or `[]` on the
- *                      first fire of a fresh draft). Closures must
- *                      ship them into the request body so the
- *                      server's already-addressed check can see what
- *                      the analyzer just coached on a near-identical
- *                      earlier version of the same draft and stop
- *                      re-circling the same kind keystroke after
- *                      keystroke.
+ *                      doFetch call; those are the ACCUMULATED
+ *                      suggestions across every iteration of this
+ *                      draft session, deduped by `kind` (latest text
+ *                      wins per kind). Closures must ship them into
+ *                      the request body so the server's
+ *                      already-addressed check can see EVERY kind
+ *                      the analyzer has coached on so far, not just
+ *                      whatever the most recent verdict happened to
+ *                      surface. Without accumulation a verdict-by-
+ *                      verdict view drops kinds the analyzer raised
+ *                      two iterations ago, and the model re-suggests
+ *                      them; that was the failure mode pilot users
+ *                      hit at iteration ~10 even after the latest-
+ *                      verdict-only fix landed.
+ *
+ *                      Reset (empties accumulated): the input box
+ *                      drops below MIN_LENGTH (a delete-back-to-empty
+ *                      means the student is starting a fresh draft);
+ *                      the conversation switches (resetKey changes);
+ *                      `reset()` is called explicitly; or `consume()`
+ *                      ships the verdict with a successful Send.
  * @param resetKey      changes when the conversation context flips
  *                      (e.g. user switched conversations). Bumping
- *                      this clears the cached analysis so panel
- *                      content from one conversation never leaks
- *                      into another.
+ *                      this clears the cached analysis AND the
+ *                      accumulated history so panel content / coaching
+ *                      memory from one conversation never leaks into
+ *                      another.
  */
 export function useAegisLiveAnalyzer(
   input: string,
@@ -99,6 +112,21 @@ export function useAegisLiveAnalyzer(
   // Track the last input we actually fired against so an unrelated
   // re-render with the same `input` doesn't refire the analyzer.
   const lastAnalyzed = useRef<string | null>(null)
+  // Accumulated coaching memory for the current draft session. Maps
+  // suggestion `kind` -> the latest suggestion of that kind we've
+  // seen across iterations. The values get shipped to the server on
+  // every fire as `previous_suggestions` so the already-addressed
+  // check sees the FULL history of dimensions Aegis has coached on,
+  // not just whatever happened to be in the most recent verdict.
+  // Map (not array) so we naturally dedupe by kind; insertion order
+  // is preserved by JS Map semantics, oldest kind first.
+  //
+  // Why not state: this is read inside a closure that the debounce
+  // setTimeout captures. Putting it in useState would either need
+  // us to read fresh-state-from-a-ref-anyway, or accept stale
+  // captures from a slow render. Using a ref is the simpler path
+  // given we never render this map.
+  const accumulatedRef = useRef<Map<string, AegisSuggestion>>(new Map())
   const abortRef = useRef<AbortController | null>(null)
   // Handle for the queued debounce timeout, so `analyzeNow` can cancel
   // it before it fires. Without this, a setTimeout queued by typing
@@ -116,8 +144,10 @@ export function useAegisLiveAnalyzer(
 
   // Conversation switch (or initial mount with a different
   // resetKey) wipes everything: cached verdict, in-flight request,
-  // last-analyzed marker. Without this, switching from one chat to
-  // another would briefly show the previous chat's panel content.
+  // last-analyzed marker, AND the accumulated coaching memory.
+  // Without this, switching from one chat to another would briefly
+  // show the previous chat's panel content and (worse) leak its
+  // accumulated kinds into the next conversation's analyze calls.
   useEffect(() => {
     abortRef.current?.abort()
     abortRef.current = null
@@ -127,6 +157,7 @@ export function useAegisLiveAnalyzer(
     }
     analyzeNowInFlight.current = false
     lastAnalyzed.current = null
+    accumulatedRef.current = new Map()
     setAnalysis(null)
     setPending(false)
   }, [resetKey])
@@ -147,8 +178,16 @@ export function useAegisLiveAnalyzer(
       // Cancel any in-flight call from an earlier longer input
       // so a delete-back-to-empty doesn't briefly show a stale
       // verdict landing after the user wiped the box.
+      //
+      // Also wipe the accumulated coaching memory: a delete-back-to-
+      // empty (or anywhere below MIN_LENGTH) is the strongest signal
+      // we have that the student is restarting their draft from
+      // scratch. Carrying coached kinds from the abandoned draft
+      // into the next one would suppress legitimate suggestions on
+      // a brand-new prompt that happens to share a dimension.
       abortRef.current?.abort()
       abortRef.current = null
+      accumulatedRef.current = new Map()
       if (analysis !== null) setAnalysis(null)
       lastAnalyzed.current = null
       return
@@ -170,20 +209,33 @@ export function useAegisLiveAnalyzer(
       const controller = new AbortController()
       abortRef.current = controller
       setPending(true)
-      // Hand the LATEST cached verdict's suggestions back to the
-      // server as live-iteration context. Reading `analysis` here
-      // is fine; the effect's deps deliberately omit `analysis`
-      // (we don't want every setAnalysis to refire), but the closure
-      // captures the latest state value via React's normal closure
-      // semantics on each render. On the first fire of a fresh
-      // draft this is `[]`, which the backend treats as no live
-      // context (cold start).
-      const previousSuggestions = analysis?.suggestions ?? []
+      // Hand the FULL ACCUMULATED coaching history back to the
+      // server as live-iteration context, not just the latest
+      // verdict. Each iteration's verdict only surfaces 0..=2
+      // current concerns; an iteration ago's `clarity` may have
+      // dropped out of the visible verdict because the analyzer
+      // moved on to `constraints`, but the student has already
+      // been coached on clarity and we don't want it re-raised.
+      // Reading the ref (not state) so we always see the latest
+      // accumulator regardless of render staleness.
+      const previousSuggestions = Array.from(
+        accumulatedRef.current.values(),
+      )
       doFetch(trimmed, previousSuggestions, controller.signal)
         .then((result) => {
           if (controller.signal.aborted) return
           lastAnalyzed.current = trimmed
           setAnalysis(result)
+          // Merge the new verdict's suggestions into the accumulator,
+          // dedup-by-kind, latest text wins. Empty / null results
+          // (analyzer said "looks good" or soft-failed) leave the
+          // accumulator alone; we don't want a "looks good" reading
+          // to wipe history of kinds we've already coached on.
+          if (result) {
+            for (const s of result.suggestions) {
+              accumulatedRef.current.set(s.kind, s)
+            }
+          }
         })
         .catch((e) => {
           if (controller.signal.aborted) return
@@ -209,18 +261,23 @@ export function useAegisLiveAnalyzer(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, aegisEnabled, doFetch])
 
-  // Stable callbacks. Both consumers wipe local state but only
-  // `reset` also nulls `lastAnalyzed`; `consume` retains it so
-  // the same analysis isn't re-fetched on the next keystroke
-  // when the input string hasn't actually changed yet.
+  // Stable callbacks. Both consumers wipe local state and the
+  // accumulator (a successful Send or explicit reset both end the
+  // current draft session, so accumulated coaching memory must
+  // not bleed into the next one). Only `reset` also nulls
+  // `lastAnalyzed`; `consume` retains it so the same analysis isn't
+  // re-fetched on the next keystroke when the input string hasn't
+  // actually changed yet.
   const reset = () => {
     abortRef.current?.abort()
     abortRef.current = null
     lastAnalyzed.current = null
+    accumulatedRef.current = new Map()
     setAnalysis(null)
   }
   const consume = (): PromptAnalysis | null => {
     const v = analysis
+    accumulatedRef.current = new Map()
     setAnalysis(null)
     return v
   }
@@ -256,17 +313,30 @@ export function useAegisLiveAnalyzer(
     analyzeNowInFlight.current = true
     setPending(true)
     // Same live-iteration context as the debounced path: hand the
-    // last cached verdict's suggestions to the server so the
-    // already-addressed check sees them. On Send-driven analyzeNow
-    // the cache may already match the input (handled by the
-    // short-circuit above) or hold a near-identical earlier verdict;
-    // both shapes are correct to forward.
-    const previousSuggestions = analysis?.suggestions ?? []
+    // FULL accumulated coaching history to the server so the
+    // already-addressed check sees every kind we've coached on
+    // across this draft session, not just the most recent verdict.
+    const previousSuggestions = Array.from(
+      accumulatedRef.current.values(),
+    )
     try {
-      const result = await doFetch(trimmed, previousSuggestions, controller.signal)
+      const result = await doFetch(
+        trimmed,
+        previousSuggestions,
+        controller.signal,
+      )
       if (controller.signal.aborted) return null
       lastAnalyzed.current = trimmed
       setAnalysis(result)
+      // Merge the analyzeNow verdict into the accumulator on the
+      // same terms as the debounced path; if the user un-Sends
+      // and keeps editing, the next debounced fire still has the
+      // full history.
+      if (result) {
+        for (const s of result.suggestions) {
+          accumulatedRef.current.set(s.kind, s)
+        }
+      }
       return result
     } catch (e) {
       if (controller.signal.aborted) return null

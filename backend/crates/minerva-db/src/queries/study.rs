@@ -112,6 +112,11 @@ pub struct StudyParticipantStateRow {
     pub pre_survey_completed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub post_survey_completed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub locked_out_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Per-course sequential identifier assigned at consent time
+    /// (see `record_consent`); persistent across deletes so the UI
+    /// can show stable "participant 5" references and the JSONL
+    /// export keeps the same id over time. NULL until consent.
+    pub participant_number: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -453,7 +458,7 @@ pub async fn get_state(
 ) -> Result<Option<StudyParticipantStateRow>, sqlx::Error> {
     sqlx::query_as!(
         StudyParticipantStateRow,
-        r#"SELECT course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at
+        r#"SELECT course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at
         FROM study_participant_state
         WHERE course_id = $1 AND user_id = $2"#,
         course_id,
@@ -476,7 +481,7 @@ pub async fn get_or_init_state(
         r#"INSERT INTO study_participant_state (course_id, user_id)
         VALUES ($1, $2)
         ON CONFLICT (course_id, user_id) DO UPDATE SET updated_at = study_participant_state.updated_at
-        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at"#,
+        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at"#,
         course_id,
         user_id,
     )
@@ -484,8 +489,17 @@ pub async fn get_or_init_state(
     .await
 }
 
-/// Record consent and transition to `pre_survey`. Idempotent on the
-/// stage transition (a second click stays in `pre_survey`).
+/// Record consent and transition to `pre_survey`, assigning a
+/// `participant_number` on first consent. The number is the
+/// per-course running max + 1 (1-based, dense within the course's
+/// lifetime). Idempotent on the stage transition (a second click
+/// stays in `pre_survey` and reuses the existing participant_number).
+///
+/// Race: two simultaneous consents can compute the same MAX+1; the
+/// UNIQUE index will reject the second. Frontend retries on the
+/// resulting 500 / db error. For the eval scale (low concurrency)
+/// this is exceedingly unlikely; if it ever bites, swap MAX+1 for
+/// a per-course advisory lock.
 pub async fn record_consent(
     db: &PgPool,
     course_id: Uuid,
@@ -496,9 +510,15 @@ pub async fn record_consent(
         r#"UPDATE study_participant_state
         SET stage = 'pre_survey',
             consented_at = COALESCE(consented_at, NOW()),
+            participant_number = COALESCE(
+                participant_number,
+                (SELECT COALESCE(MAX(participant_number), 0) + 1
+                   FROM study_participant_state
+                   WHERE course_id = $1)
+            ),
             updated_at = NOW()
         WHERE course_id = $1 AND user_id = $2 AND stage IN ('consent', 'pre_survey')
-        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at"#,
+        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at"#,
         course_id,
         user_id,
     )
@@ -520,7 +540,7 @@ pub async fn advance_to_first_task(
             pre_survey_completed_at = COALESCE(pre_survey_completed_at, NOW()),
             updated_at = NOW()
         WHERE course_id = $1 AND user_id = $2 AND stage IN ('pre_survey', 'task')
-        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at"#,
+        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at"#,
         course_id,
         user_id,
     )
@@ -559,7 +579,7 @@ pub async fn advance_after_task(
           AND user_id = $2
           AND stage = 'task'
           AND current_task_index = $5
-        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at"#,
+        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at"#,
         course_id,
         user_id,
         next_stage,
@@ -584,7 +604,7 @@ pub async fn advance_to_done(
             locked_out_at = COALESCE(locked_out_at, NOW()),
             updated_at = NOW()
         WHERE course_id = $1 AND user_id = $2 AND stage IN ('post_survey', 'done')
-        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at"#,
+        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at"#,
         course_id,
         user_id,
     )
@@ -715,11 +735,16 @@ pub async fn count_user_messages_in_conversation(
 // Admin views
 // ---------------------------------------------------------------------------
 
+/// Anonymous per-participant progress row. Deliberately omits
+/// `user_id`, `eppn`, and `display_name`: the Study Mode admin UI
+/// only ever shows `participant_number` so researchers can't (and
+/// don't have to) know which person submitted what during analysis.
+/// Pre-consent rows (no `participant_number`) are included so the
+/// admin can see consent-screen drop-off, just with `None` for the
+/// number.
 #[derive(Debug, Clone)]
 pub struct ParticipantProgressRow {
-    pub user_id: Uuid,
-    pub eppn: Option<String>,
-    pub display_name: Option<String>,
+    pub participant_number: Option<i32>,
     pub stage: String,
     pub current_task_index: i32,
     pub consented_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -734,35 +759,140 @@ pub async fn list_participants_with_stages(
 ) -> Result<Vec<ParticipantProgressRow>, sqlx::Error> {
     sqlx::query_as!(
         ParticipantProgressRow,
-        r#"SELECT s.user_id, u.eppn AS "eppn?", u.display_name, s.stage, s.current_task_index,
+        r#"SELECT s.participant_number, s.stage, s.current_task_index,
             s.consented_at, s.pre_survey_completed_at, s.post_survey_completed_at, s.locked_out_at
         FROM study_participant_state s
-        JOIN users u ON u.id = s.user_id
         WHERE s.course_id = $1
-        ORDER BY s.consented_at ASC NULLS LAST, s.created_at ASC"#,
+        ORDER BY s.participant_number ASC NULLS LAST, s.created_at ASC"#,
         course_id,
     )
     .fetch_all(db)
     .await
 }
 
+/// Fetch a single participant by `participant_number` for the
+/// admin detail view. Returns the full state row (still anonymous;
+/// the user_id is internal-only and the route layer never
+/// surfaces it). NULL when the number doesn't exist for this
+/// course.
+pub async fn find_by_participant_number(
+    db: &PgPool,
+    course_id: Uuid,
+    participant_number: i32,
+) -> Result<Option<StudyParticipantStateRow>, sqlx::Error> {
+    sqlx::query_as!(
+        StudyParticipantStateRow,
+        r#"SELECT course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at
+        FROM study_participant_state
+        WHERE course_id = $1 AND participant_number = $2"#,
+        course_id,
+        participant_number,
+    )
+    .fetch_optional(db)
+    .await
+}
+
+/// Per-course study completion stage for a given user. Used by
+/// the members listing to show "completed" badges + gate the
+/// "Remove from study" button. Returns None for users who never
+/// hit the consent screen.
+pub async fn get_stage_for_user(
+    db: &PgPool,
+    course_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    let row: Option<String> = sqlx::query_scalar!(
+        "SELECT stage FROM study_participant_state WHERE course_id = $1 AND user_id = $2",
+        course_id,
+        user_id,
+    )
+    .fetch_optional(db)
+    .await?;
+    Ok(row)
+}
+
+/// Wipe all study data for one (course, user). GDPR-style erasure:
+/// deletes the participant_state row, all per-task conversations
+/// (which CASCADEs through to messages, prompt_analyses,
+/// aegis_iterations, and the study_task_conversations mapping
+/// itself), and all survey responses for this user in this course's
+/// surveys. Idempotent: running on a user with no study data is a
+/// no-op. The user's course_members row is NOT touched; that's a
+/// separate "remove from course" operation.
+pub async fn delete_participant_data(
+    db: &PgPool,
+    course_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let mut tx = db.begin().await?;
+
+    // 1. List the per-task conversation IDs so we can drop the
+    //    underlying conversations rows. Deleting a conversation
+    //    CASCADEs to messages -> prompt_analyses (via
+    //    messages.id), aegis_iterations (via conversation_id),
+    //    AND study_task_conversations (via conversation_id).
+    let conversation_ids: Vec<Uuid> = sqlx::query_scalar!(
+        "SELECT conversation_id FROM study_task_conversations WHERE course_id = $1 AND user_id = $2",
+        course_id,
+        user_id,
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    for cid in conversation_ids {
+        sqlx::query!("DELETE FROM conversations WHERE id = $1", cid)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    // 2. Survey responses. Filtered by survey_ids that belong to
+    //    this course so we never touch responses for other courses
+    //    if (somehow) the user participated in multiple studies.
+    sqlx::query!(
+        r#"DELETE FROM study_survey_responses
+        WHERE user_id = $1
+          AND survey_id IN (SELECT id FROM study_surveys WHERE course_id = $2)"#,
+        user_id,
+        course_id,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    // 3. Participant state row last; this is the row whose absence
+    //    means "no longer a study participant", so nothing else
+    //    should depend on it after this point.
+    sqlx::query!(
+        "DELETE FROM study_participant_state WHERE course_id = $1 AND user_id = $2",
+        course_id,
+        user_id,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Export support
 // ---------------------------------------------------------------------------
 
-/// One row per participant who has at least consented; ordered by
-/// `consented_at ASC` so the export route can assign sequential
-/// participant IDs deterministically.
+/// One row per consented participant; ordered by the persistent
+/// `participant_number` so the export's identifier matches the
+/// admin UI and stays stable across deletes (a hole appears in the
+/// numbering after a deletion rather than re-indexing later rows).
+/// Pre-consent rows are excluded by definition (they have no
+/// participant_number).
 pub async fn list_participants_for_export(
     db: &PgPool,
     course_id: Uuid,
 ) -> Result<Vec<StudyParticipantStateRow>, sqlx::Error> {
     sqlx::query_as!(
         StudyParticipantStateRow,
-        r#"SELECT course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at
+        r#"SELECT course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at
         FROM study_participant_state
-        WHERE course_id = $1 AND consented_at IS NOT NULL
-        ORDER BY consented_at ASC, user_id ASC"#,
+        WHERE course_id = $1 AND participant_number IS NOT NULL
+        ORDER BY participant_number ASC"#,
         course_id,
     )
     .fetch_all(db)

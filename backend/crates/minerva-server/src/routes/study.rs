@@ -69,6 +69,14 @@ pub fn admin_router() -> Router<AppState> {
             "/study/courses/{course_id}/seed-dm2731",
             post(admin_seed_dm2731),
         )
+        .route(
+            "/study/courses/{course_id}/participants/{participant_number}/detail",
+            get(admin_get_participant_detail),
+        )
+        .route(
+            "/study/courses/{course_id}/participants/by-user/{user_id}",
+            axum::routing::delete(admin_delete_participant_data),
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -1052,11 +1060,21 @@ fn to_survey_inputs(
 // Admin: GET /admin/study/courses/{course_id}/participants
 // ---------------------------------------------------------------------------
 
+/// Anonymous participant row for the Study Mode admin UI. No
+/// `user_id`, `eppn`, or `display_name` here on purpose: the
+/// researcher's analysis view should never need (or be able to)
+/// link a row back to a specific person. The "who is participant
+/// 5?" lookup happens via the regular course members tab, where
+/// names live alongside a `study_stage` field for matching, and the
+/// "delete participant data on request" operation goes via the
+/// members tab too. Strict separation of identified-roster from
+/// anonymous-analysis views.
 #[derive(Serialize)]
 struct AdminParticipantRow {
-    user_id: Uuid,
-    eppn: Option<String>,
-    display_name: Option<String>,
+    /// Sequential per-course participant identifier, assigned at
+    /// consent time. NULL for rows that landed on the consent
+    /// screen but never consented (still useful to count drop-off).
+    participant_number: Option<i32>,
     stage: String,
     current_task_index: i32,
     consented_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -1071,18 +1089,12 @@ async fn admin_list_participants(
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<AdminParticipantRow>>, AppError> {
     require_course_owner_teacher_or_admin(&state, course_id, &user).await?;
-    // Bypass `ext_obfuscate` deliberately; the admin researcher needs
-    // real identifiers to reconcile against their participant roster
-    // and to revoke / reach out to specific people. The export route
-    // (Phase 5) does the same.
     let rows =
         minerva_db::queries::study::list_participants_with_stages(&state.db, course_id).await?;
     Ok(Json(
         rows.into_iter()
             .map(|r| AdminParticipantRow {
-                user_id: r.user_id,
-                eppn: r.eppn,
-                display_name: r.display_name,
+                participant_number: r.participant_number,
                 stage: r.stage,
                 current_task_index: r.current_task_index,
                 consented_at: r.consented_at,
@@ -1092,6 +1104,159 @@ async fn admin_list_participants(
             })
             .collect(),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Admin: GET /admin/study/courses/{id}/participants/{n}/detail
+// ---------------------------------------------------------------------------
+
+/// Per-participant detail dump for the researcher's UI drill-in.
+/// Keyed by `participant_number`, never by user_id, so the admin
+/// page never has to surface a person-identifying token. Returns
+/// the same data shape as one line of the JSONL export (surveys +
+/// tasks + messages + Aegis analyses + iteration history) but as a
+/// regular JSON response for the frontend to render.
+async fn admin_get_participant_detail(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, participant_number)): Path<(Uuid, i32)>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_course_owner_teacher_or_admin(&state, course_id, &user).await?;
+
+    let participant = minerva_db::queries::study::find_by_participant_number(
+        &state.db,
+        course_id,
+        participant_number,
+    )
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let pre_survey =
+        minerva_db::queries::study::get_survey_with_questions(&state.db, course_id, "pre").await?;
+    let post_survey =
+        minerva_db::queries::study::get_survey_with_questions(&state.db, course_id, "post").await?;
+
+    let pre_responses = if let Some(s) = &pre_survey {
+        minerva_db::queries::study::export_responses_for_user_in_survey(
+            &state.db,
+            s.survey.id,
+            participant.user_id,
+        )
+        .await?
+    } else {
+        vec![]
+    };
+    let post_responses = if let Some(s) = &post_survey {
+        minerva_db::queries::study::export_responses_for_user_in_survey(
+            &state.db,
+            s.survey.id,
+            participant.user_id,
+        )
+        .await?
+    } else {
+        vec![]
+    };
+
+    let task_conversations = minerva_db::queries::study::list_task_conversations_for_user(
+        &state.db,
+        course_id,
+        participant.user_id,
+    )
+    .await?;
+
+    let mut tasks_json = Vec::with_capacity(task_conversations.len());
+    for tc in &task_conversations {
+        let task_meta =
+            minerva_db::queries::study::get_task(&state.db, course_id, tc.task_index).await?;
+        let messages = minerva_db::queries::study::export_messages_for_conversation(
+            &state.db,
+            tc.conversation_id,
+        )
+        .await?;
+        let analyses = minerva_db::queries::study::export_prompt_analyses_for_conversation(
+            &state.db,
+            tc.conversation_id,
+        )
+        .await?;
+        let iterations = minerva_db::queries::aegis_iterations::list_for_conversation(
+            &state.db,
+            tc.conversation_id,
+        )
+        .await?;
+        tasks_json.push(json!({
+            "task_index": tc.task_index,
+            "task_title": task_meta.as_ref().map(|t| t.title.clone()),
+            "task_description": task_meta.as_ref().map(|t| t.description.clone()),
+            "conversation_id": tc.conversation_id,
+            "started_at": tc.started_at,
+            "marked_done_at": tc.marked_done_at,
+            "messages": messages.into_iter().map(|m| json!({
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "model_used": m.model_used,
+                "tokens_prompt": m.tokens_prompt,
+                "tokens_completion": m.tokens_completion,
+                "generation_ms": m.generation_ms,
+                "retrieval_count": m.retrieval_count,
+                "created_at": m.created_at,
+            })).collect::<Vec<_>>(),
+            "aegis_prompt_analyses": analyses.into_iter().map(|a| json!({
+                "message_id": a.message_id,
+                "suggestions": a.suggestions,
+                "mode": a.mode,
+                "model_used": a.model_used,
+                "created_at": a.created_at,
+            })).collect::<Vec<_>>(),
+            "aegis_live_iterations": iterations.into_iter().map(|it| json!({
+                "id": it.id,
+                "draft_text": it.draft_text,
+                "suggestions": it.suggestions,
+                "mode": it.mode,
+                "model_used": it.model_used,
+                "created_at": it.created_at,
+            })).collect::<Vec<_>>(),
+        }));
+    }
+
+    Ok(Json(json!({
+        "participant_number": participant.participant_number,
+        "stage": participant.stage,
+        "consented_at": participant.consented_at,
+        "pre_survey_completed_at": participant.pre_survey_completed_at,
+        "post_survey_completed_at": participant.post_survey_completed_at,
+        "locked_out_at": participant.locked_out_at,
+        "pre_survey_responses": pre_responses.iter().cloned().map(serialize_response).collect::<Vec<_>>(),
+        "post_survey_responses": post_responses.iter().cloned().map(serialize_response).collect::<Vec<_>>(),
+        "tasks": tasks_json,
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// Admin: DELETE /admin/study/courses/{id}/participants/by-user/{user_id}
+// ---------------------------------------------------------------------------
+
+/// GDPR-style erasure of one participant's study data. Triggered
+/// from the course members tab (where names ARE shown so the
+/// researcher can pick "Alice"), NOT from the anonymous Study Mode
+/// participants table. Wipes per-task conversations (and through
+/// CASCADE: messages, prompt_analyses, aegis_iterations, the
+/// study_task_conversations mapping), survey responses, and the
+/// participant_state row. Course membership stays put; that's a
+/// separate "remove from course" operation.
+///
+/// The deleted participant's `participant_number` is NOT reused;
+/// remaining participants keep their stable numbers so any prior
+/// analyses referring to "participant 5" still mean the same row.
+async fn admin_delete_participant_data(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, target_user_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_course_owner_teacher_or_admin(&state, course_id, &user).await?;
+    minerva_db::queries::study::delete_participant_data(&state.db, course_id, target_user_id)
+        .await?;
+    Ok(Json(json!({ "deleted": true })))
 }
 
 // ---------------------------------------------------------------------------
@@ -1136,28 +1301,31 @@ async fn admin_export_jsonl(
         minerva_db::queries::study::get_survey_with_questions(&state.db, course_id, "post").await?;
 
     let db = state.db.clone();
-    let line_stream =
-        stream::iter(participants.into_iter().enumerate()).then(move |(idx, participant)| {
-            let db = db.clone();
-            let pre_survey_id = pre_survey.as_ref().map(|s| s.survey.id);
-            let post_survey_id = post_survey.as_ref().map(|s| s.survey.id);
-            let study_course_meta = json!({
-                "course_id": study.course_id,
-                "number_of_tasks": study.number_of_tasks,
-                "completion_gate_kind": study.completion_gate_kind.clone(),
-            });
-            async move {
-                build_participant_line(
-                    &db,
-                    idx + 1,
-                    &participant,
-                    pre_survey_id,
-                    post_survey_id,
-                    &study_course_meta,
-                )
-                .await
-            }
+    let line_stream = stream::iter(participants).then(move |participant| {
+        let db = db.clone();
+        let pre_survey_id = pre_survey.as_ref().map(|s| s.survey.id);
+        let post_survey_id = post_survey.as_ref().map(|s| s.survey.id);
+        let study_course_meta = json!({
+            "course_id": study.course_id,
+            "number_of_tasks": study.number_of_tasks,
+            "completion_gate_kind": study.completion_gate_kind.clone(),
         });
+        async move {
+            // The list query only returns rows with a non-null
+            // participant_number, so unwrap is safe; fall back
+            // to 0 defensively in the impossible-but-explicit case.
+            let pid = participant.participant_number.unwrap_or(0);
+            build_participant_line(
+                &db,
+                pid,
+                &participant,
+                pre_survey_id,
+                post_survey_id,
+                &study_course_meta,
+            )
+            .await
+        }
+    });
 
     let body = Body::from_stream(line_stream);
     let mut response = Response::new(body);
@@ -1184,7 +1352,7 @@ async fn admin_export_jsonl(
 /// the researcher can see which participant failed.
 async fn build_participant_line(
     db: &sqlx::PgPool,
-    participant_id: usize,
+    participant_id: i32,
     participant: &minerva_db::queries::study::StudyParticipantStateRow,
     pre_survey_id: Option<Uuid>,
     post_survey_id: Option<Uuid>,
@@ -1372,7 +1540,7 @@ fn serialize_response(r: minerva_db::queries::study::ExportSurveyResponseRow) ->
     })
 }
 
-fn json_err_line(participant_id: usize, msg: &str) -> Bytes {
+fn json_err_line(participant_id: i32, msg: &str) -> Bytes {
     let mut s = serde_json::to_string(&json!({
         "participant_id": participant_id,
         "error": msg,

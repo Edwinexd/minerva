@@ -433,6 +433,13 @@ struct MemberResponse {
     display_name: Option<String>,
     role: String,
     added_at: chrono::DateTime<chrono::Utc>,
+    /// Per-course study pipeline stage for this user, or None if
+    /// they've never landed on the consent screen. Populated only
+    /// when the course's `study_mode` flag is on; null otherwise.
+    /// Drives the members tab's "Study" column + the "Remove from
+    /// study" button gating.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    study_stage: Option<String>,
 }
 
 async fn list_members(
@@ -459,17 +466,37 @@ async fn list_members(
         &state.config.hmac_secret,
     )
     .await?;
+
+    // Resolve study stages in parallel with the role-listing only when
+    // the course is actually in study mode; for a regular course the
+    // members tab doesn't need the column at all so we skip the N
+    // single-row lookups entirely.
+    let study_on = crate::feature_flags::study_mode_enabled(&state.db, id).await;
+    let mut study_stages: std::collections::HashMap<Uuid, String> =
+        std::collections::HashMap::new();
+    if study_on {
+        for r in &rows {
+            if let Some(stage) =
+                minerva_db::queries::study::get_stage_for_user(&state.db, id, r.user_id).await?
+            {
+                study_stages.insert(r.user_id, stage);
+            }
+        }
+    }
+
     Ok(Json(
         rows.into_iter()
             .map(|r| {
                 let (eppn, display_name) =
                     crate::ext_obfuscate::apply(ps.as_ref(), r.user_id, r.eppn, r.display_name);
+                let study_stage = study_stages.get(&r.user_id).cloned();
                 MemberResponse {
                     user_id: r.user_id,
                     eppn,
                     display_name,
                     role: r.role,
                     added_at: r.added_at,
+                    study_stage,
                 }
             })
             .collect(),

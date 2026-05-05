@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE study_participant_state\n        SET stage = 'done',\n            post_survey_completed_at = COALESCE(post_survey_completed_at, NOW()),\n            locked_out_at = COALESCE(locked_out_at, NOW()),\n            updated_at = NOW()\n        WHERE course_id = $1 AND user_id = $2 AND stage IN ('post_survey', 'done')\n        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at",
+  "query": "UPDATE study_participant_state\n        SET stage = 'done',\n            post_survey_completed_at = COALESCE(post_survey_completed_at, NOW()),\n            locked_out_at = COALESCE(locked_out_at, NOW()),\n            updated_at = NOW()\n        WHERE course_id = $1 AND user_id = $2 AND stage IN ('post_survey', 'done')\n        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -45,11 +45,16 @@
       },
       {
         "ordinal": 8,
+        "name": "participant_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -69,9 +74,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "0fcc262ae96e488d5bcb1416bb6b0739576c319114670d2ba33d3bb7473bca79"
+  "hash": "180d6e1e65554e9cb07169d901a2dd3fa1ef6c740004eade2f4e21d467070d79"
 }

@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.participant_number, s.stage, s.current_task_index,\n            s.consented_at, s.pre_survey_completed_at, s.post_survey_completed_at, s.locked_out_at\n        FROM study_participant_state s\n        WHERE s.course_id = $1\n        ORDER BY s.participant_number ASC NULLS LAST, s.created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "participant_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "stage",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "current_task_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "consented_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "pre_survey_completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "post_survey_completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "locked_out_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "d7b9bee5d6269e96b51a35e259b75266d6e99326fb46c9427689f15854bd35d8"
+}

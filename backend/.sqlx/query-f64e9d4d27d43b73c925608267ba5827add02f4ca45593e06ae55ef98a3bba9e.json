@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE study_participant_state\n        SET stage = 'pre_survey',\n            consented_at = COALESCE(consented_at, NOW()),\n            updated_at = NOW()\n        WHERE course_id = $1 AND user_id = $2 AND stage IN ('consent', 'pre_survey')\n        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at",
+  "query": "INSERT INTO study_participant_state (course_id, user_id)\n        VALUES ($1, $2)\n        ON CONFLICT (course_id, user_id) DO UPDATE SET updated_at = study_participant_state.updated_at\n        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -45,11 +45,16 @@
       },
       {
         "ordinal": 8,
+        "name": "participant_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -69,9 +74,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "dcb7fe3acd8bfa5acf4fd7a1eda2d35e2c1171a3da6138468d5aef6fb5d63ace"
+  "hash": "f64e9d4d27d43b73c925608267ba5827add02f4ca45593e06ae55ef98a3bba9e"
 }

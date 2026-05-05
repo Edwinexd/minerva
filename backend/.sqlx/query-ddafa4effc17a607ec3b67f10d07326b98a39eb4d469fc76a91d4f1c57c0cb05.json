@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at\n        FROM study_participant_state\n        WHERE course_id = $1 AND consented_at IS NOT NULL\n        ORDER BY consented_at ASC, user_id ASC",
+  "query": "SELECT course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at\n        FROM study_participant_state\n        WHERE course_id = $1 AND participant_number = $2",
   "describe": {
     "columns": [
       {
@@ -45,18 +45,24 @@
       },
       {
         "ordinal": 8,
+        "name": "participant_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Int4"
       ]
     },
     "nullable": [
@@ -68,9 +74,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "7abf2fe5109c67834a6676bdf5493131672500686d4eefdb4ef80dffd899dba2"
+  "hash": "ddafa4effc17a607ec3b67f10d07326b98a39eb4d469fc76a91d4f1c57c0cb05"
 }

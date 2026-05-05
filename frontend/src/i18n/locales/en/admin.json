@@ -252,6 +252,9 @@
     "save": "Save changes",
     "saving": "Saving...",
     "participantsTitle": "Participants",
+    "participantsAnonymousNote": "Participants are anonymised by sequential ID. To match an ID to a person, use the course Members tab.",
+    "preConsent": "(pre-consent)",
+    "viewDetail": "View attempts",
     "downloadJsonl": "Download JSONL export",
     "noParticipants": "No participants have started the study yet.",
     "cols": {
@@ -261,7 +264,25 @@
       "consented": "Consented",
       "preCompleted": "Pre done",
       "postCompleted": "Post done",
-      "lockedOut": "Locked out"
+      "lockedOut": "Locked out",
+      "detail": "Detail"
+    },
+    "detail": {
+      "title": "Participant #{{n}}",
+      "closeLabel": "Close",
+      "statusHeader": "Status",
+      "preSurveyHeader": "Pre-survey responses",
+      "postSurveyHeader": "Post-survey responses",
+      "tasksHeader": "Tasks ({{count}})",
+      "noResponses": "No responses recorded.",
+      "taskTitle": "Task {{n}}",
+      "taskMeta": "{{messages}} messages · {{iterations}} live iterations",
+      "iterationsHeader": "Aegis live iterations (every keystroke-debounced analyze call)",
+      "noIterations": "No live-analyze calls captured for this task.",
+      "messagesHeader": "Conversation",
+      "noMessages": "No messages.",
+      "atSendVerdictsHeader": "At-send verdicts (one per submitted message)",
+      "forMessageId": "for message {{id}}..."
     }
   },
   "rules": {

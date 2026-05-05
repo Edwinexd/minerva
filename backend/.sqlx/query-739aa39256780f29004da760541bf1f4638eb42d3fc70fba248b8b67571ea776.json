@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE study_participant_state\n        SET stage = $3,\n            current_task_index = $4,\n            updated_at = NOW()\n        WHERE course_id = $1\n          AND user_id = $2\n          AND stage = 'task'\n          AND current_task_index = $5\n        RETURNING course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at",
+  "query": "SELECT course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at\n        FROM study_participant_state\n        WHERE course_id = $1 AND participant_number IS NOT NULL\n        ORDER BY participant_number ASC",
   "describe": {
     "columns": [
       {
@@ -45,22 +45,23 @@
       },
       {
         "ordinal": 8,
+        "name": "participant_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Int4",
-        "Int4"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -72,9 +73,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "77e5107481a30da1293f87ff78716d2f3068972c2e66a7e64c6c2391dad516fd"
+  "hash": "739aa39256780f29004da760541bf1f4638eb42d3fc70fba248b8b67571ea776"
 }

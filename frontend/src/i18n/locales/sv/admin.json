@@ -252,6 +252,9 @@
     "save": "Spara ändringar",
     "saving": "Sparar...",
     "participantsTitle": "Deltagare",
+    "participantsAnonymousNote": "Deltagarna är anonymiserade med ett löpnummer. Använd kursens Medlemmar-flik för att koppla ett ID till en person.",
+    "preConsent": "(före samtycke)",
+    "viewDetail": "Visa försök",
     "downloadJsonl": "Ladda ner JSONL-export",
     "noParticipants": "Inga deltagare har påbörjat studien ännu.",
     "cols": {
@@ -261,7 +264,25 @@
       "consented": "Samtyckte",
       "preCompleted": "För klar",
       "postCompleted": "Efter klar",
-      "lockedOut": "Utestängd"
+      "lockedOut": "Utestängd",
+      "detail": "Detalj"
+    },
+    "detail": {
+      "title": "Deltagare #{{n}}",
+      "closeLabel": "Stäng",
+      "statusHeader": "Status",
+      "preSurveyHeader": "Förenkätens svar",
+      "postSurveyHeader": "Eftersändningsenkätens svar",
+      "tasksHeader": "Uppgifter ({{count}})",
+      "noResponses": "Inga svar registrerade.",
+      "taskTitle": "Uppgift {{n}}",
+      "taskMeta": "{{messages}} meddelanden · {{iterations}} live-iterationer",
+      "iterationsHeader": "Aegis live-iterationer (varje debounced analyse-anrop vid skrivning)",
+      "noIterations": "Inga live-iterationer fångades för den här uppgiften.",
+      "messagesHeader": "Konversation",
+      "noMessages": "Inga meddelanden.",
+      "atSendVerdictsHeader": "Vid-skick-bedömningar (en per skickat meddelande)",
+      "forMessageId": "för meddelande {{id}}..."
     }
   },
   "rules": {

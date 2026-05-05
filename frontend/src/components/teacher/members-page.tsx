@@ -58,6 +58,21 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
     onSuccess: invalidate,
   })
 
+  // GDPR-style erasure of one participant's study data; the
+  // members tab is the only place this lives because (a) the
+  // anonymised Study Mode page deliberately doesn't surface the
+  // user_id needed to call the endpoint, and (b) the researcher
+  // needs the real name to act on a "please delete my data"
+  // request from a specific person. Conversations + messages +
+  // Aegis analyses + iterations + survey responses + the
+  // participant_state row are all wiped transactionally; the
+  // member's course membership stays intact.
+  const removeStudyDataMutation = useMutation({
+    mutationFn: (userId: string) =>
+      api.delete(`/admin/study/courses/${courseId}/participants/by-user/${userId}`),
+    onSuccess: invalidate,
+  })
+
   const approveMutation = useMutation({
     mutationFn: (suggestionId: string) =>
       api.post(
@@ -215,6 +230,39 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Badge variant="outline">{m.role}</Badge>
+                  {m.study_stage && (
+                    <Badge
+                      variant={m.study_stage === "done" ? "default" : "secondary"}
+                      title={t("members.studyStageTooltip", {
+                        stage: m.study_stage,
+                      })}
+                    >
+                      {t(`members.studyStage.${m.study_stage}`)}
+                    </Badge>
+                  )}
+                  {/* "Remove study data" is teacher-only AND only when
+                      the member has actually entered the pipeline; no
+                      sense offering it on a member who hasn't consented. */}
+                  {canMutate && m.study_stage && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            t("members.removeStudyDataConfirm", {
+                              name: m.display_name || m.eppn || m.user_id,
+                            }),
+                          )
+                        ) {
+                          removeStudyDataMutation.mutate(m.user_id)
+                        }
+                      }}
+                      disabled={removeStudyDataMutation.isPending}
+                    >
+                      {t("members.removeStudyData")}
+                    </Button>
+                  )}
                   {canMutate && (
                     <Button
                       variant="ghost"

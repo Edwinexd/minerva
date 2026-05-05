@@ -377,7 +377,17 @@
     "roleTA": "TA",
     "roleTeacher": "Teacher",
     "add": "Add",
-    "remove": "Remove"
+    "remove": "Remove",
+    "removeStudyData": "Remove study data",
+    "removeStudyDataConfirm": "Permanently delete all study data (consent record, surveys, conversations, Aegis history) for {{name}}? This can't be undone. Their course membership stays.",
+    "studyStageTooltip": "Study pipeline stage: {{stage}}",
+    "studyStage": {
+      "consent": "Consent open",
+      "pre_survey": "Pre-survey",
+      "task": "In task",
+      "post_survey": "Post-survey",
+      "done": "Completed"
+    }
   },
   "playDesignations": {
     "title": "Play Designations",

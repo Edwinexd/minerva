@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { api } from "@/lib/api"
 import {
   adminStudyConfigQuery,
+  adminStudyParticipantDetailQuery,
   adminStudyParticipantsQuery,
   coursesQuery,
 } from "@/lib/queries"
@@ -680,6 +681,8 @@ export function ParticipantsPanel({ courseId }: { courseId: string }) {
   const { data, isLoading, error } = useQuery(
     adminStudyParticipantsQuery(courseId),
   )
+  // Open detail drawer for a specific participant_number; null = closed.
+  const [openDetail, setOpenDetail] = useState<number | null>(null)
 
   // Download is a normal anchor click rather than fetch; the
   // browser handles the streaming response and the file save.
@@ -693,7 +696,10 @@ export function ParticipantsPanel({ courseId }: { courseId: string }) {
         <CardTitle>{t("study.participantsTitle")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            {t("study.participantsAnonymousNote")}
+          </p>
           <a href={downloadUrl} download>
             <Button variant="outline" size="sm">
               {t("study.downloadJsonl")}
@@ -734,23 +740,24 @@ export function ParticipantsPanel({ courseId }: { courseId: string }) {
                   <th className="py-2 pr-4 font-medium">
                     {t("study.cols.postCompleted")}
                   </th>
-                  <th className="py-2 font-medium">
+                  <th className="py-2 pr-4 font-medium">
                     {t("study.cols.lockedOut")}
+                  </th>
+                  <th className="py-2 font-medium">
+                    {t("study.cols.detail")}
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {data.map((p) => (
-                  <tr key={p.user_id} className="border-b">
-                    <td className="py-2 pr-4">
-                      <div className="font-medium">
-                        {p.display_name ?? p.eppn ?? p.user_id.slice(0, 8)}
-                      </div>
-                      {p.display_name && p.eppn && (
-                        <div className="text-xs text-muted-foreground">
-                          {p.eppn}
-                        </div>
-                      )}
+                {data.map((p, i) => (
+                  <tr
+                    key={p.participant_number ?? `pre-consent-${i}`}
+                    className="border-b"
+                  >
+                    <td className="py-2 pr-4 font-mono">
+                      {p.participant_number !== null
+                        ? `#${p.participant_number}`
+                        : t("study.preConsent")}
                     </td>
                     <td className="py-2 pr-4">
                       <Badge variant="outline">{p.stage}</Badge>
@@ -763,7 +770,20 @@ export function ParticipantsPanel({ courseId }: { courseId: string }) {
                     <td className="py-2 pr-4">
                       {formatTs(p.post_survey_completed_at)}
                     </td>
-                    <td className="py-2">{formatTs(p.locked_out_at)}</td>
+                    <td className="py-2 pr-4">{formatTs(p.locked_out_at)}</td>
+                    <td className="py-2">
+                      {p.participant_number !== null && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setOpenDetail(p.participant_number ?? null)
+                          }
+                        >
+                          {t("study.viewDetail")}
+                        </Button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -771,7 +791,298 @@ export function ParticipantsPanel({ courseId }: { courseId: string }) {
           </div>
         )}
       </CardContent>
+
+      {openDetail !== null && (
+        <ParticipantDetailDrawer
+          courseId={courseId}
+          participantNumber={openDetail}
+          onClose={() => setOpenDetail(null)}
+        />
+      )}
     </Card>
+  )
+}
+
+/**
+ * Modal-overlay drill-in for one anonymous participant. Renders
+ * the same data the JSONL export carries (surveys + per-task chat
+ * + Aegis analyses + live iteration history) but formatted for
+ * eyeballing rather than parsing. Keyed by participant_number, no
+ * names anywhere; researcher cross-references "who is participant
+ * 5?" via the members tab when needed.
+ */
+function ParticipantDetailDrawer({
+  courseId,
+  participantNumber,
+  onClose,
+}: {
+  courseId: string
+  participantNumber: number
+  onClose: () => void
+}) {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
+  const { data, isLoading, error } = useQuery(
+    adminStudyParticipantDetailQuery(courseId, participantNumber),
+  )
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground ring-1 ring-foreground/10 shadow-lg">
+        <div className="flex items-center justify-between border-b px-6 py-3">
+          <h2 className="text-lg font-semibold">
+            {t("study.detail.title", { n: participantNumber })}
+          </h2>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-muted-foreground hover:text-foreground"
+            aria-label={t("study.detail.closeLabel")}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 text-sm">
+          {isLoading && <Skeleton className="h-32 w-full" />}
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {formatError(error)}
+            </p>
+          )}
+          {data && (
+            <>
+              <section className="space-y-2">
+                <h3 className="text-base font-semibold">
+                  {t("study.detail.statusHeader")}
+                </h3>
+                <ul className="text-xs text-muted-foreground space-y-1">
+                  <li>
+                    {t("study.cols.stage")}: {data.stage}
+                  </li>
+                  <li>
+                    {t("study.cols.consented")}: {formatTs(data.consented_at)}
+                  </li>
+                  <li>
+                    {t("study.cols.preCompleted")}:{" "}
+                    {formatTs(data.pre_survey_completed_at)}
+                  </li>
+                  <li>
+                    {t("study.cols.postCompleted")}:{" "}
+                    {formatTs(data.post_survey_completed_at)}
+                  </li>
+                  <li>
+                    {t("study.cols.lockedOut")}: {formatTs(data.locked_out_at)}
+                  </li>
+                </ul>
+              </section>
+
+              <DetailSurveySection
+                title={t("study.detail.preSurveyHeader")}
+                responses={data.pre_survey_responses}
+              />
+
+              <section className="space-y-3">
+                <h3 className="text-base font-semibold">
+                  {t("study.detail.tasksHeader", { count: data.tasks.length })}
+                </h3>
+                {data.tasks.map((task) => (
+                  <DetailTaskBlock key={task.conversation_id} task={task} />
+                ))}
+              </section>
+
+              <DetailSurveySection
+                title={t("study.detail.postSurveyHeader")}
+                responses={data.post_survey_responses}
+              />
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DetailSurveySection({
+  title,
+  responses,
+}: {
+  title: string
+  responses: import("@/lib/queries").AdminStudySurveyResponse[]
+}) {
+  const { t } = useTranslation("admin")
+  return (
+    <section className="space-y-2">
+      <h3 className="text-base font-semibold">{title}</h3>
+      {responses.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {t("study.detail.noResponses")}
+        </p>
+      ) : (
+        <ol className="space-y-2">
+          {responses.map((r) => (
+            <li key={r.question_id} className="rounded border p-2">
+              <p className="text-xs text-muted-foreground">{r.question_prompt}</p>
+              <p className="font-medium">
+                {r.likert_value !== null
+                  ? r.likert_value
+                  : (r.free_text_value ?? "")}
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+}
+
+function DetailTaskBlock({
+  task,
+}: {
+  task: import("@/lib/queries").AdminStudyParticipantTask
+}) {
+  const { t } = useTranslation("admin")
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="rounded border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/40"
+      >
+        <span className="font-medium">
+          {t("study.detail.taskTitle", { n: task.task_index + 1 })}{" "}
+          {task.task_title && (
+            <span className="text-muted-foreground font-normal">
+              - {task.task_title}
+            </span>
+          )}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {t("study.detail.taskMeta", {
+            messages: task.messages.length,
+            iterations: task.aegis_live_iterations.length,
+          })}
+        </span>
+      </button>
+      {open && (
+        <div className="border-t px-3 py-3 space-y-4">
+          {task.task_description && (
+            <p className="text-xs whitespace-pre-wrap text-muted-foreground">
+              {task.task_description}
+            </p>
+          )}
+
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("study.detail.iterationsHeader")}
+            </h4>
+            {task.aegis_live_iterations.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {t("study.detail.noIterations")}
+              </p>
+            ) : (
+              <ol className="space-y-2">
+                {task.aegis_live_iterations.map((it, i) => (
+                  <li key={it.id} className="rounded border bg-muted/20 p-2">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>#{i + 1}</span>
+                      <span>{formatTs(it.created_at)}</span>
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap text-sm">
+                      {it.draft_text}
+                    </p>
+                    {Array.isArray(it.suggestions) &&
+                      it.suggestions.length > 0 && (
+                        <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
+                          {(it.suggestions as Array<{
+                            kind?: string
+                            text?: string
+                          }>).map((s, j) => (
+                            <li key={j}>
+                              <span className="font-mono">
+                                {s.kind ?? "?"}
+                              </span>{" "}
+                              {s.text ?? ""}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("study.detail.messagesHeader")}
+            </h4>
+            {task.messages.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {t("study.detail.noMessages")}
+              </p>
+            ) : (
+              <ol className="space-y-2">
+                {task.messages.map((m) => (
+                  <li
+                    key={m.id}
+                    className={`rounded border p-2 ${
+                      m.role === "user" ? "bg-blue-50 dark:bg-blue-950/20" : ""
+                    }`}
+                  >
+                    <div className="text-xs text-muted-foreground">
+                      {m.role} · {formatTs(m.created_at)}
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm">{m.content}</p>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+
+          {task.aegis_prompt_analyses.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("study.detail.atSendVerdictsHeader")}
+              </h4>
+              <ol className="space-y-2">
+                {task.aegis_prompt_analyses.map((a) => (
+                  <li key={a.message_id} className="rounded border p-2">
+                    <div className="text-xs text-muted-foreground">
+                      {t("study.detail.forMessageId", {
+                        id: a.message_id.slice(0, 8),
+                      })}{" "}
+                      · {a.mode} · {a.model_used}
+                    </div>
+                    {Array.isArray(a.suggestions) &&
+                      a.suggestions.length > 0 && (
+                        <ul className="mt-1 list-disc pl-5 text-xs">
+                          {(a.suggestions as Array<{
+                            kind?: string
+                            text?: string
+                          }>).map((s, j) => (
+                            <li key={j}>
+                              <span className="font-mono">
+                                {s.kind ?? "?"}
+                              </span>{" "}
+                              {s.text ?? ""}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -240,6 +240,14 @@ export interface CourseMember {
   display_name: string | null
   role: string
   added_at: string
+  /**
+   * Per-course study pipeline stage for this member, populated only
+   * when the course's `study_mode` flag is on. Drives the "Study"
+   * column + the "Remove from study" button gating in the members
+   * tab. Undefined when study mode is off OR the member has never
+   * landed on the consent screen.
+   */
+  study_stage?: "consent" | "pre_survey" | "task" | "post_survey" | "done"
 }
 
 export interface RoleSuggestion {

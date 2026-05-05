@@ -377,7 +377,17 @@
     "roleTA": "TA",
     "roleTeacher": "Lärare",
     "add": "Lägg till",
-    "remove": "Ta bort"
+    "remove": "Ta bort",
+    "removeStudyData": "Ta bort studiedata",
+    "removeStudyDataConfirm": "Permanent radera all studiedata (samtycke, enkäter, konversationer, Aegis-historik) för {{name}}? Detta kan inte ångras. Deras kursmedlemskap behålls.",
+    "studyStageTooltip": "Studiens pipeline-steg: {{stage}}",
+    "studyStage": {
+      "consent": "Samtycke öppet",
+      "pre_survey": "Förenkät",
+      "task": "I uppgift",
+      "post_survey": "Eftersändningsenkät",
+      "done": "Slutförd"
+    }
   },
   "playDesignations": {
     "title": "Play-beteckningar",

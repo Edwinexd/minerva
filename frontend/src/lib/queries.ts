@@ -448,14 +448,14 @@ export const adminStudyConfigQuery = (courseId: string) =>
   })
 
 /// Per-participant progress for the admin "Participants" panel.
-/// Researcher uses this to spot stalls and to reach individual
-/// participants by eppn for follow-up. Real eppns + display names
-/// (no pseudonymisation) so the export's `participant_id`-only
-/// transcripts can be reconciled against the live roster.
+/// Anonymous on purpose: `participant_number` (assigned at consent
+/// time, persistent) is the only identifier surfaced to researchers
+/// during analysis. The "who is participant 5?" lookup happens
+/// via the regular course members tab, where names live alongside
+/// a `study_stage` field for matching.
 export interface AdminStudyParticipantRow {
-  user_id: string
-  eppn: string | null
-  display_name: string | null
+  /** NULL for pre-consent rows (consent screen drop-off). */
+  participant_number: number | null
   stage: string
   current_task_index: number
   consented_at: string | null
@@ -474,4 +474,92 @@ export const adminStudyParticipantsQuery = (courseId: string) =>
     /// Stale-while-revalidate is fine for this; the operator
     /// expects fresh-ish data but not realtime.
     staleTime: 10_000,
+  })
+
+/// Full per-participant data dump for the researcher's drill-in
+/// view. Shape mirrors one line of the JSONL export. Keyed by
+/// participant_number, never user_id.
+export interface AdminStudyParticipantDetail {
+  participant_number: number
+  stage: string
+  consented_at: string | null
+  pre_survey_completed_at: string | null
+  post_survey_completed_at: string | null
+  locked_out_at: string | null
+  pre_survey_responses: AdminStudySurveyResponse[]
+  post_survey_responses: AdminStudySurveyResponse[]
+  tasks: AdminStudyParticipantTask[]
+}
+
+export interface AdminStudySurveyResponse {
+  question_id: string
+  question_ord: number
+  question_prompt: string
+  question_kind: string
+  likert_value: number | null
+  free_text_value: string | null
+  submitted_at: string
+}
+
+export interface AdminStudyParticipantTask {
+  task_index: number
+  task_title: string | null
+  task_description: string | null
+  conversation_id: string
+  started_at: string
+  marked_done_at: string | null
+  messages: AdminStudyTaskMessage[]
+  aegis_prompt_analyses: AdminStudyAegisAnalysis[]
+  aegis_live_iterations: AdminStudyAegisIteration[]
+}
+
+export interface AdminStudyTaskMessage {
+  id: string
+  role: string
+  content: string
+  model_used: string | null
+  tokens_prompt: number | null
+  tokens_completion: number | null
+  generation_ms: number | null
+  retrieval_count: number | null
+  created_at: string
+}
+
+export interface AdminStudyAegisAnalysis {
+  message_id: string
+  /** JSONB suggestions array; each suggestion is `{kind, severity, text, explanation, ...}`. */
+  suggestions: unknown
+  mode: string
+  model_used: string
+  created_at: string
+}
+
+export interface AdminStudyAegisIteration {
+  id: string
+  draft_text: string
+  /** Same JSONB shape as analysis.suggestions. */
+  suggestions: unknown
+  mode: string
+  model_used: string
+  created_at: string
+}
+
+export const adminStudyParticipantDetailQuery = (
+  courseId: string,
+  participantNumber: number,
+) =>
+  queryOptions({
+    queryKey: [
+      "admin",
+      "study",
+      "courses",
+      courseId,
+      "participants",
+      participantNumber,
+      "detail",
+    ],
+    queryFn: () =>
+      api.get<AdminStudyParticipantDetail>(
+        `/admin/study/courses/${courseId}/participants/${participantNumber}/detail`,
+      ),
   })

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, created_at, updated_at\n        FROM study_participant_state\n        WHERE course_id = $1 AND user_id = $2",
+  "query": "SELECT course_id, user_id, stage, current_task_index, consented_at, pre_survey_completed_at, post_survey_completed_at, locked_out_at, participant_number, created_at, updated_at\n        FROM study_participant_state\n        WHERE course_id = $1 AND user_id = $2",
   "describe": {
     "columns": [
       {
@@ -45,11 +45,16 @@
       },
       {
         "ordinal": 8,
+        "name": "participant_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -69,9 +74,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "36ecba919692d715fc0d9c0f9d16a0858401b0740956ee750130f46b8a377be2"
+  "hash": "73245c7b256c8fbb04f08541faf7d98af8cf2e336626d1e5512ba1b8591a36c1"
 }

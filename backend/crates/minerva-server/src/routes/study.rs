@@ -785,9 +785,31 @@ async fn admin_get_config(
 ) -> Result<Json<AdminConfigResponse>, AppError> {
     require_admin(&user)?;
 
+    // Bootstrap-tolerant: if the admin enabled the `study_mode` flag
+    // for a course that doesn't yet have a `study_courses` row (the
+    // common path when setting up a new study), we synthesise an
+    // empty default config so the editor + "Load preset" button can
+    // render. The row is created on first save (PUT /config) or on
+    // first preset seed (POST /seed-dm2731), both of which use
+    // upsert_study_course. We never write here so a stray GET can't
+    // leave junk rows behind.
     let study = minerva_db::queries::study::get_study_course(&state.db, course_id)
         .await?
-        .ok_or(AppError::NotFound)?;
+        .unwrap_or_else(|| minerva_db::queries::study::StudyCourseRow {
+            course_id,
+            // 0 here is a wire-only default; the DB CHECK requires
+            // `> 0`. The frontend's task editor keeps `number_of_tasks`
+            // in lockstep with `tasks.length` as the admin adds rows,
+            // so the first PUT after they add at least one task will
+            // satisfy the CHECK. Saving with zero tasks gets caught
+            // upstream by `study.number_of_tasks_invalid`.
+            number_of_tasks: 0,
+            completion_gate_kind: "messages_only".into(),
+            consent_html: String::new(),
+            thank_you_html: String::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        });
     let tasks = minerva_db::queries::study::list_tasks(&state.db, course_id).await?;
     let pre =
         minerva_db::queries::study::get_survey_with_questions(&state.db, course_id, "pre").await?;

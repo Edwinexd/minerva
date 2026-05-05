@@ -662,6 +662,11 @@ export function ChatWindow({
               onPreview={handlePreviewIdeas}
               onApply={handleApplyRewrite}
               onDismiss={() => setBannerDismissedFor(input)}
+              // Study mode: the participant should see suggestions
+              // immediately rather than needing to find the chevron.
+              // Re-using the `forceAegisMode` signal as the study
+              // marker since the two policies always travel together.
+              defaultExpanded={forceAegisMode != null}
             />
           )}
           {aegisEnabled && !showBanner && (

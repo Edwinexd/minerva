@@ -1556,8 +1556,7 @@ participate in this study.
 
 const DM2731_THANKS: &str = r#"# Thank you for your participation!
 
-Your responses and conversation log have been recorded. The researchers
-will reach out via your DSV/KTH email if any follow-up is needed.
+Your responses and conversation log have been recorded.
 
 You can close this tab.
 "#;

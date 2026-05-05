@@ -119,18 +119,25 @@ export function TaskRunner({
         )}
       </Card>
 
-      <div className="flex-1 min-h-0">
-        {conversationId === null ? (
-          <Skeleton className="h-full w-full" />
-        ) : (
-          <ChatWindow
-            courseId={courseId}
-            conversationId={conversationId}
-            aegisEnabled={true}
-            readOnly={false}
-          />
-        )}
-      </div>
+      {/*
+        ChatWindow's root is `flex flex-1 min-h-0`; it needs a flex
+        column ancestor (this TaskRunner div) to get bounded height
+        and to let its inner transcript scroll instead of pushing
+        the page height up. Wrapping it in a non-flex div was
+        breaking layout: the transcript grew to its full content
+        height and the composer + page chrome ended up beneath it.
+        Render it as a direct child of the flex column instead.
+      */}
+      {conversationId === null ? (
+        <Skeleton className="flex-1 min-h-0 w-full" />
+      ) : (
+        <ChatWindow
+          courseId={courseId}
+          conversationId={conversationId}
+          aegisEnabled={true}
+          readOnly={false}
+        />
+      )}
     </div>
   )
 }

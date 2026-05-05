@@ -42,19 +42,29 @@ export function ConsentScreen({
     onError: (e) => setError(e),
   })
 
+  const trimmed = consentMarkdown.trim()
   return (
     <Card className="mx-auto my-8 max-w-3xl space-y-6 p-6">
-      <h1 className="text-2xl font-semibold">{t("consent.title")}</h1>
-
-      <div className="prose prose-sm max-w-none dark:prose-invert">
-        {consentMarkdown.trim() === "" ? (
-          <p className="text-muted-foreground italic">
-            {t("consent.missingHtml")}
-          </p>
-        ) : (
+      {/*
+        Same as the thank-you screen: researcher's consent markdown
+        almost always opens with its own H1 ("# Consent to ..."), so
+        only render the static i18n title when the consent copy is
+        empty (researcher hasn't filled it in yet).
+      */}
+      {trimmed === "" ? (
+        <>
+          <h1 className="text-2xl font-semibold">{t("consent.title")}</h1>
+          <div className="prose prose-sm max-w-none dark:prose-invert">
+            <p className="text-muted-foreground italic">
+              {t("consent.missingHtml")}
+            </p>
+          </div>
+        </>
+      ) : (
+        <div className="prose prose-sm max-w-none dark:prose-invert">
           <ReactMarkdown>{consentMarkdown}</ReactMarkdown>
-        )}
-      </div>
+        </div>
+      )}
 
       <label className="flex items-start gap-3 text-sm">
         <Checkbox

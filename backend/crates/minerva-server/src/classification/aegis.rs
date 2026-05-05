@@ -165,6 +165,10 @@ The signal does NOT have to be in the current draft itself. Prior turns in the t
 
 Prior Aegis suggestions on a prior turn (rendered under that turn as `↳ Aegis previously suggested: <kind> ; "<text>"`) are an EXTRA-strong signal that the kind has been coached. If a prior turn was suggested `clarity` and the student's NEXT turn made progress (any progress) on naming the referent, do NOT raise `clarity` again on this draft just because it could in principle be sharper still; the student is being coached on it and you are watching them iterate.
 
+LIVE-ITERATION signal (read this carefully ; the failure mode it prevents is the most painful one for students). The current draft itself may carry one or more bullets phrased as `↳ Aegis just suggested on a near-identical earlier version of THIS draft: <kind> ; "<text>"`. Those are suggestions YOU (or the same analyzer) just produced moments ago on a draft that differs from the current one by at most a few keystrokes; the student is iterating in real time and has seen them. Treat each such kind as ALREADY COACHED for this draft, even if the current text could in principle still be sharpened on that dimension. The student gets to decide whether they have already taken your advice; you do not get to keep raising the same kind every keystroke until they capitulate. The ONLY case where you should re-raise a kind that appears in a live-iteration bullet is when the student has materially undone the fix they made for it (e.g. live-iteration suggested `constraints`, the student added a version, then in the current draft REMOVED that version). Iterating closer to the same fix, leaving it alone, or polishing other dimensions are all NOT grounds to re-raise.
+
+A practical rule when the current draft has live-iteration bullets: prefer returning fewer suggestions, including [], over returning the same kind again. If you would have produced two suggestions and one of them overlaps a live-iteration kind, drop that one and either return just the other or, if the other is weak, return [].
+
 If after this check no suggestions remain, return an empty list. The "looks good" state is a healthy outcome, not a failure ; reaching it is what tells the student their draft is ready to send."#;
 
 /// Calibration addendum. Calibrates the rubric against the
@@ -320,17 +324,30 @@ pub struct AegisVerdict {
 }
 
 /// One entry in the trail handed to the analyzer. The LAST entry is
-/// the current draft (its `prior_suggestions` is always empty since
-/// the analyzer hasn't run on it yet); everything before it is a
-/// prior user turn in the same conversation, optionally annotated
-/// with the Aegis suggestions that were produced for that turn at
-/// the time and persisted to `prompt_analyses`.
+/// the current draft; everything before it is a prior user turn in
+/// the same conversation. Each entry may optionally carry the Aegis
+/// suggestions that were produced for it.
+///
+/// Two kinds of `prior_suggestions` populate this field:
+///
+///   * For a PRIOR turn, the suggestions persisted to
+///     `prompt_analyses` for that message ; the analyzer's output
+///     from a previous Send.
+///   * For the CURRENT draft, the suggestions the live debounced
+///     analyzer returned on the previous fire (a near-identical
+///     earlier version of the same draft); the frontend caches
+///     the latest verdict and ships it back via the analyze
+///     request's `previous_suggestions` field. Without this, the
+///     pre-Send debounced loop has zero memory of its own output
+///     and pilot users hit the failure mode of editing a prompt
+///     10 times and never reaching the empty / "looks good" state
+///     because each iteration was a fresh roll of the dice.
 ///
 /// Why both pieces in one struct: the system prompt's
 /// already-addressed check needs to know not just WHAT the student
 /// said before, but also what Aegis ITSELF coached them on; without
-/// the prior suggestions the model can't tell "the student
-/// chose not to address X yet" from "Aegis already raised X and the
+/// the prior suggestions the model can't tell "the student chose
+/// not to address X yet" from "Aegis already raised X and the
 /// student is in the middle of iterating on it". The original
 /// commit shipped the check without this signal and pilot users hit
 /// the exact failure mode the check was supposed to fix; the
@@ -340,12 +357,14 @@ pub struct AegisVerdict {
 #[derive(Debug, Clone, Default)]
 pub struct AegisTrailEntry {
     pub content: String,
-    /// Aegis suggestions previously produced for THIS turn. Empty
-    /// when (a) the entry is the current draft, (b) the turn pre-
-    /// dates the aegis flag being on, or (c) the analyzer soft-
-    /// failed for that turn. The system-prompt branch that mentions
-    /// "prior Aegis suggestions" is gated on at least one entry
-    /// having a non-empty list, so an empty vec here is harmless.
+    /// Aegis suggestions previously produced for THIS turn (or, on
+    /// the current-draft entry, for its near-identical earlier live
+    /// version; see the struct doc). Empty when the turn pre-dates
+    /// the aegis flag being on, the analyzer soft-failed, or this
+    /// is the very first debounced fire of a fresh draft. The
+    /// system-prompt branch that mentions "prior Aegis suggestions"
+    /// is gated on at least one entry having a non-empty list, so
+    /// an empty vec here is harmless.
     pub prior_suggestions: Vec<AegisSuggestion>,
 }
 
@@ -411,11 +430,20 @@ pub async fn analyze_prompt(
     // and `options` here ; the model already knows how to expand on
     // a kind, and the bullet would otherwise blow past the trail
     // budget on a long conversation.
+    //
+    // The current-draft entry has its own bullet phrasing
+    // ("just suggested on a near-identical earlier version of THIS
+    // draft") so the model treats those as live coaching on the
+    // very thing it's about to score, not as historical context
+    // from another turn. That distinction is what stops the
+    // pre-Send "10 iterations and still circling" failure mode
+    // where the live debounced loop kept rolling fresh dice.
     let formatted_trail: Vec<String> = windowed
         .iter()
         .enumerate()
         .map(|(i, entry)| {
-            let header = if i == last_idx {
+            let is_current = i == last_idx;
+            let header = if is_current {
                 format!("[current draft] {}", entry.content)
             } else {
                 format!("[prior {}] {}", i + 1, entry.content)
@@ -423,15 +451,15 @@ pub async fn analyze_prompt(
             if entry.prior_suggestions.is_empty() {
                 header
             } else {
+                let lead = if is_current {
+                    "   ↳ Aegis just suggested on a near-identical earlier version of THIS draft"
+                } else {
+                    "   ↳ Aegis previously suggested"
+                };
                 let bullets: Vec<String> = entry
                     .prior_suggestions
                     .iter()
-                    .map(|s| {
-                        format!(
-                            "   ↳ Aegis previously suggested: {} ; \"{}\"",
-                            s.kind, s.text,
-                        )
-                    })
+                    .map(|s| format!("{}: {} ; \"{}\"", lead, s.kind, s.text))
                     .collect();
                 format!("{}\n{}", header, bullets.join("\n"))
             }
@@ -439,14 +467,21 @@ pub async fn analyze_prompt(
         .collect();
 
     // Has the trail any context worth gating the already-addressed
-    // check on? "Prior context" here = >= 1 prior turn in the
-    // window. We do NOT additionally require non-empty
-    // prior_suggestions; a prior turn's plain text alone is enough
-    // for the per-kind signals (e.g. constraints already named, a
-    // rationale already stated) to fire. On a true cold start
-    // (single turn = the current draft) the check would burn tokens
-    // without anywhere to apply, so we skip it.
-    let has_prior_context = windowed.len() > 1;
+    // check on? Two ways to qualify:
+    //   * >= 1 prior turn in the window (cross-message context); a
+    //     prior turn's plain text alone is enough for the per-kind
+    //     signals (constraints already named, rationale stated) to
+    //     fire.
+    //   * the current draft itself carries prior_suggestions from
+    //     the live debounced loop (pre-Send iteration on the same
+    //     draft); the model needs the check active to know it has
+    //     just-coached signals to compare against.
+    // On a true cold start (single turn = empty live verdict) the
+    // check would burn tokens with nothing to apply, so we skip it.
+    let has_prior_context = windowed.len() > 1
+        || windowed
+            .last()
+            .is_some_and(|e| !e.prior_suggestions.is_empty());
 
     let user_payload = serde_json::json!({
         "trail_oldest_first": formatted_trail.join("\n\n"),

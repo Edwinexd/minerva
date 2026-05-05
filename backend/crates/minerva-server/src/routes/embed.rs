@@ -375,6 +375,14 @@ struct AnalyzePromptRequest {
     /// Beginner so missing-field requests get the lenient grade.
     #[serde(default)]
     mode: AegisModeWire,
+    /// Mirrors `chat::AnalyzePromptRequest::previous_suggestions`.
+    /// The verdict the analyzer returned for the previous debounced
+    /// fire on (a near-identical earlier version of) this same draft;
+    /// the embed frontend ships it back so the model can avoid
+    /// re-circling on dimensions it just coached. Defaults to empty
+    /// for older clients.
+    #[serde(default)]
+    previous_suggestions: Vec<AegisSuggestionPayload>,
 }
 
 /// Embed-side wrapper around `chat::analyze_prompt_for_user`.
@@ -397,6 +405,7 @@ async fn analyze_prompt(
         body.content,
         body.conversation_id,
         body.mode,
+        body.previous_suggestions,
     )
     .await?;
     Ok(Json(verdict))

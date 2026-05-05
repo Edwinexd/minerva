@@ -31,7 +31,7 @@
  *     a render that doesn't actually edit the input shouldn't refire.
  */
 import { useEffect, useRef, useState } from "react"
-import type { PromptAnalysis } from "@/lib/types"
+import type { AegisSuggestion, PromptAnalysis } from "@/lib/types"
 
 const DEBOUNCE_MS = 400
 const MIN_LENGTH = 8
@@ -67,6 +67,17 @@ export interface AegisLiveAnalyzerState {
  *                      server soft-failed (aegis disabled, analyzer
  *                      hiccup). Hook treats null as "no panel
  *                      content for this turn".
+ *
+ *                      The hook hands `previousSuggestions` to every
+ *                      doFetch call; those are the suggestions from
+ *                      the LATEST cached verdict (or `[]` on the
+ *                      first fire of a fresh draft). Closures must
+ *                      ship them into the request body so the
+ *                      server's already-addressed check can see what
+ *                      the analyzer just coached on a near-identical
+ *                      earlier version of the same draft and stop
+ *                      re-circling the same kind keystroke after
+ *                      keystroke.
  * @param resetKey      changes when the conversation context flips
  *                      (e.g. user switched conversations). Bumping
  *                      this clears the cached analysis so panel
@@ -78,6 +89,7 @@ export function useAegisLiveAnalyzer(
   aegisEnabled: boolean,
   doFetch: (
     content: string,
+    previousSuggestions: AegisSuggestion[],
     signal: AbortSignal,
   ) => Promise<PromptAnalysis | null>,
   resetKey: string | null,
@@ -158,7 +170,16 @@ export function useAegisLiveAnalyzer(
       const controller = new AbortController()
       abortRef.current = controller
       setPending(true)
-      doFetch(trimmed, controller.signal)
+      // Hand the LATEST cached verdict's suggestions back to the
+      // server as live-iteration context. Reading `analysis` here
+      // is fine; the effect's deps deliberately omit `analysis`
+      // (we don't want every setAnalysis to refire), but the closure
+      // captures the latest state value via React's normal closure
+      // semantics on each render. On the first fire of a fresh
+      // draft this is `[]`, which the backend treats as no live
+      // context (cold start).
+      const previousSuggestions = analysis?.suggestions ?? []
+      doFetch(trimmed, previousSuggestions, controller.signal)
         .then((result) => {
           if (controller.signal.aborted) return
           lastAnalyzed.current = trimmed
@@ -234,8 +255,15 @@ export function useAegisLiveAnalyzer(
     abortRef.current = controller
     analyzeNowInFlight.current = true
     setPending(true)
+    // Same live-iteration context as the debounced path: hand the
+    // last cached verdict's suggestions to the server so the
+    // already-addressed check sees them. On Send-driven analyzeNow
+    // the cache may already match the input (handled by the
+    // short-circuit above) or hold a near-identical earlier verdict;
+    // both shapes are correct to forward.
+    const previousSuggestions = analysis?.suggestions ?? []
     try {
-      const result = await doFetch(trimmed, controller.signal)
+      const result = await doFetch(trimmed, previousSuggestions, controller.signal)
       if (controller.signal.aborted) return null
       lastAnalyzed.current = trimmed
       setAnalysis(result)

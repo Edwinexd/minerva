@@ -403,6 +403,7 @@ function EmbedChatWindow({
   const fetchLiveAnalysis = useCallback(
     async (
       content: string,
+      previousSuggestions: AegisSuggestion[],
       signal: AbortSignal,
     ): Promise<PromptAnalysis | null> => {
       const res = await fetch(`/api/embed/course/${courseId}/aegis/analyze`, {
@@ -413,6 +414,12 @@ function EmbedChatWindow({
           token,
           conversation_id: conversationId,
           mode: aegisMode,
+          // Live-iteration context; mirrors chat-page. The server
+          // slots these onto the current-draft trail entry so the
+          // already-addressed check can drop kinds the analyzer
+          // just coached on a near-identical earlier version of
+          // the same draft.
+          previous_suggestions: previousSuggestions,
         }),
         signal,
       })

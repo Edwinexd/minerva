@@ -1009,6 +1009,21 @@ pub(crate) struct AnalyzePromptRequest {
     /// from an older client (no field) gets the more lenient grade.
     #[serde(default)]
     pub mode: AegisModeWire,
+    /// The verdict the analyzer returned for the PREVIOUS debounced
+    /// fire on (a near-identical earlier version of) this same draft.
+    /// The frontend caches the latest verdict and ships its
+    /// suggestions back here on the next call so the analyzer can
+    /// see what it ITSELF coached the student on a few keystrokes
+    /// ago. Without this, every debounced fire is a fresh roll of
+    /// the dice; pilot users hit the failure mode of editing a
+    /// prompt 10 times and never reaching the empty / "looks good"
+    /// state because each iteration introduced a new wrinkle that
+    /// triggered a new dimension. Treated as established coaching
+    /// for the current draft (see `AegisTrailEntry::prior_suggestions`
+    /// on the current-draft entry). Defaults to empty so older
+    /// clients keep working.
+    #[serde(default)]
+    pub previous_suggestions: Vec<AegisSuggestionPayload>,
 }
 
 /// Wire shape for `AegisMode`. `serde` reads this as the lower-cased
@@ -1056,6 +1071,7 @@ pub(crate) async fn analyze_prompt_for_user(
     content: String,
     conversation_id: Option<Uuid>,
     mode: AegisModeWire,
+    previous_suggestions: Vec<AegisSuggestionPayload>,
 ) -> Result<Option<AegisAnalysisPayload>, AppError> {
     if !crate::feature_flags::aegis_enabled(&state.db, course_id).await {
         return Ok(None);
@@ -1137,11 +1153,30 @@ pub(crate) async fn analyze_prompt_for_user(
             }
         }
     }
-    // Current draft is always the last entry; no prior suggestions
-    // exist for it (the analyzer hasn't run on it yet).
+    // Current draft is always the last entry. Its `prior_suggestions`
+    // is whatever the analyzer just returned on the previous
+    // debounced fire of this same draft (frontend ships it back via
+    // the request's `previous_suggestions` field). Treating those
+    // as already-coached for the current entry is what stops the
+    // pre-Send "10 iterations and still circling" failure: the
+    // model can see "I just suggested clarity on a near-identical
+    // earlier draft; the student edited slightly; do not raise
+    // clarity again unless something materially changed".
+    let current_prior_suggestions: Vec<crate::classification::aegis::AegisSuggestion> =
+        previous_suggestions
+            .into_iter()
+            .map(|s| crate::classification::aegis::AegisSuggestion {
+                kind: s.kind,
+                severity: s.severity,
+                text: s.text,
+                explanation: s.explanation,
+                options: s.options,
+                answer: s.answer,
+            })
+            .collect();
     trail.push(crate::classification::aegis::AegisTrailEntry {
         content,
-        prior_suggestions: Vec::new(),
+        prior_suggestions: current_prior_suggestions,
     });
 
     let verdict = match crate::classification::aegis::analyze_prompt(
@@ -1192,6 +1227,7 @@ async fn analyze_prompt_route(
         body.content,
         body.conversation_id,
         body.mode,
+        body.previous_suggestions,
     )
     .await?;
     Ok(Json(verdict))

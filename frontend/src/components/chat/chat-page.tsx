@@ -238,6 +238,7 @@ function ChatWindow({
   const fetchLiveAnalysis = useCallback(
     async (
       content: string,
+      previousSuggestions: AegisSuggestion[],
       signal: AbortSignal,
     ): Promise<PromptAnalysis | null> => {
       const devUser = localStorage.getItem("minerva-dev-user")
@@ -252,6 +253,15 @@ function ChatWindow({
           content,
           conversation_id: conversationId,
           mode: aegisMode,
+          // Live-iteration context: the suggestions Aegis returned
+          // on the previous debounced fire of (a near-identical
+          // earlier version of) this same draft. The server slots
+          // them onto the current-draft trail entry so the
+          // already-addressed check can drop kinds the analyzer
+          // just coached on; without this the pre-Send loop is
+          // memoryless and pilot users hit the "10 iterations and
+          // never happy" failure mode.
+          previous_suggestions: previousSuggestions,
         }),
         signal,
       })

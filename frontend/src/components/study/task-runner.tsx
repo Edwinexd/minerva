@@ -136,6 +136,11 @@ export function TaskRunner({
           conversationId={conversationId}
           aegisEnabled={true}
           readOnly={false}
+          // Pin Aegis to expert calibration for every study
+          // participant. Without this, prior localStorage values from
+          // a participant's earlier non-study chat use would inject
+          // mode variance into the eval data.
+          forceAegisMode="expert"
         />
       )}
     </div>

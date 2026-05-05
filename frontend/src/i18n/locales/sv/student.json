@@ -58,6 +58,7 @@
     "modeBeginner": "Nybörjare",
     "modeExpert": "Expert",
     "modeToggleHint": "Hur väl kan du ämnet? Nybörjare: Aegis är generös med jargong och kontext. Expert: Aegis förväntar sig precisa termer, uttalade ramar och vad du har provat. Klicka för att växla.",
+    "modeForcedHint": "Den här studien låser Aegis till expertkalibrering så alla deltagare kör under samma rubrik. Inställningen kan inte ändras under studien.",
     "checking": "Kontrollerar…",
     "hidePanel": "Dölj Aegis-panelen",
     "showPanel": "Visa Aegis-panelen",

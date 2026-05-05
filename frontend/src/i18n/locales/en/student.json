@@ -58,6 +58,7 @@
     "modeBeginner": "Beginner",
     "modeExpert": "Expert",
     "modeToggleHint": "How well do you know this subject? Beginner: Aegis goes lenient on jargon and context. Expert: Aegis expects precise terms, named constraints, and what you've already tried. Click to toggle.",
+    "modeForcedHint": "This study locks Aegis to its expert calibration so all participants run under the same rubric. The setting can't be changed during the study.",
     "checking": "Checking…",
     "hidePanel": "Hide Aegis panel",
     "showPanel": "Show Aegis panel",

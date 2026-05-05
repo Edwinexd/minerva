@@ -181,6 +181,7 @@ export function ChatWindow({
   conversationId,
   readOnly = false,
   aegisEnabled = false,
+  forceAegisMode,
 }: {
   courseId: string
   conversationId: string | null
@@ -192,6 +193,16 @@ export function ChatWindow({
    * panel auto-hides on courses where the admin hasn't opted in.
    */
   aegisEnabled?: boolean
+  /**
+   * When set, the Aegis analyzer's calibration mode is locked to
+   * this value for the duration of this chat window; the panel's
+   * Beginner/Expert toggle is disabled and the user's stored
+   * preference is ignored. Study mode pins this to "expert" so
+   * every participant runs under the same rubric (otherwise prior
+   * localStorage values from regular chat use would inject mode
+   * variance into the eval data).
+   */
+  forceAegisMode?: import("./use-aegis-mode").AegisMode
 }) {
   const navigate = useNavigate()
   const { t } = useTranslation("student")
@@ -229,8 +240,10 @@ export function ChatWindow({
   // storage-backed hook the panel's toggle writes to, so flipping
   // the badge automatically affects the NEXT analyze call without
   // any prop wiring. We only need the value here; the setter
-  // lives in the panel.
-  const [aegisMode] = useAegisMode()
+  // lives in the panel. `forceAegisMode` overrides for callers
+  // that need a fixed calibration (study mode forces "expert").
+  const [storedAegisMode] = useAegisMode()
+  const aegisMode = forceAegisMode ?? storedAegisMode
   // Storage-backed; the X on the panel header writes false, the
   // floating Aegis logo button below brings it back. Default true
   // so a course with aegis on shows the feature by default.
@@ -744,6 +757,7 @@ export function ChatWindow({
             <AegisFeedbackPanel
               analyses={promptAnalyses}
               onHide={() => setPanelVisible(false)}
+              forceMode={forceAegisMode}
             />
           </aside>
         </>

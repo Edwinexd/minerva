@@ -1421,6 +1421,12 @@ fn dm2731_preset() -> AdminPutConfigRequest {
 }
 
 fn dm2731_pre_survey() -> Vec<AdminSurveyQuestionView> {
+    // GDPR consent is collected via the consent screen that
+    // precedes the pre-survey, not as a survey question. The
+    // `kill_on_value` infrastructure is still present in the
+    // schema + admin editor for any future survey that wants a
+    // withdraw-on-answer kill switch; the DM2731 preset just
+    // doesn't use it.
     vec![
         free_text("How old are you? (e.g. 23)", true),
         likert(
@@ -1433,19 +1439,6 @@ fn dm2731_pre_survey() -> Vec<AdminSurveyQuestionView> {
             None,
         ),
         free_text("How do you use Generative AI?", true),
-        likert(
-            "Are you okay with us saving this information according to the General Data Protection Regulation (GDPR)?",
-            1,
-            2,
-            "No",
-            "Yes",
-            true,
-            // 1 = "No"; selecting it short-circuits the participant
-            // straight to `done` (lockout) without further data
-            // collection. See `kill_on_value` in
-            // migration 20260505000008.
-            Some(1),
-        ),
     ]
 }
 

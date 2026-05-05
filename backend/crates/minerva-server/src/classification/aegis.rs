@@ -119,9 +119,36 @@ Each suggestion has THREE student-visible fields:
 * `explanation` ; one to two short sentences expanding on WHY this fix matters for THIS specific draft and what the student should think about when applying it. Reference details from the draft itself rather than restating the rubric. ≤ 50 words. The panel hides this behind a click-to-expand; the student opts into reading it when they want the longer reasoning.
 * `options`     ; an array of 3 to 4 plausible, MUTUALLY DISTINCT answers a student might pick to satisfy the suggestion. The frontend renders these as a dropdown next to the suggestion; the student picks one (or types their own via a "Custom" entry) and that selection is what the rewrite step weaves into the revised prompt. Each option must be a SHORT, CONCRETE, FILL-IN-THE-BLANK answer the student could actually mean (≤ 12 words; written first-person where natural; complete enough to drop into the rewrite). Cover materially different intents (do not give four near-paraphrases of the same answer) so the dropdown is a real choice. Never include "Other" / "Custom" / "I don't know"; the frontend handles those itself. If the suggestion is genuinely a clarification question (e.g. "what do you mean by 'live on'?"), the options ARE the candidate clarifications. If the suggestion asks the student to add information they alone know (e.g. "what version are you using?"), the options are the most-likely-from-context candidates plus a placeholder phrasing they could edit.
 
+Hard rules:
+* Do NOT answer the prompt. Do NOT critique the chatbot's reply. Your only output is suggestions about the prompt itself.
+* Do NOT score, rank, or grade the prompt. No numbers, no rubric points, no "your prompt is X/10".
+* If the draft is already clear and the student has been thoughtful, return an EMPTY suggestion list. Inventing suggestions for the sake of having something to say is the condescending failure mode we explicitly avoid.
+* Every suggestion must be tied to a concrete detail of THIS draft. Generic prompt-engineering tips that could attach to any prompt are not allowed; if you can't point at the specific phrase or gap that triggered the suggestion, drop it.
+* Order suggestions most-impactful first. Prefer ONE strong suggestion over two weak ones; the system asks for at most TWO and ZERO is a perfectly valid answer. Never produce two suggestions of the same `kind` in one response.
+* When the draft is genuinely ambiguous between two or three plausible interpretations, prefer phrasing the suggestion as a clarifying question back to the student ("Did you mean X, or Y?") rather than a directive; the student picks.
+
+Tone: constructive partner, not condescending teacher. Encouraging, never moralising. Never lecture, never refuse. The student decides whether to act on your feedback; this is non-blocking advice.
+
+Be generous on short follow-up questions whose context is obvious from the previous turns. A two-word "explain that further" after a long substantive turn usually needs no suggestions."#;
+
+/// Already-addressed check. Spliced into the system prompt only when
+/// the trail carries prior context (>= 1 prior turn, OR at least one
+/// prior turn with persisted Aegis suggestions to compare against).
+/// On a first-turn cold-start it would just burn tokens telling the
+/// model "do not re-suggest things from prior turns" when there ARE
+/// no prior turns; pilot feedback was that the unconditional version
+/// also leaked references to "the trail" into the model's reasoning
+/// in ways that confused it on first turns.
+///
+/// Every signal here is phrased so it works the moment the section
+/// IS spliced in: the model is told the trail is real, prior Aegis
+/// suggestions ARE in front of it, and "already addressed" can come
+/// from the draft itself, prior user turns, or prior Aegis feedback.
+const AEGIS_ALREADY_ADDRESSED_CHECK: &str = r#"
+
 Already-addressed check (run BEFORE producing each suggestion):
 
-For each candidate suggestion of kind K, scan the WHOLE draft AND the prior turns in the trail for evidence that K is already covered. If it is covered, DROP the suggestion ; do not re-suggest a polished, refined, or rephrased version of the same dimension. Pilot users described the analyzer "going in circles" when it kept asking for a thing they had just added (e.g. asking for a time frame when the draft already names one); they could never reach the empty / "looks good" state, and they stopped trusting the panel. One fewer suggestion is better than a repeat.
+For each candidate suggestion of kind K, scan the WHOLE draft AND the prior turns in the trail AND the prior Aegis suggestions you (or a previous Aegis run) already produced for those turns. If K is already covered by ANY of those, DROP the suggestion ; do not re-suggest a polished, refined, or rephrased version of the same dimension. Pilot users described the analyzer "going in circles" when it kept asking for a thing they had just added (e.g. asking for a time frame when the draft already names one) or kept re-raising a kind it had already coached the student on a turn ago; they could never reach the empty / "looks good" state, and they stopped trusting the panel. One fewer suggestion is better than a repeat.
 
 Per-kind signals that the dimension is ALREADY addressed (treat any one of these as sufficient evidence; do not produce a suggestion of that kind):
 
@@ -136,19 +163,9 @@ Per-kind signals that the dimension is ALREADY addressed (treat any one of these
 
 The signal does NOT have to be in the current draft itself. Prior turns in the trail count as established context; the chatbot reads the same trail you do. If the trail makes the audience / constraints / rationale / etc. clear, the student does NOT need to repeat it in the new draft, and asking them to is exactly the "going in circles" failure mode. Apply the same generosity to a `[current draft]` that follows up on a prior turn ("explain that further", "shorter please", "give me an example") ; the prior turn carries the context.
 
-If after this check no suggestions remain, return an empty list. The "looks good" state is a healthy outcome, not a failure ; reaching it is what tells the student their draft is ready to send.
+Prior Aegis suggestions on a prior turn (rendered under that turn as `↳ Aegis previously suggested: <kind> ; "<text>"`) are an EXTRA-strong signal that the kind has been coached. If a prior turn was suggested `clarity` and the student's NEXT turn made progress (any progress) on naming the referent, do NOT raise `clarity` again on this draft just because it could in principle be sharper still; the student is being coached on it and you are watching them iterate.
 
-Hard rules:
-* Do NOT answer the prompt. Do NOT critique the chatbot's reply. Your only output is suggestions about the prompt itself.
-* Do NOT score, rank, or grade the prompt. No numbers, no rubric points, no "your prompt is X/10".
-* If the draft is already clear and the student has been thoughtful, return an EMPTY suggestion list. Inventing suggestions for the sake of having something to say is the condescending failure mode we explicitly avoid.
-* Every suggestion must be tied to a concrete detail of THIS draft. Generic prompt-engineering tips that could attach to any prompt are not allowed; if you can't point at the specific phrase or gap that triggered the suggestion, drop it.
-* Order suggestions most-impactful first. Prefer ONE strong suggestion over two weak ones; the system asks for at most TWO and ZERO is a perfectly valid answer. Never produce two suggestions of the same `kind` in one response.
-* When the draft is genuinely ambiguous between two or three plausible interpretations, prefer phrasing the suggestion as a clarifying question back to the student ("Did you mean X, or Y?") rather than a directive; the student picks.
-
-Tone: constructive partner, not condescending teacher. Encouraging, never moralising. Never lecture, never refuse. The student decides whether to act on your feedback; this is non-blocking advice.
-
-Be generous on short follow-up questions whose context is obvious from the previous turns. A two-word "explain that further" after a long substantive turn usually needs no suggestions."#;
+If after this check no suggestions remain, return an empty list. The "looks good" state is a healthy outcome, not a failure ; reaching it is what tells the student their draft is ready to send."#;
 
 /// Calibration addendum. Calibrates the rubric against the
 /// student's self-declared subject expertise. The two addendums
@@ -302,9 +319,41 @@ pub struct AegisVerdict {
     pub suggestions: Vec<AegisSuggestion>,
 }
 
-/// Run the analyzer. `recent_user_messages` is the trail of the
-/// student's last few prompts (oldest first); the LAST element is
-/// the current draft. `mode` calibrates the rubric.
+/// One entry in the trail handed to the analyzer. The LAST entry is
+/// the current draft (its `prior_suggestions` is always empty since
+/// the analyzer hasn't run on it yet); everything before it is a
+/// prior user turn in the same conversation, optionally annotated
+/// with the Aegis suggestions that were produced for that turn at
+/// the time and persisted to `prompt_analyses`.
+///
+/// Why both pieces in one struct: the system prompt's
+/// already-addressed check needs to know not just WHAT the student
+/// said before, but also what Aegis ITSELF coached them on; without
+/// the prior suggestions the model can't tell "the student
+/// chose not to address X yet" from "Aegis already raised X and the
+/// student is in the middle of iterating on it". The original
+/// commit shipped the check without this signal and pilot users hit
+/// the exact failure mode the check was supposed to fix; the
+/// analyzer kept re-raising the same kind turn after turn because
+/// the only "memory" it had was the user's text, not its own
+/// previous output.
+#[derive(Debug, Clone, Default)]
+pub struct AegisTrailEntry {
+    pub content: String,
+    /// Aegis suggestions previously produced for THIS turn. Empty
+    /// when (a) the entry is the current draft, (b) the turn pre-
+    /// dates the aegis flag being on, or (c) the analyzer soft-
+    /// failed for that turn. The system-prompt branch that mentions
+    /// "prior Aegis suggestions" is gated on at least one entry
+    /// having a non-empty list, so an empty vec here is harmless.
+    pub prior_suggestions: Vec<AegisSuggestion>,
+}
+
+/// Run the analyzer. `trail` is the student's last few prompts
+/// (oldest first); the LAST element is the current draft. Each prior
+/// entry may carry the Aegis suggestions that were produced for it,
+/// so the model can detect dimensions it has already coached on and
+/// stop "going in circles". `mode` calibrates the rubric.
 ///
 /// Three return shapes:
 ///
@@ -327,48 +376,95 @@ pub async fn analyze_prompt(
     api_key: &str,
     db: &PgPool,
     course_id: Uuid,
-    recent_user_messages: &[String],
+    trail: &[AegisTrailEntry],
     mode: AegisMode,
 ) -> Result<Option<AegisVerdict>, String> {
     if api_key.is_empty() {
         // Dev / test path without CEREBRAS_API_KEY.
         return Ok(None);
     }
-    let Some(current) = recent_user_messages.last() else {
+    let Some(current) = trail.last() else {
         return Ok(None);
     };
-    if current.trim().is_empty() {
+    if current.content.trim().is_empty() {
         return Ok(None);
     }
 
-    // Build the trail compactly. Numbered, oldest first; the
-    // current turn is highlighted as `[current]` so the model
-    // never confuses prior turns with the draft under review.
-    let trail: Vec<String> = recent_user_messages
+    // Window the trail to HISTORY_TURNS oldest-first. The current
+    // draft is always the last entry; everything else is a prior
+    // turn (numbered from the start of the window).
+    let windowed: Vec<&AegisTrailEntry> = trail
         .iter()
         .rev()
         .take(HISTORY_TURNS)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
+        .collect();
+    let last_idx = windowed.len().saturating_sub(1);
+
+    // Format each entry: header line for the turn, plus a one-line
+    // bullet under it for each prior Aegis suggestion the turn
+    // carried (kind ; text). The student never saw the literal
+    // bullet shape; this is purely for the analyzer to read its
+    // own previous output back. We deliberately omit `explanation`
+    // and `options` here ; the model already knows how to expand on
+    // a kind, and the bullet would otherwise blow past the trail
+    // budget on a long conversation.
+    let formatted_trail: Vec<String> = windowed
+        .iter()
         .enumerate()
-        .map(|(i, m)| {
-            if i + 1 == HISTORY_TURNS.min(recent_user_messages.len()) {
-                format!("[current draft] {}", m)
+        .map(|(i, entry)| {
+            let header = if i == last_idx {
+                format!("[current draft] {}", entry.content)
             } else {
-                format!("[prior {}] {}", i + 1, m)
+                format!("[prior {}] {}", i + 1, entry.content)
+            };
+            if entry.prior_suggestions.is_empty() {
+                header
+            } else {
+                let bullets: Vec<String> = entry
+                    .prior_suggestions
+                    .iter()
+                    .map(|s| {
+                        format!(
+                            "   ↳ Aegis previously suggested: {} ; \"{}\"",
+                            s.kind, s.text,
+                        )
+                    })
+                    .collect();
+                format!("{}\n{}", header, bullets.join("\n"))
             }
         })
         .collect();
+
+    // Has the trail any context worth gating the already-addressed
+    // check on? "Prior context" here = >= 1 prior turn in the
+    // window. We do NOT additionally require non-empty
+    // prior_suggestions; a prior turn's plain text alone is enough
+    // for the per-kind signals (e.g. constraints already named, a
+    // rationale already stated) to fire. On a true cold start
+    // (single turn = the current draft) the check would burn tokens
+    // without anywhere to apply, so we skip it.
+    let has_prior_context = windowed.len() > 1;
+
     let user_payload = serde_json::json!({
-        "trail_oldest_first": trail.join("\n\n"),
+        "trail_oldest_first": formatted_trail.join("\n\n"),
     });
 
-    // Compose the system prompt: base rubric + per-mode calibration
-    // + output-format footer.
+    // Compose the system prompt: base rubric + (gated) already-
+    // addressed check + per-mode calibration + output-format footer.
+    // The check goes BEFORE the mode addendum so the addendum's
+    // "default behaviour" guidance (esp. Beginner's "return [] for
+    // most things") still has the last word.
     let system_prompt = format!(
-        "{}{}{}",
+        "{}{}{}{}",
         AEGIS_SYSTEM_PROMPT_BASE,
+        if has_prior_context {
+            AEGIS_ALREADY_ADDRESSED_CHECK
+        } else {
+            ""
+        },
         mode.addendum(),
         AEGIS_OUTPUT_FOOTER,
     );

@@ -1065,7 +1065,18 @@ pub(crate) async fn analyze_prompt_for_user(
     // conversation_id is given, scope-check it before pulling
     // history so a cross-course / cross-user id can't leak prior
     // turns through the analyzer's prompt.
-    let mut trail: Vec<String> = Vec::new();
+    //
+    // For each prior user message we also pull the Aegis suggestions
+    // we previously persisted for it (one row in `prompt_analyses`
+    // per analysed message). Those ride alongside the message text
+    // into the analyzer so the model can see what it ITSELF coached
+    // on a turn ago and stop circling on the same kind. Without
+    // this, the system prompt's already-addressed check has no
+    // memory beyond the user's text; pilot users described the
+    // panel re-raising a kind that had just been suggested AND
+    // applied, because the model couldn't tell those turns apart
+    // from a cold-start draft.
+    let mut trail: Vec<crate::classification::aegis::AegisTrailEntry> = Vec::new();
     if let Some(cid) = conversation_id {
         let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
             .await?
@@ -1077,13 +1088,61 @@ pub(crate) async fn analyze_prompt_for_user(
             return Err(AppError::Forbidden);
         }
         let history = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
+
+        // Map message_id -> prior aegis suggestions. We tolerate
+        // a query failure here (no panic, no 500) because the
+        // analyzer call itself is best-effort; without prior
+        // suggestions we degrade to text-only context which is
+        // strictly better than killing the analyze request.
+        let prior_by_message: HashMap<Uuid, Vec<crate::classification::aegis::AegisSuggestion>> =
+            match minerva_db::queries::prompt_analyses::list_for_conversation(&state.db, cid).await
+            {
+                Ok(rows) => rows
+                    .into_iter()
+                    .filter_map(|row| {
+                        let mid = row.message_id;
+                        match serde_json::from_value::<
+                            Vec<crate::classification::aegis::AegisSuggestion>,
+                        >(row.suggestions)
+                        {
+                            Ok(s) => Some((mid, s)),
+                            Err(e) => {
+                                tracing::warn!(
+                                    "aegis trail: prompt_analyses.suggestions malformed for message_id={}: {}",
+                                    mid,
+                                    e,
+                                );
+                                None
+                            }
+                        }
+                    })
+                    .collect(),
+                Err(e) => {
+                    tracing::warn!(
+                        "aegis trail: list_for_conversation failed for cid={}: {}; degrading to text-only trail",
+                        cid,
+                        e,
+                    );
+                    HashMap::new()
+                }
+            };
+
         for m in history {
             if m.role == "user" {
-                trail.push(m.content);
+                let prior_suggestions = prior_by_message.get(&m.id).cloned().unwrap_or_default();
+                trail.push(crate::classification::aegis::AegisTrailEntry {
+                    content: m.content,
+                    prior_suggestions,
+                });
             }
         }
     }
-    trail.push(content);
+    // Current draft is always the last entry; no prior suggestions
+    // exist for it (the analyzer hasn't run on it yet).
+    trail.push(crate::classification::aegis::AegisTrailEntry {
+        content,
+        prior_suggestions: Vec::new(),
+    });
 
     let verdict = match crate::classification::aegis::analyze_prompt(
         &state.http_client,

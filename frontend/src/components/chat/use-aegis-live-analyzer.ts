@@ -13,9 +13,32 @@
  * request body, and this hook stays neutral by taking a `doFetch`
  * closure that wires whichever flow applies.
  *
- * Cancellation: each new debounced fire aborts the previous in-flight
- * request via AbortController, so a fast typer never sees a stale
- * verdict win the race.
+ * Race handling. We do NOT abort the previous in-flight analyze
+ * when a new debounced fire starts ; that was the original design
+ * but it broke the accumulator. Aborting causes `fetch` to throw,
+ * `.then()` never runs, and the aborted call's suggestions never
+ * make it into the coaching-memory accumulator. After ~3 fast
+ * iterations the accumulator was empty even though Aegis had
+ * coached on several kinds, and the analyzer kept re-raising them.
+ *
+ * Instead we use a session+generation pair:
+ *
+ *   * `sessionRef` bumps on genuine end-of-session events
+ *     (conversation switch, MIN_LENGTH wipe, Send-driven consume).
+ *     In-flight calls whose captured session token doesn't match
+ *     the current value drop their result entirely (no merge, no
+ *     `setAnalysis`).
+ *   * `generationRef` bumps on every fire. The result's `setAnalysis`
+ *     is gated on `myGen === generationRef.current` so an older
+ *     in-flight call landing after a newer one can't overwrite the
+ *     panel.
+ *
+ * All completed calls within the same session merge their
+ * suggestions into the accumulator regardless of generation, so a
+ * fast typer who fires three calls during one draft session ends
+ * up with all three calls' kinds in the accumulator, not just the
+ * latest's. That's the property the server-side already-addressed
+ * check needs to actually work.
  *
  * Cost shaping:
  *   * `DEBOUNCE_MS`; pause length before we hit the analyzer.
@@ -77,12 +100,7 @@ export interface AegisLiveAnalyzerState {
  *                      already-addressed check can see EVERY kind
  *                      the analyzer has coached on so far, not just
  *                      whatever the most recent verdict happened to
- *                      surface. Without accumulation a verdict-by-
- *                      verdict view drops kinds the analyzer raised
- *                      two iterations ago, and the model re-suggests
- *                      them; that was the failure mode pilot users
- *                      hit at iteration ~10 even after the latest-
- *                      verdict-only fix landed.
+ *                      surface.
  *
  *                      Reset (empties accumulated): the input box
  *                      drops below MIN_LENGTH (a delete-back-to-empty
@@ -133,28 +151,44 @@ export function useAegisLiveAnalyzer(
   // captures from a slow render. Using a ref is the simpler path
   // given we never render this map.
   const accumulatedRef = useRef<Map<string, AegisSuggestion>>(new Map())
+  // Bumps on session-end events (conversation switch, MIN_LENGTH
+  // wipe, Send-driven consume). In-flight calls capture this at
+  // fire time; if the value has moved by the time the response
+  // lands, the call's session is dead and we drop the result.
+  const sessionRef = useRef(0)
+  // Bumps on every fire (debounce or analyzeNow). Used to gate
+  // setAnalysis: only the latest-generation result updates the
+  // panel, so an older in-flight call landing after a newer one
+  // can't overwrite the displayed verdict.
+  const generationRef = useRef(0)
+  // Latest in-flight controller. Used by analyzeNow + the
+  // session-end paths to abort the network request when we're
+  // sure we don't want its result. The debounce path does NOT
+  // abort; multiple calls can race to completion and all merge
+  // into the accumulator (subject to the session check).
   const abortRef = useRef<AbortController | null>(null)
   // Handle for the queued debounce timeout, so `analyzeNow` can cancel
   // it before it fires. Without this, a setTimeout queued by typing
-  // would still fire ~1s later and abort an in-flight `analyzeNow`
-  // call (its first action is `abortRef.current?.abort()`), causing
-  // the just-in-time intercept on Send to return null and the message
-  // to slip through ungated.
+  // would still fire ~1s later and burn an extra LLM call on the
+  // same content analyzeNow is already covering.
   const debounceHandleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // True while a Send-driven `analyzeNow` is awaiting its doFetch.
-  // The debounce setTimeout checks this and skips when set, so a
-  // *new* debounce fired by typing AFTER clicking Send (which the
-  // setTimeout-handle clear above can't reach) still can't abort
-  // the in-flight analyzeNow controller.
+  // The debounce setTimeout checks this and skips when set so a
+  // *new* debounce fired by typing AFTER clicking Send doesn't burn
+  // a redundant LLM call on the same draft analyzeNow is already
+  // resolving.
   const analyzeNowInFlight = useRef(false)
 
   // Conversation switch (or initial mount with a different
   // resetKey) wipes everything: cached verdict, in-flight request,
-  // last-analyzed marker, AND the accumulated coaching memory.
-  // Without this, switching from one chat to another would briefly
-  // show the previous chat's panel content and (worse) leak its
-  // accumulated kinds into the next conversation's analyze calls.
+  // last-analyzed marker, accumulated coaching memory, AND bumps
+  // session so any in-flight call lands on a dead session and is
+  // dropped. Without the session bump, a request fired against the
+  // previous conversation that happened to land mid-switch would
+  // still merge its kinds into the (just-wiped) accumulator and
+  // show its verdict on the new conversation's panel.
   useEffect(() => {
+    sessionRef.current++
     abortRef.current?.abort()
     abortRef.current = null
     if (debounceHandleRef.current) {
@@ -181,21 +215,19 @@ export function useAegisLiveAnalyzer(
 
     const trimmed = input.trim()
     if (trimmed.length < MIN_LENGTH) {
-      // Cancel any in-flight call from an earlier longer input
-      // so a delete-back-to-empty doesn't briefly show a stale
-      // verdict landing after the user wiped the box.
-      //
-      // Also wipe the accumulated coaching memory: a delete-back-to-
-      // empty (or anywhere below MIN_LENGTH) is the strongest signal
-      // we have that the student is restarting their draft from
-      // scratch. Carrying coached kinds from the abandoned draft
-      // into the next one would suppress legitimate suggestions on
-      // a brand-new prompt that happens to share a dimension.
+      // Delete-back-to-empty (or anywhere below MIN_LENGTH) is the
+      // strongest signal we have that the student is restarting
+      // their draft from scratch. Bump session so any in-flight
+      // call's result is dropped, abort the network request, and
+      // wipe the accumulator so coached kinds from the abandoned
+      // draft don't suppress legitimate suggestions on the next one.
+      sessionRef.current++
       abortRef.current?.abort()
       abortRef.current = null
       accumulatedRef.current = new Map()
       if (analysis !== null) setAnalysis(null)
       lastAnalyzed.current = null
+      setPending(false)
       return
     }
 
@@ -203,44 +235,57 @@ export function useAegisLiveAnalyzer(
 
     debounceHandleRef.current = setTimeout(() => {
       debounceHandleRef.current = null
-      // If a Send-driven analyzeNow is currently awaiting, leave it
-      // alone; aborting its controller here is exactly the race
-      // that lets ungated messages through. The user pressed Send,
-      // analyzeNow is racing to deliver a verdict; the panel will
-      // pick up its result via setAnalysis.
+      // If a Send-driven analyzeNow is currently awaiting, skip;
+      // analyzeNow is already covering this draft and the panel
+      // will pick up its result. A debounced fire here would just
+      // burn a redundant LLM call.
       if (analyzeNowInFlight.current) return
-      // Fresh AbortController per fire; cancels whatever's still
-      // in flight from the previous debounce tick.
-      abortRef.current?.abort()
+      // Capture session + generation BEFORE firing. The result
+      // handler uses these to decide whether to merge into the
+      // accumulator (session match) and / or update the displayed
+      // analysis (latest generation).
+      const mySession = sessionRef.current
+      const myGen = ++generationRef.current
+      // Each fire gets its own controller. We do NOT abort previous
+      // in-flight debounced calls; aborting throws inside fetch and
+      // .then never runs, so the aborted call's suggestions never
+      // reach the accumulator. The session/generation guards below
+      // are what keep stale results from corrupting the panel.
       const controller = new AbortController()
       abortRef.current = controller
       setPending(true)
       // Hand the FULL ACCUMULATED coaching history back to the
-      // server as live-iteration context, not just the latest
-      // verdict. Each iteration's verdict only surfaces 0..=2
-      // current concerns; an iteration ago's `clarity` may have
-      // dropped out of the visible verdict because the analyzer
-      // moved on to `constraints`, but the student has already
-      // been coached on clarity and we don't want it re-raised.
-      // Reading the ref (not state) so we always see the latest
-      // accumulator regardless of render staleness.
+      // server, not just the latest verdict. Each iteration's
+      // verdict only surfaces 0..=2 current concerns; an iteration
+      // ago's `clarity` may have dropped out of the visible verdict
+      // because the analyzer moved on to `constraints`, but the
+      // student has already been coached on it and we don't want
+      // it re-raised.
       const previousSuggestions = Array.from(
         accumulatedRef.current.values(),
       )
       doFetch(trimmed, previousSuggestions, controller.signal)
         .then((result) => {
-          if (controller.signal.aborted) return
-          lastAnalyzed.current = trimmed
-          setAnalysis(result)
-          // Merge the new verdict's suggestions into the accumulator,
-          // dedup-by-kind, latest text wins. Empty / null results
-          // (analyzer said "looks good" or soft-failed) leave the
-          // accumulator alone; we don't want a "looks good" reading
-          // to wipe history of kinds we've already coached on.
+          // Session-end event since we fired? Drop the result
+          // entirely (no merge, no display).
+          if (sessionRef.current !== mySession) return
+          // Merge the result's suggestions into the accumulator
+          // unconditionally on session match. Even if this isn't
+          // the latest-generation result (a newer call has fired
+          // since), the kinds it raised are still valid coaching
+          // memory for this draft session and need to ride into
+          // the next request's previous_suggestions.
           if (result) {
             for (const s of result.suggestions) {
               accumulatedRef.current.set(s.kind, s)
             }
+          }
+          // Display only the LATEST generation. An older call
+          // landing after a newer one would otherwise overwrite
+          // the panel with stale content.
+          if (myGen === generationRef.current) {
+            lastAnalyzed.current = trimmed
+            setAnalysis(result)
           }
         })
         .catch((e) => {
@@ -252,7 +297,16 @@ export function useAegisLiveAnalyzer(
           console.warn("aegis live analyzer:", e)
         })
         .finally(() => {
-          if (!controller.signal.aborted) setPending(false)
+          // Only clear pending when this is the latest-generation
+          // call AND we're still in the same session; otherwise
+          // an older call's finally would clear pending while a
+          // newer call is still running.
+          if (
+            sessionRef.current === mySession &&
+            myGen === generationRef.current
+          ) {
+            setPending(false)
+          }
         })
     }, DEBOUNCE_MS)
 
@@ -272,24 +326,26 @@ export function useAegisLiveAnalyzer(
   // the same analysis isn't re-fetched on the next keystroke
   // when the input string hasn't actually changed yet.
   //
-  // `reset()` deliberately does NOT wipe the accumulator: it's
-  // called by the rewrite-apply path (chat-page + embed-page) to
-  // clear the stale verdict during the ~400ms wait for the
-  // rewritten input's own analyze call, but the rewrite is just
-  // AI-assisted iteration on the SAME draft session ; coaching
-  // memory must survive. The accumulator gets wiped on the
-  // genuine end-of-session events instead: `consume()` (Send went
-  // through), the `resetKey` effect (conversation switch), and
-  // the MIN_LENGTH branch in the input effect (delete-back-to-
-  // empty signals a fresh draft).
+  // `reset()` deliberately does NOT wipe the accumulator OR bump
+  // session: it's called by the rewrite-apply path (chat-page +
+  // embed-page) to clear the stale verdict during the ~400ms wait
+  // for the rewritten input's own analyze call, but the rewrite is
+  // just AI-assisted iteration on the SAME draft session ; coaching
+  // memory must survive. The accumulator gets wiped on the genuine
+  // end-of-session events instead: `consume()` (Send went through),
+  // the `resetKey` effect (conversation switch), and the MIN_LENGTH
+  // branch in the input effect (delete-back-to-empty signals a
+  // fresh draft).
   const reset = () => {
     abortRef.current?.abort()
     abortRef.current = null
     lastAnalyzed.current = null
     setAnalysis(null)
+    setPending(false)
   }
   const consume = (): PromptAnalysis | null => {
     const v = analysis
+    sessionRef.current++
     accumulatedRef.current = new Map()
     setAnalysis(null)
     return v
@@ -310,25 +366,21 @@ export function useAegisLiveAnalyzer(
     }
     // Cancel any queued debounce timeout BEFORE we install our own
     // controller. Without this, a setTimeout the user's typing put
-    // on the queue would fire ~1s later, call abortRef.current?.abort()
-    // (which is now OUR controller), and short-circuit the doFetch
-    // below to a null verdict; exactly the race that lets a Send
-    // through ungated when feedback isn't ready yet.
+    // on the queue would fire ~1s later and burn a redundant LLM
+    // call on the same content analyzeNow is already covering.
     if (debounceHandleRef.current) {
       clearTimeout(debounceHandleRef.current)
       debounceHandleRef.current = null
     }
-    // Otherwise fire fresh; abort any in-flight or pending call
-    // first so this one wins the race.
-    abortRef.current?.abort()
+    // Capture session + generation, then fire. Same race-handling
+    // shape as the debounce path: the accumulator merge is gated on
+    // session match, the panel update is gated on latest generation.
+    const mySession = sessionRef.current
+    const myGen = ++generationRef.current
     const controller = new AbortController()
     abortRef.current = controller
     analyzeNowInFlight.current = true
     setPending(true)
-    // Same live-iteration context as the debounced path: hand the
-    // FULL accumulated coaching history to the server so the
-    // already-addressed check sees every kind we've coached on
-    // across this draft session, not just the most recent verdict.
     const previousSuggestions = Array.from(
       accumulatedRef.current.values(),
     )
@@ -338,17 +390,15 @@ export function useAegisLiveAnalyzer(
         previousSuggestions,
         controller.signal,
       )
-      if (controller.signal.aborted) return null
-      lastAnalyzed.current = trimmed
-      setAnalysis(result)
-      // Merge the analyzeNow verdict into the accumulator on the
-      // same terms as the debounced path; if the user un-Sends
-      // and keeps editing, the next debounced fire still has the
-      // full history.
+      if (sessionRef.current !== mySession) return null
       if (result) {
         for (const s of result.suggestions) {
           accumulatedRef.current.set(s.kind, s)
         }
+      }
+      if (myGen === generationRef.current) {
+        lastAnalyzed.current = trimmed
+        setAnalysis(result)
       }
       return result
     } catch (e) {
@@ -357,7 +407,12 @@ export function useAegisLiveAnalyzer(
       return null
     } finally {
       analyzeNowInFlight.current = false
-      if (!controller.signal.aborted) setPending(false)
+      if (
+        sessionRef.current === mySession &&
+        myGen === generationRef.current
+      ) {
+        setPending(false)
+      }
     }
   }
 

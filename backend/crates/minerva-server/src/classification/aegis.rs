@@ -624,7 +624,46 @@ pub async fn analyze_prompt(
                 return Err(format!("suggestions array malformed: {e}"));
             }
         };
-    Ok(Some(AegisVerdict { suggestions }))
+
+    // Hard server-side filter against already-coached kinds. The
+    // system prompt's already-addressed check tells the model not
+    // to re-raise dimensions it has already coached on, but
+    // llama3.1-8b is best-effort at instruction following on this
+    // axis ; pilot users repeatedly saw the analyzer return the
+    // exact same kinds that were already in `previous_suggestions`.
+    // Treating the prompt as advisory and the filter as enforcement
+    // is the only reliable way to deliver "stop circling" given
+    // the model we run on the hot path.
+    //
+    // Scope: every kind the trail carries as prior_suggestions ; on
+    // the current-draft entry that's the live-iteration history
+    // the frontend ships back via `previous_suggestions`, on prior
+    // entries it's the persisted `prompt_analyses` rows. Both
+    // legitimately mean "already coached on this dimension". An
+    // empty result after filtering is fine ; the panel renders the
+    // "looks good" affirmation.
+    let already_coached: std::collections::HashSet<&str> = trail
+        .iter()
+        .flat_map(|e| e.prior_suggestions.iter().map(|s| s.kind.as_str()))
+        .collect();
+    let filtered: Vec<AegisSuggestion> = suggestions
+        .into_iter()
+        .filter(|s| {
+            if already_coached.contains(s.kind.as_str()) {
+                tracing::debug!(
+                    "aegis: dropped re-raised kind={} despite live-iteration coverage",
+                    s.kind,
+                );
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    Ok(Some(AegisVerdict {
+        suggestions: filtered,
+    }))
 }
 
 // ─── Rewrite helper ─────────────────────────────────────────────

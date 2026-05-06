@@ -1,0 +1,25 @@
+# Dependencies for the play.dsv ingest workflow's GH runner.
+#
+# The classifier itself (play_classifier.py + play_frame_sampler.py)
+# only needs opencv + numpy. The future fetch_play_videos.py adds
+# dsv-wrapper for authenticated track download and rapidocr for the
+# CPU OCR tiebreak; both are listed here so the GHA workflow installs
+# everything in one pip pass.
+#
+# pytest is included so the workflow can run smoke tests of the
+# classifier on synthetic frames before paying to download real
+# multi-GB candidates - fail-fast on a borked image build.
+opencv-python-headless>=4.10,<5
+numpy>=2.0,<3
+Pillow>=10.0,<12
+requests>=2.31,<3
+zstandard>=0.22,<1
+# CPU OCR tiebreak. rapidocr-onnxruntime is the lighter of the two
+# common ONNX OCR Python packages; paddleocr is heavier but more
+# accurate. Switch if accuracy on real DSV slides demands it.
+rapidocr-onnxruntime>=1.3,<2
+# dsv-wrapper >=0.2 for get_media_tracks / download_track / stream_track.
+# Pinned to a public package name; substitute the gitea install URL
+# in the workflow if dsv-wrapper isn't on PyPI yet.
+dsv-wrapper>=0.2,<1
+pytest>=8,<10

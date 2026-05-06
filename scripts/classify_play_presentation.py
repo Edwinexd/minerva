@@ -53,6 +53,20 @@ _TIEBREAK_FRAMES_PER_TRACK = 5
 # we report slide_track_missing.
 _TIEBREAK_MIN_CHARS = 50
 
+# Sample frames per candidate used by the duplicate-cluster detector.
+# We only need enough text to compute a stable Jaccard between tracks;
+# 3 frames spread across the recording is plenty for slide content
+# (slides change slowly, cumulative text accumulates fast).
+_DEDUP_FRAMES_PER_TRACK = 3
+
+# Pairwise Jaccard threshold above which two tracks are considered
+# duplicate recordings of the same slide source. Lower than the
+# `find_duplicate_slide_clusters` default (0.45) would group tracks
+# that merely share a course title; higher would split duplicates
+# whose OCR has minor recognition differences. Tune against real
+# multi-projector lectures.
+_DEDUP_SIMILARITY_THRESHOLD = 0.45
+
 
 def _classify(presentation_uuid: str, keep_frames: bool) -> dict:
     try:
@@ -123,6 +137,92 @@ def _classify(presentation_uuid: str, keep_frames: bool) -> dict:
             raise SystemExit("no track produced usable frames")
 
         result = pc.classify_tracks(evidence_per_track)
+
+        # Duplicate-cluster detection. Lecture halls with multiple
+        # projectors record the same slide source N times; without
+        # this step the visual classifier picks one arbitrarily and we
+        # may end up indexing a 720p projector recording when a 1080p
+        # one is also available. Only OCR-sample tracks that pass the
+        # cheap absolute slide-likeness gate, so cam-only tracks don't
+        # eat OCR budget here.
+        slide_like_indices = [
+            i
+            for i, ev in enumerate(evidence_per_track)
+            if pc.is_slide_like_absolute(ev)
+        ]
+        dedup_report: dict | None = None
+        if len(slide_like_indices) >= 2:
+            print(
+                f"  multiple slide-like tracks detected ({slide_like_indices}); "
+                "running duplicate-cluster OCR...",
+                file=sys.stderr,
+            )
+            ocr_runner = play_ocr.make_ocr_runner()
+            samples: list[pc.TrackOcrSample] = []
+            for i in slide_like_indices:
+                meta = track_meta[i]
+                track_path = workdir / f"track_{meta['index']}.mp4"
+                frames = pfs.sample_frames(
+                    track_path,
+                    n=_DEDUP_FRAMES_PER_TRACK,
+                    duration_seconds=meta["duration_seconds"],
+                )
+                text = " ".join(ocr_runner(f) for f in frames)
+                samples.append(
+                    pc.TrackOcrSample(track_index=i, ocr_text=text)
+                )
+
+            clusters = pc.find_duplicate_slide_clusters(
+                samples, similarity_threshold=_DEDUP_SIMILARITY_THRESHOLD
+            )
+            chosen_idx = result.selected_track_index
+            chosen_cluster = next(
+                (c for c in clusters if chosen_idx is not None and chosen_idx in c),
+                None,
+            )
+
+            if chosen_cluster is not None and len(chosen_cluster) > 1:
+                # Multiple recordings of same content - pick the
+                # highest-resolution member of the cluster. Ties on
+                # height go to whichever scored higher under the
+                # visual classifier (preserves the original signal as
+                # a deterministic tiebreaker).
+                cluster_members = sorted(
+                    chosen_cluster,
+                    key=lambda i: (
+                        track_meta[i]["height"] or 0,
+                        next(s.score for s in result.all_scores if s.track_index == i),
+                    ),
+                    reverse=True,
+                )
+                best_idx = cluster_members[0]
+                if best_idx != chosen_idx:
+                    print(
+                        f"  duplicate cluster {sorted(chosen_cluster)}: "
+                        f"swapping to highest-res track {best_idx} "
+                        f"({track_meta[best_idx]['height']}p)",
+                        file=sys.stderr,
+                    )
+                    result = pc.ClassificationResult(
+                        selected_track_index=best_idx,
+                        score=result.score,
+                        runner_up_score=result.runner_up_score,
+                        needs_tiebreak=False,
+                        all_scores=result.all_scores,
+                    )
+
+            dedup_report = {
+                "slide_like_indices": slide_like_indices,
+                "clusters": [sorted(c) for c in clusters],
+                "chosen_cluster": (
+                    sorted(chosen_cluster) if chosen_cluster else None
+                ),
+                "swapped_to_higher_res": (
+                    chosen_cluster is not None
+                    and len(chosen_cluster) > 1
+                    and result.selected_track_index != chosen_idx
+                ),
+            }
 
         # OCR tiebreak: when the visual classifier isn't confident, OCR
         # a small batch of sample frames per candidate and let
@@ -225,6 +325,7 @@ def _classify(presentation_uuid: str, keep_frames: bool) -> dict:
             "runner_up_score": result.runner_up_score,
             "needs_tiebreak": result.needs_tiebreak,
             "tiebreak": tiebreak_report,
+            "dedup": dedup_report,
             "crop_bbox": crop,
             "workdir": str(workdir) if not cleanup else None,
         }

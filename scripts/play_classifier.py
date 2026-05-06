@@ -40,6 +40,29 @@ import cv2
 import numpy as np
 
 
+# --- Absolute slide-likeness + duplicate clustering ---------------------
+#
+# z-normalized scores compare candidates within a presentation but say
+# nothing about absolute slide-likeness. Two cases need an absolute
+# check:
+#
+#   (a) Lecture halls with multiple projectors record the same slide
+#       source N times. All N tracks score similarly under z-norm; the
+#       relative ranking picks one arbitrarily, ignoring that the
+#       others are duplicates of the same content. We want to pick the
+#       highest-resolution member of the duplicate cluster.
+#
+#   (b) Cam-only lectures (no slide capture exists) still produce a
+#       relative "winner" under z-norm. Without an absolute check, we
+#       silently mark a presenter cam as the slide track. The classifier
+#       should defer to slide_track_missing here.
+#
+# The gates below are intentionally permissive: a track that crosses
+# them is *plausibly* slide content, not "definitely slide content".
+# Pairwise OCR-text similarity disambiguates the duplicate case;
+# the OCR-tiebreak floor disambiguates the all-cam case.
+
+
 # --- Feature extraction --------------------------------------------------
 
 
@@ -417,6 +440,123 @@ def detect_pip_crop(
 
 
 # --- OCR tiebreaker (skeleton for the GH worker to fill in) -------------
+
+
+def is_slide_like_absolute(ev: TrackEvidence) -> bool:
+    """Cheap absolute gate that doesn't depend on the candidate set.
+
+    True when the track's features are individually consistent with
+    "this could be a slide track" - high enough text density, not
+    dominated by faces. Used to identify candidates worth running
+    duplicate-detection OCR on; cam-only tracks fail this gate and
+    skip the (expensive) cross-track OCR comparison.
+
+    Thresholds are deliberately loose. Tighter gates here would miss
+    sparse slides (a single diagram, a handwritten board, a code-only
+    deck with few text regions). The duplicate-clustering step that
+    consumes this gate is robust to false positives because the OCR
+    similarity check filters out cam tracks that snuck through.
+    """
+    return (
+        ev.edge_density_mean >= 0.020
+        and ev.text_regions_mean >= 1.5
+        and ev.face_count_mean < 1.5
+    )
+
+
+def _tokenize(text: str) -> set[str]:
+    """Whitespace + punctuation-stripped lowercase tokens, length >=3.
+
+    Short tokens (`a`, `is`, `of`) drag Jaccard toward the universal
+    similarity floor and don't carry slide-distinguishing content;
+    dropping them sharpens the duplicate-vs-distinct signal.
+    """
+    out: set[str] = set()
+    cur = []
+    for ch in text.lower():
+        if ch.isalnum():
+            cur.append(ch)
+        else:
+            if cur:
+                token = "".join(cur)
+                if len(token) >= 3:
+                    out.add(token)
+                cur = []
+    if cur:
+        token = "".join(cur)
+        if len(token) >= 3:
+            out.add(token)
+    return out
+
+
+def jaccard_similarity(a: str, b: str) -> float:
+    """Token-level Jaccard. 0 = disjoint, 1 = identical sets."""
+    ta, tb = _tokenize(a), _tokenize(b)
+    if not ta and not tb:
+        return 0.0
+    union = ta | tb
+    if not union:
+        return 0.0
+    return len(ta & tb) / len(union)
+
+
+@dataclass
+class TrackOcrSample:
+    """Pairing of a track index with the OCR'd text from a small batch
+    of its sample frames. Built by the caller; consumed by
+    `find_duplicate_slide_clusters`."""
+
+    track_index: int
+    ocr_text: str
+
+
+def find_duplicate_slide_clusters(
+    samples: Sequence[TrackOcrSample],
+    similarity_threshold: float = 0.45,
+) -> list[set[int]]:
+    """Group tracks whose OCR'd text is highly similar - typically
+    multiple recordings of the same slide source (one cam per
+    projector in lecture halls with multiple displays).
+
+    Returns a list of clusters; each cluster is a set of track indices.
+    Single-track clusters are included so callers can iterate
+    uniformly. Clusters are built via union-find over pairwise Jaccard
+    similarity; threshold is conservative enough that "same slides
+    captured by two cameras with mild OCR variance" cluster together
+    while "two distinct slide tracks (e.g. main deck + Q&A view)"
+    stay separate.
+
+    Track indices outside the supplied samples - or samples whose
+    `ocr_text` is empty - are returned as singletons. Empty inputs
+    return an empty list.
+    """
+    n = len(samples)
+    if n == 0:
+        return []
+
+    parent = {s.track_index: s.track_index for s in samples}
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if jaccard_similarity(samples[i].ocr_text, samples[j].ocr_text) >= similarity_threshold:
+                union(samples[i].track_index, samples[j].track_index)
+
+    clusters: dict[int, set[int]] = {}
+    for s in samples:
+        root = find(s.track_index)
+        clusters.setdefault(root, set()).add(s.track_index)
+    return list(clusters.values())
 
 
 def tiebreak_by_ocr_char_count(

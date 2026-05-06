@@ -322,6 +322,120 @@ def test_detect_pip_crop_returns_none_for_tiny_static_region():
 # --- OCR tiebreaker shape ----------------------------------------------
 
 
+def test_jaccard_similarity_identical():
+    assert pc.jaccard_similarity("hello world test", "hello world test") == 1.0
+
+
+def test_jaccard_similarity_disjoint():
+    assert pc.jaccard_similarity("alpha beta gamma", "delta epsilon zeta") == 0.0
+
+
+def test_jaccard_similarity_partial_overlap():
+    sim = pc.jaccard_similarity(
+        "lecture title bullet point one",
+        "lecture title bullet point two",
+    )
+    # token sets share {lecture, title, bullet, point}; differ on
+    # {one} vs {two} (length 3, included by tokenizer). 4/6 = 0.667.
+    assert 0.5 < sim < 0.8, sim
+
+
+def test_jaccard_similarity_drops_short_tokens():
+    """Short connectives shouldn't drag similarity up. The tokenizer
+    only retains tokens of length >= 3, so single letters / `is` / `of`
+    don't count toward overlap or union."""
+    sim = pc.jaccard_similarity("a b c d e", "a b c d e")
+    # All tokens are length 1; tokenizer drops them; similarity is 0
+    # because both sets are empty.
+    assert sim == 0.0
+
+
+def test_find_duplicate_slide_clusters_three_distinct():
+    samples = [
+        pc.TrackOcrSample(0, "introduction lecture machine learning algorithms"),
+        pc.TrackOcrSample(1, "presenter wearing blue shirt face"),
+        pc.TrackOcrSample(2, "second presenter view different angle"),
+    ]
+    clusters = pc.find_duplicate_slide_clusters(samples)
+    # Three singleton clusters.
+    assert len(clusters) == 3
+    assert {len(c) for c in clusters} == {1}
+
+
+def test_find_duplicate_slide_clusters_two_duplicates_and_unique():
+    """Two tracks recording the same slide deck (essentially identical
+    OCR text) should cluster together; a third distinct track stays
+    separate."""
+    slide_text = (
+        "lecture title machine learning bullet definition algorithm "
+        "training data validation accuracy precision recall"
+    )
+    samples = [
+        pc.TrackOcrSample(0, slide_text),
+        pc.TrackOcrSample(1, slide_text + " minor recognition variance"),
+        pc.TrackOcrSample(2, "completely different presenter cam content"),
+    ]
+    clusters = pc.find_duplicate_slide_clusters(samples)
+    assert len(clusters) == 2
+    sizes = sorted(len(c) for c in clusters)
+    assert sizes == [1, 2]
+    # The duplicate cluster contains 0 and 1.
+    pair_cluster = next(c for c in clusters if len(c) == 2)
+    assert pair_cluster == {0, 1}
+
+
+def test_find_duplicate_slide_clusters_all_duplicates():
+    slide_text = (
+        "lecture introduction overview chapter one definitions bullet "
+        "point list multiple words shared across recordings"
+    )
+    samples = [
+        pc.TrackOcrSample(i, slide_text + f" extra{i}") for i in range(4)
+    ]
+    clusters = pc.find_duplicate_slide_clusters(samples)
+    assert len(clusters) == 1
+    assert clusters[0] == {0, 1, 2, 3}
+
+
+def test_find_duplicate_slide_clusters_empty_input():
+    assert pc.find_duplicate_slide_clusters([]) == []
+
+
+def test_find_duplicate_slide_clusters_handles_empty_text():
+    """Empty OCR output (cam track that snuck through the absolute
+    gate) should land in its own singleton, not bleed into a cluster
+    of other tracks."""
+    samples = [
+        pc.TrackOcrSample(0, "lecture title machine learning content"),
+        pc.TrackOcrSample(1, ""),
+        pc.TrackOcrSample(2, "lecture title machine learning content"),
+    ]
+    clusters = pc.find_duplicate_slide_clusters(samples)
+    # Tracks 0 and 2 cluster together; track 1 is alone.
+    assert len(clusters) == 2
+    sizes = sorted(len(c) for c in clusters)
+    assert sizes == [1, 2]
+    pair = next(c for c in clusters if len(c) == 2)
+    assert pair == {0, 2}
+
+
+def test_is_slide_like_absolute_passes_synthetic_slide_evidence():
+    """Slide track evidence should pass the cheap absolute gate. Use
+    the same synthetic frames the per-feature tests rely on so this
+    test breaks loudly if feature extraction regresses below the
+    duplicate-detection threshold."""
+    ev = pc.aggregate_track([make_slide_frame(seed=i) for i in range(6)])
+    assert pc.is_slide_like_absolute(ev), ev
+
+
+def test_is_slide_like_absolute_rejects_synthetic_cam_evidence():
+    ev = pc.aggregate_track([make_cam_frame(seed=i) for i in range(6)])
+    # Cam frames should fail the gate. They have skin-tone color
+    # variance and detectable faces; they don't have the text-region
+    # density that slides do.
+    assert not pc.is_slide_like_absolute(ev), ev
+
+
 def test_tiebreak_picks_track_with_most_chars():
     # Synthetic OCR: track 1 produces more chars than track 0.
     sample_frames = [

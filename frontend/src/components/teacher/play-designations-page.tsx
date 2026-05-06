@@ -95,6 +95,10 @@ export function PlayDesignationsPage({ useParams }: { useParams: () => { courseI
           </Button>
         </form>
 
+        <p className="text-xs text-muted-foreground">
+          {t("playDesignations.charsHint")}
+        </p>
+
         {createMutation.isError && (
           <p className="text-sm text-destructive">
             {formatError(createMutation.error)}

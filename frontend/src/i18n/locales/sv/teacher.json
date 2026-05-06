@@ -394,6 +394,7 @@
     "descriptionPrefix": "Bevaka kursbeteckningar på play.dsv.su.se (t.ex. ",
     "descriptionMid": ", ",
     "descriptionSuffix": "). Den timvisa transkriberingspipelinen upptäcker nya presentationer under varje beteckning och indexerar deras transkriberingar till den här kursen automatiskt.",
+    "charsHint": "Beteckningen får inte innehålla blanksteg eller snedstreck.",
     "placeholder": "Beteckningskod (t.ex. PROG1)",
     "adding": "Lägger till...",
     "add": "Lägg till",

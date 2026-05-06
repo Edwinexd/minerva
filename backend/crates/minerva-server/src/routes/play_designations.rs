@@ -113,12 +113,10 @@ async fn create_play_designation(
     if designation.is_empty() || designation.len() > 64 {
         return Err(AppError::bad_request("play.designation_invalid_length"));
     }
-    // Designation codes are short ASCII (letters/digits/dash/underscore). Keep it
-    // permissive but reject anything with whitespace or slashes.
-    if designation
-        .chars()
-        .any(|c| c.is_whitespace() || c == '/' || c == '\\')
-    {
+    // Designation codes can contain spaces (e.g. some play.dsv.su.se codes
+    // include a term suffix like `IB907V VT26`). Slashes are still rejected
+    // because the code ends up in URL paths downstream.
+    if designation.chars().any(|c| c == '/' || c == '\\') {
         return Err(AppError::bad_request("play.designation_invalid_chars"));
     }
 

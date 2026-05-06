@@ -394,7 +394,6 @@
     "descriptionPrefix": "Watch course designations on play.dsv.su.se (e.g. ",
     "descriptionMid": ", ",
     "descriptionSuffix": "). The hourly transcript pipeline will discover any new presentations under each designation and auto-index their transcripts into this course.",
-    "charsHint": "Designation must not contain whitespace or slashes.",
     "placeholder": "Designation code (e.g. PROG1)",
     "adding": "Adding...",
     "add": "Add",

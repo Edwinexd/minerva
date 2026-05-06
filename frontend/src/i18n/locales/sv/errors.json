@@ -120,7 +120,7 @@
   },
   "play": {
     "designation_invalid_length": "Beteckningen måste vara mellan 1 och 64 tecken.",
-    "designation_invalid_chars": "Beteckningen får inte innehålla blanksteg eller snedstreck.",
+    "designation_invalid_chars": "Beteckningen får inte innehålla snedstreck.",
     "designation_duplicate": "Den beteckningen är redan kopplad till den här kursen."
   },
   "site_integration": {

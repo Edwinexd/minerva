@@ -120,7 +120,7 @@
   },
   "play": {
     "designation_invalid_length": "Designation must be between 1 and 64 characters.",
-    "designation_invalid_chars": "Designation must not contain whitespace or slashes.",
+    "designation_invalid_chars": "Designation must not contain slashes.",
     "designation_duplicate": "That designation is already attached to this course."
   },
   "site_integration": {

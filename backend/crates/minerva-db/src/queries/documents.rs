@@ -431,6 +431,153 @@ pub async fn set_pooled_embedding(
     Ok(result.rows_affected() > 0)
 }
 
+/// Documents waiting for an external GPU OCR pass (PDFs and images).
+/// Used by the worker's RunPod submitter; mirrors the
+/// `list_awaiting_transcripts` shape one layer up.
+pub async fn list_awaiting_ocr(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, sqlx::Error> {
+    sqlx::query_as!(
+        DocumentRow,
+        r#"SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding
+           FROM documents WHERE status = 'awaiting_ocr' ORDER BY created_at ASC LIMIT $1"#,
+        limit as i64,
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// Documents whose play.dsv frame bundle is uploaded and ready for the
+/// RunPod video-index task.
+pub async fn list_awaiting_video_index(
+    db: &PgPool,
+    limit: i32,
+) -> Result<Vec<DocumentRow>, sqlx::Error> {
+    sqlx::query_as!(
+        DocumentRow,
+        r#"SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding
+           FROM documents WHERE status = 'awaiting_video_index' ORDER BY created_at ASC LIMIT $1"#,
+        limit as i64,
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// Transition a doc from awaiting_ocr / awaiting_video_index to the
+/// processing_* state matching the in-flight RunPod job. Status guard
+/// prevents racing with a concurrent reset/correction.
+pub async fn mark_processing_ocr(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE documents SET status = 'processing_ocr' WHERE id = $1 AND status = 'awaiting_ocr'",
+        id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn mark_processing_video_index(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE documents SET status = 'processing_video_index' WHERE id = $1 AND status = 'awaiting_video_index'",
+        id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Replace a doc's bytes-on-disk metadata with the OCR-produced markdown
+/// and return it to `pending` so the existing chunker re-processes it as
+/// a regular text doc. Status guard accepts either of the in-flight OCR
+/// states (the apply step runs after a RunPod completion poll, so the
+/// doc should be in `processing_*` or `awaiting_*` if a manual
+/// re-OCR-from-output happened).
+pub async fn replace_with_ocr_output(
+    db: &PgPool,
+    id: Uuid,
+    filename: &str,
+    mime_type: &str,
+    size_bytes: i64,
+    ocr_quality: &str,
+    add_gpu_seconds: f32,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"UPDATE documents
+           SET filename = $1,
+               mime_type = $2,
+               size_bytes = $3,
+               status = 'pending',
+               error_msg = NULL,
+               chunk_count = NULL,
+               processed_at = NULL,
+               processing_started_at = NULL,
+               ocr_quality = $4,
+               ocr_gpu_seconds = COALESCE(ocr_gpu_seconds, 0) + $5
+           WHERE id = $6
+             AND status IN ('processing_ocr', 'processing_video_index',
+                            'awaiting_ocr', 'awaiting_video_index')"#,
+        filename,
+        mime_type,
+        size_bytes,
+        ocr_quality,
+        add_gpu_seconds,
+        id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Transition a doc to a dead-letter OCR status with an error message.
+/// Used when retry_count on the underlying RunPod job exceeds the cap.
+pub async fn mark_ocr_failed(
+    db: &PgPool,
+    id: Uuid,
+    target_status: &str,
+    error: &str,
+) -> Result<bool, sqlx::Error> {
+    debug_assert!(matches!(target_status, "ocr_failed" | "video_index_failed"));
+    let result = sqlx::query!(
+        "UPDATE documents SET status = $1, error_msg = $2 WHERE id = $3",
+        target_status,
+        error,
+        id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Persist the GH worker's track-classification choice for a video doc.
+/// Called from the bundle-upload service handler.
+#[allow(clippy::too_many_arguments)]
+pub async fn set_video_track_metadata(
+    db: &PgPool,
+    id: Uuid,
+    selected_track_index: Option<i32>,
+    slide_track_score: Option<f32>,
+    crop_bbox: Option<&serde_json::Value>,
+    sample_fps: Option<&str>,
+    slide_track_missing: bool,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"UPDATE documents
+           SET selected_track_index = $1,
+               slide_track_score = $2,
+               crop_bbox = $3,
+               sample_fps = $4,
+               slide_track_missing = $5
+           WHERE id = $6"#,
+        selected_track_index,
+        slide_track_score,
+        crop_bbox,
+        sample_fps,
+        slide_track_missing,
+        id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn classification_stats(db: &PgPool) -> Result<ClassificationStats, sqlx::Error> {
     let row = sqlx::query!(
         r#"

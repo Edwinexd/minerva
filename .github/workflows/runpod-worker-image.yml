@@ -1,0 +1,120 @@
+name: RunPod worker image
+
+# Builds the Python GPU handler image used by RunPod serverless. Mirrors
+# the shape of `docker.yml` but only fires when files under
+# `runpod-worker/` change; the handler iterates much faster than the
+# main app, and rebuilding the ~10GB weights-baked image on every
+# backend commit would burn a lot of GHA cache for nothing.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "runpod-worker/**"
+      - ".github/workflows/runpod-worker-image.yml"
+    tags: ["runpod-worker-v*"]
+  pull_request:
+    paths:
+      - "runpod-worker/**"
+      - ".github/workflows/runpod-worker-image.yml"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  # Distinct image name from the main app so RunPod can pin to whichever
+  # tag is current without coupling to backend deploys.
+  IMAGE_NAME: ${{ github.repository }}-runpod-worker
+
+jobs:
+  smoke-import:
+    # Sanity check the handler is importable without DeepSeek-OCR / CUDA.
+    # Catches syntax errors and stale imports before paying for a multi-GB
+    # GPU image build. The DeepSeek-OCR install only happens inside the
+    # Dockerfile, so this stage runs on a vanilla Python interpreter.
+    name: Handler smoke imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install non-torch deps
+        working-directory: runpod-worker
+        run: pip install -r requirements.txt
+      - name: Compile-check handler
+        working-directory: runpod-worker
+        # py_compile catches syntax errors; full import would pull
+        # deepseek_ocr (which we don't install here on purpose).
+        run: python -m py_compile handler.py
+
+  build-and-push:
+    name: Build and push image
+    needs: smoke-import
+    # Building the image needs the DeepSeek-OCR-2 weights pulled from
+    # HuggingFace. ~5GB of LFS objects + model setup pushes the build
+    # past the default 6h limit on free runners only when the cache is
+    # cold; warm cache rebuilds run in a few minutes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write
+    # Only push from master pushes / explicit tags / manual dispatch.
+    # PRs build to validate the Dockerfile but don't pollute ghcr.
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            # Custom tag prefix so this image's versioning is independent
+            # of the backend's semver. A bare `vX.Y.Z` tag belongs to the
+            # backend and shouldn't trigger a worker rebuild.
+            type=match,pattern=runpod-worker-(v\d+\.\d+\.\d+),group=1
+            type=sha,prefix=worker-
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: runpod-worker
+          file: runpod-worker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GHA cache scope is keyed by the workflow file; this stays
+          # disjoint from the main backend image's cache.
+          cache-from: type=gha,scope=runpod-worker
+          cache-to: type=gha,mode=max,scope=runpod-worker
+
+  build-only:
+    name: Build (no push) on PR
+    if: github.event_name == 'pull_request'
+    needs: smoke-import
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: runpod-worker
+          file: runpod-worker/Dockerfile
+          push: false
+          cache-from: type=gha,scope=runpod-worker
+          cache-to: type=gha,mode=max,scope=runpod-worker

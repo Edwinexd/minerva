@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runpod_jobs\n           SET runpod_job_id = $1, status = 'in_queue'\n           WHERE client_request_id = $2 AND status = 'submitting'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "59e5727bf66c3c7824900b2d503760207a17de3d2fd65151657755b4518c6d11"
+}

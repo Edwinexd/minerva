@@ -7,9 +7,11 @@ mod eureka_runtime;
 mod ext_obfuscate;
 mod feature_flags;
 pub mod lti;
+mod ocr_worker;
 mod relink_scheduler;
 mod routes;
 mod rules;
+mod runpod;
 mod state;
 mod strategy;
 mod worker;
@@ -47,6 +49,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Start the background document-processing worker.
     worker::start(state.clone(), config.max_concurrent_ingests);
+
+    // Start the OCR + video-indexing pipeline (RunPod submitter, poller,
+    // reconciler). Internally no-ops when MINERVA_OCR_PIPELINE_ENABLED
+    // is unset, so this is safe to call unconditionally.
+    ocr_worker::start(state.clone());
 
     // Benchmark FastEmbed models in the background (doesn't block startup).
     // Only the small ONNX models in `STARTUP_BENCHMARK_MODELS` are warmed

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET status = 'processing_ocr' WHERE id = $1 AND status = 'awaiting_ocr'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c6b3e982f623252338891e763e65ea3f775cf5d5bbf1c84e1a1dfcd698529e0f"
+}

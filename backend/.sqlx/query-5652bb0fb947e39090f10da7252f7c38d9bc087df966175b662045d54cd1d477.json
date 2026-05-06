@@ -1,0 +1,96 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO runpod_jobs\n               (client_request_id, task, document_id, status)\n           VALUES ($1, $2, $3, 'submitting')\n           RETURNING id, client_request_id, runpod_job_id, task, document_id,\n                     status, submitted_at, completed_at, output, error,\n                     retry_count, gpu_seconds, estimated_cost_usd",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_request_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "runpod_job_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "task",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "document_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "submitted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "output",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "retry_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "gpu_seconds",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 12,
+        "name": "estimated_cost_usd",
+        "type_info": "Float4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "5652bb0fb947e39090f10da7252f7c38d9bc087df966175b662045d54cd1d477"
+}

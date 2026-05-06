@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, document_id, page, t_start_seconds, t_end_seconds,\n                  bbox, caption, storage_path, created_at\n           FROM document_figures\n           WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "document_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "page",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "t_start_seconds",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 4,
+        "name": "t_end_seconds",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 5,
+        "name": "bbox",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "caption",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "storage_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "bad3eaf63953de771e34f9b48d9ab076158f6288967154b955c7ef6c85258d0c"
+}

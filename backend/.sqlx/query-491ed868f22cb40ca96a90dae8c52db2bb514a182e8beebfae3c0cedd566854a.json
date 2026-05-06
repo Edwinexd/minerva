@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runpod_jobs\n           SET status = 'failed', completed_at = NOW(), error = $1,\n               retry_count = retry_count + 1\n           WHERE runpod_job_id = $2\n           RETURNING retry_count",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "retry_count",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "491ed868f22cb40ca96a90dae8c52db2bb514a182e8beebfae3c0cedd566854a"
+}

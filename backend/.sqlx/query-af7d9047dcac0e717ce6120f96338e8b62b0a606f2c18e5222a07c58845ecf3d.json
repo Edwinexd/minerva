@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET status = $1\n                     WHERE id = $2 AND status IN ('processing_ocr', 'processing_video_index')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "af7d9047dcac0e717ce6120f96338e8b62b0a606f2c18e5222a07c58845ecf3d"
+}

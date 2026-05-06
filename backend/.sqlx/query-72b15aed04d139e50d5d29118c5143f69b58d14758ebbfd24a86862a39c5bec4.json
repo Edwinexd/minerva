@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runpod_jobs\n           SET status = 'completed',\n               completed_at = NOW(),\n               output = $1,\n               gpu_seconds = $2,\n               estimated_cost_usd = $3\n           WHERE runpod_job_id = $4 AND status NOT IN ('completed', 'failed')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Float4",
+        "Float4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "72b15aed04d139e50d5d29118c5143f69b58d14758ebbfd24a86862a39c5bec4"
+}

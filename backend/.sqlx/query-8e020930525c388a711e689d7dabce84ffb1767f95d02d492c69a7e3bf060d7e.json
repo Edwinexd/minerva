@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS(\n               SELECT 1 FROM runpod_jobs\n               WHERE document_id = $1\n                 AND status IN ('submitting', 'in_queue', 'in_progress')\n           ) as \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8e020930525c388a711e689d7dabce84ffb1767f95d02d492c69a7e3bf060d7e"
+}

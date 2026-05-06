@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents\n           SET filename = $1,\n               mime_type = $2,\n               size_bytes = $3,\n               status = 'pending',\n               error_msg = NULL,\n               chunk_count = NULL,\n               processed_at = NULL,\n               processing_started_at = NULL,\n               ocr_quality = $4,\n               ocr_gpu_seconds = COALESCE(ocr_gpu_seconds, 0) + $5\n           WHERE id = $6\n             AND status IN ('processing_ocr', 'processing_video_index',\n                            'awaiting_ocr', 'awaiting_video_index')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Float4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0c1baf01309bd61d8d5f1c7352dee94f26eb2caae7365bf559a6ad90149624d9"
+}

@@ -1,0 +1,12 @@
+# RunPod serverless SDK + Minerva handler runtime deps.
+#
+# torch is intentionally omitted: the base image (nvidia/cuda:12.4.0)
+# carries a CUDA toolchain only, and DeepSeek-OCR's installer pulls a
+# matching torch wheel during model setup. Listing torch here would
+# either pin to a version that fights the model loader or duplicate
+# the install.
+runpod>=1.7.0,<2
+requests>=2.31,<3
+zstandard>=0.22,<1
+Pillow>=10.0,<12
+pypdfium2>=4.30,<5

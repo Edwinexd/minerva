@@ -4,15 +4,27 @@
 //! the `MINERVA_SERVICE_API_KEY` environment variable. This is a global
 //! key, not scoped to any course.
 
-use axum::extract::{Path, State};
-use axum::http::HeaderMap;
+use axum::body::Body;
+use axum::extract::{Multipart, Path, State};
+use axum::http::{header, HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::state::AppState;
+
+/// Maximum size of a video frames bundle uploaded by the GH ingest worker.
+/// At fps=1/5 with the blank-frame pre-filter, an hour-long lecture is
+/// typically 50-150 MB compressed; 500 MB gives ample headroom for longer
+/// lectures and higher sample rates without opening the door to abuse.
+pub const MAX_BUNDLE_UPLOAD_BYTES: i64 = 500 * 1_000_000;
+
+/// Maximum size of a single figure crop PNG uploaded by RunPod.
+pub const MAX_FIGURE_UPLOAD_BYTES: i64 = 20 * 1_000_000;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -31,6 +43,24 @@ pub fn router() -> Router<AppState> {
             post(create_url_document),
         )
         .route("/play-courses", put(replace_play_course_catalog))
+        // OCR + video-indexing pipeline: RunPod fetches sources from these
+        // endpoints, the GH ingest worker uploads bundles, the backend's
+        // submitter consumes the pending-* listings.
+        .route("/pending-ocr", get(pending_ocr))
+        .route("/pending-video-index", get(pending_video_index))
+        .route("/documents/{document_id}/source", get(get_source))
+        .route(
+            "/documents/{document_id}/video-bundle",
+            get(get_video_bundle).post(post_video_bundle).layer(
+                axum::extract::DefaultBodyLimit::max(MAX_BUNDLE_UPLOAD_BYTES as usize),
+            ),
+        )
+        .route(
+            "/figure-uploads/{document_id}",
+            post(post_figure_upload).layer(axum::extract::DefaultBodyLimit::max(
+                MAX_FIGURE_UPLOAD_BYTES as usize,
+            )),
+        )
 }
 
 /// Authenticate using the global service API key (MINERVA_SERVICE_API_KEY).
@@ -445,4 +475,460 @@ async fn replace_play_course_catalog(
     Ok(Json(
         serde_json::json!({ "submitted": n, "upserted": upserted }),
     ))
+}
+
+//; OCR + video-indexing pipeline --
+
+/// Where on disk we stash a doc's primary blob (PDF, image, or `.url`).
+/// Mirrors the convention used by `routes::documents::upload_document`.
+fn doc_source_path(docs_path: &str, course_id: Uuid, doc_id: Uuid, ext: &str) -> String {
+    format!("{}/{}/{}.{}", docs_path, course_id, doc_id, ext)
+}
+
+fn doc_bundle_path(docs_path: &str, course_id: Uuid, doc_id: Uuid) -> String {
+    format!("{}/{}/{}.bundle.tar.zst", docs_path, course_id, doc_id)
+}
+
+fn doc_vtt_path(docs_path: &str, course_id: Uuid, doc_id: Uuid) -> String {
+    format!("{}/{}/{}.vtt", docs_path, course_id, doc_id)
+}
+
+fn figures_dir(docs_path: &str) -> String {
+    format!("{}/figures", docs_path)
+}
+
+fn figure_storage_path(docs_path: &str, figure_id: Uuid) -> String {
+    format!("{}/figures/{}.png", docs_path, figure_id)
+}
+
+#[derive(Serialize)]
+struct PendingOcrInfo {
+    id: Uuid,
+    course_id: Uuid,
+    filename: String,
+    mime_type: String,
+    /// Absolute URL of `GET /api/service/documents/{id}/source`. The RunPod
+    /// handler fetches the PDF/image bytes from here using its service key.
+    source_url: String,
+}
+
+/// List PDFs and images waiting on a RunPod OCR pass. Cap with `?limit=N`
+/// (default 50) so a tight worker poll doesn't repeatedly scan a huge
+/// queue.
+async fn pending_ocr(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<PendingQuery>,
+) -> Result<Json<Vec<PendingOcrInfo>>, AppError> {
+    authenticate_service(&state, &headers)?;
+    let limit = params.limit.unwrap_or(50).clamp(1, 500);
+    let docs = minerva_db::queries::documents::list_awaiting_ocr(&state.db, limit).await?;
+    let base = &state.config.runpod_callback_base;
+    Ok(Json(
+        docs.into_iter()
+            .map(|d| PendingOcrInfo {
+                id: d.id,
+                course_id: d.course_id,
+                filename: d.filename,
+                mime_type: d.mime_type,
+                source_url: format!("{}/api/service/documents/{}/source", base, d.id),
+            })
+            .collect(),
+    ))
+}
+
+#[derive(Deserialize)]
+struct PendingQuery {
+    limit: Option<i32>,
+}
+
+#[derive(Serialize)]
+struct PendingVideoIndexInfo {
+    id: Uuid,
+    course_id: Uuid,
+    filename: String,
+    bundle_url: String,
+    /// Pre-fetched VTT text shipped with the bundle. The handler doesn't
+    /// re-pull from play.dsv; same VTT applies for the lifetime of the doc.
+    vtt_text: String,
+    sample_fps: String,
+}
+
+async fn pending_video_index(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<PendingQuery>,
+) -> Result<Json<Vec<PendingVideoIndexInfo>>, AppError> {
+    authenticate_service(&state, &headers)?;
+    let limit = params.limit.unwrap_or(50).clamp(1, 500);
+    let docs = minerva_db::queries::documents::list_awaiting_video_index(&state.db, limit).await?;
+    let base = &state.config.runpod_callback_base;
+    let default_fps = state.config.video_sample_fps.clone();
+
+    let mut out = Vec::with_capacity(docs.len());
+    for doc in docs {
+        let vtt_path = doc_vtt_path(&state.config.docs_path, doc.course_id, doc.id);
+        let vtt_text = tokio::fs::read_to_string(&vtt_path)
+            .await
+            .unwrap_or_default();
+        out.push(PendingVideoIndexInfo {
+            id: doc.id,
+            course_id: doc.course_id,
+            filename: doc.filename,
+            bundle_url: format!("{}/api/service/documents/{}/video-bundle", base, doc.id),
+            vtt_text,
+            sample_fps: default_fps.clone(),
+        });
+    }
+    Ok(Json(out))
+}
+
+/// Stream the original blob (PDF, image, or `.url`) so RunPod can fetch
+/// it without us inlining megabytes into the job input.
+async fn get_source(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(document_id): Path<Uuid>,
+) -> Result<Response, AppError> {
+    authenticate_service(&state, &headers)?;
+
+    let doc = minerva_db::queries::documents::find_by_id(&state.db, document_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let ext = super::documents::extension_from_filename(&doc.filename);
+    let path = doc_source_path(&state.config.docs_path, doc.course_id, doc.id, ext);
+    stream_file(&path, &doc.mime_type).await
+}
+
+async fn get_video_bundle(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(document_id): Path<Uuid>,
+) -> Result<Response, AppError> {
+    authenticate_service(&state, &headers)?;
+
+    let doc = minerva_db::queries::documents::find_by_id(&state.db, document_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let path = doc_bundle_path(&state.config.docs_path, doc.course_id, doc.id);
+    stream_file(&path, "application/zstd").await
+}
+
+async fn stream_file(path: &str, mime: &str) -> Result<Response, AppError> {
+    let file = match tokio::fs::File::open(path).await {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(AppError::NotFound),
+        Err(e) => return Err(AppError::Internal(format!("stat failed: {}", e))),
+    };
+    let meta = file
+        .metadata()
+        .await
+        .map_err(|e| AppError::Internal(format!("metadata failed: {}", e)))?;
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
+    let mut resp = Response::new(body);
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_str(mime)
+            .unwrap_or(header::HeaderValue::from_static("application/octet-stream")),
+    );
+    resp.headers_mut().insert(
+        header::CONTENT_LENGTH,
+        header::HeaderValue::from(meta.len()),
+    );
+    Ok(resp.into_response())
+}
+
+#[derive(Deserialize, Default)]
+struct VideoBundleMetadata {
+    /// Index into the play.dsv presentation's track list (0-based).
+    selected_track_index: Option<i32>,
+    /// Aggregate visual classifier score for the chosen track.
+    slide_track_score: Option<f32>,
+    /// {x,y,w,h} in original-frame pixel coords; null = no crop applied.
+    #[serde(default)]
+    crop_bbox: Option<serde_json::Value>,
+    /// ffmpeg sample rate fraction the bundle was extracted at.
+    sample_fps: Option<String>,
+    /// VTT transcript shipped alongside frames. Empty = caption not yet
+    /// available (state -> vtt_pending).
+    #[serde(default)]
+    vtt_text: Option<String>,
+    /// Set by the GH worker when classification rejected every candidate
+    /// track. Backend records the flag and falls back to transcript-only
+    /// via the existing pipeline (caller is expected to also POST the
+    /// transcript to /transcript on the same document, not via this route).
+    #[serde(default)]
+    slide_track_missing: bool,
+}
+
+/// Multipart upload of a video frames bundle.
+///
+/// Fields:
+///   * `metadata` (text): JSON matching `VideoBundleMetadata`.
+///   * `bundle` (file): tar.zst containing manifest.json + frames/*.png.
+///   * `vtt` (file, optional): pre-fetched VTT text. Same as
+///     metadata.vtt_text but lets the GH worker stream large captions
+///     instead of inlining them in JSON.
+async fn post_video_bundle(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(document_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> Result<Json<serde_json::Value>, AppError> {
+    authenticate_service(&state, &headers)?;
+
+    let doc = minerva_db::queries::documents::find_by_id(&state.db, document_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    // Status guard: only accept bundles for docs the worker actually parked
+    // in awaiting_video_index. This protects against stale GH retries
+    // overwriting an already-processed timeline.
+    if !matches!(
+        doc.status.as_str(),
+        "awaiting_video_index" | "vtt_pending" | "video_index_failed"
+    ) {
+        return Err(AppError::bad_request_with(
+            "service.wrong_status",
+            [("status", doc.status.clone())],
+        ));
+    }
+
+    let mut bundle_bytes: Option<bytes::Bytes> = None;
+    let mut vtt_text: Option<String> = None;
+    let mut metadata = VideoBundleMetadata::default();
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        AppError::bad_request_with("service.multipart_error", [("detail", e.to_string())])
+    })? {
+        let name = field.name().unwrap_or("").to_string();
+        match name.as_str() {
+            "metadata" => {
+                let text = field.text().await.map_err(|e| {
+                    AppError::bad_request_with("service.read_failed", [("detail", e.to_string())])
+                })?;
+                metadata = serde_json::from_str(&text).map_err(|e| {
+                    AppError::bad_request_with(
+                        "service.metadata_invalid",
+                        [("detail", e.to_string())],
+                    )
+                })?;
+            }
+            "bundle" => {
+                let bytes = field.bytes().await.map_err(|e| {
+                    AppError::bad_request_with("service.read_failed", [("detail", e.to_string())])
+                })?;
+                bundle_bytes = Some(bytes);
+            }
+            "vtt" => {
+                let text = field.text().await.map_err(|e| {
+                    AppError::bad_request_with("service.read_failed", [("detail", e.to_string())])
+                })?;
+                vtt_text = Some(text);
+            }
+            _ => {
+                // Ignore unknown fields rather than 400ing so we can add
+                // optional ones (e.g. provenance receipts) without
+                // breaking older GH workers mid-deploy.
+            }
+        }
+    }
+
+    if metadata.slide_track_missing {
+        // Caller flagged that no track had usable slides. Persist the
+        // signal and bounce them to use the legacy transcript route.
+        // Don't accept a bundle here so we don't waste disk.
+        minerva_db::queries::documents::set_video_track_metadata(
+            &state.db,
+            doc.id,
+            metadata.selected_track_index,
+            metadata.slide_track_score,
+            metadata.crop_bbox.as_ref(),
+            metadata.sample_fps.as_deref(),
+            true,
+        )
+        .await?;
+        return Ok(Json(
+            serde_json::json!({ "status": "slide_track_missing", "next": "post transcript via /documents/{id}/transcript" }),
+        ));
+    }
+
+    let bundle = bundle_bytes.ok_or_else(|| AppError::bad_request("service.bundle_missing"))?;
+
+    let dir = format!("{}/{}", state.config.docs_path, doc.course_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Internal(format!("mkdir failed: {}", e)))?;
+
+    let bundle_path = doc_bundle_path(&state.config.docs_path, doc.course_id, doc.id);
+    tokio::fs::write(&bundle_path, &bundle)
+        .await
+        .map_err(|e| AppError::Internal(format!("bundle write failed: {}", e)))?;
+
+    // Resolve VTT precedence: explicit file beats inline metadata.
+    let resolved_vtt = vtt_text.or(metadata.vtt_text.clone());
+    if let Some(ref text) = resolved_vtt {
+        let vtt_path = doc_vtt_path(&state.config.docs_path, doc.course_id, doc.id);
+        tokio::fs::write(&vtt_path, text.as_bytes())
+            .await
+            .map_err(|e| AppError::Internal(format!("vtt write failed: {}", e)))?;
+    }
+
+    minerva_db::queries::documents::set_video_track_metadata(
+        &state.db,
+        doc.id,
+        metadata.selected_track_index,
+        metadata.slide_track_score,
+        metadata.crop_bbox.as_ref(),
+        metadata.sample_fps.as_deref(),
+        false,
+    )
+    .await?;
+
+    // Flip status: vtt_pending if no caption yet, awaiting_video_index
+    // (the OCR submitter's queue) if we have everything.
+    let next_status = if resolved_vtt
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+    {
+        "awaiting_video_index"
+    } else {
+        "vtt_pending"
+    };
+    sqlx::query!(
+        "UPDATE documents SET status = $1 WHERE id = $2",
+        next_status,
+        doc.id,
+    )
+    .execute(&state.db)
+    .await?;
+
+    tracing::info!(
+        "service: video bundle stored for document {} ({} bytes), status -> {}",
+        doc.id,
+        bundle.len(),
+        next_status,
+    );
+
+    Ok(Json(serde_json::json!({
+        "status": next_status,
+        "bytes": bundle.len(),
+    })))
+}
+
+#[derive(Deserialize)]
+struct FigureUploadMetadata {
+    /// Stable identifier the RunPod handler picked. The metadata table
+    /// uses it as PK so the handler can reference figures from the
+    /// markdown body (e.g. `![Fig 1](minerva-figure:abc-123)`).
+    figure_id: Uuid,
+    /// 1-based PDF page or null for video-derived figures.
+    #[serde(default)]
+    page: Option<i32>,
+    #[serde(default)]
+    t_start_seconds: Option<f32>,
+    #[serde(default)]
+    t_end_seconds: Option<f32>,
+    /// {x,y,w,h} normalized 0..1 within the OCRed image.
+    #[serde(default)]
+    bbox: Option<serde_json::Value>,
+    #[serde(default)]
+    caption: Option<String>,
+}
+
+/// Multipart endpoint the RunPod handler hits to upload a figure crop.
+/// Writes the PNG to `figures/<figure_id>.png` and inserts a row in
+/// `document_figures`. Idempotent on `figure_id` collision: the second
+/// upload overwrites the file and refreshes the metadata. Used by both
+/// `ocr_pdf` (page figures) and `video_index` (slide thumbnails).
+async fn post_figure_upload(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(document_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> Result<Json<serde_json::Value>, AppError> {
+    authenticate_service(&state, &headers)?;
+
+    let doc = minerva_db::queries::documents::find_by_id(&state.db, document_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let mut metadata: Option<FigureUploadMetadata> = None;
+    let mut png_bytes: Option<bytes::Bytes> = None;
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        AppError::bad_request_with("service.multipart_error", [("detail", e.to_string())])
+    })? {
+        let name = field.name().unwrap_or("").to_string();
+        match name.as_str() {
+            "metadata" => {
+                let text = field.text().await.map_err(|e| {
+                    AppError::bad_request_with("service.read_failed", [("detail", e.to_string())])
+                })?;
+                metadata = Some(serde_json::from_str(&text).map_err(|e| {
+                    AppError::bad_request_with(
+                        "service.metadata_invalid",
+                        [("detail", e.to_string())],
+                    )
+                })?);
+            }
+            "png" => {
+                png_bytes = Some(field.bytes().await.map_err(|e| {
+                    AppError::bad_request_with("service.read_failed", [("detail", e.to_string())])
+                })?);
+            }
+            _ => {}
+        }
+    }
+
+    let metadata = metadata.ok_or_else(|| AppError::bad_request("service.metadata_missing"))?;
+    let png = png_bytes.ok_or_else(|| AppError::bad_request("service.png_missing"))?;
+
+    let dir = figures_dir(&state.config.docs_path);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Internal(format!("mkdir failed: {}", e)))?;
+
+    let storage_path = figure_storage_path(&state.config.docs_path, metadata.figure_id);
+    tokio::fs::write(&storage_path, &png)
+        .await
+        .map_err(|e| AppError::Internal(format!("figure write failed: {}", e)))?;
+
+    // Idempotent insert: same figure_id + same doc means RunPod retried
+    // the upload. Delete the old row so the new caption/bbox wins.
+    sqlx::query!(
+        "DELETE FROM document_figures WHERE id = $1",
+        metadata.figure_id,
+    )
+    .execute(&state.db)
+    .await?;
+
+    minerva_db::queries::document_figures::insert(
+        &state.db,
+        minerva_db::queries::document_figures::NewFigure {
+            id: metadata.figure_id,
+            document_id: doc.id,
+            page: metadata.page,
+            t_start_seconds: metadata.t_start_seconds,
+            t_end_seconds: metadata.t_end_seconds,
+            bbox: metadata.bbox.as_ref(),
+            caption: metadata.caption.as_deref(),
+            storage_path: &storage_path,
+        },
+    )
+    .await?;
+
+    Ok(Json(
+        serde_json::json!({ "figure_id": metadata.figure_id, "bytes": png.len() }),
+    ))
+}
+
+// 405 is more useful than 404 here: the route exists, the method doesn't.
+#[allow(dead_code)]
+async fn method_not_allowed() -> StatusCode {
+    StatusCode::METHOD_NOT_ALLOWED
 }

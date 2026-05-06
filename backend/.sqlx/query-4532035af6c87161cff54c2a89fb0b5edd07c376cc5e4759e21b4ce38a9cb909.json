@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runpod_jobs\n           SET status = $1\n           WHERE runpod_job_id = $2 AND status NOT IN ('completed', 'failed')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4532035af6c87161cff54c2a89fb0b5edd07c376cc5e4759e21b4ce38a9cb909"
+}

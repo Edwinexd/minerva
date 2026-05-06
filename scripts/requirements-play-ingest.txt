@@ -21,11 +21,11 @@ zstandard>=0.22,<1
 dsv-wrapper>=0.2,<1
 pytest>=8,<10
 
-# CPU OCR engine for the classifier's tiebreaker. NOT pinned here
-# because the agent wiring up the tiebreak step picks the engine
-# (rapidocr 3.x / paddleocr / tesseract) based on accuracy benchmarks
-# on real DSV slides. Both common Python packages have wheel/version
-# constraints that bind the surrounding deps tightly, so deferring
-# the choice keeps THIS file Python-3.12-AND-3.13 compatible. The
-# classifier's `tiebreak_by_ocr_char_count` accepts any
-# `ocr_runner(frame_bgr) -> str` callable.
+# CPU OCR engine for the classifier's tiebreaker (`play_ocr.py`).
+# rapidocr 3.x replaced rapidocr-onnxruntime; the latter froze at
+# 1.2.x and has no Python 3.13 wheel. rapidocr 3.8 ships ONNX models
+# that auto-download on first call (~12 MB cached in the venv).
+# Pinned conservatively because the wire-format of the engine's output
+# (`.txts`) is what `play_ocr.ocr_text` consumes.
+rapidocr>=3.8,<4
+onnxruntime>=1.20,<2

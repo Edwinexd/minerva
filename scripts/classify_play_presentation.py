@@ -31,12 +31,27 @@ import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
+
 # Allow running as a script (`python scripts/classify_play_presentation.py`)
 # or as a module (`python -m scripts.classify_play_presentation`).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import play_classifier as pc
 import play_frame_sampler as pfs
+import play_ocr
+
+
+# Sample frames per candidate used by the OCR tiebreaker. 5 is a
+# compromise: enough text for the char-count signal to be meaningful
+# even when one frame happens to be a transition, but few enough that
+# the tiebreak doesn't dominate runtime when it fires.
+_TIEBREAK_FRAMES_PER_TRACK = 5
+
+# A candidate whose total OCR'd character count is below this is
+# treated as "no readable slides", and if EVERY candidate is below it
+# we report slide_track_missing.
+_TIEBREAK_MIN_CHARS = 50
 
 
 def _classify(presentation_uuid: str, keep_frames: bool) -> dict:
@@ -109,6 +124,70 @@ def _classify(presentation_uuid: str, keep_frames: bool) -> dict:
 
         result = pc.classify_tracks(evidence_per_track)
 
+        # OCR tiebreak: when the visual classifier isn't confident, OCR
+        # a small batch of sample frames per candidate and let
+        # whichever track has the most readable text win. If every
+        # candidate is below MIN_CHARS, treat as slide_track_missing.
+        tiebreak_report: dict | None = None
+        if result.needs_tiebreak and len(evidence_per_track) >= 2:
+            print(
+                "  visual scores ambiguous - running OCR tiebreak...",
+                file=sys.stderr,
+            )
+            ocr_runner = play_ocr.make_ocr_runner()
+            sample_frames_per_track = []
+            for meta in track_meta:
+                track_path = workdir / f"track_{meta['index']}.mp4"
+                tb_frames = pfs.sample_frames(
+                    track_path,
+                    n=_TIEBREAK_FRAMES_PER_TRACK,
+                    duration_seconds=meta["duration_seconds"],
+                )
+                sample_frames_per_track.append(tb_frames)
+
+            char_counts = []
+            for frames in sample_frames_per_track:
+                total = sum(len(ocr_runner(f)) for f in frames)
+                char_counts.append(total)
+            print(f"  OCR char counts per track: {char_counts}", file=sys.stderr)
+
+            best_count = max(char_counts) if char_counts else 0
+            if best_count < _TIEBREAK_MIN_CHARS:
+                # Every candidate is below the readable-slides floor.
+                # Override the visual pick with a slide_track_missing
+                # signal so the GH worker bounces this presentation to
+                # the transcript-only fallback path.
+                result = pc.ClassificationResult(
+                    selected_track_index=None,
+                    score=result.score,
+                    runner_up_score=result.runner_up_score,
+                    needs_tiebreak=False,
+                    all_scores=result.all_scores,
+                )
+            else:
+                # Override selected_track_index with the OCR winner.
+                # The structured-output downstream consumers don't see
+                # all_scores, just selected_track_index, so this is the
+                # right place to let OCR have the final word.
+                ocr_winner = int(np.argmax(np.array(char_counts)))
+                result = pc.ClassificationResult(
+                    selected_track_index=ocr_winner,
+                    score=result.score,
+                    runner_up_score=result.runner_up_score,
+                    needs_tiebreak=False,
+                    all_scores=result.all_scores,
+                )
+            tiebreak_report = {
+                "fired": True,
+                "char_counts": char_counts,
+                "min_chars_threshold": _TIEBREAK_MIN_CHARS,
+                "result": (
+                    "slide_track_missing"
+                    if result.selected_track_index is None
+                    else f"ocr_picked_track_{result.selected_track_index}"
+                ),
+            }
+
         # PIP detection runs on the chosen track's frames; re-sample
         # densely for the temporal-std signal it depends on.
         crop = None
@@ -145,6 +224,7 @@ def _classify(presentation_uuid: str, keep_frames: bool) -> dict:
             "score": result.score,
             "runner_up_score": result.runner_up_score,
             "needs_tiebreak": result.needs_tiebreak,
+            "tiebreak": tiebreak_report,
             "crop_bbox": crop,
             "workdir": str(workdir) if not cleanup else None,
         }

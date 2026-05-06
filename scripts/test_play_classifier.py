@@ -419,6 +419,139 @@ def test_find_duplicate_slide_clusters_handles_empty_text():
     assert pair == {0, 2}
 
 
+def test_track_ocr_sample_stability_zero_when_no_frames():
+    s = pc.TrackOcrSample(track_index=0, ocr_text="anything")
+    # Default total_frames is 0; stability must not divide-by-zero.
+    assert s.stability == 0.0
+
+
+def test_track_ocr_sample_stability_full_and_partial():
+    full = pc.TrackOcrSample(
+        track_index=0, ocr_text="...", readable_frames=5, total_frames=5
+    )
+    partial = pc.TrackOcrSample(
+        track_index=1, ocr_text="...", readable_frames=2, total_frames=5
+    )
+    assert full.stability == 1.0
+    assert partial.stability == 0.4
+
+
+def test_pick_from_cluster_prefers_stable_over_higher_res_unstable():
+    """Multi-projector hall: 1080p projector recording is stuttering
+    (only 30% of sampled frames produced readable OCR), 720p
+    recording is clean. Picker must prefer the 720p over the
+    higher-resolution-but-unstable 1080p."""
+    samples = {
+        0: pc.TrackOcrSample(0, "...", readable_frames=1, total_frames=3),  # 33%
+        1: pc.TrackOcrSample(1, "...", readable_frames=3, total_frames=3),  # 100%
+    }
+    heights = {0: 1080, 1: 720}
+    scores = {0: 0.5, 1: 0.4}
+    chosen = pc.pick_from_cluster(
+        cluster_members={0, 1},
+        samples_by_track=samples,
+        height_by_track=heights,
+        score_by_track=scores,
+    )
+    assert chosen == 1
+
+
+def test_pick_from_cluster_picks_higher_res_among_stable():
+    """When all members clear the stability floor, falls back to
+    the resolution-then-score ordering."""
+    samples = {
+        0: pc.TrackOcrSample(0, "...", readable_frames=3, total_frames=3),
+        1: pc.TrackOcrSample(1, "...", readable_frames=3, total_frames=3),
+    }
+    heights = {0: 720, 1: 1080}
+    scores = {0: 0.5, 1: 0.4}
+    chosen = pc.pick_from_cluster(
+        cluster_members={0, 1},
+        samples_by_track=samples,
+        height_by_track=heights,
+        score_by_track=scores,
+    )
+    assert chosen == 1  # 1080p wins over 720p when both stable
+
+
+def test_pick_from_cluster_ties_on_height_break_by_score():
+    samples = {
+        0: pc.TrackOcrSample(0, "...", readable_frames=3, total_frames=3),
+        1: pc.TrackOcrSample(1, "...", readable_frames=3, total_frames=3),
+    }
+    heights = {0: 1080, 1: 1080}
+    scores = {0: 0.2, 1: 0.9}
+    chosen = pc.pick_from_cluster(
+        cluster_members={0, 1},
+        samples_by_track=samples,
+        height_by_track=heights,
+        score_by_track=scores,
+    )
+    assert chosen == 1
+
+
+def test_pick_from_cluster_falls_through_when_all_unstable():
+    """Bad recording day - every member fell below the stability
+    floor. Don't punt, pick by (height, score) across all members
+    so the caller still gets a usable index back."""
+    samples = {
+        0: pc.TrackOcrSample(0, "...", readable_frames=0, total_frames=3),
+        1: pc.TrackOcrSample(1, "...", readable_frames=1, total_frames=3),  # 33%
+    }
+    heights = {0: 1080, 1: 720}
+    scores = {0: 0.5, 1: 0.4}
+    chosen = pc.pick_from_cluster(
+        cluster_members={0, 1},
+        samples_by_track=samples,
+        height_by_track=heights,
+        score_by_track=scores,
+    )
+    # Both fail the floor (default 0.6); fallthrough sorts by height -> 1080p.
+    assert chosen == 0
+
+
+def test_pick_from_cluster_handles_unknown_height():
+    samples = {
+        0: pc.TrackOcrSample(0, "...", readable_frames=3, total_frames=3),
+        1: pc.TrackOcrSample(1, "...", readable_frames=3, total_frames=3),
+    }
+    heights = {0: None, 1: 720}  # mp4 didn't publish height for track 0
+    scores = {0: 0.5, 1: 0.4}
+    chosen = pc.pick_from_cluster(
+        cluster_members={0, 1},
+        samples_by_track=samples,
+        height_by_track=heights,
+        score_by_track=scores,
+    )
+    # None -> 0 in the sort key, so 720p wins despite the visual score gap.
+    assert chosen == 1
+
+
+def test_pick_from_cluster_empty_raises():
+    with pytest.raises(ValueError):
+        pc.pick_from_cluster(
+            cluster_members=set(),
+            samples_by_track={},
+            height_by_track={},
+            score_by_track={},
+        )
+
+
+def test_pick_from_cluster_singleton_returns_member():
+    """Cluster of one is the no-op case; return the only member
+    regardless of its stability or resolution."""
+    samples = {
+        0: pc.TrackOcrSample(0, "...", readable_frames=0, total_frames=3),
+    }
+    chosen = pc.pick_from_cluster(
+        cluster_members={0},
+        samples_by_track=samples,
+        height_by_track={0: 480},
+        score_by_track={0: -1.0},
+    )
+    assert chosen == 0
+
+
 def test_is_slide_like_absolute_passes_synthetic_slide_evidence():
     """Slide track evidence should pass the cheap absolute gate. Use
     the same synthetic frames the per-feature tests rely on so this

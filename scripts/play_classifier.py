@@ -500,14 +500,44 @@ def jaccard_similarity(a: str, b: str) -> float:
     return len(ta & tb) / len(union)
 
 
+# Per-frame OCR character floor used by the cluster picker to decide
+# whether a sample frame "produced readable text". Below this we count
+# the frame as a dropout - encoding stutter, freeze, blank transition,
+# or a presenter-cam frame that happened to land in a slide-like
+# track. The dedup picker uses the ratio of dropouts to gauge whether
+# a duplicate cluster member is stable enough to prefer.
+MIN_READABLE_FRAME_CHARS = 30
+
+
 @dataclass
 class TrackOcrSample:
     """Pairing of a track index with the OCR'd text from a small batch
     of its sample frames. Built by the caller; consumed by
-    `find_duplicate_slide_clusters`."""
+    `find_duplicate_slide_clusters` and `pick_from_cluster`.
+
+    `readable_frames` / `total_frames` capture how many of the sampled
+    frames cleared `MIN_READABLE_FRAME_CHARS`. Their ratio is a cheap
+    stability signal: a stuttering / partially-corrupt duplicate of a
+    slide track will have many sample frames that OCR to garbage,
+    while a clean recording of the same source produces text on most
+    of them. The cluster picker prefers stable members so we don't
+    silently swap in a higher-resolution but flickery recording.
+    """
 
     track_index: int
     ocr_text: str
+    readable_frames: int = 0
+    total_frames: int = 0
+
+    @property
+    def stability(self) -> float:
+        """Fraction of sampled frames that produced readable OCR.
+        0.0 = every frame was a dropout, 1.0 = every frame had text.
+        Returns 0.0 (not NaN) when no frames were sampled, so callers
+        can compare without special-casing."""
+        if self.total_frames <= 0:
+            return 0.0
+        return self.readable_frames / self.total_frames
 
 
 def find_duplicate_slide_clusters(
@@ -557,6 +587,47 @@ def find_duplicate_slide_clusters(
         root = find(s.track_index)
         clusters.setdefault(root, set()).add(s.track_index)
     return list(clusters.values())
+
+
+def pick_from_cluster(
+    cluster_members: set[int] | Sequence[int],
+    samples_by_track: dict[int, TrackOcrSample],
+    height_by_track: dict[int, int | None],
+    score_by_track: dict[int, float],
+    stability_floor: float = 0.6,
+) -> int:
+    """Choose the best member of a duplicate-slide cluster.
+
+    Multi-projector lecture recordings produce N copies of the same
+    slide source; absent a stability signal, naively picking by
+    resolution silently swaps in a stuttering / encoding-glitched
+    duplicate over a clean lower-res recording. This function
+    prefers cluster members whose dedup OCR landed on readable text in
+    at least `stability_floor` of their sample frames; among those,
+    picks by (height desc, visual classifier score desc).
+
+    Fallback: if EVERY cluster member falls below the stability floor
+    (e.g. the whole room had a bad recording day, or we sampled at
+    bad timestamps), falls through to the resolution-then-score
+    ordering across all members rather than punting. The CLI logs the
+    fallthrough so a human can investigate; the alternative
+    (returning None) would force the caller to invent recovery logic
+    we can do generically here.
+    """
+    members = list(cluster_members)
+    if not members:
+        raise ValueError("cluster is empty")
+
+    def sort_key(m: int) -> tuple[int, float]:
+        return (height_by_track.get(m) or 0, score_by_track.get(m, 0.0))
+
+    stable = [
+        m
+        for m in members
+        if m in samples_by_track and samples_by_track[m].stability >= stability_floor
+    ]
+    pool = stable if stable else members
+    return max(pool, key=sort_key)
 
 
 def tiebreak_by_ocr_char_count(

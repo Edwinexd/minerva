@@ -167,9 +167,20 @@ def _classify(presentation_uuid: str, keep_frames: bool) -> dict:
                     n=_DEDUP_FRAMES_PER_TRACK,
                     duration_seconds=meta["duration_seconds"],
                 )
-                text = " ".join(ocr_runner(f) for f in frames)
+                # Per-frame texts so we can count readable frames; the
+                # stability ratio is what `pick_from_cluster` uses to
+                # filter out stuttering / partially-corrupt duplicates.
+                texts = [ocr_runner(f) for f in frames]
+                readable = sum(
+                    1 for t in texts if len(t) >= pc.MIN_READABLE_FRAME_CHARS
+                )
                 samples.append(
-                    pc.TrackOcrSample(track_index=i, ocr_text=text)
+                    pc.TrackOcrSample(
+                        track_index=i,
+                        ocr_text=" ".join(texts),
+                        readable_frames=readable,
+                        total_frames=len(texts),
+                    )
                 )
 
             clusters = pc.find_duplicate_slide_clusters(
@@ -181,26 +192,32 @@ def _classify(presentation_uuid: str, keep_frames: bool) -> dict:
                 None,
             )
 
+            samples_by_track = {s.track_index: s for s in samples}
             if chosen_cluster is not None and len(chosen_cluster) > 1:
-                # Multiple recordings of same content - pick the
-                # highest-resolution member of the cluster. Ties on
-                # height go to whichever scored higher under the
-                # visual classifier (preserves the original signal as
-                # a deterministic tiebreaker).
-                cluster_members = sorted(
+                # Multiple recordings of same content. Prefer a stable
+                # member (most sampled frames produced readable OCR);
+                # fall back to height + visual score among stable
+                # members, then across all members if none clear the
+                # stability floor.
+                height_by_track = {
+                    i: track_meta[i]["height"] for i in chosen_cluster
+                }
+                score_by_track = {
+                    s.track_index: s.score for s in result.all_scores
+                }
+                best_idx = pc.pick_from_cluster(
                     chosen_cluster,
-                    key=lambda i: (
-                        track_meta[i]["height"] or 0,
-                        next(s.score for s in result.all_scores if s.track_index == i),
-                    ),
-                    reverse=True,
+                    samples_by_track=samples_by_track,
+                    height_by_track=height_by_track,
+                    score_by_track=score_by_track,
                 )
-                best_idx = cluster_members[0]
                 if best_idx != chosen_idx:
+                    chosen_stab = samples_by_track[best_idx].stability
                     print(
                         f"  duplicate cluster {sorted(chosen_cluster)}: "
-                        f"swapping to highest-res track {best_idx} "
-                        f"({track_meta[best_idx]['height']}p)",
+                        f"swapping to track {best_idx} "
+                        f"({track_meta[best_idx]['height']}p, "
+                        f"stability {chosen_stab:.0%})",
                         file=sys.stderr,
                     )
                     result = pc.ClassificationResult(
@@ -217,6 +234,14 @@ def _classify(presentation_uuid: str, keep_frames: bool) -> dict:
                 "chosen_cluster": (
                     sorted(chosen_cluster) if chosen_cluster else None
                 ),
+                "stability_by_track": {
+                    s.track_index: {
+                        "readable_frames": s.readable_frames,
+                        "total_frames": s.total_frames,
+                        "ratio": round(s.stability, 3),
+                    }
+                    for s in samples
+                },
                 "swapped_to_higher_res": (
                     chosen_cluster is not None
                     and len(chosen_cluster) > 1

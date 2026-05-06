@@ -232,6 +232,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
                 };
                 let openai_api_key = state.config.openai_api_key.clone();
                 let docs_path = state.config.docs_path.clone();
+                let ocr_pipeline_enabled = state.config.ocr_pipeline_enabled;
                 let doc_id = doc.id;
                 let course_id_for_relink = doc.course_id;
                 let scheduler = state.relink_scheduler.clone();
@@ -266,7 +267,10 @@ pub fn start(state: AppState, max_concurrent: usize) {
                     let ext = crate::routes::documents::extension_from_filename(&doc.filename);
 
                     // URL documents: check if they're play.dsv.su.se links that
-                    // the external transcript pipeline can handle.
+                    // an external pipeline can handle. With the OCR pipeline
+                    // flag on, play URLs go through the GPU-backed video
+                    // indexer (transcript + slide OCR fusion); off, they
+                    // continue down the existing transcript-only path.
                     if ext == "url" {
                         let file_path =
                             format!("{}/{}/{}.{}", docs_path, doc.course_id, doc.id, ext);
@@ -274,13 +278,20 @@ pub fn start(state: AppState, max_concurrent: usize) {
                             .await
                             .unwrap_or_default();
                         if url.contains("play.dsv.su.se") {
+                            let next_status = if ocr_pipeline_enabled {
+                                "awaiting_video_index"
+                            } else {
+                                "awaiting_transcript"
+                            };
                             tracing::info!(
-                                "worker: document {} ({}) is a play.dsv.su.se URL, awaiting transcript",
+                                "worker: document {} ({}) is a play.dsv.su.se URL, status -> {}",
                                 doc.id,
                                 doc.filename,
+                                next_status,
                             );
                             let _ = sqlx::query!(
-                                "UPDATE documents SET status = 'awaiting_transcript' WHERE id = $1",
+                                "UPDATE documents SET status = $1 WHERE id = $2",
+                                next_status,
                                 doc.id,
                             )
                             .execute(&db)
@@ -301,7 +312,36 @@ pub fn start(state: AppState, max_concurrent: usize) {
                         return;
                     }
 
+                    // OCR pipeline: PDFs and images get parked in
+                    // `awaiting_ocr` for the backend's RunPod submitter
+                    // to pick up. Skips the in-process pdftotext path
+                    // entirely, even for clean text PDFs, so layout +
+                    // figure extraction is consistent across all docs.
+                    // The legacy path remains the default until the
+                    // flag flips, so this is a no-op at boot.
+                    let is_ocr_target =
+                        matches!(ext, "pdf" | "png" | "jpg" | "jpeg" | "gif" | "webp");
+                    if ocr_pipeline_enabled && is_ocr_target {
+                        tracing::info!(
+                            "worker: document {} ({}) routed to OCR pipeline (awaiting_ocr)",
+                            doc.id,
+                            doc.filename,
+                        );
+                        let _ = sqlx::query!(
+                            "UPDATE documents SET status = 'awaiting_ocr' WHERE id = $1",
+                            doc.id,
+                        )
+                        .execute(&db)
+                        .await;
+                        return;
+                    }
+
                     // Only process supported file types; store others as 'unsupported'.
+                    // When the OCR pipeline is off, PDFs go through the legacy
+                    // pdftotext path (still listed as supported below); images
+                    // remain unsupported because the legacy pipeline can't
+                    // handle them. Once the OCR flag is on, images become
+                    // first-class above and stop landing here.
                     let is_supported = matches!(
                         ext,
                         "pdf" | "txt" | "html" | "htm" | "md" | "rst" | "csv" | "tsv"

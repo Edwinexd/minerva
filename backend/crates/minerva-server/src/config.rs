@@ -42,6 +42,43 @@ pub struct Config {
     /// How often a Canvas connection with `auto_sync = true` re-syncs.
     /// Measured in hours; 0 disables the background loop entirely.
     pub canvas_auto_sync_interval_hours: i32,
+    /// When true, the worker routes PDFs/images to `awaiting_ocr` and
+    /// play.dsv URLs to `awaiting_video_index` instead of the legacy
+    /// extract-text / awaiting_transcript paths. Default false: the new
+    /// states stay valid in the schema but the worker keeps the old
+    /// behavior so the GPU pipeline can ship table-by-table behind a
+    /// flag without disrupting production ingestion.
+    pub ocr_pipeline_enabled: bool,
+    /// RunPod API key for the backend's submitter. Used as
+    /// `Authorization: Bearer <key>` against `runpod_api_base`. Optional
+    /// because the OCR pipeline is gated; without it, submissions error
+    /// at runtime but the rest of the app starts fine.
+    pub runpod_api_key: Option<String>,
+    /// RunPod serverless endpoint id (the ghcr.io/.../minerva-runpod-worker
+    /// image runs behind it). Submitter targets POST {api_base}/v2/{id}/run.
+    pub runpod_endpoint_id: Option<String>,
+    /// Base URL for the RunPod API. Default is the public hosted API; lets
+    /// us point at a staging or mock RunPod in tests.
+    pub runpod_api_base: String,
+    /// Per-second GPU rate used to compute estimated_cost_usd at job
+    /// completion. RunPod has no native daily cap; we stamp this on each
+    /// job at completion time so the daily-budget circuit breaker doesn't
+    /// have to re-multiply on every poll.
+    pub runpod_per_second_usd: f64,
+    /// Soft daily cap on RunPod spend, in USD. When exceeded, the
+    /// submitter pauses (docs stay in awaiting_*; cron picks them up
+    /// next day). 0 disables the cap.
+    pub runpod_daily_budget_usd: f64,
+    /// Public base URL of this Minerva instance; embedded in service URLs
+    /// handed to RunPod (RunPod fetches PDFs / bundles back from here).
+    /// Falls back to `base_url` when unset; lets staging environments
+    /// point RunPod at an internal hostname different from the user-facing
+    /// `base_url`.
+    pub runpod_callback_base: String,
+    /// Sample-rate fraction for video frame extraction (e.g. "1/5" = one
+    /// frame every 5 seconds). Hardcoded global default; per-course
+    /// override is deferred until a course actually needs it.
+    pub video_sample_fps: String,
 }
 
 impl Config {
@@ -98,6 +135,35 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(24),
+            ocr_pipeline_enabled: env::var("MINERVA_OCR_PIPELINE_ENABLED").unwrap_or_default()
+                == "true",
+            runpod_api_key: env::var("RUNPOD_API_KEY").ok().filter(|s| !s.is_empty()),
+            runpod_endpoint_id: env::var("RUNPOD_ENDPOINT_ID")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            runpod_api_base: env::var("RUNPOD_API_BASE")
+                .unwrap_or_else(|_| "https://api.runpod.ai".to_string())
+                .trim_end_matches('/')
+                .to_string(),
+            runpod_per_second_usd: env::var("MINERVA_RUNPOD_PER_SECOND_USD")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.000_2),
+            runpod_daily_budget_usd: env::var("MINERVA_RUNPOD_DAILY_BUDGET_USD")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.0),
+            runpod_callback_base: env::var("MINERVA_RUNPOD_CALLBACK_BASE")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| {
+                    env::var("MINERVA_BASE_URL")
+                        .unwrap_or_else(|_| "https://minerva.dsv.su.se".to_string())
+                        .trim_end_matches('/')
+                        .to_string()
+                }),
+            video_sample_fps: env::var("MINERVA_VIDEO_SAMPLE_FPS")
+                .unwrap_or_else(|_| "1/5".to_string()),
         })
     }
 

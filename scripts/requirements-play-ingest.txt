@@ -1,10 +1,10 @@
 # Dependencies for the play.dsv ingest workflow's GH runner.
 #
+# Tested on Python 3.12 and 3.13 except for the OCR engine - see below.
+#
 # The classifier itself (play_classifier.py + play_frame_sampler.py)
 # only needs opencv + numpy. The future fetch_play_videos.py adds
-# dsv-wrapper for authenticated track download and rapidocr for the
-# CPU OCR tiebreak; both are listed here so the GHA workflow installs
-# everything in one pip pass.
+# dsv-wrapper for authenticated track download.
 #
 # pytest is included so the workflow can run smoke tests of the
 # classifier on synthetic frames before paying to download real
@@ -14,12 +14,18 @@ numpy>=2.0,<3
 Pillow>=10.0,<12
 requests>=2.31,<3
 zstandard>=0.22,<1
-# CPU OCR tiebreak. rapidocr-onnxruntime is the lighter of the two
-# common ONNX OCR Python packages; paddleocr is heavier but more
-# accurate. Switch if accuracy on real DSV slides demands it.
-rapidocr-onnxruntime>=1.3,<2
 # dsv-wrapper >=0.2 for get_media_tracks / download_track / stream_track.
-# Pinned to a public package name; substitute the gitea install URL
-# in the workflow if dsv-wrapper isn't on PyPI yet.
+# Currently install-from-source only:
+#   pip install git+https://github.com/Edwinexd/dsv-wrapper.git@master
+# Replace the line below with the source URL until 0.2 reaches PyPI.
 dsv-wrapper>=0.2,<1
 pytest>=8,<10
+
+# CPU OCR engine for the classifier's tiebreaker. NOT pinned here
+# because the agent wiring up the tiebreak step picks the engine
+# (rapidocr 3.x / paddleocr / tesseract) based on accuracy benchmarks
+# on real DSV slides. Both common Python packages have wheel/version
+# constraints that bind the surrounding deps tightly, so deferring
+# the choice keeps THIS file Python-3.12-AND-3.13 compatible. The
+# classifier's `tiebreak_by_ocr_char_count` accepts any
+# `ocr_runner(frame_bgr) -> str` callable.

@@ -51,7 +51,11 @@ fi
 
 violations=()
 # Enumerate migration files at the baseline (only existing ones can change).
-mapfile -t baseline_files < <(git ls-tree -r --name-only "$baseline" "--" backend/migrations \
+# Plain `while read` loop instead of `mapfile` for macOS bash 3.2 compatibility.
+baseline_files=()
+while IFS= read -r line; do
+    baseline_files+=("$line")
+done < <(git ls-tree -r --name-only "$baseline" "--" backend/migrations \
     | grep -E '\.sql$')
 
 for f in "${baseline_files[@]}"; do

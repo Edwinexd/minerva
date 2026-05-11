@@ -307,7 +307,18 @@ function LikertScale({
         <span>{question.likert_min_label ?? min}</span>
         <span>{question.likert_max_label ?? max}</span>
       </div>
-      <div className="flex flex-wrap gap-2">
+      {/*
+        Spread the ticks across the full row width so the first tick
+        sits under the "Strongly disagree" endpoint label and the last
+        sits under "Strongly agree". `justify-between` keeps the
+        endpoints flush; `flex-wrap` survives narrow viewports where
+        10-tick scales don't fit on one line (the alignment guarantee
+        only holds on the unwrapped row, which is the universal
+        desktop case and the only one that matters for the SUS
+        layout). `gap-2` keeps adjacent ticks from kissing on
+        super-narrow rows.
+      */}
+      <div className="flex flex-wrap justify-between gap-2">
         {ticks.map((v) => (
           <label
             key={v}

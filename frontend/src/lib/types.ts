@@ -87,6 +87,15 @@ export interface StudyTaskView {
   task_index: number
   title: string
   description: string
+  /**
+   * Per-round Aegis gate. When FALSE, `TaskRunner` passes
+   * `aegisEnabled={false}` to `ChatWindow`, hiding the panel,
+   * banner and rewrite button and suppressing live analyzer
+   * calls. Defaults TRUE on the server for back-compat; the
+   * DM2731 preset sets rounds 1 and 3 to FALSE and round 2 to
+   * TRUE.
+   */
+  aegis_enabled: boolean
 }
 
 export interface StudyState {

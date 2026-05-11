@@ -19,9 +19,12 @@ import type {
  * cached server-side, so re-entering the same task slot after a tab
  * close lands back in the same conversation.
  *
- * Aegis is forced on at the backend layer (`feature_flags::aegis_enabled`
- * short-circuits to true under study mode), so we pass `aegisEnabled`
- * unconditionally true here.
+ * Aegis support is per-round: the study config (`study_tasks.aegis_enabled`)
+ * decides whether this task's chat shows the Aegis panel and runs the
+ * live analyzer / rewrite endpoints. The backend's
+ * `feature_flags::aegis_enabled_for_conversation` helper enforces the
+ * same gate server-side, so a hand-crafted request from the client can't
+ * bypass the round's setting.
  */
 export function TaskRunner({
   courseId,
@@ -29,6 +32,7 @@ export function TaskRunner({
   totalTasks,
   title,
   description,
+  aegisEnabled,
   conversationIdFromState,
 }: {
   courseId: string
@@ -36,6 +40,8 @@ export function TaskRunner({
   totalTasks: number
   title: string
   description: string
+  /** Per-round Aegis gate from `StudyState.current_task.aegis_enabled`. */
+  aegisEnabled: boolean
   /** May be null if /state ran before the participant ever started this task. */
   conversationIdFromState: string | null
 }) {
@@ -134,12 +140,13 @@ export function TaskRunner({
         <ChatWindow
           courseId={courseId}
           conversationId={conversationId}
-          aegisEnabled={true}
+          aegisEnabled={aegisEnabled}
           readOnly={false}
           // Pin Aegis to expert calibration for every study
           // participant. Without this, prior localStorage values from
           // a participant's earlier non-study chat use would inject
-          // mode variance into the eval data.
+          // mode variance into the eval data. (Inert on
+          // aegisEnabled=false rounds, but cheap to keep set.)
           forceAegisMode="expert"
         />
       )}

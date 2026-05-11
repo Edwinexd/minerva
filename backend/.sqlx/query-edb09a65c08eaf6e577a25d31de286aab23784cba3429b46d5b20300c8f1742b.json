@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, course_id, task_index, title, description, created_at, updated_at\n        FROM study_tasks\n        WHERE course_id = $1\n        ORDER BY task_index ASC",
+  "query": "INSERT INTO study_tasks (course_id, task_index, title, description, aegis_enabled)\n            VALUES ($1, $2, $3, $4, $5)\n            RETURNING id, course_id, task_index, title, description, aegis_enabled, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -30,18 +30,27 @@
       },
       {
         "ordinal": 5,
+        "name": "aegis_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Bool"
       ]
     },
     "nullable": [
@@ -51,8 +60,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "e6c9b8ec8883acc771327a5c295a4a5b2e18573a0ecd244f882a3d6476fbd53f"
+  "hash": "edb09a65c08eaf6e577a25d31de286aab23784cba3429b46d5b20300c8f1742b"
 }

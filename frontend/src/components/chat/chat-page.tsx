@@ -535,6 +535,12 @@ export function ChatWindow({
             content: draft,
             suggestions: selected,
             mode: aegisMode,
+            // Lets the backend's per-conversation Aegis gate honour
+            // study-mode off-rounds even when the umbrella flag is
+            // forced on. Null is fine for brand-new composers (no
+            // conv yet); the backend falls back to the umbrella in
+            // that case.
+            conversation_id: conversationId,
           }),
         },
       )

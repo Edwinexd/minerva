@@ -404,6 +404,13 @@ export interface AdminStudyTask {
   task_index: number
   title: string
   description: string
+  /**
+   * Per-round Aegis support flag. FALSE hides the panel /
+   * suppresses analyzer + rewrite calls for the round; TRUE
+   * (the schema default) keeps it on. Used by the DM2731 design
+   * to alternate support: rounds 1 and 3 off, round 2 on.
+   */
+  aegis_enabled: boolean
 }
 
 export interface AdminStudySurveyConfig {

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.aegis_enabled\n        FROM study_task_conversations c\n        JOIN study_tasks t\n          ON t.course_id = c.course_id AND t.task_index = c.task_index\n        WHERE c.conversation_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "aegis_enabled",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f650ab6007b50db9760787ac2dfa8dcc96ed06d132b8675b219aacddae3476fa"
+}

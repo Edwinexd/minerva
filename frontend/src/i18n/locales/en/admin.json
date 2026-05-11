@@ -222,6 +222,8 @@
     "taskBadge": "#{{n}}",
     "taskTitlePlaceholder": "Short title shown in the task banner",
     "taskDescriptionPlaceholder": "Full prompt shown to the participant",
+    "taskAegisEnabledLabel": "Aegis support enabled for this round",
+    "taskAegisEnabledHelp": "When off, the Aegis panel, live analyzer and rewrite button are hidden for this task's chat. Use for off-rounds in with-vs-without studies.",
     "preSurveyLabel": "Pre-task survey",
     "postSurveyLabel": "Post-task survey",
     "responseCount": "{{count}} responses",

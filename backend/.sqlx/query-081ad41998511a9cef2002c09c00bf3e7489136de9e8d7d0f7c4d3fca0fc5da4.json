@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, course_id, task_index, title, description, created_at, updated_at\n        FROM study_tasks\n        WHERE course_id = $1 AND task_index = $2",
+  "query": "SELECT id, course_id, task_index, title, description, aegis_enabled, created_at, updated_at\n        FROM study_tasks\n        WHERE course_id = $1\n        ORDER BY task_index ASC",
   "describe": {
     "columns": [
       {
@@ -30,19 +30,23 @@
       },
       {
         "ordinal": 5,
+        "name": "aegis_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Int4"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -52,8 +56,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "1a2b84654b70c41d6ea9dd881d3004ca7f051800c1f4ce9d035e9f079511cf07"
+  "hash": "081ad41998511a9cef2002c09c00bf3e7489136de9e8d7d0f7c4d3fca0fc5da4"
 }

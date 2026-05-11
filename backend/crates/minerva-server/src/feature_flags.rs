@@ -123,13 +123,22 @@ pub async fn extraction_guard_enabled(db: &PgPool, course_id: Uuid) -> bool {
     }
 }
 
-/// True iff aegis prompt-coaching is enabled for this course.
+/// True iff aegis prompt-coaching is enabled for this course at the
+/// course/umbrella level.
+///
 /// Resolution: study mode forces TRUE (study mode treats Aegis as
-/// part of the experimental condition); otherwise course-scoped
-/// row -> global row -> default (FALSE). Errors are logged and
-/// treated as "not enabled"; the analyzer runs on every user turn
-/// so a flaky DB shouldn't slow down the chat path with retries;
-/// falling closed reverts to pre-aegis behaviour transparently.
+/// part of the experimental condition, so the per-course flag is
+/// irrelevant); otherwise course-scoped row -> global row ->
+/// default (FALSE). Errors are logged and treated as "not enabled";
+/// the analyzer runs on every user turn so a flaky DB shouldn't slow
+/// down the chat path with retries; falling closed reverts to
+/// pre-aegis behaviour transparently.
+///
+/// NOTE: this is the umbrella. For chat-path decisions that should
+/// also respect study mode's per-task on/off rounds, use
+/// [`aegis_enabled_for_conversation`]; it short-circuits to the
+/// per-task `study_tasks.aegis_enabled` when the conversation maps
+/// to a study task.
 pub async fn aegis_enabled(db: &PgPool, course_id: Uuid) -> bool {
     if study_mode_enabled(db, course_id).await {
         return true;
@@ -147,6 +156,54 @@ pub async fn aegis_enabled(db: &PgPool, course_id: Uuid) -> bool {
                 e,
             );
             false
+        }
+    }
+}
+
+/// Per-conversation Aegis gate.
+///
+/// In study mode the umbrella `aegis_enabled` is forced TRUE for the
+/// whole course, but individual rounds opt out: the DM2731 design has
+/// round 1 + 3 without support and round 2 with. Each task gets its
+/// own conversation (see `study_task_conversations`), so the
+/// conversation_id is the natural key for "which round is the user
+/// on right now".
+///
+/// Resolution order:
+///   1. `aegis_enabled(course_id)`; if the umbrella is off, the
+///      answer is off and we don't need to do the per-task lookup.
+///   2. Otherwise look up `study_tasks.aegis_enabled` joined through
+///      `study_task_conversations` on the given conversation_id.
+///      Found row wins; the per-task flag is the gate.
+///   3. No mapping row (regular chat, or no conversation_id supplied)
+///      -> fall back to the umbrella (which is TRUE here, since
+///      step 1 didn't short-circuit).
+///
+/// DB errors during the per-task lookup log at warn and treat the
+/// round as Aegis-enabled (degraded-open rather than degraded-closed);
+/// the alternative would silently break round 2 on a flaky DB, which
+/// is the worse failure mode for the eval.
+pub async fn aegis_enabled_for_conversation(
+    db: &PgPool,
+    course_id: Uuid,
+    conversation_id: Option<Uuid>,
+) -> bool {
+    if !aegis_enabled(db, course_id).await {
+        return false;
+    }
+    let Some(conv_id) = conversation_id else {
+        return true;
+    };
+    match minerva_db::queries::study::get_aegis_enabled_for_task_conversation(db, conv_id).await {
+        Ok(Some(per_task)) => per_task,
+        Ok(None) => true,
+        Err(e) => {
+            tracing::warn!(
+                "feature_flags: per-task aegis lookup for conv {} failed ({}); treating as enabled",
+                conv_id,
+                e,
+            );
+            true
         }
     }
 }

@@ -75,6 +75,7 @@ export function StudyPage({
           totalTasks={state.number_of_tasks}
           title={state.current_task.title}
           description={state.current_task.description}
+          aegisEnabled={state.current_task.aegis_enabled}
           conversationIdFromState={state.current_task_conversation_id}
         />
       )

@@ -45,6 +45,14 @@ pub struct StudyTaskRow {
     pub task_index: i32,
     pub title: String,
     pub description: String,
+    /// Whether Aegis prompt-coaching is active for this round.
+    /// In study mode the umbrella `feature_flags::aegis_enabled`
+    /// helper short-circuits to TRUE for the course, so this is the
+    /// real gate: off-rounds set this to FALSE and the
+    /// `feature_flags::aegis_enabled_for_conversation` helper
+    /// returns FALSE for any chat whose conversation_id maps to
+    /// this task.
+    pub aegis_enabled: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -191,7 +199,7 @@ pub async fn upsert_study_course(
 pub async fn list_tasks(db: &PgPool, course_id: Uuid) -> Result<Vec<StudyTaskRow>, sqlx::Error> {
     sqlx::query_as!(
         StudyTaskRow,
-        r#"SELECT id, course_id, task_index, title, description, created_at, updated_at
+        r#"SELECT id, course_id, task_index, title, description, aegis_enabled, created_at, updated_at
         FROM study_tasks
         WHERE course_id = $1
         ORDER BY task_index ASC"#,
@@ -208,11 +216,38 @@ pub async fn get_task(
 ) -> Result<Option<StudyTaskRow>, sqlx::Error> {
     sqlx::query_as!(
         StudyTaskRow,
-        r#"SELECT id, course_id, task_index, title, description, created_at, updated_at
+        r#"SELECT id, course_id, task_index, title, description, aegis_enabled, created_at, updated_at
         FROM study_tasks
         WHERE course_id = $1 AND task_index = $2"#,
         course_id,
         task_index,
+    )
+    .fetch_optional(db)
+    .await
+}
+
+/// Per-conversation Aegis gate for study-task chats. Returns:
+///   * `Ok(Some(true|false))` if `conversation_id` maps to a study
+///     task row; the bool is that task's `aegis_enabled`.
+///   * `Ok(None)` if no `study_task_conversations` row exists for the
+///     id (regular non-study chat); callers should fall through to
+///     the course-level resolver.
+///
+/// This is the join key used by the
+/// `feature_flags::aegis_enabled_for_conversation` helper so the
+/// chat path can keep using a conversation_id (which it already
+/// has) rather than threading a task_index everywhere.
+pub async fn get_aegis_enabled_for_task_conversation(
+    db: &PgPool,
+    conversation_id: Uuid,
+) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT t.aegis_enabled
+        FROM study_task_conversations c
+        JOIN study_tasks t
+          ON t.course_id = c.course_id AND t.task_index = c.task_index
+        WHERE c.conversation_id = $1"#,
+        conversation_id,
     )
     .fetch_optional(db)
     .await
@@ -232,7 +267,7 @@ pub async fn get_task(
 pub async fn replace_tasks(
     db: &PgPool,
     course_id: Uuid,
-    tasks: &[(i32, String, String)],
+    tasks: &[StudyTaskInput],
 ) -> Result<Vec<StudyTaskRow>, sqlx::Error> {
     let mut tx = db.begin().await?;
     sqlx::query!("DELETE FROM study_tasks WHERE course_id = $1", course_id,)
@@ -240,16 +275,17 @@ pub async fn replace_tasks(
         .await?;
 
     let mut out = Vec::with_capacity(tasks.len());
-    for (idx, title, description) in tasks {
+    for t in tasks {
         let row = sqlx::query_as!(
             StudyTaskRow,
-            r#"INSERT INTO study_tasks (course_id, task_index, title, description)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, course_id, task_index, title, description, created_at, updated_at"#,
+            r#"INSERT INTO study_tasks (course_id, task_index, title, description, aegis_enabled)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, course_id, task_index, title, description, aegis_enabled, created_at, updated_at"#,
             course_id,
-            idx,
-            title,
-            description,
+            t.task_index,
+            t.title,
+            t.description,
+            t.aegis_enabled,
         )
         .fetch_one(&mut *tx)
         .await?;
@@ -258,6 +294,17 @@ pub async fn replace_tasks(
 
     tx.commit().await?;
     Ok(out)
+}
+
+/// Input shape for `replace_tasks`. Mirrors the `study_tasks` columns
+/// the admin editor surfaces; the row's `id` / timestamps are managed
+/// by the DB and returned via `StudyTaskRow`.
+#[derive(Debug, Clone)]
+pub struct StudyTaskInput {
+    pub task_index: i32,
+    pub title: String,
+    pub description: String,
+    pub aegis_enabled: bool,
 }
 
 // ---------------------------------------------------------------------------

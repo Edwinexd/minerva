@@ -222,6 +222,8 @@
     "taskBadge": "#{{n}}",
     "taskTitlePlaceholder": "Kort titel som visas i uppgiftsbannern",
     "taskDescriptionPlaceholder": "Hela uppgiftstexten som visas för deltagaren",
+    "taskAegisEnabledLabel": "Aegis-stöd aktivt för denna runda",
+    "taskAegisEnabledHelp": "Om av: Aegis-panelen, live-analysen och omskrivningsknappen döljs i denna uppgifts chatt. Använd för rundor utan stöd i studier som jämför med och utan.",
     "preSurveyLabel": "Förenkät",
     "postSurveyLabel": "Eftersändningsenkät",
     "responseCount": "{{count}} svar",

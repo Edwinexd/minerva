@@ -215,7 +215,10 @@ export function ConfigPanel({
   const addTask = () => {
     const next = [
       ...tasks,
-      { task_index: tasks.length, title: "", description: "" },
+      // Default aegis_enabled = true so the round behaves like every
+      // existing task; researchers explicitly opt out for off-rounds
+      // via the checkbox below.
+      { task_index: tasks.length, title: "", description: "", aegis_enabled: true },
     ]
     setTasks(next)
     setNumberOfTasks(next.length)
@@ -359,6 +362,26 @@ export function ConfigPanel({
                 placeholder={t("study.taskDescriptionPlaceholder")}
                 rows={4}
               />
+              {/*
+                Per-round Aegis on/off. Backend stores this on
+                `study_tasks.aegis_enabled` and the chat-path gate
+                short-circuits to false when the participant's
+                conversation maps to a task with this set to false.
+                Used by the DM2731 design's round 1+3 (no support)
+                vs. round 2 (with support) contrast.
+              */}
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={task.aegis_enabled}
+                  onCheckedChange={(v) =>
+                    setTask(idx, { aegis_enabled: v === true })
+                  }
+                />
+                <span>{t("study.taskAegisEnabledLabel")}</span>
+              </label>
+              <p className="pl-6 text-xs text-muted-foreground">
+                {t("study.taskAegisEnabledHelp")}
+              </p>
             </div>
           ))}
         </div>

@@ -1089,7 +1089,14 @@ pub(crate) async fn analyze_prompt_for_user(
     mode: AegisModeWire,
     previous_suggestions: Vec<AegisSuggestionPayload>,
 ) -> Result<Option<AegisAnalysisPayload>, AppError> {
-    if !crate::feature_flags::aegis_enabled(&state.db, course_id).await {
+    // Per-conversation gate: in study mode the umbrella aegis flag is
+    // forced TRUE for the course, but individual rounds may opt out
+    // (the DM2731 design has rounds 1+3 without support, round 2 with).
+    // `aegis_enabled_for_conversation` falls back to the umbrella when
+    // the conversation isn't bound to a study task.
+    if !crate::feature_flags::aegis_enabled_for_conversation(&state.db, course_id, conversation_id)
+        .await
+    {
         return Ok(None);
     }
 
@@ -1318,6 +1325,14 @@ pub(crate) struct RewritePromptRequest {
     /// (beginner stays casual; expert stays terse).
     #[serde(default)]
     pub mode: AegisModeWire,
+    /// Conversation context for the rewrite. Optional because the
+    /// composer can rewrite a draft before the first message lands
+    /// (no conversation_id yet). When supplied, the route uses it
+    /// to honour study mode's per-task Aegis gate; a round-1/3
+    /// (no-support) conversation refuses rewrite even though the
+    /// course-level umbrella is forced on.
+    #[serde(default)]
+    pub conversation_id: Option<Uuid>,
 }
 
 /// Shared rewrite pipeline. Caller is responsible for proving the
@@ -1330,11 +1345,18 @@ pub(crate) async fn rewrite_prompt_for_user(
     content: String,
     suggestions: Vec<AegisSuggestionPayload>,
     mode: AegisModeWire,
+    conversation_id: Option<Uuid>,
 ) -> Result<AegisRewriteResponse, AppError> {
-    if !crate::feature_flags::aegis_enabled(&state.db, course_id).await {
+    // Per-conversation gate: respects study mode's per-task on/off
+    // when the rewrite happens inside a known study-task chat. Falls
+    // back to the umbrella for non-study chats and for pre-conv
+    // rewrites (no conversation_id yet on a brand-new composer).
+    if !crate::feature_flags::aegis_enabled_for_conversation(&state.db, course_id, conversation_id)
+        .await
+    {
         // Aegis off -> rewrite makes no sense to expose. 404 reads
         // cleaner than 400 here since the route conceptually
-        // doesn't exist for this course.
+        // doesn't exist for this course / round.
         return Err(AppError::NotFound);
     }
     // Map wire-shape suggestions to the analyzer's internal struct
@@ -1380,9 +1402,15 @@ async fn rewrite_prompt_route(
     Json(body): Json<RewritePromptRequest>,
 ) -> Result<Json<AegisRewriteResponse>, AppError> {
     verify_course_access(&state, course_id, user.id).await?;
-    let resp =
-        rewrite_prompt_for_user(&state, course_id, body.content, body.suggestions, body.mode)
-            .await?;
+    let resp = rewrite_prompt_for_user(
+        &state,
+        course_id,
+        body.content,
+        body.suggestions,
+        body.mode,
+        body.conversation_id,
+    )
+    .await?;
     Ok(Json(resp))
 }
 
@@ -1564,7 +1592,12 @@ pub(super) async fn run_chat_message(
     // The student already saw the panel during typing; missing
     // a History entry is the right failure mode.
     if let Some(analysis) = prompt_analysis {
-        if crate::feature_flags::aegis_enabled(&state.db, course_id).await {
+        // Per-conversation gate so study mode's off-rounds don't
+        // accidentally persist analyses just because the umbrella
+        // forces aegis on at the course level.
+        if crate::feature_flags::aegis_enabled_for_conversation(&state.db, course_id, Some(conv_id))
+            .await
+        {
             // Trim to the same ceiling the analyzer schema
             // enforces, in case a hand-crafted body exceeds.
             let mut suggestions = analysis.suggestions;

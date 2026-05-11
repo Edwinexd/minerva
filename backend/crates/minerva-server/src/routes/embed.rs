@@ -419,6 +419,13 @@ struct RewritePromptRequest {
     suggestions: Vec<AegisSuggestionPayload>,
     #[serde(default)]
     mode: AegisModeWire,
+    /// Optional conversation context (mirrors the Shibboleth rewrite
+    /// route). Embed contexts almost never overlap with study mode,
+    /// so this stays None for the common path and the umbrella gate
+    /// decides; passed through for symmetry so a future embedded
+    /// study can use it without another signature change.
+    #[serde(default)]
+    conversation_id: Option<Uuid>,
 }
 
 /// Embed-side wrapper around `chat::rewrite_prompt_for_user`.
@@ -433,9 +440,15 @@ async fn rewrite_prompt(
     if resolved_course_id != course_id {
         return Err(AppError::Forbidden);
     }
-    let resp =
-        rewrite_prompt_for_user(&state, course_id, body.content, body.suggestions, body.mode)
-            .await?;
+    let resp = rewrite_prompt_for_user(
+        &state,
+        course_id,
+        body.content,
+        body.suggestions,
+        body.mode,
+        body.conversation_id,
+    )
+    .await?;
     Ok(Json(resp))
 }
 

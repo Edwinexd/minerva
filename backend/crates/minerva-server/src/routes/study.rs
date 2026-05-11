@@ -216,6 +216,13 @@ struct TaskView {
     task_index: i32,
     title: String,
     description: String,
+    /// Per-round Aegis gate. Mirrors `study_tasks.aegis_enabled`.
+    /// Frontend's `TaskRunner` plumbs this into `ChatWindow`'s
+    /// `aegisEnabled` prop so off-rounds suppress the panel, the
+    /// live analyzer, and the rewrite button. The backend's
+    /// `aegis_enabled_for_conversation` helper enforces the same
+    /// gate server-side, so a hand-crafted request can't bypass it.
+    aegis_enabled: bool,
 }
 
 async fn get_state(
@@ -248,6 +255,7 @@ async fn get_state(
                 task_index: t.task_index,
                 title: t.title,
                 description: t.description,
+                aegis_enabled: t.aegis_enabled,
             }),
             conv,
         )
@@ -778,6 +786,14 @@ struct AdminTaskView {
     task_index: i32,
     title: String,
     description: String,
+    /// Per-round Aegis gate. Defaults to TRUE when an older admin
+    /// client omits the field on save (the pre-aegis-per-task
+    /// editor only sent title + description); existing rows
+    /// migrated in with `DEFAULT TRUE` for the same reason. Set
+    /// to FALSE for off-rounds in studies that compare with/without
+    /// support.
+    #[serde(default = "default_true")]
+    aegis_enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -904,6 +920,7 @@ async fn admin_get_config(
                 task_index: t.task_index,
                 title: t.title,
                 description: t.description,
+                aegis_enabled: t.aegis_enabled,
             })
             .collect(),
         pre_survey: pre_view,
@@ -963,10 +980,15 @@ async fn admin_put_config(
     )
     .await?;
 
-    let task_inputs: Vec<(i32, String, String)> = body
+    let task_inputs: Vec<minerva_db::queries::study::StudyTaskInput> = body
         .tasks
         .into_iter()
-        .map(|t| (t.task_index, t.title, t.description))
+        .map(|t| minerva_db::queries::study::StudyTaskInput {
+            task_index: t.task_index,
+            title: t.title,
+            description: t.description,
+            aegis_enabled: t.aegis_enabled,
+        })
         .collect();
     minerva_db::queries::study::replace_tasks(&state.db, course_id, &task_inputs).await?;
 
@@ -1187,6 +1209,10 @@ async fn admin_get_participant_detail(
             "task_index": tc.task_index,
             "task_title": task_meta.as_ref().map(|t| t.title.clone()),
             "task_description": task_meta.as_ref().map(|t| t.description.clone()),
+            // Per-round Aegis flag. Lets researchers slice the export
+            // by support condition without having to re-derive it from
+            // the configured task list (which can be edited mid-study).
+            "task_aegis_enabled": task_meta.as_ref().map(|t| t.aegis_enabled),
             "conversation_id": tc.conversation_id,
             "started_at": tc.started_at,
             "marked_done_at": tc.marked_done_at,
@@ -1409,6 +1435,22 @@ async fn build_participant_line(
 
     let mut tasks_json = Vec::with_capacity(task_conversations.len());
     for tc in &task_conversations {
+        // Pull the task row so the export carries the per-round
+        // Aegis flag alongside transcripts; researchers slicing the
+        // JSONL want to filter "with support" vs "without" without
+        // re-joining against the live config.
+        let task_meta =
+            match minerva_db::queries::study::get_task(db, participant.course_id, tc.task_index)
+                .await
+            {
+                Ok(m) => m,
+                Err(e) => {
+                    return Ok(json_err_line(
+                        participant_id,
+                        &format!("task meta for task {}: {e}", tc.task_index),
+                    ))
+                }
+            };
         let messages = match minerva_db::queries::study::export_messages_for_conversation(
             db,
             tc.conversation_id,
@@ -1453,6 +1495,9 @@ async fn build_participant_line(
         };
         tasks_json.push(json!({
             "task_index": tc.task_index,
+            "task_title": task_meta.as_ref().map(|t| t.title.clone()),
+            "task_description": task_meta.as_ref().map(|t| t.description.clone()),
+            "task_aegis_enabled": task_meta.as_ref().map(|t| t.aegis_enabled),
             "conversation_id": tc.conversation_id,
             "started_at": tc.started_at,
             "marked_done_at": tc.marked_done_at,
@@ -1602,10 +1647,15 @@ async fn admin_seed_dm2731(
     )
     .await?;
 
-    let task_inputs: Vec<(i32, String, String)> = body
+    let task_inputs: Vec<minerva_db::queries::study::StudyTaskInput> = body
         .tasks
         .into_iter()
-        .map(|t| (t.task_index, t.title, t.description))
+        .map(|t| minerva_db::queries::study::StudyTaskInput {
+            task_index: t.task_index,
+            title: t.title,
+            description: t.description,
+            aegis_enabled: t.aegis_enabled,
+        })
         .collect();
     minerva_db::queries::study::replace_tasks(&state.db, course_id, &task_inputs).await?;
 
@@ -1628,20 +1678,42 @@ async fn admin_seed_dm2731(
 }
 
 /// AdminPutConfigRequest payload for the DM2731 / Aegis evaluation.
+///
+/// Three-round design: rounds 1 and 3 run without Aegis support, round
+/// 2 runs with it on. This is the experimental contrast for the eval --
+/// the same participant prompts on similar tasks twice unaided and once
+/// coached, and the post-survey + transcripts let researchers compare
+/// prompting behaviour with and without the panel.
+///
 /// Survey content is from the researcher; the typo on the "I felt
 /// engaged when using Aegis" question (both endpoints labelled
 /// "Strongly agree" in the source) is corrected here to disagree -> agree.
 fn dm2731_preset() -> AdminPutConfigRequest {
     AdminPutConfigRequest {
-        number_of_tasks: 1,
+        number_of_tasks: 3,
         completion_gate_kind: "messages_only".into(),
         consent_html: DM2731_CONSENT.into(),
         thank_you_html: DM2731_THANKS.into(),
-        tasks: vec![AdminTaskView {
-            task_index: 0,
-            title: "Mars habitability prompt".into(),
-            description: "Your task is to create a prompt that helps you understand what environmental and technological challenges must be addressed for humans to live on Mars.".into(),
-        }],
+        tasks: vec![
+            AdminTaskView {
+                task_index: 0,
+                title: "Round 1 (no support): Post-colonial democratic outcomes".into(),
+                description: "You're preparing for a seminar discussion next week where the group will debate why some former colonies developed strong democratic institutions after independence while others didn't. You'll be expected to bring up specific examples and engage with counterarguments. You don't have a background in this area. Use the AI to help you prepare.".into(),
+                aegis_enabled: false,
+            },
+            AdminTaskView {
+                task_index: 1,
+                title: "Round 2 (with support): Democratic transitions".into(),
+                description: "You're preparing for a seminar discussion next week where the group will debate why some countries successfully transitioned away from authoritarian rule in the late 20th century while others reverted. You'll be expected to bring up specific examples and engage with counterarguments. You don't have a background in this area. Use the AI to help you prepare.".into(),
+                aegis_enabled: true,
+            },
+            AdminTaskView {
+                task_index: 2,
+                title: "Round 3 (no support): Post-conflict peace".into(),
+                description: "You're preparing for a seminar discussion next week where the group will debate why some post-conflict societies built lasting peace while others returned to violence. You'll be expected to bring up specific examples and engage with counterarguments. You don't have a background in this area. Use the AI to help you prepare.".into(),
+                aegis_enabled: false,
+            },
+        ],
         pre_survey: dm2731_pre_survey(),
         post_survey: dm2731_post_survey(),
     }
@@ -1673,8 +1745,14 @@ fn dm2731_post_survey() -> Vec<AdminSurveyQuestionView> {
     let sus_endpoints = ("Strongly disagree", "Strongly agree");
     let sus = |prompt: &str| likert(prompt, 1, 5, sus_endpoints.0, sus_endpoints.1, true, None);
     vec![
+        // Researcher's 2026-05-11 update: the first SUS block is
+        // explicitly tagged "with Aegis" so participants don't
+        // conflate it with the second Aegis-specific UI block. The
+        // off-rounds (1 and 3) deliberately keep the panel out of
+        // sight; this section asks about the chat experience with
+        // the panel present.
         section_heading(
-            "Please rank these according to your experience with the User Interface.",
+            "Please rank these according to your experience with the User Interface with Aegis.",
         ),
         sus("I think that I would like to use this system frequently."),
         sus("I found the system unnecessarily complex."),
@@ -1696,6 +1774,15 @@ fn dm2731_post_survey() -> Vec<AdminSurveyQuestionView> {
         // disagree -> agree to match the rest.
         sus("I felt engaged when using Aegis."),
         free_text("How did using Aegis affect your prompting?", true),
+        // Added 2026-05-11: open-ended feedback on what the panel
+        // got right vs. wrong, surfaced alongside the existing
+        // "how did Aegis affect your prompting" question so the
+        // researcher gets both behaviour and reaction in the same
+        // pass.
+        free_text(
+            "What kind of feedback from Aegis was most helpful/least helpful?",
+            true,
+        ),
         // Final question explicitly optional (no asterisk in source).
         free_text("Anything you would like to add about your experience?", false),
     ]
@@ -1749,6 +1836,15 @@ fn section_heading(prompt: &str) -> AdminSurveyQuestionView {
     }
 }
 
+// Researcher's 2026-05-11 brief: after consent, the participant should
+// see a primer on Aegis and a description of the study flow (3 tasks
+// followed by an exit survey) so they know what's coming before they
+// land in round 1. We embed both inside the consent markdown rather
+// than inserting a new stage in the FSM: the consent screen already
+// renders markdown, it's the very first thing post-load, and a stage
+// addition would ripple through the export schema for negligible UX
+// gain. The headings come BEFORE the "## Consent" footer so they're
+// part of what the participant is consenting to.
 const DM2731_CONSENT: &str = r#"# Consent to Participate in a User Study
 
 You are invited to take part in a research study conducted as part of the
@@ -1772,7 +1868,30 @@ to take approximately 30 minutes.
 
 If you have any questions before or during the study, feel free to ask
 the researchers. You can always contact us at:
-**edwinsu@dsv.su.se**, **edwinsu@kth.se**, **khogb@kth.se**
+**emilcr@kth.se**, **khogb@kth.se**, **edwinsu@{dsv.su.se, kth.se}**
+
+## What is Aegis?
+
+**Aegis** is a prompt-coaching panel that sits next to the chat. As you
+type a prompt, Aegis reads your draft and suggests ways to make it
+clearer, more specific, or better grounded; for example, asking you to
+spell out what kind of answer you're looking for, or to add context the
+model would otherwise have to guess at. It does not write the prompt for
+you; it only flags things you might consider before you press Send. The
+panel is non-blocking, so you can ignore any suggestion you disagree
+with.
+
+## What you'll do
+
+The study is structured as **three short tasks followed by an exit
+survey**:
+
+1. **Round 1**: a seminar-prep task, no Aegis support.
+2. **Round 2**: a similar seminar-prep task, with Aegis support active.
+3. **Round 3**: a final seminar-prep task, no Aegis support.
+
+Each task takes a few minutes; you decide when you're done. After the
+third round you'll fill in a short exit survey about your experience.
 
 ## Consent
 

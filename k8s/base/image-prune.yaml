@@ -20,10 +20,12 @@ spec:
                 - /bin/sh
                 - -c
                 - |
+                  # --config /dev/null skips the missing crictl.yaml lookup;
+                  # k3s' default config path lives outside the pod's mount namespace.
                   echo "Pruning unused container images..."
-                  crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock rmi --prune
+                  crictl --config /dev/null --runtime-endpoint unix:///run/k3s/containerd/containerd.sock rmi --prune
                   echo "Remaining images:"
-                  crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images
+                  crictl --config /dev/null --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images
               volumeMounts:
                 - name: containerd-sock
                   mountPath: /run/k3s/containerd/containerd.sock

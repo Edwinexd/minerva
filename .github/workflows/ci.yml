@@ -21,17 +21,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Fetch eureka-2 release artifact
-        # Populates backend/vendor/eureka-2/ from the GitHub Release
-        # pinned in .eureka-version. The path-dep declared by
-        # crates/minerva-eureka requires this before any cargo
-        # invocation that touches the workspace, including the implicit
-        # workspace metadata reads cargo fmt and cargo clippy do.
-        env:
-          EUREKA_RELEASE_TOKEN: ${{ secrets.EUREKA_RELEASE_TOKEN }}
-        working-directory: ${{ github.workspace }}
-        run: ./scripts/fetch-eureka.sh
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -45,11 +34,6 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
-
-      - name: Clippy (with eureka feature)
-        # Verify the eureka cargo feature on minerva-server still
-        # composes cleanly with the rest of the workspace.
-        run: cargo clippy -p minerva-server --features eureka --all-targets -- -D warnings
 
       - name: Build
         run: cargo build

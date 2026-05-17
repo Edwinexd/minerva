@@ -19,6 +19,3 @@ terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.backup
 terraform/*.tfvars
-
-# Vendored eureka-2 release artifact (populated by scripts/fetch-eureka.sh).
-backend/vendor/

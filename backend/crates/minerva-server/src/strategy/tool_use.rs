@@ -27,11 +27,49 @@ use axum::response::sse::Event;
 use tokio::sync::mpsc;
 
 use super::common;
-use super::research_phase::{self, ResearchConfig};
+use super::common::RagChunk;
+use super::research_phase::{self, ResearchConfig, ToolEventRecord};
 use super::tools::ToolCatalogFlags;
 use super::writeup;
 use super::GenerationContext;
 use crate::error::AppError;
+
+/// Build a `ToolEventRecord` for a server-initiated retrieval (seed
+/// RAG, KG expansion). These don't go through the model-visible
+/// tool catalog, but from the user's perspective they're still
+/// retrievals and should show up in the "Thinking" disclosure
+/// alongside the model-initiated tool calls. We additionally emit
+/// the matching `tool_call` / `tool_result` SSE pair so the
+/// disclosure renders them live during streaming, then prepend the
+/// record onto `research.tool_events` after the research phase
+/// completes so they get persisted on the message.
+async fn record_server_retrieval(
+    tx: &tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, AppError>>,
+    name: &str,
+    args: serde_json::Value,
+    chunks: &[RagChunk],
+) -> ToolEventRecord {
+    let result_payload: Vec<serde_json::Value> = chunks
+        .iter()
+        .map(|c| serde_json::json!({"filename": c.filename, "text": c.text}))
+        .collect();
+    let result_value = serde_json::Value::Array(result_payload);
+    let summary = if chunks.is_empty() {
+        "0 chunks".to_string()
+    } else if chunks.len() == 1 {
+        "1 chunk".to_string()
+    } else {
+        format!("{} chunks", chunks.len())
+    };
+    research_phase::emit_tool_call(tx, name, &args).await;
+    research_phase::emit_tool_result(tx, name, &summary, &result_value).await;
+    ToolEventRecord {
+        name: name.to_string(),
+        args,
+        result_summary: summary,
+        result: result_value,
+    }
+}
 
 /// Per-response token cap mirroring `flare.rs`. Same multiplier
 /// applied to `courses.daily_token_limit` so a tool-use answer
@@ -95,6 +133,27 @@ pub async fn run(
         .await;
     }
 
+    // Surface the seed retrieval as a tool event. From the user's
+    // POV this is "the system fetched relevant chunks before the
+    // model started thinking" ; same role any model-initiated
+    // tool call plays, just kicked off server-side on the
+    // student's question. Done AFTER the kind-aware partition and
+    // adversarial filter so the visible result matches what the
+    // model actually sees in context.
+    let mut prelim_events: Vec<ToolEventRecord> = Vec::new();
+    prelim_events.push(
+        record_server_retrieval(
+            &tx,
+            "initial_retrieve",
+            serde_json::json!({
+                "query": ctx.user_content.clone(),
+                "trigger": "user_question",
+            }),
+            &rag.context,
+        )
+        .await,
+    );
+
     if ctx.kg_enabled {
         let extra = common::expand_context_via_graph(
             &ctx.db,
@@ -110,6 +169,24 @@ pub async fn run(
             &rag.context,
         )
         .await;
+        // Only surface the KG-expansion event when it actually
+        // added something ; an empty extras list means the seed
+        // chunks already covered the KG neighbourhood and there's
+        // nothing useful to disclose.
+        if !extra.is_empty() {
+            prelim_events.push(
+                record_server_retrieval(
+                    &tx,
+                    "kg_expand",
+                    serde_json::json!({
+                        "trigger": "knowledge_graph_neighbours",
+                        "seeded_from_chunks": rag.context.len(),
+                    }),
+                    &extra,
+                )
+                .await,
+            );
+        }
         rag.context.extend(extra);
     }
 
@@ -139,8 +216,19 @@ pub async fn run(
         kg_enabled: ctx.kg_enabled,
     };
     let config = ResearchConfig::defaults(use_logprobs);
-    let research =
+    let mut research =
         research_phase::run(&ctx, config, catalog_flags, rag.context.clone(), cap, &tx).await;
+
+    // Prepend the server-initiated retrievals (seed RAG, optional
+    // KG expansion) so the persisted message and the in-progress
+    // disclosure both render them at the top of the tool-event
+    // list, chronologically before any model-initiated calls.
+    let prelim_count = prelim_events.len();
+    if !prelim_events.is_empty() {
+        let mut combined = std::mem::take(&mut prelim_events);
+        combined.extend(std::mem::take(&mut research.tool_events));
+        research.tool_events = combined;
+    }
 
     tracing::info!(
         "tool_use: research finished for conv {}: turns={}, tool_calls={}, flare_injections={}, stop={:?}, chunks={}",
@@ -229,6 +317,13 @@ pub async fn run(
         serde_json::to_value(&research.tool_events).ok()
     };
 
+    // retrieval_count: real count of retrievals the user can see
+    // in the disclosure. Mirrors `tool_events.len()` ; one row per
+    // retrieval regardless of who triggered it (server seed, KG
+    // expansion, model tool call, FLARE injection).
+    let retrieval_count =
+        (prelim_count + research.tool_calls_executed + research.flare_injections) as i32;
+
     common::finalize(
         &ctx,
         &tx,
@@ -238,10 +333,7 @@ pub async fn run(
         total_completion,
         !research.chunks.is_empty() || !rag.signals.is_empty(),
         started_at.elapsed().as_millis() as i64,
-        // `iterations` field in finalize counts FLARE outer-loop
-        // iterations; for the tool-use path we report
-        // research turns + 1 (the writeup) so it's comparable.
-        (research.turns as i32) + 1,
+        retrieval_count,
         thinking_transcript,
         tool_events_json.as_ref(),
         Some(research.duration_ms.clamp(0, i32::MAX as i64) as i32),

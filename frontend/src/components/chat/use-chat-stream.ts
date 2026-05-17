@@ -139,10 +139,14 @@ export function useChatStream(
     try {
       const response = await doFetch()
       if (!response.ok) {
-        const body = await response
-          .json()
-          .catch(() => ({ error: response.statusText }))
-        throw new Error(body.error || response.statusText)
+        // Backend error responses are `{ code, message, params }`
+        // (see `minerva-server/src/error.rs`). Prefer `message`,
+        // fall back to `error` for older shapes, then statusText.
+        // Surfacing the real message matters for things like the
+        // 429 quota cap so the student sees "daily token quota
+        // exceeded" rather than the bare HTTP statusText.
+        const body = await response.json().catch(() => ({}))
+        throw new Error(body.message || body.error || response.statusText)
       }
 
       const reader = response.body?.getReader()
@@ -245,13 +249,21 @@ export function useChatStream(
     } finally {
       setStreaming(false)
       setStreamedTokens("")
-      setPendingUserMsg(null)
       setThinkingActive(false)
       // Keep `thinkingTokens` and `toolEvents` populated after the
       // stream ends so the assistant message's "Thinking" disclosure
       // stays expandable until the user navigates away or sends
       // another message (which calls reset() at the top of send).
     }
+    // Clear the optimistic user echo only on success. On failure
+    // (e.g. 429 quota cap, fetch threw, or a mid-stream `error`
+    // event) we keep it visible alongside the error so the student
+    // sees what they sent. Critically, on the `/new` route this
+    // also keeps `showGreeting` in chat-page.tsx false, preventing
+    // a one-frame flash back to the empty-state hero. The next
+    // send() call overwrites pendingUserMsg at the top, and
+    // reset() (called on conversation switch) clears it explicitly.
+    if (success) setPendingUserMsg(null)
     return success
   }
 

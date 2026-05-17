@@ -11,7 +11,7 @@
  * teacher-pinned-conversation handling. Centralising here means future
  * source/feedback tweaks land in both places automatically.
  */
-import React, { useCallback, useEffect, useRef, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, ChevronUp } from "lucide-react"
 import Markdown, { defaultUrlTransform } from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -21,12 +21,65 @@ import remarkGfm from "remark-gfm"
  * prompted to use ASCII `[#N]`, but some models (notably qwen and
  * gpt-oss variants when generating in a multilingual context)
  * occasionally swap in CJK full-width brackets `【#N】` or
- * heavy-bracket variants `〔#N〕`. We accept any of those on
+ * heavy-bracket variants `〔#N〕`, and sometimes drop the `#`
+ * prefix entirely (`【12】`, `[5]`). We accept any of those on
  * read so the citation badges still wire up; the `rewrite` pass
  * normalises them all into a single ASCII form before handing to
  * `react-markdown`.
+ *
+ * `#` is optional so naked-digit forms like `【12】` match. The
+ * surrounding brackets keep the false-positive rate low ; plain
+ * bracketed numbers in prose ("see step [3] above") will still
+ * get badged, but that's acceptable: the user can read the
+ * actual source target, and unmatched indexes just fail to
+ * scroll rather than crash.
  */
-const CITATION_RE = /[[【〔]#(\d+)[\]】〕]/g
+const CITATION_RE = /[[【〔]#?(\d+)[\]】〕]/g
+
+/**
+ * Pull the `[Source: filename]` header off each chunk so we can
+ * map model-emitted `【filename.ext】` citations back to a 1-based
+ * source index. Returns a map keyed by lowercased filename for
+ * case-insensitive lookup; entries without a parseable header
+ * are skipped (the corresponding index just won't resolve, which
+ * matches today's behaviour for orphan citations).
+ */
+function buildFilenameIndex(
+  chunks: string[] | null,
+): Map<string, number> {
+  const map = new Map<string, number>()
+  if (!chunks) return map
+  chunks.forEach((c, i) => {
+    const m = c.match(/^\[Source: (.+?)\](\n|$)/)
+    if (m) {
+      const key = m[1].toLowerCase()
+      // First write wins: if two chunks share a filename only the
+      // first index is reachable from a `【filename】` marker. That's
+      // a rare edge case (same doc, multiple chunks) and the user
+      // can still click into the sources panel for the rest.
+      if (!map.has(key)) map.set(key, i + 1)
+    }
+  })
+  return map
+}
+
+/**
+ * Pre-pass: replace `【filename.ext】` markers with `【#N】` so the
+ * digit-form regex below can pick them up. Only rewrites brackets
+ * whose contents match a known source filename ; ordinary
+ * bracketed prose flows through untouched.
+ */
+function rewriteFilenameCitations(
+  content: string,
+  filenameIndex: Map<string, number>,
+): string {
+  if (filenameIndex.size === 0) return content
+  return content.replace(/[[【〔]([^\]】〕#]+?)[\]】〕]/g, (full, inner) => {
+    const key = String(inner).trim().toLowerCase()
+    const idx = filenameIndex.get(key)
+    return idx ? `[#${idx}]` : full
+  })
+}
 
 /**
  * Strip the optional `[Source: filename]` prefix off a stored
@@ -67,15 +120,26 @@ const CITATION_HREF_PREFIX = "minerva-cite:"
  * Consecutive markers `[#1][#3]` get a thin separator inserted so
  * the resulting badges don't visually collide into "13" ; same
  * fix applies in the per-source list of inbound refs.
+ *
+ * `filenameIndex` is the source-index lookup used to resolve
+ * filename-form citations like `【1706.03762v7.pdf】`; pass the
+ * result of `buildFilenameIndex(chunks_used)`. Empty map skips
+ * the filename pass cleanly.
  */
-function rewriteCitationsForMarkdown(content: string): string {
-  // Two-step rewrite: first insert a thin space between adjacent
-  // citation markers (including across mixed bracket styles, so
-  // `[#1]【#3】` still gets a separator). Then convert every
-  // remaining marker into the canonical `[N](minerva-cite:N)`
-  // markdown link form the custom `<a>` component intercepts.
-  const padded = content.replace(
-    /([[【〔]#\d+[\]】〕])(?=[[【〔]#)/g,
+function rewriteCitationsForMarkdown(
+  content: string,
+  filenameIndex: Map<string, number>,
+): string {
+  // Three-step rewrite. (1) Resolve `【filename.ext】` markers to
+  // `[#N]` via the chunks lookup ; the digit regex below picks
+  // them up after that. (2) Insert a thin space between adjacent
+  // markers (including across mixed bracket styles, so `[#1]【3】`
+  // still gets a separator). (3) Convert every remaining marker
+  // into the canonical `[N](minerva-cite:N)` markdown link form
+  // the custom `<a>` component intercepts.
+  const normalized = rewriteFilenameCitations(content, filenameIndex)
+  const padded = normalized.replace(
+    /([[【〔]#?\d+[\]】〕])(?=[[【〔]#?\d)/g,
     "$1 ",
   )
   return padded.replace(
@@ -89,10 +153,18 @@ function rewriteCitationsForMarkdown(content: string): string {
  * Used by the bottom "N sources" panel to highlight cited chunks
  * vs ones that only fed retrieval context but never landed in the
  * answer.
+ *
+ * Includes filename-form citations (resolved via `filenameIndex`)
+ * so a message that only used `【filename.ext】` markers still
+ * lights up the cited rows in the panel.
  */
-function extractCitedSourceIds(content: string): Set<number> {
+function extractCitedSourceIds(
+  content: string,
+  filenameIndex: Map<string, number>,
+): Set<number> {
   const ids = new Set<number>()
-  for (const m of content.matchAll(CITATION_RE)) {
+  const normalized = rewriteFilenameCitations(content, filenameIndex)
+  for (const m of normalized.matchAll(CITATION_RE)) {
     const n = parseInt(m[1], 10)
     if (Number.isFinite(n)) ids.add(n)
   }
@@ -157,6 +229,7 @@ export function MarkdownContent({
   content,
   className,
   onCitationClick,
+  chunks,
 }: {
   content: string
   className?: string
@@ -167,8 +240,23 @@ export function MarkdownContent({
    * superscript text with no click behaviour.
    */
   onCitationClick?: (sourceIndex: number) => void
+  /**
+   * Persisted `chunks_used` for the surrounding message. When
+   * present, `【filename.ext】`-style citations get resolved back
+   * to their source index by matching filenames. Optional ; the
+   * streaming bubble has no chunks yet, in which case only the
+   * `[#N]` / `【N】` digit forms wire up and filename citations
+   * render as plain bracketed text until the final message lands.
+   */
+  chunks?: string[] | null
 }) {
-  const rewritten = onCitationClick ? rewriteCitationsForMarkdown(content) : content
+  const filenameIndex = useMemo(
+    () => buildFilenameIndex(chunks ?? null),
+    [chunks],
+  )
+  const rewritten = onCitationClick
+    ? rewriteCitationsForMarkdown(content, filenameIndex)
+    : content
   return (
     <div className={`prose prose-sm dark:prose-invert max-w-none ${className || ""}`}>
       <Markdown
@@ -236,8 +324,12 @@ export function ChatBubble({
   const isUser = message.role === "user"
   const [showSources, setShowSources] = useState(false)
   const chunks = message.chunks_used
+  const filenameIndex = useMemo(
+    () => buildFilenameIndex(chunks ?? null),
+    [chunks],
+  )
   const citedSourceIds = !isUser
-    ? extractCitedSourceIds(message.content)
+    ? extractCitedSourceIds(message.content, filenameIndex)
     : new Set<number>()
   const hasCitations = citedSourceIds.size > 0
   // Show-uncited is derived from the message + a per-mount user
@@ -314,6 +406,7 @@ export function ChatBubble({
           <MarkdownContent
             content={message.content}
             onCitationClick={handleCitationClick}
+            chunks={chunks}
           />
         )}
         {!isUser && (

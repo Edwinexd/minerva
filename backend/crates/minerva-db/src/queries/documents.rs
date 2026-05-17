@@ -71,6 +71,41 @@ pub async fn insert(
     .await
 }
 
+/// Lightweight projection of a document for callers that only need
+/// the id + filename + classified kind, namely the suggested-
+/// questions feature, which grounds the LLM prompt on a handful
+/// of recent ready docs and would otherwise pay for hauling
+/// `pooled_embedding` (an `Option<Vec<f32>>`) across the wire on
+/// every cache check.
+#[derive(Debug)]
+pub struct ReadyDocSummary {
+    pub id: Uuid,
+    pub filename: String,
+    pub kind: Option<String>,
+}
+
+/// The `limit` most-recently-created `status='ready'` docs for a
+/// course, newest first. Used by the suggested-questions cache to
+/// decide whether the latest-N source set has drifted.
+pub async fn list_latest_ready_by_course(
+    db: &PgPool,
+    course_id: Uuid,
+    limit: i64,
+) -> Result<Vec<ReadyDocSummary>, sqlx::Error> {
+    sqlx::query_as!(
+        ReadyDocSummary,
+        r#"SELECT id, filename, kind
+           FROM documents
+           WHERE course_id = $1 AND status = 'ready'
+           ORDER BY created_at DESC
+           LIMIT $2"#,
+        course_id,
+        limit,
+    )
+    .fetch_all(db)
+    .await
+}
+
 pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,

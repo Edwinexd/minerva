@@ -7,15 +7,12 @@
 //! configured returns 503 instead of panicking, matching the
 //! fail-soft policy in `crate::eureka_runtime`.
 
-use std::collections::BTreeMap;
-
 use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use minerva_core::models::User;
 use minerva_eureka::eureka_2::{export::to_json_view, pipeline, schema};
-use qdrant_client::qdrant::ScrollPointsBuilder;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -209,40 +206,17 @@ async fn extract_concept_graph(
     Ok(Json(summary))
 }
 
-/// Pull every chunk for `doc_id` from `collection_name` via qdrant scroll,
-/// sort by `chunk_index`, and concatenate with paragraph breaks.
+/// Pull every chunk for `doc_id` from `collection_name` via qdrant scroll
+/// and concatenate (in chunk-index order) with paragraph breaks.
 async fn fetch_document_text(
     state: &AppState,
     collection_name: &str,
     doc_id: Uuid,
 ) -> Result<String, String> {
-    let filter = qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
-        "document_id",
-        doc_id.to_string(),
-    )]);
-
-    let result = state
-        .qdrant
-        .scroll(
-            ScrollPointsBuilder::new(collection_name)
-                .filter(filter)
-                .with_payload(true)
-                .limit(2000),
-        )
-        .await
-        .map_err(|e| format!("qdrant scroll: {e}"))?;
-
-    let mut by_index: BTreeMap<i64, String> = BTreeMap::new();
-    for point in result.result {
-        let text = crate::strategy::common::payload_string(&point.payload, "text");
-        let idx = crate::strategy::common::payload_int(&point.payload, "chunk_index").unwrap_or(0);
-        if let Some(t) = text {
-            by_index.insert(idx, t);
-        }
-    }
-
-    let joined = by_index.values().cloned().collect::<Vec<_>>().join("\n\n");
-    Ok(joined)
+    let by_index =
+        crate::strategy::common::scroll_doc_chunks(&state.qdrant, collection_name, doc_id, 2000)
+            .await?;
+    Ok(by_index.values().cloned().collect::<Vec<_>>().join("\n\n"))
 }
 
 #[derive(Serialize)]

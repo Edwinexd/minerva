@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n              course_id,\n              questions       AS \"questions: Json<Vec<String>>\",\n              source_doc_ids,\n              model,\n              generated_at,\n              last_checked_at\n           FROM course_suggested_questions\n           WHERE course_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "questions: Json<Vec<String>>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_doc_ids",
+        "type_info": "UuidArray"
+      },
+      {
+        "ordinal": 3,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "generated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_checked_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d902d50d4f172059e978fc836df813af3e5579f407138ddcef189b75dd4b3427"
+}

@@ -27,6 +27,7 @@ use crate::routes::chat::{
 };
 use crate::routes::courses::{resolve_course_flags, CourseFeatureFlagsView};
 use crate::routes::integration::verify_embed_token;
+use crate::routes::suggested_questions::{self, SuggestedQuestionsResponse};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -62,6 +63,10 @@ pub fn router() -> Router<AppState> {
         // panel's "Some ideas" button to revise a draft with the
         // suggestions baked in.
         .route("/course/{course_id}/aegis/rewrite", post(rewrite_prompt))
+        .route(
+            "/course/{course_id}/suggested-questions",
+            get(suggested_questions_handler),
+        )
 }
 
 /// All embed endpoints require `?token=...` query param.
@@ -208,6 +213,17 @@ async fn get_course(
         description: course.description,
         feature_flags,
     }))
+}
+
+async fn suggested_questions_handler(
+    State(state): State<AppState>,
+    Path(course_id): Path<Uuid>,
+    Query(query): Query<TokenQuery>,
+) -> Result<Json<SuggestedQuestionsResponse>, AppError> {
+    // Token already proves the bearer is a member of `course_id`.
+    authenticate(&state, course_id, &query)?;
+    let questions = suggested_questions::get_or_refresh(&state, course_id).await?;
+    Ok(Json(SuggestedQuestionsResponse { questions }))
 }
 
 async fn list_conversations(

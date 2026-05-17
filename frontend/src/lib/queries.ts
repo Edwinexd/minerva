@@ -138,6 +138,23 @@ export const pinnedConversationsQuery = (courseId: string) =>
     queryFn: () => api.get<ConversationWithUser[]>(`/courses/${courseId}/conversations/pinned`),
   })
 
+export interface SuggestedQuestionsResponse {
+  questions: string[]
+}
+
+/// Starter prompts for the chat empty state. Server-side cache is
+/// the real bound on freshness; the 1h client stale-time just
+/// keeps the empty-state snappy across rapid /new visits.
+export const suggestedQuestionsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "suggested-questions"],
+    queryFn: () =>
+      api.get<SuggestedQuestionsResponse>(
+        `/courses/${courseId}/suggested-questions`,
+      ),
+    staleTime: 60 * 60 * 1000,
+  })
+
 export const popularTopicsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", "topics"],

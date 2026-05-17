@@ -138,6 +138,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   const [pinned, setPinned] = useState<EmbedPinnedConversation[]>([])
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
   const [me, setMe] = useState<EmbedMe | null>(null)
+  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -160,7 +161,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
     let cancelled = false
     ;(async () => {
       try {
-        const [c, convs, m, pins] = await Promise.all([
+        const [c, convs, m, pins, suggestions] = await Promise.all([
           embedGet<EmbedCourse>(`/course/${courseId}`, token),
           embedGet<EmbedConversation[]>(`/course/${courseId}/conversations`, token),
           embedGet<EmbedMe>(`/course/${courseId}/me`, token),
@@ -168,12 +169,18 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
             `/course/${courseId}/conversations/pinned`,
             token,
           ).catch(() => [] as EmbedPinnedConversation[]),
+          // Soft-failures collapse to no chips; greeting still renders.
+          embedGet<{ questions: string[] }>(
+            `/course/${courseId}/suggested-questions`,
+            token,
+          ).catch(() => ({ questions: [] as string[] })),
         ])
         if (cancelled) return
         setCourse(c)
         setConversations(convs)
         setMe(m)
         setPinned(pins)
+        setSuggestedQuestions(suggestions.questions)
         // Deliberately leave `activeConvId` as null on first load,
         // mirroring the Shibboleth route's `/new` redirect. LTI
         // re-launches and iframe refreshes used to land on the
@@ -337,6 +344,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
           aegisEnabled={course?.feature_flags?.aegis === true}
           courseName={course?.name ?? null}
           displayName={me?.display_name ?? null}
+          suggestedQuestions={suggestedQuestions}
         />
       </div>
     </div>
@@ -357,6 +365,7 @@ function EmbedChatWindow({
   aegisEnabled = false,
   courseName = null,
   displayName = null,
+  suggestedQuestions = [],
 }: {
   courseId: string
   conversationId: string | null
@@ -378,15 +387,11 @@ function EmbedChatWindow({
    * panel auto-hides on courses where the admin hasn't opted in.
    */
   aegisEnabled?: boolean
-  /**
-   * Course name + viewer display name surfaced in the
-   * empty-state greeting that renders when `conversationId` is
-   * null (i.e. fresh-launched iframe, before the user has typed
-   * anything). Threaded from the parent so the embed-only `/me`
-   * + `/course` fetches stay where they already live.
-   */
+  // Greeting + chip strip data; threaded from the parent so the
+  // embed-only `/me` + `/course` fetches stay where they already live.
   courseName?: string | null
   displayName?: string | null
+  suggestedQuestions?: string[]
 }) {
   const { t } = useTranslation("auth")
   // Aegis strings live in the student namespace (the panel itself
@@ -718,6 +723,8 @@ function EmbedChatWindow({
             <EmptyChatGreeting
               displayName={displayName}
               courseName={courseName}
+              suggestions={suggestedQuestions}
+              onSuggestionClick={(q) => setInput(q)}
             />
           </div>
         ) : (

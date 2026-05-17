@@ -10,6 +10,8 @@
 //!   * `linker`
 //!   * `adversarial_filter`
 //!   * `extraction_guard`
+//!   * `aegis`
+//!   * `suggested_questions`
 //!
 //! Embeddings are deliberately not tracked; pocket change
 //! relative to LLM calls (per the operational policy).
@@ -34,6 +36,7 @@ pub const CATEGORY_LINKER: &str = "linker";
 pub const CATEGORY_ADVERSARIAL_FILTER: &str = "adversarial_filter";
 pub const CATEGORY_EXTRACTION_GUARD: &str = "extraction_guard";
 pub const CATEGORY_AEGIS: &str = "aegis";
+pub const CATEGORY_SUGGESTED_QUESTIONS: &str = "suggested_questions";
 
 /// Insert a single usage row. Best-effort: callers log a warning
 /// on error and continue; we never block a chat / ingest path

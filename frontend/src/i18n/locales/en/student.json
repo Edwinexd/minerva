@@ -17,7 +17,8 @@
     "withName": "{{greeting}}, {{name}}!",
     "standalone": "{{greeting}}!",
     "subtitle": "Ask anything about the course materials.",
-    "subtitleCourse": "Ask anything about {{course}}."
+    "subtitleCourse": "Ask anything about {{course}}.",
+    "suggestionsLabel": "Try one of these"
   },
   "chat": {
     "inputPlaceholder": "Ask about the course materials…",

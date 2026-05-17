@@ -105,6 +105,52 @@ pub fn chunks_for_client(chunks: &[RagChunk], hidden_doc_ids: &HashSet<String>) 
 
 // ── Qdrant payload helpers ──────────────────────────────────────────
 
+/// Scroll every chunk for one document out of `collection_name` and
+/// return `{chunk_index: text}`, sorted ascending by index. Used by:
+///   * `routes::concept_graph::fetch_document_text` (joins all chunks
+///     back into the full doc body),
+///   * `routes::suggested_questions::fetch_head_chunks` (takes the
+///     first few for LLM grounding).
+///
+/// `scroll_limit` caps the per-call batch; callers that only want the
+/// head chunks can pass something small (8-16), full-doc reads pass
+/// 2000+. Points without a `text` payload are silently skipped (those
+/// pre-date the chunker writing text alongside vectors).
+///
+/// `with_vectors` is forced off: every existing caller discards the
+/// vector and the embedding bytes dominate the per-point payload size.
+pub async fn scroll_doc_chunks(
+    qdrant: &qdrant_client::Qdrant,
+    collection_name: &str,
+    doc_id: uuid::Uuid,
+    scroll_limit: u32,
+) -> Result<std::collections::BTreeMap<i64, String>, String> {
+    let filter = qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
+        "document_id",
+        doc_id.to_string(),
+    )]);
+    let result = qdrant
+        .scroll(
+            qdrant_client::qdrant::ScrollPointsBuilder::new(collection_name)
+                .filter(filter)
+                .with_payload(true)
+                .with_vectors(false)
+                .limit(scroll_limit),
+        )
+        .await
+        .map_err(|e| format!("qdrant scroll: {e}"))?;
+
+    let mut by_index = std::collections::BTreeMap::new();
+    for point in result.result {
+        let Some(text) = payload_string(&point.payload, "text") else {
+            continue;
+        };
+        let idx = payload_int(&point.payload, "chunk_index").unwrap_or(0);
+        by_index.insert(idx, text);
+    }
+    Ok(by_index)
+}
+
 /// Extract a string field from a Qdrant point payload, returning None if missing.
 pub fn payload_string(
     payload: &HashMap<String, qdrant_client::qdrant::Value>,

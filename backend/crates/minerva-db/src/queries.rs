@@ -3,6 +3,7 @@ pub mod api_keys;
 pub mod canvas;
 pub mod conversation_flags;
 pub mod conversations;
+pub mod course_suggested_questions;
 pub mod course_token_usage;
 pub mod courses;
 pub mod document_relations;

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE course_suggested_questions\n           SET last_checked_at = NOW()\n           WHERE course_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c4aa9c0bcdde5918ed238411e5c725b06a92e4f0399c77179594de4f238243f1"
+}

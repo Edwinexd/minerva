@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO course_suggested_questions\n              (course_id, questions, source_doc_ids, model, generated_at, last_checked_at)\n           VALUES ($1, $2, $3, $4, NOW(), NOW())\n           ON CONFLICT (course_id) DO UPDATE\n              SET questions       = EXCLUDED.questions,\n                  source_doc_ids  = EXCLUDED.source_doc_ids,\n                  model           = EXCLUDED.model,\n                  generated_at    = NOW(),\n                  last_checked_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "UuidArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4986c9ac030ee8eda2224e9ca53e01b90cdf5c768a60128b8d26b4329047521b"
+}

@@ -6,6 +6,7 @@ import {
   conversationsQuery,
   conversationDetailQuery,
   pinnedConversationsQuery,
+  suggestedQuestionsQuery,
   userQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
@@ -221,6 +222,11 @@ export function ChatWindow({
   // fires for them anyway, and TaskRunner already has its own
   // task framing.
   const { data: course } = useQuery(courseQuery(courseId))
+  // Only paid on /new; resuming an existing chat doesn't fetch.
+  const { data: suggestions } = useQuery({
+    ...suggestedQuestionsQuery(courseId),
+    enabled: conversationId === null,
+  })
   const { data, isLoading } = useQuery({
     ...conversationDetailQuery(courseId, conversationId ?? ""),
     enabled: conversationId !== null,
@@ -634,6 +640,8 @@ export function ChatWindow({
             <EmptyChatGreeting
               displayName={user?.display_name}
               courseName={course?.name}
+              suggestions={suggestions?.questions}
+              onSuggestionClick={(q) => setInput(q)}
             />
           </div>
         ) : (

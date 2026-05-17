@@ -1,26 +1,18 @@
 /**
  * Empty-state hero shown above the chat input when the user lands
- * on a brand-new conversation (no `conversationId` yet, no messages
- * pending or streaming).
- *
- * Time-of-day greeting + optional first-name personalisation,
- * mirrored in both the Shibboleth chat page and the LTI/embed
- * iframe so the two entry paths look the same. Reads its strings
- * from the `student` i18n namespace, which both routes already use
- * (the embed view borrows aegis keys from there too) so we don't
- * need to duplicate copy across `auth.json`.
+ * on a brand-new conversation. Time-of-day greeting + first-name
+ * personalisation + LLM-generated starter chips. Used by both the
+ * Shibboleth chat page and the LTI/embed iframe; strings live in
+ * the `student` namespace so we don't duplicate keys across
+ * `auth.json`.
  */
 import { useTranslation } from "react-i18next"
 
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 type TimeOfDay = "morning" | "afternoon" | "evening" | "night"
 
-/**
- * Bucket the current hour into one of four greeting slots. Buckets:
- *   05:00-11:59 morning, 12:00-16:59 afternoon,
- *   17:00-21:59 evening, 22:00-04:59 night (casual fallback).
- */
 function getTimeOfDay(now: Date = new Date()): TimeOfDay {
   const hour = now.getHours()
   if (hour >= 5 && hour < 12) return "morning"
@@ -32,20 +24,18 @@ function getTimeOfDay(now: Date = new Date()): TimeOfDay {
 export function EmptyChatGreeting({
   displayName,
   courseName,
+  suggestions,
+  onSuggestionClick,
   className,
 }: {
-  /**
-   * Full display name from `/auth/me` (or the embed `/me` shape).
-   * We render only the first whitespace-separated token because
-   * "Good morning, Edwin Sundberg!" reads stilted; "Good morning,
-   * Edwin!" matches how a person would actually greet someone.
-   * For `ext:` users the backend's pseudonymiser already returns a
-   * two-word EFF-wordlist name (e.g. "Wombling Wombat"); taking
-   * the first token still reads naturally there.
-   */
+  // We render only the first whitespace-separated token because
+  // "Good morning, Edwin Sundberg!" reads stilted; for `ext:` users
+  // the backend pseudonymiser returns a two-word EFF-wordlist name
+  // and the first token still reads naturally.
   displayName: string | null | undefined
-  /** Optional course name surfaced in the subtitle for context. */
   courseName?: string | null
+  suggestions?: string[]
+  onSuggestionClick?: (question: string) => void
   className?: string
 }) {
   const { t } = useTranslation("student")
@@ -72,6 +62,28 @@ export function EmptyChatGreeting({
       <p className="mt-2 text-sm text-muted-foreground max-w-md">
         {subtitle}
       </p>
+      {(suggestions?.length ?? 0) > 0 && (
+        <div className="mt-6 w-full max-w-2xl">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+            {t("greeting.suggestionsLabel")}
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {suggestions!.map((q, i) => (
+              <Button
+                key={`${i}-${q}`}
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onSuggestionClick?.(q)}
+                disabled={!onSuggestionClick}
+                className="rounded-full max-w-full"
+              >
+                <span className="truncate">{q}</span>
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

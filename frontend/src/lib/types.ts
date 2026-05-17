@@ -566,6 +566,12 @@ export interface Message {
    */
   thinking_transcript: string | null
   tool_events: PersistedToolEvent[] | null
+  /**
+   * Research-phase wall-clock duration in milliseconds. Lets the
+   * "Thinking" disclosure render "Thought for Ns" on past messages,
+   * symmetrical with the live-stream timer.
+   */
+  thinking_ms: number | null
   created_at: string
 }
 
@@ -595,6 +601,12 @@ export interface PersistedToolEvent {
   name: string
   args?: unknown
   result_summary?: string
+  /**
+   * Raw JSON payload the tool returned to the model (already
+   * truncated server-side). Frontend renders it click-to-expand on
+   * each tool-call row.
+   */
+  result?: unknown
 }
 
 export interface PlayCourseCatalogEntry {

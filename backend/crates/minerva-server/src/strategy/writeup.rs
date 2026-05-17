@@ -32,9 +32,13 @@ pub struct WriteupOutput {
 
 /// Build the writeup system prompt: the standard course system
 /// prompt seeded with the consolidated chunk set, plus a "Prior
-/// research" section that tells the model what tools fired and
-/// what they returned. Helps the model anchor on the research
-/// without us having to re-feed raw tool results.
+/// research" section that carries BOTH the research agent's
+/// synthesised narrative (`research_transcript`) AND a compressed
+/// log of which tools fired (`tool_log`). Without the transcript
+/// the writeup model would have to re-derive everything from raw
+/// chunks; the research agent's bullets are exactly the kind of
+/// distilled signal that lets writeup just compose tone and
+/// pedagogy on top.
 ///
 /// Takes primitives rather than a `GenerationContext` so unit
 /// tests can exercise the prompt shape without standing up a
@@ -43,19 +47,36 @@ pub fn build_writeup_system_prompt(
     course_name: &str,
     custom_prompt: &Option<String>,
     chunks: &[RagChunk],
-    research_summary: &str,
+    research_transcript: &str,
+    tool_log: &str,
 ) -> String {
     let base = common::build_system_prompt(course_name, custom_prompt, chunks);
+    // Inline the transcript section only when there's something to
+    // show; on legacy paths or trivial turns it can be empty.
+    let transcript_section = if research_transcript.trim().is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\n### Research agent findings (your own prior notes)\n\
+            You already analysed this question in a hidden research phase. \
+            Treat the bullets below as established facts and build on them \
+            directly; do NOT re-derive them from the raw `Course materials` \
+            section.\n\n{}",
+            research_transcript
+        )
+    };
     format!(
         "{base}\n\n## Prior research (server-side)\n\
-        Before this turn you ran a hidden research phase, using tools to\n\
-        gather the materials now present in `Course materials` above.\n\
-        Your prior calls were:\n\n{summary}\n\n\
-        Compose the student's reply now. Use the gathered materials.\n\
-        Do NOT call any tools; do NOT describe your research process to\n\
-        the student; just write the reply.",
+        Before this turn you ran a hidden research phase to gather context. \
+        The materials it produced are in `Course materials` above. The tools \
+        you called were:\n\n{tool_log}{transcript_section}\n\n\
+        Compose the student-facing reply now. Use the findings above directly \
+        ; lean on them, paraphrase as needed, structure for pedagogy. Do NOT \
+        call any tools; do NOT describe your research process to the student; \
+        do NOT say things like \"based on my research\"; just answer.",
         base = base,
-        summary = research_summary,
+        tool_log = tool_log,
+        transcript_section = transcript_section,
     )
 }
 
@@ -65,7 +86,8 @@ pub fn build_writeup_system_prompt(
 pub async fn run(
     ctx: &GenerationContext,
     chunks: &[RagChunk],
-    research_summary: &str,
+    research_transcript: &str,
+    tool_log: &str,
     tx: &mpsc::Sender<Result<Event, AppError>>,
 ) -> Result<WriteupOutput, AppError> {
     let http_client = reqwest::Client::new();
@@ -73,7 +95,8 @@ pub async fn run(
         &ctx.course_name,
         &ctx.custom_prompt,
         chunks,
-        research_summary,
+        research_transcript,
+        tool_log,
     );
     let messages = compose_messages(&system, ctx);
 
@@ -116,18 +139,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prompt_embeds_research_summary() {
+    fn prompt_embeds_tool_log() {
         let chunks: Vec<RagChunk> = Vec::new();
-        let summary = "- keyword_search({\"query\":\"deadline\"}) -> 2 chunks";
-        let prompt = build_writeup_system_prompt("Test Course", &None, &chunks, summary);
+        let tool_log = "- keyword_search({\"query\":\"deadline\"}) -> 2 chunks";
+        let prompt = build_writeup_system_prompt("Test Course", &None, &chunks, "", tool_log);
         assert!(prompt.contains("Prior research"));
         assert!(prompt.contains("keyword_search"));
     }
 
     #[test]
+    fn prompt_embeds_research_transcript_when_nonempty() {
+        let chunks: Vec<RagChunk> = Vec::new();
+        let transcript = "- Deadline for assignment 2 is November 15.";
+        let prompt = build_writeup_system_prompt(
+            "Test Course",
+            &None,
+            &chunks,
+            transcript,
+            "(no tool calls)",
+        );
+        assert!(prompt.contains("Research agent findings"));
+        assert!(prompt.contains("November 15"));
+    }
+
+    #[test]
+    fn prompt_skips_research_findings_when_transcript_empty() {
+        let chunks: Vec<RagChunk> = Vec::new();
+        let prompt = build_writeup_system_prompt(
+            "Test Course",
+            &None,
+            &chunks,
+            "",
+            "- keyword_search(...) -> 0 chunks",
+        );
+        assert!(!prompt.contains("Research agent findings"));
+    }
+
+    #[test]
     fn prompt_instructs_model_to_skip_tool_calls() {
         let chunks: Vec<RagChunk> = Vec::new();
-        let prompt = build_writeup_system_prompt("Test Course", &None, &chunks, "no calls");
+        let prompt = build_writeup_system_prompt("Test Course", &None, &chunks, "", "no calls");
         assert!(prompt.contains("Do NOT call any tools"));
     }
 }

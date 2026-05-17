@@ -182,7 +182,9 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         true,
         started_at.elapsed().as_millis() as i64,
         1,
-        // Legacy single-pass path; no research transcript.
+        // Legacy single-pass path; no research transcript, no tool
+        // events, no thinking duration.
+        None,
         None,
         None,
     )

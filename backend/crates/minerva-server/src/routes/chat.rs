@@ -174,6 +174,9 @@ struct MessageResponse {
     /// the research phase. Same shape as the `tool_call`/`tool_result`
     /// SSE pairs the frontend receives during streaming.
     tool_events: Option<serde_json::Value>,
+    /// Research-phase wall-clock duration in milliseconds. Lets the
+    /// frontend render "Thought for Ns" on past messages.
+    thinking_ms: Option<i32>,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -1052,6 +1055,7 @@ async fn get_conversation(
                 retrieval_count: m.retrieval_count,
                 thinking_transcript: m.thinking_transcript,
                 tool_events: m.tool_events,
+                thinking_ms: m.thinking_ms,
                 created_at: m.created_at,
             })
             .collect(),
@@ -1672,7 +1676,9 @@ pub(super) async fn run_chat_message(
         None,
         None,
         None,
-        // User messages have no research transcript or tool events.
+        // User messages have no research transcript, tool events,
+        // or thinking duration.
+        None,
         None,
         None,
     )

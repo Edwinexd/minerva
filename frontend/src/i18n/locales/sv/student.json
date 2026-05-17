@@ -31,6 +31,7 @@
     "assistantResponseLabel": "Assistentens svar",
     "thinkingActive": "Tänker…",
     "thinkingDone": "Tankebana",
+    "thinkingDoneWithDuration": "Tänkte i {{seconds}}s",
     "toolCallsAriaLabel": "Verktyg som assistenten anropade under research-fasen"
   },
   "message": {

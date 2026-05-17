@@ -29,6 +29,12 @@ import type { ToolEvent } from "./use-chat-stream"
 export interface PersistedThinking {
   thinking_transcript: string | null
   tool_events: ToolEvent[] | null
+  /**
+   * Persisted research-phase duration in milliseconds. `null` on
+   * legacy rows that pre-date the `thinking_ms` column; the
+   * disclosure falls back to a generic "Thinking" label then.
+   */
+  thinking_ms: number | null
 }
 
 export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
@@ -51,6 +57,13 @@ export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
   toolEvents?: ToolEvent[]
   /** True while research phase is active. */
   thinkingActive?: boolean
+  /**
+   * Live research-phase duration in ms, populated when the backend
+   * emits `thinking_done` with its `duration_ms` field. `null`
+   * during streaming and on conversations rendered from history
+   * (those use the per-message `thinking_ms` instead).
+   */
+  thinkingDurationMs?: number | null
   bubbleLabels: ChatBubbleLabels
   /** Labels for the collapsible "Thinking" disclosure. */
   thinkingLabels?: ThinkingBlockLabels
@@ -82,6 +95,7 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
   thinkingTokens,
   toolEvents,
   thinkingActive,
+  thinkingDurationMs,
   bubbleLabels,
   thinkingLabels,
   getPersistedThinking,
@@ -125,25 +139,33 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
           ((persisted.thinking_transcript &&
             persisted.thinking_transcript.length > 0) ||
             (persisted.tool_events && persisted.tool_events.length > 0))
+        // The thinking disclosure and its bubble are grouped in a
+        // single wrapper with a very tight internal gap so they read
+        // as one unit ; the parent's `space-y-4` then puts a normal
+        // separation between THIS group and the next message above,
+        // instead of also between the thinking and its own bubble.
         return (
           <React.Fragment key={msg.id}>
-            {hasPersistedThinking && thinkingLabels && (
-              <div className="flex justify-start">
-                <div className="max-w-[80%] w-full">
-                  <ThinkingBlock
-                    thinkingTokens={persisted?.thinking_transcript || ""}
-                    toolEvents={persisted?.tool_events || []}
-                    active={false}
-                    labels={thinkingLabels}
-                  />
+            <div className="space-y-1">
+              {hasPersistedThinking && thinkingLabels && (
+                <div className="flex justify-start">
+                  <div className="max-w-[80%]">
+                    <ThinkingBlock
+                      thinkingTokens={persisted?.thinking_transcript || ""}
+                      toolEvents={persisted?.tool_events || []}
+                      active={false}
+                      durationMs={persisted?.thinking_ms ?? null}
+                      labels={thinkingLabels}
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
-            <ChatBubble
-              message={msg}
-              labels={bubbleLabels}
-              feedbackSlot={renderFeedbackSlot?.(msg)}
-            />
+              )}
+              <ChatBubble
+                message={msg}
+                labels={bubbleLabels}
+                feedbackSlot={renderFeedbackSlot?.(msg)}
+              />
+            </div>
             {renderAfterMessage?.(msg)}
           </React.Fragment>
         )
@@ -156,15 +178,16 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
         </div>
       )}
       {streaming && (
-        <>
+        <div className="space-y-1">
           {(thinkingTokens || (toolEvents && toolEvents.length > 0)) &&
             thinkingLabels && (
               <div className="flex justify-start">
-                <div className="max-w-[80%] w-full">
+                <div className="max-w-[80%]">
                   <ThinkingBlock
                     thinkingTokens={thinkingTokens || ""}
                     toolEvents={toolEvents || []}
                     active={!!thinkingActive}
+                    durationMs={thinkingDurationMs ?? null}
                     labels={thinkingLabels}
                   />
                 </div>
@@ -188,7 +211,7 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
               )}
             </div>
           </div>
-        </>
+        </div>
       )}
       {error && (
         <p role="alert" className="text-sm text-destructive text-center">

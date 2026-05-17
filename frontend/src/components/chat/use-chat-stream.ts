@@ -40,12 +40,28 @@ export interface ChatStreamState {
    * answer area until writeup tokens start flowing.
    */
   thinkingActive: boolean
+  /**
+   * Wall-clock duration of the research phase in milliseconds.
+   * `null` until `thinking_done` arrives with its `duration_ms`
+   * field (or until the user picks an older message from history
+   * whose persisted `thinking_ms` populates it via the bubble).
+   * Used to render "Thought for Ns" on the disclosure.
+   */
+  thinkingDurationMs: number | null
 }
 
 export interface ToolEvent {
   name: string
   args?: unknown
   resultSummary?: string
+  /**
+   * Raw JSON payload the tool returned to the model (truncated to
+   * `MAX_TOOL_RESULT_BYTES` server-side). Rendered click-to-expand
+   * so a curious user can see exactly what came back; `undefined`
+   * until the matching `tool_result` SSE event arrives, which is
+   * the only producer.
+   */
+  result?: unknown
 }
 
 /**
@@ -90,6 +106,9 @@ export function useChatStream(
   const [thinkingTokens, setThinkingTokens] = useState("")
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([])
   const [thinkingActive, setThinkingActive] = useState(false)
+  const [thinkingDurationMs, setThinkingDurationMs] = useState<number | null>(
+    null,
+  )
 
   const reset = () => {
     setStreaming(false)
@@ -99,6 +118,7 @@ export function useChatStream(
     setThinkingTokens("")
     setToolEvents([])
     setThinkingActive(false)
+    setThinkingDurationMs(null)
   }
 
   const send = async (
@@ -113,6 +133,7 @@ export function useChatStream(
     setThinkingTokens("")
     setToolEvents([])
     setThinkingActive(false)
+    setThinkingDurationMs(null)
 
     let success = true
     try {
@@ -180,6 +201,7 @@ export function useChatStream(
                             typeof data.result_summary === "string"
                               ? data.result_summary
                               : undefined,
+                          result: data.result,
                         }
                         break
                       }
@@ -188,6 +210,9 @@ export function useChatStream(
                   })
                 } else if (data.type === "thinking_done") {
                   setThinkingActive(false)
+                  if (typeof data.duration_ms === "number") {
+                    setThinkingDurationMs(data.duration_ms)
+                  }
                 } else if (data.type === "error") {
                   setError(data.error)
                   success = false
@@ -238,6 +263,7 @@ export function useChatStream(
     thinkingTokens,
     toolEvents,
     thinkingActive,
+    thinkingDurationMs,
     send,
     reset,
     setError,

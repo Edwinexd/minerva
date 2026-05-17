@@ -325,7 +325,9 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         !output.all_chunks.is_empty(),
         started_at.elapsed().as_millis() as i64,
         1 + output.restarts as i32,
-        // Legacy FLARE path; no research transcript or tool events.
+        // Legacy FLARE path; no research transcript, no tool
+        // events, no thinking duration.
+        None,
         None,
         None,
     )

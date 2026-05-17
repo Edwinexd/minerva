@@ -1022,6 +1022,7 @@ pub async fn finalize(
     retrieval_count: i32,
     thinking_transcript: Option<&str>,
     tool_events: Option<&serde_json::Value>,
+    thinking_ms: Option<i32>,
 ) {
     let assistant_msg_id = uuid::Uuid::new_v4();
     let _ = minerva_db::queries::conversations::insert_message(
@@ -1038,6 +1039,7 @@ pub async fn finalize(
         Some(retrieval_count),
         thinking_transcript,
         tool_events,
+        thinking_ms,
     )
     .await;
 

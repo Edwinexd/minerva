@@ -141,6 +141,10 @@ struct MessageResponse {
     /// the research phase; mirrors the chat route's shape so the
     /// embed UI can render the same "Thinking" disclosure.
     tool_events: Option<serde_json::Value>,
+    /// Research-phase duration in milliseconds; surfaced so the
+    /// embed UI can render "Thought for Ns" symmetrically with the
+    /// regular chat.
+    thinking_ms: Option<i32>,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -331,6 +335,7 @@ async fn get_conversation(
                 model_used: m.model_used,
                 thinking_transcript: m.thinking_transcript,
                 tool_events: m.tool_events,
+                thinking_ms: m.thinking_ms,
                 created_at: m.created_at,
             })
             .collect(),

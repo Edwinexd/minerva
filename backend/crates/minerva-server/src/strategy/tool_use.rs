@@ -155,19 +155,31 @@ pub async fn run(
     // 4. Writeup phase. Single clean streaming pass; tokens flow
     //    to the client as `{"type":"token", ...}` (same shape as
     //    the legacy strategies).
-    let writeup_output =
-        match writeup::run(&ctx, &research.chunks, &research.research_summary, &tx).await {
-            Ok(o) => o,
-            Err(e) => {
-                let msg = format!("{}", e);
-                let _ = tx
-                    .send(Ok(Event::default().data(
-                        serde_json::json!({"type": "error", "error": msg}).to_string(),
-                    )))
-                    .await;
-                return;
-            }
-        };
+    let writeup_output = match writeup::run(
+        &ctx,
+        &research.chunks,
+        // The research agent's actual narrative (its bullet-point
+        // findings) is what the writeup model should lean on. The
+        // tool log is metadata about HOW those findings were
+        // produced and is still surfaced so the writeup model can
+        // see what was searched.
+        &research.transcript,
+        &research.research_summary,
+        &tx,
+    )
+    .await
+    {
+        Ok(o) => o,
+        Err(e) => {
+            let msg = format!("{}", e);
+            let _ = tx
+                .send(Ok(Event::default().data(
+                    serde_json::json!({"type": "error", "error": msg}).to_string(),
+                )))
+                .await;
+            return;
+        }
+    };
 
     // 5. Post-generation extraction-guard intercept. Operates on
     //    a clean single-pass writeup (much better signal than the
@@ -202,11 +214,15 @@ pub async fn run(
 
     // Persist the research-phase artefacts alongside the assistant
     // message so the frontend's "Thinking" disclosure survives a
-    // page refresh. `tool_events_json` is built from the
-    // `research.tool_log` shape that already feeds the
-    // `research_summary` text; the JSONB column lets the frontend
-    // render the same structured list it shows during streaming.
-    let thinking_transcript = (!research.transcript.is_empty()).then_some(&research.transcript);
+    // page refresh. We persist even when the research is trivial
+    // (no tool calls, no FLARE injections, model just chatted): the
+    // disclosure stays collapsed by default and shows duration, so
+    // boring research is unobtrusive but still discoverable.
+    let thinking_transcript = if research.transcript.is_empty() {
+        None
+    } else {
+        Some(research.transcript.as_str())
+    };
     let tool_events_json = if research.tool_events.is_empty() {
         None
     } else {
@@ -226,8 +242,9 @@ pub async fn run(
         // iterations; for the tool-use path we report
         // research turns + 1 (the writeup) so it's comparable.
         (research.turns as i32) + 1,
-        thinking_transcript.map(|s| s.as_str()),
+        thinking_transcript,
         tool_events_json.as_ref(),
+        Some(research.duration_ms.clamp(0, i32::MAX as i64) as i32),
     )
     .await;
 }

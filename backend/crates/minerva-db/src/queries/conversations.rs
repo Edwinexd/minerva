@@ -75,6 +75,11 @@ pub struct MessageRow {
     /// JSONB array of `{name, args, result_summary}` triples ordered
     /// by tool-call emission. NULL on legacy single-pass messages.
     pub tool_events: Option<serde_json::Value>,
+    /// Wall-clock duration of the research phase in milliseconds.
+    /// NULL on legacy single-pass messages; persisted alongside the
+    /// transcript so the frontend can render "Thought for Ns" on
+    /// past messages, not just the in-progress one.
+    pub thinking_ms: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -396,7 +401,7 @@ pub async fn list_messages(
 ) -> Result<Vec<MessageRow>, sqlx::Error> {
     sqlx::query_as!(
         MessageRow,
-        "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
+        "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
         conversation_id,
     )
     .fetch_all(db)
@@ -418,6 +423,7 @@ pub async fn insert_message(
     retrieval_count: Option<i32>,
     thinking_transcript: Option<&str>,
     tool_events: Option<&serde_json::Value>,
+    thinking_ms: Option<i32>,
 ) -> Result<MessageRow, sqlx::Error> {
     // Also update conversation timestamp
     let _ = sqlx::query!(
@@ -429,9 +435,9 @@ pub async fn insert_message(
 
     sqlx::query_as!(
         MessageRow,
-        r#"INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, created_at"#,
+        r#"INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, created_at"#,
         id,
         conversation_id,
         role,
@@ -444,6 +450,7 @@ pub async fn insert_message(
         retrieval_count,
         thinking_transcript,
         tool_events,
+        thinking_ms,
     )
     .fetch_one(db)
     .await

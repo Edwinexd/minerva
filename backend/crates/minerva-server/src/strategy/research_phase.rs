@@ -131,11 +131,18 @@ pub struct ResearchOutput {
     pub tool_calls_executed: usize,
     pub flare_injections: usize,
     pub stop_reason: ResearchStopReason,
+    /// Wall-clock duration of the research phase, in milliseconds.
+    /// Persisted on the message so the frontend's "Thinking"
+    /// disclosure can render "Thought for Ns" on past messages, not
+    /// just the one currently streaming.
+    pub duration_ms: i64,
 }
 
 /// One tool-call record persisted on the message. Mirrors the
 /// `{type:"tool_call"} + {type:"tool_result"}` SSE pair the frontend
-/// receives during streaming, collapsed into a single row.
+/// receives during streaming, collapsed into a single row, plus the
+/// raw tool result so a curious user can click any call and see
+/// exactly what came back.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolEventRecord {
     pub name: String,
@@ -145,8 +152,15 @@ pub struct ToolEventRecord {
     pub args: serde_json::Value,
     /// Short human-readable summary of the tool result (e.g. "3
     /// results", "error: bad_args"). Matches what the `tool_result`
-    /// SSE event carries.
+    /// SSE event carries; used as the closed-state label.
     pub result_summary: String,
+    /// The raw JSON payload the tool returned to the model, parsed
+    /// back into a `Value` so the frontend can pretty-print it on
+    /// click. Already truncated by the dispatcher to fit
+    /// `MAX_TOOL_RESULT_BYTES`. `null` only when JSON parsing of the
+    /// dispatcher output itself failed (rare; the dispatcher emits
+    /// valid JSON by construction).
+    pub result: serde_json::Value,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -182,23 +196,29 @@ async fn emit_tool_call(
         .await;
 }
 
-async fn emit_tool_result(tx: &mpsc::Sender<Result<Event, AppError>>, name: &str, summary: &str) {
+async fn emit_tool_result(
+    tx: &mpsc::Sender<Result<Event, AppError>>,
+    name: &str,
+    summary: &str,
+    result: &serde_json::Value,
+) {
     let _ = tx
         .send(Ok(Event::default().data(
             serde_json::json!({
                 "type": "tool_result",
                 "name": name,
                 "result_summary": summary,
+                "result": result,
             })
             .to_string(),
         )))
         .await;
 }
 
-async fn emit_thinking_done(tx: &mpsc::Sender<Result<Event, AppError>>) {
+async fn emit_thinking_done(tx: &mpsc::Sender<Result<Event, AppError>>, duration_ms: i64) {
     let _ = tx
         .send(Ok(Event::default().data(
-            serde_json::json!({"type": "thinking_done"}).to_string(),
+            serde_json::json!({"type": "thinking_done", "duration_ms": duration_ms}).to_string(),
         )))
         .await;
 }
@@ -406,25 +426,32 @@ pub async fn run(
                                 }
                             }
                             let summary = summarise_for_event(&outcome.model_message);
+                            let result_value: serde_json::Value =
+                                serde_json::from_str(&outcome.model_message)
+                                    .unwrap_or(serde_json::Value::Null);
+                            emit_tool_result(tx, &call.name, &summary, &result_value).await;
                             tool_events.push(ToolEventRecord {
                                 name: call.name.clone(),
                                 args: args_value.clone(),
-                                result_summary: summary.clone(),
+                                result_summary: summary,
+                                result: result_value,
                             });
-                            emit_tool_result(tx, &call.name, &summary).await;
                             outcome.model_message
                         }
                         Err(err) => {
                             tracing::warn!("research: tool {} failed: {:?}", call.name, err);
                             let msg = err.to_tool_message();
                             let summary = summarise_for_event(&msg);
+                            let result_value: serde_json::Value =
+                                serde_json::from_str(&msg).unwrap_or(serde_json::Value::Null);
+                            emit_tool_result(tx, &call.name, &summary, &result_value).await;
                             tool_events.push(ToolEventRecord {
                                 name: call.name.clone(),
                                 args: serde_json::from_str(&call.arguments)
                                     .unwrap_or(serde_json::Value::Null),
-                                result_summary: summary.clone(),
+                                result_summary: summary,
+                                result: result_value,
                             });
-                            emit_tool_result(tx, &call.name, &summary).await;
                             msg
                         }
                     }
@@ -510,7 +537,8 @@ pub async fn run(
         break ResearchStopReason::Completed;
     };
 
-    emit_thinking_done(tx).await;
+    let duration_ms = started_at.elapsed().as_millis() as i64;
+    emit_thinking_done(tx, duration_ms).await;
 
     let research_summary = render_summary(&tool_log, flare_injections);
 
@@ -525,6 +553,7 @@ pub async fn run(
         tool_calls_executed,
         flare_injections,
         stop_reason,
+        duration_ms,
     }
 }
 
@@ -563,15 +592,31 @@ struct PendingToolCall {
 fn build_research_system_prompt(ctx: &GenerationContext, chunks: &[RagChunk]) -> String {
     let base = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, chunks);
     format!(
-        "{base}\n\n## Research phase\n\
-        You are in a hidden research phase before composing the student's reply. \
-        Think out loud, work through the problem, and call tools (keyword_search, \
-        semantic_search, list_documents, get_document_chunks) whenever you need \
-        information you don't already have. The student will NOT see this phase; \
-        they will see only the final reply you will compose afterwards. Stop \
-        calling tools when you have enough context, and just emit a short summary \
-        of what you found so the writeup phase can act on it. Do NOT write the \
-        student-facing reply here.",
+        "{base}\n\n## Research phase (you are the FIRST of two agents)\n\
+        You are the RESEARCH agent in a two-step pipeline. A separate WRITEUP \
+        agent will compose the actual reply to the student afterwards, using \
+        the materials you gather here. The student will NEVER see what you \
+        write in this phase. Your job is to prepare context for the writeup \
+        agent, not to talk to the student.\n\
+        \n\
+        How to do that:\n\
+        1. Decide what the question needs that the `## Course materials` \
+           section above doesn't already cover.\n\
+        2. Call tools (`keyword_search`, `semantic_search`, `list_documents`, \
+           `get_document_chunks`) to fetch missing facts. Be deliberate: \
+           don't call a tool just to look busy.\n\
+        3. When you have enough, emit a SHORT bulleted handoff for the writeup \
+           agent. Aim for at most 5 bullets, one fact each. No prose, no \
+           greetings, no apology, no \"I'll do my best\". Just the facts the \
+           writeup agent needs.\n\
+        \n\
+        If the question is trivial or social (greeting, thanks, clarification) \
+        and needs no extra context, emit ONE short line saying so and stop. \
+        Do not call tools you don't need.\n\
+        \n\
+        Never write the student-facing reply here. The writeup agent will \
+        handle tone, structure, pedagogy, and formatting. You only handle \
+        facts.",
     )
 }
 

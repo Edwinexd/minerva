@@ -31,6 +31,7 @@
     "assistantResponseLabel": "Assistant response",
     "thinkingActive": "Thinking…",
     "thinkingDone": "Thinking",
+    "thinkingDoneWithDuration": "Thought for {{seconds}}s",
     "toolCallsAriaLabel": "Tools the assistant called during research"
   },
   "message": {

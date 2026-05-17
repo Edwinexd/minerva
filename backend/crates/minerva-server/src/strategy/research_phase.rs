@@ -184,7 +184,7 @@ async fn emit_thinking_token(tx: &mpsc::Sender<Result<Event, AppError>>, token: 
         .await;
 }
 
-async fn emit_tool_call(
+pub(super) async fn emit_tool_call(
     tx: &mpsc::Sender<Result<Event, AppError>>,
     name: &str,
     args: &serde_json::Value,
@@ -196,7 +196,7 @@ async fn emit_tool_call(
         .await;
 }
 
-async fn emit_tool_result(
+pub(super) async fn emit_tool_result(
     tx: &mpsc::Sender<Result<Event, AppError>>,
     name: &str,
     summary: &str,

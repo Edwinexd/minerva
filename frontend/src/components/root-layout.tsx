@@ -6,6 +6,7 @@ import { ExternalLink } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { LanguageSwitcher } from "@/components/language-switcher"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 interface DevConfig {
   dev_mode: boolean
@@ -100,6 +101,7 @@ export function RootLayout() {
                 {embedMe.eppn}{embedMe.lti_client_id && ` via LTI (${embedMe.lti_client_id})`}
               </span>
             )}
+            <ThemeToggle />
             <LanguageSwitcher />
           </nav>
         </div>

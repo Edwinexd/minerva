@@ -6,6 +6,34 @@
     <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Minerva</title>
+    <script>
+      // Resolve the theme BEFORE the first paint so the page doesn't
+      // flash light-then-dark (or vice versa) on load. Mirrors the
+      // logic in `src/lib/use-theme.ts`; if you change one, change the
+      // other. Three modes: "light", "dark", "system" (default).
+      // localStorage key matches `THEME_STORAGE_KEY` over there.
+      (function () {
+        try {
+          var stored = localStorage.getItem("minerva-theme");
+          var preferDark = window.matchMedia(
+            "(prefers-color-scheme: dark)"
+          ).matches;
+          var resolved =
+            stored === "light" || stored === "dark"
+              ? stored
+              : preferDark
+                ? "dark"
+                : "light";
+          if (resolved === "dark") {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (_) {
+          // localStorage / matchMedia unavailable (private mode, old
+          // browser, SSR shim, ...). Default to light; the React-side
+          // hook will re-resolve once it mounts.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

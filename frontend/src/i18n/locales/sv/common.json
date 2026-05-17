@@ -65,6 +65,15 @@
     "english": "English",
     "swedish": "Svenska"
   },
+  "theme": {
+    "modes": {
+      "light": "ljust läge",
+      "dark": "mörkt läge",
+      "system": "systemtema"
+    },
+    "switchTo": "Byt till {{next}}",
+    "current": "Tema: {{mode}} (klicka för att växla)"
+  },
   "home": {
     "welcome": "Välkommen, {{name}}",
     "appName": "Minerva",

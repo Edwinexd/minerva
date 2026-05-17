@@ -162,6 +162,16 @@ async fn regenerate(
             { "role": "system", "content": SYSTEM_PROMPT },
             { "role": "user", "content": format!("{USER_TEMPLATE_PREFIX}\n\n{grounding}") },
         ],
+        // Cerebras strict mode rejects `minItems`/`maxItems`
+        // (400 wrong_api_format; same constraint that bit aegis
+        // and the chat suggestions array). The
+        // exactly-three-questions ceiling is enforced two other
+        // ways: the system prompt explicitly says "Output exactly
+        // three questions", and the parse step below clamps with
+        // `.take(QUESTIONS_PER_REGEN)`. A model that returns
+        // fewer than three degrades gracefully; the frontend
+        // hides the strip on zero and renders whatever it gets
+        // for 1-2.
         "response_format": {
             "type": "json_schema",
             "json_schema": {
@@ -175,8 +185,6 @@ async fn regenerate(
                         "questions": {
                             "type": "array",
                             "items": { "type": "string" },
-                            "minItems": QUESTIONS_PER_REGEN,
-                            "maxItems": QUESTIONS_PER_REGEN,
                         }
                     }
                 }

@@ -145,10 +145,13 @@ struct MessageResponse {
     /// embed UI can render "Thought for Ns" symmetrically with the
     /// regular chat.
     thinking_ms: Option<i32>,
-    /// Research/agentic token subtotal; mirrors the chat-route
-    /// field so the embed bubble can render the same
-    /// `N tokens (A research + B writeup)` breakdown.
-    research_tokens: Option<i32>,
+    /// Research-phase prompt-token share of `tokens_prompt`; mirrors
+    /// the chat-route field so the embed bubble can nest research /
+    /// writeup under the prompt total.
+    research_prompt_tokens: Option<i32>,
+    /// Research-phase completion-token share of `tokens_completion`;
+    /// mirrors the chat-route field.
+    research_completion_tokens: Option<i32>,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -340,7 +343,8 @@ async fn get_conversation(
                 thinking_transcript: m.thinking_transcript,
                 tool_events: m.tool_events,
                 thinking_ms: m.thinking_ms,
-                research_tokens: m.research_tokens,
+                research_prompt_tokens: m.research_prompt_tokens,
+                research_completion_tokens: m.research_completion_tokens,
                 created_at: m.created_at,
             })
             .collect(),

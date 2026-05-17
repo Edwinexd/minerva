@@ -177,12 +177,17 @@ struct MessageResponse {
     /// Research-phase wall-clock duration in milliseconds. Lets the
     /// frontend render "Thought for Ns" on past messages.
     thinking_ms: Option<i32>,
-    /// Subtotal of `tokens_prompt + tokens_completion` consumed by
-    /// the research/agentic phase. Frontend renders the per-message
-    /// footer as `N tokens (A research + B writeup)` when this is
-    /// non-NULL. NULL on legacy single-pass messages and on user
-    /// messages.
-    research_tokens: Option<i32>,
+    /// Research-phase prompt-token share of `tokens_prompt`. Lets the
+    /// frontend render research / writeup as honest subsets of the
+    /// prompt and completion totals (writeup prompt =
+    /// `tokens_prompt - research_prompt_tokens`). NULL on legacy
+    /// single-pass messages and on user messages.
+    research_prompt_tokens: Option<i32>,
+    /// Research-phase completion-token share of `tokens_completion`.
+    /// Writeup completion = `tokens_completion -
+    /// research_completion_tokens`. NULL on legacy single-pass
+    /// messages and on user messages.
+    research_completion_tokens: Option<i32>,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -1062,7 +1067,8 @@ async fn get_conversation(
                 thinking_transcript: m.thinking_transcript,
                 tool_events: m.tool_events,
                 thinking_ms: m.thinking_ms,
-                research_tokens: m.research_tokens,
+                research_prompt_tokens: m.research_prompt_tokens,
+                research_completion_tokens: m.research_completion_tokens,
                 created_at: m.created_at,
             })
             .collect(),
@@ -1684,7 +1690,8 @@ pub(super) async fn run_chat_message(
         None,
         None,
         // User messages have no research transcript, tool events,
-        // thinking duration, or research-token split.
+        // thinking duration, or research-phase token split.
+        None,
         None,
         None,
         None,

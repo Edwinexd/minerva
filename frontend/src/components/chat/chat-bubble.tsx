@@ -107,11 +107,15 @@ export interface ChatBubbleMessage {
   tokens_prompt?: number | null
   tokens_completion?: number | null
   /**
-   * When non-null, the per-message footer renders the token total
-   * broken into `(A research + B writeup)`. `null` on legacy
-   * single-pass messages and on user messages.
+   * Research-phase prompt-token share of `tokens_prompt`. When
+   * both `research_prompt_tokens` and `research_completion_tokens`
+   * are non-null the per-message footer can break the total into
+   * `(A research + B writeup)`. `null` on legacy single-pass
+   * messages and on user messages.
    */
-  research_tokens?: number | null
+  research_prompt_tokens?: number | null
+  /** Research-phase completion-token share of `tokens_completion`. */
+  research_completion_tokens?: number | null
   generation_ms?: number | null
   retrieval_count?: number | null
 }
@@ -137,10 +141,10 @@ export interface ChatBubbleLabels {
     tokensUsed: (count: number) => string
     /**
      * Renders the per-message research vs writeup split when the
-     * message carries a `research_tokens` value. Receives the
-     * pre-formatted research and writeup counts and returns the
-     * complete footer fragment (e.g. ` (123 research + 456
-     * writeup)`).
+     * message carries `research_prompt_tokens` /
+     * `research_completion_tokens`. Receives the summed research
+     * count and the derived writeup count and returns the complete
+     * footer fragment (e.g. ` (123 research + 456 writeup)`).
      */
     tokenBreakdown: (research: number, writeup: number) => string
     generationTime: (seconds: string) => string
@@ -320,21 +324,30 @@ export function ChatBubble({
                   message.tokens_prompt + (message.tokens_completion ?? 0),
                 )}
                 {/*
-                  When the message has a stored research-token
-                  subtotal, append ` (A research + B writeup)`
-                  immediately after the headline `N tokens`
-                  number. NULL on legacy single-pass messages, in
-                  which case this whole fragment is skipped and
-                  the headline stays opaque.
+                  When the message has stored research subtotals,
+                  append ` (A research + B writeup)` immediately
+                  after the headline `N tokens` number. The
+                  research total sums the prompt + completion
+                  shares; the writeup total is the rest of the
+                  message's combined tokens. NULL on legacy
+                  single-pass messages, in which case this
+                  fragment is skipped and the headline stays
+                  opaque.
                 */}
-                {message.research_tokens != null &&
+                {message.research_prompt_tokens != null &&
+                  message.research_completion_tokens != null &&
                   message.tokens_prompt != null &&
-                  labels.stats.tokenBreakdown(
-                    message.research_tokens,
-                    message.tokens_prompt +
-                      (message.tokens_completion ?? 0) -
-                      message.research_tokens,
-                  )}
+                  (() => {
+                    const research =
+                      message.research_prompt_tokens +
+                      message.research_completion_tokens
+                    const total =
+                      message.tokens_prompt + (message.tokens_completion ?? 0)
+                    return labels.stats!.tokenBreakdown(
+                      research,
+                      total - research,
+                    )
+                  })()}
                 {message.generation_ms != null &&
                   labels.stats.generationTime(
                     (message.generation_ms / 1000).toFixed(1),

@@ -93,11 +93,11 @@
   },
   "usage": {
     "totalTokens": "Totalt antal tokens",
+    "promptTokens": "Prompt-tokens",
+    "completionTokens": "Completion-tokens",
     "totalRequests": "Totalt antal förfrågningar",
-    "activeCourses": "Aktiva kurser",
-    "researchShare": "Research-andel",
-    "researchShareHint": "Andel av totala tokens som gick till den agentiska research-fasen.",
-    "tokenBreakdown": "{{research}} research + {{writeup}} writeup",
+    "activeCoursesLine": "över {{count}} aktiva kurser",
+    "subsetBreakdown": "{{research}} research + {{writeup}} writeup",
     "byCourseTitle": "Användning per kurs",
     "byCourseEmpty": "Ingen användningsdata än.",
     "topUsersTitle": "Toppanvändare efter tokenanvändning",
@@ -105,8 +105,6 @@
     "columns": {
       "course": "Kurs",
       "tokens": "Tokens",
-      "research": "Research",
-      "writeup": "Writeup",
       "requests": "Förfrågningar",
       "limit": "Gräns",
       "user": "Användare"

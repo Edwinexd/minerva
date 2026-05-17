@@ -93,11 +93,11 @@
   },
   "usage": {
     "totalTokens": "Total Tokens",
+    "promptTokens": "Prompt Tokens",
+    "completionTokens": "Completion Tokens",
     "totalRequests": "Total Requests",
-    "activeCourses": "Active Courses",
-    "researchShare": "Research Share",
-    "researchShareHint": "Share of total tokens spent on the agentic research phase.",
-    "tokenBreakdown": "{{research}} research + {{writeup}} writeup",
+    "activeCoursesLine": "across {{count}} active courses",
+    "subsetBreakdown": "{{research}} research + {{writeup}} writeup",
     "byCourseTitle": "Usage by Course",
     "byCourseEmpty": "No usage data yet.",
     "topUsersTitle": "Top Users by Token Usage",
@@ -105,8 +105,6 @@
     "columns": {
       "course": "Course",
       "tokens": "Tokens",
-      "research": "Research",
-      "writeup": "Writeup",
       "requests": "Requests",
       "limit": "Limit",
       "user": "User"

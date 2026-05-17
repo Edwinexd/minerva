@@ -249,14 +249,16 @@ export interface UsageRecord {
   completion_tokens: number
   embedding_tokens: number
   /**
-   * Subtotal of (prompt + completion) consumed by the research /
-   * agentic phase across this row's chat calls. Lets the
-   * teacher/admin usage views break the daily total into research vs
-   * writeup. Zero on days where no `tool_use_enabled` chat traffic
-   * happened. Backend: `usage_daily.research_tokens` (see
-   * `migrations/20260519000004_research_tokens.sql`).
+   * Research-phase prompt-token share of `prompt_tokens`. Lets the
+   * teacher/admin usage views nest research / writeup as honest
+   * subsets of the prompt and completion totals (writeup prompt =
+   * `prompt_tokens - research_prompt_tokens`). Zero on days without
+   * `tool_use_enabled` chat traffic. Backend column lives in
+   * `usage_daily` (see `migrations/20260519000004_research_tokens.sql`).
    */
-  research_tokens: number
+  research_prompt_tokens: number
+  /** Research-phase completion-token share of `completion_tokens`. */
+  research_completion_tokens: number
   request_count: number
 }
 
@@ -582,13 +584,17 @@ export interface Message {
    */
   thinking_ms: number | null
   /**
-   * Subtotal of `tokens_prompt + tokens_completion` consumed by
-   * the research/agentic phase. When non-null the per-message
-   * footer renders `N tokens (A research + B writeup)`. `null`
-   * on legacy single-pass assistant messages and on user
-   * messages.
+   * Research-phase prompt-token share of `tokens_prompt`. When
+   * non-null the per-message footer can break the prompt total
+   * into `research + writeup`. `null` on legacy single-pass
+   * assistant messages and on user messages.
    */
-  research_tokens: number | null
+  research_prompt_tokens: number | null
+  /**
+   * Research-phase completion-token share of `tokens_completion`.
+   * Same null semantics as `research_prompt_tokens`.
+   */
+  research_completion_tokens: number | null
   created_at: string
 }
 

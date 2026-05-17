@@ -10,15 +10,19 @@ pub struct UsageDailyRow {
     pub completion_tokens: i64,
     pub embedding_tokens: i64,
     pub request_count: i32,
-    /// Subtotal of `prompt_tokens + completion_tokens` consumed by
-    /// the research/agentic phase across the day's chat calls.
-    /// Lets the teacher usage view break the daily total into
-    /// `research + writeup` (writeup = `prompt + completion -
-    /// research`). Backfills to 0 on rows that predate the column,
-    /// matching the migration default.
-    pub research_tokens: i64,
+    /// Research-phase prompt-token share of `prompt_tokens` for the
+    /// day. Lets the teacher usage view nest research/writeup under
+    /// the prompt total (writeup = `prompt_tokens -
+    /// research_prompt_tokens`). Backfills to 0 on rows that predate
+    /// the column, matching the migration default.
+    pub research_prompt_tokens: i64,
+    /// Research-phase completion-token share of `completion_tokens`
+    /// for the day. Writeup share is `completion_tokens -
+    /// research_completion_tokens`.
+    pub research_completion_tokens: i64,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn record_usage(
     db: &PgPool,
     user_id: Uuid,
@@ -26,24 +30,27 @@ pub async fn record_usage(
     prompt_tokens: i64,
     completion_tokens: i64,
     embedding_tokens: i64,
-    research_tokens: i64,
+    research_prompt_tokens: i64,
+    research_completion_tokens: i64,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
-        r#"INSERT INTO usage_daily (user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, research_tokens, request_count)
-        VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, 1)
+        r#"INSERT INTO usage_daily (user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, research_prompt_tokens, research_completion_tokens, request_count)
+        VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, 1)
         ON CONFLICT (user_id, course_id, date)
         DO UPDATE SET
             prompt_tokens = usage_daily.prompt_tokens + $3,
             completion_tokens = usage_daily.completion_tokens + $4,
             embedding_tokens = usage_daily.embedding_tokens + $5,
-            research_tokens = usage_daily.research_tokens + $6,
+            research_prompt_tokens = usage_daily.research_prompt_tokens + $6,
+            research_completion_tokens = usage_daily.research_completion_tokens + $7,
             request_count = usage_daily.request_count + 1"#,
         user_id,
         course_id,
         prompt_tokens,
         completion_tokens,
         embedding_tokens,
-        research_tokens,
+        research_prompt_tokens,
+        research_completion_tokens,
     )
     .execute(db)
     .await?;
@@ -56,7 +63,7 @@ pub async fn get_course_usage(
 ) -> Result<Vec<UsageDailyRow>, sqlx::Error> {
     sqlx::query_as!(
         UsageDailyRow,
-        "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_tokens FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
+        "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
         course_id,
     )
     .fetch_all(db)
@@ -66,7 +73,7 @@ pub async fn get_course_usage(
 pub async fn get_all_usage(db: &PgPool) -> Result<Vec<UsageDailyRow>, sqlx::Error> {
     sqlx::query_as!(
         UsageDailyRow,
-        "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_tokens FROM usage_daily ORDER BY date DESC",
+        "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily ORDER BY date DESC",
     )
     .fetch_all(db)
     .await

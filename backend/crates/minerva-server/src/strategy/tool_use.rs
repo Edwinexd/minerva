@@ -325,12 +325,15 @@ pub async fn run(
         (prelim_count + research.tool_calls_executed + research.flare_injections) as i32;
 
     // Split of the message's token total into research vs writeup.
-    // The frontend uses this to render `N tokens (A research + B
-    // writeup)` and the daily-usage views aggregate `research_tokens`
-    // for per-course / per-user breakdowns. `i32` cap is fine: the
-    // per-message token cap is bounded by the per-response budget
-    // (200K default), well under i32::MAX.
-    let research_tokens = research.total_prompt_tokens + research.total_completion_tokens;
+    // Tracked separately for prompt and completion so the
+    // per-message footer and the daily-usage dashboards can render
+    // research / writeup as honest subsets of the prompt and
+    // completion totals (writeup_prompt = `total_prompt -
+    // research_prompt`, writeup_completion = `total_completion -
+    // research_completion`). `i32` cap is fine: the per-message
+    // token budget (200K default) is well under i32::MAX.
+    let research_prompt_tokens = research.total_prompt_tokens;
+    let research_completion_tokens = research.total_completion_tokens;
 
     common::finalize(
         &ctx,
@@ -345,7 +348,8 @@ pub async fn run(
         thinking_transcript,
         tool_events_json.as_ref(),
         Some(research.duration_ms.clamp(0, i32::MAX as i64) as i32),
-        Some(research_tokens),
+        Some(research_prompt_tokens),
+        Some(research_completion_tokens),
     )
     .await;
 }

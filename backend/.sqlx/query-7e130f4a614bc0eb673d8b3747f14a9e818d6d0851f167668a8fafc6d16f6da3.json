@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_tokens)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)\n        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_tokens, created_at",
+  "query": "INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)\n        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens, created_at",
   "describe": {
     "columns": [
       {
@@ -70,11 +70,16 @@
       },
       {
         "ordinal": 13,
-        "name": "research_tokens",
+        "name": "research_prompt_tokens",
         "type_info": "Int4"
       },
       {
         "ordinal": 14,
+        "name": "research_completion_tokens",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -94,6 +99,7 @@
         "Text",
         "Jsonb",
         "Int4",
+        "Int4",
         "Int4"
       ]
     },
@@ -112,8 +118,9 @@
       true,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "801f75350d068cce3ec7be3d45084480956f11629b29c381a921e4f15daa456b"
+  "hash": "7e130f4a614bc0eb673d8b3747f14a9e818d6d0851f167668a8fafc6d16f6da3"
 }

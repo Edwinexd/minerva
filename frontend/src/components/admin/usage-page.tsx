@@ -31,63 +31,108 @@ export function PlatformUsagePanel() {
   const courseMap = new Map(courses.map((c) => [c.id, c]))
   const userMap = new Map((users ?? []).map((u) => [u.id, u]))
 
-  const byCourse = new Map<
-    string,
-    { tokens: number; research: number; requests: number }
-  >()
+  // Aggregations keep prompt vs completion (input/output axis) and
+  // research vs writeup (phase axis) as orthogonal slices, so the
+  // dashboard can nest the phase split *under* the prompt and
+  // completion totals rather than promoting research/writeup to
+  // flat siblings of prompt/completion.
+  type Agg = {
+    prompt: number
+    completion: number
+    researchPrompt: number
+    researchCompletion: number
+    requests: number
+  }
+  const emptyAgg = (): Agg => ({
+    prompt: 0,
+    completion: 0,
+    researchPrompt: 0,
+    researchCompletion: 0,
+    requests: 0,
+  })
+
+  const byCourse = new Map<string, Agg>()
   for (const row of usage) {
-    const existing = byCourse.get(row.course_id) ?? {
-      tokens: 0,
-      research: 0,
-      requests: 0,
-    }
-    existing.tokens += row.prompt_tokens + row.completion_tokens
-    existing.research += row.research_tokens
+    const existing = byCourse.get(row.course_id) ?? emptyAgg()
+    existing.prompt += row.prompt_tokens
+    existing.completion += row.completion_tokens
+    existing.researchPrompt += row.research_prompt_tokens
+    existing.researchCompletion += row.research_completion_tokens
     existing.requests += row.request_count
     byCourse.set(row.course_id, existing)
   }
 
-  const totalTokens = usage.reduce(
-    (sum, r) => sum + r.prompt_tokens + r.completion_tokens,
-    0,
-  )
-  const totalResearch = usage.reduce((sum, r) => sum + r.research_tokens, 0)
-  const totalWriteup = totalTokens - totalResearch
-  const totalRequests = usage.reduce((sum, r) => sum + r.request_count, 0)
-
-  const byUser = new Map<
-    string,
-    { tokens: number; research: number; requests: number }
-  >()
+  const byUser = new Map<string, Agg>()
   for (const row of usage) {
-    const existing = byUser.get(row.user_id) ?? {
-      tokens: 0,
-      research: 0,
-      requests: 0,
-    }
-    existing.tokens += row.prompt_tokens + row.completion_tokens
-    existing.research += row.research_tokens
+    const existing = byUser.get(row.user_id) ?? emptyAgg()
+    existing.prompt += row.prompt_tokens
+    existing.completion += row.completion_tokens
+    existing.researchPrompt += row.research_prompt_tokens
+    existing.researchCompletion += row.research_completion_tokens
     existing.requests += row.request_count
     byUser.set(row.user_id, existing)
   }
 
-  const sortedUsers = [...byUser.entries()].sort(
-    (a, b) => b[1].tokens - a[1].tokens,
+  const totalPrompt = usage.reduce((s, r) => s + r.prompt_tokens, 0)
+  const totalCompletion = usage.reduce((s, r) => s + r.completion_tokens, 0)
+  const totalResearchPrompt = usage.reduce(
+    (s, r) => s + r.research_prompt_tokens,
+    0,
   )
+  const totalResearchCompletion = usage.reduce(
+    (s, r) => s + r.research_completion_tokens,
+    0,
+  )
+  const totalTokens = totalPrompt + totalCompletion
+  const totalResearch = totalResearchPrompt + totalResearchCompletion
+  const totalRequests = usage.reduce((sum, r) => sum + r.request_count, 0)
+
+  const sortedUsers = [...byUser.entries()].sort(
+    (a, b) =>
+      b[1].prompt + b[1].completion - (a[1].prompt + a[1].completion),
+  )
+
+  const fmtSubset = (research: number, writeup: number): string =>
+    t("usage.subsetBreakdown", {
+      research: research.toLocaleString(),
+      writeup: writeup.toLocaleString(),
+    })
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>{t("usage.totalTokens")}</CardDescription>
             <CardTitle className="text-2xl">{totalTokens.toLocaleString()}</CardTitle>
             {totalResearch > 0 && (
               <p className="text-xs text-muted-foreground">
-                {t("usage.tokenBreakdown", {
-                  research: totalResearch.toLocaleString(),
-                  writeup: totalWriteup.toLocaleString(),
-                })}
+                {fmtSubset(totalResearch, totalTokens - totalResearch)}
+              </p>
+            )}
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>{t("usage.promptTokens")}</CardDescription>
+            <CardTitle className="text-2xl">{totalPrompt.toLocaleString()}</CardTitle>
+            {totalResearchPrompt > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {fmtSubset(totalResearchPrompt, totalPrompt - totalResearchPrompt)}
+              </p>
+            )}
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>{t("usage.completionTokens")}</CardDescription>
+            <CardTitle className="text-2xl">{totalCompletion.toLocaleString()}</CardTitle>
+            {totalResearchCompletion > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {fmtSubset(
+                  totalResearchCompletion,
+                  totalCompletion - totalResearchCompletion,
+                )}
               </p>
             )}
           </CardHeader>
@@ -96,24 +141,8 @@ export function PlatformUsagePanel() {
           <CardHeader className="pb-2">
             <CardDescription>{t("usage.totalRequests")}</CardDescription>
             <CardTitle className="text-2xl">{totalRequests.toLocaleString()}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>{t("usage.activeCourses")}</CardDescription>
-            <CardTitle className="text-2xl">{courses.length}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>{t("usage.researchShare")}</CardDescription>
-            <CardTitle className="text-2xl">
-              {totalTokens > 0
-                ? `${((totalResearch / totalTokens) * 100).toFixed(1)}%`
-                : "0%"}
-            </CardTitle>
             <p className="text-xs text-muted-foreground">
-              {t("usage.researchShareHint")}
+              {t("usage.activeCoursesLine", { count: courses.length })}
             </p>
           </CardHeader>
         </Card>
@@ -133,31 +162,32 @@ export function PlatformUsagePanel() {
                   <tr className="border-b text-left">
                     <th className="py-2 pr-4 font-medium">{t("usage.columns.course")}</th>
                     <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.tokens")}</th>
-                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.research")}</th>
-                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.writeup")}</th>
                     <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.requests")}</th>
                     <th className="py-2 font-medium text-right">{t("usage.columns.limit")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {[...byCourse.entries()]
-                    .sort((a, b) => b[1].tokens - a[1].tokens)
+                    .sort(
+                      (a, b) =>
+                        b[1].prompt + b[1].completion - (a[1].prompt + a[1].completion),
+                    )
                     .map(([courseId, stats]) => {
                       const course = courseMap.get(courseId)
-                      const writeup = stats.tokens - stats.research
+                      const total = stats.prompt + stats.completion
+                      const research = stats.researchPrompt + stats.researchCompletion
                       return (
-                        <tr key={courseId} className="border-b">
+                        <tr key={courseId} className="border-b align-top">
                           <td className="py-2 pr-4">
                             {course?.name ?? courseId.slice(0, 8)}
                           </td>
                           <td className="py-2 pr-4 text-right font-mono">
-                            {stats.tokens.toLocaleString()}
-                          </td>
-                          <td className="py-2 pr-4 text-right font-mono text-muted-foreground">
-                            {stats.research.toLocaleString()}
-                          </td>
-                          <td className="py-2 pr-4 text-right font-mono text-muted-foreground">
-                            {writeup.toLocaleString()}
+                            {total.toLocaleString()}
+                            {research > 0 && (
+                              <span className="block text-[10px] font-normal text-muted-foreground/80">
+                                {fmtSubset(research, total - research)}
+                              </span>
+                            )}
                           </td>
                           <td className="py-2 pr-4 text-right font-mono">
                             {stats.requests.toLocaleString()}
@@ -193,28 +223,26 @@ export function PlatformUsagePanel() {
                   <tr className="border-b text-left">
                     <th className="py-2 pr-4 font-medium">{t("usage.columns.user")}</th>
                     <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.tokens")}</th>
-                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.research")}</th>
-                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.writeup")}</th>
                     <th className="py-2 font-medium text-right">{t("usage.columns.requests")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedUsers.slice(0, 50).map(([userId, stats]) => {
                     const u = userMap.get(userId)
-                    const writeup = stats.tokens - stats.research
+                    const total = stats.prompt + stats.completion
+                    const research = stats.researchPrompt + stats.researchCompletion
                     return (
-                      <tr key={userId} className="border-b">
+                      <tr key={userId} className="border-b align-top">
                         <td className="py-2 pr-4">
                           {u?.display_name ?? u?.eppn ?? userId.slice(0, 8)}
                         </td>
                         <td className="py-2 pr-4 text-right font-mono">
-                          {stats.tokens.toLocaleString()}
-                        </td>
-                        <td className="py-2 pr-4 text-right font-mono text-muted-foreground">
-                          {stats.research.toLocaleString()}
-                        </td>
-                        <td className="py-2 pr-4 text-right font-mono text-muted-foreground">
-                          {writeup.toLocaleString()}
+                          {total.toLocaleString()}
+                          {research > 0 && (
+                            <span className="block text-[10px] font-normal text-muted-foreground/80">
+                              {fmtSubset(research, total - research)}
+                            </span>
+                          )}
                         </td>
                         <td className="py-2 text-right font-mono">
                           {stats.requests.toLocaleString()}

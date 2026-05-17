@@ -1034,6 +1034,7 @@ pub async fn finalize(
     thinking_transcript: Option<&str>,
     tool_events: Option<&serde_json::Value>,
     thinking_ms: Option<i32>,
+    research_tokens: Option<i32>,
 ) {
     let assistant_msg_id = uuid::Uuid::new_v4();
     let _ = minerva_db::queries::conversations::insert_message(
@@ -1051,6 +1052,7 @@ pub async fn finalize(
         thinking_transcript,
         tool_events,
         thinking_ms,
+        research_tokens,
     )
     .await;
 
@@ -1073,6 +1075,11 @@ pub async fn finalize(
         prompt_tokens as i64,
         completion_tokens as i64,
         0,
+        // research_tokens daily-aggregate signal; legacy strategies
+        // pass None on the message column, which we treat as 0
+        // here. usage_daily uses BIGINT so the 32-bit cap on the
+        // per-message column doesn't matter at the aggregate.
+        research_tokens.unwrap_or(0) as i64,
     )
     .await;
 
@@ -1082,6 +1089,7 @@ pub async fn finalize(
                 "type": "done",
                 "tokens_prompt": prompt_tokens,
                 "tokens_completion": completion_tokens,
+                "research_tokens": research_tokens,
                 "rag_injected": rag_injected,
                 "chunks_used": chunks_json,
                 "generation_ms": generation_ms,

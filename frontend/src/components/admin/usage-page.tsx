@@ -31,10 +31,18 @@ export function PlatformUsagePanel() {
   const courseMap = new Map(courses.map((c) => [c.id, c]))
   const userMap = new Map((users ?? []).map((u) => [u.id, u]))
 
-  const byCourse = new Map<string, { tokens: number; requests: number }>()
+  const byCourse = new Map<
+    string,
+    { tokens: number; research: number; requests: number }
+  >()
   for (const row of usage) {
-    const existing = byCourse.get(row.course_id) ?? { tokens: 0, requests: 0 }
+    const existing = byCourse.get(row.course_id) ?? {
+      tokens: 0,
+      research: 0,
+      requests: 0,
+    }
     existing.tokens += row.prompt_tokens + row.completion_tokens
+    existing.research += row.research_tokens
     existing.requests += row.request_count
     byCourse.set(row.course_id, existing)
   }
@@ -43,12 +51,22 @@ export function PlatformUsagePanel() {
     (sum, r) => sum + r.prompt_tokens + r.completion_tokens,
     0,
   )
+  const totalResearch = usage.reduce((sum, r) => sum + r.research_tokens, 0)
+  const totalWriteup = totalTokens - totalResearch
   const totalRequests = usage.reduce((sum, r) => sum + r.request_count, 0)
 
-  const byUser = new Map<string, { tokens: number; requests: number }>()
+  const byUser = new Map<
+    string,
+    { tokens: number; research: number; requests: number }
+  >()
   for (const row of usage) {
-    const existing = byUser.get(row.user_id) ?? { tokens: 0, requests: 0 }
+    const existing = byUser.get(row.user_id) ?? {
+      tokens: 0,
+      research: 0,
+      requests: 0,
+    }
     existing.tokens += row.prompt_tokens + row.completion_tokens
+    existing.research += row.research_tokens
     existing.requests += row.request_count
     byUser.set(row.user_id, existing)
   }
@@ -59,11 +77,19 @@ export function PlatformUsagePanel() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>{t("usage.totalTokens")}</CardDescription>
             <CardTitle className="text-2xl">{totalTokens.toLocaleString()}</CardTitle>
+            {totalResearch > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t("usage.tokenBreakdown", {
+                  research: totalResearch.toLocaleString(),
+                  writeup: totalWriteup.toLocaleString(),
+                })}
+              </p>
+            )}
           </CardHeader>
         </Card>
         <Card>
@@ -76,6 +102,19 @@ export function PlatformUsagePanel() {
           <CardHeader className="pb-2">
             <CardDescription>{t("usage.activeCourses")}</CardDescription>
             <CardTitle className="text-2xl">{courses.length}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>{t("usage.researchShare")}</CardDescription>
+            <CardTitle className="text-2xl">
+              {totalTokens > 0
+                ? `${((totalResearch / totalTokens) * 100).toFixed(1)}%`
+                : "0%"}
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              {t("usage.researchShareHint")}
+            </p>
           </CardHeader>
         </Card>
       </div>
@@ -94,6 +133,8 @@ export function PlatformUsagePanel() {
                   <tr className="border-b text-left">
                     <th className="py-2 pr-4 font-medium">{t("usage.columns.course")}</th>
                     <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.tokens")}</th>
+                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.research")}</th>
+                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.writeup")}</th>
                     <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.requests")}</th>
                     <th className="py-2 font-medium text-right">{t("usage.columns.limit")}</th>
                   </tr>
@@ -103,6 +144,7 @@ export function PlatformUsagePanel() {
                     .sort((a, b) => b[1].tokens - a[1].tokens)
                     .map(([courseId, stats]) => {
                       const course = courseMap.get(courseId)
+                      const writeup = stats.tokens - stats.research
                       return (
                         <tr key={courseId} className="border-b">
                           <td className="py-2 pr-4">
@@ -110,6 +152,12 @@ export function PlatformUsagePanel() {
                           </td>
                           <td className="py-2 pr-4 text-right font-mono">
                             {stats.tokens.toLocaleString()}
+                          </td>
+                          <td className="py-2 pr-4 text-right font-mono text-muted-foreground">
+                            {stats.research.toLocaleString()}
+                          </td>
+                          <td className="py-2 pr-4 text-right font-mono text-muted-foreground">
+                            {writeup.toLocaleString()}
                           </td>
                           <td className="py-2 pr-4 text-right font-mono">
                             {stats.requests.toLocaleString()}
@@ -145,12 +193,15 @@ export function PlatformUsagePanel() {
                   <tr className="border-b text-left">
                     <th className="py-2 pr-4 font-medium">{t("usage.columns.user")}</th>
                     <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.tokens")}</th>
+                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.research")}</th>
+                    <th className="py-2 pr-4 font-medium text-right">{t("usage.columns.writeup")}</th>
                     <th className="py-2 font-medium text-right">{t("usage.columns.requests")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedUsers.slice(0, 50).map(([userId, stats]) => {
                     const u = userMap.get(userId)
+                    const writeup = stats.tokens - stats.research
                     return (
                       <tr key={userId} className="border-b">
                         <td className="py-2 pr-4">
@@ -158,6 +209,12 @@ export function PlatformUsagePanel() {
                         </td>
                         <td className="py-2 pr-4 text-right font-mono">
                           {stats.tokens.toLocaleString()}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-muted-foreground">
+                          {stats.research.toLocaleString()}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-muted-foreground">
+                          {writeup.toLocaleString()}
                         </td>
                         <td className="py-2 text-right font-mono">
                           {stats.requests.toLocaleString()}

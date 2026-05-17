@@ -248,6 +248,15 @@ export interface UsageRecord {
   prompt_tokens: number
   completion_tokens: number
   embedding_tokens: number
+  /**
+   * Subtotal of (prompt + completion) consumed by the research /
+   * agentic phase across this row's chat calls. Lets the
+   * teacher/admin usage views break the daily total into research vs
+   * writeup. Zero on days where no `tool_use_enabled` chat traffic
+   * happened. Backend: `usage_daily.research_tokens` (see
+   * `migrations/20260519000004_research_tokens.sql`).
+   */
+  research_tokens: number
   request_count: number
 }
 
@@ -572,6 +581,14 @@ export interface Message {
    * symmetrical with the live-stream timer.
    */
   thinking_ms: number | null
+  /**
+   * Subtotal of `tokens_prompt + tokens_completion` consumed by
+   * the research/agentic phase. When non-null the per-message
+   * footer renders `N tokens (A research + B writeup)`. `null`
+   * on legacy single-pass assistant messages and on user
+   * messages.
+   */
+  research_tokens: number | null
   created_at: string
 }
 

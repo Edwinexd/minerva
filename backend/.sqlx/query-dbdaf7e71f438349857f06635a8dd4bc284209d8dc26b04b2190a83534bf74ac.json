@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
+  "query": "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_tokens FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,11 @@
         "ordinal": 6,
         "name": "request_count",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "research_tokens",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
@@ -51,8 +56,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "6699c3975fc536aaf013f2d1bb36eae734f9ad5464b2161abd7beab667052901"
+  "hash": "dbdaf7e71f438349857f06635a8dd4bc284209d8dc26b04b2190a83534bf74ac"
 }

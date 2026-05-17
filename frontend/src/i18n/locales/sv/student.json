@@ -37,6 +37,7 @@
   "message": {
     "tokensUsed_one": "{{count}} token",
     "tokensUsed_other": "{{count}} tokens",
+    "tokenBreakdown": " ({{research}} research + {{writeup}} writeup)",
     "generationTime": " på {{seconds}} s",
     "usingSuffix": " med",
     "source_one": "{{count}} källa",

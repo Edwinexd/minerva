@@ -796,6 +796,7 @@ mod tests {
             thinking_transcript: None,
             tool_events: None,
             thinking_ms: None,
+            research_tokens: None,
             created_at: chrono::Utc::now(),
         };
         let h = vec![mk("user", "u1"), mk("assistant", "a1"), mk("user", "u2")];
@@ -823,6 +824,7 @@ mod tests {
             thinking_transcript: None,
             tool_events: None,
             thinking_ms: None,
+            research_tokens: None,
             created_at: chrono::Utc::now(),
         };
         let h = vec![mk("user"), mk("assistant"), mk("user"), mk("assistant")];

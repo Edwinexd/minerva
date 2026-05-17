@@ -37,6 +37,7 @@
   "message": {
     "tokensUsed_one": "{{count}} token",
     "tokensUsed_other": "{{count}} tokens",
+    "tokenBreakdown": " ({{research}} research + {{writeup}} writeup)",
     "generationTime": " in {{seconds}}s",
     "usingSuffix": " using",
     "source_one": "{{count}} source",

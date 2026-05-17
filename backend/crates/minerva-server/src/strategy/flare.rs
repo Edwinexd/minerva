@@ -326,7 +326,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         started_at.elapsed().as_millis() as i64,
         1 + output.restarts as i32,
         // Legacy FLARE path; no research transcript, no tool
-        // events, no thinking duration.
+        // events, no thinking duration, no research-token split.
+        None,
         None,
         None,
         None,

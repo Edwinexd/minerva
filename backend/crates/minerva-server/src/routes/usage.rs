@@ -26,6 +26,12 @@ struct UsageResponse {
     prompt_tokens: i64,
     completion_tokens: i64,
     embedding_tokens: i64,
+    /// Subtotal of `prompt + completion` consumed by the research /
+    /// agentic phase across this row's chat calls. Lets the
+    /// teacher/admin usage views break the daily total into
+    /// research vs writeup. Zero on days where no `tool_use_enabled`
+    /// chat traffic happened.
+    research_tokens: i64,
     request_count: i32,
 }
 
@@ -55,6 +61,7 @@ async fn get_course_usage(
                 prompt_tokens: r.prompt_tokens,
                 completion_tokens: r.completion_tokens,
                 embedding_tokens: r.embedding_tokens,
+                research_tokens: r.research_tokens,
                 request_count: r.request_count,
             })
             .collect(),
@@ -146,6 +153,7 @@ async fn get_all_usage(
                 prompt_tokens: r.prompt_tokens,
                 completion_tokens: r.completion_tokens,
                 embedding_tokens: r.embedding_tokens,
+                research_tokens: r.research_tokens,
                 request_count: r.request_count,
             })
             .collect(),

@@ -19,6 +19,13 @@ interface UsageRow {
   prompt_tokens: number
   completion_tokens: number
   embedding_tokens: number
+  /**
+   * Subtotal of (prompt + completion) consumed by the research /
+   * agentic phase across this row's chat calls; zero on days without
+   * any `tool_use_enabled` traffic. Lets the teacher split the daily
+   * total into research vs writeup.
+   */
+  research_tokens: number
   request_count: number
 }
 
@@ -42,24 +49,28 @@ export function UsagePage({ useParams }: { useParams: () => { courseId: string }
     userMap.set(m.user_id, m.display_name || m.eppn || m.user_id)
   }
 
-  const byUser = new Map<string, { prompt: number; completion: number; embedding: number; requests: number }>()
+  const byUser = new Map<string, { prompt: number; completion: number; embedding: number; research: number; requests: number }>()
   for (const row of usage || []) {
-    const existing = byUser.get(row.user_id) || { prompt: 0, completion: 0, embedding: 0, requests: 0 }
+    const existing = byUser.get(row.user_id) || { prompt: 0, completion: 0, embedding: 0, research: 0, requests: 0 }
     existing.prompt += row.prompt_tokens
     existing.completion += row.completion_tokens
     existing.embedding += row.embedding_tokens
+    existing.research += row.research_tokens
     existing.requests += row.request_count
     byUser.set(row.user_id, existing)
   }
 
   let totalPrompt = 0
   let totalCompletion = 0
+  let totalResearch = 0
   let totalRequests = 0
   for (const v of byUser.values()) {
     totalPrompt += v.prompt
     totalCompletion += v.completion
+    totalResearch += v.research
     totalRequests += v.requests
   }
+  const totalWriteup = totalPrompt + totalCompletion - totalResearch
 
   return (
     <Card>
@@ -83,7 +94,7 @@ export function UsagePage({ useParams }: { useParams: () => { courseId: string }
 
         {byUser.size > 0 && (
           <>
-            <div className="grid grid-cols-4 gap-4 text-center">
+            <div className="grid grid-cols-3 gap-4 text-center sm:grid-cols-6">
               <div>
                 <p className="text-2xl font-bold">{formatTokens(totalPrompt + totalCompletion)}</p>
                 <p className="text-xs text-muted-foreground">{t("usage.totalTokens")}</p>
@@ -100,29 +111,45 @@ export function UsagePage({ useParams }: { useParams: () => { courseId: string }
                 <p className="text-2xl font-bold">{formatTokens(totalCompletion)}</p>
                 <p className="text-xs text-muted-foreground">{t("usage.completionTokens")}</p>
               </div>
+              <div>
+                <p className="text-2xl font-bold">{formatTokens(totalResearch)}</p>
+                <p className="text-xs text-muted-foreground">{t("usage.researchTokens")}</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{formatTokens(totalWriteup)}</p>
+                <p className="text-xs text-muted-foreground">{t("usage.writeupTokens")}</p>
+              </div>
             </div>
 
             <Separator />
 
             <div className="space-y-1">
-              <div className="grid grid-cols-5 gap-2 text-xs font-medium text-muted-foreground px-2 pb-1">
+              <div className="grid grid-cols-7 gap-2 text-xs font-medium text-muted-foreground px-2 pb-1">
                 <span>{t("usage.colUser")}</span>
                 <span className="text-right">{t("usage.colPrompt")}</span>
                 <span className="text-right">{t("usage.colCompletion")}</span>
+                <span className="text-right">{t("usage.colResearch")}</span>
+                <span className="text-right">{t("usage.colWriteup")}</span>
                 <span className="text-right">{t("usage.colTotal")}</span>
                 <span className="text-right">{t("usage.colRequests")}</span>
               </div>
               {Array.from(byUser.entries())
                 .sort((a, b) => (b[1].prompt + b[1].completion) - (a[1].prompt + a[1].completion))
-                .map(([userId, stats]) => (
-                  <div key={userId} className="grid grid-cols-5 gap-2 text-sm px-2 py-1.5 border-b last:border-0">
-                    <span className="truncate">{userMap.get(userId) || userId.slice(0, 8)}</span>
-                    <span className="text-right text-muted-foreground">{formatTokens(stats.prompt)}</span>
-                    <span className="text-right text-muted-foreground">{formatTokens(stats.completion)}</span>
-                    <span className="text-right font-medium">{formatTokens(stats.prompt + stats.completion)}</span>
-                    <span className="text-right text-muted-foreground">{stats.requests}</span>
-                  </div>
-                ))}
+                .map(([userId, stats]) => {
+                  const total = stats.prompt + stats.completion
+                  const writeup = total - stats.research
+                  return (
+                    <div key={userId} className="grid grid-cols-7 gap-2 text-sm px-2 py-1.5 border-b last:border-0">
+                      <span className="truncate">{userMap.get(userId) || userId.slice(0, 8)}</span>
+                      <span className="text-right text-muted-foreground">{formatTokens(stats.prompt)}</span>
+                      <span className="text-right text-muted-foreground">{formatTokens(stats.completion)}</span>
+                      <span className="text-right text-muted-foreground">{formatTokens(stats.research)}</span>
+                      <span className="text-right text-muted-foreground">{formatTokens(writeup)}</span>
+                      <span className="text-right font-medium">{formatTokens(total)}</span>
+                      <span className="text-right text-muted-foreground">{stats.requests}</span>
+                    </div>
+                  )
+                })}
             </div>
           </>
         )}
@@ -133,22 +160,30 @@ export function UsagePage({ useParams }: { useParams: () => { courseId: string }
             <div>
               <h4 className="text-sm font-medium mb-2">{t("usage.dailyBreakdown")}</h4>
               <div className="space-y-1 max-h-64 overflow-y-auto">
-                <div className="grid grid-cols-5 gap-2 text-xs font-medium text-muted-foreground px-2 pb-1">
+                <div className="grid grid-cols-7 gap-2 text-xs font-medium text-muted-foreground px-2 pb-1">
                   <span>{t("usage.colDate")}</span>
                   <span>{t("usage.colUser")}</span>
                   <span className="text-right">{t("usage.colPrompt")}</span>
                   <span className="text-right">{t("usage.colCompletion")}</span>
+                  <span className="text-right">{t("usage.colResearch")}</span>
+                  <span className="text-right">{t("usage.colWriteup")}</span>
                   <span className="text-right">{t("usage.colRequests")}</span>
                 </div>
-                {usage.map((row, i) => (
-                  <div key={i} className="grid grid-cols-5 gap-2 text-xs px-2 py-1 border-b last:border-0">
-                    <span>{row.date}</span>
-                    <span className="truncate">{userMap.get(row.user_id) || row.user_id.slice(0, 8)}</span>
-                    <span className="text-right">{formatTokens(row.prompt_tokens)}</span>
-                    <span className="text-right">{formatTokens(row.completion_tokens)}</span>
-                    <span className="text-right">{row.request_count}</span>
-                  </div>
-                ))}
+                {usage.map((row, i) => {
+                  const writeup =
+                    row.prompt_tokens + row.completion_tokens - row.research_tokens
+                  return (
+                    <div key={i} className="grid grid-cols-7 gap-2 text-xs px-2 py-1 border-b last:border-0">
+                      <span>{row.date}</span>
+                      <span className="truncate">{userMap.get(row.user_id) || row.user_id.slice(0, 8)}</span>
+                      <span className="text-right">{formatTokens(row.prompt_tokens)}</span>
+                      <span className="text-right">{formatTokens(row.completion_tokens)}</span>
+                      <span className="text-right">{formatTokens(row.research_tokens)}</span>
+                      <span className="text-right">{formatTokens(writeup)}</span>
+                      <span className="text-right">{row.request_count}</span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </>

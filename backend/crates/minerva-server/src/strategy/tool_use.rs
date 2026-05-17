@@ -324,6 +324,14 @@ pub async fn run(
     let retrieval_count =
         (prelim_count + research.tool_calls_executed + research.flare_injections) as i32;
 
+    // Split of the message's token total into research vs writeup.
+    // The frontend uses this to render `N tokens (A research + B
+    // writeup)` and the daily-usage views aggregate `research_tokens`
+    // for per-course / per-user breakdowns. `i32` cap is fine: the
+    // per-message token cap is bounded by the per-response budget
+    // (200K default), well under i32::MAX.
+    let research_tokens = research.total_prompt_tokens + research.total_completion_tokens;
+
     common::finalize(
         &ctx,
         &tx,
@@ -337,6 +345,7 @@ pub async fn run(
         thinking_transcript,
         tool_events_json.as_ref(),
         Some(research.duration_ms.clamp(0, i32::MAX as i64) as i32),
+        Some(research_tokens),
     )
     .await;
 }

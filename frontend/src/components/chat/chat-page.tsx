@@ -648,6 +648,8 @@ export function ChatWindow({
     sourceUnavailable: t("message.sourceUnavailable"),
     stats: {
       tokensUsed: (count) => t("message.tokensUsed", { count }),
+      tokenBreakdown: (research, writeup) =>
+        t("message.tokenBreakdown", { research, writeup }),
       generationTime: (seconds) => t("message.generationTime", { seconds }),
       usingSuffix: t("message.usingSuffix"),
       acrossRetrievals: (count) => t("message.acrossRetrievals", { count }),

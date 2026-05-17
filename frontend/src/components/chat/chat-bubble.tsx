@@ -106,6 +106,12 @@ export interface ChatBubbleMessage {
   chunks_used: string[] | null
   tokens_prompt?: number | null
   tokens_completion?: number | null
+  /**
+   * When non-null, the per-message footer renders the token total
+   * broken into `(A research + B writeup)`. `null` on legacy
+   * single-pass messages and on user messages.
+   */
+  research_tokens?: number | null
   generation_ms?: number | null
   retrieval_count?: number | null
 }
@@ -129,6 +135,14 @@ export interface ChatBubbleLabels {
    */
   stats?: {
     tokensUsed: (count: number) => string
+    /**
+     * Renders the per-message research vs writeup split when the
+     * message carries a `research_tokens` value. Receives the
+     * pre-formatted research and writeup counts and returns the
+     * complete footer fragment (e.g. ` (123 research + 456
+     * writeup)`).
+     */
+    tokenBreakdown: (research: number, writeup: number) => string
     generationTime: (seconds: string) => string
     usingSuffix: string
     acrossRetrievals: (count: number) => string
@@ -305,6 +319,22 @@ export function ChatBubble({
                 {labels.stats.tokensUsed(
                   message.tokens_prompt + (message.tokens_completion ?? 0),
                 )}
+                {/*
+                  When the message has a stored research-token
+                  subtotal, append ` (A research + B writeup)`
+                  immediately after the headline `N tokens`
+                  number. NULL on legacy single-pass messages, in
+                  which case this whole fragment is skipped and
+                  the headline stays opaque.
+                */}
+                {message.research_tokens != null &&
+                  message.tokens_prompt != null &&
+                  labels.stats.tokenBreakdown(
+                    message.research_tokens,
+                    message.tokens_prompt +
+                      (message.tokens_completion ?? 0) -
+                      message.research_tokens,
+                  )}
                 {message.generation_ms != null &&
                   labels.stats.generationTime(
                     (message.generation_ms / 1000).toFixed(1),

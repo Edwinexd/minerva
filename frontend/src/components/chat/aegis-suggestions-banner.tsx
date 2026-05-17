@@ -38,7 +38,7 @@
  * The dismiss X collapses the banner for THIS draft only; new
  * input regenerates a fresh verdict and the banner can return.
  */
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { ChevronDown, Wand2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -153,22 +153,26 @@ export function AegisSuggestionsBanner({
     () => JSON.stringify(suggestions.map((s) => [s.kind, s.text])),
     [suggestions],
   )
-  useEffect(() => {
+  // `expanded` is deliberately NOT reset here. If the student
+  // already had the tray open and a new verdict lands (e.g. they
+  // applied a rewrite, the input changed, and aegis returned a
+  // fresh set of suggestions), keeping the tray expanded lets
+  // them iterate without re-clicking Review every cycle. Fresh
+  // banner mounts still start collapsed via useState's initial
+  // value; this only protects an already-open tray from snapping
+  // shut on every analyzer turn.
+  //
+  // Adjust-state-on-prop-change during render is the React-docs-
+  // sanctioned alternative to setState-in-effect; see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevSigKey, setPrevSigKey] = useState(sigKey)
+  if (sigKey !== prevSigKey) {
+    setPrevSigKey(sigKey)
     setSelected(new Set(suggestions.map((_, i) => i)))
     setAnswers({})
     setCustomMode(new Set())
     setPreview(null)
-    // `expanded` is deliberately NOT reset here. If the student
-    // already had the tray open and a new verdict lands (e.g. they
-    // applied a rewrite, the input changed, and aegis returned a
-    // fresh set of suggestions), keeping the tray expanded lets
-    // them iterate without re-clicking Review every cycle. Fresh
-    // banner mounts still start collapsed via useState's initial
-    // value; this only protects an already-open tray from snapping
-    // shut on every analyzer turn.
-    // Re-run only on the structural signature, not on parent re-renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sigKey])
+  }
 
   const compactState: "idle" | "blocked" | "working" = working
     ? "working"

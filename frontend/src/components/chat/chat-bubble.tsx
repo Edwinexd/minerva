@@ -452,7 +452,17 @@ export function ChatBubble({
               <>
                 <button
                   className="underline hover:text-foreground"
-                  onClick={() => setShowSources(!showSources)}
+                  onClick={() => {
+                    // Toggling the count button is the "fresh open"
+                    // path: drop any sticky override left over from
+                    // a prior citation-badge click so the panel
+                    // defaults back to cited-only (the override flips
+                    // to `true` on badge click to guarantee the
+                    // clicked row is visible ; without this reset it
+                    // would persist across panel re-opens).
+                    if (!showSources) setUserShowUncitedOverride(null)
+                    setShowSources(!showSources)
+                  }}
                 >
                   {labels.sourceCount(visibleSourceCount)}
                   {showSources ? (

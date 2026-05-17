@@ -296,6 +296,15 @@ def chat_pipeline() -> graphviz.Digraph:
 
     _box(g, "student", "student message", shape="stadium")
 
+    with g.subgraph(name="cluster_aegis") as c:
+        c.attr(label="Aegis (pre-send, off hot path)", **CLUSTER_BASE)
+        _box(c, "aegis_analyze", "analyze draft",
+             subtitle="llama3.1-8b, debounced keystrokes")
+        _box(c, "aegis_rewrite", "rewrite on Use ideas",
+             subtitle="gpt-oss-120b")
+        c.edge("aegis_analyze", "aegis_rewrite",
+               label="optional", style="dashed")
+
     with g.subgraph(name="cluster_pre") as c:
         c.attr(label="Pre-generation guard", **CLUSTER_BASE)
         _box(c, "intent", "intent classifier", shape="diamond",
@@ -303,14 +312,19 @@ def chat_pipeline() -> graphviz.Digraph:
         _box(c, "lift", "kg_state refusal lift")
         _box(c, "strat", "strategy", shape="diamond", bold=False)
 
-    # All three strategies share retrieval -> KG -> prompt -> LLM. They differ
-    # in *when* retrieval runs relative to generation:
-    #   simple   : retrieve once, then generate.
-    #   parallel : start the LLM stream and retrieve concurrently; splice in
-    #              context as soon as it lands.
-    #   FLARE    : multi-turn. The LLM streams a sentence; if a token is
-    #              low-confidence, the partial sentence becomes the next
-    #              retrieval query and generation resumes (loop is capped).
+    # Both strategies share retrieval ; KG ; prompt ; LLM. They differ in
+    # *when* retrieval runs relative to generation:
+    #   simple : retrieve once, then generate.
+    #   FLARE  : multi-turn. The LLM streams a sentence; if a token is
+    #            low-confidence, the partial sentence becomes the next
+    #            retrieval query and generation resumes (loop is capped).
+    # The legacy `parallel` strategy (concurrent stream + retrieve) was
+    # retired in migration 20260519000001; existing rows were remapped to
+    # `simple`. The replacement is the orthogonal `tool_use_enabled` toggle,
+    # which splits generation into a hidden research phase (model calls
+    # tools, with FLARE's logprob signal injected as a tool event) and a
+    # clean writeup phase. Rendered here as the dashed orange research box
+    # between retrieval and prompt assembly.
     with g.subgraph(name="cluster_retrieve") as c:
         c.attr(label="Retrieval", **CLUSTER_BASE)
         _box(c, "retrieve", "embed query, top-k", icon="qdrant")
@@ -320,8 +334,12 @@ def chat_pipeline() -> graphviz.Digraph:
 
     with g.subgraph(name="cluster_gen") as c:
         c.attr(label="Generation", **CLUSTER_BASE)
+        _box(c, "research", "research phase",
+             shape="diamond",
+             subtitle="tool_use_enabled: tools + thinking",
+             bold=False)
         _box(c, "prompt", "assemble prompt",
-             subtitle="system + chunks + history")
+             subtitle="system + chunks + history\n(writeup phase if tool_use)")
         _box(c, "llm", "Cerebras LLM",
              subtitle="OpenAI-compatible SSE stream")
         _box(c, "flare_check", "low-logprob token?",
@@ -330,11 +348,13 @@ def chat_pipeline() -> graphviz.Digraph:
         c.edge("llm", "flare_check", label="per sentence")
 
     with g.subgraph(name="cluster_post") as c:
-        c.attr(label="Post-generation guard", **CLUSTER_BASE)
+        c.attr(label="Post-generation guard (extraction_guard flag)",
+               **CLUSTER_BASE)
         _box(c, "out_class", "output classifier", shape="diamond",
-             subtitle="per chunk", bold=False)
+             subtitle="per chunk, llama3.1-8b", bold=False)
         _box(c, "rewrite", "Socratic rewrite", subtitle="gpt-oss-120b")
-        _box(c, "out", "stream to student", shape="stadium")
+        _box(c, "out", "stream to student\n+ inline [n] citations",
+             shape="stadium")
 
     with g.subgraph(name="cluster_book") as c:
         c.attr(label="Bookkeeping", **CLUSTER_BASE)
@@ -343,17 +363,24 @@ def chat_pipeline() -> graphviz.Digraph:
              shape="diamond", subtitle="student + owner", bold=False)
         _box(c, "over", "HTTP 429 next turn", shape="stadium")
 
-    g.edge("student", "intent")
+    g.edge("student", "aegis_analyze",
+           label="draft (pre-send)", style="dashed",
+           color="#3b6ea5", constraint="false")
+    g.edge("aegis_rewrite", "student",
+           label="revised draft", style="dashed",
+           color="#3b6ea5", constraint="false")
+    g.edge("student", "intent", label="on send")
     g.edge("intent", "strat", label="benign")
     g.edge("intent", "lift", label="exfil intent", color=GUARD)
     g.edge("lift", "strat")
 
-    # Each strategy enters retrieval; only "parallel" runs it concurrently
-    # with the LLM stream (annotated below).
-    g.edge("strat", "retrieve",
-           label="simple / FLARE-init /\nparallel (concurrent)")
+    # Each strategy enters retrieval. The KG-expanded chunks flow into the
+    # optional research phase when `tool_use_enabled` is on, otherwise the
+    # research box is a pass-through to prompt assembly.
+    g.edge("strat", "retrieve", label="simple / FLARE-init")
 
-    g.edge("kg", "prompt")
+    g.edge("kg", "research")
+    g.edge("research", "prompt")
 
     # FLARE feedback loop: if a streamed token is low-confidence, use the
     # partial sentence as the next retrieval query and resume generation.

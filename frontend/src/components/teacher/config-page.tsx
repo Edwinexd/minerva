@@ -9,6 +9,7 @@ import {
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Card,
   CardContent,
@@ -188,7 +189,10 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [systemPrompt, setSystemPrompt] = useState(course.system_prompt || "")
   const [maxChunks, setMaxChunks] = useState(course.max_chunks)
   const [minScore, setMinScore] = useState(course.min_score)
-  const [strategy, setStrategy] = useState(course.strategy)
+  const [strategy, setStrategy] = useState(
+    course.strategy === "parallel" ? "simple" : course.strategy,
+  )
+  const [toolUseEnabled, setToolUseEnabled] = useState(course.tool_use_enabled)
   const [embeddingProvider, setEmbeddingProvider] = useState(course.embedding_provider)
   const [embeddingModel, setEmbeddingModel] = useState(course.embedding_model)
   const [dailyTokenLimit, setDailyTokenLimit] = useState(course.daily_token_limit)
@@ -218,6 +222,7 @@ function CourseConfigForm({ course }: { course: Course }) {
     max_chunks: maxChunks,
     min_score: minScore,
     strategy,
+    tool_use_enabled: toolUseEnabled,
     embedding_provider: embeddingProvider,
     embedding_model: embeddingModel,
     daily_token_limit: dailyTokenLimit,
@@ -331,9 +336,6 @@ function CourseConfigForm({ course }: { course: Course }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="parallel">
-                  {t("config.strategyParallel")}
-                </SelectItem>
                 <SelectItem value="simple">
                   {t("config.strategySimple")}
                 </SelectItem>
@@ -344,6 +346,19 @@ function CourseConfigForm({ course }: { course: Course }) {
             </Select>
             <p className="text-xs text-muted-foreground">
               {t("config.strategyHelp")}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 font-normal">
+              <Checkbox
+                checked={toolUseEnabled}
+                onCheckedChange={(v) => setToolUseEnabled(v === true)}
+              />
+              <span>{t("config.toolUseLabel")}</span>
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              {t("config.toolUseHelp")}
             </p>
           </div>
 

@@ -134,6 +134,17 @@ struct MessageResponse {
     content: String,
     chunks_used: Option<serde_json::Value>,
     model_used: Option<String>,
+    /// Research-phase thinking transcript persisted on the message
+    /// (populated only for `tool_use_enabled` courses).
+    thinking_transcript: Option<String>,
+    /// JSONB array of `{name, args, result_summary}` records from
+    /// the research phase; mirrors the chat route's shape so the
+    /// embed UI can render the same "Thinking" disclosure.
+    tool_events: Option<serde_json::Value>,
+    /// Research-phase duration in milliseconds; surfaced so the
+    /// embed UI can render "Thought for Ns" symmetrically with the
+    /// regular chat.
+    thinking_ms: Option<i32>,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -322,6 +333,9 @@ async fn get_conversation(
                 content: m.content,
                 chunks_used: m.chunks_used,
                 model_used: m.model_used,
+                thinking_transcript: m.thinking_transcript,
+                tool_events: m.tool_events,
+                thinking_ms: m.thinking_ms,
                 created_at: m.created_at,
             })
             .collect(),

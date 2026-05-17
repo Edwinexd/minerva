@@ -59,6 +59,20 @@ impl RagChunk {
     }
 }
 
+/// Stable identity hash over `(document_id, text)`. Used by the agentic
+/// research loop (and historically FLARE) to dedupe chunks pulled from
+/// different sources: initial seed RAG, model-initiated tool calls,
+/// server-side FLARE retrievals, and KG expansion. Same chunk fetched
+/// via different paths hashes the same so the chunk accumulator stays
+/// O(n) rather than O(n^2) on `Vec::contains`.
+pub fn chunk_identity_hash(c: &RagChunk) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    c.document_id.hash(&mut h);
+    c.text.hash(&mut h);
+    h.finish()
+}
+
 /// Result of a RAG lookup, partitioned by intended use.
 ///
 /// * `context`; chunk text gets pasted into the system prompt under
@@ -828,6 +842,62 @@ pub async fn rag_lookup(
     }
 }
 
+/// Keyword lookup against Qdrant's payload text-index on the `text`
+/// field. Returns chunks whose tokenised words match the query;
+/// no embedding model needed, no similarity score (set to 0.0 in the
+/// `RagChunk`).
+///
+/// Complement to `rag_lookup`: semantic search via embeddings is best
+/// for conceptual paraphrase ("explain CRUD"), keyword search via this
+/// helper is best for exact tokens ("deadline", `rubric.pdf`, function
+/// names). Both feed the same `RagChunk` shape so callers can union
+/// the result sets through the existing `chunk_identity_hash` dedup.
+///
+/// The text-index is created on demand by
+/// `minerva_ingest::pipeline::ensure_text_index` when a collection is
+/// first written to; legacy collections without the index will return
+/// an error here, which the caller surfaces as a `ToolError::Backend`.
+pub async fn keyword_lookup(
+    qdrant: &qdrant_client::Qdrant,
+    collection_name: &str,
+    query: &str,
+    limit: u64,
+) -> Result<Vec<RagChunk>, String> {
+    use qdrant_client::qdrant::{Condition, Filter, ScrollPointsBuilder};
+    // `Condition::matches_text` wraps a `MatchText` filter under the
+    // hood; Qdrant tokenises the query the same way the index was
+    // built (whitespace, lowercased) and requires all tokens to be
+    // present. That's effectively an AND-of-words match, which is
+    // the right default for "did the model ask for an exact phrase".
+    let filter = Filter::must([Condition::matches_text("text", query.to_string())]);
+    let response = qdrant
+        .scroll(
+            ScrollPointsBuilder::new(collection_name)
+                .filter(filter)
+                .with_payload(true)
+                .with_vectors(false)
+                .limit(limit as u32),
+        )
+        .await
+        .map_err(|e| format!("qdrant keyword scroll: {e}"))?;
+
+    let chunks: Vec<RagChunk> = response
+        .result
+        .into_iter()
+        .filter_map(|point| {
+            let text = payload_string(&point.payload, "text")?;
+            Some(RagChunk {
+                document_id: payload_string(&point.payload, "document_id").unwrap_or_default(),
+                filename: payload_string(&point.payload, "filename").unwrap_or_default(),
+                text,
+                kind: payload_string(&point.payload, "kind"),
+                score: 0.0,
+            })
+        })
+        .collect();
+    Ok(chunks)
+}
+
 /// Stream a Cerebras completion to the client via tx, appending tokens to full_text.
 /// Returns (prompt_tokens, completion_tokens).
 pub async fn stream_cerebras_to_client(
@@ -934,6 +1004,11 @@ pub async fn stream_cerebras_to_client(
 }
 
 /// Finalize: save message, set title, record usage, send done event.
+///
+/// `thinking_transcript` + `tool_events` are populated only when the
+/// course's `tool_use_enabled` is true and a research phase ran;
+/// legacy strategies pass `None` for both, which keeps the message
+/// row's new columns NULL and the frontend renders no disclosure.
 #[allow(clippy::too_many_arguments)]
 pub async fn finalize(
     ctx: &super::GenerationContext,
@@ -945,6 +1020,9 @@ pub async fn finalize(
     rag_injected: bool,
     generation_ms: i64,
     retrieval_count: i32,
+    thinking_transcript: Option<&str>,
+    tool_events: Option<&serde_json::Value>,
+    thinking_ms: Option<i32>,
 ) {
     let assistant_msg_id = uuid::Uuid::new_v4();
     let _ = minerva_db::queries::conversations::insert_message(
@@ -959,6 +1037,9 @@ pub async fn finalize(
         Some(completion_tokens),
         Some(generation_ms as i32),
         Some(retrieval_count),
+        thinking_transcript,
+        tool_events,
+        thinking_ms,
     )
     .await;
 

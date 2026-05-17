@@ -28,7 +28,11 @@
     "dataHandlingLink": "hur Minerva hanterar dina uppgifter",
     "disclaimerAfter": ".",
     "unknownError": "Okänt fel",
-    "assistantResponseLabel": "Assistentens svar"
+    "assistantResponseLabel": "Assistentens svar",
+    "thinkingActive": "Tänker…",
+    "thinkingDone": "Tankebana",
+    "thinkingDoneWithDuration": "Tänkte i {{seconds}}s",
+    "toolCallsAriaLabel": "Verktyg som assistenten anropade under research-fasen"
   },
   "message": {
     "tokensUsed_one": "{{count}} token",

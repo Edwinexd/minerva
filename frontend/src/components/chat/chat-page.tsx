@@ -683,7 +683,29 @@ export function ChatWindow({
           streaming={stream.streaming}
           streamedTokens={stream.streamedTokens}
           error={stream.error}
+          thinkingTokens={stream.thinkingTokens}
+          toolEvents={stream.toolEvents}
+          thinkingActive={stream.thinkingActive}
+          thinkingDurationMs={stream.thinkingDurationMs}
           bubbleLabels={bubbleLabels}
+          thinkingLabels={{
+            thinkingActive: t("chat.thinkingActive"),
+            thinkingDone: t("chat.thinkingDone"),
+            thinkingDoneWithDuration: t("chat.thinkingDoneWithDuration"),
+            toolCallsAriaLabel: t("chat.toolCallsAriaLabel"),
+          }}
+          getPersistedThinking={(msg) => ({
+            thinking_transcript: msg.thinking_transcript,
+            tool_events: msg.tool_events
+              ? msg.tool_events.map((e) => ({
+                  name: e.name,
+                  args: e.args,
+                  resultSummary: e.result_summary,
+                  result: e.result,
+                }))
+              : null,
+            thinking_ms: msg.thinking_ms,
+          })}
           assistantResponseLabel={t("chat.assistantResponseLabel")}
           renderBeforeMessages={() =>
             conversationNotes.length > 0 ? (

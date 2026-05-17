@@ -16,6 +16,26 @@ import {
   type ChatBubbleMessage,
   MarkdownContent,
 } from "./chat-bubble"
+import { ThinkingBlock, type ThinkingBlockLabels } from "./thinking-block"
+import type { ToolEvent } from "./use-chat-stream"
+
+/**
+ * Optional persisted-thinking shape that callers can attach to each
+ * `ChatBubbleMessage`. Mirrors `PersistedToolEvent` from
+ * `lib/types`; ChatTranscript reads these to render the
+ * post-refresh "Thinking" disclosure ABOVE each assistant message,
+ * matching where the live disclosure sits during streaming.
+ */
+export interface PersistedThinking {
+  thinking_transcript: string | null
+  tool_events: ToolEvent[] | null
+  /**
+   * Persisted research-phase duration in milliseconds. `null` on
+   * legacy rows that pre-date the `thinking_ms` column; the
+   * disclosure falls back to a generic "Thinking" label then.
+   */
+  thinking_ms: number | null
+}
 
 export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
   messages: M[] | undefined
@@ -27,7 +47,34 @@ export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
   /** Tokens streamed so far (rendered as in-progress markdown). */
   streamedTokens: string
   error: string | null
+  /**
+   * Concatenated `thinking_token` SSE stream (research phase
+   * tokens). Only populated for `tool_use_enabled` courses;
+   * legacy strategies pass an empty string.
+   */
+  thinkingTokens?: string
+  /** Tool-call events emitted during the research phase. */
+  toolEvents?: ToolEvent[]
+  /** True while research phase is active. */
+  thinkingActive?: boolean
+  /**
+   * Live research-phase duration in ms, populated when the backend
+   * emits `thinking_done` with its `duration_ms` field. `null`
+   * during streaming and on conversations rendered from history
+   * (those use the per-message `thinking_ms` instead).
+   */
+  thinkingDurationMs?: number | null
   bubbleLabels: ChatBubbleLabels
+  /** Labels for the collapsible "Thinking" disclosure. */
+  thinkingLabels?: ThinkingBlockLabels
+  /**
+   * Pull the persisted research-phase fields off a message. Returns
+   * `null` when the message has no thinking attached (legacy
+   * single-pass messages). When omitted, no historical disclosure
+   * renders; the live streaming one still works because it reads
+   * from the `thinkingTokens` / `toolEvents` props above.
+   */
+  getPersistedThinking?: (msg: M) => PersistedThinking | null
   /** aria-label for the in-progress assistant bubble. */
   assistantResponseLabel: string
   /** Optional per-message feedback slot (thumbs up/down on the regular chat). */
@@ -45,7 +92,13 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
   streaming,
   streamedTokens,
   error,
+  thinkingTokens,
+  toolEvents,
+  thinkingActive,
+  thinkingDurationMs,
   bubbleLabels,
+  thinkingLabels,
+  getPersistedThinking,
   assistantResponseLabel,
   renderFeedbackSlot,
   renderAfterMessage,
@@ -72,16 +125,51 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
             <Skeleton className="h-12 w-64 rounded-lg" />
           </div>
         ))}
-      {messages?.map((msg) => (
-        <React.Fragment key={msg.id}>
-          <ChatBubble
-            message={msg}
-            labels={bubbleLabels}
-            feedbackSlot={renderFeedbackSlot?.(msg)}
-          />
-          {renderAfterMessage?.(msg)}
-        </React.Fragment>
-      ))}
+      {messages?.map((msg) => {
+        // Persisted research-phase data for this specific assistant
+        // message, if any. Rendered ABOVE the bubble so it sits in
+        // the same visual position the live disclosure occupies
+        // during streaming (above the answer being written).
+        const persisted =
+          msg.role === "assistant" && getPersistedThinking
+            ? getPersistedThinking(msg)
+            : null
+        const hasPersistedThinking =
+          persisted &&
+          ((persisted.thinking_transcript &&
+            persisted.thinking_transcript.length > 0) ||
+            (persisted.tool_events && persisted.tool_events.length > 0))
+        // The thinking disclosure and its bubble are grouped in a
+        // single wrapper with a very tight internal gap so they read
+        // as one unit ; the parent's `space-y-4` then puts a normal
+        // separation between THIS group and the next message above,
+        // instead of also between the thinking and its own bubble.
+        return (
+          <React.Fragment key={msg.id}>
+            <div className="space-y-1">
+              {hasPersistedThinking && thinkingLabels && (
+                <div className="flex justify-start">
+                  <div className="max-w-[80%]">
+                    <ThinkingBlock
+                      thinkingTokens={persisted?.thinking_transcript || ""}
+                      toolEvents={persisted?.tool_events || []}
+                      active={false}
+                      durationMs={persisted?.thinking_ms ?? null}
+                      labels={thinkingLabels}
+                    />
+                  </div>
+                </div>
+              )}
+              <ChatBubble
+                message={msg}
+                labels={bubbleLabels}
+                feedbackSlot={renderFeedbackSlot?.(msg)}
+              />
+            </div>
+            {renderAfterMessage?.(msg)}
+          </React.Fragment>
+        )
+      })}
       {pendingUserMsg && (
         <div className="flex justify-end">
           <div className="rounded-lg px-4 py-2 max-w-[80%] bg-primary text-primary-foreground">
@@ -90,22 +178,38 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
         </div>
       )}
       {streaming && (
-        <div className="flex justify-start">
-          <div
-            className="bg-muted rounded-lg px-4 py-2 max-w-[80%]"
-            aria-live="polite"
-            aria-atomic="false"
-            aria-label={assistantResponseLabel}
-          >
-            {streamedTokens ? (
-              <MarkdownContent content={streamedTokens} />
-            ) : (
-              <div className="flex gap-1" aria-hidden="true">
-                <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
-                <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
-                <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:300ms]" />
+        <div className="space-y-1">
+          {(thinkingTokens || (toolEvents && toolEvents.length > 0)) &&
+            thinkingLabels && (
+              <div className="flex justify-start">
+                <div className="max-w-[80%]">
+                  <ThinkingBlock
+                    thinkingTokens={thinkingTokens || ""}
+                    toolEvents={toolEvents || []}
+                    active={!!thinkingActive}
+                    durationMs={thinkingDurationMs ?? null}
+                    labels={thinkingLabels}
+                  />
+                </div>
               </div>
             )}
+          <div className="flex justify-start">
+            <div
+              className="bg-muted rounded-lg px-4 py-2 max-w-[80%]"
+              aria-live="polite"
+              aria-atomic="false"
+              aria-label={assistantResponseLabel}
+            >
+              {streamedTokens ? (
+                <MarkdownContent content={streamedTokens} />
+              ) : (
+                <div className="flex gap-1" aria-hidden="true">
+                  <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
+                  <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
+                  <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:300ms]" />
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

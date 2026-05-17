@@ -14,6 +14,13 @@ pub struct CourseRow {
     pub max_chunks: i32,
     pub min_score: f32,
     pub strategy: String,
+    /// Orthogonal toggle: when TRUE, the model has access to a tool
+    /// catalog during a "research" phase (visible as thinking) that
+    /// precedes a clean single-pass writeup. Strategy (`simple` vs
+    /// `flare`) only determines which retrieval signals run inside
+    /// that research phase. Defaults to FALSE on existing courses so
+    /// they keep their pre-tool-use behaviour.
+    pub tool_use_enabled: bool,
     pub embedding_provider: String,
     pub embedding_model: String,
     /// Bumped on every embedding model/provider rotation. Used by the
@@ -53,6 +60,7 @@ pub struct UpdateCourse {
     pub max_chunks: Option<i32>,
     pub min_score: Option<f32>,
     pub strategy: Option<String>,
+    pub tool_use_enabled: Option<bool>,
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
     pub daily_token_limit: Option<i64>,
@@ -71,7 +79,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             CourseRow,
             r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit, embedding_model)
             VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
+            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
             id,
             input.name,
             input.description,
@@ -86,7 +94,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             CourseRow,
             r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit)
             VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
+            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
             id,
             input.name,
             input.description,
@@ -101,7 +109,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
         id,
     )
     .fetch_optional(db)
@@ -111,7 +119,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx
 pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
         owner_id,
     )
     .fetch_all(db)
@@ -121,7 +129,7 @@ pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at
+        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at
         FROM courses c
         JOIN course_members cm ON cm.course_id = c.id
         WHERE cm.user_id = $1 AND c.active = true
@@ -138,7 +146,7 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_for_teacher(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -160,7 +168,7 @@ pub async fn list_for_teacher_strict(
 ) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -175,7 +183,7 @@ pub async fn list_for_teacher_strict(
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",
     )
     .fetch_all(db)
     .await
@@ -197,13 +205,14 @@ pub async fn update(
             system_prompt = COALESCE($7, system_prompt),
             max_chunks = COALESCE($8, max_chunks),
             strategy = COALESCE($9, strategy),
-            daily_token_limit = COALESCE($10, daily_token_limit),
-            embedding_provider = COALESCE($11, embedding_provider),
-            embedding_model = COALESCE($12, embedding_model),
-            min_score = COALESCE($13, min_score),
+            tool_use_enabled = COALESCE($10, tool_use_enabled),
+            daily_token_limit = COALESCE($11, daily_token_limit),
+            embedding_provider = COALESCE($12, embedding_provider),
+            embedding_model = COALESCE($13, embedding_model),
+            min_score = COALESCE($14, min_score),
             updated_at = NOW()
         WHERE id = $1 AND active = true
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
         id,
         input.name,
         input.description,
@@ -213,6 +222,7 @@ pub async fn update(
         input.system_prompt,
         input.max_chunks,
         input.strategy,
+        input.tool_use_enabled,
         input.daily_token_limit,
         input.embedding_provider,
         input.embedding_model,

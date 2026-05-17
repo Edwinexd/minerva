@@ -21,6 +21,14 @@ export interface Course {
   max_chunks: number
   min_score: number
   strategy: string
+  /**
+   * Orthogonal to `strategy`: when TRUE, the model gains access to a
+   * tool catalog during a research/thinking phase before the final
+   * writeup. Both `simple` and `flare` honour this flag. The API will
+   * reject a save that picks tool use on a model that doesn't
+   * support it (see backend `model_capabilities`).
+   */
+  tool_use_enabled: boolean
   embedding_provider: string
   embedding_model: string
   /**
@@ -550,6 +558,20 @@ export interface Message {
   tokens_completion: number | null
   generation_ms: number | null
   retrieval_count: number | null
+  /**
+   * Persisted research-phase output for assistant messages produced
+   * by a `tool_use_enabled` course. NULL on legacy single-pass
+   * messages; the chat UI hides the "Thinking" disclosure when both
+   * are missing.
+   */
+  thinking_transcript: string | null
+  tool_events: PersistedToolEvent[] | null
+  /**
+   * Research-phase wall-clock duration in milliseconds. Lets the
+   * "Thinking" disclosure render "Thought for Ns" on past messages,
+   * symmetrical with the live-stream timer.
+   */
+  thinking_ms: number | null
   created_at: string
 }
 
@@ -567,6 +589,24 @@ export interface ApiKey {
   key_prefix: string
   created_at: string
   last_used_at: string | null
+}
+
+/**
+ * One tool call persisted on an assistant message. Mirrors the
+ * `tool_call` + `tool_result` SSE event pair the chat stream emits
+ * during a tool-use research phase, collapsed into a single
+ * structured row. Stored as JSONB on the backend side.
+ */
+export interface PersistedToolEvent {
+  name: string
+  args?: unknown
+  result_summary?: string
+  /**
+   * Raw JSON payload the tool returned to the model (already
+   * truncated server-side). Frontend renders it click-to-expand on
+   * each tool-call row.
+   */
+  result?: unknown
 }
 
 export interface PlayCourseCatalogEntry {

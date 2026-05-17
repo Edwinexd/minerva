@@ -2,7 +2,10 @@ FROM rust:latest AS builder
 
 WORKDIR /app/backend
 
-# Phase 1: cache dependencies
+# Phase 1: cache dependencies. Copy each workspace member's
+# Cargo.toml plus the root manifest, stub out their sources, run
+# `cargo build` so cargo downloads and compiles every crate.io dep
+# without paying for source changes on every rebuild.
 COPY backend/Cargo.toml backend/Cargo.lock ./
 COPY backend/crates/minerva-core/Cargo.toml crates/minerva-core/Cargo.toml
 COPY backend/crates/minerva-db/Cargo.toml crates/minerva-db/Cargo.toml
@@ -14,8 +17,11 @@ RUN mkdir -p crates/minerva-core/src crates/minerva-db/src crates/minerva-ingest
     cargo build && \
     rm -rf crates/*/src
 
-# Phase 2: build actual code (deps cached)
+# Phase 2: build actual code (deps cached). `SQLX_OFFLINE` uses the
+# committed `.sqlx/` cache so the build doesn't need a live
+# postgres at image-build time.
 COPY backend/ .
+ENV SQLX_OFFLINE=true
 RUN touch crates/*/src/*.rs && cargo build
 
 FROM debian:trixie-slim

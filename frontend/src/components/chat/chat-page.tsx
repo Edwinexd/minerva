@@ -26,6 +26,7 @@ import { useDocumentTitle } from "@/lib/use-document-title"
 import { ChatTranscript } from "./chat-transcript"
 import type { ChatBubbleLabels } from "./chat-bubble"
 import { ConversationList } from "./conversation-list"
+import { EmptyChatGreeting } from "./empty-chat-greeting"
 import { TeacherNoteInline } from "./teacher-note-inline"
 import { useChatStream } from "./use-chat-stream"
 import { AegisFeedbackPanel } from "./aegis-feedback-panel"
@@ -206,6 +207,14 @@ export function ChatWindow({
 }) {
   const navigate = useNavigate()
   const { t } = useTranslation("student")
+  // Course is already loaded by the parent ChatPage; React Query
+  // dedups so this is a cache hit. Pulled in here (rather than
+  // threaded as a prop) so study mode's TaskRunner caller doesn't
+  // have to wire it through; study sessions always have a
+  // non-null conversationId so the greeting block below never
+  // fires for them anyway, and TaskRunner already has its own
+  // task framing.
+  const { data: course } = useQuery(courseQuery(courseId))
   const { data, isLoading } = useQuery({
     ...conversationDetailQuery(courseId, conversationId ?? ""),
     enabled: conversationId !== null,
@@ -602,10 +611,26 @@ export function ChatWindow({
     },
   }
 
+  // Show the greeting hero in place of the transcript when the
+  // route is `/new`, before the user has typed anything or any
+  // SSE has started. The moment a send is dispatched
+  // `pendingUserMsg` becomes truthy and the transcript takes
+  // over; from there it's the normal message-list view.
+  const showGreeting =
+    conversationId === null && !stream.streaming && !stream.pendingUserMsg
+
   return (
     <div className="relative flex flex-1 min-h-0 gap-4">
       <div className="flex-1 flex flex-col min-w-0">
       <div className="flex-1 overflow-y-auto pr-4">
+        {showGreeting ? (
+          <div className="h-full flex items-center justify-center">
+            <EmptyChatGreeting
+              displayName={user?.display_name}
+              courseName={course?.name}
+            />
+          </div>
+        ) : (
         <ChatTranscript<Message>
           messages={messages}
           isLoading={isLoading}
@@ -648,6 +673,7 @@ export function ChatWindow({
             ))
           }
         />
+        )}
       </div>
 
       {!readOnly && (

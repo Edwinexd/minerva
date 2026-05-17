@@ -9,6 +9,16 @@
     "pinnedByTeacher": "Pinned by teacher",
     "studentFallback": "Student"
   },
+  "greeting": {
+    "morning": "Good morning",
+    "afternoon": "Good afternoon",
+    "evening": "Good evening",
+    "night": "Hello",
+    "withName": "{{greeting}}, {{name}}!",
+    "standalone": "{{greeting}}!",
+    "subtitle": "Ask anything about the course materials.",
+    "subtitleCourse": "Ask anything about {{course}}."
+  },
   "chat": {
     "inputPlaceholder": "Ask about the course materials…",
     "send": "Send",

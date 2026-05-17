@@ -9,6 +9,16 @@
     "pinnedByTeacher": "Fäst av lärare",
     "studentFallback": "Student"
   },
+  "greeting": {
+    "morning": "God morgon",
+    "afternoon": "God eftermiddag",
+    "evening": "God kväll",
+    "night": "Hej",
+    "withName": "{{greeting}}, {{name}}!",
+    "standalone": "{{greeting}}!",
+    "subtitle": "Fråga vad du vill om kursmaterialet.",
+    "subtitleCourse": "Fråga vad du vill om {{course}}."
+  },
   "chat": {
     "inputPlaceholder": "Fråga om kursmaterialet…",
     "send": "Skicka",

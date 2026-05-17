@@ -8,6 +8,7 @@ import { useDocumentTitle } from "@/lib/use-document-title"
 import { ChatTranscript } from "@/components/chat/chat-transcript"
 import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
 import { ConversationList } from "@/components/chat/conversation-list"
+import { EmptyChatGreeting } from "@/components/chat/empty-chat-greeting"
 import { TeacherNoteInline } from "@/components/chat/teacher-note-inline"
 import { useChatStream } from "@/components/chat/use-chat-stream"
 import { AegisFeedbackPanel } from "@/components/chat/aegis-feedback-panel"
@@ -173,14 +174,14 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
         setConversations(convs)
         setMe(m)
         setPinned(pins)
-        if (convs.length > 0) {
-          setActiveConvId(convs[0].id)
-        } else if (pins.length > 0) {
-          // Land on a pinned chat if the user has nothing of their own
-          //; otherwise the pane would be empty even though the
-          // teacher highlighted something.
-          setActiveConvId(pins[0].id)
-        }
+        // Deliberately leave `activeConvId` as null on first load,
+        // mirroring the Shibboleth route's `/new` redirect. LTI
+        // re-launches and iframe refreshes used to land on the
+        // student's most recent chat (or a teacher pin), which
+        // polluted the context window with whatever they were last
+        // doing. The empty state below now greets the user and
+        // surfaces the input directly; the sidebar still lists
+        // every prior + pinned chat for one-click resume.
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : t("embed.failedToLoad"))
       } finally {
@@ -332,6 +333,8 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
           onAcknowledgePrivacy={acknowledgePrivacy}
           readOnly={isPinnedView}
           aegisEnabled={course?.feature_flags?.aegis === true}
+          courseName={course?.name ?? null}
+          displayName={me?.display_name ?? null}
         />
       </div>
     </div>
@@ -350,6 +353,8 @@ function EmbedChatWindow({
   onAcknowledgePrivacy,
   readOnly = false,
   aegisEnabled = false,
+  courseName = null,
+  displayName = null,
 }: {
   courseId: string
   conversationId: string | null
@@ -371,6 +376,15 @@ function EmbedChatWindow({
    * panel auto-hides on courses where the admin hasn't opted in.
    */
   aegisEnabled?: boolean
+  /**
+   * Course name + viewer display name surfaced in the
+   * empty-state greeting that renders when `conversationId` is
+   * null (i.e. fresh-launched iframe, before the user has typed
+   * anything). Threaded from the parent so the embed-only `/me`
+   * + `/course` fetches stay where they already live.
+   */
+  courseName?: string | null
+  displayName?: string | null
 }) {
   const { t } = useTranslation("auth")
   // Aegis strings live in the student namespace (the panel itself
@@ -686,10 +700,25 @@ function EmbedChatWindow({
     // sits in front of students who don't need to see model accounting.
   }
 
+  // Greeting hero in place of the transcript on a fresh iframe
+  // launch (no conv selected, nothing pending or streaming). The
+  // first send fills `pendingUserMsg` and the transcript takes
+  // over from there.
+  const showGreeting =
+    conversationId === null && !stream.streaming && !stream.pendingUserMsg
+
   return (
     <div className="relative flex flex-1 min-h-0 gap-2">
       <div className="flex-1 flex flex-col min-w-0">
       <div className="flex-1 overflow-y-auto px-4">
+        {showGreeting ? (
+          <div className="h-full flex items-center justify-center">
+            <EmptyChatGreeting
+              displayName={displayName}
+              courseName={courseName}
+            />
+          </div>
+        ) : (
         <ChatTranscript<EmbedMessage>
           messages={messages}
           isLoading={loading}
@@ -722,6 +751,7 @@ function EmbedChatWindow({
             ))
           }
         />
+        )}
       </div>
 
       {!readOnly && (

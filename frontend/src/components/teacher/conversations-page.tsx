@@ -495,16 +495,15 @@ function FeedbackBadges({
   const { t } = useTranslation("teacher")
   const categoryLabel = useCategoryLabel()
   const queryClient = useQueryClient()
-  const down = feedback.filter((f) => f.rating === "down")
-  const up = feedback.filter((f) => f.rating === "up")
-  if (down.length === 0 && up.length === 0) return null
-
   // Per-row ack mutation. Course-shared (same semantics as flag
   // ack); whichever teacher clicks first resolves it for the
   // team. Symmetric with the legacy "leaving a note on this
   // message resolves it" rule; the dashboard's unaddressed_down
   // counter ORs both clearing paths so either drops the row out
   // of the "Flagged" tab.
+  //
+  // Declared BEFORE the early-return below so hooks are called in
+  // a stable order on every render (rules-of-hooks).
   const ackFeedback = useMutation({
     mutationFn: (fbId: string) =>
       api.post(
@@ -520,6 +519,9 @@ function FeedbackBadges({
       })
     },
   })
+  const down = feedback.filter((f) => f.rating === "down")
+  const up = feedback.filter((f) => f.rating === "up")
+  if (down.length === 0 && up.length === 0) return null
 
   return (
     <div className="flex flex-wrap items-center gap-1 mt-1.5">

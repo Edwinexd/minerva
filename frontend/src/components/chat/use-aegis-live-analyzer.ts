@@ -196,6 +196,19 @@ export function useAegisLiveAnalyzer(
   // previous conversation that happened to land mid-switch would
   // still merge its kinds into the (just-wiped) accumulator and
   // show its verdict on the new conversation's panel.
+  //
+  // The state resets (`setAnalysis(null)` + `setPending(false)`)
+  // happen during render via the adjust-state-on-prop-change
+  // pattern; only the genuine side effects (ref mutations, abort,
+  // clearTimeout) stay in the effect so we satisfy both
+  // react-hooks/set-state-in-effect and react-hooks/refs. See
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevResetKey, setPrevResetKey] = useState(resetKey)
+  if (resetKey !== prevResetKey) {
+    setPrevResetKey(resetKey)
+    setAnalysis(null)
+    setPending(false)
+  }
   useEffect(() => {
     sessionRef.current++
     abortRef.current?.abort()
@@ -207,20 +220,22 @@ export function useAegisLiveAnalyzer(
     analyzeNowInFlight.current = false
     lastAnalyzed.current = null
     accumulatedRef.current = []
-    setAnalysis(null)
-    setPending(false)
   }, [resetKey])
 
+  // "Dead" condition: the analyzer has nothing to show because the
+  // course flag is off or the draft is too short. Drop any stale
+  // verdict + pending flag eagerly during render so a flag-on-again
+  // or quick retype doesn't briefly re-render an old panel before
+  // the next debounce tick. Adjust-state-during-render is the
+  // React-docs-sanctioned alternative to setState-in-effect; see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const trimmedInput = input.trim()
+  const analyzerDormant = !aegisEnabled || trimmedInput.length < MIN_LENGTH
+  if (analyzerDormant && analysis !== null) setAnalysis(null)
+  if (analyzerDormant && pending) setPending(false)
+
   useEffect(() => {
-    if (!aegisEnabled) {
-      // Flag flipped off mid-session: drop any stale verdict so
-      // the panel hides cleanly. The actual hide happens in the
-      // chat layout via the same flag, but clearing here keeps
-      // a flag-on-again path from briefly re-rendering an old
-      // verdict before the next debounce tick.
-      if (analysis !== null) setAnalysis(null)
-      return
-    }
+    if (!aegisEnabled) return
 
     const trimmed = input.trim()
     if (trimmed.length < MIN_LENGTH) {
@@ -230,13 +245,14 @@ export function useAegisLiveAnalyzer(
       // call's result is dropped, abort the network request, and
       // wipe the accumulator so coached kinds from the abandoned
       // draft don't suppress legitimate suggestions on the next one.
+      // (Verdict + pending clears live in the during-render block
+      // above, since they're pure setState and would otherwise trip
+      // the react-hooks/set-state-in-effect rule.)
       sessionRef.current++
       abortRef.current?.abort()
       abortRef.current = null
       accumulatedRef.current = []
-      if (analysis !== null) setAnalysis(null)
       lastAnalyzed.current = null
-      setPending(false)
       return
     }
 
@@ -330,9 +346,6 @@ export function useAegisLiveAnalyzer(
         debounceHandleRef.current = null
       }
     }
-    // `analysis` deliberately omitted; the effect's job is to
-    // react to INPUT changes, not to its own setAnalysis writes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, aegisEnabled, doFetch])
 
   // Stable callbacks. Both consumers wipe local state but only

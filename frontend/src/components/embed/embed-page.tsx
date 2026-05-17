@@ -161,9 +161,29 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   const [error, setError] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  useEffect(() => {
+  // Collapse the sidebar whenever the active conversation changes.
+  // Adjust-state-on-prop-change during render is the React-docs-
+  // sanctioned alternative to setState-in-effect; see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevActiveConvIdForSidebar, setPrevActiveConvIdForSidebar] =
+    useState(activeConvId)
+  if (activeConvId !== prevActiveConvIdForSidebar) {
+    setPrevActiveConvIdForSidebar(activeConvId)
     setSidebarOpen(false)
-  }, [activeConvId])
+  }
+
+  const refreshConversations = useCallback(async () => {
+    if (!token) return
+    try {
+      const convs = await embedGet<EmbedConversation[]>(
+        `/course/${courseId}/conversations`,
+        token,
+      )
+      setConversations(convs)
+    } catch {
+      // Silent refresh failure
+    }
+  }, [courseId, token])
 
   // Stamp `student_last_viewed_at = NOW()` on the embed side when
   // the user opens an existing conversation. Mirrors the Shibboleth
@@ -177,22 +197,17 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
       .catch(() => {
         // Cosmetic; ignore.
       })
-    // refreshConversations is closure-stable enough; including it
-    // would refire the mark-read on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConvId, courseId, token])
+  }, [activeConvId, courseId, token, refreshConversations])
 
   useDocumentTitle(course ? tCommon("pageTitles.embed", { course: course.name }) : null)
 
   // Load course, user, conversations, and any teacher-pinned chats on
   // mount. Pinned failures are tolerated; the rest of the page still
-  // works without them.
+  // works without them. The missing-token case is handled by the
+  // render-time early return below, not here, so this effect can
+  // assume `token` is set.
   useEffect(() => {
-    if (!token) {
-      setError(t("embed.missingToken"))
-      setLoading(false)
-      return
-    }
+    if (!token) return
     let cancelled = false
     ;(async () => {
       try {
@@ -247,16 +262,6 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   // first message (see EmbedChatWindow.handleSubmit).
   const startNewConversation = () => {
     setActiveConvId(null)
-  }
-
-  const refreshConversations = async () => {
-    if (!token) return
-    try {
-      const convs = await embedGet<EmbedConversation[]>(`/course/${courseId}/conversations`, token)
-      setConversations(convs)
-    } catch {
-      // Silent refresh failure
-    }
   }
 
   if (!token) {
@@ -501,20 +506,28 @@ function EmbedChatWindow({
   // empty thread with the input ready (lazy creation happens on first send).
   // The live analyzer wipes its own cached verdict via its resetKey so
   // we don't poke it from here.
-  useEffect(() => {
-    let cancelled = false
+  //
+  // The synchronous resets (reset/setInput/setMessages/setNotes/etc.)
+  // happen during render via the adjust-state-on-prop-change pattern;
+  // the genuine async fetch stays in the effect below. See
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevConversationId, setPrevConversationId] = useState(conversationId)
+  if (conversationId !== prevConversationId) {
+    setPrevConversationId(conversationId)
     reset()
     setInput("")
-
     if (conversationId === null) {
       setMessages([])
       setNotes([])
       setPromptAnalyses([])
       setLoading(false)
-      return
+    } else {
+      setLoading(true)
     }
-
-    setLoading(true)
+  }
+  useEffect(() => {
+    if (conversationId === null) return
+    let cancelled = false
     embedGet<EmbedConversationDetail>(`/course/${courseId}/conversations/${conversationId}`, token)
       .then((data) => {
         if (!cancelled) {
@@ -530,12 +543,8 @@ function EmbedChatWindow({
           setLoading(false)
         }
       })
-
     return () => { cancelled = true }
-    // `reset`/`setError` from useChatStream are stable enough; including
-    // them would refire this on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [courseId, conversationId, token, t])
+  }, [courseId, conversationId, token, t, setError])
 
   // Index notes the same way the regular chat page does: per-message
   // notes render right after that bubble; conversation-level notes
@@ -622,12 +631,6 @@ function EmbedChatWindow({
   const [confirmDraftSend, setConfirmDraftSend] = useState<string | null>(null)
   const [submitChecking, setSubmitChecking] = useState(false)
 
-  useEffect(() => {
-    if (confirmDraftSend !== null && confirmDraftSend !== input) {
-      setConfirmDraftSend(null)
-    }
-  }, [input, confirmDraftSend])
-
   const dispatchSend = (msg: string) => {
     setInput("")
     setConfirmDraftSend(null)
@@ -672,11 +675,21 @@ function EmbedChatWindow({
     null,
   )
   const [rewriting, setRewriting] = useState(false)
-  useEffect(() => {
+
+  // Reset both `confirmDraftSend` and `bannerDismissedFor` whenever
+  // the draft diverges from the snapshot we last reset against.
+  // Adjust-state-on-prop-change during render; see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevDraftInput, setPrevDraftInput] = useState(input)
+  if (input !== prevDraftInput) {
+    setPrevDraftInput(input)
+    if (confirmDraftSend !== null && confirmDraftSend !== input) {
+      setConfirmDraftSend(null)
+    }
     if (bannerDismissedFor !== null && bannerDismissedFor !== input) {
       setBannerDismissedFor(null)
     }
-  }, [input, bannerDismissedFor])
+  }
   const liveSuggestions = liveAnalyzer.analysis?.suggestions ?? []
   const showBanner =
     aegisEnabled &&

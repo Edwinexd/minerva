@@ -140,16 +140,29 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   // showing the current value until the teacher confirms.
   const [editingKind, setEditingKind] = React.useState<DocType | null>(null)
 
-  // Drop selections that no longer exist (e.g. after a delete round-trip).
-  React.useEffect(() => {
-    if (!documents) return
-    const existing = new Set(documents.map((d) => d.id))
-    setSelected((prev) => {
-      const next = new Set<string>()
-      for (const id of prev) if (existing.has(id)) next.add(id)
-      return next.size === prev.size ? prev : next
-    })
-  }, [documents])
+  // Drop selections that no longer exist (e.g. after a delete
+  // round-trip). Adjust-state-on-prop-change during render is the
+  // React-docs-sanctioned alternative to setState-in-effect; see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevDocuments, setPrevDocuments] = React.useState(documents)
+  if (documents !== prevDocuments) {
+    setPrevDocuments(documents)
+    if (documents) {
+      const existing = new Set(documents.map((d) => d.id))
+      let drift = false
+      for (const id of selected) {
+        if (!existing.has(id)) {
+          drift = true
+          break
+        }
+      }
+      if (drift) {
+        const next = new Set<string>()
+        for (const id of selected) if (existing.has(id)) next.add(id)
+        setSelected(next)
+      }
+    }
+  }
 
   const uploadMutation = useMutation({
     mutationFn: async (files: File[]) => {

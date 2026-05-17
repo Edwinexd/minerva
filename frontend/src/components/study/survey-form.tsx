@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { api } from "@/lib/api"
@@ -37,20 +37,21 @@ export function SurveyForm({
   const [validationError, setValidationError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<unknown>(null)
 
-  // Hydrate the local edit map from the server's `existing` array on
-  // first load. Done in a memo + effect-free check so the component
-  // doesn't double-update during fast renders.
-  const initialised = useMemo(() => {
-    if (!survey) return false
+  // Hydrate the local edit map from the server's `existing` array
+  // whenever the survey kind changes. Adjust-state-on-prop-change
+  // during render is the React-docs-sanctioned alternative to
+  // setState-in-useMemo (which the new react-hooks/set-state-in-
+  // render rule rightly flags as a potential infinite loop). See
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevSurveyKind, setPrevSurveyKind] = useState(survey?.kind)
+  if (survey && survey.kind !== prevSurveyKind) {
+    setPrevSurveyKind(survey.kind)
     const map = new Map<string, StudySurveyAnswer>()
     for (const a of survey.existing) {
       map.set(a.question_id, a)
     }
     setAnswers(map)
-    return true
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [survey?.kind])
-  void initialised
+  }
 
   const mutation = useMutation({
     mutationFn: (payload: { answers: StudySurveyAnswer[] }) =>

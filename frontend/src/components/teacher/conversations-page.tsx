@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useMemo, useState } from "react"
 import type { ConversationFlag, ConversationWithUser, MessageFeedback, TeacherNote } from "@/lib/types"
 import { FEEDBACK_CATEGORIES } from "@/lib/types"
 
@@ -62,24 +62,31 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
     new Set(),
   )
 
-  useEffect(() => {
+  // Seed `stickyUnreviewedIds` when entering the unreviewed tab,
+  // clear it when leaving. Adjust-state-on-prop-change during render
+  // is the React-docs-sanctioned alternative to setState-in-effect;
+  // see https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  //
+  // The seed-on-entry guard (only seed when the set is empty, i.e.
+  // we just landed on the tab) survives the move because we also
+  // track the previous tab: on a fresh entry the set IS empty (since
+  // we cleared it on leave), so the seed populates; subsequent
+  // re-renders within the tab don't re-trigger the diff branch.
+  const [prevActiveTab, setPrevActiveTab] = useState(activeTab)
+  if (activeTab !== prevActiveTab) {
+    setPrevActiveTab(activeTab)
     if (activeTab === "unreviewed") {
-      // Seed only when the set is empty (i.e. we just entered the
-      // tab). Re-seeding on every `conversations` refetch would
-      // re-add the row the teacher just reviewed and defeat the
-      // dot/count clearing.
-      setStickyUnreviewedIds((prev) => {
-        if (prev.size > 0) return prev
+      if (stickyUnreviewedIds.size === 0) {
         const next = new Set<string>()
         for (const c of conversations || []) {
           if (c.teacher_unreviewed) next.add(c.id)
         }
-        return next
-      })
-    } else {
-      setStickyUnreviewedIds((prev) => (prev.size === 0 ? prev : new Set()))
+        if (next.size > 0) setStickyUnreviewedIds(next)
+      }
+    } else if (stickyUnreviewedIds.size > 0) {
+      setStickyUnreviewedIds(new Set())
     }
-  }, [activeTab, conversations])
+  }
 
   // Mark a conversation as reviewed by the teaching team when the
   // teacher expands the row. Per the product call "read ==

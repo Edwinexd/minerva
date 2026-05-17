@@ -343,14 +343,17 @@ export function ChatWindow({
 
   // Reset state when conversation changes. `liveAnalyzer` resets
   // its own cache via the resetKey above, so we don't poke it here.
-  useEffect(() => {
+  // Adjust-state-on-prop-change during render is the React-docs-
+  // sanctioned alternative to setState-in-effect; `reset()` from
+  // useChatStream is idempotent on no-op (it just clears in-memory
+  // stream state) so calling it inside the diff branch is safe.
+  // See https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevConversationId, setPrevConversationId] = useState(conversationId)
+  if (conversationId !== prevConversationId) {
+    setPrevConversationId(conversationId)
     reset()
     setInput("")
-    // `reset` from useChatStream is stable enough; including it would
-    // refire the wipe on every render and clobber an in-flight stream
-    // for the new id.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId])
+  }
 
   // Mark the conversation as read on the student side whenever the
   // chat-page opens an existing conversation. Fire-and-forget; the
@@ -463,12 +466,6 @@ export function ChatWindow({
   const [confirmDraftSend, setConfirmDraftSend] = useState<string | null>(null)
   const [submitChecking, setSubmitChecking] = useState(false)
 
-  useEffect(() => {
-    if (confirmDraftSend !== null && confirmDraftSend !== input) {
-      setConfirmDraftSend(null)
-    }
-  }, [input, confirmDraftSend])
-
   const dispatchSend = (msg: string) => {
     setInput("")
     setConfirmDraftSend(null)
@@ -537,11 +534,22 @@ export function ChatWindow({
     null,
   )
   const [rewriting, setRewriting] = useState(false)
-  useEffect(() => {
+
+  // Reset both `confirmDraftSend` and `bannerDismissedFor` as soon as
+  // the draft diverges from the snapshot we last reset against. Done
+  // as a single adjust-state-on-prop-change during render (the React-
+  // docs-sanctioned alternative to setState-in-effect; see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes).
+  const [prevDraftInput, setPrevDraftInput] = useState(input)
+  if (input !== prevDraftInput) {
+    setPrevDraftInput(input)
+    if (confirmDraftSend !== null && confirmDraftSend !== input) {
+      setConfirmDraftSend(null)
+    }
     if (bannerDismissedFor !== null && bannerDismissedFor !== input) {
       setBannerDismissedFor(null)
     }
-  }, [input, bannerDismissedFor])
+  }
   const liveSuggestions = liveAnalyzer.analysis?.suggestions ?? []
   const showBanner =
     aegisEnabled &&

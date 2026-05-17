@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import React, { useMemo, useState } from "react"
+import React, { useEffect, useMemo, useState } from "react"
 import type { ConversationFlag, ConversationWithUser, MessageFeedback, TeacherNote } from "@/lib/types"
 import { FEEDBACK_CATEGORIES } from "@/lib/types"
 
@@ -52,6 +52,34 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<"all" | "flagged" | "unreviewed">("all")
   const queryClient = useQueryClient()
+  // Sticky membership for the "Unreviewed" tab. Snapshotted on tab
+  // entry; rows here stay visible for the rest of the visit even
+  // after the teacher opens them and the live `teacher_unreviewed`
+  // flag flips to false. Prevents the row from vanishing out from
+  // under the teacher mid-read. Cleared on leaving the tab so the
+  // next visit reflects ground truth.
+  const [stickyUnreviewedIds, setStickyUnreviewedIds] = useState<Set<string>>(
+    new Set(),
+  )
+
+  useEffect(() => {
+    if (activeTab === "unreviewed") {
+      // Seed only when the set is empty (i.e. we just entered the
+      // tab). Re-seeding on every `conversations` refetch would
+      // re-add the row the teacher just reviewed and defeat the
+      // dot/count clearing.
+      setStickyUnreviewedIds((prev) => {
+        if (prev.size > 0) return prev
+        const next = new Set<string>()
+        for (const c of conversations || []) {
+          if (c.teacher_unreviewed) next.add(c.id)
+        }
+        return next
+      })
+    } else {
+      setStickyUnreviewedIds((prev) => (prev.size === 0 ? prev : new Set()))
+    }
+  }, [activeTab, conversations])
 
   // Mark a conversation as reviewed by the teaching team when the
   // teacher expands the row. Per the product call "read ==
@@ -137,11 +165,19 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
       // (just a fresh student message with no extraction trip or
       // downvote), and vice versa (an acked flag stays out of
       // here once a teacher opens the row).
-      list = list.filter((c) => c.teacher_unreviewed === true)
+      //
+      // Membership is the union of "still unreviewed" and the
+      // sticky set captured on tab entry, so opening a row marks
+      // it read (dot clears, count drops) without yanking the row
+      // out from under the teacher. The sticky set is cleared on
+      // leaving the tab; next visit shows ground truth.
+      list = list.filter(
+        (c) => c.teacher_unreviewed === true || stickyUnreviewedIds.has(c.id),
+      )
     }
     return list
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversations, topicConvIds, activeTab, flagKinds])
+  }, [conversations, topicConvIds, activeTab, flagKinds, stickyUnreviewedIds])
 
   const flaggedCount = useMemo(
     () =>

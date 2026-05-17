@@ -74,6 +74,9 @@
     "rating_invalid": "Rating must be 'up' or 'down'.",
     "feedback_only_assistant": "Feedback can only be left on assistant messages."
   },
+  "conversation": {
+    "pinned_frozen": "This chat has been pinned by a teacher and is now read-only. Start a new chat to continue."
+  },
   "signed_url": {
     "expired": "This invite link has expired.",
     "max_uses_reached": "This invite link has reached its maximum number of uses."

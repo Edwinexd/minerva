@@ -1500,6 +1500,21 @@ pub(super) async fn run_chat_message(
         if row.user_id != user_id {
             return Err(AppError::Forbidden);
         }
+        // Teacher-pinned conversations are frozen for everyone, the
+        // owner included. The pin marks the chat as a vetted exemplar
+        // the teacher has signed off on; allowing the owner to keep
+        // appending after the pin would let arbitrary follow-ups
+        // attach to something that was supposed to be "this is the
+        // good answer, full stop". The UI hides the composer for
+        // pinned views (`isPinnedView` in the frontend), but that's
+        // a presentation gate; a hand-crafted POST would otherwise
+        // still append. Enforce here so the rule holds regardless of
+        // client. New-conv path is exempt: a freshly created conv
+        // is `pinned = false` by default and there's no way for it
+        // to be pinned before its first message lands.
+        if row.pinned {
+            return Err(AppError::bad_request("conversation.pinned_frozen"));
+        }
         Some(row)
     } else {
         None

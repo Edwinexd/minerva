@@ -74,6 +74,9 @@
     "rating_invalid": "Betyget måste vara 'up' eller 'down'.",
     "feedback_only_assistant": "Feedback kan bara lämnas på assistentens meddelanden."
   },
+  "conversation": {
+    "pinned_frozen": "Den här chatten har fästs av en lärare och är nu skrivskyddad. Starta en ny chatt för att fortsätta."
+  },
   "signed_url": {
     "expired": "Den här inbjudningslänken har gått ut.",
     "max_uses_reached": "Den här inbjudningslänken har använts maximalt antal gånger."

@@ -245,12 +245,14 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
     )
   }
 
-  // The active chat is a teacher pin the viewer doesn't own -> render
-  // it read-only (hide the input below). Mirrors the regular page.
+  // Teacher pin freezes the chat for EVERYONE, owner included.
+  // Previously this also required the viewer to not own the
+  // conv, which let students keep appending to their own chats
+  // after a pin and broke the "vetted exemplar" contract.
+  // Backend enforces the same rule via `conversation.pinned_frozen`.
   const isPinnedView =
     activeConvId !== null &&
-    pinned.some((p) => p.id === activeConvId) &&
-    !conversations.some((c) => c.id === activeConvId)
+    pinned.some((p) => p.id === activeConvId)
 
   return (
     <div className="relative flex h-full bg-background text-foreground">

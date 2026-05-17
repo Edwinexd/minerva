@@ -70,9 +70,15 @@ function ChatPage({
 
   useDocumentTitle(course ? tCommon("pageTitles.course", { course: course.name }) : null)
 
+  // A teacher pin freezes the chat for EVERYONE, the owner
+  // included. Previously this also required the viewer to not
+  // own the conv (`!conversations.some(...)`), which meant
+  // students could still append to their own chats after a
+  // pin; defeating the whole point of pinning ("this is the
+  // vetted answer, don't change it"). Backend enforces the
+  // same rule via `conversation.pinned_frozen`.
   const isPinnedView = conversationId !== null &&
-    pinned?.some((p) => p.id === conversationId) &&
-    !conversations?.some((c) => c.id === conversationId)
+    !!pinned?.some((p) => p.id === conversationId)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [prevConversationId, setPrevConversationId] = useState(conversationId)

@@ -558,6 +558,14 @@ export interface Message {
   tokens_completion: number | null
   generation_ms: number | null
   retrieval_count: number | null
+  /**
+   * Persisted research-phase output for assistant messages produced
+   * by a `tool_use_enabled` course. NULL on legacy single-pass
+   * messages; the chat UI hides the "Thinking" disclosure when both
+   * are missing.
+   */
+  thinking_transcript: string | null
+  tool_events: PersistedToolEvent[] | null
   created_at: string
 }
 
@@ -575,6 +583,18 @@ export interface ApiKey {
   key_prefix: string
   created_at: string
   last_used_at: string | null
+}
+
+/**
+ * One tool call persisted on an assistant message. Mirrors the
+ * `tool_call` + `tool_result` SSE event pair the chat stream emits
+ * during a tool-use research phase, collapsed into a single
+ * structured row. Stored as JSONB on the backend side.
+ */
+export interface PersistedToolEvent {
+  name: string
+  args?: unknown
+  result_summary?: string
 }
 
 export interface PlayCourseCatalogEntry {

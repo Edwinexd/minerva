@@ -113,22 +113,40 @@ pub struct ResearchOutput {
     /// FLARE pulled in. Deduped by `chunk_identity_hash`.
     pub chunks: Vec<RagChunk>,
     /// Concatenation of every thinking token the model emitted.
-    /// The writeup phase reads `research_summary` rather than this;
-    /// the raw transcript is preserved on the struct so a future
-    /// tracing pipeline or a test assertion can inspect it without
-    /// re-deriving from SSE events.
-    #[allow(dead_code)]
+    /// Persisted on the assistant message alongside `tool_events` so
+    /// the frontend's "Thinking" disclosure survives a page refresh.
     pub transcript: String,
     /// Compressed bullet-list summary of the research the model did:
     /// each tool call and its result-size. The writeup system prompt
     /// embeds this so the writeup model can reference what was done.
     pub research_summary: String,
+    /// Ordered list of tool calls (name, args, result summary) that
+    /// fired during the research phase. Persisted as JSONB on the
+    /// message so the post-refresh disclosure can render the same
+    /// structured list it showed during streaming.
+    pub tool_events: Vec<ToolEventRecord>,
     pub total_prompt_tokens: i32,
     pub total_completion_tokens: i32,
     pub turns: usize,
     pub tool_calls_executed: usize,
     pub flare_injections: usize,
     pub stop_reason: ResearchStopReason,
+}
+
+/// One tool-call record persisted on the message. Mirrors the
+/// `{type:"tool_call"} + {type:"tool_result"}` SSE pair the frontend
+/// receives during streaming, collapsed into a single row.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ToolEventRecord {
+    pub name: String,
+    /// JSON-parsed args (so the frontend doesn't have to re-parse a
+    /// nested JSON-string). Falls back to `null` if the model emitted
+    /// malformed JSON for arguments.
+    pub args: serde_json::Value,
+    /// Short human-readable summary of the tool result (e.g. "3
+    /// results", "error: bad_args"). Matches what the `tool_result`
+    /// SSE event carries.
+    pub result_summary: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -247,6 +265,10 @@ pub async fn run(
 
     let mut transcript = String::new();
     let mut tool_log: Vec<ToolLogEntry> = Vec::new();
+    // Records the public-facing tool-call list persisted on the
+    // message. Parallel to `tool_log` (which is the compressed,
+    // model-facing summary): same calls, different shape.
+    let mut tool_events: Vec<ToolEventRecord> = Vec::new();
     let mut total_prompt_tokens: i32 = 0;
     let mut total_completion_tokens: i32 = 0;
     let mut turns: usize = 0;
@@ -383,18 +405,26 @@ pub async fn run(
                                     chunks.push(c);
                                 }
                             }
-                            emit_tool_result(
-                                tx,
-                                &call.name,
-                                &summarise_for_event(&outcome.model_message),
-                            )
-                            .await;
+                            let summary = summarise_for_event(&outcome.model_message);
+                            tool_events.push(ToolEventRecord {
+                                name: call.name.clone(),
+                                args: args_value.clone(),
+                                result_summary: summary.clone(),
+                            });
+                            emit_tool_result(tx, &call.name, &summary).await;
                             outcome.model_message
                         }
                         Err(err) => {
                             tracing::warn!("research: tool {} failed: {:?}", call.name, err);
                             let msg = err.to_tool_message();
-                            emit_tool_result(tx, &call.name, &summarise_for_event(&msg)).await;
+                            let summary = summarise_for_event(&msg);
+                            tool_events.push(ToolEventRecord {
+                                name: call.name.clone(),
+                                args: serde_json::from_str(&call.arguments)
+                                    .unwrap_or(serde_json::Value::Null),
+                                result_summary: summary.clone(),
+                            });
+                            emit_tool_result(tx, &call.name, &summary).await;
                             msg
                         }
                     }
@@ -488,6 +518,7 @@ pub async fn run(
         chunks,
         transcript,
         research_summary,
+        tool_events,
         total_prompt_tokens,
         total_completion_tokens,
         turns,

@@ -166,6 +166,14 @@ struct MessageResponse {
     tokens_completion: Option<i32>,
     generation_ms: Option<i32>,
     retrieval_count: Option<i32>,
+    /// Research-phase thinking transcript (markdown-ish text). NULL
+    /// for legacy single-pass messages; populated when the message
+    /// was produced by a `tool_use_enabled` course.
+    thinking_transcript: Option<String>,
+    /// JSONB array of `{name, args, result_summary}` records from
+    /// the research phase. Same shape as the `tool_call`/`tool_result`
+    /// SSE pairs the frontend receives during streaming.
+    tool_events: Option<serde_json::Value>,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -1042,6 +1050,8 @@ async fn get_conversation(
                 tokens_completion: m.tokens_completion,
                 generation_ms: m.generation_ms,
                 retrieval_count: m.retrieval_count,
+                thinking_transcript: m.thinking_transcript,
+                tool_events: m.tool_events,
                 created_at: m.created_at,
             })
             .collect(),
@@ -1660,6 +1670,9 @@ pub(super) async fn run_chat_message(
         None,
         None,
         None,
+        None,
+        None,
+        // User messages have no research transcript or tool events.
         None,
         None,
     )

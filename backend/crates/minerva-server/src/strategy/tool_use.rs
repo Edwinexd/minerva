@@ -200,6 +200,19 @@ pub async fn run(
     let total_prompt = research.total_prompt_tokens + writeup_output.prompt_tokens;
     let total_completion = research.total_completion_tokens + writeup_output.completion_tokens;
 
+    // Persist the research-phase artefacts alongside the assistant
+    // message so the frontend's "Thinking" disclosure survives a
+    // page refresh. `tool_events_json` is built from the
+    // `research.tool_log` shape that already feeds the
+    // `research_summary` text; the JSONB column lets the frontend
+    // render the same structured list it shows during streaming.
+    let thinking_transcript = (!research.transcript.is_empty()).then_some(&research.transcript);
+    let tool_events_json = if research.tool_events.is_empty() {
+        None
+    } else {
+        serde_json::to_value(&research.tool_events).ok()
+    };
+
     common::finalize(
         &ctx,
         &tx,
@@ -213,6 +226,8 @@ pub async fn run(
         // iterations; for the tool-use path we report
         // research turns + 1 (the writeup) so it's comparable.
         (research.turns as i32) + 1,
+        thinking_transcript.map(|s| s.as_str()),
+        tool_events_json.as_ref(),
     )
     .await;
 }

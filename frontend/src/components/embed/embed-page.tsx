@@ -72,7 +72,15 @@ interface EmbedMessage {
   content: string
   chunks_used: string[] | null
   model_used: string | null
+  thinking_transcript: string | null
+  tool_events: PersistedToolEvent[] | null
   created_at: string
+}
+
+interface PersistedToolEvent {
+  name: string
+  args?: unknown
+  result_summary?: string
 }
 
 interface EmbedConversationDetail {
@@ -770,6 +778,16 @@ function EmbedChatWindow({
             thinkingDone: t("embed.thinkingDone"),
             toolCallsAriaLabel: t("embed.toolCallsAriaLabel"),
           }}
+          getPersistedThinking={(msg) => ({
+            thinking_transcript: msg.thinking_transcript,
+            tool_events: msg.tool_events
+              ? msg.tool_events.map((e) => ({
+                  name: e.name,
+                  args: e.args,
+                  resultSummary: e.result_summary,
+                }))
+              : null,
+          })}
           assistantResponseLabel={t("embed.assistantResponseLabel")}
           renderBeforeMessages={() =>
             conversationNotes.length > 0 ? (

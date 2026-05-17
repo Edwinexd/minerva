@@ -19,6 +19,18 @@ import {
 import { ThinkingBlock, type ThinkingBlockLabels } from "./thinking-block"
 import type { ToolEvent } from "./use-chat-stream"
 
+/**
+ * Optional persisted-thinking shape that callers can attach to each
+ * `ChatBubbleMessage`. Mirrors `PersistedToolEvent` from
+ * `lib/types`; ChatTranscript reads these to render the
+ * post-refresh "Thinking" disclosure ABOVE each assistant message,
+ * matching where the live disclosure sits during streaming.
+ */
+export interface PersistedThinking {
+  thinking_transcript: string | null
+  tool_events: ToolEvent[] | null
+}
+
 export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
   messages: M[] | undefined
   isLoading: boolean
@@ -42,6 +54,14 @@ export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
   bubbleLabels: ChatBubbleLabels
   /** Labels for the collapsible "Thinking" disclosure. */
   thinkingLabels?: ThinkingBlockLabels
+  /**
+   * Pull the persisted research-phase fields off a message. Returns
+   * `null` when the message has no thinking attached (legacy
+   * single-pass messages). When omitted, no historical disclosure
+   * renders; the live streaming one still works because it reads
+   * from the `thinkingTokens` / `toolEvents` props above.
+   */
+  getPersistedThinking?: (msg: M) => PersistedThinking | null
   /** aria-label for the in-progress assistant bubble. */
   assistantResponseLabel: string
   /** Optional per-message feedback slot (thumbs up/down on the regular chat). */
@@ -64,6 +84,7 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
   thinkingActive,
   bubbleLabels,
   thinkingLabels,
+  getPersistedThinking,
   assistantResponseLabel,
   renderFeedbackSlot,
   renderAfterMessage,
@@ -78,21 +99,6 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
     scrollToBottom()
   }, [messages, streamedTokens, scrollToBottom])
 
-  // Identify the most-recent assistant message so we can attach the
-  // post-stream "Thinking" disclosure to it. When streaming wraps
-  // up, the in-progress bubble disappears and the persisted
-  // assistant message takes its place; the thinking buffer in state
-  // outlives the streaming bubble, so the disclosure stays
-  // expandable on the just-arrived answer until the user sends a
-  // new message (which calls `reset()` on the stream hook).
-  const lastAssistantId =
-    !streaming && (thinkingTokens || (toolEvents && toolEvents.length > 0))
-      ? messages
-          ?.slice()
-          .reverse()
-          .find((m) => m.role === "assistant")?.id
-      : undefined
-
   return (
     <div className="space-y-4 py-4">
       {renderBeforeMessages?.()}
@@ -105,28 +111,43 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
             <Skeleton className="h-12 w-64 rounded-lg" />
           </div>
         ))}
-      {messages?.map((msg) => (
-        <React.Fragment key={msg.id}>
-          <ChatBubble
-            message={msg}
-            labels={bubbleLabels}
-            feedbackSlot={renderFeedbackSlot?.(msg)}
-          />
-          {msg.id === lastAssistantId && thinkingLabels && (
-            <div className="flex justify-start">
-              <div className="max-w-[80%] w-full">
-                <ThinkingBlock
-                  thinkingTokens={thinkingTokens || ""}
-                  toolEvents={toolEvents || []}
-                  active={false}
-                  labels={thinkingLabels}
-                />
+      {messages?.map((msg) => {
+        // Persisted research-phase data for this specific assistant
+        // message, if any. Rendered ABOVE the bubble so it sits in
+        // the same visual position the live disclosure occupies
+        // during streaming (above the answer being written).
+        const persisted =
+          msg.role === "assistant" && getPersistedThinking
+            ? getPersistedThinking(msg)
+            : null
+        const hasPersistedThinking =
+          persisted &&
+          ((persisted.thinking_transcript &&
+            persisted.thinking_transcript.length > 0) ||
+            (persisted.tool_events && persisted.tool_events.length > 0))
+        return (
+          <React.Fragment key={msg.id}>
+            {hasPersistedThinking && thinkingLabels && (
+              <div className="flex justify-start">
+                <div className="max-w-[80%] w-full">
+                  <ThinkingBlock
+                    thinkingTokens={persisted?.thinking_transcript || ""}
+                    toolEvents={persisted?.tool_events || []}
+                    active={false}
+                    labels={thinkingLabels}
+                  />
+                </div>
               </div>
-            </div>
-          )}
-          {renderAfterMessage?.(msg)}
-        </React.Fragment>
-      ))}
+            )}
+            <ChatBubble
+              message={msg}
+              labels={bubbleLabels}
+              feedbackSlot={renderFeedbackSlot?.(msg)}
+            />
+            {renderAfterMessage?.(msg)}
+          </React.Fragment>
+        )
+      })}
       {pendingUserMsg && (
         <div className="flex justify-end">
           <div className="rounded-lg px-4 py-2 max-w-[80%] bg-primary text-primary-foreground">
@@ -135,33 +156,39 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
         </div>
       )}
       {streaming && (
-        <div className="flex justify-start">
-          <div
-            className="bg-muted rounded-lg px-4 py-2 max-w-[80%] space-y-2"
-            aria-live="polite"
-            aria-atomic="false"
-            aria-label={assistantResponseLabel}
-          >
-            {(thinkingTokens || (toolEvents && toolEvents.length > 0)) &&
-              thinkingLabels && (
-                <ThinkingBlock
-                  thinkingTokens={thinkingTokens || ""}
-                  toolEvents={toolEvents || []}
-                  active={!!thinkingActive}
-                  labels={thinkingLabels}
-                />
-              )}
-            {streamedTokens ? (
-              <MarkdownContent content={streamedTokens} />
-            ) : thinkingActive ? null : (
-              <div className="flex gap-1" aria-hidden="true">
-                <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
-                <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
-                <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:300ms]" />
+        <>
+          {(thinkingTokens || (toolEvents && toolEvents.length > 0)) &&
+            thinkingLabels && (
+              <div className="flex justify-start">
+                <div className="max-w-[80%] w-full">
+                  <ThinkingBlock
+                    thinkingTokens={thinkingTokens || ""}
+                    toolEvents={toolEvents || []}
+                    active={!!thinkingActive}
+                    labels={thinkingLabels}
+                  />
+                </div>
               </div>
             )}
+          <div className="flex justify-start">
+            <div
+              className="bg-muted rounded-lg px-4 py-2 max-w-[80%]"
+              aria-live="polite"
+              aria-atomic="false"
+              aria-label={assistantResponseLabel}
+            >
+              {streamedTokens ? (
+                <MarkdownContent content={streamedTokens} />
+              ) : (
+                <div className="flex gap-1" aria-hidden="true">
+                  <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
+                  <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
+                  <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:300ms]" />
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       )}
       {error && (
         <p role="alert" className="text-sm text-destructive text-center">

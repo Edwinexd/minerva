@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
+  "query": "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
   "describe": {
     "columns": [
       {
@@ -55,6 +55,16 @@
       },
       {
         "ordinal": 10,
+        "name": "thinking_transcript",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "tool_events",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -75,8 +85,10 @@
       true,
       true,
       true,
+      true,
+      true,
       false
     ]
   },
-  "hash": "8e2f93e3266ca390d04e70b1fa6f4976a4479e7d0f99ec2b32c301cbfaf33b29"
+  "hash": "e8d6174efef500ad2d8450e5ceff31c1ee5655bed0a6c4376777e45dfe30ae45"
 }

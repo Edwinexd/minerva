@@ -1004,6 +1004,11 @@ pub async fn stream_cerebras_to_client(
 }
 
 /// Finalize: save message, set title, record usage, send done event.
+///
+/// `thinking_transcript` + `tool_events` are populated only when the
+/// course's `tool_use_enabled` is true and a research phase ran;
+/// legacy strategies pass `None` for both, which keeps the message
+/// row's new columns NULL and the frontend renders no disclosure.
 #[allow(clippy::too_many_arguments)]
 pub async fn finalize(
     ctx: &super::GenerationContext,
@@ -1015,6 +1020,8 @@ pub async fn finalize(
     rag_injected: bool,
     generation_ms: i64,
     retrieval_count: i32,
+    thinking_transcript: Option<&str>,
+    tool_events: Option<&serde_json::Value>,
 ) {
     let assistant_msg_id = uuid::Uuid::new_v4();
     let _ = minerva_db::queries::conversations::insert_message(
@@ -1029,6 +1036,8 @@ pub async fn finalize(
         Some(completion_tokens),
         Some(generation_ms as i32),
         Some(retrieval_count),
+        thinking_transcript,
+        tool_events,
     )
     .await;
 

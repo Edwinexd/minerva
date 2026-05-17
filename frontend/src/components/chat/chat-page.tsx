@@ -692,6 +692,16 @@ export function ChatWindow({
             thinkingDone: t("chat.thinkingDone"),
             toolCallsAriaLabel: t("chat.toolCallsAriaLabel"),
           }}
+          getPersistedThinking={(msg) => ({
+            thinking_transcript: msg.thinking_transcript,
+            tool_events: msg.tool_events
+              ? msg.tool_events.map((e) => ({
+                  name: e.name,
+                  args: e.args,
+                  resultSummary: e.result_summary,
+                }))
+              : null,
+          })}
           assistantResponseLabel={t("chat.assistantResponseLabel")}
           renderBeforeMessages={() =>
             conversationNotes.length > 0 ? (

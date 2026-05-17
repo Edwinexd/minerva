@@ -11,6 +11,15 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_courses).post(create_course))
+        // Cross-course aggregation of the caller's unread
+        // conversations. Returns `{course_id: count}` for any
+        // course with at least one unread; courses with zero are
+        // omitted so the response stays small. Drives the unread
+        // badge on the "My Courses" tile. Lives in the courses
+        // router (not chat) because the chat router is mounted
+        // under `/courses/{course_id}` and this rollup is
+        // course-agnostic.
+        .route("/unread-counts", get(student_unread_counts))
         .route(
             "/{id}",
             get(get_course).put(update_course).delete(archive_course),
@@ -26,6 +35,24 @@ pub fn router() -> Router<AppState> {
             "/{id}/role-suggestions/{suggestion_id}/decline",
             post(decline_role_suggestion),
         )
+}
+
+/// Per-course unread-conversation counts for the calling user.
+/// Returns `{course_id_string: count}` so the frontend's "My
+/// Courses" tile can render a badge per card without N round-trips.
+/// Empty object when nothing is unread; courses with zero are
+/// excluded from the payload to keep it tight.
+async fn student_unread_counts(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<std::collections::HashMap<String, i64>>, AppError> {
+    let rows = minerva_db::queries::conversations::student_unread_conversations(&state.db, user.id)
+        .await?;
+    let mut by_course: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for r in rows {
+        *by_course.entry(r.course_id.to_string()).or_insert(0) += 1;
+    }
+    Ok(Json(by_course))
 }
 
 #[derive(Deserialize)]

@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH updated AS (\n            UPDATE message_feedback\n            SET acknowledged_at = NOW(), acknowledged_by = $2\n            WHERE id = $1\n            RETURNING id, message_id, user_id, rating, category, comment,\n                created_at, updated_at, acknowledged_at, acknowledged_by\n        )\n        SELECT u2.id AS \"id!\", u2.message_id AS \"message_id!\",\n            u2.user_id AS \"user_id!\", u2.rating AS \"rating!\", u2.category,\n            u2.comment, u2.created_at AS \"created_at!\", u2.updated_at AS \"updated_at!\",\n            u.eppn AS \"user_eppn?\", u.display_name AS user_display_name,\n            u2.acknowledged_at, u2.acknowledged_by,\n            au.display_name AS acknowledger_display_name\n        FROM updated u2\n        JOIN users u ON u.id = u2.user_id\n        LEFT JOIN users au ON au.id = u2.acknowledged_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "message_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "rating!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "category",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "comment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "user_eppn?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "user_display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "acknowledged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "acknowledged_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "acknowledger_display_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5933dc4aff3a03b0dd881eb82b16963c8f33ae45a577c343bbd87eb0363bf837"
+}

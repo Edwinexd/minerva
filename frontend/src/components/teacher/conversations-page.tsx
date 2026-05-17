@@ -50,8 +50,25 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   const { data: flagKinds } = useQuery(conversationFlagKindsQuery(courseId))
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<"all" | "flagged">("all")
+  const [activeTab, setActiveTab] = useState<"all" | "flagged" | "unreviewed">("all")
   const queryClient = useQueryClient()
+
+  // Mark a conversation as reviewed by the teaching team when the
+  // teacher expands the row. Per the product call "read ==
+  // reviewed"; opening the conversation IS the review. Course-shared
+  // (any teacher / TA / owner / admin's view counts) so the
+  // "Unreviewed" tab and per-row dot clear for the whole team.
+  // Extraction-guard flags + unaddressed downvotes are NOT auto-
+  // cleared by viewing; they need explicit Acknowledge clicks.
+  const markReviewedMutation = useMutation({
+    mutationFn: (cid: string) =>
+      api.post(`/courses/${courseId}/conversations/${cid}/mark-read`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "conversations"],
+      })
+    },
+  })
 
   const pinMutation = useMutation({
     mutationFn: ({ cid, pinned }: { cid: string; pinned: boolean }) =>
@@ -73,7 +90,7 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
     [activeTopic],
   )
 
-  // A conversation lands in the "Needs Review" tab when either
+  // A conversation lands in the "Flagged" tab when either
   // signal is true:
   //   1. Unaddressed student downvotes (existing behaviour).
   //   2. The extraction guard fired in a way that warrants a
@@ -81,6 +98,13 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   //      the assistant text got rewritten. Other guard flags
   //      (intent_detected, engagement_refused, constraint_lifted)
   //      are trace events that don't themselves require review.
+  //
+  // Acknowledged flags are filtered server-side by
+  // `flag_kinds_by_conversation`, so the kinds list here is
+  // already pruned; explicit ack drops a conversation out of
+  // this tab without any client-side bookkeeping. Same applies
+  // to acknowledged downvotes via the `unaddressed_down`
+  // server-side accounting.
   const needsReview = (convId: string): boolean => {
     const kinds = flagKinds?.[convId] || []
     return (
@@ -106,6 +130,14 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
           if (ax !== bx) return bx - ax
           return (b.unaddressed_down ?? 0) - (a.unaddressed_down ?? 0)
         })
+    } else if (activeTab === "unreviewed") {
+      // Conversations the teaching team hasn't looked at since
+      // the last student turn. Independent from "flagged"; a
+      // conversation can be unreviewed without being flagged
+      // (just a fresh student message with no extraction trip or
+      // downvote), and vice versa (an acked flag stays out of
+      // here once a teacher opens the row).
+      list = list.filter((c) => c.teacher_unreviewed === true)
     }
     return list
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -118,6 +150,11 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
       ).length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [conversations, flagKinds],
+  )
+
+  const unreviewedCount = useMemo(
+    () => (conversations || []).filter((c) => c.teacher_unreviewed === true).length,
+    [conversations],
   )
 
   const grouped = new Map<string, { label: string; conversations: ConversationWithUser[] }>()
@@ -252,6 +289,18 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
                 </Badge>
               )}
             </Button>
+            <Button
+              variant={activeTab === "unreviewed" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setActiveTab("unreviewed")}
+            >
+              {t("conversations.tabUnreviewed")}
+              {unreviewedCount > 0 && (
+                <Badge variant="secondary" className="ml-1.5 px-1.5 py-0 text-xs">
+                  {unreviewedCount}
+                </Badge>
+              )}
+            </Button>
           </div>
 
           {isLoading && (
@@ -265,9 +314,11 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
             <p className="text-muted-foreground text-sm">
               {activeTab === "flagged"
                 ? t("conversations.emptyFlagged")
-                : activeTopic
-                  ? t("conversations.emptyTopic")
-                  : t("conversations.emptyAll")}
+                : activeTab === "unreviewed"
+                  ? t("conversations.emptyUnreviewed")
+                  : activeTopic
+                    ? t("conversations.emptyTopic")
+                    : t("conversations.emptyAll")}
             </p>
           )}
           <div className="space-y-6">
@@ -287,11 +338,33 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
                         >
                           <button
                             type="button"
-                            onClick={() => setExpandedId(expanded ? null : conv.id)}
+                            onClick={() => {
+                              const next = expanded ? null : conv.id
+                              setExpandedId(next)
+                              // Fire mark-reviewed when transitioning to
+                              // expanded (not on collapse). Skip if the
+                              // row is already reviewed so we don't churn
+                              // the upsert + invalidate the list for no
+                              // change.
+                              if (next !== null && conv.teacher_unreviewed) {
+                                markReviewedMutation.mutate(conv.id)
+                              }
+                            }}
                             aria-expanded={expanded}
                             aria-controls={panelId}
                             className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 rounded"
                           >
+                            {conv.teacher_unreviewed && (
+                              // Per-row unread dot for the teaching
+                              // team. Same affordance as the student
+                              // sidebar (`ConversationList`) so the
+                              // surface reads uniformly across roles.
+                              <span
+                                aria-label={t("conversations.unreviewedDot")}
+                                title={t("conversations.unreviewedDot")}
+                                className="inline-block w-2 h-2 rounded-full bg-primary shrink-0"
+                              />
+                            )}
                             <span className="text-sm truncate">
                               {conv.title || t("conversations.untitled")}
                             </span>
@@ -374,30 +447,88 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   )
 }
 
-function FeedbackBadges({ feedback }: { feedback: MessageFeedback[] }) {
+function FeedbackBadges({
+  courseId,
+  conversationId,
+  feedback,
+}: {
+  courseId: string
+  conversationId: string
+  feedback: MessageFeedback[]
+}) {
   const { t } = useTranslation("teacher")
   const categoryLabel = useCategoryLabel()
+  const queryClient = useQueryClient()
   const down = feedback.filter((f) => f.rating === "down")
   const up = feedback.filter((f) => f.rating === "up")
   if (down.length === 0 && up.length === 0) return null
+
+  // Per-row ack mutation. Course-shared (same semantics as flag
+  // ack); whichever teacher clicks first resolves it for the
+  // team. Symmetric with the legacy "leaving a note on this
+  // message resolves it" rule; the dashboard's unaddressed_down
+  // counter ORs both clearing paths so either drops the row out
+  // of the "Flagged" tab.
+  const ackFeedback = useMutation({
+    mutationFn: (fbId: string) =>
+      api.post(
+        `/courses/${courseId}/conversations/${conversationId}/feedback/${fbId}/acknowledge`,
+        {},
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "conversations", conversationId],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "conversations", "all"],
+      })
+    },
+  })
+
   return (
-    <div className="flex flex-wrap gap-1 mt-1.5">
+    <div className="flex flex-wrap items-center gap-1 mt-1.5">
       {up.length > 0 && (
         <Badge variant="outline" className="text-xs border-green-300 text-green-700 dark:border-green-700 dark:text-green-300">
           {t("conversations.helpfulBadge", { count: up.length })}
         </Badge>
       )}
-      {down.map((f) => (
-        <Badge
-          key={f.id}
-          variant="outline"
-          className="text-xs border-red-300 text-red-700 dark:border-red-700 dark:text-red-300"
-          title={f.comment ?? undefined}
-        >
-          {categoryLabel(f.category)}
-          {f.user_display_name ? ` (${f.user_display_name})` : ""}
-        </Badge>
-      ))}
+      {down.map((f) => {
+        const isAcked = !!f.acknowledged_at
+        return (
+          <span key={f.id} className="inline-flex items-center gap-1.5">
+            <Badge
+              variant="outline"
+              className={`text-xs ${
+                isAcked
+                  ? "border-muted-foreground/30 text-muted-foreground opacity-70"
+                  : "border-red-300 text-red-700 dark:border-red-700 dark:text-red-300"
+              }`}
+              title={f.comment ?? undefined}
+            >
+              {categoryLabel(f.category)}
+              {f.user_display_name ? ` (${f.user_display_name})` : ""}
+            </Badge>
+            {!isAcked && (
+              <button
+                type="button"
+                className="text-xs text-red-700 dark:text-red-300 hover:underline"
+                onClick={() => ackFeedback.mutate(f.id)}
+                disabled={ackFeedback.isPending}
+              >
+                {t("conversations.acknowledgeFeedback")}
+              </button>
+            )}
+            {isAcked && (
+              <span className="text-xs text-muted-foreground italic">
+                {t("conversations.acknowledgedBy", {
+                  name:
+                    f.acknowledger_display_name ?? t("conversations.unknownAcker"),
+                })}
+              </span>
+            )}
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -417,10 +548,56 @@ function FeedbackBadges({ feedback }: { feedback: MessageFeedback[] }) {
  *   - muted/neutral: trace events (intent classifier said yes,
  *     student refused engagement). Useful for the lifecycle
  *     timeline but not themselves a "look at this" signal.
+ *
+ * Reviewable kinds (constraint_activated, rewrote) carry an
+ * Acknowledge button when `acknowledged_at` is null. Acked flags
+ * stay in the list (audit trail) with a dimmed "✓ acknowledged
+ * by X" caption. Trace events don't expose the button; they're
+ * not the kind of thing a teacher decides about, just a record.
  */
-function ConversationFlagDisplay({ flag }: { flag: ConversationFlag }) {
+function ConversationFlagDisplay({
+  courseId,
+  conversationId,
+  flag,
+}: {
+  courseId: string
+  conversationId: string
+  flag: ConversationFlag
+}) {
   const { t } = useTranslation("teacher")
+  const queryClient = useQueryClient()
+  const ackable =
+    flag.flag === "extraction_constraint_activated" ||
+    flag.flag === "extraction_rewrote"
+  const isAcked = !!flag.acknowledged_at
+  const ackMutation = useMutation({
+    mutationFn: () =>
+      api.post(
+        `/courses/${courseId}/conversations/${conversationId}/flags/${flag.id}/acknowledge`,
+        {},
+      ),
+    onSuccess: () => {
+      // Both the detail panel (for the ✓ caption) and the
+      // course-level conversation list (for the badge + Flagged
+      // tab counter) read flag state, so invalidate both.
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "conversations", conversationId],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "conversations", "flag-kinds"],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "conversations", "all"],
+      })
+    },
+  })
+
   const colour = (() => {
+    if (isAcked) {
+      // Acked rows dim to muted regardless of original kind so
+      // the audit trail reads "resolved" at a glance.
+      return "border-muted-foreground/30 text-muted-foreground opacity-70"
+    }
     switch (flag.flag) {
       case "extraction_constraint_lifted":
         return "border-green-300 text-green-700 dark:border-green-700 dark:text-green-300"
@@ -446,6 +623,24 @@ function ConversationFlagDisplay({ flag }: { flag: ConversationFlag }) {
       {flag.rationale && (
         <span className="text-xs text-muted-foreground italic">
           {flag.rationale}
+        </span>
+      )}
+      {ackable && !isAcked && (
+        <button
+          type="button"
+          className="text-xs text-amber-700 dark:text-amber-300 hover:underline"
+          onClick={() => ackMutation.mutate()}
+          disabled={ackMutation.isPending}
+        >
+          {t("conversations.acknowledgeFlag")}
+        </button>
+      )}
+      {isAcked && (
+        <span className="text-xs text-muted-foreground italic">
+          {t("conversations.acknowledgedBy", {
+            name:
+              flag.acknowledger_display_name ?? t("conversations.unknownAcker"),
+          })}
         </span>
       )}
     </div>
@@ -613,10 +808,19 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
                 </div>
               )}
               {msg.role === "assistant" && msgFeedback.length > 0 && (
-                <FeedbackBadges feedback={msgFeedback} />
+                <FeedbackBadges
+                  courseId={courseId}
+                  conversationId={conversationId}
+                  feedback={msgFeedback}
+                />
               )}
               {turnFlags.map((f) => (
-                <ConversationFlagDisplay key={f.id} flag={f} />
+                <ConversationFlagDisplay
+                  key={f.id}
+                  courseId={courseId}
+                  conversationId={conversationId}
+                  flag={f}
+                />
               ))}
               <div className="flex items-center gap-3 mt-1.5">
                 <button

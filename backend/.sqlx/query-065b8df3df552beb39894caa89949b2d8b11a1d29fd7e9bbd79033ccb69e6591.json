@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH updated AS (\n            UPDATE conversation_flags\n            SET acknowledged_at = NOW(), acknowledged_by = $2\n            WHERE id = $1\n            RETURNING id, conversation_id, flag, turn_index, rationale,\n                metadata, created_at, acknowledged_at, acknowledged_by\n        )\n        SELECT u2.id AS \"id!\", u2.conversation_id AS \"conversation_id!\",\n            u2.flag AS \"flag!\", u2.turn_index, u2.rationale, u2.metadata,\n            u2.created_at AS \"created_at!\", u2.acknowledged_at, u2.acknowledged_by,\n            au.display_name AS acknowledger_display_name\n        FROM updated u2\n        LEFT JOIN users au ON au.id = u2.acknowledged_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "conversation_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "flag!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "turn_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "rationale",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "acknowledged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "acknowledged_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "acknowledger_display_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "065b8df3df552beb39894caa89949b2d8b11a1d29fd7e9bbd79033ccb69e6591"
+}

@@ -7,7 +7,8 @@
     "newConversation": "New conversation",
     "conversation": "Conversation",
     "pinnedByTeacher": "Pinned by teacher",
-    "studentFallback": "Student"
+    "studentFallback": "Student",
+    "unreadNote": "New teacher note"
   },
   "greeting": {
     "morning": "Good morning",

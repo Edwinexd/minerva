@@ -156,6 +156,7 @@ function ChatPage({
               conversation: t("sidebar.conversation"),
               pinnedByTeacher: t("sidebar.pinnedByTeacher"),
               studentFallback: t("sidebar.studentFallback"),
+              unreadNote: t("sidebar.unreadNote"),
             }}
           />
         </div>
@@ -350,6 +351,36 @@ export function ChatWindow({
     // for the new id.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId])
+
+  // Mark the conversation as read on the student side whenever the
+  // chat-page opens an existing conversation. Fire-and-forget; the
+  // backend stamps `student_last_viewed_at = NOW()` so the sidebar's
+  // unread dot (and the "My Courses" tile's unread badge) clear on
+  // the next refetch. We invalidate the sidebar + the cross-course
+  // rollup so the dot disappears without a full page reload.
+  //
+  // No mark-read for `conversationId === null` (i.e. /new); the
+  // route hasn't created a row yet, and the empty-state has nothing
+  // to mark read. We also skip readOnly contexts (study mode read-
+  // only views) since those are pre-recorded research data, not the
+  // user's own chat surface.
+  useEffect(() => {
+    if (conversationId === null || readOnly) return
+    void api
+      .post(`/courses/${courseId}/conversations/${conversationId}/mark-read`, {})
+      .then(() => {
+        queryClient.invalidateQueries({
+          queryKey: ["courses", courseId, "conversations"],
+        })
+        queryClient.invalidateQueries({ queryKey: ["courses", "unread-counts"] })
+      })
+      .catch(() => {
+        // Best-effort: a failed mark-read is purely cosmetic
+        // (the dot just doesn't clear). Don't surface to the
+        // user; logged at the network layer if relevant.
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, courseId, readOnly])
 
   /**
    * Returns the conversation id this send landed in (the existing one

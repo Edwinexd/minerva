@@ -126,6 +126,25 @@ export const conversationsQuery = (courseId: string) =>
     queryFn: () => api.get<Conversation[]>(`/courses/${courseId}/conversations`),
   })
 
+/**
+ * Cross-course unread-conversation counts for the calling user.
+ * Returns `{course_id: count}` for any course with at least one
+ * conversation that received a teacher note after the student
+ * last viewed it; courses with zero unread are omitted server-side
+ * so the payload stays tight. Drives the unread badge on the
+ * "My Courses" tile.
+ *
+ * Modest staleTime: a fresh teacher note that just landed should
+ * surface promptly, but we don't need realtime polling; the
+ * student visiting a course will refetch on focus / mount anyway,
+ * and the dot clearing happens via invalidation on mark-read.
+ */
+export const unreadCountsQuery = queryOptions({
+  queryKey: ["courses", "unread-counts"],
+  queryFn: () => api.get<Record<string, number>>(`/courses/unread-counts`),
+  staleTime: 30 * 1000,
+})
+
 export const allConversationsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", "all"],

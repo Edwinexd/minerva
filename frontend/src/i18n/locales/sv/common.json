@@ -88,6 +88,10 @@
     "clickToChat": "Klicka för att börja chatta",
     "ragBadge": "{{percent}} % RAG",
     "temperatureBadge": "T={{value}}",
+    "unreadNotesBadge_one": "{{count}} ny notering",
+    "unreadNotesBadge_other": "{{count}} nya noteringar",
+    "unreadNotesTooltip_one": "En lärare har skrivit {{count}} ny notering i en av dina konversationer",
+    "unreadNotesTooltip_other": "En lärare har skrivit {{count}} nya noteringar i dina konversationer",
     "create": {
       "title": "Skapa kurs",
       "nameLabel": "Kursnamn",

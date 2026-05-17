@@ -278,6 +278,15 @@ export interface Conversation {
   pinned: boolean
   created_at: string
   updated_at: string
+  /**
+   * True when this conversation's owner (the student) has a
+   * teacher note that arrived after their last view. Drives
+   * the unread dot in the chat sidebar's conversation row.
+   * Optional because not every endpoint that returns a
+   * Conversation populates it (e.g. the pin endpoint, which is
+   * teacher-side and doesn't render this field).
+   */
+  has_unread_note?: boolean
 }
 
 export interface ConversationWithUser extends Conversation {
@@ -288,8 +297,33 @@ export interface ConversationWithUser extends Conversation {
   /** Only present on the /all endpoint (teacher view). */
   feedback_up?: number
   feedback_down?: number
-  /** Thumbs-down messages with no teacher note yet. Drives "Needs Review". */
+  /**
+   * Thumbs-down feedback rows that have neither been explicitly
+   * acknowledged nor have a teacher note attached to the same
+   * message. Either clearing rule (ack or note) drops the row
+   * out of this counter; the dashboard's "Flagged" tab uses
+   * this count to badge the conversation.
+   */
   unaddressed_down?: number
+  /**
+   * True when there's student activity (a new user turn) the
+   * teaching team hasn't seen since the last review. Drives the
+   * dashboard's "Unreviewed" tab + per-row dot. Per the product
+   * call, opening the conversation in the dashboard counts as a
+   * review (read == reviewed) and clears this; explicit re-review
+   * is just re-opening. Course-shared (any teacher / TA / owner /
+   * admin clears it for the whole team).
+   */
+  teacher_unreviewed?: boolean
+  /**
+   * Timestamp of the most-recent teaching-team review, or null
+   * when nobody on the team has opened this conversation since
+   * the migration backfill ran. Surfaced as "Reviewed by X · 2d
+   * ago" in the dashboard row.
+   */
+  last_reviewed_at?: string | null
+  last_reviewed_by?: string | null
+  last_reviewer_display_name?: string | null
 }
 
 export interface CourseFeedbackStats {
@@ -442,6 +476,16 @@ export interface ConversationFlag {
   rationale: string | null
   metadata: Record<string, unknown> | null
   created_at: string
+  /**
+   * NULL until a teacher clicks "Acknowledge" on the dashboard.
+   * Acked flags still render in the conversation detail (audit
+   * trail) but stop driving the per-row badge and stop pulling
+   * the conversation into the "Needs Review" tab. Fixes the
+   * prior "extraction flags are stuck forever" behaviour.
+   */
+  acknowledged_at?: string | null
+  acknowledged_by?: string | null
+  acknowledger_display_name?: string | null
 }
 
 export const FEEDBACK_CATEGORIES = [
@@ -484,6 +528,16 @@ export interface MessageFeedback {
   updated_at: string
   user_eppn: string | null
   user_display_name: string | null
+  /**
+   * NULL until a teacher explicitly clicks "Mark as reviewed"
+   * on this feedback row. Orthogonal to the legacy "leaving a
+   * note on the same message addresses the downvote" path; the
+   * dashboard's unaddressed_down counter ORs the two clearing
+   * rules so either resolves it.
+   */
+  acknowledged_at?: string | null
+  acknowledged_by?: string | null
+  acknowledger_display_name?: string | null
 }
 
 export interface Message {

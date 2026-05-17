@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { coursesQuery, userQuery } from "@/lib/queries"
+import { coursesQuery, unreadCountsQuery, userQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { useDocumentTitle } from "@/lib/use-document-title"
@@ -94,6 +94,7 @@ export function Home() {
           title={hasBoth ? t("home.studentSection") : null}
           courses={studentCourses}
           variant="student"
+          showUnread
         />
       )}
 
@@ -110,11 +111,26 @@ function CourseSection({
   title,
   courses,
   variant,
+  showUnread = false,
 }: {
   title: string | null
   courses: Course[]
   variant: "teacher" | "student"
+  /**
+   * When true, fetch the per-course unread rollup and pass each
+   * card its unread count. Only student tiles render the badge
+   * (teachers have their own per-course dashboard with the
+   * Unreviewed tab; double-surfacing on the tile would be noisy).
+   */
+  showUnread?: boolean
 }) {
+  // Cross-course rollup of conversations with unread teacher
+  // notes. Only fetched when a section actually needs it; the
+  // teacher tiles section skips the query entirely.
+  const { data: unreadByCourse } = useQuery({
+    ...unreadCountsQuery,
+    enabled: showUnread,
+  })
   return (
     <section className="space-y-3">
       {title && (
@@ -127,7 +143,11 @@ function CourseSection({
           variant === "teacher" ? (
             <TeacherCourseCard key={course.id} course={course} />
           ) : (
-            <StudentCourseCard key={course.id} course={course} />
+            <StudentCourseCard
+              key={course.id}
+              course={course}
+              unreadCount={unreadByCourse?.[course.id] ?? 0}
+            />
           ),
         )}
       </div>
@@ -177,13 +197,35 @@ function TeacherCourseCard({ course }: { course: Course }) {
   )
 }
 
-function StudentCourseCard({ course }: { course: Course }) {
+function StudentCourseCard({
+  course,
+  unreadCount,
+}: {
+  course: Course
+  unreadCount: number
+}) {
   const { t } = useTranslation("common")
   return (
     <Link to="/course/$courseId" params={{ courseId: course.id }}>
       <Card className="hover:border-foreground/20 transition-colors cursor-pointer h-full">
         <CardHeader>
-          <CardTitle className="text-lg">{course.name}</CardTitle>
+          <div className="flex items-start justify-between gap-2">
+            <CardTitle className="text-lg">{course.name}</CardTitle>
+            {unreadCount > 0 && (
+              // Small primary-filled badge with the unread count.
+              // Significantly more discoverable than a dot inside
+              // the chat sidebar (the only place a fresh teacher
+              // note lived before), since this catches the user
+              // before they pick which course to open.
+              <Badge
+                variant="default"
+                className="shrink-0"
+                title={t("home.unreadNotesTooltip", { count: unreadCount })}
+              >
+                {t("home.unreadNotesBadge", { count: unreadCount })}
+              </Badge>
+            )}
+          </div>
           {course.description && (
             <CardDescription>{course.description}</CardDescription>
           )}

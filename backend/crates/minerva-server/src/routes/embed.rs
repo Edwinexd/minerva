@@ -49,6 +49,15 @@ pub fn router() -> Router<AppState> {
             "/course/{course_id}/conversations/{cid}/message",
             post(send_message),
         )
+        // Mirrors the Shibboleth chat router's mark-read. The embed
+        // surface is always a student opening their own conversation
+        // (embed tokens are owner-scoped), so this purely bumps
+        // `student_last_viewed_at`; no teacher branch like the
+        // Shibboleth handler has.
+        .route(
+            "/course/{course_id}/conversations/{cid}/mark-read",
+            post(mark_read),
+        )
         .route("/course/{course_id}/me", get(get_me))
         .route(
             "/course/{course_id}/acknowledge-privacy",
@@ -111,6 +120,11 @@ struct ConversationResponse {
     title: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
+    /// True when a teacher note attached to this conversation
+    /// post-dates the owner's last view. Drives the unread dot
+    /// in the embed sidebar; symmetrical with the Shibboleth
+    /// route's `ConversationResponse`.
+    has_unread_note: bool,
 }
 
 #[derive(Serialize)]
@@ -245,6 +259,7 @@ async fn list_conversations(
                 title: r.title,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
+                has_unread_note: r.has_unread_note,
             })
             .collect(),
     ))
@@ -360,6 +375,31 @@ async fn send_message(
         body.prompt_analysis,
     )
     .await
+}
+
+/// Stamp `student_last_viewed_at = NOW()` on the conversation for
+/// the embed-token holder. Required steps: token must be valid,
+/// must match the URL course_id, AND the user_id encoded in the
+/// token must be the owner of the conversation. The last check is
+/// what stops a (legitimate) embed user from clearing someone
+/// else's unread state by guessing a conversation id.
+async fn mark_read(
+    State(state): State<AppState>,
+    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Query(query): Query<TokenQuery>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let (_, user_id) = authenticate(&state, course_id, &query)?;
+    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if conv.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+    if conv.user_id != user_id {
+        return Err(AppError::Forbidden);
+    }
+    minerva_db::queries::conversations::mark_student_viewed(&state.db, cid).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 async fn start_conversation(

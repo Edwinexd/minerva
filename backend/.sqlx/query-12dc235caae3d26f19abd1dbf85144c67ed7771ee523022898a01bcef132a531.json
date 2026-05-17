@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.id, f.message_id, f.user_id, f.rating, f.category, f.comment,\n            f.created_at, f.updated_at,\n            u.eppn AS \"user_eppn?\", u.display_name AS user_display_name,\n            f.acknowledged_at, f.acknowledged_by,\n            au.display_name AS acknowledger_display_name\n        FROM message_feedback f\n        JOIN messages m ON m.id = f.message_id\n        JOIN users u ON u.id = f.user_id\n        LEFT JOIN users au ON au.id = f.acknowledged_by\n        WHERE m.conversation_id = $1\n        ORDER BY f.created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "rating",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "category",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "comment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "user_eppn?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "user_display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "acknowledged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "acknowledged_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "acknowledger_display_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "12dc235caae3d26f19abd1dbf85144c67ed7771ee523022898a01bcef132a531"
+}

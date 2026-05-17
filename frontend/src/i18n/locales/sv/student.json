@@ -7,7 +7,8 @@
     "newConversation": "Ny konversation",
     "conversation": "Konversation",
     "pinnedByTeacher": "Fäst av lärare",
-    "studentFallback": "Student"
+    "studentFallback": "Student",
+    "unreadNote": "Ny lärarnotering"
   },
   "greeting": {
     "morning": "God morgon",

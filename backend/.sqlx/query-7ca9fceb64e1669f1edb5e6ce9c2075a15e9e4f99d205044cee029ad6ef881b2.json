@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO message_feedback (id, message_id, user_id, rating, category, comment)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        ON CONFLICT (message_id, user_id) DO UPDATE\n            SET rating = EXCLUDED.rating,\n                category = EXCLUDED.category,\n                comment = EXCLUDED.comment,\n                updated_at = NOW()\n        RETURNING id, message_id, user_id, rating, category, comment, created_at, updated_at",
+  "query": "INSERT INTO message_feedback (id, message_id, user_id, rating, category, comment)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        ON CONFLICT (message_id, user_id) DO UPDATE\n            SET rating = EXCLUDED.rating,\n                category = EXCLUDED.category,\n                comment = EXCLUDED.comment,\n                updated_at = NOW(),\n                acknowledged_at = NULL,\n                acknowledged_by = NULL\n        RETURNING id, message_id, user_id, rating, category, comment,\n            created_at, updated_at, acknowledged_at, acknowledged_by",
   "describe": {
     "columns": [
       {
@@ -42,6 +42,16 @@
         "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "acknowledged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "acknowledged_by",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
@@ -62,8 +72,10 @@
       true,
       true,
       false,
-      false
+      false,
+      true,
+      true
     ]
   },
-  "hash": "4794c84613ab4c9943e271384a91e109d3b40f9c94a467ba683fbcd270d6bd22"
+  "hash": "7ca9fceb64e1669f1edb5e6ce9c2075a15e9e4f99d205044cee029ad6ef881b2"
 }

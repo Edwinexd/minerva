@@ -48,6 +48,30 @@ pub fn router() -> Router<AppState> {
             "/conversations/{cid}/messages/{message_id}/feedback",
             put(set_feedback),
         )
+        // Stamp a "last viewed" / "last reviewed" marker on the
+        // conversation. Same endpoint serves both sides; the
+        // handler dispatches on caller role: conversation owner
+        // bumps `student_last_viewed_at`, teacher/TA/owner/admin
+        // upserts `conversation_reviews`. Per the product call
+        // "read == reviewed" for teachers; no separate review
+        // endpoint exists.
+        .route("/conversations/{cid}/mark-read", post(mark_read))
+        // Acknowledge an extraction-guard flag. Teacher-only;
+        // clears the per-row badge + removes it from the
+        // "Needs Review" tab while keeping the row visible in
+        // the conversation detail for audit.
+        .route(
+            "/conversations/{cid}/flags/{flag_id}/acknowledge",
+            post(acknowledge_flag),
+        )
+        // Acknowledge a downvote feedback row. Symmetrical with
+        // flag ack; the legacy "leaving a note on the same
+        // message" path still clears the downvote too (the
+        // dashboard's unaddressed_down counter ORs both rules).
+        .route(
+            "/conversations/{cid}/feedback/{fb_id}/acknowledge",
+            post(acknowledge_feedback),
+        )
         // Aegis live analyzer. Called from the frontend on debounced
         // input changes; the panel updates BEFORE the user hits Send.
         // No persistence happens here; the verdict the student
@@ -68,6 +92,11 @@ struct ConversationResponse {
     pinned: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
+    /// True when a teacher note attached to this conversation
+    /// post-dates the owner's `student_last_viewed_at`. The
+    /// student-side chat sidebar reads this to render the
+    /// unread dot per row.
+    has_unread_note: bool,
 }
 
 #[derive(Serialize)]
@@ -99,6 +128,18 @@ struct ConversationWithFeedbackResponse {
     feedback_up: i64,
     feedback_down: i64,
     unaddressed_down: i64,
+    /// True iff the conversation has activity (a new student
+    /// message) the teaching team hasn't seen since the last
+    /// review. Drives the "Unreviewed" tab + per-row dot on
+    /// the dashboard.
+    teacher_unreviewed: bool,
+    /// Most-recent teaching-team review timestamp, or null when
+    /// nobody on the team has opened this conversation. The
+    /// migration backfilled existing rows to migration time so
+    /// day-one isn't "everything unreviewed".
+    last_reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
+    last_reviewed_by: Option<Uuid>,
+    last_reviewer_display_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -152,6 +193,15 @@ struct MessageFeedbackResponse {
     updated_at: chrono::DateTime<chrono::Utc>,
     user_eppn: Option<String>,
     user_display_name: Option<String>,
+    /// NULL until a teacher explicitly clicks "Mark as reviewed"
+    /// on this feedback row. Independent of the legacy "leaving a
+    /// note on the same message addresses the downvote" path; the
+    /// teacher dashboard's `unaddressed_down` counter ORs the two
+    /// clearing rules so either resolves it. Sent over the wire
+    /// so the UI can dim the row + show "Reviewed by X".
+    acknowledged_at: Option<chrono::DateTime<chrono::Utc>>,
+    acknowledged_by: Option<Uuid>,
+    acknowledger_display_name: Option<String>,
 }
 
 /// Wire shape for an aegis verdict that flows in BOTH directions:
@@ -377,6 +427,15 @@ struct ConversationFlagResponse {
     /// "details" pane.
     metadata: Option<serde_json::Value>,
     created_at: chrono::DateTime<chrono::Utc>,
+    /// NULL until a teacher clicks "Acknowledge" on the
+    /// dashboard. Acked flags still render in the conversation
+    /// detail (audit trail) but stop driving the per-row badge
+    /// and stop pulling the conversation into "Needs Review" --
+    /// fixes the prior "extraction flags are stuck forever"
+    /// behaviour.
+    acknowledged_at: Option<chrono::DateTime<chrono::Utc>>,
+    acknowledged_by: Option<Uuid>,
+    acknowledger_display_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -416,6 +475,7 @@ async fn list_conversations(
                 pinned: r.pinned,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
+                has_unread_note: r.has_unread_note,
             })
             .collect(),
     ))
@@ -439,6 +499,17 @@ async fn list_all_conversations(
             .map(|r| {
                 let (user_eppn, user_display_name) =
                     ext_obfuscate::apply(ps.as_ref(), r.user_id, r.user_eppn, r.user_display_name);
+                // Reviewer name goes through the same pseudonymizer
+                // so an ext: viewer sees "Reviewed by Wombling
+                // Wombat" rather than the real teacher eppn. The
+                // first tuple element (eppn) is unused here; we only
+                // display the name on the dashboard.
+                let (_, last_reviewer_display_name) = ext_obfuscate::apply(
+                    ps.as_ref(),
+                    r.last_reviewed_by.unwrap_or_else(Uuid::nil),
+                    None,
+                    r.last_reviewer_display_name,
+                );
                 ConversationWithFeedbackResponse {
                     id: r.id,
                     course_id: r.course_id,
@@ -453,6 +524,10 @@ async fn list_all_conversations(
                     feedback_up: r.feedback_up,
                     feedback_down: r.feedback_down,
                     unaddressed_down: r.unaddressed_down,
+                    teacher_unreviewed: r.teacher_unreviewed,
+                    last_reviewed_at: r.last_reviewed_at,
+                    last_reviewed_by: r.last_reviewed_by,
+                    last_reviewer_display_name,
                 }
             })
             .collect(),
@@ -925,6 +1000,17 @@ async fn get_conversation(
             };
             let (user_eppn, user_display_name) =
                 ext_obfuscate::apply(ps.as_ref(), f.user_id, raw_eppn, raw_display);
+            // Acknowledger display name follows the same pseudonym
+            // path so an ext: viewer sees a fake name. Acked rows
+            // are visible to the conversation owner too (they can
+            // see that a teacher reviewed their downvote without
+            // posting a note); the ack id itself isn't sensitive.
+            let (_, acknowledger_display_name) = ext_obfuscate::apply(
+                ps.as_ref(),
+                f.acknowledged_by.unwrap_or_else(Uuid::nil),
+                None,
+                f.acknowledger_display_name,
+            );
             MessageFeedbackResponse {
                 id: f.id,
                 message_id: f.message_id,
@@ -936,6 +1022,9 @@ async fn get_conversation(
                 updated_at: f.updated_at,
                 user_eppn,
                 user_display_name,
+                acknowledged_at: f.acknowledged_at,
+                acknowledged_by: f.acknowledged_by,
+                acknowledger_display_name,
             }
         })
         .collect();
@@ -976,13 +1065,24 @@ async fn get_conversation(
         feedback,
         flags: flag_rows
             .into_iter()
-            .map(|f| ConversationFlagResponse {
-                id: f.id,
-                flag: f.flag,
-                turn_index: f.turn_index,
-                rationale: f.rationale,
-                metadata: f.metadata,
-                created_at: f.created_at,
+            .map(|f| {
+                let (_, acknowledger_display_name) = ext_obfuscate::apply(
+                    ps.as_ref(),
+                    f.acknowledged_by.unwrap_or_else(Uuid::nil),
+                    None,
+                    f.acknowledger_display_name,
+                );
+                ConversationFlagResponse {
+                    id: f.id,
+                    flag: f.flag,
+                    turn_index: f.turn_index,
+                    rationale: f.rationale,
+                    metadata: f.metadata,
+                    created_at: f.created_at,
+                    acknowledged_at: f.acknowledged_at,
+                    acknowledged_by: f.acknowledged_by,
+                    acknowledger_display_name,
+                }
             })
             .collect(),
         prompt_analyses,
@@ -1723,6 +1823,12 @@ async fn set_pin(
         pinned: row.pinned,
         created_at: row.created_at,
         updated_at: row.updated_at,
+        // Pinning is teacher-only and the response is consumed
+        // by the teacher dashboard, never the student sidebar
+        // that actually reads this field. Safe to stub false;
+        // the next student sidebar refetch goes through the
+        // dedicated list query which re-derives it correctly.
+        has_unread_note: false,
     }))
 }
 
@@ -1959,6 +2065,183 @@ async fn set_feedback(
         updated_at: row.updated_at,
         user_eppn: Some(user.eppn.clone()),
         user_display_name: user.display_name.clone(),
+        // Upsert clears any prior ack on the row (see
+        // `message_feedback::upsert`); reflect that in the
+        // response so the client doesn't render a stale "Reviewed
+        // by X" caption on a freshly-changed feedback.
+        acknowledged_at: row.acknowledged_at,
+        acknowledged_by: row.acknowledged_by,
+        acknowledger_display_name: None,
+    }))
+}
+
+// ── Mark-read & acknowledge ───────────────────────────────────────────────
+
+/// Stamp the appropriate "last seen" marker on a conversation.
+/// One endpoint, two semantics based on caller role:
+///   * Conversation owner → bumps `conversations.student_last_viewed_at`
+///     so the chat sidebar's unread dot clears.
+///   * Teacher / TA / owner / admin → upserts `conversation_reviews`
+///     so the dashboard's "Unreviewed" tab and per-row dot clear
+///     (course-shared; any team member's view counts).
+///   * If the caller happens to be BOTH the owner AND a teacher
+///     (e.g. an admin opening a chat they themselves authored on
+///     a course they teach), both markers are stamped; neither
+///     side's UI is wrong as a result.
+///
+/// Idempotent; safe to fire on every conversation open. 403 when
+/// the caller has no relationship to the conversation.
+async fn mark_read(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    // Course-membership gate; verify_course_access also returns
+    // 404 for non-existent course ids so we get the same auth
+    // shape as the rest of the chat routes.
+    verify_course_access(&state, course_id, user.id).await?;
+
+    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if conv.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+
+    let is_owner = conv.user_id == user.id;
+    let is_teacher = is_course_teacher_or_admin(&state, course_id, &user).await?;
+    // Reject early if neither relationship applies. Pinned
+    // conversations are readable by non-owner students, but
+    // there's no "student bookmark" concept here; silently
+    // noop'ing on a read attempt by a non-owner non-teacher
+    // would be confusing (the call succeeds but nothing
+    // happens). Forbidden is the honest status.
+    if !is_owner && !is_teacher {
+        return Err(AppError::Forbidden);
+    }
+
+    if is_owner {
+        minerva_db::queries::conversations::mark_student_viewed(&state.db, cid).await?;
+    }
+    if is_teacher {
+        minerva_db::queries::conversations::mark_teacher_reviewed(&state.db, cid, user.id).await?;
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Mark an extraction-guard flag as acknowledged by the calling
+/// teacher. Teacher-only; 403 for student callers even if they
+/// own the conversation, since the flag UI is teacher-side only.
+async fn acknowledge_flag(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, cid, flag_id)): Path<(Uuid, Uuid, Uuid)>,
+) -> Result<Json<ConversationFlagResponse>, AppError> {
+    verify_course_teacher_access(&state, course_id, &user).await?;
+
+    // Triple-check the (course, conversation, flag) URL path:
+    // otherwise a teacher of course A could ack a flag in
+    // course B by putting B's flag_id in the path.
+    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if conv.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+    let existing = minerva_db::queries::conversation_flags::find_by_id(&state.db, flag_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if existing.conversation_id != cid {
+        return Err(AppError::NotFound);
+    }
+
+    let updated = minerva_db::queries::conversation_flags::acknowledge(&state.db, flag_id, user.id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
+    let (_, acknowledger_display_name) = ext_obfuscate::apply(
+        ps.as_ref(),
+        updated.acknowledged_by.unwrap_or_else(Uuid::nil),
+        None,
+        updated.acknowledger_display_name,
+    );
+
+    Ok(Json(ConversationFlagResponse {
+        id: updated.id,
+        flag: updated.flag,
+        turn_index: updated.turn_index,
+        rationale: updated.rationale,
+        metadata: updated.metadata,
+        created_at: updated.created_at,
+        acknowledged_at: updated.acknowledged_at,
+        acknowledged_by: updated.acknowledged_by,
+        acknowledger_display_name,
+    }))
+}
+
+/// Mark a downvote feedback row as reviewed. Teacher-only; same
+/// triple-check on the URL path as flag ack. Up-votes can be acked
+/// too via the same endpoint (the dashboard doesn't surface them
+/// today, but keeping the behaviour uniform avoids a special-case
+/// failure mode if a future "addressed-positive" badge lands).
+async fn acknowledge_feedback(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, cid, fb_id)): Path<(Uuid, Uuid, Uuid)>,
+) -> Result<Json<MessageFeedbackResponse>, AppError> {
+    verify_course_teacher_access(&state, course_id, &user).await?;
+
+    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if conv.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+    let existing = minerva_db::queries::message_feedback::find_by_id(&state.db, fb_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    // Walk message → conversation to enforce the scope. We avoid
+    // pushing this into a JOIN in `find_by_id` so the same helper
+    // is reusable for non-scope contexts (audit views, etc.).
+    let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
+    if !messages.iter().any(|m| m.id == existing.message_id) {
+        return Err(AppError::NotFound);
+    }
+
+    let updated = minerva_db::queries::message_feedback::acknowledge(&state.db, fb_id, user.id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
+    let (user_eppn, user_display_name) = ext_obfuscate::apply(
+        ps.as_ref(),
+        updated.user_id,
+        updated.user_eppn,
+        updated.user_display_name,
+    );
+    let (_, acknowledger_display_name) = ext_obfuscate::apply(
+        ps.as_ref(),
+        updated.acknowledged_by.unwrap_or_else(Uuid::nil),
+        None,
+        updated.acknowledger_display_name,
+    );
+
+    Ok(Json(MessageFeedbackResponse {
+        id: updated.id,
+        message_id: updated.message_id,
+        user_id: updated.user_id,
+        rating: updated.rating,
+        category: updated.category,
+        comment: updated.comment,
+        created_at: updated.created_at,
+        updated_at: updated.updated_at,
+        user_eppn,
+        user_display_name,
+        acknowledged_at: updated.acknowledged_at,
+        acknowledged_by: updated.acknowledged_by,
+        acknowledger_display_name,
     }))
 }
 

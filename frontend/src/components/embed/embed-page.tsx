@@ -43,6 +43,14 @@ interface EmbedConversation {
   title: string | null
   created_at: string
   updated_at: string
+  /**
+   * Mirrors the Shibboleth `Conversation.has_unread_note`: true
+   * when a teacher note attached to this conversation post-dates
+   * the owner's last view. Drives the unread dot in the embed
+   * sidebar (same `ConversationList` component as the regular
+   * chat page).
+   */
+  has_unread_note?: boolean
 }
 
 /**
@@ -146,6 +154,23 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   useEffect(() => {
     setSidebarOpen(false)
   }, [activeConvId])
+
+  // Stamp `student_last_viewed_at = NOW()` on the embed side when
+  // the user opens an existing conversation. Mirrors the Shibboleth
+  // chat-page mark-read effect; the embed handler validates that
+  // the embed-token user owns the conversation before stamping.
+  // Best-effort; failure just leaves the dot up.
+  useEffect(() => {
+    if (!token || activeConvId === null) return
+    void embedPost(`/course/${courseId}/conversations/${activeConvId}/mark-read`, token)
+      .then(() => void refreshConversations())
+      .catch(() => {
+        // Cosmetic; ignore.
+      })
+    // refreshConversations is closure-stable enough; including it
+    // would refire the mark-read on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConvId, courseId, token])
 
   useDocumentTitle(course ? tCommon("pageTitles.embed", { course: course.name }) : null)
 
@@ -321,6 +346,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
               conversation: t("embed.untitledConversation"),
               pinnedByTeacher: t("embed.pinnedByTeacher"),
               studentFallback: t("embed.studentFallback"),
+              unreadNote: t("embed.unreadNote"),
             }}
           />
         </div>

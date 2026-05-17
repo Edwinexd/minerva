@@ -13,6 +13,23 @@ pub struct ConversationRow {
 }
 
 #[derive(Debug)]
+pub struct StudentSidebarConversationRow {
+    pub id: Uuid,
+    pub course_id: Uuid,
+    pub user_id: Uuid,
+    pub title: Option<String>,
+    pub pinned: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// True iff a teacher_note attached to this conversation has
+    /// a `created_at` newer than the owner's
+    /// `student_last_viewed_at` (or the latter is NULL = never
+    /// visited yet). Drives the unread dot on the student-side
+    /// chat sidebar.
+    pub has_unread_note: bool,
+}
+
+#[derive(Debug)]
 pub struct ConversationWithUserRow {
     pub id: Uuid,
     pub course_id: Uuid,
@@ -74,10 +91,32 @@ pub async fn list_by_course_user(
     db: &PgPool,
     course_id: Uuid,
     user_id: Uuid,
-) -> Result<Vec<ConversationRow>, sqlx::Error> {
+) -> Result<Vec<StudentSidebarConversationRow>, sqlx::Error> {
+    // `has_unread_note` is a single correlated EXISTS per row;
+    // cheap because `teacher_notes` is indexed by conversation_id
+    // and we short-circuit on the first match. Two truth cases:
+    //   1. The owner has never visited (NULL last-viewed) AND a
+    //      note exists at all → unread.
+    //   2. A note's `created_at` is strictly newer than the
+    //      stored last-viewed → unread.
+    // Acked / pre-existing notes that pre-date the migration
+    // backfill don't fire spuriously because the backfill set
+    // `student_last_viewed_at = NOW()` on every existing row.
     sqlx::query_as!(
-        ConversationRow,
-        "SELECT id, course_id, user_id, title, pinned, created_at, updated_at FROM conversations WHERE course_id = $1 AND user_id = $2 ORDER BY updated_at DESC",
+        StudentSidebarConversationRow,
+        r#"SELECT c.id, c.course_id, c.user_id, c.title, c.pinned,
+            c.created_at, c.updated_at,
+            EXISTS (
+                SELECT 1 FROM teacher_notes tn
+                WHERE tn.conversation_id = c.id
+                  AND (
+                      c.student_last_viewed_at IS NULL
+                      OR tn.created_at > c.student_last_viewed_at
+                  )
+            ) AS "has_unread_note!: bool"
+        FROM conversations c
+        WHERE c.course_id = $1 AND c.user_id = $2
+        ORDER BY c.updated_at DESC"#,
         course_id,
         user_id,
     )
@@ -109,7 +148,31 @@ pub struct ConversationWithFeedbackRow {
     pub message_count: Option<i64>,
     pub feedback_up: i64,
     pub feedback_down: i64,
+    /// Down-vote feedback rows for this conversation that have
+    /// neither been explicitly acknowledged nor have a teacher
+    /// note attached to the same message. Drives the "Needs
+    /// Review" badge counter; either resolution path clears it,
+    /// the OR of the two rules is what keeps the legacy "add a
+    /// note" shortcut working alongside the new explicit ack.
     pub unaddressed_down: i64,
+    /// True iff the conversation has activity the teaching team
+    /// hasn't seen yet: either no `conversation_reviews` row
+    /// exists, or the latest user message arrived after the
+    /// stored `reviewed_at`. Re-derived per query rather than
+    /// cached on the conversation row so a new student turn
+    /// automatically flips this back on without explicit
+    /// invalidation. Read by the teacher dashboard's
+    /// "Unreviewed" filter.
+    pub teacher_unreviewed: bool,
+    /// Most-recent teaching-team review timestamp, or NULL if no
+    /// teacher has opened this conversation since the migration
+    /// backfill ran. Surfaced for the "Reviewed by X · 2d ago"
+    /// caption in the dashboard.
+    pub last_reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// User who performed the most-recent review; pseudonymised
+    /// at the response layer for ext: viewers.
+    pub last_reviewed_by: Option<Uuid>,
+    pub last_reviewer_display_name: Option<String>,
 }
 
 pub async fn list_all_by_course(
@@ -135,6 +198,19 @@ pub async fn list_all_by_course_with_feedback(
     db: &PgPool,
     course_id: Uuid,
 ) -> Result<Vec<ConversationWithFeedbackRow>, sqlx::Error> {
+    // `teacher_unreviewed` joins the per-conversation review marker
+    // against the latest user-message timestamp. Two truth cases:
+    //   1. No review row at all (LEFT JOIN miss) → true.
+    //   2. Latest student turn timestamp > reviewed_at → true.
+    // The implicit "MAX(NULL)" path (a conversation with zero user
+    // messages, which shouldn't happen but is defensive) reads as
+    // FALSE because `> NULL` is unknown -> false.
+    //
+    // `unaddressed_down` is the OR of the two clearing rules:
+    // either the feedback row has been explicitly acknowledged, OR
+    // a teacher note is attached to the same message. Keeps the
+    // legacy "add a correction note" shortcut working alongside
+    // the new explicit ack button.
     sqlx::query_as!(
         ConversationWithFeedbackRow,
         r#"SELECT c.id, c.course_id, c.user_id, c.title, c.pinned, c.created_at, c.updated_at,
@@ -154,12 +230,26 @@ pub async fn list_all_by_course_with_feedback(
                 SELECT COUNT(*) FROM message_feedback f
                 JOIN messages m ON m.id = f.message_id
                 WHERE m.conversation_id = c.id AND f.rating = 'down'
+                  AND f.acknowledged_at IS NULL
                   AND NOT EXISTS (
                       SELECT 1 FROM teacher_notes tn WHERE tn.message_id = f.message_id
                   )
-            ), 0) AS "unaddressed_down!: i64"
+            ), 0) AS "unaddressed_down!: i64",
+            (
+                cr.reviewed_at IS NULL
+                OR cr.reviewed_at < COALESCE(
+                    (SELECT MAX(m.created_at) FROM messages m
+                       WHERE m.conversation_id = c.id AND m.role = 'user'),
+                    cr.reviewed_at
+                )
+            ) AS "teacher_unreviewed!: bool",
+            cr.reviewed_at AS "last_reviewed_at?",
+            cr.reviewed_by AS "last_reviewed_by?",
+            ru.display_name AS last_reviewer_display_name
         FROM conversations c
         JOIN users u ON u.id = c.user_id
+        LEFT JOIN conversation_reviews cr ON cr.conversation_id = c.id
+        LEFT JOIN users ru ON ru.id = cr.reviewed_by
         WHERE c.course_id = $1
         ORDER BY c.updated_at DESC"#,
         course_id,
@@ -380,4 +470,92 @@ pub async fn update_title(db: &PgPool, id: Uuid, title: &str) -> Result<(), sqlx
     .execute(db)
     .await?;
     Ok(())
+}
+
+// ── Unread / reviewed markers ────────────────────────────────────────
+
+/// Stamp `student_last_viewed_at = NOW()` for the conversation owner.
+/// Idempotent; fired on every chat-page open. The conversation list
+/// query compares this against `MAX(teacher_notes.created_at)` to
+/// decide whether to render an unread dot on the row.
+///
+/// Does NOT verify the caller IS the owner; the route layer enforces
+/// that (otherwise a teacher opening a student's chat from the
+/// dashboard would silently clear the student's own unread state).
+pub async fn mark_student_viewed(db: &PgPool, conversation_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE conversations SET student_last_viewed_at = NOW() WHERE id = $1",
+        conversation_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Upsert the per-conversation review marker. Course-shared (any
+/// teacher / TA / owner / admin clears it for the whole team);
+/// `read == reviewed` per the product call, so this fires on every
+/// teacher dashboard expand.
+///
+/// Route layer is responsible for verifying `reviewer_id` is in
+/// fact a teacher / TA / owner / admin on the course; bypassing
+/// that check here would let a student mark a conversation
+/// "reviewed by teaching team" by hitting the wrong endpoint.
+pub async fn mark_teacher_reviewed(
+    db: &PgPool,
+    conversation_id: Uuid,
+    reviewer_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"INSERT INTO conversation_reviews (conversation_id, reviewed_at, reviewed_by)
+        VALUES ($1, NOW(), $2)
+        ON CONFLICT (conversation_id) DO UPDATE
+            SET reviewed_at = NOW(),
+                reviewed_by = EXCLUDED.reviewed_by"#,
+        conversation_id,
+        reviewer_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+#[derive(Debug)]
+pub struct StudentUnreadRow {
+    pub conversation_id: Uuid,
+    pub course_id: Uuid,
+}
+
+/// All conversations owned by `user_id` that have a teacher_note
+/// created after the student's `student_last_viewed_at`. Used to
+/// (a) flag rows in the chat sidebar's conversation list, and (b)
+/// roll up per-course unread counts for the "My Courses" tile.
+///
+/// "Never visited" (student_last_viewed_at IS NULL) counts as
+/// unread iff a note exists at all; the migration backfilled
+/// the column to NOW() so existing day-one rows don't fire
+/// spuriously, but new conversations created post-migration
+/// start out NULL and we want a fresh teacher note on them to
+/// still surface a dot.
+pub async fn student_unread_conversations(
+    db: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<StudentUnreadRow>, sqlx::Error> {
+    sqlx::query_as!(
+        StudentUnreadRow,
+        r#"SELECT c.id AS conversation_id, c.course_id
+        FROM conversations c
+        WHERE c.user_id = $1
+          AND EXISTS (
+              SELECT 1 FROM teacher_notes tn
+              WHERE tn.conversation_id = c.id
+                AND (
+                    c.student_last_viewed_at IS NULL
+                    OR tn.created_at > c.student_last_viewed_at
+                )
+          )"#,
+        user_id,
+    )
+    .fetch_all(db)
+    .await
 }

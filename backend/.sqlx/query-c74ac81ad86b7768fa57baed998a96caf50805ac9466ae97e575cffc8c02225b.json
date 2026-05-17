@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO conversation_reviews (conversation_id, reviewed_at, reviewed_by)\n        VALUES ($1, NOW(), $2)\n        ON CONFLICT (conversation_id) DO UPDATE\n            SET reviewed_at = NOW(),\n                reviewed_by = EXCLUDED.reviewed_by",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c74ac81ad86b7768fa57baed998a96caf50805ac9466ae97e575cffc8c02225b"
+}

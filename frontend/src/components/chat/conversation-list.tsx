@@ -21,6 +21,14 @@ export interface SidebarConversation {
   title: string | null
   /** True if the user themselves pinned this conversation (separate from teacher-pinned). */
   pinned?: boolean
+  /**
+   * True when this conversation has a teacher note that arrived
+   * after the owner's last view. Renders a small dot next to
+   * the title. Optional because the pinned-by-teacher section
+   * doesn't carry the field (those are read in someone else's
+   * context); the regular conversations section does.
+   */
+  has_unread_note?: boolean
 }
 
 export interface SidebarPinnedConversation {
@@ -36,6 +44,8 @@ export interface ConversationListLabels {
   conversation: string
   pinnedByTeacher: string
   studentFallback: string
+  /** aria-label / tooltip for the unread-note dot. */
+  unreadNote: string
 }
 
 /**
@@ -95,6 +105,19 @@ export function ConversationList({
                 <span className="mr-1" title={labels.pinned}>
                   *
                 </span>
+              )}
+              {conv.has_unread_note && (
+                // Small filled dot rendered inline before the
+                // title. Uses the same primary colour the
+                // active-row highlight uses so the affordance
+                // reads as "new" without introducing a new
+                // accent. aria-label covers the visual-only
+                // nature for screen readers.
+                <span
+                  aria-label={labels.unreadNote}
+                  title={labels.unreadNote}
+                  className="inline-block w-2 h-2 rounded-full bg-primary mr-1.5 align-middle"
+                />
               )}
               {conv.title || labels.newConversation}
             </>

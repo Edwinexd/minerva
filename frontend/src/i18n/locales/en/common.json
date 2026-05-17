@@ -88,6 +88,10 @@
     "clickToChat": "Click to start chatting",
     "ragBadge": "{{percent}}% RAG",
     "temperatureBadge": "T={{value}}",
+    "unreadNotesBadge_one": "{{count}} new note",
+    "unreadNotesBadge_other": "{{count}} new notes",
+    "unreadNotesTooltip_one": "A teacher left {{count}} new note on one of your conversations",
+    "unreadNotesTooltip_other": "A teacher left {{count}} new notes across your conversations",
     "create": {
       "title": "Create Course",
       "nameLabel": "Course Name",

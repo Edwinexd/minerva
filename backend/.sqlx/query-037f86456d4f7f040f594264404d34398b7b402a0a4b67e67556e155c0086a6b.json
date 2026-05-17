@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cf.id, cf.conversation_id, cf.flag, cf.turn_index,\n            cf.rationale, cf.metadata, cf.created_at,\n            cf.acknowledged_at, cf.acknowledged_by,\n            au.display_name AS acknowledger_display_name\n         FROM conversation_flags cf\n         LEFT JOIN users au ON au.id = cf.acknowledged_by\n         WHERE cf.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "conversation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "flag",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "turn_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "rationale",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "acknowledged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "acknowledged_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "acknowledger_display_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "037f86456d4f7f040f594264404d34398b7b402a0a4b67e67556e155c0086a6b"
+}

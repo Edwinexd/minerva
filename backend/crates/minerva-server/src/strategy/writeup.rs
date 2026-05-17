@@ -50,9 +50,42 @@ pub fn build_writeup_system_prompt(
     research_transcript: &str,
     tool_log: &str,
 ) -> String {
-    let base = common::build_system_prompt(course_name, custom_prompt, chunks);
-    // Inline the transcript section only when there's something to
-    // show; on legacy paths or trivial turns it can be empty.
+    // Build the base prompt with NO chunks attached: we want to
+    // present the chunks ourselves with explicit numeric IDs so the
+    // writeup model can cite them inline as `[#1]`, `[#2]`, etc.
+    // The base prompt's default `[Source: filename]` framing has no
+    // IDs to reference, which is why citations on the legacy path
+    // were always vague.
+    let base = common::build_system_prompt(course_name, custom_prompt, &[]);
+
+    // Numbered chunk view: `[#N] <filename>` heading per chunk, then
+    // the chunk body. The IDs are what the model cites against
+    // inline.
+    let numbered_chunks = if chunks.is_empty() {
+        String::new()
+    } else {
+        let mut s = String::from(
+            "\n\n## Course materials\n\
+            Each excerpt is numbered. Cite the relevant excerpt(s) inline as \
+            `[#N]` immediately after each fact or claim you draw from them. \
+            Multiple sources go in one bracket: `[#1][#3]`. \
+            **Use ASCII brackets only**: the opening character must be `[` \
+            (U+005B) and the closing character `]` (U+005D). Do NOT use \
+            full-width brackets `【` `】`, heavy brackets `〔` `〕`, or any \
+            other variant. Do not invent IDs beyond the ones listed.\n\n---\n",
+        );
+        for (i, c) in chunks.iter().enumerate() {
+            let id = i + 1;
+            s.push_str(&format!(
+                "[#{id}] {filename}\n{text}\n---\n",
+                id = id,
+                filename = c.filename,
+                text = c.text
+            ));
+        }
+        s
+    };
+
     let transcript_section = if research_transcript.trim().is_empty() {
         String::new()
     } else {
@@ -61,20 +94,34 @@ pub fn build_writeup_system_prompt(
             You already analysed this question in a hidden research phase. \
             Treat the bullets below as established facts and build on them \
             directly; do NOT re-derive them from the raw `Course materials` \
-            section.\n\n{}",
+            section. Each fact you state in the reply should still carry an \
+            inline `[#N]` citation pointing at the underlying excerpt(s).\n\n{}",
             research_transcript
         )
     };
+
     format!(
-        "{base}\n\n## Prior research (server-side)\n\
+        "{base}{numbered_chunks}\n\n## Prior research (server-side)\n\
         Before this turn you ran a hidden research phase to gather context. \
-        The materials it produced are in `Course materials` above. The tools \
-        you called were:\n\n{tool_log}{transcript_section}\n\n\
-        Compose the student-facing reply now. Use the findings above directly \
-        ; lean on them, paraphrase as needed, structure for pedagogy. Do NOT \
-        call any tools; do NOT describe your research process to the student; \
-        do NOT say things like \"based on my research\"; just answer.",
+        The tools you called were:\n\n{tool_log}{transcript_section}\n\n\
+        ## How to write the reply\n\
+        Compose the student-facing reply now. Rules:\n\
+        - Use the findings above directly; lean on them, paraphrase as needed, \
+          structure for pedagogy.\n\
+        - Every factual claim that comes from `Course materials` must end with \
+          an inline `[#N]` citation referencing the excerpt(s) it came from. \
+          Place the citation immediately after the sentence or list item the \
+          fact appears in. Multiple sources go together as `[#1][#3]`.\n\
+        - If you state something that is NOT in the materials (e.g. common \
+          knowledge or pedagogical scaffolding), do not invent a citation; \
+          leave that sentence uncited.\n\
+        - Do NOT call any tools.\n\
+        - Do NOT describe your research process to the student or say things \
+          like \"based on my research\".\n\
+        - Do NOT list the cited excerpts at the bottom; the UI surfaces them \
+          separately.",
         base = base,
+        numbered_chunks = numbered_chunks,
         tool_log = tool_log,
         transcript_section = transcript_section,
     )

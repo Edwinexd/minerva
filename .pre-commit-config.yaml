@@ -72,6 +72,20 @@ repos:
         pass_filenames: false
         files: \.(ts|tsx)$
 
+      - id: eslint-check
+        name: eslint check
+        # `--max-warnings 0` so warnings fail the hook the same way
+        # errors do; the previous setup had eslint only run on
+        # demand via `npm run lint`, so new lint regressions could
+        # slip into a commit (rules-of-hooks errors did in the
+        # past). Triggered whenever any frontend source / config
+        # file changes, regardless of which one, because lint state
+        # is cross-file (a re-export break in A flags B).
+        entry: bash -c 'cd frontend && npx eslint . --max-warnings 0'
+        language: system
+        pass_filenames: false
+        files: ^frontend/(src/.*\.(ts|tsx|js|jsx)|package(-lock)?\.json|eslint\.config\.(js|ts|mjs)|tsconfig.*\.json)$
+
       - id: cargo-fmt
         name: cargo fmt
         entry: bash -c 'cd backend && cargo fmt --all -- --check'

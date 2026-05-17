@@ -48,6 +48,14 @@ export interface ThinkingBlockProps {
    * messages without a stored duration.
    */
   durationMs: number | null
+  /**
+   * Override the initial open state. When the parent knows this
+   * disclosure belongs to the most-recent message and was just
+   * being read live, it passes `true` so the persisted version
+   * inherits the same expanded state instead of collapsing on the
+   * streaming->persisted handover.
+   */
+  defaultOpen?: boolean
   labels: ThinkingBlockLabels
 }
 
@@ -56,15 +64,24 @@ export function ThinkingBlock({
   toolEvents,
   active,
   durationMs,
+  defaultOpen,
   labels,
 }: ThinkingBlockProps) {
   // Auto-expand while research is streaming, auto-collapse once
   // it's done. The user can override that with a manual toggle;
-  // null = "follow `active`", true/false = explicit user choice.
-  // Derived (no useEffect ; the linter forbids cascading
-  // setState in effects).
+  // null = "follow `active` / `defaultOpen`", true/false = explicit
+  // user choice. Derived (no useEffect ; the linter forbids
+  // cascading setState in effects).
+  //
+  // `defaultOpen` lets the parent override the auto-collapse on
+  // the streaming->persisted handover: when this disclosure
+  // belongs to the most-recent message the user was just reading,
+  // ChatTranscript passes `true` so the new mount inherits the
+  // expanded state instead of snapping shut.
   const [userOpen, setUserOpen] = useState<boolean | null>(null)
-  const open = userOpen ?? active
+  // `active` is a boolean so `??` against it doesn't fall through;
+  // `||` lets `defaultOpen` take over once streaming has finished.
+  const open = userOpen ?? (active || (defaultOpen ?? false))
 
   // Trigger text: while streaming -> "Thinking...", once done and
   // we have a duration -> "Thought for {{seconds}}s", otherwise

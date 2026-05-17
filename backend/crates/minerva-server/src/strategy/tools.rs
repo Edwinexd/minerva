@@ -124,11 +124,11 @@ fn keyword_search_spec() -> Json {
         "type": "function",
         "function": {
             "name": "keyword_search",
-            "description": "Search course materials by exact keyword or phrase. Best for deadlines, dates, identifiers, file names, code symbols, and other terms where exact match matters. Tokenised word match, lowercased.",
+            "description": "Search course materials by exact keyword or phrase, matching against BOTH chunk body text AND document filenames. Best for deadlines, dates, identifiers, file names (e.g. searching 'syllabus' finds chunks in syllabus.pdf even if its body doesn't contain that word), code symbols, and other terms where exact match matters. Tokenised word match, lowercased.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Words or phrases to find verbatim in course content."},
+                    "query": {"type": "string", "description": "Words or phrases to find verbatim in course content or in document filenames."},
                     "k": {"type": "integer", "description": "Max chunks to return (1-20).", "default": 10, "minimum": 1, "maximum": 20}
                 },
                 "required": ["query"]

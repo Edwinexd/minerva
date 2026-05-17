@@ -577,6 +577,7 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
                 // round-trip on every subsequent upload.
                 ensure_document_id_index(qdrant, name).await;
                 ensure_text_index(qdrant, name).await;
+                ensure_filename_text_index(qdrant, name).await;
                 tracing::info!(
                     "created qdrant collection {} (dimensions: {})",
                     name,
@@ -644,6 +645,7 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
     // reasoning applies after the lost-race recovery.
     ensure_document_id_index(qdrant, name).await;
     ensure_text_index(qdrant, name).await;
+    ensure_filename_text_index(qdrant, name).await;
     Ok(())
 }
 
@@ -688,6 +690,40 @@ pub async fn ensure_document_id_index(qdrant: &Qdrant, collection: &str) {
 /// new courses get the index immediately) and the existing-collection
 /// path (so a course that pre-dates this change is backfilled on its
 /// next ingest event).
+/// Idempotent text payload index on the chunk `filename` field.
+/// Lets `keyword_search` match by filename too, not just chunk
+/// body, so the model can search for "syllabus" and find chunks
+/// from `syllabus.pdf` even when the body text doesn't contain
+/// the word. Without this index, surfacing filenames via
+/// `list_documents` would be a dead end for any model that wanted
+/// to look them up by name. Same error-swallow contract as
+/// `ensure_document_id_index`: existing-index errors are treated
+/// as success.
+pub async fn ensure_filename_text_index(qdrant: &Qdrant, collection: &str) {
+    // Slightly more permissive token bounds than the body-text
+    // index ; filenames have words like "2025-syllabus" or
+    // "lecture_03_intro" that benefit from a larger max-token
+    // window than prose tends to need.
+    let params = TextIndexParamsBuilder::new(TokenizerType::Word)
+        .lowercase(true)
+        .min_token_len(2)
+        .max_token_len(40)
+        .ascii_folding(true);
+    if let Err(e) = qdrant
+        .create_field_index(
+            CreateFieldIndexCollectionBuilder::new(collection, "filename", FieldType::Text)
+                .field_index_params(params),
+        )
+        .await
+    {
+        tracing::debug!(
+            "qdrant: filename text index on {} not created (likely already exists): {}",
+            collection,
+            e
+        );
+    }
+}
+
 pub async fn ensure_text_index(qdrant: &Qdrant, collection: &str) {
     // Word tokenizer with lowercasing. Min/max token length matches
     // the smoke test that locked in the design ; drops very short

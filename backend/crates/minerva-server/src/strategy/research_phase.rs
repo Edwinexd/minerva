@@ -521,6 +521,43 @@ pub async fn run(
                         "role": "user",
                         "content": injection,
                     }));
+
+                    // Surface the FLARE-driven retrieval as a tool
+                    // event so it shows up in the frontend's
+                    // disclosure right alongside model-initiated
+                    // calls. From the user's perspective FLARE IS a
+                    // retrieval ; only difference is the server
+                    // triggered it on a low-confidence sentence
+                    // rather than the model explicitly asking for
+                    // it. The reserved `flare_auto_retrieve` name is
+                    // outside the published tool catalog so the
+                    // model won't confuse it with one of its own
+                    // tools.
+                    let trimmed_sentence: String = sentence.chars().take(160).collect();
+                    let flare_args = serde_json::json!({
+                        "sentence": trimmed_sentence,
+                        "trigger": "low_confidence_token",
+                    });
+                    let result_chunks: Vec<serde_json::Value> = new_chunks
+                        .iter()
+                        .take(ctx.max_chunks as usize)
+                        .map(|c| {
+                            serde_json::json!({
+                                "filename": c.filename,
+                                "text": c.text,
+                            })
+                        })
+                        .collect();
+                    let result_value = serde_json::Value::Array(result_chunks);
+                    let summary = format!("{} chunks added", added);
+                    emit_tool_call(tx, "flare_auto_retrieve", &flare_args).await;
+                    emit_tool_result(tx, "flare_auto_retrieve", &summary, &result_value).await;
+                    tool_events.push(ToolEventRecord {
+                        name: "flare_auto_retrieve".to_string(),
+                        args: flare_args,
+                        result_summary: summary,
+                        result: result_value,
+                    });
                     continue;
                 }
                 // Retrieval found nothing new; fall through to break.

@@ -842,21 +842,25 @@ pub async fn rag_lookup(
     }
 }
 
-/// Keyword lookup against Qdrant's payload text-index on the `text`
-/// field. Returns chunks whose tokenised words match the query;
-/// no embedding model needed, no similarity score (set to 0.0 in the
-/// `RagChunk`).
+/// Keyword lookup against Qdrant's payload text-indexes. Matches
+/// chunks whose tokenised words match the query in EITHER the chunk
+/// body text OR the document filename; that way the model can
+/// search for `syllabus` and find chunks from `syllabus.pdf` even
+/// when the body doesn't repeat the filename in prose. No embedding
+/// model needed, no similarity score (set to 0.0 in the `RagChunk`).
 ///
-/// Complement to `rag_lookup`: semantic search via embeddings is best
-/// for conceptual paraphrase ("explain CRUD"), keyword search via this
-/// helper is best for exact tokens ("deadline", `rubric.pdf`, function
-/// names). Both feed the same `RagChunk` shape so callers can union
-/// the result sets through the existing `chunk_identity_hash` dedup.
+/// Complement to `rag_lookup`: semantic search via embeddings is
+/// best for conceptual paraphrase ("explain CRUD"), keyword search
+/// via this helper is best for exact tokens (deadlines,
+/// `rubric.pdf`, function names, course codes). Both feed the same
+/// `RagChunk` shape so callers can union the result sets through
+/// the existing `chunk_identity_hash` dedup.
 ///
-/// The text-index is created on demand by
-/// `minerva_ingest::pipeline::ensure_text_index` when a collection is
-/// first written to; legacy collections without the index will return
-/// an error here, which the caller surfaces as a `ToolError::Backend`.
+/// The text indexes are created on demand by
+/// `minerva_ingest::pipeline::ensure_text_index` /
+/// `ensure_filename_text_index` when a collection is first written
+/// to; legacy collections without the index will return an error
+/// here, which the caller surfaces as a `ToolError::Backend`.
 pub async fn keyword_lookup(
     qdrant: &qdrant_client::Qdrant,
     collection_name: &str,
@@ -864,12 +868,19 @@ pub async fn keyword_lookup(
     limit: u64,
 ) -> Result<Vec<RagChunk>, String> {
     use qdrant_client::qdrant::{Condition, Filter, ScrollPointsBuilder};
-    // `Condition::matches_text` wraps a `MatchText` filter under the
-    // hood; Qdrant tokenises the query the same way the index was
-    // built (whitespace, lowercased) and requires all tokens to be
-    // present. That's effectively an AND-of-words match, which is
-    // the right default for "did the model ask for an exact phrase".
-    let filter = Filter::must([Condition::matches_text("text", query.to_string())]);
+    // `Condition::matches_text` wraps a `MatchText` filter; Qdrant
+    // tokenises the query the same way the index was built
+    // (whitespace, lowercased) and requires all tokens to be
+    // present. Wrapping two `matches_text` conditions in `should`
+    // turns this into an OR: a chunk matches if its body text OR
+    // its filename payload contains all of the query tokens. That
+    // way searching "deadline" finds chunks discussing deadlines,
+    // AND searching "syllabus" finds chunks from a file named
+    // `syllabus.pdf` regardless of body content.
+    let filter = Filter::should([
+        Condition::matches_text("text", query.to_string()),
+        Condition::matches_text("filename", query.to_string()),
+    ]);
     let response = qdrant
         .scroll(
             ScrollPointsBuilder::new(collection_name)

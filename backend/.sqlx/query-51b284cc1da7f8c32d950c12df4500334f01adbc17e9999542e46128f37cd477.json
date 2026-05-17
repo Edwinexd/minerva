@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
+  "query": "UPDATE courses SET\n            name = COALESCE($2, name),\n            description = COALESCE($3, description),\n            context_ratio = COALESCE($4, context_ratio),\n            temperature = COALESCE($5, temperature),\n            model = COALESCE($6, model),\n            system_prompt = COALESCE($7, system_prompt),\n            max_chunks = COALESCE($8, max_chunks),\n            strategy = COALESCE($9, strategy),\n            tool_use_enabled = COALESCE($10, tool_use_enabled),\n            daily_token_limit = COALESCE($11, daily_token_limit),\n            embedding_provider = COALESCE($12, embedding_provider),\n            embedding_model = COALESCE($13, embedding_model),\n            min_score = COALESCE($14, min_score),\n            updated_at = NOW()\n        WHERE id = $1 AND active = true\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -60,43 +60,61 @@
       },
       {
         "ordinal": 11,
+        "name": "tool_use_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
         "name": "embedding_provider",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "embedding_model",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "embedding_version",
         "type_info": "Int4"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "daily_token_limit",
         "type_info": "Int8"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Text",
+        "Float8",
+        "Float8",
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Bool",
+        "Int8",
+        "Text",
+        "Text",
+        "Float4"
       ]
     },
     "nullable": [
@@ -117,8 +135,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "0f4fc7fd07202a2a94398269981303db7689ce48bfa468267a060828046c920c"
+  "hash": "51b284cc1da7f8c32d950c12df4500334f01adbc17e9999542e46128f37cd477"
 }

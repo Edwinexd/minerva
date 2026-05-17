@@ -16,6 +16,8 @@ import {
   type ChatBubbleMessage,
   MarkdownContent,
 } from "./chat-bubble"
+import { ThinkingBlock, type ThinkingBlockLabels } from "./thinking-block"
+import type { ToolEvent } from "./use-chat-stream"
 
 export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
   messages: M[] | undefined
@@ -27,7 +29,19 @@ export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
   /** Tokens streamed so far (rendered as in-progress markdown). */
   streamedTokens: string
   error: string | null
+  /**
+   * Concatenated `thinking_token` SSE stream (research phase
+   * tokens). Only populated for `tool_use_enabled` courses;
+   * legacy strategies pass an empty string.
+   */
+  thinkingTokens?: string
+  /** Tool-call events emitted during the research phase. */
+  toolEvents?: ToolEvent[]
+  /** True while research phase is active. */
+  thinkingActive?: boolean
   bubbleLabels: ChatBubbleLabels
+  /** Labels for the collapsible "Thinking" disclosure. */
+  thinkingLabels?: ThinkingBlockLabels
   /** aria-label for the in-progress assistant bubble. */
   assistantResponseLabel: string
   /** Optional per-message feedback slot (thumbs up/down on the regular chat). */
@@ -45,7 +59,11 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
   streaming,
   streamedTokens,
   error,
+  thinkingTokens,
+  toolEvents,
+  thinkingActive,
   bubbleLabels,
+  thinkingLabels,
   assistantResponseLabel,
   renderFeedbackSlot,
   renderAfterMessage,
@@ -92,14 +110,23 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
       {streaming && (
         <div className="flex justify-start">
           <div
-            className="bg-muted rounded-lg px-4 py-2 max-w-[80%]"
+            className="bg-muted rounded-lg px-4 py-2 max-w-[80%] space-y-2"
             aria-live="polite"
             aria-atomic="false"
             aria-label={assistantResponseLabel}
           >
+            {(thinkingTokens || (toolEvents && toolEvents.length > 0)) &&
+              thinkingLabels && (
+                <ThinkingBlock
+                  thinkingTokens={thinkingTokens || ""}
+                  toolEvents={toolEvents || []}
+                  active={!!thinkingActive}
+                  labels={thinkingLabels}
+                />
+              )}
             {streamedTokens ? (
               <MarkdownContent content={streamedTokens} />
-            ) : (
+            ) : thinkingActive ? null : (
               <div className="flex gap-1" aria-hidden="true">
                 <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
                 <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />

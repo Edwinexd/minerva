@@ -7,6 +7,7 @@ mod eureka_runtime;
 mod ext_obfuscate;
 mod feature_flags;
 pub mod lti;
+mod model_capabilities;
 mod relink_scheduler;
 mod routes;
 mod rules;

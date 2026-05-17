@@ -82,6 +82,18 @@ const DAILY_LIMIT_RESPONSE_MULTIPLIER: i64 = 2;
 /// as a retrieval query. If relevant chunks are found, generation restarts
 /// from that point with enriched context.
 pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError>>) {
+    if ctx.tool_use_enabled {
+        // Tools-on path: hand off to the shared research+writeup
+        // orchestrator with `use_logprobs = true`. That preserves
+        // FLARE's low-confidence-sentence signal as a server-side
+        // retrieval injection inside the research phase while also
+        // giving the model the explicit tool catalog. The legacy
+        // restart-with-continuation-prompt code below runs only
+        // when tool use is disabled (preserves the prior FLARE
+        // behaviour exactly for tools-off courses).
+        super::tool_use::run(ctx, true, tx).await;
+        return;
+    }
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name =

@@ -28,7 +28,10 @@
     "dataHandlingLink": "how Minerva handles your data",
     "disclaimerAfter": ".",
     "unknownError": "Unknown error",
-    "assistantResponseLabel": "Assistant response"
+    "assistantResponseLabel": "Assistant response",
+    "thinkingActive": "Thinking…",
+    "thinkingDone": "Thinking",
+    "toolCallsAriaLabel": "Tools the assistant called during research"
   },
   "message": {
     "tokensUsed_one": "{{count}} token",

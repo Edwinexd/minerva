@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at\n        FROM courses c\n        JOIN course_members cm ON cm.course_id = c.id\n        WHERE cm.user_id = $1 AND c.active = true\n        ORDER BY c.updated_at DESC",
+  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
   "describe": {
     "columns": [
       {
@@ -60,36 +60,41 @@
       },
       {
         "ordinal": 11,
+        "name": "tool_use_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
         "name": "embedding_provider",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "embedding_model",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "embedding_version",
         "type_info": "Int4"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "daily_token_limit",
         "type_info": "Int8"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -117,8 +122,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "3032dc565cafbdfcf08ddc14ee51b0aa45ad293a07518a3f9bd08073525f3c73"
+  "hash": "6bd10ba92e5c80e816b8b15ba6fb876d0b94a0641e0f942532ddb32b3aa3664d"
 }

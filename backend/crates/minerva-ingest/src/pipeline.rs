@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use qdrant_client::qdrant::{
     CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, Distance, FieldType, PointStruct,
-    UpsertPointsBuilder, VectorParamsBuilder,
+    TextIndexParamsBuilder, TokenizerType, UpsertPointsBuilder, VectorParamsBuilder,
 };
 use qdrant_client::Qdrant;
 use sqlx::PgPool;
@@ -571,19 +571,19 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
             .await
         {
             Ok(_) => {
-                // Create payload index up-front so the very first
-                // delete/scroll on this collection benefits. Only
-                // done at creation time so we don't pay a round-trip
-                // on every subsequent upload.
+                // Create payload indexes up-front so the very first
+                // delete/scroll/keyword-search on this collection
+                // benefits. Done at creation time so we don't pay a
+                // round-trip on every subsequent upload.
                 ensure_document_id_index(qdrant, name).await;
+                ensure_text_index(qdrant, name).await;
                 tracing::info!(
                     "created qdrant collection {} (dimensions: {})",
                     name,
                     dimensions
                 );
-                // Freshly created with the requested dimensions --
-                // skip the dim verification round-trip on the happy
-                // path.
+                // Freshly created with the requested dimensions; skip
+                // the dim verification round-trip on the happy path.
                 return Ok(());
             }
             Err(e) => {
@@ -635,6 +635,15 @@ async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Resu
             }
         }
     }
+    // Existing-collection path: a course created before the text
+    // index landed has no `text` index, and an old `document_id`
+    // index may be present without it. Both ensure_* calls are
+    // idempotent (Qdrant returns an error on duplicate; we log+swallow),
+    // so calling them here costs one round-trip per ingest event on a
+    // legacy course and zero new work once the indexes exist. Same
+    // reasoning applies after the lost-race recovery.
+    ensure_document_id_index(qdrant, name).await;
+    ensure_text_index(qdrant, name).await;
     Ok(())
 }
 
@@ -656,6 +665,54 @@ pub async fn ensure_document_id_index(qdrant: &Qdrant, collection: &str) {
     {
         tracing::debug!(
             "qdrant: document_id index on {} not created (likely already exists): {}",
+            collection,
+            e
+        );
+    }
+}
+
+/// Idempotent text payload index on the chunk `text` field. Backs the
+/// `keyword_search` tool exposed in the agentic research phase
+/// (`strategy::tools`): tokenised, lowercased word match against chunk
+/// bodies via Qdrant's `match_text` filter.
+///
+/// Word tokenizer with lowercasing + ASCII folding handles the mixed
+/// English / Swedish content the platform sees ("inlämning" folds to
+/// "inlamning", "café" to "cafe"). Phrase matching is left off; the
+/// filter is set-membership over tokens, which matches what
+/// `common::keyword_lookup` expects.
+///
+/// Same error-swallow contract as `ensure_document_id_index`: an
+/// existing index returns an error from Qdrant, which we treat as
+/// success. We call this from both the create-collection branch (so
+/// new courses get the index immediately) and the existing-collection
+/// path (so a course that pre-dates this change is backfilled on its
+/// next ingest event).
+pub async fn ensure_text_index(qdrant: &Qdrant, collection: &str) {
+    // Word tokenizer with lowercasing. Min/max token length matches
+    // the smoke test that locked in the design ; drops very short
+    // tokens ("a", "i") that bloat the index without adding
+    // selectivity, and very long ones (>20 chars) that almost
+    // certainly aren't natural keywords. The qdrant_client builder
+    // implements `Into<IndexParams>` so we hand it directly to
+    // `field_index_params`.
+    let params = TextIndexParamsBuilder::new(TokenizerType::Word)
+        .lowercase(true)
+        .min_token_len(2)
+        .max_token_len(20)
+        // ASCII-fold accented characters so a query "inlamning"
+        // matches indexed "inlämning" and vice versa; crucial for
+        // Swedish course content where students often type ASCII.
+        .ascii_folding(true);
+    if let Err(e) = qdrant
+        .create_field_index(
+            CreateFieldIndexCollectionBuilder::new(collection, "text", FieldType::Text)
+                .field_index_params(params),
+        )
+        .await
+    {
+        tracing::debug!(
+            "qdrant: text index on {} not created (likely already exists): {}",
             collection,
             e
         );

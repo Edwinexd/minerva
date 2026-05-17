@@ -10,7 +10,16 @@ use crate::error::AppError;
 /// 2. Search Qdrant
 /// 3. Build prompt with context
 /// 4. Stream from Cerebras
+///
+/// When `ctx.tool_use_enabled` is TRUE, hands off to
+/// `tool_use::run(use_logprobs = false)` instead: the model gets a
+/// tool-using research phase before a clean writeup. The path
+/// below runs only when tool use is disabled.
 pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError>>) {
+    if ctx.tool_use_enabled {
+        super::tool_use::run(ctx, false, tx).await;
+        return;
+    }
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name =

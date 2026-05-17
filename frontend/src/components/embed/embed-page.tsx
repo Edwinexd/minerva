@@ -761,7 +761,15 @@ function EmbedChatWindow({
           streaming={stream.streaming}
           streamedTokens={stream.streamedTokens}
           error={stream.error}
+          thinkingTokens={stream.thinkingTokens}
+          toolEvents={stream.toolEvents}
+          thinkingActive={stream.thinkingActive}
           bubbleLabels={bubbleLabels}
+          thinkingLabels={{
+            thinkingActive: t("embed.thinkingActive"),
+            thinkingDone: t("embed.thinkingDone"),
+            toolCallsAriaLabel: t("embed.toolCallsAriaLabel"),
+          }}
           assistantResponseLabel={t("embed.assistantResponseLabel")}
           renderBeforeMessages={() =>
             conversationNotes.length > 0 ? (

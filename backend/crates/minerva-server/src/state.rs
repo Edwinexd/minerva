@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::lti::LtiKeyPair;
+use crate::model_capabilities::CapabilityCache;
 use crate::relink_scheduler::RelinkScheduler;
 use crate::rules::RuleCache;
 use minerva_ingest::fastembed_embedder::FastEmbedder;
@@ -104,6 +105,13 @@ pub struct AppState {
     /// course dirty here; a sweep loop drains and relinks. See
     /// `crate::relink_scheduler`.
     pub relink_scheduler: Arc<RelinkScheduler>,
+    /// Per-model capability cache populated by probing Cerebras
+    /// on first observation. Read on every `update_course` call
+    /// to validate the (model, strategy, tool_use) triple before
+    /// persisting; also available to runtime paths that want to
+    /// short-circuit before issuing requests the model can't
+    /// satisfy. See `crate::model_capabilities`.
+    pub model_capabilities: CapabilityCache,
     /// Live progress of the admin classification backfill task.
     /// `None` when no backfill has run since the last server restart;
     /// `Some(_)` while one is running and for the cycle after it
@@ -164,14 +172,24 @@ impl AppState {
         #[cfg(feature = "eureka")]
         let eureka = crate::eureka_runtime::EurekaContext::from_env(config).map(Arc::new);
 
+        let http_client = reqwest::Client::new();
+        // Capability cache shares the HTTP client so probes
+        // benefit from connection pooling against Cerebras the
+        // same way live chat traffic does.
+        let model_capabilities = CapabilityCache::new(
+            crate::strategy::common::CEREBRAS_CHAT_COMPLETIONS_URL.to_string(),
+            config.cerebras_api_key.clone(),
+            http_client.clone(),
+        );
         Ok(Self {
             db: db.clone(),
             qdrant: Arc::new(qdrant),
             config: Arc::new(config.clone()),
             lti: Arc::new(lti),
-            http_client: reqwest::Client::new(),
+            http_client,
             fastembed,
             rules,
+            model_capabilities,
             relink_scheduler: Arc::new(RelinkScheduler::new(db)),
             backfill_tracker: Arc::new(BackfillTracker::default()),
             #[cfg(feature = "eureka")]

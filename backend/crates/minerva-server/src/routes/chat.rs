@@ -1779,6 +1779,7 @@ pub(super) async fn run_chat_message(
         qdrant: Arc::clone(&state.qdrant),
         fastembed: Arc::clone(&state.fastembed),
         kg_enabled,
+        tool_use_enabled: course.tool_use_enabled,
     };
 
     tokio::spawn(async move {

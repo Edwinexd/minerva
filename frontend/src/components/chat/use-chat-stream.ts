@@ -19,6 +19,33 @@ export interface ChatStreamState {
   streamedTokens: string
   pendingUserMsg: string | null
   error: string | null
+  /**
+   * Concatenation of `thinking_token` SSE events emitted by the
+   * backend's research phase (active only when the course has
+   * `tool_use_enabled = true`). When the writeup phase starts the
+   * backend emits a `thinking_done` event; the frontend keeps this
+   * buffer around so the user can still expand the "Thinking"
+   * disclosure under the assistant reply.
+   */
+  thinkingTokens: string
+  /**
+   * Tool-use events surfaced for the "Thinking" disclosure. Each
+   * entry pairs a `tool_call` with its later `tool_result` (matched
+   * positionally; the backend emits them in pair-order per turn).
+   */
+  toolEvents: ToolEvent[]
+  /**
+   * True between `thinking_started` (implicit at the first
+   * thinking_token) and `thinking_done`. Lets the UI dim the chat
+   * answer area until writeup tokens start flowing.
+   */
+  thinkingActive: boolean
+}
+
+export interface ToolEvent {
+  name: string
+  args?: unknown
+  resultSummary?: string
 }
 
 /**
@@ -60,12 +87,18 @@ export function useChatStream(
   const [streamedTokens, setStreamedTokens] = useState("")
   const [pendingUserMsg, setPendingUserMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [thinkingTokens, setThinkingTokens] = useState("")
+  const [toolEvents, setToolEvents] = useState<ToolEvent[]>([])
+  const [thinkingActive, setThinkingActive] = useState(false)
 
   const reset = () => {
     setStreaming(false)
     setStreamedTokens("")
     setPendingUserMsg(null)
     setError(null)
+    setThinkingTokens("")
+    setToolEvents([])
+    setThinkingActive(false)
   }
 
   const send = async (
@@ -77,6 +110,9 @@ export function useChatStream(
     setStreaming(true)
     setStreamedTokens("")
     setPendingUserMsg(content)
+    setThinkingTokens("")
+    setToolEvents([])
+    setThinkingActive(false)
 
     let success = true
     try {
@@ -103,7 +139,55 @@ export function useChatStream(
               try {
                 const data = JSON.parse(line.slice(6))
                 if (data.type === "token") {
+                  // Writeup-phase token (always; legacy strategies
+                  // emit these directly without a thinking phase).
+                  // First `token` after thinking implicitly closes
+                  // the thinking-active flag, in case the backend
+                  // didn't emit a `thinking_done` for some reason.
+                  setThinkingActive(false)
                   setStreamedTokens((prev) => prev + data.token)
+                } else if (data.type === "thinking_token") {
+                  // Research-phase token (tool_use_enabled courses
+                  // only). Routed to a separate buffer so the UI
+                  // can render a collapsible "Thinking" disclosure
+                  // distinct from the answer.
+                  setThinkingActive(true)
+                  if (typeof data.token === "string") {
+                    setThinkingTokens((prev) => prev + data.token)
+                  }
+                } else if (data.type === "tool_call") {
+                  // Model issued a tool call. Append a new pair to
+                  // `toolEvents`; the matching tool_result event
+                  // patches the last entry below.
+                  setToolEvents((prev) => [
+                    ...prev,
+                    {
+                      name: typeof data.name === "string" ? data.name : "?",
+                      args: data.args,
+                    },
+                  ])
+                } else if (data.type === "tool_result") {
+                  // Match positionally to the most recent un-
+                  // resolved tool_call (the backend emits them in
+                  // pair-order within one turn).
+                  setToolEvents((prev) => {
+                    const next = [...prev]
+                    for (let i = next.length - 1; i >= 0; i--) {
+                      if (next[i].resultSummary === undefined) {
+                        next[i] = {
+                          ...next[i],
+                          resultSummary:
+                            typeof data.result_summary === "string"
+                              ? data.result_summary
+                              : undefined,
+                        }
+                        break
+                      }
+                    }
+                    return next
+                  })
+                } else if (data.type === "thinking_done") {
+                  setThinkingActive(false)
                 } else if (data.type === "error") {
                   setError(data.error)
                   success = false
@@ -137,6 +221,11 @@ export function useChatStream(
       setStreaming(false)
       setStreamedTokens("")
       setPendingUserMsg(null)
+      setThinkingActive(false)
+      // Keep `thinkingTokens` and `toolEvents` populated after the
+      // stream ends so the assistant message's "Thinking" disclosure
+      // stays expandable until the user navigates away or sends
+      // another message (which calls reset() at the top of send).
     }
     return success
   }
@@ -146,6 +235,9 @@ export function useChatStream(
     streamedTokens,
     pendingUserMsg,
     error,
+    thinkingTokens,
+    toolEvents,
+    thinkingActive,
     send,
     reset,
     setError,

@@ -72,6 +72,7 @@ struct UpdateCourseRequest {
     max_chunks: Option<i32>,
     min_score: Option<f32>,
     strategy: Option<String>,
+    tool_use_enabled: Option<bool>,
     embedding_provider: Option<String>,
     embedding_model: Option<String>,
     daily_token_limit: Option<i64>,
@@ -90,6 +91,10 @@ struct CourseResponse {
     max_chunks: i32,
     min_score: f32,
     strategy: String,
+    /// Orthogonal to `strategy`: when TRUE, the model gains a tool
+    /// catalog during a research/thinking phase before the writeup.
+    /// Mirrors `courses.tool_use_enabled`.
+    tool_use_enabled: bool,
     embedding_provider: String,
     embedding_model: String,
     /// Bumped each time `embedding_provider` or `embedding_model`
@@ -156,6 +161,7 @@ impl CourseResponse {
             max_chunks: row.max_chunks,
             min_score: row.min_score,
             strategy: row.strategy,
+            tool_use_enabled: row.tool_use_enabled,
             embedding_provider: row.embedding_provider,
             embedding_model: row.embedding_model,
             embedding_version: row.embedding_version,
@@ -291,6 +297,35 @@ async fn update_course(
         }
     }
 
+    // Capability check: reject mismatches between the chosen
+    // (model, strategy, tool_use) triple before persisting. The
+    // registry lives in `model_capabilities`; unknown models are
+    // treated as supporting neither tools nor logprobs so a
+    // teacher can't enable a feature the runtime cannot deliver.
+    // We resolve effective values by overlaying the request body
+    // on the existing row so a partial PUT (changing only one
+    // field) still validates the resulting triple, not just the
+    // delta.
+    let effective_model = body.model.as_deref().unwrap_or(existing.model.as_str());
+    let effective_strategy = body
+        .strategy
+        .as_deref()
+        .unwrap_or(existing.strategy.as_str());
+    let effective_tool_use = body.tool_use_enabled.unwrap_or(existing.tool_use_enabled);
+    if let Err(mismatch) = crate::model_capabilities::validate_config(
+        &state.model_capabilities,
+        effective_model,
+        effective_strategy,
+        effective_tool_use,
+    )
+    .await
+    {
+        return Err(AppError::bad_request_with(
+            mismatch.translation_key(),
+            [("model", effective_model.to_string())],
+        ));
+    }
+
     // Validate embedding_provider
     if let Some(ref provider) = body.embedding_provider {
         if !minerva_ingest::pipeline::VALID_EMBEDDING_PROVIDERS.contains(&provider.as_str()) {
@@ -422,6 +457,7 @@ async fn update_course(
         max_chunks: body.max_chunks,
         min_score: body.min_score,
         strategy: body.strategy,
+        tool_use_enabled: body.tool_use_enabled,
         embedding_provider: None,
         embedding_model: None,
         daily_token_limit: body.daily_token_limit,

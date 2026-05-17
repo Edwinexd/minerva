@@ -683,7 +683,15 @@ export function ChatWindow({
           streaming={stream.streaming}
           streamedTokens={stream.streamedTokens}
           error={stream.error}
+          thinkingTokens={stream.thinkingTokens}
+          toolEvents={stream.toolEvents}
+          thinkingActive={stream.thinkingActive}
           bubbleLabels={bubbleLabels}
+          thinkingLabels={{
+            thinkingActive: t("chat.thinkingActive"),
+            thinkingDone: t("chat.thinkingDone"),
+            toolCallsAriaLabel: t("chat.toolCallsAriaLabel"),
+          }}
           assistantResponseLabel={t("chat.assistantResponseLabel")}
           renderBeforeMessages={() =>
             conversationNotes.length > 0 ? (

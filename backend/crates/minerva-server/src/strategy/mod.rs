@@ -1,8 +1,11 @@
 pub mod common;
 pub mod extraction_guard;
 pub mod flare;
-pub mod parallel;
+pub mod research_phase;
 pub mod simple;
+pub mod tool_use;
+pub mod tools;
+pub mod writeup;
 
 use axum::response::sse::Event;
 use tokio::sync::mpsc;
@@ -57,9 +60,24 @@ pub struct GenerationContext {
     /// Decided once at the chat-route entry and propagated through
     /// the strategy so each pass sees a stable view.
     pub kg_enabled: bool,
+    /// Mirror of `courses.tool_use_enabled`. When TRUE, the strategy
+    /// orchestrator splits generation into a hidden-thinking research
+    /// phase (model uses `tools::catalog` and, for `flare`, the
+    /// logprob signal) followed by a clean writeup phase. When FALSE,
+    /// the legacy single-pass behaviour of `simple` / `flare` runs
+    /// unchanged. Validated against `model_capabilities::validate_config`
+    /// at config-save time so a runtime mismatch is impossible.
+    pub tool_use_enabled: bool,
 }
 
 /// Run the appropriate strategy based on the strategy name.
+///
+/// `parallel` is retired (migration `20260519000001` remaps existing
+/// rows to `simple`); any unknown strategy string falls through to
+/// `simple` here so a stray DB value doesn't 5xx. The orthogonal
+/// `tool_use_enabled` axis is read off `ctx` inside each strategy:
+/// when FALSE they behave as they always have; when TRUE they split
+/// into a research+writeup pair (see `research_phase`, `writeup`).
 pub async fn run_strategy(
     strategy: &str,
     ctx: GenerationContext,
@@ -67,7 +85,6 @@ pub async fn run_strategy(
 ) {
     match strategy {
         "flare" => flare::run(ctx, tx).await,
-        "simple" => simple::run(ctx, tx).await,
-        _ => parallel::run(ctx, tx).await, // "parallel" is the default
+        _ => simple::run(ctx, tx).await,
     }
 }

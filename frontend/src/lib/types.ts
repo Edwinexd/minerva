@@ -21,6 +21,14 @@ export interface Course {
   max_chunks: number
   min_score: number
   strategy: string
+  /**
+   * Orthogonal to `strategy`: when TRUE, the model gains access to a
+   * tool catalog during a research/thinking phase before the final
+   * writeup. Both `simple` and `flare` honour this flag. The API will
+   * reject a save that picks tool use on a model that doesn't
+   * support it (see backend `model_capabilities`).
+   */
+  tool_use_enabled: boolean
   embedding_provider: string
   embedding_model: string
   /**

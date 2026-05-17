@@ -78,6 +78,21 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
     scrollToBottom()
   }, [messages, streamedTokens, scrollToBottom])
 
+  // Identify the most-recent assistant message so we can attach the
+  // post-stream "Thinking" disclosure to it. When streaming wraps
+  // up, the in-progress bubble disappears and the persisted
+  // assistant message takes its place; the thinking buffer in state
+  // outlives the streaming bubble, so the disclosure stays
+  // expandable on the just-arrived answer until the user sends a
+  // new message (which calls `reset()` on the stream hook).
+  const lastAssistantId =
+    !streaming && (thinkingTokens || (toolEvents && toolEvents.length > 0))
+      ? messages
+          ?.slice()
+          .reverse()
+          .find((m) => m.role === "assistant")?.id
+      : undefined
+
   return (
     <div className="space-y-4 py-4">
       {renderBeforeMessages?.()}
@@ -97,6 +112,18 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
             labels={bubbleLabels}
             feedbackSlot={renderFeedbackSlot?.(msg)}
           />
+          {msg.id === lastAssistantId && thinkingLabels && (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] w-full">
+                <ThinkingBlock
+                  thinkingTokens={thinkingTokens || ""}
+                  toolEvents={toolEvents || []}
+                  active={false}
+                  labels={thinkingLabels}
+                />
+              </div>
+            </div>
+          )}
           {renderAfterMessage?.(msg)}
         </React.Fragment>
       ))}

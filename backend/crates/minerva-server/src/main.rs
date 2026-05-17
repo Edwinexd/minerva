@@ -2,8 +2,6 @@ mod auth;
 mod classification;
 mod config;
 mod error;
-#[cfg(feature = "eureka")]
-mod eureka_runtime;
 mod ext_obfuscate;
 mod feature_flags;
 pub mod lti;

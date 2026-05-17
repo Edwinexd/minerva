@@ -2,8 +2,6 @@ mod admin;
 mod api_keys;
 pub(crate) mod canvas;
 mod chat;
-#[cfg(feature = "eureka")]
-mod concept_graph;
 mod courses;
 pub(crate) mod documents;
 pub mod embed;
@@ -88,9 +86,6 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/admin", integration_admin::router())
         .nest("/admin", study::admin_router())
         .nest("/admin", system::router());
-
-    #[cfg(feature = "eureka")]
-    let authed = authed.nest("/admin", concept_graph::admin_router());
 
     let authed = authed
         .merge(usage::admin_router())

@@ -57,7 +57,7 @@
     "name_invalid_length": "Name must be between 1 and 100 characters."
   },
   "admin": {
-    "role_invalid": "Role must be 'teacher' or 'student'.",
+    "role_invalid": "Role must be 'teacher', 'integrator', or 'student'.",
     "cannot_suspend_self": "You can't suspend your own account.",
     "limit_negative": "Limit must be 0 or greater.",
     "limit_too_large": "Limit must be {{max}} or less.",

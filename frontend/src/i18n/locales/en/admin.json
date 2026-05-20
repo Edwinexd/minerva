@@ -129,7 +129,8 @@
     "roles": {
       "admin": "admin",
       "student": "student",
-      "teacher": "teacher"
+      "teacher": "teacher",
+      "integrator": "integrator"
     },
     "locked": "locked",
     "lockedTitle": "Locked from rule auto-promotion",

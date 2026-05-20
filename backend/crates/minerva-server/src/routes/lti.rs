@@ -14,7 +14,7 @@
 //!   POST   /courses/{course_id}/lti         ; Register LTI connection
 //!   DELETE /courses/{course_id}/lti/{id}    ; Remove registration
 //!
-//! Admin endpoints (behind auth_middleware, admin only):
+//! Admin endpoints (behind auth_middleware, admin or integrator):
 //!   GET    /admin/lti/platforms             ; List site-level platforms
 //!   POST   /admin/lti/platforms             ; Create site-level platform
 //!   DELETE /admin/lti/platforms/{id}        ; Remove site-level platform
@@ -1084,8 +1084,11 @@ async fn bind_complete(
 // Admin (site-level) platforms
 // ---------------------------------------------------------------------------
 
-fn require_admin(user: &User) -> Result<(), AppError> {
-    if !user.role.is_admin() {
+/// Site-wide LTI platform management is open to admins and integrators; the
+/// integrator role exists precisely to delegate this (and site integration
+/// keys) without full admin.
+fn require_site_integrator(user: &User) -> Result<(), AppError> {
+    if !user.role.can_manage_site_integrations() {
         return Err(AppError::Forbidden);
     }
     Ok(())
@@ -1098,7 +1101,7 @@ async fn admin_lti_setup(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> Result<Json<LtiSetupResponse>, AppError> {
-    require_admin(&user)?;
+    require_site_integrator(&user)?;
     Ok(Json(build_admin_setup_response(&state.config.base_url)))
 }
 
@@ -1169,7 +1172,7 @@ async fn list_platforms(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> Result<Json<Vec<PlatformResponse>>, AppError> {
-    require_admin(&user)?;
+    require_site_integrator(&user)?;
     let rows = minerva_db::queries::lti::list_platforms(&state.db).await?;
     Ok(Json(
         rows.into_iter()
@@ -1200,7 +1203,7 @@ async fn create_platform(
     Extension(user): Extension<User>,
     Json(body): Json<CreatePlatformRequest>,
 ) -> Result<Json<PlatformResponse>, AppError> {
-    require_admin(&user)?;
+    require_site_integrator(&user)?;
 
     let issuer = body.issuer.trim_end_matches('/');
     let auth_login_url = body
@@ -1314,7 +1317,7 @@ async fn delete_platform(
     Extension(user): Extension<User>,
     Path(platform_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_admin(&user)?;
+    require_site_integrator(&user)?;
     minerva_db::queries::lti::delete_platform(&state.db, platform_id).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
@@ -1336,7 +1339,7 @@ async fn list_platform_bindings(
     Extension(user): Extension<User>,
     Path(platform_id): Path<Uuid>,
 ) -> Result<Json<Vec<BindingResponse>>, AppError> {
-    require_admin(&user)?;
+    require_site_integrator(&user)?;
 
     let rows = minerva_db::queries::lti::list_bindings_for_platform(&state.db, platform_id).await?;
     let mut out = Vec::with_capacity(rows.len());
@@ -1363,7 +1366,7 @@ async fn delete_platform_binding(
     Extension(user): Extension<User>,
     Path((_platform_id, binding_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_admin(&user)?;
+    require_site_integrator(&user)?;
     minerva_db::queries::lti::delete_binding(&state.db, binding_id).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
 }

@@ -333,6 +333,56 @@ mod tests {
     }
 
     #[test]
+    fn integrator_persists_across_logins() {
+        // Integrator is DB-granted (always with the manual lock set). The
+        // lock branch returns the stored role unchanged, and the ex-admin
+        // clamp must leave Integrator alone since it isn't env-sourced.
+        assert_eq!(
+            decide_role(false, false, true, Some(UserRole::Integrator), None),
+            UserRole::Integrator,
+        );
+        // Unlocked (e.g. lock later cleared): rules cap at Teacher, and the
+        // additive merge keeps the higher-ranked stored Integrator.
+        assert_eq!(
+            decide_role(
+                false,
+                false,
+                false,
+                Some(UserRole::Integrator),
+                Some(UserRole::Teacher)
+            ),
+            UserRole::Integrator,
+        );
+        // Env admin still wins over a stored Integrator.
+        assert_eq!(
+            decide_role(true, false, false, Some(UserRole::Integrator), None),
+            UserRole::Admin,
+        );
+    }
+
+    #[test]
+    fn integrator_capabilities_and_rank() {
+        assert!(UserRole::Integrator.can_manage_site_integrations());
+        assert!(UserRole::Admin.can_manage_site_integrations());
+        assert!(!UserRole::Teacher.can_manage_site_integrations());
+        assert!(!UserRole::Student.can_manage_site_integrations());
+        // Full teacher powers, but not admin.
+        assert!(UserRole::Integrator.is_teacher_or_above());
+        assert!(!UserRole::Integrator.is_admin());
+        // Sits strictly between Teacher and Admin.
+        assert!(UserRole::Integrator.rank() > UserRole::Teacher.rank());
+        assert!(UserRole::Integrator.rank() < UserRole::Admin.rank());
+        // Not env-sourced, so the ex-admin clamp leaves it intact.
+        assert_eq!(
+            UserRole::Integrator.clamp_below_admin(),
+            UserRole::Integrator,
+        );
+        // Round-trips through string form.
+        assert_eq!(UserRole::parse("integrator"), UserRole::Integrator);
+        assert_eq!(UserRole::Integrator.as_str(), "integrator");
+    }
+
+    #[test]
     fn rule_cannot_promote_locked_user() {
         // Even an Admin-target rule (impossible at the API layer, but
         // belt-and-braces) can't move a locked Student.

@@ -4,7 +4,7 @@ export interface User {
   id: string
   eppn: string
   display_name: string | null
-  role: "student" | "teacher" | "admin"
+  role: "student" | "teacher" | "integrator" | "admin"
   suspended?: boolean
   privacy_acknowledged_at: string | null
 }

@@ -57,7 +57,7 @@
     "name_invalid_length": "Namnet måste vara mellan 1 och 100 tecken."
   },
   "admin": {
-    "role_invalid": "Rollen måste vara 'teacher' eller 'student'.",
+    "role_invalid": "Rollen måste vara 'teacher', 'integrator' eller 'student'.",
     "cannot_suspend_self": "Du kan inte stänga av ditt eget konto.",
     "limit_negative": "Gränsen måste vara 0 eller större.",
     "limit_too_large": "Gränsen får vara högst {{max}}.",

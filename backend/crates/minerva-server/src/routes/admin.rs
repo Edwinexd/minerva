@@ -104,8 +104,9 @@ async fn update_user_role(
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_admin(&user)?;
 
-    // Only allow setting to teacher or student (not admin)
-    if body.role != "teacher" && body.role != "student" {
+    // Allow setting to student, teacher, or integrator. Admin stays env-only
+    // (MINERVA_ADMINS), so it is intentionally not assignable here.
+    if body.role != "teacher" && body.role != "student" && body.role != "integrator" {
         return Err(AppError::bad_request("admin.role_invalid"));
     }
 

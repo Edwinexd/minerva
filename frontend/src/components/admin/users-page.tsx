@@ -143,6 +143,7 @@ function UserRow({ user }: { user: AdminUser }) {
               <SelectContent>
                 <SelectItem value="student">{t("users.roles.student")}</SelectItem>
                 <SelectItem value="teacher">{t("users.roles.teacher")}</SelectItem>
+                <SelectItem value="integrator">{t("users.roles.integrator")}</SelectItem>
               </SelectContent>
             </Select>
             {user.role_manually_set && (

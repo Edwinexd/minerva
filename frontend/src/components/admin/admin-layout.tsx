@@ -1,5 +1,7 @@
 import { Outlet, useLocation, useNavigate } from "@tanstack/react-router"
+import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
+import { userQuery } from "@/lib/queries"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -24,7 +26,10 @@ const TAB_VALUES = [
 
 type TabValue = (typeof TAB_VALUES)[number]
 
-const VALID_TABS = new Set<TabValue>(TAB_VALUES)
+// Tabs an integrator (non-admin) may see. The integrator role exists to
+// delegate exactly these two site-wide surfaces; every other admin tab stays
+// admin-only (and its backend routes still return 403 for integrators).
+const INTEGRATOR_TABS: readonly TabValue[] = ["lti", "integrations"]
 
 const TAB_ROUTES = {
   usage: "/admin/usage",
@@ -67,11 +72,23 @@ export function AdminLayout() {
   const location = useLocation()
   const { t } = useTranslation("admin")
   const { t: tCommon } = useTranslation("common")
+  const { data: user } = useQuery(userQuery)
+
+  // Admins see every tab; integrators are limited to their two site-wide
+  // surfaces. Anyone else shouldn't reach this layout (the nav entry and the
+  // /admin redirect both gate on role), but fall back to no tabs to be safe.
+  const visibleTabs: readonly TabValue[] =
+    user?.role === "admin"
+      ? TAB_VALUES
+      : user?.role === "integrator"
+        ? INTEGRATOR_TABS
+        : []
+  const visibleTabSet = new Set<TabValue>(visibleTabs)
 
   const lastSegment = location.pathname.split("/").pop() || ""
-  const activeTab: TabValue = VALID_TABS.has(lastSegment as TabValue)
+  const activeTab: TabValue = visibleTabSet.has(lastSegment as TabValue)
     ? (lastSegment as TabValue)
-    : "usage"
+    : (visibleTabs[0] ?? "usage")
 
   useDocumentTitle(
     `${tCommon("pageTitles.admin")} – ${tCommon(TAB_TITLE_KEYS[activeTab])}`,
@@ -85,14 +102,14 @@ export function AdminLayout() {
         <Select
           value={activeTab}
           onValueChange={(value) => {
-            if (VALID_TABS.has(value as TabValue)) navigate({ to: TAB_ROUTES[value as TabValue] })
+            if (visibleTabSet.has(value as TabValue)) navigate({ to: TAB_ROUTES[value as TabValue] })
           }}
         >
           <SelectTrigger className="w-full">
             <SelectValue>{t(TAB_LABEL_KEYS[activeTab])}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {TAB_VALUES.map((value) => (
+            {visibleTabs.map((value) => (
               <SelectItem key={value} value={value}>
                 {t(TAB_LABEL_KEYS[value])}
               </SelectItem>
@@ -104,12 +121,12 @@ export function AdminLayout() {
       <Tabs
         value={activeTab}
         onValueChange={(value: unknown) => {
-          if (VALID_TABS.has(value as TabValue)) navigate({ to: TAB_ROUTES[value as TabValue] })
+          if (visibleTabSet.has(value as TabValue)) navigate({ to: TAB_ROUTES[value as TabValue] })
         }}
         className="hidden md:flex"
       >
         <TabsList>
-          {TAB_VALUES.map((value) => (
+          {visibleTabs.map((value) => (
             <TabsTrigger key={value} value={value}>
               {t(TAB_LABEL_KEYS[value])}
             </TabsTrigger>

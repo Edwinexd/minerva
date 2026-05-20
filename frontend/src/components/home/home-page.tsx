@@ -5,6 +5,7 @@ import { coursesQuery, unreadCountsQuery, userQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { useDocumentTitle } from "@/lib/use-document-title"
+import { isTeacherOrAbove } from "@/lib/roles"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -29,7 +30,7 @@ export function Home() {
   const { data: courses, isLoading, error } = useQuery(coursesQuery)
   const [showCreate, setShowCreate] = useState(false)
 
-  const canCreate = user?.role === "teacher" || user?.role === "admin"
+  const canCreate = isTeacherOrAbove(user?.role)
 
   const teacherCourses = courses?.filter(
     (c) => c.my_role === "teacher" || c.my_role === "ta",

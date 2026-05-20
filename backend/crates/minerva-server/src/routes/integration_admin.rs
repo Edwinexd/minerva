@@ -5,8 +5,9 @@
 //!
 //! The keys themselves are never usable for course data access; they only
 //! authorize the two /api/integration/site/* endpoints. That makes them low
-//! enough risk to keep in a single row, high enough value to keep behind an
-//! admin-only CRUD surface here.
+//! enough risk to keep in a single row, high enough value to keep behind a
+//! CRUD surface gated to admins and integrators (see
+//! `UserRole::can_manage_site_integrations`).
 
 use axum::extract::{Extension, Path, State};
 use axum::routing::{delete, get};
@@ -31,8 +32,11 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-fn require_admin(user: &User) -> Result<(), AppError> {
-    if !user.role.is_admin() {
+/// Site integration keys are mintable by admins and integrators alike;
+/// delegating this without full admin is the whole point of the integrator
+/// role.
+fn require_site_integrator(user: &User) -> Result<(), AppError> {
+    if !user.role.can_manage_site_integrations() {
         return Err(AppError::Forbidden);
     }
     Ok(())
@@ -76,7 +80,7 @@ async fn list_site_integration_keys(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> Result<Json<Vec<SiteKeyResponse>>, AppError> {
-    require_admin(&user)?;
+    require_site_integrator(&user)?;
     let rows = minerva_db::queries::site_integration_keys::list_all(&state.db).await?;
     Ok(Json(
         rows.into_iter()
@@ -122,7 +126,7 @@ async fn create_site_integration_key(
     Extension(user): Extension<User>,
     Json(body): Json<CreateSiteKeyRequest>,
 ) -> Result<Json<SiteKeyCreatedResponse>, AppError> {
-    require_admin(&user)?;
+    require_site_integrator(&user)?;
 
     let name = body.name.trim();
     if name.is_empty() || name.len() > 100 {
@@ -178,7 +182,7 @@ async fn delete_site_integration_key(
     Extension(user): Extension<User>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_admin(&user)?;
+    require_site_integrator(&user)?;
     let deleted = minerva_db::queries::site_integration_keys::delete(&state.db, id).await?;
     Ok(Json(serde_json::json!({ "deleted": deleted })))
 }

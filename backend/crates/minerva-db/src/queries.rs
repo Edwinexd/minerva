@@ -13,6 +13,7 @@ pub mod external_auth;
 pub mod feature_flags;
 pub mod linker_decisions;
 pub mod lti;
+pub mod lti_nrps;
 pub mod message_feedback;
 pub mod play_course_catalog;
 pub mod play_designations;

@@ -42,6 +42,10 @@ pub struct Config {
     /// How often a Canvas connection with `auto_sync = true` re-syncs.
     /// Measured in hours; 0 disables the background loop entirely.
     pub canvas_auto_sync_interval_hours: i32,
+    /// How often an LTI NRPS context's roster is reconciled (add new LMS
+    /// members, remove ones who left). Measured in hours; 0 disables the
+    /// background loop entirely.
+    pub lti_nrps_sync_interval_hours: i32,
 }
 
 impl Config {
@@ -98,6 +102,10 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(24),
+            lti_nrps_sync_interval_hours: env::var("MINERVA_LTI_NRPS_SYNC_INTERVAL_HOURS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(6),
         })
     }
 

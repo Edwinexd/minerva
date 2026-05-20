@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useState } from "react"
 import {
   adminLtiPlatformBindingsQuery,
+  adminLtiPlatformNrpsQuery,
   adminLtiPlatformsQuery,
   adminLtiSetupQuery,
 } from "@/lib/queries"
@@ -277,6 +278,10 @@ function PlatformRow({
     ...adminLtiPlatformBindingsQuery(platform.id),
     enabled: open,
   })
+  const { data: nrps } = useQuery({
+    ...adminLtiPlatformNrpsQuery(platform.id),
+    enabled: open,
+  })
 
   return (
     <div className="rounded-md border">
@@ -346,6 +351,60 @@ function PlatformRow({
                 ))}
               </tbody>
             </table>
+          )}
+
+          {nrps && nrps.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-2 text-xs text-muted-foreground">
+                {t("ltiPlatforms.nrpsHint")}
+              </p>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.nrpsColumns.context")}</th>
+                    <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.nrpsColumns.status")}</th>
+                    <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.nrpsColumns.changes")}</th>
+                    <th className="py-1 font-medium">{t("ltiPlatforms.nrpsColumns.lastSync")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {nrps.map((ctx) => (
+                    <tr key={ctx.id} className="border-b last:border-0 align-top">
+                      <td className="py-1 pr-3 font-mono text-xs">{ctx.context_id || "-"}</td>
+                      <td className="py-1 pr-3">
+                        {ctx.last_sync_status === "error" ? (
+                          <Badge variant="destructive">{t("ltiPlatforms.nrpsStatusError")}</Badge>
+                        ) : ctx.last_sync_status === "ok" ? (
+                          <Badge variant="secondary">{t("ltiPlatforms.nrpsStatusOk")}</Badge>
+                        ) : (
+                          <Badge variant="outline">{t("ltiPlatforms.nrpsStatusPending")}</Badge>
+                        )}
+                        {ctx.last_sync_status === "error" && ctx.last_sync_error && (
+                          <div className="mt-1 text-xs text-destructive break-all">
+                            {ctx.last_sync_error}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-1 pr-3 text-xs">
+                        {ctx.last_sync_status === "ok"
+                          ? t("ltiPlatforms.nrpsCounts", {
+                              added: ctx.last_sync_added ?? 0,
+                              removed: ctx.last_sync_removed ?? 0,
+                            })
+                          : "-"}
+                      </td>
+                      <td className="py-1 text-xs">
+                        {ctx.last_sync_at ? (
+                          <RelativeTime date={ctx.last_sync_at} />
+                        ) : (
+                          t("ltiPlatforms.nrpsNeverSynced")
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

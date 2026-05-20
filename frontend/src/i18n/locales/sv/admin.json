@@ -89,6 +89,18 @@
       "context": "LMS-kurs",
       "course": "Minerva-kurs",
       "created": "Länkad"
+    },
+    "nrpsHint": "Status för Names and Role Provisioning-synk för varje länkad kurs. Nya deltagare läggs till och deltagare som lämnar LMS-kursen tas bort automatiskt.",
+    "nrpsStatusOk": "Synkad",
+    "nrpsStatusError": "Fel",
+    "nrpsStatusPending": "Väntar",
+    "nrpsNeverSynced": "Inte synkad ännu",
+    "nrpsCounts": "{{added}} tillagda, {{removed}} borttagna",
+    "nrpsColumns": {
+      "context": "LMS-kontext",
+      "status": "Status",
+      "changes": "Senaste ändringar",
+      "lastSync": "Senaste synk"
     }
   },
   "usage": {

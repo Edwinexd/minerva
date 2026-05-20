@@ -370,7 +370,14 @@
     "saveRegistration": "Save Registration",
     "emptyRegistrations": "No LTI connections yet. Configure the tool in Moodle first using the values above, then add the connection here.",
     "copied": "Copied!",
-    "remove": "Remove"
+    "remove": "Remove",
+    "nrpsTitle": "Roster sync (NRPS)",
+    "nrpsDescription": "When the LMS supports LTI Names and Role Provisioning, Minerva periodically syncs this course's roster: new members are added and members who leave the LMS course are removed automatically.",
+    "nrpsStatusOk": "Synced",
+    "nrpsStatusError": "Error",
+    "nrpsStatusPending": "Pending",
+    "nrpsNeverSynced": "Not synced yet",
+    "nrpsCounts": "{{added}} added, {{removed}} removed"
   },
   "members": {
     "suggestionsTitle": "Pending role suggestions",

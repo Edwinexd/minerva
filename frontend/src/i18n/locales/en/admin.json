@@ -89,6 +89,18 @@
       "context": "LMS course",
       "course": "Minerva course",
       "created": "Linked"
+    },
+    "nrpsHint": "Names and Role Provisioning roster sync status for each linked course. New members are added and members who leave the LMS course are removed automatically.",
+    "nrpsStatusOk": "Synced",
+    "nrpsStatusError": "Error",
+    "nrpsStatusPending": "Pending",
+    "nrpsNeverSynced": "Not synced yet",
+    "nrpsCounts": "{{added}} added, {{removed}} removed",
+    "nrpsColumns": {
+      "context": "LMS context",
+      "status": "Status",
+      "changes": "Last changes",
+      "lastSync": "Last sync"
     }
   },
   "usage": {

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { ltiSetupQuery, ltiRegistrationsQuery } from "@/lib/queries"
+import { ltiSetupQuery, ltiRegistrationsQuery, ltiNrpsStatusQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { RelativeTime } from "@/components/relative-time"
 import { useState } from "react"
 import type { LtiRegistration } from "@/lib/types"
 
@@ -27,6 +28,7 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
   const formatError = useApiErrorMessage()
   const { data: setup } = useQuery(ltiSetupQuery(courseId))
   const { data: registrations, isLoading } = useQuery(ltiRegistrationsQuery(courseId))
+  const { data: nrps } = useQuery(ltiNrpsStatusQuery(courseId))
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState("")
   const [issuer, setIssuer] = useState("")
@@ -222,6 +224,57 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
           </div>
         </CardContent>
       </Card>
+
+      {nrps && nrps.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("lti.nrpsTitle")}</CardTitle>
+            <CardDescription>{t("lti.nrpsDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {nrps.map((ctx) => (
+              <div
+                key={ctx.id}
+                className="flex flex-wrap items-center justify-between gap-2 border-b py-2 text-sm last:border-0"
+              >
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2">
+                    {ctx.last_sync_status === "error" ? (
+                      <Badge variant="destructive">{t("lti.nrpsStatusError")}</Badge>
+                    ) : ctx.last_sync_status === "ok" ? (
+                      <Badge variant="secondary">{t("lti.nrpsStatusOk")}</Badge>
+                    ) : (
+                      <Badge variant="outline">{t("lti.nrpsStatusPending")}</Badge>
+                    )}
+                    {ctx.last_sync_at ? (
+                      <span className="text-xs text-muted-foreground">
+                        <RelativeTime date={ctx.last_sync_at} />
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        {t("lti.nrpsNeverSynced")}
+                      </span>
+                    )}
+                  </div>
+                  {ctx.last_sync_status === "ok" && (
+                    <div className="text-xs text-muted-foreground">
+                      {t("lti.nrpsCounts", {
+                        added: ctx.last_sync_added ?? 0,
+                        removed: ctx.last_sync_removed ?? 0,
+                      })}
+                    </div>
+                  )}
+                  {ctx.last_sync_status === "error" && ctx.last_sync_error && (
+                    <div className="text-xs text-destructive break-all">
+                      {ctx.last_sync_error}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

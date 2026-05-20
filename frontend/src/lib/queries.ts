@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -244,6 +244,12 @@ export const ltiRegistrationsQuery = (courseId: string) =>
     queryFn: () => api.get<LtiRegistration[]>(`/courses/${courseId}/lti`),
   })
 
+export const ltiNrpsStatusQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "lti", "nrps"],
+    queryFn: () => api.get<LtiNrpsStatus[]>(`/courses/${courseId}/lti/nrps`),
+  })
+
 export const canvasConnectionsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "canvas"],
@@ -393,6 +399,13 @@ export const adminLtiPlatformBindingsQuery = (platformId: string) =>
     queryKey: ["admin", "lti", "platforms", platformId, "bindings"],
     queryFn: () =>
       api.get<LtiPlatformBinding[]>(`/admin/lti/platforms/${platformId}/bindings`),
+  })
+
+export const adminLtiPlatformNrpsQuery = (platformId: string) =>
+  queryOptions({
+    queryKey: ["admin", "lti", "platforms", platformId, "nrps"],
+    queryFn: () =>
+      api.get<LtiNrpsStatus[]>(`/admin/lti/platforms/${platformId}/nrps`),
   })
 
 // ── Study mode ─────────────────────────────────────────────────────

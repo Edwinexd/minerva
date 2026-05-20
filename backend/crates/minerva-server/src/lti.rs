@@ -121,6 +121,15 @@ pub struct LtiLaunchClaims {
         default
     )]
     pub launch_presentation: Option<LtiLaunchPresentation>,
+
+    /// LTI Advantage Names and Role Provisioning Service. Present only when
+    /// the platform has the NRPS service enabled for this tool; carries the
+    /// `context_memberships_url` we later poll to reconcile the roster.
+    #[serde(
+        rename = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice",
+        default
+    )]
+    pub names_role_service: Option<LtiNamesRoleService>,
 }
 
 /// The `aud` claim can be a single string or an array of strings.
@@ -161,6 +170,13 @@ pub struct LtiLaunchPresentation {
     pub document_target: Option<String>,
     pub return_url: Option<String>,
     pub locale: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LtiNamesRoleService {
+    pub context_memberships_url: String,
+    #[serde(default)]
+    pub service_versions: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

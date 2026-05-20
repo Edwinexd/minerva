@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE lti_nrps_contexts\n           SET last_sync_at = NOW(),\n               last_sync_status = $2,\n               last_sync_error = $3,\n               last_sync_added = $4,\n               last_sync_removed = $5,\n               updated_at = NOW()\n           WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1c950bfc464cb4f3259696cf86048bfe0af4ddaa6a9b00841fbe54e305baca3d"
+}

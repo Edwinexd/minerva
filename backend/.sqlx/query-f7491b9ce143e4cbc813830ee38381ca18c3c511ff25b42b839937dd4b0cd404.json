@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT nrps_context_id, user_id, lti_user_id, last_status, last_seen_at\n        FROM lti_nrps_memberships\n        WHERE nrps_context_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "nrps_context_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "lti_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f7491b9ce143e4cbc813830ee38381ca18c3c511ff25b42b839937dd4b0cd404"
+}

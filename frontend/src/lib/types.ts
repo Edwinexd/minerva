@@ -704,6 +704,19 @@ export interface LtiPlatform {
   allowed_eppn_domains: string[]
 }
 
+export interface LtiNrpsStatus {
+  id: string
+  course_id: string
+  /// "registration" (per-course) or "platform" (site-level).
+  source: "registration" | "platform"
+  context_id: string
+  last_sync_at: string | null
+  last_sync_status: "ok" | "error" | null
+  last_sync_error: string | null
+  last_sync_added: number | null
+  last_sync_removed: number | null
+}
+
 export interface LtiPlatformBinding {
   id: string
   platform_id: string

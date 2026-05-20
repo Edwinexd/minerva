@@ -67,6 +67,7 @@ pub fn course_router() -> Router<AppState> {
     Router::new()
         .route("/lti/setup", get(lti_setup))
         .route("/lti", get(list_registrations).post(create_registration))
+        .route("/lti/nrps", get(list_course_nrps_status))
         .route("/lti/{registration_id}", delete(delete_registration))
 }
 
@@ -79,6 +80,10 @@ pub fn admin_router() -> Router<AppState> {
         .route(
             "/lti/platforms/{platform_id}/bindings",
             get(list_platform_bindings),
+        )
+        .route(
+            "/lti/platforms/{platform_id}/nrps",
+            get(list_platform_nrps_status),
         )
         .route(
             "/lti/platforms/{platform_id}/bindings/{binding_id}",
@@ -389,8 +394,60 @@ async fn handle_launch(
     //    directly; they only suggest.
     apply_course_membership(&state, course_id, &user, &claims).await?;
 
+    // 9b. Capture the NRPS context (if the platform advertised one) so the
+    //     periodic reconcile loop can later pull this course's roster and
+    //     remove members who leave the LMS. Works for both launch sources.
+    let nrps_source = match &source {
+        ResolvedSource::Registration(r) => {
+            minerva_db::queries::lti_nrps::NrpsSource::Registration(r.id)
+        }
+        ResolvedSource::Platform(p) => minerva_db::queries::lti_nrps::NrpsSource::Platform(p.id),
+    };
+    let nrps_context_id = claims
+        .context
+        .as_ref()
+        .and_then(|c| c.id.clone())
+        .unwrap_or_default();
+    capture_nrps_context(
+        &state,
+        nrps_source,
+        &nrps_context_id,
+        course_id,
+        claims
+            .names_role_service
+            .as_ref()
+            .map(|n| n.context_memberships_url.as_str()),
+    )
+    .await?;
+
     // 10. Issue the embed token and return the redirect page.
     embed_redirect_response(&state, course_id, &user, source.client_id())
+}
+
+/// Upsert the NRPS context for a launch when the platform advertised a
+/// `context_memberships_url`. No-op when NRPS isn't enabled for the tool
+/// (the claim is absent) so non-NRPS platforms are unaffected. Shared by
+/// the launch handler and the bind-complete handler.
+async fn capture_nrps_context(
+    state: &AppState,
+    source: minerva_db::queries::lti_nrps::NrpsSource,
+    context_id: &str,
+    course_id: Uuid,
+    memberships_url: Option<&str>,
+) -> Result<(), AppError> {
+    let Some(url) = memberships_url.filter(|u| !u.is_empty()) else {
+        return Ok(());
+    };
+    minerva_db::queries::lti_nrps::upsert_context(
+        &state.db,
+        Uuid::new_v4(),
+        source,
+        context_id,
+        course_id,
+        url,
+    )
+    .await?;
+    Ok(())
 }
 
 /// Apply course membership (always as student) and optionally suggest teacher
@@ -502,6 +559,10 @@ fn bind_redirect_response(
         context_title: claims.context.as_ref().and_then(|c| c.title.clone()),
         roles: claims.roles.clone(),
         client_id: platform.client_id.clone(),
+        memberships_url: claims
+            .names_role_service
+            .as_ref()
+            .map(|n| n.context_memberships_url.clone()),
         expires_at: expires_at.timestamp(),
     };
 
@@ -588,8 +649,8 @@ fn build_setup_response(base_url: &str) -> LtiSetupResponse {
                 "Under 'Show more...', set Icon URL to: {}",
                 config.icon_url,
             ),
-            "Under Services, leave defaults (no grade passback needed).".into(),
-            "Under Privacy, 'Share launcher's name' is optional (populates display names).".into(),
+            "Under Services, set 'IMS LTI Names and Role Provisioning' to 'Use this service to retrieve members' information as per privacy settings'; this lets Minerva sync the roster (adding new students and removing those who leave the course). No grade passback is needed.".into(),
+            "Under Privacy, set 'Share launcher's name with tool' and 'Share launcher's email with tool' to 'Always'; the roster sync needs these to identify members.".into(),
             "Save. Moodle will show the tool's registration details.".into(),
             "Copy the Platform ID (issuer), Client ID, Deployment ID, and the platform endpoints (Authentication request URL, Access token URL, Public keyset URL) from Moodle.".into(),
             "Back in Minerva, create an LTI registration for this course with those values.".into(),
@@ -850,6 +911,12 @@ struct BindTokenPayload {
     context_title: Option<String>,
     roles: Vec<String>,
     client_id: String,
+    /// NRPS `context_memberships_url` from the launch, if the platform
+    /// advertised one. Threaded through so the very first site-platform
+    /// launch (the one that triggers binding) still captures NRPS instead
+    /// of waiting for a second launch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    memberships_url: Option<String>,
     /// Unix timestamp.
     expires_at: i64,
 }
@@ -1072,8 +1139,20 @@ async fn bind_complete(
         resource_link: None,
         custom: None,
         launch_presentation: None,
+        names_role_service: None,
     };
     apply_course_membership(&state, binding.course_id, &user, &synthetic_claims).await?;
+
+    // Capture NRPS context from the bind token so the first site-platform
+    // launch (the one that created this binding) is immediately syncable.
+    capture_nrps_context(
+        &state,
+        minerva_db::queries::lti_nrps::NrpsSource::Platform(platform.id),
+        &payload.context_id,
+        binding.course_id,
+        payload.memberships_url.as_deref(),
+    )
+    .await?;
 
     let redirect_url =
         build_embed_redirect_url(&state, binding.course_id, &user, &payload.client_id)?;
@@ -1120,6 +1199,8 @@ fn build_admin_setup_response(base_url: &str) -> LtiSetupResponse {
                 "Under Custom parameters, add: {}",
                 config.custom_parameters,
             ),
+            "Under Services, set 'IMS LTI Names and Role Provisioning' to 'Use this service to retrieve members' information as per privacy settings'; this enables roster sync (auto add/remove of members) across every course this tool is added to.".into(),
+            "Under Privacy, set 'Share launcher's name' and 'Share launcher's email' to 'Always'; the roster sync needs these to identify members.".into(),
             format!(
                 "Under 'Show more...', set Icon URL to: {}",
                 config.icon_url,
@@ -1359,6 +1440,72 @@ async fn list_platform_bindings(
         });
     }
     Ok(Json(out))
+}
+
+// ---------------------------------------------------------------------------
+// NRPS roster-sync status (read-only)
+// ---------------------------------------------------------------------------
+
+/// Read-only view of an NRPS context's last reconcile. There is intentionally
+/// no manual-trigger endpoint: the reconcile runs on the in-process periodic
+/// loop (see `worker::start` / `lti_nrps::reconcile_context`).
+#[derive(Debug, Serialize)]
+struct NrpsStatusResponse {
+    id: Uuid,
+    course_id: Uuid,
+    /// "registration" (per-course) or "platform" (site-level).
+    source: &'static str,
+    context_id: String,
+    last_sync_at: Option<chrono::DateTime<chrono::Utc>>,
+    last_sync_status: Option<String>,
+    last_sync_error: Option<String>,
+    last_sync_added: Option<i32>,
+    last_sync_removed: Option<i32>,
+}
+
+fn nrps_to_response(r: minerva_db::queries::lti_nrps::NrpsContextRow) -> NrpsStatusResponse {
+    NrpsStatusResponse {
+        id: r.id,
+        course_id: r.course_id,
+        source: if r.registration_id.is_some() {
+            "registration"
+        } else {
+            "platform"
+        },
+        context_id: r.context_id,
+        last_sync_at: r.last_sync_at,
+        last_sync_status: r.last_sync_status,
+        last_sync_error: r.last_sync_error,
+        last_sync_added: r.last_sync_added,
+        last_sync_removed: r.last_sync_removed,
+    }
+}
+
+/// GET /courses/{course_id}/lti/nrps; NRPS sync status for the course's
+/// contexts (both per-course registrations and site-platform bindings that
+/// reconcile into this course).
+async fn list_course_nrps_status(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<Vec<NrpsStatusResponse>>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    let rows =
+        minerva_db::queries::lti_nrps::list_contexts_for_course(&state.db, course_id).await?;
+    Ok(Json(rows.into_iter().map(nrps_to_response).collect()))
+}
+
+/// GET /admin/lti/platforms/{platform_id}/nrps; NRPS sync status for every
+/// context bound to a site-level platform.
+async fn list_platform_nrps_status(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(platform_id): Path<Uuid>,
+) -> Result<Json<Vec<NrpsStatusResponse>>, AppError> {
+    require_site_integrator(&user)?;
+    let rows =
+        minerva_db::queries::lti_nrps::list_contexts_for_platform(&state.db, platform_id).await?;
+    Ok(Json(rows.into_iter().map(nrps_to_response).collect()))
 }
 
 async fn delete_platform_binding(

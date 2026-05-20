@@ -5,6 +5,7 @@ mod error;
 mod ext_obfuscate;
 mod feature_flags;
 pub mod lti;
+mod lti_nrps;
 mod model_capabilities;
 mod relink_scheduler;
 mod routes;

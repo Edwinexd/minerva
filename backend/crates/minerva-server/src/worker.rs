@@ -67,6 +67,11 @@ const STALE_THRESHOLD_SECS: i64 = 600;
 const CANVAS_AUTO_SYNC_CHECK_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(60 * 60);
 
+/// How often the LTI NRPS reconcile loop checks for due contexts. Same
+/// rationale as the Canvas check interval: effective lag is at most this
+/// plus `lti_nrps_sync_interval_hours`.
+const LTI_NRPS_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
 /// Start the background document-processing worker.
 ///
 /// On startup it resets any documents stuck in `processing` (crash recovery),
@@ -155,6 +160,86 @@ pub fn start(state: AppState, max_concurrent: usize) {
                             name,
                             e,
                         ),
+                    }
+                }
+            }
+        });
+    }
+
+    // LTI NRPS reconcile: periodically pull each syncable context's roster
+    // from the LMS and add/remove course members. Runs sequentially across
+    // due contexts so we don't stampede a platform's token + membership
+    // endpoints. Removal is LTI-sourced-only (see lti_nrps::reconcile_context).
+    let nrps_interval_hours = state.config.lti_nrps_sync_interval_hours;
+    if nrps_interval_hours > 0 {
+        let state = state.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(LTI_NRPS_CHECK_INTERVAL).await;
+                let due = match minerva_db::queries::lti_nrps::find_due_for_sync(
+                    &state.db,
+                    nrps_interval_hours,
+                )
+                .await
+                {
+                    Ok(rows) => rows,
+                    Err(e) => {
+                        tracing::error!("lti nrps: due query failed: {}", e);
+                        continue;
+                    }
+                };
+                if due.is_empty() {
+                    continue;
+                }
+                tracing::info!(
+                    "lti nrps: {} context(s) due (interval {}h)",
+                    due.len(),
+                    nrps_interval_hours,
+                );
+                for ctx in due {
+                    match crate::lti_nrps::reconcile_context(&state, &ctx).await {
+                        Ok(outcome) => {
+                            tracing::info!(
+                                "lti nrps: context {} (course {}): {} added, {} removed",
+                                ctx.id,
+                                ctx.course_id,
+                                outcome.added,
+                                outcome.removed,
+                            );
+                            if let Err(e) = minerva_db::queries::lti_nrps::record_sync_result(
+                                &state.db,
+                                ctx.id,
+                                "ok",
+                                None,
+                                Some(outcome.added),
+                                Some(outcome.removed),
+                            )
+                            .await
+                            {
+                                tracing::error!(
+                                    "lti nrps: failed to record sync result for {}: {}",
+                                    ctx.id,
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "lti nrps: context {} (course {}) failed: {}",
+                                ctx.id,
+                                ctx.course_id,
+                                e,
+                            );
+                            let _ = minerva_db::queries::lti_nrps::record_sync_result(
+                                &state.db,
+                                ctx.id,
+                                "error",
+                                Some(&e.to_string()),
+                                None,
+                                None,
+                            )
+                            .await;
+                        }
                     }
                 }
             }

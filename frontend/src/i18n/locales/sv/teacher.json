@@ -370,7 +370,14 @@
     "saveRegistration": "Spara registrering",
     "emptyRegistrations": "Inga LTI-anslutningar ännu. Konfigurera verktyget i Moodle först med värdena ovan, och lägg sedan till anslutningen här.",
     "copied": "Kopierad!",
-    "remove": "Ta bort"
+    "remove": "Ta bort",
+    "nrpsTitle": "Deltagarsynk (NRPS)",
+    "nrpsDescription": "När LMS:et stöder LTI Names and Role Provisioning synkar Minerva regelbundet kursens deltagarlista: nya deltagare läggs till och deltagare som lämnar LMS-kursen tas bort automatiskt.",
+    "nrpsStatusOk": "Synkad",
+    "nrpsStatusError": "Fel",
+    "nrpsStatusPending": "Väntar",
+    "nrpsNeverSynced": "Inte synkad ännu",
+    "nrpsCounts": "{{added}} tillagda, {{removed}} borttagna"
   },
   "members": {
     "suggestionsTitle": "Väntande rollförslag",

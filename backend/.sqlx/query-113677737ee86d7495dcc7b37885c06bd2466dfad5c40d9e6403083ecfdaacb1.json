@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lti_nrps_memberships\n            (nrps_context_id, user_id, lti_user_id, last_status, last_seen_at)\n        VALUES ($1, $2, $3, $4, NOW())\n        ON CONFLICT (nrps_context_id, user_id)\n        DO UPDATE SET lti_user_id = EXCLUDED.lti_user_id,\n                      last_status = EXCLUDED.last_status,\n                      last_seen_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "113677737ee86d7495dcc7b37885c06bd2466dfad5c40d9e6403083ecfdaacb1"
+}

@@ -113,7 +113,8 @@
     "no_jwks_key": "No matching key in the platform's JWKS.",
     "jwt_validation_failed": "JWT validation failed: {{detail}}",
     "nonce_mismatch": "LTI nonce mismatch.",
-    "message_type_unsupported": "Unsupported LTI message type: {{type}}"
+    "message_type_unsupported": "Unsupported LTI message type: {{type}}",
+    "eppn_domain_forbidden": "Your eppn \"{{eppn}}\" is outside this platform's allowed domains ({{allowed_domains}})."
   },
   "course": {
     "min_score_out_of_range": "min_score must be between 0.0 and 1.0.",
@@ -130,6 +131,7 @@
   },
   "site_integration": {
     "invalid_domain": "\"{{domain}}\" is not a valid eppn domain. Use bare hostnames like dsv.su.se.",
-    "user_not_found": "No Minerva user with eppn \"{{eppn}}\"; they must log into Minerva at least once before being linked."
+    "user_not_found": "No Minerva user with eppn \"{{eppn}}\"; they must log into Minerva at least once before being linked.",
+    "eppn_domain_forbidden": "The eppn \"{{eppn}}\" is outside this key's allowed domains ({{allowed_domains}})."
   }
 }

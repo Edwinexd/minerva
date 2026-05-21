@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::error::AppError;
+use crate::error::{AppError, ErrorParams};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -543,7 +543,12 @@ fn enforce_eppn_domain(
         .iter()
         .any(|d| eppn.ends_with(&format!("@{}", d.to_lowercase())));
     if !matches {
-        return Err(AppError::Forbidden);
+        let allowed = domains.join(", ");
+        return Err(AppError::ForbiddenWith {
+            code: "site_integration.eppn_domain_forbidden",
+            message: format!("forbidden: eppn '{eppn}' not in allowed domains [{allowed}]"),
+            params: ErrorParams::from([("eppn", eppn.to_string()), ("allowed_domains", allowed)]),
+        });
     }
     Ok(())
 }

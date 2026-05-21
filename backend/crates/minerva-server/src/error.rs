@@ -58,6 +58,10 @@ impl LocalizedMessage {
             AppError::NotFound => Self::new("not_found"),
             AppError::Unauthorized => Self::new("unauthorized"),
             AppError::Forbidden => Self::new("forbidden"),
+            AppError::ForbiddenWith { code, params, .. } => Self {
+                code,
+                params: params.clone(),
+            },
             AppError::BadRequest { code, params } => Self {
                 code,
                 params: params.clone(),
@@ -82,6 +86,18 @@ pub enum AppError {
 
     #[error("forbidden")]
     Forbidden,
+
+    /// Forbidden with a specific, human-readable reason. Surfaces as 403 like
+    /// `Forbidden`, but carries an English `message` (for integrators reading
+    /// the raw JSON / logs) plus a translatable `code` + `params` for the
+    /// frontend i18n layer. Used where a bare "forbidden" is unhelpful, e.g.
+    /// eppn domain-scope mismatches on integration keys and LTI launches.
+    #[error("{message}")]
+    ForbiddenWith {
+        code: &'static str,
+        message: String,
+        params: ErrorParams,
+    },
 
     #[error("bad request ({code})")]
     BadRequest {
@@ -137,7 +153,9 @@ impl IntoResponse for AppError {
         let status = match &self {
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::Unauthorized => StatusCode::UNAUTHORIZED,
-            AppError::Forbidden | AppError::PrivacyNotAcknowledged => StatusCode::FORBIDDEN,
+            AppError::Forbidden
+            | AppError::ForbiddenWith { .. }
+            | AppError::PrivacyNotAcknowledged => StatusCode::FORBIDDEN,
             AppError::BadRequest { .. } => StatusCode::BAD_REQUEST,
             AppError::QuotaExceeded | AppError::OwnerQuotaExceeded => StatusCode::TOO_MANY_REQUESTS,
             AppError::StudyLockedOut => StatusCode::LOCKED,

@@ -105,12 +105,29 @@ See [.env.example](.env.example) for the rest.
 
 See [apache/README.md](apache/README.md) for the vhost.
 
+## Accessibility
+
+Per DSV-IT policy, new sites must meet the accessibility law; Minerva targets
+**WCAG 2.2 level AA**. Compliance is enforced automatically (pre-commit + CI),
+not just reviewed by hand, across three layers:
+
+| Layer | Tool | Catches |
+|-------|------|---------|
+| Static lint | `eslint-plugin-jsx-a11y` (`strict`) | Markup-level issues: alt text, label/control association, ARIA misuse, missing keyboard handlers |
+| Rendered components | Vitest + Testing Library + `axe-core` (WCAG 2.2 AA tags) | Violations only visible once a component is rendered to the DOM |
+| End-to-end | `pa11y-ci` (htmlcs WCAG2AA + axe) in a real browser | Color contrast and other render-time criteria jsdom can't compute |
+
+Modal dialogs use the native `<dialog>` element with `showModal()`, so focus
+trapping, Escape-to-close, top-layer rendering and the `::backdrop` come from the
+platform rather than hand-rolled code. Details and local commands
+(`npm run test:run`, `npm run pa11y`) live in [frontend/README.md](frontend/README.md#accessibility-wcag-22).
+
 ## Contributing
 
 CLA in [CLA.md](CLA.md). CI runs:
 
 - **Backend**: `cargo fmt`, `cargo clippy --all-targets` (warnings treated as errors), `cargo build` (all with `SQLX_OFFLINE=true`).
-- **Frontend**: `eslint --max-warnings 0`, `tsc -b`, `vite build`.
+- **Frontend**: `eslint --max-warnings 0` (incl. `jsx-a11y` strict), `tsc -b`, `tsc -p tsconfig.test.json`, `vitest run` (axe-core component checks), `vite build`, plus a `pa11y-ci` job that audits the built app in a real browser. See [Accessibility](#accessibility).
 - **Moodle plugin**: `php -l` + `phpcs` against `moodlehq/moodle-cs`.
 - **Apache**: lua syntax + unit tests + `apache2ctl configtest` for `apache/minerva-app.conf`.
 - **Style gates**: ban emdashes + ban space-dash-dash-space anywhere a non-whitespace char precedes them on the line.

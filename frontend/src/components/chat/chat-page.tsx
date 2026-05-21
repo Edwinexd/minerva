@@ -104,7 +104,9 @@ function ChatPage({
         <Menu className="w-4 h-4" />
       </Button>
       {sidebarOpen && (
-        <div
+        <button
+          type="button"
+          aria-label={t("sidebar.closeConversations")}
           className="md:hidden fixed inset-0 z-30 bg-background/60"
           onClick={() => setSidebarOpen(false)}
         />
@@ -792,8 +794,7 @@ export function ChatWindow({
             // Send, so the student never wonders "did my Send go
             // through?" while the analyzer is still racing to
             // deliver a verdict.
-            <div
-              role="status"
+            <output
               aria-live="polite"
               className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
             >
@@ -808,7 +809,7 @@ export function ChatWindow({
                     ? t("aegis.looksGoodTitle")
                     : t("aegis.emptyTitle")}
               </span>
-            </div>
+            </output>
           )}
           <form onSubmit={handleSubmit} className="flex gap-2">
             <Input

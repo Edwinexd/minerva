@@ -276,7 +276,7 @@ export function AegisSuggestionsBanner({
   }
 
   return (
-    <div className={containerClass} role="status" aria-live="polite">
+    <output className={containerClass} aria-live="polite">
       {/* Compact row: status + count + Review/Collapse + dismiss. */}
       <div className="flex items-center gap-2 px-3 py-2">
         <AegisShieldFilled
@@ -509,6 +509,6 @@ export function AegisSuggestionsBanner({
           )}
         </div>
       )}
-    </div>
+    </output>
   )
 }

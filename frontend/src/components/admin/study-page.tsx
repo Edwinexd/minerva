@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { api } from "@/lib/api"
@@ -845,32 +845,52 @@ function ParticipantDetailDrawer({
 }) {
   const { t } = useTranslation("admin")
   const formatError = useApiErrorMessage()
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
   const { data, isLoading, error } = useQuery(
     adminStudyParticipantDetailQuery(courseId, participantNumber),
   )
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
-      <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground ring-1 ring-foreground/10 shadow-lg">
-        <div className="flex items-center justify-between border-b px-6 py-3">
-          <h2 className="text-lg font-semibold">
-            {t("study.detail.title", { n: participantNumber })}
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-muted-foreground hover:text-foreground"
-            aria-label={t("study.detail.closeLabel")}
-          >
-            ✕
-          </button>
-        </div>
+  // The drawer is mounted only while a participant is selected, so open it as a
+  // true modal on mount. showModal() handles focus trapping, Escape-to-close
+  // and focus restoration; every close path funnels through the native `close`
+  // event into onClose, which unmounts this component.
+  useEffect(() => {
+    dialogRef.current?.showModal()
+  }, [])
 
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 text-sm">
+  // Light-dismiss: a click on the dialog element itself is a ::backdrop click.
+  useEffect(() => {
+    const el = dialogRef.current
+    if (!el) return
+    const onBackdropClick = (e: MouseEvent) => {
+      if (e.target === el) el.close()
+    }
+    el.addEventListener("click", onBackdropClick)
+    return () => el.removeEventListener("click", onBackdropClick)
+  }, [])
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      onClose={onClose}
+      className="m-auto flex max-h-[90vh] w-[calc(100%-2rem)] max-w-4xl flex-col overflow-hidden rounded-xl border-0 bg-popover p-0 text-popover-foreground ring-1 ring-foreground/10 shadow-lg backdrop:bg-black/40"
+    >
+      <div className="flex items-center justify-between border-b px-6 py-3">
+        <h2 id={titleId} className="text-lg font-semibold">
+          {t("study.detail.title", { n: participantNumber })}
+        </h2>
+        <button
+          onClick={() => dialogRef.current?.close()}
+          className="rounded p-1 text-muted-foreground hover:text-foreground"
+          aria-label={t("study.detail.closeLabel")}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 text-sm">
           {isLoading && <Skeleton className="h-32 w-full" />}
           {error && (
             <p role="alert" className="text-sm text-destructive">
@@ -924,9 +944,8 @@ function ParticipantDetailDrawer({
               />
             </>
           )}
-        </div>
       </div>
-    </div>
+    </dialog>
   )
 }
 

@@ -62,8 +62,59 @@ jobs:
       - name: Type check
         run: npx tsc -b
 
+      - name: Type check (tests)
+        run: npx tsc -p tsconfig.test.json
+
+      - name: Accessibility tests (vitest + axe-core)
+        run: npx vitest run
+
       - name: Build
         run: npm run build
+
+  frontend-a11y:
+    name: Frontend accessibility (pa11y-ci)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        # pa11y-ci pulls puppeteer, whose postinstall downloads the Chromium
+        # build pa11y drives (lands in ~/.cache/puppeteer).
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run pa11y-ci against the built app
+        # Serve the production build with `vite preview` (SPA history fallback
+        # included) and run pa11y-ci over the public routes. Color contrast and
+        # other render-time WCAG 2.2 AA checks run here in a real browser,
+        # complementing the jsdom/axe component tests in the `frontend` job.
+        # No backend runs, so only unauthenticated routes are listed in
+        # .pa11yci.json; their shells still render real, auditable markup.
+        run: |
+          npm run preview -- --port 4173 --host 127.0.0.1 &
+          PREVIEW_PID=$!
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:4173/ >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          set +e
+          npm run pa11y
+          STATUS=$?
+          kill "$PREVIEW_PID" 2>/dev/null || true
+          exit $STATUS
 
   moodle-plugin:
     name: Moodle plugin

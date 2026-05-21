@@ -1,0 +1,17 @@
+{
+  "defaults": {
+    "standard": "WCAG2AA",
+    "runners": ["htmlcs", "axe"],
+    "timeout": 60000,
+    "wait": 1500,
+    "chromeLaunchConfig": {
+      "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"]
+    },
+    "ignore": []
+  },
+  "urls": [
+    "http://localhost:4173/",
+    "http://localhost:4173/acknowledgements",
+    "http://localhost:4173/data-handling"
+  ]
+}

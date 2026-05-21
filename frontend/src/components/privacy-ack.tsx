@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { DataHandlingContent } from "@/components/data-handling"
@@ -22,10 +22,9 @@ export function PrivacyAckBanner({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const titleId = useId()
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const previousFocusRef = useRef<HTMLElement | null>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
 
-  const handleClose = useCallback(() => setOpen(false), [])
+  const handleClose = () => setOpen(false)
 
   const handleAgree = async () => {
     setSubmitting(true)
@@ -40,59 +39,28 @@ export function PrivacyAckBanner({
     }
   }
 
-  // Focus management + Escape + Tab trap while the dialog is open.
+  // Drive the native <dialog> as a true modal. showModal() puts it in the top
+  // layer with a ::backdrop and provides focus trapping, Escape-to-close and
+  // focus restoration natively, so no hand-rolled focus management is needed.
   useEffect(() => {
-    if (!open) return
+    const el = dialogRef.current
+    if (!el) return
+    if (open && !el.open) el.showModal()
+    else if (!open && el.open) el.close()
+  }, [open])
 
-    previousFocusRef.current = document.activeElement as HTMLElement | null
-
-    const getFocusable = () => {
-      const root = dialogRef.current
-      if (!root) return [] as HTMLElement[]
-      return Array.from(
-        root.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => !el.hasAttribute("aria-hidden"))
+  // Light-dismiss: a click landing on the dialog element itself is a click on
+  // the ::backdrop (all content lives in child nodes), so close. Registered
+  // imperatively to keep it off the JSX and to ignore clicks mid-submit.
+  useEffect(() => {
+    const el = dialogRef.current
+    if (!el) return
+    const onBackdropClick = (e: MouseEvent) => {
+      if (!submitting && e.target === el) setOpen(false)
     }
-
-    // Focus the first interactive element so keyboard users land inside.
-    const focusables = getFocusable()
-    focusables[0]?.focus()
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !submitting) {
-        e.stopPropagation()
-        handleClose()
-        return
-      }
-      if (e.key === "Tab") {
-        const nodes = getFocusable()
-        if (nodes.length === 0) return
-        const first = nodes[0]
-        const last = nodes[nodes.length - 1]
-        const active = document.activeElement as HTMLElement | null
-        if (e.shiftKey) {
-          if (active === first || !dialogRef.current?.contains(active)) {
-            e.preventDefault()
-            last.focus()
-          }
-        } else {
-          if (active === last) {
-            e.preventDefault()
-            first.focus()
-          }
-        }
-      }
-    }
-
-    document.addEventListener("keydown", onKeyDown)
-    return () => {
-      document.removeEventListener("keydown", onKeyDown)
-      // Restore focus to the trigger when the dialog closes.
-      previousFocusRef.current?.focus()
-    }
-  }, [open, submitting, handleClose])
+    el.addEventListener("click", onBackdropClick)
+    return () => el.removeEventListener("click", onBackdropClick)
+  }, [submitting])
 
   return (
     <>
@@ -105,18 +73,18 @@ export function PrivacyAckBanner({
         </Button>
       </div>
 
-      {open && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={(e) => { if (e.target === e.currentTarget && !submitting) setOpen(false) }}
-        >
-          <div
-            ref={dialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={titleId}
-            className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground ring-1 ring-foreground/10 shadow-lg"
-          >
+      <dialog
+        ref={dialogRef}
+        aria-labelledby={titleId}
+        onCancel={(e) => {
+          // Block Escape-to-close while the acknowledgement is saving.
+          if (submitting) e.preventDefault()
+        }}
+        onClose={() => setOpen(false)}
+        className="m-auto flex max-h-[90vh] w-[calc(100%-2rem)] max-w-2xl flex-col overflow-hidden rounded-xl border-0 bg-popover p-0 text-popover-foreground ring-1 ring-foreground/10 shadow-lg backdrop:bg-black/40"
+      >
+        {open && (
+          <>
             <div className="flex items-center justify-between border-b px-6 py-4">
               <h2 id={titleId} className="text-lg font-semibold">{t("privacy.dialogTitle")}</h2>
               <button
@@ -142,9 +110,9 @@ export function PrivacyAckBanner({
                 {submitting ? t("privacy.savingButton") : t("privacy.agreeButton")}
               </Button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </dialog>
     </>
   )
 }

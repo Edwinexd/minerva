@@ -67,7 +67,11 @@ repos:
 
       - id: tsc-check
         name: tsc check
-        entry: bash -c 'cd frontend && npx tsc -b'
+        # `tsc -b` type-checks the app (tsconfig.app.json), which excludes the
+        # test files so the production build stays free of vitest/jsdom types.
+        # The second invocation type-checks the test suite (src + tests with
+        # the vitest/jest-dom globals) via the standalone tsconfig.test.json.
+        entry: bash -c 'cd frontend && npx tsc -b && npx tsc -p tsconfig.test.json'
         language: system
         pass_filenames: false
         files: \.(ts|tsx)$
@@ -85,6 +89,19 @@ repos:
         language: system
         pass_filenames: false
         files: ^frontend/(src/.*\.(ts|tsx|js|jsx)|package(-lock)?\.json|eslint\.config\.(js|ts|mjs)|tsconfig.*\.json)$
+
+      - id: vitest-a11y
+        name: vitest accessibility tests
+        # Renders components into jsdom and runs axe-core (WCAG 2.2 AA tags)
+        # against them. Static jsx-a11y lint (eslint-check) catches markup
+        # smells; this catches violations only visible in the rendered tree.
+        # Color-contrast lives in the CI-only pa11y job, which uses a real
+        # browser (jsdom can't compute layout/contrast). Triggered on any
+        # frontend source change since a11y state is cross-file.
+        entry: bash -c 'cd frontend && npx vitest run'
+        language: system
+        pass_filenames: false
+        files: ^frontend/(src/.*\.(ts|tsx)|package(-lock)?\.json|vite(st)?\.config\.ts|tsconfig.*\.json)$
 
       - id: cargo-fmt
         name: cargo fmt

@@ -313,7 +313,9 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
         <Menu className="w-4 h-4" />
       </Button>
       {sidebarOpen && (
-        <div
+        <button
+          type="button"
+          aria-label={t("embed.closeConversations")}
           className="md:hidden fixed inset-0 z-30 bg-background/60"
           onClick={() => setSidebarOpen(false)}
         />
@@ -854,8 +856,7 @@ function EmbedChatWindow({
             // the iframe student sees a clear "aegis is on" signal at
             // all times, including before the analyzer has anything
             // to say. See chat-page.tsx for the full rationale.
-            <div
-              role="status"
+            <output
               aria-live="polite"
               className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
             >
@@ -870,7 +871,7 @@ function EmbedChatWindow({
                     ? tStudent("aegis.looksGoodTitle")
                     : tStudent("aegis.emptyTitle")}
               </span>
-            </div>
+            </output>
           )}
           <form onSubmit={handleSubmit} className="flex gap-2">
             <Input

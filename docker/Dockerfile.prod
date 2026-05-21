@@ -1,6 +1,8 @@
 FROM node:26-alpine AS frontend-builder
 WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
+# .npmrc carries legacy-peer-deps=true, which npm ci needs to resolve
+# eslint-plugin-jsx-a11y against eslint 10 (its peer range still caps at 9).
+COPY frontend/package.json frontend/package-lock.json frontend/.npmrc ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build

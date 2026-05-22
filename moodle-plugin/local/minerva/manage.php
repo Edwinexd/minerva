@@ -76,30 +76,6 @@ if ($action === 'resetsync') {
     );
 }
 
-if ($action === 'sync') {
-    $link = $DB->get_record('local_minerva_links', ['courseid' => $courseid]);
-    if ($link) {
-        try {
-            $client = \local_minerva\api_client::from_link($link);
-            $result = \local_minerva\task\sync_enrolments::reconcile_members($client, $link, $context);
-            redirect(
-                $pageurl,
-                get_string('sync_enrolment_done', 'local_minerva', $result),
-                null,
-                \core\output\notification::NOTIFY_SUCCESS
-            );
-        } catch (\Exception $e) {
-            redirect(
-                $pageurl,
-                $e->getMessage(),
-                null,
-                \core\output\notification::NOTIFY_ERROR
-            );
-        }
-    }
-    redirect($pageurl);
-}
-
 echo $OUTPUT->header();
 
 // Data-handling disclosure shown on every view so teachers re-see it on
@@ -111,7 +87,6 @@ echo html_writer::tag(
         html_writer::tag(
             'ul',
             html_writer::tag('li', get_string('datahandling_materials', 'local_minerva')) .
-                html_writer::tag('li', get_string('datahandling_enrolments', 'local_minerva')) .
                 html_writer::tag('li', get_string('datahandling_inference', 'local_minerva')) .
                 html_writer::tag('li', get_string('datahandling_apikey', 'local_minerva'))
         ),
@@ -146,13 +121,6 @@ if ($link) {
     );
     $unlinkbtn->add_confirm_action(get_string('unlink_course_confirm', 'local_minerva'));
     echo $OUTPUT->render($unlinkbtn);
-
-    // Sync enrolment (non-destructive).
-    echo $OUTPUT->single_button(
-        new moodle_url($pageurl, ['action' => 'sync']),
-        get_string('sync_enrolment', 'local_minerva'),
-        'post'
-    );
 
     // Sync materials button.
     if (has_capability('local/minerva:syncmaterials', $context)) {

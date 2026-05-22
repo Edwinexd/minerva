@@ -161,65 +161,6 @@ class api_client {
     }
 
     /**
-     * Ensure a user exists in Minerva by eppn.
-     *
-     * @param string $eppn User's eppn (e.g. user1234@SU.SE).
-     * @param string|null $displayname User's display name.
-     * @return object User info with id, eppn, created.
-     */
-    public function ensure_user(string $eppn, ?string $displayname = null): object {
-        $body = ['eppn' => $eppn];
-        if ($displayname !== null) {
-            $body['display_name'] = $displayname;
-        }
-        return $this->request('POST', '/integration/users/ensure', $body);
-    }
-
-    /**
-     * List members of a Minerva course.
-     *
-     * @param string $minervacid Minerva course UUID.
-     * @return array List of member objects with user_id, eppn, display_name, role.
-     */
-    public function list_members(string $minervacid): array {
-        return $this->request('GET', "/integration/courses/{$minervacid}/members");
-    }
-
-    /**
-     * Add a user to a Minerva course.
-     *
-     * @param string $minervacid Minerva course UUID.
-     * @param string $eppn User's eppn.
-     * @param string|null $displayname User's display name.
-     * @param string $role Role in the course (student, teacher, ta).
-     * @return object Result with added, user_id.
-     */
-    public function add_member(
-        string $minervacid,
-        string $eppn,
-        ?string $displayname = null,
-        string $role = 'student'
-    ): object {
-        $body = ['eppn' => $eppn, 'role' => $role];
-        if ($displayname !== null) {
-            $body['display_name'] = $displayname;
-        }
-        return $this->request('POST', "/integration/courses/{$minervacid}/members", $body);
-    }
-
-    /**
-     * Remove a user from a Minerva course.
-     *
-     * @param string $minervacid Minerva course UUID.
-     * @param string $eppn User's eppn.
-     * @return object Result with removed boolean.
-     */
-    public function remove_member(string $minervacid, string $eppn): object {
-        $encodedeppn = rawurlencode($eppn);
-        return $this->request('DELETE', "/integration/courses/{$minervacid}/members/by-eppn/{$encodedeppn}");
-    }
-
-    /**
      * List documents in a Minerva course.
      *
      * @param string $minervacid Minerva course UUID.
@@ -286,22 +227,6 @@ class api_client {
             return substr($response, 0, $max) . '...';
         }
         return $response;
-    }
-
-    /**
-     * Create an embed token for a user scoped to a course.
-     *
-     * @param string $minervacid Minerva course UUID.
-     * @param string $eppn User's eppn.
-     * @param string|null $displayname User's display name.
-     * @return object Token info with token, expires_at.
-     */
-    public function create_embed_token(string $minervacid, string $eppn, ?string $displayname = null): object {
-        $body = ['eppn' => $eppn];
-        if ($displayname !== null) {
-            $body['display_name'] = $displayname;
-        }
-        return $this->request('POST', "/integration/courses/{$minervacid}/embed-token", $body);
     }
 
     /**

@@ -54,14 +54,6 @@ if ($hassiteconfig) {
         ''
     ));
 
-    // Auto-sync enrollment on enrol/unenrol events.
-    $settings->add(new admin_setting_configcheckbox(
-        'local_minerva/autosync_enrolment',
-        get_string('settings_autosync', 'local_minerva'),
-        get_string('settings_autosync_desc', 'local_minerva'),
-        1
-    ));
-
     // Auto-sync materials on schedule.
     $settings->add(new admin_setting_configcheckbox(
         'local_minerva/autosync_materials',

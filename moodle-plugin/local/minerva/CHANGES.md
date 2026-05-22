@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.1.0 (2026-05-22)
+
+- Drop enrolment/membership sync entirely. Course membership is now provisioned by Minerva on LTI launch (and reconciled via NRPS), so the plugin no longer adds or removes members.
+- Removed the `sync_enrolments` scheduled task, the `user_enrolment_created` / `user_enrolment_deleted` event observers, the "Sync enrolment now" manage-page button, and the `autosync_enrolment` admin setting.
+- Removed the now-unused member endpoints (`ensure_user`, `list_members`, `add_member`, `remove_member`) from the API client.
+- Removed the deprecated embed/iframe surface: the `create_embed_token` API method, the `local/minerva:view` capability, and the unused `chat_*` / `minerva_assistant` / `open_in_new_tab` strings. The assistant is surfaced to students via LTI launch, not this plugin.
+- The plugin is now materials-only: it links a course and pushes content to Minerva.
+
 ## v0.7.1 (2026-04-22)
 
 - Target Moodle 4.5 LTS explicitly (`requires` 4.5, `supported = [405, 405]`). Older Moodles are no longer supported since DSV runs only 4.5 LTS.

@@ -36,18 +36,6 @@ $capabilities = [
         ],
     ],
 
-    // View the Minerva AI assistant chat within a course.
-    'local/minerva:view' => [
-        'captype' => 'read',
-        'contextlevel' => CONTEXT_COURSE,
-        'archetypes' => [
-            'student' => CAP_ALLOW,
-            'teacher' => CAP_ALLOW,
-            'editingteacher' => CAP_ALLOW,
-            'manager' => CAP_ALLOW,
-        ],
-    ],
-
     // Sync course materials to Minerva.
     'local/minerva:syncmaterials' => [
         'riskbitmask' => RISK_CONFIG,

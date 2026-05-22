@@ -31,10 +31,8 @@ $string['settings_apiurl_admin_desc'] = 'If set, this URL is used for all course
 $string['settings_apiurl_help'] = 'The URL of the Minerva instance (e.g. https://minerva.dsv.su.se). This is set per course by the teacher.';
 $string['settings_apikey'] = 'API key';
 $string['settings_connection'] = 'Minerva connection';
-$string['settings_autosync'] = 'Auto-sync enrolment';
-$string['settings_autosync_desc'] = 'Automatically enrol/unenrol students in the linked Minerva course when they are enrolled/unenrolled in Moodle.';
 $string['settings_autosync_materials'] = 'Auto-sync materials';
-$string['settings_autosync_materials_desc'] = 'Automatically upload new resources from linked courses to Minerva every 30 minutes.';
+$string['settings_autosync_materials_desc'] = 'Automatically upload new resources from linked courses to Minerva twice an hour.';
 $string['settings_site_api_key'] = 'Site integration key';
 $string['settings_site_api_key_desc'] = 'Optional. If set, teachers link courses by picking from a dropdown of Minerva courses they can manage instead of pasting an API key. Mint the key in the Minerva admin area (Plugin Integrations).';
 $string['site_integration_not_configured'] = 'Site integration key is not configured. Set it in the plugin settings or leave the site URL and key blank to use the legacy per-course key flow.';
@@ -45,11 +43,9 @@ $string['site_provision_empty_key'] = 'Minerva returned an empty API key. Please
 
 // Capabilities.
 $string['minerva:manage'] = 'Manage Minerva course link';
-$string['minerva:view'] = 'View Minerva AI assistant';
 $string['minerva:syncmaterials'] = 'Sync materials to Minerva';
 
 // Navigation & UI.
-$string['minerva_assistant'] = 'AI Assistant';
 $string['manage_link'] = 'Minerva settings';
 $string['link_course'] = 'Link Minerva course';
 $string['unlink_course'] = 'Unlink';
@@ -58,8 +54,6 @@ $string['no_link'] = 'This course is not linked to a Minerva course.';
 $string['select_minerva_course'] = 'Select Minerva course';
 $string['link_saved'] = 'Course link saved.';
 $string['link_removed'] = 'Course link removed.';
-$string['sync_enrolment'] = 'Sync enrolment now';
-$string['sync_enrolment_done'] = 'Enrolment sync complete: {$a->added} added, {$a->removed} removed.';
 $string['sync_materials'] = 'Sync materials';
 $string['sync_materials_desc'] = 'Upload course resources (files, URLs, pages, books, labels, section summaries) to the linked Minerva course.';
 $string['sync_materials_done'] = 'Material sync complete: {$a->uploaded} resource(s) uploaded.';
@@ -73,7 +67,6 @@ $string['no_api_configured'] = 'Minerva API credentials are missing or invalid. 
 // Data-handling disclosure shown on the manage page.
 $string['datahandling_heading'] = 'What linking this course to Minerva does';
 $string['datahandling_materials'] = 'Sending "Sync materials" uploads course files, page/book/label HTML, section summaries, and URLs from this course to Minerva, where they are indexed for retrieval.';
-$string['datahandling_enrolments'] = 'Sending "Sync enrolment" shares enrolled students\' usernames (eppn) and display names with Minerva. Teacher/TA role is not shared; all users are added to Minerva as students.';
 $string['datahandling_inference'] = 'When students chat via the Minerva assistant, their messages and relevant course-material excerpts are sent to Cerebras for AI inference.';
 $string['datahandling_apikey'] = 'The Minerva API key configured below grants write access to the linked Minerva course. Treat it as a secret and rotate it in Minerva if it leaks.';
 $string['invalid_api_url'] = 'Invalid Minerva API URL.';
@@ -83,11 +76,7 @@ $string['minerva_course_id'] = 'Minerva course ID';
 $string['minerva_course_id_help'] = 'The UUID of the Minerva course to link to (e.g. a1b2c3d4-e5f6-7890-abcd-ef1234567890). You can find this in the Minerva teacher dashboard.';
 $string['invalid_uuid'] = 'Invalid course ID format. Please enter a valid UUID.';
 $string['connection_failed'] = 'Could not connect to Minerva: {$a}';
-$string['chat_title'] = 'Minerva AI Assistant';
-$string['chat_description'] = 'Ask questions about the course material.';
-$string['open_in_new_tab'] = 'Open in new tab';
-$string['privacy:metadata'] = 'The Minerva plugin sends user identifiers (eppn) to the external Minerva service for authentication and enrolment sync.';
+$string['privacy:metadata'] = 'The Minerva plugin sends the teacher\'s user identifier (eppn) to the external Minerva service when provisioning a course link.';
 
 // Tasks.
-$string['task_sync_enrolments'] = 'Sync enrolments to Minerva';
 $string['task_sync_materials'] = 'Sync materials to Minerva';

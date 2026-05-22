@@ -17,54 +17,17 @@
 namespace local_minerva;
 
 /**
- * Event observer for enrolment changes.
+ * Event observer for local_minerva.
  *
- * Syncs Moodle enrolments to the linked Minerva course in real time.
+ * Membership is now provisioned by Minerva on LTI launch, so the plugin no
+ * longer syncs enrolments. The only event we still care about is course
+ * deletion, where we clean up our own link + sync-log rows.
  *
  * @package    local_minerva
  * @copyright  2026 DSV, Stockholm University
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class observer {
-    /**
-     * Handle user enrolment created event.
-     *
-     * @param \core\event\user_enrolment_created $event
-     */
-    public static function user_enrolled(\core\event\user_enrolment_created $event): void {
-        if (!get_config('local_minerva', 'autosync_enrolment')) {
-            return;
-        }
-
-        $courseid = $event->courseid;
-        $userid = $event->relateduserid;
-
-        self::sync_user_to_minerva($courseid, $userid, 'add');
-    }
-
-    /**
-     * Handle user enrolment deleted event.
-     *
-     * @param \core\event\user_enrolment_deleted $event
-     */
-    public static function user_unenrolled(\core\event\user_enrolment_deleted $event): void {
-        if (!get_config('local_minerva', 'autosync_enrolment')) {
-            return;
-        }
-
-        $courseid = $event->courseid;
-        $userid = $event->relateduserid;
-
-        // A user may have multiple enrolment instances (e.g. manual + cohort).
-        // Only remove from Minerva if no active enrolment remains.
-        $context = \context_course::instance($courseid, IGNORE_MISSING);
-        if ($context && is_enrolled($context, $userid, '', false)) {
-            return;
-        }
-
-        self::sync_user_to_minerva($courseid, $userid, 'remove');
-    }
-
     /**
      * Handle course deleted event: clean up local link + sync log rows.
      *
@@ -75,55 +38,5 @@ class observer {
 
         $DB->delete_records('local_minerva_links', ['courseid' => $event->courseid]);
         $DB->delete_records('local_minerva_sync_log', ['courseid' => $event->courseid]);
-    }
-
-    /**
-     * Add or remove a user from the linked Minerva course.
-     *
-     * @param int $courseid Moodle course ID.
-     * @param int $userid Moodle user ID.
-     * @param string $action 'add' or 'remove'.
-     */
-    private static function sync_user_to_minerva(int $courseid, int $userid, string $action): void {
-        global $DB;
-
-        $link = $DB->get_record('local_minerva_links', ['courseid' => $courseid]);
-        if (!$link) {
-            return;
-        }
-
-        $user = $DB->get_record('user', ['id' => $userid], 'id, username, firstname, lastname');
-        if (!$user) {
-            return;
-        }
-
-        $eppn = self::get_eppn($user);
-        $displayname = trim($user->firstname . ' ' . $user->lastname);
-
-        try {
-            $client = api_client::from_link($link);
-
-            if ($action === 'add') {
-                $client->add_member($link->minerva_course_id, $eppn, $displayname);
-            } else {
-                $client->remove_member($link->minerva_course_id, $eppn);
-            }
-        } catch (\Exception $e) {
-            debugging("Minerva enrolment sync failed for user {$userid} " .
-                "in course {$courseid}: " . $e->getMessage(), DEBUG_NORMAL);
-        }
-    }
-
-    /**
-     * Return the eppn for a Moodle user.
-     *
-     * Moodle usernames at SU are the Shibboleth eppn (e.g. abcd1234@su.se),
-     * so we just pass it through.
-     *
-     * @param object $user Moodle user record.
-     * @return string
-     */
-    public static function get_eppn(object $user): string {
-        return $user->username;
     }
 }

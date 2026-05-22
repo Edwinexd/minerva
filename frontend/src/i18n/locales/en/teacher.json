@@ -2,6 +2,7 @@
   "layout": {
     "tryChat": "Try Chat",
     "courseNotFound": "Course not found",
+    "sectionNavLabel": "Course section",
     "tabs": {
       "config": "Configuration",
       "members": "Members",
@@ -220,6 +221,8 @@
     "title": "Documents",
     "description": "Upload PDFs and other documents for RAG",
     "uploading": "Uploading...",
+    "uploadPdfLabel": "Upload PDF documents",
+    "mbzUploadLabel": "Upload Moodle backup (.mbz) file",
     "uploadFailed": "{{failed}} of {{total}} uploads failed: {{messages}}",
     "unknownError": "unknown error",
     "bulkDeleteFailed": "{{failed}} of {{total}} deletes failed",
@@ -291,6 +294,7 @@
     "notBuiltYet": "No edges have been computed yet.",
     "pipelinePending": "No edges yet; the linker runs automatically a few seconds after each ingest. Hold tight or check the server logs.",
     "noEdges": "The linker found no confident relationships between docs in this course.",
+    "canvasLabel": "Knowledge graph visualisation showing {{nodes}} documents and {{edges}} relationships. The full list of relationships is available in the expandable list below.",
     "edgeListTitle_one": "{{count}} edge (click to expand)",
     "edgeListTitle_other": "{{count}} edges (click to expand)",
     "edgeKind": {
@@ -388,6 +392,8 @@
     "title": "Members",
     "description": "Manage who has access to this course",
     "eppnPlaceholder": "username@su.se",
+    "eppnLabel": "Username to add",
+    "roleLabel": "Role for new member",
     "roleStudent": "Student",
     "roleTA": "TA",
     "roleTeacher": "Teacher",

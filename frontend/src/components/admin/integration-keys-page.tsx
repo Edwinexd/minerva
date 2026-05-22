@@ -223,12 +223,16 @@ function CreatedKeyCallout({
         <input
           readOnly
           value={created.key}
+          aria-label={t("integrationKeys.callout.keyLabel")}
           className="flex-1 rounded border bg-background px-2 py-1 font-mono text-xs"
           onFocus={(e) => e.currentTarget.select()}
         />
         <Button type="button" size="sm" variant="outline" onClick={copy}>
           {copied ? t("integrationKeys.callout.copied") : t("integrationKeys.callout.copy")}
         </Button>
+        <output className="sr-only">
+          {copied ? t("integrationKeys.callout.copied") : ""}
+        </output>
       </div>
     </div>
   )

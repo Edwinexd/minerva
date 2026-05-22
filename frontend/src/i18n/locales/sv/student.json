@@ -56,6 +56,7 @@
     "dialogDescription": "Välj alternativet som passar bäst. Din kommentar är valfri men hjälper din lärare att förstå problemet.",
     "categoryLabel": "Kategori",
     "required": "*",
+    "requiredLabel": "(obligatoriskt)",
     "categoryPlaceholder": "Välj en kategori…",
     "commentLabel": "Kommentar (valfritt)",
     "commentPlaceholder": "Lägg till mer detaljer…",

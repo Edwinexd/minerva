@@ -42,11 +42,11 @@ export function Home() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">
+          <h1 className="text-2xl font-bold tracking-tight">
             {user
               ? t("home.welcome", { name: user.display_name || user.eppn })
               : t("home.appName")}
-          </h2>
+          </h1>
           <p className="text-muted-foreground mt-1">
             {user?.role === "student" ? t("home.yourCourse") : t("home.yourCourses")}
           </p>
@@ -135,9 +135,9 @@ function CourseSection({
   return (
     <section className="space-y-3">
       {title && (
-        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
           {title}
-        </h3>
+        </h2>
       )}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {courses.map((course) =>
@@ -272,7 +272,11 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
           }}
         >
           <div className="space-y-2">
-            <Label htmlFor="name">{t("home.create.nameLabel")}</Label>
+            <Label htmlFor="name">
+              {t("home.create.nameLabel")}{" "}
+              <span className="text-destructive" aria-hidden="true">{t("forms.requiredMark")}</span>
+              <span className="sr-only">{t("forms.requiredLabel")}</span>
+            </Label>
             <Input
               id="name"
               value={name}

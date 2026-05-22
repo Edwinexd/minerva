@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
+import { useDocumentTitle } from "@/lib/use-document-title"
 import { studyStateQuery } from "@/lib/queries"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -24,7 +25,9 @@ export function StudyPage({
 }) {
   const { courseId } = useParams()
   const { t } = useTranslation("study")
+  const { t: tCommon } = useTranslation("common")
   const formatError = useApiErrorMessage()
+  useDocumentTitle(tCommon("pageTitles.study"))
   const { data: state, isLoading, error } = useQuery(studyStateQuery(courseId))
 
   if (isLoading) {

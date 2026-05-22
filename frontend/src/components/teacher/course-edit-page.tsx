@@ -134,7 +134,7 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
             if (typeof value === "string" && Object.hasOwn(TAB_ROUTES, value)) navigate({ to: TAB_ROUTES[value as TabValue], params: { courseId } })
           }}
         >
-          <SelectTrigger className="w-full">
+          <SelectTrigger className="w-full" aria-label={t("layout.sectionNavLabel")}>
             <SelectValue>
               {visibleTabValues.includes(activeTab as (typeof TAB_VALUES)[number])
                 ? t(TAB_LABEL_KEYS[activeTab as (typeof TAB_VALUES)[number]])

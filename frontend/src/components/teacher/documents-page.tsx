@@ -383,6 +383,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                 type="file"
                 accept=".pdf"
                 multiple
+                aria-label={t("documents.uploadPdfLabel")}
                 onChange={(e) => {
                   const files = Array.from(e.target.files ?? [])
                   if (files.length > 0) uploadMutation.mutate(files)
@@ -390,13 +391,13 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                 className="flex-1"
               />
               {uploadMutation.isPending && (
-                <span className="text-sm text-muted-foreground self-center">
+                <output className="text-sm text-muted-foreground self-center">
                   {t("documents.uploading")}
-                </span>
+                </output>
               )}
             </div>
             {uploadMutation.isError && (
-              <p className="text-sm text-destructive">
+              <p role="alert" className="text-sm text-destructive">
                 {formatError(uploadMutation.error)}
               </p>
             )}
@@ -413,6 +414,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                   ref={mbzInputRef}
                   type="file"
                   accept=".mbz"
+                  aria-label={t("documents.mbzUploadLabel")}
                   onChange={(e) => {
                     const file = e.target.files?.[0]
                     if (file) {
@@ -424,9 +426,9 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                   disabled={mbzMutation.isPending}
                 />
                 {mbzMutation.isPending && (
-                  <span className="text-sm text-muted-foreground self-center">
+                  <output className="text-sm text-muted-foreground self-center">
                     {t("documents.mbzImporting")}
-                  </span>
+                  </output>
                 )}
               </div>
               {mbzMutation.isError && (

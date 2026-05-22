@@ -110,6 +110,9 @@ export function LtiPlatformsPanel() {
                   >
                     {copiedField === key ? t("ltiPlatforms.copied") : tCommon("actions.copy")}
                   </Button>
+                  <output className="sr-only">
+                    {copiedField === key ? t("ltiPlatforms.copied") : ""}
+                  </output>
                 </div>
               ))}
               <Separator />

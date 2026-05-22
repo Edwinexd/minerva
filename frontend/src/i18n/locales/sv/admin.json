@@ -1,6 +1,7 @@
 {
   "layout": {
     "title": "Plattformsadmin",
+    "sectionNavLabel": "Adminavsnitt",
     "tabs": {
       "usage": "Plattformsanvändning",
       "users": "Användarhantering",
@@ -28,6 +29,7 @@
     "callout": {
       "title": "Nyckel skapad för {{name}}",
       "note": "Kopiera den nu; Minerva sparar bara hash-värdet. Klistra in den i pluginets webbplatsinställningar.",
+      "keyLabel": "Skapad API-nyckel",
       "copy": "Kopiera",
       "copied": "Kopierat"
     },
@@ -144,6 +146,7 @@
       "teacher": "lärare",
       "integrator": "integratör"
     },
+    "roleSelectLabel": "Användarroll",
     "locked": "låst",
     "lockedTitle": "Låst från automatisk befordran via regler",
     "status": {
@@ -156,7 +159,8 @@
     "suspend": "Stäng av",
     "unsuspend": "Aktivera igen",
     "ownerLimit": {
-      "unlimited": "obegränsat"
+      "unlimited": "obegränsat",
+      "inputLabel": "Daglig tokengräns för ägare {{name}}"
     }
   },
   "courses": {
@@ -354,6 +358,7 @@
       "title": "Inbjudningslänk för {{eppn}}",
       "dismiss": "stäng",
       "note": "Dela länken privat. Den visas endast en gång och ger inloggning till ",
+      "urlLabel": "Inbjudningslänk för {{eppn}}",
       "copy": "Kopiera",
       "copied": "Kopierat"
     },

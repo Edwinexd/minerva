@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from "./routes/__root"
 import { Route as DataHandlingRouteImport } from "./routes/data-handling"
 import { Route as AdminRouteImport } from "./routes/admin"
 import { Route as AcknowledgementsRouteImport } from "./routes/acknowledgements"
+import { Route as AccessibilityRouteImport } from "./routes/accessibility"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
 import { Route as AdminIndexRouteImport } from "./routes/admin/index"
@@ -60,6 +61,11 @@ const AdminRoute = AdminRouteImport.update({
 const AcknowledgementsRoute = AcknowledgementsRouteImport.update({
   id: "/acknowledgements",
   path: "/acknowledgements",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccessibilityRoute = AccessibilityRouteImport.update({
+  id: "/accessibility",
+  path: "/accessibility",
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -250,6 +256,7 @@ const TeacherCoursesCourseIdApiKeysRoute =
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
+  "/accessibility": typeof AccessibilityRoute
   "/acknowledgements": typeof AcknowledgementsRoute
   "/admin": typeof AdminRouteWithChildren
   "/data-handling": typeof DataHandlingRoute
@@ -289,6 +296,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/accessibility": typeof AccessibilityRoute
   "/acknowledgements": typeof AcknowledgementsRoute
   "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
@@ -327,6 +335,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
+  "/accessibility": typeof AccessibilityRoute
   "/acknowledgements": typeof AcknowledgementsRoute
   "/admin": typeof AdminRouteWithChildren
   "/data-handling": typeof DataHandlingRoute
@@ -368,6 +377,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | "/"
+    | "/accessibility"
     | "/acknowledgements"
     | "/admin"
     | "/data-handling"
@@ -407,6 +417,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
+    | "/accessibility"
     | "/acknowledgements"
     | "/data-handling"
     | "/admin/courses"
@@ -444,6 +455,7 @@ export interface FileRouteTypes {
   id:
     | "__root__"
     | "/"
+    | "/accessibility"
     | "/acknowledgements"
     | "/admin"
     | "/data-handling"
@@ -484,6 +496,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AccessibilityRoute: typeof AccessibilityRoute
   AcknowledgementsRoute: typeof AcknowledgementsRoute
   AdminRoute: typeof AdminRouteWithChildren
   DataHandlingRoute: typeof DataHandlingRoute
@@ -519,6 +532,13 @@ declare module "@tanstack/react-router" {
       path: "/acknowledgements"
       fullPath: "/acknowledgements"
       preLoaderRoute: typeof AcknowledgementsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/accessibility": {
+      id: "/accessibility"
+      path: "/accessibility"
+      fullPath: "/accessibility"
+      preLoaderRoute: typeof AccessibilityRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/": {
@@ -835,6 +855,7 @@ const TeacherCoursesCourseIdRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AccessibilityRoute: AccessibilityRoute,
   AcknowledgementsRoute: AcknowledgementsRoute,
   AdminRoute: AdminRouteWithChildren,
   DataHandlingRoute: DataHandlingRoute,

@@ -316,7 +316,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           <div className="space-y-2">
             <Label>{t("config.modelLabel")}</Label>
             <Select value={model} onValueChange={(v) => v && setModel(v)}>
-              <SelectTrigger className="w-full truncate">
+              <SelectTrigger className="w-full truncate" aria-label={t("config.modelLabel")}>
                 <SelectValue placeholder={t("config.modelPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
@@ -332,7 +332,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           <div className="space-y-2">
             <Label>{t("config.strategyLabel")}</Label>
             <Select value={strategy} onValueChange={(v) => v && setStrategy(v)}>
-              <SelectTrigger className="w-full truncate">
+              <SelectTrigger className="w-full truncate" aria-label={t("config.strategyLabel")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -365,7 +365,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           <div className="space-y-2">
             <Label>{t("config.embeddingProviderLabel")}</Label>
             <Select value={embeddingProvider} onValueChange={(v) => v && setEmbeddingProvider(v)}>
-              <SelectTrigger className="w-full truncate">
+              <SelectTrigger className="w-full truncate" aria-label={t("config.embeddingProviderLabel")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -391,7 +391,7 @@ function CourseConfigForm({ course }: { course: Course }) {
             <div className="space-y-2">
               <Label>{t("config.embeddingModelLabel")}</Label>
               <Select value={embeddingModel} onValueChange={(v) => v && setEmbeddingModel(v)}>
-                <SelectTrigger className="w-full truncate">
+                <SelectTrigger className="w-full truncate" aria-label={t("config.embeddingModelLabel")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -518,10 +518,10 @@ function CourseConfigForm({ course }: { course: Course }) {
             </Button>
           )}
           {mutation.isSuccess && (
-            <span className="text-sm text-muted-foreground ml-2">{t("config.savedToast")}</span>
+            <output className="text-sm text-muted-foreground ml-2">{t("config.savedToast")}</output>
           )}
           {mutation.isError && (
-            <p className="text-sm text-destructive">{formatError(mutation.error)}</p>
+            <p role="alert" className="text-sm text-destructive">{formatError(mutation.error)}</p>
           )}
         </form>
 

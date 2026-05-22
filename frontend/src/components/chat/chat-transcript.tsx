@@ -244,6 +244,7 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
               className="bg-muted rounded-lg px-4 py-2 max-w-[80%]"
               aria-live="polite"
               aria-atomic="false"
+              aria-busy={streaming}
               aria-label={assistantResponseLabel}
             >
               {streamedTokens ? (
@@ -260,11 +261,14 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
                   onCitationClick={() => {}}
                 />
               ) : (
-                <div className="flex gap-1" aria-hidden="true">
-                  <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
-                  <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
-                  <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:300ms]" />
-                </div>
+                <>
+                  <span className="sr-only">{assistantResponseLabel}</span>
+                  <div className="flex gap-1" aria-hidden="true">
+                    <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
+                    <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
+                    <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:300ms]" />
+                  </div>
+                </>
               )}
             </div>
           </div>

@@ -329,9 +329,9 @@ export function ConfigPanel({
 
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium">
+            <h2 className="text-sm font-medium">
               {t("study.tasksLabel", { count: tasks.length })}
-            </h3>
+            </h2>
             <Button variant="outline" size="sm" onClick={addTask}>
               {t("study.addTask")}
             </Button>
@@ -473,7 +473,7 @@ function SurveyEditor({
   return (
     <div className="space-y-3 rounded-md border p-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">{label}</h3>
+        <h2 className="text-sm font-medium">{label}</h2>
         <Badge variant="secondary">
           {t("study.responseCount", { count: responseCount })}
         </Badge>

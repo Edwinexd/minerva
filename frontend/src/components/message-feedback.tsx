@@ -129,10 +129,12 @@ export function FeedbackControls({
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="feedback-category">
-                {t("feedback.categoryLabel")} <span className="text-destructive">{t("feedback.required")}</span>
+                {t("feedback.categoryLabel")}{" "}
+                <span className="text-destructive" aria-hidden="true">{t("feedback.required")}</span>
+                <span className="sr-only">{t("feedback.requiredLabel")}</span>
               </Label>
               <Select value={category} onValueChange={(v) => v && setCategory(v)}>
-                <SelectTrigger id="feedback-category" className="w-full">
+                <SelectTrigger id="feedback-category" className="w-full" aria-required="true">
                   <SelectValue placeholder={t("feedback.categoryPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>

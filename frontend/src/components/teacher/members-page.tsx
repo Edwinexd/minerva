@@ -193,11 +193,13 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
                 value={eppn}
                 onChange={(e) => setEppn(e.target.value)}
                 placeholder={t("members.eppnPlaceholder")}
+                aria-label={t("members.eppnLabel")}
                 className="flex-1 min-w-[12rem]"
               />
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
+                aria-label={t("members.roleLabel")}
                 className="border rounded px-2 py-1 text-sm bg-background"
               >
                 <option value="student">{t("members.roleStudent")}</option>

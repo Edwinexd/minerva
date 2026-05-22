@@ -404,7 +404,7 @@ export function AegisSuggestionsBanner({
                           }
                           disabled={working || !isChecked}
                         >
-                          <SelectTrigger className="w-full">
+                          <SelectTrigger className="w-full" aria-label={t("aegis.banner.answerLabel")}>
                             <SelectValue
                               placeholder={t(
                                 "aegis.banner.answerPlaceholder",

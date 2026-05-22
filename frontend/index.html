@@ -32,6 +32,26 @@
           // browser, SSR shim, ...). Default to light; the React-side
           // hook will re-resolve once it mounts.
         }
+        // Resolve <html lang> before first paint so screen readers announce
+        // the correct language immediately (WCAG 3.1.1). Mirrors the i18next
+        // detector order (localStorage "minerva-language" first, then the
+        // browser's navigator language). i18n keeps it in sync after mount
+        // via its "languageChanged" listener. Supported langs match
+        // SUPPORTED_LANGUAGES in src/i18n/index.ts.
+        try {
+          var SUPPORTED = ["en", "sv"];
+          var storedLang = localStorage.getItem("minerva-language");
+          var navLang = (navigator.language || "en").slice(0, 2);
+          var lang =
+            SUPPORTED.indexOf(storedLang) !== -1
+              ? storedLang
+              : SUPPORTED.indexOf(navLang) !== -1
+                ? navLang
+                : "en";
+          document.documentElement.lang = lang;
+        } catch (_) {
+          // Defaults to the static lang="en" on <html>.
+        }
       })();
     </script>
   </head>

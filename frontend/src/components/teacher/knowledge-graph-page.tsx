@@ -562,6 +562,7 @@ function nodeRadius(n: ForceNode): number {
 }
 
 function ForceGraphCanvas({ graph }: { graph: KnowledgeGraph }) {
+  const { t } = useTranslation("teacher")
   // Build adapter shape. Re-derive whenever the server payload
   // changes so a Rebuild click picks up the new edges.
   const data = React.useMemo(
@@ -626,8 +627,18 @@ function ForceGraphCanvas({ graph }: { graph: KnowledgeGraph }) {
   }, [hoverId, data.links])
 
   return (
+    // A <div> wrapping the force-graph <canvas> cannot become an <img>;
+    // role="img" + aria-label is the correct pattern for exposing a complex
+    // canvas graphic to assistive tech (WCAG 1.1.1). The full relationship
+    // data is also available as text in the edge list below.
+    // eslint-disable-next-line jsx-a11y/prefer-tag-over-role
     <div
       ref={containerRef}
+      role="img"
+      aria-label={t("knowledgeGraph.canvasLabel", {
+        nodes: data.nodes.length,
+        edges: data.links.length,
+      })}
       className="overflow-hidden rounded border bg-muted/30"
       style={{ height: size.height }}
     >

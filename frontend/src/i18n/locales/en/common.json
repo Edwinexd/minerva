@@ -3,6 +3,7 @@
     "admin": "Admin",
     "dataHandling": "Data handling",
     "acknowledgements": "Acknowledgements",
+    "accessibility": "Accessibility",
     "openInNewTab": "Open in new tab",
     "skipToContent": "Skip to content"
   },
@@ -25,11 +26,17 @@
     "embed": "{{course}}",
     "dataHandling": "Data handling",
     "acknowledgements": "Acknowledgements",
+    "accessibility": "Accessibility statement",
     "join": "Join course",
-    "ltiBind": "Link course"
+    "ltiBind": "Link course",
+    "study": "Study"
   },
   "footer": {
     "licenseLead": "is licensed under"
+  },
+  "forms": {
+    "requiredMark": "*",
+    "requiredLabel": "(required)"
   },
   "actions": {
     "save": "Save",
@@ -143,5 +150,24 @@
     "roles": {
       "logoDesign": "Logo design"
     }
+  },
+  "accessibility": {
+    "title": "Accessibility statement",
+    "intro": "Stockholm University, Department of Computer and Systems Sciences (DSV), is responsible for Minerva. We want as many people as possible to be able to use it, and this statement describes how Minerva meets the Act on the Accessibility of Digital Public Service, known shortcomings, and how you can report problems.",
+    "complianceHeading": "How accessible is Minerva?",
+    "complianceStatus": "Minerva is partially compliant with the Web Content Accessibility Guidelines (WCAG) 2.1 level AA, owing to the shortcomings described below.",
+    "shortcomingsHeading": "Content that is not accessible",
+    "shortcomingsIntro": "The following content is not yet fully accessible:",
+    "shortcomings": {
+      "contrast": "Colour contrast across the full theme palette (light and dark) has not yet been verified against all WCAG contrast thresholds; some secondary text or interface borders may fall short in places.",
+      "knowledgeGraph": "The teacher knowledge-graph view is an interactive canvas visualisation. A text summary and a list of relationships are provided as an alternative, but the visual graph itself cannot be fully explored with a keyboard or screen reader.",
+      "thirdParty": "Content embedded from or launched via third parties (for example LTI launches from Moodle or Canvas, and video transcripts from play.dsv.su.se) is outside our control and may not meet the accessibility requirements."
+    },
+    "testingHeading": "How we tested Minerva",
+    "testingBody": "We use automated accessibility testing (eslint-plugin-jsx-a11y, axe-core, and pa11y) in our development and continuous-integration pipeline, complemented by manual review against WCAG 2.1 AA. Minerva was most recently assessed on 22 May 2026.",
+    "feedbackHeading": "Feedback and contact details",
+    "feedbackBody": "If you find problems that are not described on this page, or believe we are not meeting the requirements, let us know so we can fix it. Contact us at <email>{{email}}</email>.",
+    "enforcementHeading": "Enforcement procedure",
+    "enforcementBody": "The Agency for Digital Government (DIGG) is responsible for supervising the Act on the Accessibility of Digital Public Service. If you are not satisfied with how we handle your feedback, you can <digg>report it to DIGG</digg>."
   }
 }

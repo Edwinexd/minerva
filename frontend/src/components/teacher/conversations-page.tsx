@@ -23,8 +23,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import Markdown from "react-markdown"
-import remarkGfm from "remark-gfm"
+import {
+  ChatBubble,
+  type ChatBubbleLabels,
+  MarkdownContent,
+} from "@/components/chat/chat-bubble"
+import { ThinkingBlock, type ThinkingBlockLabels } from "@/components/chat/thinking-block"
 import React, { useMemo, useState } from "react"
 import type { ConversationFlag, ConversationWithUser, MessageFeedback, TeacherNote } from "@/lib/types"
 import { FEEDBACK_CATEGORIES } from "@/lib/types"
@@ -696,7 +700,34 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
   const { data, isLoading } = useQuery(conversationDetailQuery(courseId, conversationId))
   const { t } = useTranslation("teacher")
   const { t: tCommon } = useTranslation("common")
+  // Chat-bubble + thinking-disclosure strings live in the "student"
+  // namespace because they belong to the shared chat components. We
+  // pull them in here so the teacher's read-only transcript renders
+  // citations, sources, token stats, and research disclosures
+  // identically to what the student sees, rather than the old raw
+  // markdown path that dropped all of it.
+  const { t: tStudent } = useTranslation("student")
   const categoryLabel = useCategoryLabel()
+
+  const bubbleLabels: ChatBubbleLabels = {
+    sourceCount: (count) => tStudent("message.source", { count }),
+    unknownSource: tStudent("message.unknownSource"),
+    sourceUnavailable: tStudent("message.sourceUnavailable"),
+    stats: {
+      tokensUsed: (count) => tStudent("message.tokensUsed", { count }),
+      tokenBreakdown: (research, writeup) =>
+        tStudent("message.tokenBreakdown", { research, writeup }),
+      generationTime: (seconds) => tStudent("message.generationTime", { seconds }),
+      usingSuffix: tStudent("message.usingSuffix"),
+      acrossRetrievals: (count) => tStudent("message.acrossRetrievals", { count }),
+    },
+  }
+  const thinkingLabels: ThinkingBlockLabels = {
+    thinkingActive: tStudent("chat.thinkingActive"),
+    thinkingDone: tStudent("chat.thinkingDone"),
+    thinkingDoneWithDuration: tStudent("chat.thinkingDoneWithDuration"),
+    toolCallsAriaLabel: tStudent("chat.toolCallsAriaLabel"),
+  }
   const queryClient = useQueryClient()
   const [noteContent, setNoteContent] = useState("")
   const [noteForMessage, setNoteForMessage] = useState<string | null>(null)
@@ -818,9 +849,17 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
       </div>
       <Separator />
 
-      {conversationNotes.map((note) => (
-        <NoteDisplay key={note.id} note={note} onDelete={() => deleteNoteMutation.mutate(note.id)} />
-      ))}
+      {conversationNotes.length > 0 && (
+        // Conversation-wide notes are pinned to the top of the
+        // scrollable panel so they stay visible while the teacher
+        // scrolls through a long transcript, rather than scrolling
+        // out of sight up top.
+        <div className="sticky top-0 z-10 py-2 bg-background/95 supports-[backdrop-filter]:bg-background/80 backdrop-blur border-b space-y-2">
+          {conversationNotes.map((note) => (
+            <NoteDisplay key={note.id} note={note} onDelete={() => deleteNoteMutation.mutate(note.id)} />
+          ))}
+        </div>
+      )}
 
       {messages.map((msg) => {
         const msgFeedback = feedbackByMessage.get(msg.id) || []
@@ -835,23 +874,50 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
           msg.role === "assistant" && turnIdx !== undefined
             ? flagsByTurn.get(turnIdx) || []
             : []
+        // Research-phase disclosure for assistant messages, mirroring
+        // the student transcript: render the persisted "Thinking"
+        // block above the bubble when the message carries one.
+        const hasThinking =
+          msg.role === "assistant" &&
+          ((!!msg.thinking_transcript && msg.thinking_transcript.length > 0) ||
+            (!!msg.tool_events && msg.tool_events.length > 0))
         return (
           <React.Fragment key={msg.id}>
-            <div
-              className={`rounded px-3 py-2 text-sm ${
-                msg.role === "user" ? "bg-primary/10" : "bg-muted"
-              }`}
-            >
-              <span className="text-xs font-medium text-muted-foreground block mb-1">
-                {msg.role === "user" ? t("conversations.roleStudent") : t("conversations.roleAssistant")}
-              </span>
-              {msg.role === "user" ? (
-                <p className="whitespace-pre-wrap">{msg.content}</p>
-              ) : (
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
+            {/*
+              Render the message through the SAME ChatBubble the
+              student chat uses, so citations (`[#N]`), the sources
+              panel, token stats, and the research disclosure all
+              render identically. The teacher-only chrome (feedback
+              badges, extraction-guard flags, and the note-taking
+              links) is rendered below the bubble.
+            */}
+            <div className="space-y-1">
+              {hasThinking && (
+                <div className="flex justify-start">
+                  <div className="max-w-[80%]">
+                    <ThinkingBlock
+                      thinkingTokens={msg.thinking_transcript || ""}
+                      toolEvents={(msg.tool_events || []).map((e) => ({
+                        name: e.name,
+                        args: e.args,
+                        resultSummary: e.result_summary,
+                        result: e.result,
+                      }))}
+                      active={false}
+                      durationMs={msg.thinking_ms ?? null}
+                      labels={thinkingLabels}
+                    />
+                  </div>
                 </div>
               )}
+              <ChatBubble message={msg} labels={bubbleLabels} />
+            </div>
+
+            <div
+              className={`flex flex-col gap-1 px-1 ${
+                msg.role === "user" ? "items-end" : "items-start"
+              }`}
+            >
               {msg.role === "assistant" && msgFeedback.length > 0 && (
                 <FeedbackBadges
                   courseId={courseId}
@@ -867,7 +933,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
                   flag={f}
                 />
               ))}
-              <div className="flex items-center gap-3 mt-1.5">
+              <div className="flex items-center gap-3">
                 <button
                   className="text-xs text-muted-foreground hover:text-foreground underline"
                   onClick={() => setNoteForMessage(noteForMessage === msg.id ? null : msg.id)}
@@ -941,9 +1007,7 @@ function NoteDisplay({ note, onDelete }: { note: TeacherNote; onDelete: () => vo
           {tCommon("actions.delete")}
         </Button>
       </div>
-      <div className="prose prose-sm dark:prose-invert max-w-none">
-        <Markdown remarkPlugins={[remarkGfm]}>{note.content}</Markdown>
-      </div>
+      <MarkdownContent content={note.content} />
     </div>
   )
 }

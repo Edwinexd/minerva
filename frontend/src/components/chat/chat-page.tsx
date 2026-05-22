@@ -721,7 +721,11 @@ export function ChatWindow({
           assistantResponseLabel={t("chat.assistantResponseLabel")}
           renderBeforeMessages={() =>
             conversationNotes.length > 0 ? (
-              <div className="space-y-2">
+              // Pin conversation-wide teacher notes to the top of the
+              // scrolling transcript so students still see them when
+              // reading further down a long conversation, instead of
+              // them sitting above the first message out of view.
+              <div className="sticky top-0 z-10 py-2 bg-background/95 supports-[backdrop-filter]:bg-background/80 backdrop-blur space-y-2">
                 {conversationNotes.map((note) => (
                   <TeacherNoteInline
                     key={note.id}

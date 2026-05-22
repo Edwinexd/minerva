@@ -150,11 +150,21 @@ container exceeds 320 px (only `w-[220px]`, `min-w-[14rem]`, `min-w-[12rem]`,
 all in `flex-wrap` rows), and data tables sit in `overflow-x-auto`. No change
 needed.
 
+## Authenticated-page coverage ☑
+
+`src/test/pages.a11y.test.tsx` renders the real authenticated pages that the
+public pa11y job can't reach and runs axe (WCAG 2a/2aa/21a/21aa/22aa tags) on
+each loaded state: admin user management, teacher config / documents / members,
+and the student new-chat surface. It stubs the router (`Link` -> `<a>`) and
+seeds a `QueryClient` with fixtures so each page renders its real content (each
+test also asserts a known string is present, so the axe check can't pass on an
+empty skeleton). Runs in the same vitest job as the primitive tests.
+
 ## ℹ️ Still recommend a manual pass
 
 - **Screen-reader walkthroughs** (NVDA + VoiceOver) of the chat, teacher, and
-  admin flows - the bulk of the app is behind auth and never hit by the
-  pa11y job. Recommend adding authenticated axe component tests for those pages.
+  admin flows - automated axe catches programmatic violations, but only a human
+  with a screen reader can judge announcement quality and flow.
 
 ---
 

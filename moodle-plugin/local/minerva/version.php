@@ -25,11 +25,11 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'local_minerva';
-$plugin->version   = 2026042202;
+$plugin->version   = 2026052200;
 // DSV runs Moodle 4.5 LTS; that's the only deployment target, so gate
 // installs at 4.5 and explicitly mark 4.5 LTS as the supported branch.
 // Bump both `requires` and `supported` together when following future LTSes.
 $plugin->requires  = 2024100700; // Moodle 4.5 LTS.
 $plugin->supported = [405, 405];
-$plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = '0.7.1';
+$plugin->maturity  = MATURITY_STABLE;
+$plugin->release   = '1.0.0';

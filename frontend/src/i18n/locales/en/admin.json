@@ -1,6 +1,7 @@
 {
   "layout": {
     "title": "Platform Admin",
+    "sectionNavLabel": "Admin section",
     "tabs": {
       "usage": "Platform Usage",
       "users": "User Management",
@@ -28,6 +29,7 @@
     "callout": {
       "title": "Key minted for {{name}}",
       "note": "Copy this now; Minerva only stores the hash. Paste it into the Moodle plugin's site settings.",
+      "keyLabel": "Minted API key",
       "copy": "Copy",
       "copied": "Copied"
     },
@@ -144,6 +146,7 @@
       "teacher": "teacher",
       "integrator": "integrator"
     },
+    "roleSelectLabel": "User role",
     "locked": "locked",
     "lockedTitle": "Locked from rule auto-promotion",
     "status": {
@@ -156,7 +159,8 @@
     "suspend": "Suspend",
     "unsuspend": "Unsuspend",
     "ownerLimit": {
-      "unlimited": "unlimited"
+      "unlimited": "unlimited",
+      "inputLabel": "Owner daily token limit for {{name}}"
     }
   },
   "courses": {
@@ -354,6 +358,7 @@
       "title": "Invite link for {{eppn}}",
       "dismiss": "dismiss",
       "note": "Share this link privately. It is shown only once and grants login until ",
+      "urlLabel": "Invite link for {{eppn}}",
       "copy": "Copy",
       "copied": "Copied"
     },

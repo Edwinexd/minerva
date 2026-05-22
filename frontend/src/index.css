@@ -129,3 +129,22 @@
     @apply font-sans;
     }
 }
+
+/*
+ * WCAG 2.3.3 (Animation from Interactions) / 2.2.2 (Pause, Stop, Hide).
+ * Users who request reduced motion (OS setting) get all non-essential
+ * animation and motion-based transition effectively removed: spinners,
+ * pulses, the bouncing "typing" dots, dialog zoom/slide, and any CSS
+ * transition or animation. Kept outside @layer so it always wins the
+ * cascade regardless of utility specificity.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

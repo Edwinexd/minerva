@@ -104,6 +104,9 @@ export function ApiKeysPage({ useParams }: { useParams: () => { courseId: string
               >
                 {copied ? t("apiKeys.copied") : tCommon("actions.copy")}
               </Button>
+              <output className="sr-only">
+                {copied ? t("apiKeys.copied") : ""}
+              </output>
             </div>
           </div>
         )}

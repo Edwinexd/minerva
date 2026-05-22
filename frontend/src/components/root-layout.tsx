@@ -128,6 +128,11 @@ export function RootLayout() {
             ) : (
               <Link to="/acknowledgements" className="hover:text-foreground underline">{t("nav.acknowledgements")}</Link>
             )}
+            {isEmbed ? (
+              <a href="/accessibility" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">{t("nav.accessibility")}</a>
+            ) : (
+              <Link to="/accessibility" className="hover:text-foreground underline">{t("nav.accessibility")}</Link>
+            )}
             <a href="mailto:lambda@dsv.su.se" className="hover:text-foreground underline">lambda@dsv.su.se</a>
           </div>
         </div>
@@ -160,6 +165,7 @@ export function DevUserSwitcher({
       <select
         value={selected}
         onChange={(e) => setSelected(e.target.value)}
+        aria-label={t("dev.label")}
         className="border rounded px-2 py-1 text-sm bg-background max-w-[12rem] min-w-0"
       >
         {users.map((u) => (

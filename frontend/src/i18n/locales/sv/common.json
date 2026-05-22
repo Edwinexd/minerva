@@ -3,6 +3,7 @@
     "admin": "Admin",
     "dataHandling": "Datahantering",
     "acknowledgements": "Tack till",
+    "accessibility": "Tillgänglighet",
     "openInNewTab": "Öppna i ny flik",
     "skipToContent": "Hoppa till innehåll"
   },
@@ -25,11 +26,17 @@
     "embed": "{{course}}",
     "dataHandling": "Datahantering",
     "acknowledgements": "Tack till",
+    "accessibility": "Tillgänglighetsredogörelse",
     "join": "Gå med i kurs",
-    "ltiBind": "Länka kurs"
+    "ltiBind": "Länka kurs",
+    "study": "Studie"
   },
   "footer": {
     "licenseLead": "är licensierad under"
+  },
+  "forms": {
+    "requiredMark": "*",
+    "requiredLabel": "(obligatoriskt)"
   },
   "actions": {
     "save": "Spara",
@@ -143,5 +150,24 @@
     "roles": {
       "logoDesign": "Logotypdesign"
     }
+  },
+  "accessibility": {
+    "title": "Tillgänglighetsredogörelse",
+    "intro": "Stockholms universitet, Institutionen för data- och systemvetenskap (DSV), står bakom Minerva. Vi vill att så många som möjligt ska kunna använda tjänsten. Den här redogörelsen beskriver hur Minerva uppfyller lagen om tillgänglighet till digital offentlig service, kända brister och hur du kan rapportera problem.",
+    "complianceHeading": "Hur tillgänglig är Minerva?",
+    "complianceStatus": "Minerva är delvis förenlig med lagen om tillgänglighet till digital offentlig service, på grund av de brister som beskrivs nedan. Tjänsten uppfyller delvis WCAG 2.1 nivå AA.",
+    "shortcomingsHeading": "Innehåll som inte är tillgängligt",
+    "shortcomingsIntro": "Följande innehåll är ännu inte fullt tillgängligt:",
+    "shortcomings": {
+      "contrast": "Färgkontrasten i hela temat (ljust och mörkt läge) har ännu inte kontrollerats mot samtliga WCAG-gränsvärden. Viss sekundär text eller vissa gränssnittskanter kan på sina ställen ha för låg kontrast.",
+      "knowledgeGraph": "Lärarvyn med kunskapsgrafen är en interaktiv visualisering på en canvas. En textsammanfattning och en lista över relationer finns som alternativ, men själva den visuella grafen går inte att utforska fullt ut med tangentbord eller skärmläsare.",
+      "thirdParty": "Innehåll som bäddas in från eller startas via tredje part (till exempel LTI-start från Moodle eller Canvas och videotranskript från play.dsv.su.se) ligger utanför vår kontroll och uppfyller kanske inte tillgänglighetskraven."
+    },
+    "testingHeading": "Hur vi testat Minerva",
+    "testingBody": "Vi använder automatiska tillgänglighetstester (eslint-plugin-jsx-a11y, axe-core och pa11y) i vår utvecklings- och CI-process, kompletterat med manuell granskning mot WCAG 2.1 AA. Minerva bedömdes senast den 22 maj 2026.",
+    "feedbackHeading": "Återkoppling och kontaktuppgifter",
+    "feedbackBody": "Om du upptäcker problem som inte beskrivs på den här sidan, eller om du anser att vi inte uppfyller kraven, vill vi gärna veta det så att vi kan åtgärda det. Kontakta oss på <email>{{email}}</email>.",
+    "enforcementHeading": "Tillsyn",
+    "enforcementBody": "Myndigheten för digital förvaltning (DIGG) har ansvaret för tillsyn över lagen om tillgänglighet till digital offentlig service. Om du inte är nöjd med hur vi hanterar din återkoppling kan du <digg>anmäla det till DIGG</digg>."
   }
 }

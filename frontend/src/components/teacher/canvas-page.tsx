@@ -211,7 +211,7 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
                 </div>
                 {availableCourses && availableCourses.length > 0 ? (
                   <Select value={canvasCourseId} onValueChange={(v) => v && setCanvasCourseId(v)}>
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="w-full" aria-label={t("canvas.selectCoursePlaceholder")}>
                       <SelectValue placeholder={t("canvas.selectCoursePlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>

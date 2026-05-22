@@ -261,7 +261,7 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
                 value={selectedTopic ?? ""}
                 onValueChange={(v) => setSelectedTopic(v || null)}
               >
-                <SelectTrigger className="w-full sm:w-72">
+                <SelectTrigger className="w-full sm:w-72" aria-label={t("conversations.topicPlaceholder")}>
                   <SelectValue placeholder={t("conversations.topicPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>

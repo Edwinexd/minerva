@@ -137,7 +137,7 @@ function UserRow({ user }: { user: AdminUser }) {
               onValueChange={(v) => v && roleMutation.mutate(v)}
               disabled={roleMutation.isPending}
             >
-              <SelectTrigger className="h-7 w-24 text-xs">
+              <SelectTrigger className="h-7 w-24 text-xs" aria-label={t("users.roleSelectLabel")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -259,6 +259,10 @@ function OwnerLimitInput({ user }: { user: AdminUser }) {
         value={draft}
         onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
         placeholder="0"
+        inputMode="numeric"
+        aria-label={t("users.ownerLimit.inputLabel", {
+          name: user.display_name || user.eppn,
+        })}
       />
       {dirty && (
         <Button

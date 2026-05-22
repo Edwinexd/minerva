@@ -2,6 +2,7 @@
   "layout": {
     "tryChat": "Prova chatten",
     "courseNotFound": "Kursen hittades inte",
+    "sectionNavLabel": "Kursavsnitt",
     "tabs": {
       "knowledgeGraph": "Kunskapsgraf",
       "config": "Konfiguration",
@@ -220,6 +221,8 @@
     "title": "Dokument",
     "description": "Ladda upp PDF:er och andra dokument för RAG",
     "uploading": "Laddar upp...",
+    "uploadPdfLabel": "Ladda upp PDF-dokument",
+    "mbzUploadLabel": "Ladda upp Moodle-säkerhetskopia (.mbz)",
     "uploadFailed": "{{failed}} av {{total}} uppladdningar misslyckades: {{messages}}",
     "unknownError": "okänt fel",
     "bulkDeleteFailed": "{{failed}} av {{total}} borttagningar misslyckades",
@@ -291,6 +294,7 @@
     "notBuiltYet": "Inga kanter har beräknats än.",
     "pipelinePending": "Inga kanter än; länkaren körs automatiskt några sekunder efter varje ingest. Vänta lite eller titta i serverloggarna.",
     "noEdges": "Länkaren hittade inga säkra relationer mellan dokumenten i den här kursen.",
+    "canvasLabel": "Visualisering av kunskapsgrafen med {{nodes}} dokument och {{edges}} relationer. Hela listan med relationer finns i den expanderbara listan nedan.",
     "edgeListTitle_one": "{{count}} kant (klicka för att expandera)",
     "edgeListTitle_other": "{{count}} kanter (klicka för att expandera)",
     "edgeKind": {
@@ -388,6 +392,8 @@
     "title": "Medlemmar",
     "description": "Hantera vilka som har åtkomst till den här kursen",
     "eppnPlaceholder": "användarnamn@su.se",
+    "eppnLabel": "Användarnamn att lägga till",
+    "roleLabel": "Roll för ny medlem",
     "roleStudent": "Student",
     "roleTA": "TA",
     "roleTeacher": "Lärare",

@@ -193,12 +193,16 @@ function CreatedInviteCallout({
         <input
           readOnly
           value={invite.url}
+          aria-label={t("externalInvites.callout.urlLabel", { eppn: invite.eppn })}
           className="flex-1 rounded border bg-background px-2 py-1 font-mono text-xs"
           onFocus={(e) => e.currentTarget.select()}
         />
         <Button type="button" size="sm" variant="outline" onClick={copy}>
           {copied ? t("externalInvites.callout.copied") : t("externalInvites.callout.copy")}
         </Button>
+        <output className="sr-only">
+          {copied ? t("externalInvites.callout.copied") : ""}
+        </output>
       </div>
     </div>
   )

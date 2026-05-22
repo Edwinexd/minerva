@@ -12,6 +12,7 @@
   "urls": [
     "http://localhost:4173/",
     "http://localhost:4173/acknowledgements",
-    "http://localhost:4173/data-handling"
+    "http://localhost:4173/data-handling",
+    "http://localhost:4173/accessibility"
   ]
 }

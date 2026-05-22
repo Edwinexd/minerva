@@ -96,43 +96,45 @@ export function AdminLayout() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold tracking-tight">{t("layout.title")}</h2>
+      <h1 className="text-2xl font-bold tracking-tight">{t("layout.title")}</h1>
 
-      <div className="md:hidden">
-        <Select
+      <nav aria-label={t("layout.sectionNavLabel")}>
+        <div className="md:hidden">
+          <Select
+            value={activeTab}
+            onValueChange={(value) => {
+              if (visibleTabSet.has(value as TabValue)) navigate({ to: TAB_ROUTES[value as TabValue] })
+            }}
+          >
+            <SelectTrigger className="w-full" aria-label={t("layout.sectionNavLabel")}>
+              <SelectValue>{t(TAB_LABEL_KEYS[activeTab])}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {visibleTabs.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {t(TAB_LABEL_KEYS[value])}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Tabs
           value={activeTab}
-          onValueChange={(value) => {
+          onValueChange={(value: unknown) => {
             if (visibleTabSet.has(value as TabValue)) navigate({ to: TAB_ROUTES[value as TabValue] })
           }}
+          className="hidden md:flex"
         >
-          <SelectTrigger className="w-full">
-            <SelectValue>{t(TAB_LABEL_KEYS[activeTab])}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
+          <TabsList>
             {visibleTabs.map((value) => (
-              <SelectItem key={value} value={value}>
+              <TabsTrigger key={value} value={value}>
                 {t(TAB_LABEL_KEYS[value])}
-              </SelectItem>
+              </TabsTrigger>
             ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <Tabs
-        value={activeTab}
-        onValueChange={(value: unknown) => {
-          if (visibleTabSet.has(value as TabValue)) navigate({ to: TAB_ROUTES[value as TabValue] })
-        }}
-        className="hidden md:flex"
-      >
-        <TabsList>
-          {visibleTabs.map((value) => (
-            <TabsTrigger key={value} value={value}>
-              {t(TAB_LABEL_KEYS[value])}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+          </TabsList>
+        </Tabs>
+      </nav>
 
       <Outlet />
     </div>

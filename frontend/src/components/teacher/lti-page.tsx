@@ -113,6 +113,9 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
                   >
                     {copiedField === key ? t("lti.copied") : tCommon("actions.copy")}
                   </Button>
+                  <output className="sr-only">
+                    {copiedField === key ? t("lti.copied") : ""}
+                  </output>
                 </div>
               ))}
               <Separator />

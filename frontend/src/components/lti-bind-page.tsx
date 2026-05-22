@@ -138,7 +138,7 @@ export function LtiBindPage() {
             value={selectedCourseId}
             onValueChange={(v) => setSelectedCourseId(v ?? "")}
           >
-            <SelectTrigger>
+            <SelectTrigger aria-label={t("ltiBind.courseLabel")}>
               <SelectValue placeholder={t("ltiBind.coursePlaceholder")} />
             </SelectTrigger>
             <SelectContent>

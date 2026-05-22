@@ -475,7 +475,7 @@ function CourseMigrateDialog({
               {t("courses.migrateProviderLabel")}
             </label>
             <Select value={provider} onValueChange={(v) => v && setProvider(v)}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full" aria-label={t("courses.migrateProviderLabel")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -493,7 +493,7 @@ function CourseMigrateDialog({
                 {t("courses.migrateModelLabel")}
               </label>
               <Select value={model} onValueChange={(v) => v && setModel(v)}>
-                <SelectTrigger className="w-full">
+                <SelectTrigger className="w-full" aria-label={t("courses.migrateModelLabel")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

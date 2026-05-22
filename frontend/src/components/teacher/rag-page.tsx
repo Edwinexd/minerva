@@ -120,9 +120,9 @@ function RagDebugPanel({
                 )}
               </Label>
               {results.length > 0 && (
-                <span className="text-xs text-muted-foreground">
+                <output className="text-xs text-muted-foreground">
                   {t("rag.includedCount", { included: includedCount, total: results.length })}
-                </span>
+                </output>
               )}
             </div>
             <Slider

@@ -56,6 +56,7 @@
     "dialogDescription": "Pick the option that fits best. Your comment is optional but helps your teacher understand the issue.",
     "categoryLabel": "Category",
     "required": "*",
+    "requiredLabel": "(required)",
     "categoryPlaceholder": "Select a category…",
     "commentLabel": "Comment (optional)",
     "commentPlaceholder": "Add more detail…",

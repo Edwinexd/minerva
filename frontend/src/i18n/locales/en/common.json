@@ -18,7 +18,6 @@
       "externalInvites": "External invites",
       "lti": "LTI",
       "integrations": "Integrations",
-      "study": "Study mode",
       "system": "System"
     },
     "teacherCourse": "Teacher: {{course}}",
@@ -28,8 +27,7 @@
     "acknowledgements": "Acknowledgements",
     "accessibility": "Accessibility statement",
     "join": "Join course",
-    "ltiBind": "Link course",
-    "study": "Study"
+    "ltiBind": "Link course"
   },
   "footer": {
     "licenseLead": "is licensed under"

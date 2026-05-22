@@ -50,16 +50,6 @@ pub const FLAG_AEGIS: &str = "aegis";
 /// drop the persisted graph; it just hides the admin endpoints.
 pub const FLAG_CONCEPT_GRAPH: &str = "concept_graph";
 
-/// Study mode: turns the course into a research-evaluation pipeline
-/// (consent screen -> pre-survey -> N hardcoded tasks -> post-survey
-/// -> thank-you + lockout). Configuration lives in the `study_courses`
-/// table plus `study_tasks` and `study_surveys`; this flag is the
-/// runtime gate that activates the pipeline. Forces Aegis on for the
-/// duration of the study regardless of the course's own aegis flag,
-/// so researchers don't have to remember to set both. See
-/// `crate::routes::study` for the participant + admin endpoints.
-pub const FLAG_STUDY_MODE: &str = "study_mode";
-
 /// All flags the application currently knows about. The admin UI
 /// uses this to enumerate available toggles per course; new flags
 /// must be added here AND have a `pub const` above.
@@ -68,7 +58,6 @@ pub const ALL_FLAGS: &[&str] = &[
     FLAG_EXTRACTION_GUARD,
     FLAG_AEGIS,
     FLAG_CONCEPT_GRAPH,
-    FLAG_STUDY_MODE,
 ];
 
 /// True iff the KG bundle is enabled for this course. Resolution:
@@ -126,23 +115,12 @@ pub async fn extraction_guard_enabled(db: &PgPool, course_id: Uuid) -> bool {
 /// True iff aegis prompt-coaching is enabled for this course at the
 /// course/umbrella level.
 ///
-/// Resolution: study mode forces TRUE (study mode treats Aegis as
-/// part of the experimental condition, so the per-course flag is
-/// irrelevant); otherwise course-scoped row -> global row ->
-/// default (FALSE). Errors are logged and treated as "not enabled";
-/// the analyzer runs on every user turn so a flaky DB shouldn't slow
-/// down the chat path with retries; falling closed reverts to
-/// pre-aegis behaviour transparently.
-///
-/// NOTE: this is the umbrella. For chat-path decisions that should
-/// also respect study mode's per-task on/off rounds, use
-/// [`aegis_enabled_for_conversation`]; it short-circuits to the
-/// per-task `study_tasks.aegis_enabled` when the conversation maps
-/// to a study task.
+/// Resolution: course-scoped row -> global row -> default (FALSE).
+/// Errors are logged and treated as "not enabled"; the analyzer runs
+/// on every user turn so a flaky DB shouldn't slow down the chat path
+/// with retries; falling closed reverts to pre-aegis behaviour
+/// transparently.
 pub async fn aegis_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    if study_mode_enabled(db, course_id).await {
-        return true;
-    }
     match minerva_db::queries::feature_flags::is_enabled_for_course(
         db, FLAG_AEGIS, course_id, false,
     )
@@ -152,81 +130,6 @@ pub async fn aegis_enabled(db: &PgPool, course_id: Uuid) -> bool {
         Err(e) => {
             tracing::warn!(
                 "feature_flags: aegis lookup for course {} failed ({}); treating as disabled",
-                course_id,
-                e,
-            );
-            false
-        }
-    }
-}
-
-/// Per-conversation Aegis gate.
-///
-/// In study mode the umbrella `aegis_enabled` is forced TRUE for the
-/// whole course, but individual rounds opt out: the DM2731 design has
-/// round 1 + 3 without support and round 2 with. Each task gets its
-/// own conversation (see `study_task_conversations`), so the
-/// conversation_id is the natural key for "which round is the user
-/// on right now".
-///
-/// Resolution order:
-///   1. `aegis_enabled(course_id)`; if the umbrella is off, the
-///      answer is off and we don't need to do the per-task lookup.
-///   2. Otherwise look up `study_tasks.aegis_enabled` joined through
-///      `study_task_conversations` on the given conversation_id.
-///      Found row wins; the per-task flag is the gate.
-///   3. No mapping row (regular chat, or no conversation_id supplied)
-///      -> fall back to the umbrella (which is TRUE here, since
-///      step 1 didn't short-circuit).
-///
-/// DB errors during the per-task lookup log at warn and treat the
-/// round as Aegis-enabled (degraded-open rather than degraded-closed);
-/// the alternative would silently break round 2 on a flaky DB, which
-/// is the worse failure mode for the eval.
-pub async fn aegis_enabled_for_conversation(
-    db: &PgPool,
-    course_id: Uuid,
-    conversation_id: Option<Uuid>,
-) -> bool {
-    if !aegis_enabled(db, course_id).await {
-        return false;
-    }
-    let Some(conv_id) = conversation_id else {
-        return true;
-    };
-    match minerva_db::queries::study::get_aegis_enabled_for_task_conversation(db, conv_id).await {
-        Ok(Some(per_task)) => per_task,
-        Ok(None) => true,
-        Err(e) => {
-            tracing::warn!(
-                "feature_flags: per-task aegis lookup for conv {} failed ({}); treating as enabled",
-                conv_id,
-                e,
-            );
-            true
-        }
-    }
-}
-
-/// True iff study mode is enabled for this course. Resolution:
-/// course-scoped row -> global row -> default (FALSE). Errors are
-/// logged and treated as "not enabled"; the lockout + pipeline
-/// surface only exists for participants in a known study, so falling
-/// closed degrades to "regular course" rather than locking everyone
-/// out behind an unrenderable thank-you screen.
-pub async fn study_mode_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    match minerva_db::queries::feature_flags::is_enabled_for_course(
-        db,
-        FLAG_STUDY_MODE,
-        course_id,
-        false,
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "feature_flags: study_mode lookup for course {} failed ({}); treating as disabled",
                 course_id,
                 e,
             );

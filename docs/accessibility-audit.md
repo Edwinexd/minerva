@@ -78,8 +78,7 @@ were not in live regions; chat "thinking" phase was silent.
 streaming response while thinking.
 
 ### H3 - Home page has no `<h1>` · WCAG 1.3.1 / 2.4.6 (A/AA) ☑
-`home-page.tsx` top heading was `<h2>`. Orphaned `<h4>`s under `<h2>` in
-`admin/study-page.tsx`.
+`home-page.tsx` top heading was `<h2>`.
 **Fix:** promote to `<h1>`; correct level nesting.
 
 ### H4 - `<html lang>` wrong on first paint · WCAG 3.1.1 (A) ☑

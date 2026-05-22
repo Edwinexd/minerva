@@ -69,7 +69,6 @@ impl LocalizedMessage {
             AppError::QuotaExceeded => Self::new("quota.student_exceeded"),
             AppError::OwnerQuotaExceeded => Self::new("quota.owner_exceeded"),
             AppError::PrivacyNotAcknowledged => Self::new("privacy.not_acknowledged"),
-            AppError::StudyLockedOut => Self::new("study.locked_out"),
             AppError::Database(_) | AppError::Internal(_) => Self::new("internal"),
         }
     }
@@ -114,13 +113,6 @@ pub enum AppError {
     #[error("privacy acknowledgment required")]
     PrivacyNotAcknowledged,
 
-    /// Participant has finished the study pipeline; further interaction
-    /// with the course is blocked. Surface as 423 Locked so the
-    /// frontend can branch on it independently of the generic 403
-    /// (insufficient role) and 401 (unauthenticated) paths.
-    #[error("study participant is locked out")]
-    StudyLockedOut,
-
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
 
@@ -158,7 +150,6 @@ impl IntoResponse for AppError {
             | AppError::PrivacyNotAcknowledged => StatusCode::FORBIDDEN,
             AppError::BadRequest { .. } => StatusCode::BAD_REQUEST,
             AppError::QuotaExceeded | AppError::OwnerQuotaExceeded => StatusCode::TOO_MANY_REQUESTS,
-            AppError::StudyLockedOut => StatusCode::LOCKED,
             AppError::Database(_) | AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 

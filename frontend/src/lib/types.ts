@@ -75,106 +75,6 @@ export interface CourseFeatureFlags {
    * graph viewer and the extract/run-dedup actions.
    */
   concept_graph: boolean
-  /**
-   * Study mode: turns the course into a research-evaluation
-   * pipeline (consent screen, pre-survey, N hardcoded tasks,
-   * post-survey, thank-you + lockout). When TRUE the course
-   * landing page redirects members to the study pipeline instead
-   * of the regular conversation list, and forces Aegis on for the
-   * duration. Configuration lives in `study_courses` /
-   * `study_tasks` / `study_surveys`; this flag is the runtime gate.
-   */
-  study_mode: boolean
-}
-
-// ── Study mode ────────────────────────────────────────────────────
-
-export type StudyStage = "consent" | "pre_survey" | "task" | "post_survey" | "done"
-
-export interface StudyTaskView {
-  task_index: number
-  title: string
-  description: string
-  /**
-   * Per-round Aegis gate. When FALSE, `TaskRunner` passes
-   * `aegisEnabled={false}` to `ChatWindow`, hiding the panel,
-   * banner and rewrite button and suppressing live analyzer
-   * calls. Defaults TRUE on the server for back-compat; the
-   * DM2731 preset sets rounds 1 and 3 to FALSE and round 2 to
-   * TRUE.
-   */
-  aegis_enabled: boolean
-}
-
-export interface StudyState {
-  stage: StudyStage
-  current_task_index: number
-  number_of_tasks: number
-  completion_gate_kind: string
-  consent_html: string
-  thank_you_html: string
-  consented_at: string | null
-  pre_survey_completed_at: string | null
-  post_survey_completed_at: string | null
-  locked_out_at: string | null
-  /** Populated only while `stage === "task"`. */
-  current_task: StudyTaskView | null
-  /** Populated only while `stage === "task"`. */
-  current_task_conversation_id: string | null
-}
-
-export interface StudySurveyQuestion {
-  id: string
-  ord: number
-  /**
-   * `section_heading` is display-only (used to break long surveys
-   * into named sections like "System Usability"); the form never
-   * collects an answer for it. `likert` and `free_text` are
-   * answer-bearing.
-   */
-  kind: "likert" | "free_text" | "section_heading"
-  prompt: string
-  likert_min: number | null
-  likert_max: number | null
-  likert_min_label: string | null
-  likert_max_label: string | null
-  /**
-   * When false the participant may submit without answering this
-   * question. Always false for `section_heading`.
-   */
-  is_required: boolean
-  /**
-   * Withdraw-on-answer kill switch (likert-only). When the
-   * participant answers with this value, the server short-circuits
-   * the pipeline to `done` regardless of stage. Used for GDPR-style
-   * consent questions where "No" should withdraw the participant
-   * cleanly. Null when no kill switch is configured.
-   */
-  kill_on_value: number | null
-}
-
-export interface StudySurveyAnswer {
-  question_id: string
-  likert_value: number | null
-  free_text_value: string | null
-}
-
-export interface StudySurvey {
-  kind: "pre" | "post"
-  questions: StudySurveyQuestion[]
-  /** Existing answers if the participant is resuming a half-filled survey. */
-  existing: StudySurveyAnswer[]
-}
-
-export interface StudyStartTaskResponse {
-  task_index: number
-  conversation_id: string
-}
-
-export interface StudyFinishTaskResponse {
-  stage: StudyStage
-  current_task_index: number
-  is_last_task: boolean
 }
 
 export interface AdminUser {
@@ -300,14 +200,6 @@ export interface CourseMember {
   display_name: string | null
   role: string
   added_at: string
-  /**
-   * Per-course study pipeline stage for this member, populated only
-   * when the course's `study_mode` flag is on. Drives the "Study"
-   * column + the "Remove from study" button gating in the members
-   * tab. Undefined when study mode is off OR the member has never
-   * landed on the consent screen.
-   */
-  study_stage?: "consent" | "pre_survey" | "task" | "post_survey" | "done"
 }
 
 export interface RoleSuggestion {

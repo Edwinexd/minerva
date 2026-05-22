@@ -18,7 +18,6 @@ RAG platform for educational use at DSV, Stockholm University. Teachers upload c
 - **LMS integration**: Moodle local plugin (iframe + enrolment sync + MBZ import), site-level Moodle/Canvas LTI 1.3 with first-launch course binding, Canvas REST sync.
 - **DSV Play transcript pipeline**: hourly VTT fetch + index for play.dsv.su.se URLs; teacher-configurable Play designation codes drive automatic discovery of new lecture recordings.
 - **Auth**: Shibboleth (SAML) primary; HMAC-signed external-auth invites validated entirely inside Apache via `mod_lua`; attribute-based role auto-promotion rules.
-- **Study mode**: per-course pipeline (consent screen, pre-/post-surveys, hardcoded tasks with per-round Aegis on/off, lockout + JSONL export). Anonymous participant view + detail drill-in + GDPR delete. Gated by the `study_mode` flag; forces Aegis on for the duration.
 - **Privacy & i18n**: pseudonymisation for `ext:` users, in-app data-handling ack, English + Swedish, WCAG 2.1 AA fixes.
 
 ## Architecture

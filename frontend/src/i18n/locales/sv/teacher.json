@@ -15,13 +15,8 @@
       "apiKeys": "API-nycklar",
       "playDesignations": "Play-beteckningar",
       "rag": "RAG-felsökning",
-      "study": "Studie",
       "usage": "Användning"
     }
-  },
-  "study": {
-    "flagOffTitle": "Studieläge är inte aktiverat för den här kursen.",
-    "flagOffBody": "Be en plattformsadmin att slå på funktionsflaggan `study_mode` under Admin > Kurshantering > Funktioner. När det är på ersätts den vanliga konversationslistan med samtyckesskärmen, enkäterna och uppgiftspipelinen för kursmedlemmarna."
   },
   "shared": {
     "loading": "Laddar...",
@@ -406,17 +401,7 @@
     "roleTA": "TA",
     "roleTeacher": "Lärare",
     "add": "Lägg till",
-    "remove": "Ta bort",
-    "removeStudyData": "Ta bort studiedata",
-    "removeStudyDataConfirm": "Permanent radera all studiedata (samtycke, enkäter, konversationer, Aegis-historik) för {{name}}? Detta kan inte ångras. Deras kursmedlemskap behålls.",
-    "studyStageTooltip": "Studiens pipeline-steg: {{stage}}",
-    "studyStage": {
-      "consent": "Samtycke öppet",
-      "pre_survey": "Förenkät",
-      "task": "I uppgift",
-      "post_survey": "Eftersändningsenkät",
-      "done": "Slutförd"
-    }
+    "remove": "Ta bort"
   },
   "playDesignations": {
     "title": "Play-beteckningar",

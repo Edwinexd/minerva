@@ -133,7 +133,7 @@ export function AegisFeedbackPanel({
             <button
               type="button"
               onClick={toggleMode}
-              className="rounded-4xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="rounded-4xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-pressed={mode === "expert"}
               title={t("aegis.modeToggleHint")}
             >
@@ -234,7 +234,7 @@ export function SuggestionRow({
     severity === "low" &&
       "border-sky-300 bg-sky-50/60 dark:bg-sky-950/30 dark:border-sky-800",
     expandable &&
-      "cursor-pointer hover:brightness-[0.98] dark:hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+      "cursor-pointer hover:brightness-[0.98] dark:hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
   )
   // Same palette logic for the kind badge so the eye groups the
   // tag with its card.

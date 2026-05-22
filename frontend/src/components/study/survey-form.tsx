@@ -35,6 +35,9 @@ export function SurveyForm({
     new Map(),
   )
   const [validationError, setValidationError] = useState<string | null>(null)
+  // Question that failed client-side validation, so we can flag the exact
+  // control with aria-invalid + an inline aria-describedby error (WCAG 3.3.1).
+  const [invalidQuestionId, setInvalidQuestionId] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<unknown>(null)
 
   // Hydrate the local edit map from the server's `existing` array
@@ -97,6 +100,7 @@ export function SurveyForm({
 
   const setLikert = (q: StudySurveyQuestion, value: number) => {
     setValidationError(null)
+    setInvalidQuestionId(null)
     const next = new Map(answers)
     next.set(q.id, {
       question_id: q.id,
@@ -108,6 +112,7 @@ export function SurveyForm({
 
   const setFreeText = (q: StudySurveyQuestion, value: string) => {
     setValidationError(null)
+    setInvalidQuestionId(null)
     const next = new Map(answers)
     next.set(q.id, {
       question_id: q.id,
@@ -119,6 +124,7 @@ export function SurveyForm({
 
   const validateAndSubmit = () => {
     setSubmitError(null)
+    setInvalidQuestionId(null)
     const out: StudySurveyAnswer[] = []
     for (const q of survey.questions) {
       // Section headings are display-only; never validated, never sent.
@@ -135,6 +141,7 @@ export function SurveyForm({
       if (!hasAnswer) {
         if (q.is_required) {
           setValidationError(t("survey.validation.incomplete"))
+          setInvalidQuestionId(q.id)
           return
         }
         // Optional + unanswered: skip without sending.
@@ -150,6 +157,7 @@ export function SurveyForm({
           a!.likert_value! > q.likert_max
         ) {
           setValidationError(t("survey.validation.outOfRange"))
+          setInvalidQuestionId(q.id)
           return
         }
       }
@@ -177,6 +185,8 @@ export function SurveyForm({
               </div>
             )
           }
+          const isInvalid = invalidQuestionId === q.id
+          const errorId = `survey-error-${q.id}`
           return (
             <div key={q.id} className="space-y-2">
               <p className="font-medium">
@@ -193,6 +203,8 @@ export function SurveyForm({
                   value={answers.get(q.id)?.likert_value ?? null}
                   disabled={mutation.isPending}
                   onChange={(v) => setLikert(q, v)}
+                  invalid={isInvalid}
+                  errorId={isInvalid ? errorId : undefined}
                 />
               ) : (
                 <Textarea
@@ -201,18 +213,20 @@ export function SurveyForm({
                   placeholder={t("survey.freeTextPlaceholder")}
                   disabled={mutation.isPending}
                   rows={4}
+                  aria-invalid={isInvalid || undefined}
+                  aria-describedby={isInvalid ? errorId : undefined}
                 />
+              )}
+              {isInvalid && validationError !== null && (
+                <p id={errorId} role="alert" className="text-sm text-destructive">
+                  {validationError}
+                </p>
               )}
             </div>
           )
         })}
       </div>
 
-      {validationError !== null && (
-        <p role="alert" className="text-sm text-destructive">
-          {validationError}
-        </p>
-      )}
       {submitError !== null && (
         <p role="alert" className="text-sm text-destructive">
           {formatError(submitError)}
@@ -235,11 +249,15 @@ function LikertScale({
   value,
   onChange,
   disabled,
+  invalid,
+  errorId,
 }: {
   question: StudySurveyQuestion
   value: number | null
   onChange: (v: number) => void
   disabled?: boolean
+  invalid?: boolean
+  errorId?: string
 }) {
   const { t } = useTranslation("study")
   const min = question.likert_min ?? 1
@@ -268,6 +286,8 @@ function LikertScale({
           min,
           max,
         })}
+        aria-invalid={invalid || undefined}
+        aria-describedby={errorId}
         className="grid grid-cols-2 gap-2"
       >
         {ticks.map((v) => (
@@ -302,6 +322,8 @@ function LikertScale({
         min,
         max,
       })}
+      aria-invalid={invalid || undefined}
+      aria-describedby={errorId}
       className="space-y-1"
     >
       <div className="flex justify-between text-xs text-muted-foreground">

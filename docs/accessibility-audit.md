@@ -88,13 +88,12 @@ React mounts, so Swedish users got `lang="en"` until hydration.
 **Fix:** inline pre-paint script reading `minerva-language` localStorage,
 mirroring the existing theme script.
 
-### H5 - Errors not announced · WCAG 3.3.1 (A) ☑
-The config save error was a plain `<p>` (no role). **Fix:** `role="alert"` on
-the config error (the survey form already announces its form-level validation
-message via `role="alert"`, which identifies the error in text per 3.3.1).
-Per-field `aria-invalid`/`aria-describedby` is not added because these forms use
-a single form-level error message rather than a per-field error model; that
-would be a validation refactor and is noted as a future enhancement.
+### H5 - Errors not announced / not linked to fields · WCAG 3.3.1 (A) ☑
+The config save error was a plain `<p>` (no role): now `role="alert"`. The
+survey form previously showed a single form-level message; now
+`validateAndSubmit` records the offending question id and the message renders
+inline beneath that field, with `aria-invalid` + `aria-describedby` on the
+Likert radiogroup / free-text control pointing at it (per-field error model).
 
 ---
 
@@ -105,15 +104,14 @@ would be a validation refactor and is noted as a future enhancement.
 used only the `required` attribute with no visible cue.
 **Fix:** visible "(required)" text / asterisk with accessible name.
 
-### M2 - Focus-visible relies on ring-only with `outline-none` · WCAG 2.4.7 ☐
-A handful of custom buttons (`chat-page.tsx`, `aegis-feedback-panel.tsx`) use
-the same `focus-visible:ring-ring/50` indicator as the shared Button primitive,
-i.e. the whole app's focus style. A visible ring is a valid focus indicator;
-the real question is whether the `--ring` token at 50 % opacity clears the 3:1
-non-text contrast threshold in both themes. **Deliberately not special-cased**
-to 3 buttons (that would diverge from the rest of the UI); folded into the
-colour-contrast verification item below - fix the token once, globally, if it
-falls short.
+### M2 - Focus indicator contrast · WCAG 2.4.7 / 1.4.11 ☑
+Measured: the light `--ring` was 2.59:1 on white (below 3:1) even at full
+opacity, and the `ring-ring/50` halo can never reach 3:1 (a 50 % blend over
+white floors at ~1.9:1). **Fix:** darkened light `--ring`/`--sidebar-ring`
+0.708 -> 0.62 (now 3.64:1); the primitives' compliant indicator is the
+full-opacity `border-ring`, the `/50` ring stays as a decorative halo; the
+global default outline and the 5 custom ring-only buttons now use full-opacity
+`outline-ring` / `ring-ring`. See contrast results below.
 
 ### M3 - Admin nav not in a `<nav>` landmark · WCAG 1.3.1 ☑
 `admin-layout.tsx` tab/select navigation lacked a landmark.
@@ -127,16 +125,36 @@ acceptable once announced.
 
 ---
 
-## ℹ️ Not verified here (recommend a manual pass)
+## Colour contrast (1.4.3 / 1.4.11) - measured ☑
 
-- **Colour contrast (1.4.3 / 1.4.11):** the CSS token palette in `index.css`
-  was not measured against 4.5:1 (text) / 3:1 (UI) in both themes. Check
-  `text-muted-foreground` and the focus ring colour especially.
-- **200 % text zoom / 320 px reflow (1.4.4 / 1.4.10)** with real content.
+Every `--*-foreground` token was converted OKLCH -> linear sRGB and checked
+against its background in both themes (script approach; pa11y's axe + htmlcs
+runners also pass on the public pages). Failures found and fixed (all
+light-theme; dark passed throughout):
+
+| Pair | Before | After | Threshold |
+|---|---|---|---|
+| `muted-foreground` on `muted` | 4.34:1 | 4.64:1 | 4.5 (text) |
+| `--ring` (focus) on background | 2.59:1 | 3.64:1 | 3.0 (UI) |
+| `--input` border on background | 1.26:1 | 3.11:1 | 3.0 (UI) |
+
+Fix = darken light `--muted-foreground` (0.556 -> 0.54), `--ring` (0.708 ->
+0.62), `--input` (0.922 -> 0.66). `--border` is left as-is: it styles decorative
+dividers / card edges, which 1.4.11 exempts.
+
+## Reflow & zoom (1.4.4 / 1.4.10) - verified ☑
+
+Viewport is `width=device-width, initial-scale=1.0` (no `maximum-scale` /
+`user-scalable=no`, so pinch/text zoom to 200 % is allowed). No fixed-width
+container exceeds 320 px (only `w-[220px]`, `min-w-[14rem]`, `min-w-[12rem]`,
+all in `flex-wrap` rows), and data tables sit in `overflow-x-auto`. No change
+needed.
+
+## ℹ️ Still recommend a manual pass
+
 - **Screen-reader walkthroughs** (NVDA + VoiceOver) of the chat, teacher, and
   admin flows - the bulk of the app is behind auth and never hit by the
-  3-URL pa11y job. Recommend expanding pa11y coverage or adding authenticated
-  axe component tests for those pages.
+  pa11y job. Recommend adding authenticated axe component tests for those pages.
 
 ---
 

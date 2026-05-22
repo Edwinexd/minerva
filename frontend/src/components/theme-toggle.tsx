@@ -43,7 +43,7 @@ export function ThemeToggle() {
       onClick={cycle}
       aria-label={label}
       title={tooltip}
-      className="inline-flex items-center justify-center rounded-md border bg-background w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="inline-flex items-center justify-center rounded-md border bg-background w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <Icon className="w-4 h-4" aria-hidden="true" />
     </button>

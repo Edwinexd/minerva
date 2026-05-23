@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            b.id AS binding_id,\n            b.platform_id,\n            p.name AS platform_name,\n            p.issuer AS platform_issuer,\n            p.client_id AS platform_client_id,\n            b.context_id,\n            b.context_label,\n            b.context_title,\n            b.course_id,\n            b.created_at\n        FROM lti_course_bindings b\n        JOIN lti_platforms p ON p.id = b.platform_id\n        WHERE b.course_id = $1\n        ORDER BY b.created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "binding_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "platform_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "platform_issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "platform_client_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "context_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "context_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "context_title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2c57432d0051b95a23d93a44f814524bd0c24bc7bbe3ba2bb96bb2bc20406d1d"
+}

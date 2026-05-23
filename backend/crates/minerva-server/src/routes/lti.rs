@@ -68,6 +68,11 @@ pub fn course_router() -> Router<AppState> {
         .route("/lti/setup", get(lti_setup))
         .route("/lti", get(list_registrations).post(create_registration))
         .route("/lti/nrps", get(list_course_nrps_status))
+        .route("/lti/site-bindings", get(list_course_site_bindings))
+        .route(
+            "/lti/site-bindings/{binding_id}",
+            delete(delete_course_site_binding),
+        )
         .route("/lti/{registration_id}", delete(delete_registration))
 }
 
@@ -1519,6 +1524,77 @@ async fn delete_platform_binding(
     Path((_platform_id, binding_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_site_integrator(&user)?;
+    minerva_db::queries::lti::delete_binding(&state.db, binding_id).await?;
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Course-level read of site-platform bindings
+// ---------------------------------------------------------------------------
+
+/// Read-only view shown to teachers so they can see when an admin has wired
+/// this Minerva course to a site-level LTI platform (binding is admin-only;
+/// the teacher view used to hide it entirely, which made the linkage feel
+/// invisible).
+#[derive(Debug, Serialize)]
+struct CourseSiteBindingResponse {
+    id: Uuid,
+    platform_id: Uuid,
+    platform_name: String,
+    platform_issuer: String,
+    platform_client_id: String,
+    context_id: String,
+    context_label: Option<String>,
+    context_title: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// GET /courses/{course_id}/lti/site-bindings; site-level LTI platforms an
+/// admin has bound to this Minerva course. The endpoint surfaces the linkage
+/// so teachers don't see the LTI page as empty when an admin has wired the
+/// course up via a site-level platform.
+async fn list_course_site_bindings(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(course_id): Path<Uuid>,
+) -> Result<Json<Vec<CourseSiteBindingResponse>>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    let rows = minerva_db::queries::lti::list_bindings_for_course(&state.db, course_id).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|b| CourseSiteBindingResponse {
+                id: b.binding_id,
+                platform_id: b.platform_id,
+                platform_name: b.platform_name,
+                platform_issuer: b.platform_issuer,
+                platform_client_id: b.platform_client_id,
+                context_id: b.context_id,
+                context_label: b.context_label,
+                context_title: b.context_title,
+                created_at: b.created_at,
+            })
+            .collect(),
+    ))
+}
+
+/// DELETE /courses/{course_id}/lti/site-bindings/{binding_id}; lets a teacher
+/// detach the Moodle course on the other side of a site-level platform link
+/// from this Minerva course. The platform itself stays (admin-owned); only
+/// the (platform, context) -> course row is removed. A subsequent launch from
+/// the same Moodle context will trigger the bind picker again.
+///
+/// Scoped to `course_id` in the path so a teacher can only unbind a binding
+/// that actually targets their own course; cross-course tampering 404s.
+async fn delete_course_site_binding(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, binding_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_course_teacher(&state, course_id, &user).await?;
+    let bindings = minerva_db::queries::lti::list_bindings_for_course(&state.db, course_id).await?;
+    if !bindings.iter().any(|b| b.binding_id == binding_id) {
+        return Err(AppError::NotFound);
+    }
     minerva_db::queries::lti::delete_binding(&state.db, binding_id).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
 }

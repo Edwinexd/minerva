@@ -381,7 +381,15 @@
     "nrpsStatusError": "Fel",
     "nrpsStatusPending": "Väntar",
     "nrpsNeverSynced": "Inte synkad ännu",
-    "nrpsCounts": "{{added}} tillagda, {{removed}} borttagna"
+    "nrpsCounts": "{{added}} tillagda, {{removed}} borttagna",
+    "siteBindingsTitle": "LTI-länkar på siteinstans",
+    "siteBindingsDescription": "Moodle-kurser som en administratör har kopplat till den här Minerva-kursen via ett LTI-verktyg på siteinstans. Koppla bort för att lösgöra Moodle-kursen; en lärare som startar därifrån igen får välja Minerva-kurs på nytt.",
+    "siteBindingsPlatform": "Plattform",
+    "siteBindingsContext": "Moodle-kurs",
+    "siteBindingsContextIdLabel": "Context-ID",
+    "siteBindingsUnlink": "Koppla bort",
+    "siteBindingsUnlinkConfirm": "Vill du koppla bort den här Moodle-kursen från Minerva? Framtida starter därifrån måste återkopplas.",
+    "siteBindingsUnlinking": "Kopplar bort..."
   },
   "members": {
     "suggestionsTitle": "Väntande rollförslag",

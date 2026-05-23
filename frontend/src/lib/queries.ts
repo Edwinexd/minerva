@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -248,6 +248,13 @@ export const ltiNrpsStatusQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "lti", "nrps"],
     queryFn: () => api.get<LtiNrpsStatus[]>(`/courses/${courseId}/lti/nrps`),
+  })
+
+export const ltiCourseSiteBindingsQuery = (courseId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "lti", "site-bindings"],
+    queryFn: () =>
+      api.get<LtiCourseSiteBinding[]>(`/courses/${courseId}/lti/site-bindings`),
   })
 
 export const canvasConnectionsQuery = (courseId: string) =>

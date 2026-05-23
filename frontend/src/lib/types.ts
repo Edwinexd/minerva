@@ -728,6 +728,22 @@ export interface LtiPlatformBinding {
   created_at: string
 }
 
+/// Site-level platform binding as seen from the course/teacher angle: same
+/// (platform, context) -> course link, but joined with the platform metadata
+/// the teacher actually cares about (name, issuer, client_id) since they
+/// can't query the platform admin endpoints themselves.
+export interface LtiCourseSiteBinding {
+  id: string
+  platform_id: string
+  platform_name: string
+  platform_issuer: string
+  platform_client_id: string
+  context_id: string
+  context_label: string | null
+  context_title: string | null
+  created_at: string
+}
+
 export interface SiteIntegrationKey {
   id: string
   name: string

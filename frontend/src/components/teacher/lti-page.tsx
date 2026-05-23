@@ -1,6 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { ltiSetupQuery, ltiRegistrationsQuery, ltiNrpsStatusQuery } from "@/lib/queries"
+import {
+  ltiCourseSiteBindingsQuery,
+  ltiNrpsStatusQuery,
+  ltiRegistrationsQuery,
+  ltiSetupQuery,
+} from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
@@ -29,6 +34,7 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
   const { data: setup } = useQuery(ltiSetupQuery(courseId))
   const { data: registrations, isLoading } = useQuery(ltiRegistrationsQuery(courseId))
   const { data: nrps } = useQuery(ltiNrpsStatusQuery(courseId))
+  const { data: siteBindings } = useQuery(ltiCourseSiteBindingsQuery(courseId))
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState("")
   const [issuer, setIssuer] = useState("")
@@ -55,6 +61,16 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
   const deleteMutation = useMutation({
     mutationFn: (regId: string) =>
       api.delete(`/courses/${courseId}/lti/${regId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "lti"],
+      })
+    },
+  })
+
+  const unlinkSiteBindingMutation = useMutation({
+    mutationFn: (bindingId: string) =>
+      api.delete(`/courses/${courseId}/lti/site-bindings/${bindingId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["courses", courseId, "lti"],
@@ -227,6 +243,59 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
           </div>
         </CardContent>
       </Card>
+
+      {siteBindings && siteBindings.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("lti.siteBindingsTitle")}</CardTitle>
+            <CardDescription>{t("lti.siteBindingsDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {siteBindings.map((b) => {
+              const contextLabel =
+                b.context_title || b.context_label || b.context_id
+              return (
+                <div
+                  key={b.id}
+                  className="flex flex-wrap items-center justify-between gap-2 border-b py-2 text-sm last:border-0"
+                >
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{contextLabel}</span>
+                      <Badge variant="secondary">{b.platform_name}</Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground break-all">
+                      {b.platform_issuer}
+                    </div>
+                    <div className="text-xs text-muted-foreground break-all">
+                      {t("lti.siteBindingsContextIdLabel")}: {b.context_id}
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (window.confirm(t("lti.siteBindingsUnlinkConfirm"))) {
+                        unlinkSiteBindingMutation.mutate(b.id)
+                      }
+                    }}
+                    disabled={unlinkSiteBindingMutation.isPending}
+                  >
+                    {unlinkSiteBindingMutation.isPending
+                      ? t("lti.siteBindingsUnlinking")
+                      : t("lti.siteBindingsUnlink")}
+                  </Button>
+                </div>
+              )
+            })}
+            {unlinkSiteBindingMutation.isError && (
+              <p className="text-sm text-destructive">
+                {formatError(unlinkSiteBindingMutation.error)}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {nrps && nrps.length > 0 && (
         <Card>

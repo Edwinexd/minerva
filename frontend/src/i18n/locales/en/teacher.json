@@ -381,7 +381,15 @@
     "nrpsStatusError": "Error",
     "nrpsStatusPending": "Pending",
     "nrpsNeverSynced": "Not synced yet",
-    "nrpsCounts": "{{added}} added, {{removed}} removed"
+    "nrpsCounts": "{{added}} added, {{removed}} removed",
+    "siteBindingsTitle": "Site-level LTI links",
+    "siteBindingsDescription": "Moodle courses an administrator has connected to this Minerva course via a site-wide LTI tool. Unlink to detach the Moodle course; a teacher launching from it again will be re-prompted to choose a Minerva course.",
+    "siteBindingsPlatform": "Platform",
+    "siteBindingsContext": "Moodle course",
+    "siteBindingsContextIdLabel": "Context ID",
+    "siteBindingsUnlink": "Unlink",
+    "siteBindingsUnlinkConfirm": "Unlink this Moodle course from Minerva? Future launches from it will need to be re-bound.",
+    "siteBindingsUnlinking": "Unlinking..."
   },
   "members": {
     "suggestionsTitle": "Pending role suggestions",

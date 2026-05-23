@@ -278,6 +278,50 @@ pub async fn list_bindings_for_platform(
     .await
 }
 
+/// Row joining a binding to its parent platform; used by the teacher view to
+/// surface "this course is linked via a site-level platform that an admin
+/// configured" without needing two round-trips.
+#[derive(Debug)]
+pub struct BindingWithPlatformRow {
+    pub binding_id: Uuid,
+    pub platform_id: Uuid,
+    pub platform_name: String,
+    pub platform_issuer: String,
+    pub platform_client_id: String,
+    pub context_id: String,
+    pub context_label: Option<String>,
+    pub context_title: Option<String>,
+    pub course_id: Uuid,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn list_bindings_for_course(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<Vec<BindingWithPlatformRow>, sqlx::Error> {
+    sqlx::query_as!(
+        BindingWithPlatformRow,
+        r#"SELECT
+            b.id AS binding_id,
+            b.platform_id,
+            p.name AS platform_name,
+            p.issuer AS platform_issuer,
+            p.client_id AS platform_client_id,
+            b.context_id,
+            b.context_label,
+            b.context_title,
+            b.course_id,
+            b.created_at
+        FROM lti_course_bindings b
+        JOIN lti_platforms p ON p.id = b.platform_id
+        WHERE b.course_id = $1
+        ORDER BY b.created_at DESC"#,
+        course_id,
+    )
+    .fetch_all(db)
+    .await
+}
+
 pub async fn delete_binding(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!("DELETE FROM lti_course_bindings WHERE id = $1", id)
         .execute(db)

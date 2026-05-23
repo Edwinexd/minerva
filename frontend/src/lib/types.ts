@@ -745,6 +745,12 @@ export interface LtiNrpsStatus {
   last_sync_at: string | null
   last_sync_status: "ok" | "error" | null
   last_sync_error: string | null
+  /**
+   * Independent of last_sync_status. A sync can be "ok" and still carry an
+   * actionable note (e.g. the LMS isn't sharing identity claims for any
+   * member, so they were all added with synthetic ids).
+   */
+  last_sync_warning: string | null
   last_sync_added: number | null
   last_sync_removed: number | null
 }

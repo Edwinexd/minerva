@@ -37,10 +37,15 @@ const CLIENT_ASSERTION_TYPE: &str = "urn:ietf:params:oauth:client-assertion-type
 /// the reconcile forever.
 const MAX_PAGES: usize = 50;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SyncOutcome {
     pub added: i32,
     pub removed: i32,
+    /// Actionable warning surfaced even on success. `None` for a clean run;
+    /// `Some(text)` when the sync revealed an LMS-side misconfiguration the
+    /// admin should fix (e.g. identity claims absent for every active member
+    /// in the roster).
+    pub warning: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +326,7 @@ pub async fn reconcile_context(
             return Ok(SyncOutcome {
                 added: 0,
                 removed: 0,
+                warning: None,
             })
         }
     };
@@ -332,6 +338,14 @@ pub async fn reconcile_context(
 
     let mut added = 0i32;
     let mut active_user_ids: HashSet<Uuid> = HashSet::new();
+    // Track how many Active members we processed and how many of those
+    // fell through to the synthetic-eppn fallback (no `user_eppn` custom
+    // claim AND no `email`). When ALL active members are synthetic, the
+    // LMS has identity-sharing locked down and the admin needs to flip
+    // the relevant tool-privacy switches; we surface this as a warning
+    // independent of the sync's success/error status below.
+    let mut active_count: i32 = 0;
+    let mut synthetic_count: i32 = 0;
 
     for m in &members {
         // Absent status means Active per spec; anything else means the user
@@ -339,8 +353,12 @@ pub async fn reconcile_context(
         if m.status.as_deref().unwrap_or("Active") != "Active" {
             continue;
         }
+        active_count += 1;
 
         let (eppn, is_claimed) = resolve_member_eppn(m, &cfg.source_identifier);
+        if !is_claimed {
+            synthetic_count += 1;
+        }
         // A real (claimed) eppn must satisfy the platform's allowlist, same
         // as on launch; the synthetic fallback is exempt.
         if is_claimed && !eppn_in_allowlist(&cfg.allowed_eppn_domains, &eppn) {
@@ -419,5 +437,23 @@ pub async fn reconcile_context(
         minerva_db::queries::lti_nrps::delete_membership(db, ctx.id, row.user_id).await?;
     }
 
-    Ok(SyncOutcome { added, removed })
+    // Identity-sharing health check. Fires only on a non-empty roster where
+    // EVERY active member fell through to the synthetic-eppn fallback (so
+    // we're confident this is platform-side privacy lockdown, not a per-user
+    // hole). A partial population is left alone: that's a different problem
+    // (a specific member missing fields), not a tool-config one.
+    let warning = if active_count > 0 && synthetic_count == active_count {
+        Some(format!(
+            "The LMS did not share identity claims for any of the {} active member(s) in this roster (no `name`, `email`, or `user_eppn` custom claim). Members were added with synthetic ids and will NOT match the same person if they ever log in directly via Shibboleth. To fix: in the LMS tool settings, enable identity sharing for this tool. In Moodle: External tool > Privacy > set 'Share launcher's name with tool' and 'Share launcher's email with tool' to 'Always'. The setup instructions at /admin/lti/setup document this.",
+            active_count
+        ))
+    } else {
+        None
+    };
+
+    Ok(SyncOutcome {
+        added,
+        removed,
+        warning,
+    })
 }

@@ -206,11 +206,20 @@ pub fn start(state: AppState, max_concurrent: usize) {
                                 outcome.added,
                                 outcome.removed,
                             );
+                            if let Some(w) = outcome.warning.as_deref() {
+                                tracing::warn!(
+                                    "lti nrps: context {} (course {}) warning: {}",
+                                    ctx.id,
+                                    ctx.course_id,
+                                    w
+                                );
+                            }
                             if let Err(e) = minerva_db::queries::lti_nrps::record_sync_result(
                                 &state.db,
                                 ctx.id,
                                 "ok",
                                 None,
+                                outcome.warning.as_deref(),
                                 Some(outcome.added),
                                 Some(outcome.removed),
                             )
@@ -235,6 +244,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
                                 ctx.id,
                                 "error",
                                 Some(&e.to_string()),
+                                None,
                                 None,
                                 None,
                             )

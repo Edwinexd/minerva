@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO lti_nrps_contexts\n                    (id, registration_id, platform_id, context_id, course_id, memberships_url)\n                VALUES ($1, $2, NULL, $3, $4, $5)\n                ON CONFLICT (registration_id, context_id) WHERE registration_id IS NOT NULL\n                DO UPDATE SET memberships_url = EXCLUDED.memberships_url,\n                              course_id = EXCLUDED.course_id,\n                              updated_at = NOW()\n                RETURNING id, registration_id, platform_id, context_id, course_id, memberships_url,\n                          last_sync_at, last_sync_status, last_sync_error, last_sync_added,\n                          last_sync_removed, created_at, updated_at",
+  "query": "INSERT INTO lti_nrps_contexts\n                    (id, registration_id, platform_id, context_id, course_id, memberships_url)\n                VALUES ($1, $2, NULL, $3, $4, $5)\n                ON CONFLICT (registration_id, context_id) WHERE registration_id IS NOT NULL\n                DO UPDATE SET memberships_url = EXCLUDED.memberships_url,\n                              course_id = EXCLUDED.course_id,\n                              updated_at = NOW()\n                RETURNING id, registration_id, platform_id, context_id, course_id, memberships_url,\n                          last_sync_at, last_sync_status, last_sync_error, last_sync_warning,\n                          last_sync_added, last_sync_removed, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -50,21 +50,26 @@
       },
       {
         "ordinal": 9,
+        "name": "last_sync_warning",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
         "name": "last_sync_added",
         "type_info": "Int4"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "last_sync_removed",
         "type_info": "Int4"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -90,9 +95,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "6ed76fab619b65551cd4c910fe26bb202d73a534c99869a47171db4a86840586"
+  "hash": "d1ba6ef92e4b9abb8e81da1f7ea96209025343f9a8777753a6ff6979025ab0f1"
 }

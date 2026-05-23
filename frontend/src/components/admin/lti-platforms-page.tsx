@@ -375,16 +375,31 @@ function PlatformRow({
                     <tr key={ctx.id} className="border-b last:border-0 align-top">
                       <td className="py-1 pr-3 font-mono text-xs">{ctx.context_id || "-"}</td>
                       <td className="py-1 pr-3">
-                        {ctx.last_sync_status === "error" ? (
-                          <Badge variant="destructive">{t("ltiPlatforms.nrpsStatusError")}</Badge>
-                        ) : ctx.last_sync_status === "ok" ? (
-                          <Badge variant="secondary">{t("ltiPlatforms.nrpsStatusOk")}</Badge>
-                        ) : (
-                          <Badge variant="outline">{t("ltiPlatforms.nrpsStatusPending")}</Badge>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1">
+                          {ctx.last_sync_status === "error" ? (
+                            <Badge variant="destructive">{t("ltiPlatforms.nrpsStatusError")}</Badge>
+                          ) : ctx.last_sync_status === "ok" ? (
+                            <Badge variant="secondary">{t("ltiPlatforms.nrpsStatusOk")}</Badge>
+                          ) : (
+                            <Badge variant="outline">{t("ltiPlatforms.nrpsStatusPending")}</Badge>
+                          )}
+                          {ctx.last_sync_warning && (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-500 text-amber-700 dark:text-amber-400"
+                            >
+                              {t("ltiPlatforms.nrpsStatusWarning")}
+                            </Badge>
+                          )}
+                        </div>
                         {ctx.last_sync_status === "error" && ctx.last_sync_error && (
                           <div className="mt-1 text-xs text-destructive break-all">
                             {ctx.last_sync_error}
+                          </div>
+                        )}
+                        {ctx.last_sync_warning && (
+                          <div className="mt-1 text-xs text-amber-700 dark:text-amber-400 break-words">
+                            {ctx.last_sync_warning}
                           </div>
                         )}
                       </td>

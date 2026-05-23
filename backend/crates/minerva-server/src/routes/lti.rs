@@ -1469,6 +1469,11 @@ struct NrpsStatusResponse {
     last_sync_at: Option<chrono::DateTime<chrono::Utc>>,
     last_sync_status: Option<String>,
     last_sync_error: Option<String>,
+    /// Independent of `last_sync_status`: a sync can be `ok` and still carry
+    /// an actionable note (e.g. LMS-side identity sharing disabled). The UI
+    /// surfaces this with its own badge so admins notice it without first
+    /// having to read backend logs.
+    last_sync_warning: Option<String>,
     last_sync_added: Option<i32>,
     last_sync_removed: Option<i32>,
 }
@@ -1486,6 +1491,7 @@ fn nrps_to_response(r: minerva_db::queries::lti_nrps::NrpsContextRow) -> NrpsSta
         last_sync_at: r.last_sync_at,
         last_sync_status: r.last_sync_status,
         last_sync_error: r.last_sync_error,
+        last_sync_warning: r.last_sync_warning,
         last_sync_added: r.last_sync_added,
         last_sync_removed: r.last_sync_removed,
     }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, registration_id, platform_id, context_id, course_id, memberships_url,\n                  last_sync_at, last_sync_status, last_sync_error, last_sync_added,\n                  last_sync_removed, created_at, updated_at\n        FROM lti_nrps_contexts\n        WHERE platform_id = $1\n        ORDER BY created_at",
+  "query": "SELECT id, registration_id, platform_id, context_id, course_id, memberships_url,\n                  last_sync_at, last_sync_status, last_sync_error, last_sync_warning,\n                  last_sync_added, last_sync_removed, created_at, updated_at\n        FROM lti_nrps_contexts\n        WHERE last_sync_at IS NULL\n           OR last_sync_at < NOW() - make_interval(hours => $1)\n        ORDER BY last_sync_at NULLS FIRST",
   "describe": {
     "columns": [
       {
@@ -50,28 +50,33 @@
       },
       {
         "ordinal": 9,
+        "name": "last_sync_warning",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
         "name": "last_sync_added",
         "type_info": "Int4"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "last_sync_removed",
         "type_info": "Int4"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Int4"
       ]
     },
     "nullable": [
@@ -86,9 +91,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "2ef1e973cb4c1a9b9cb723d45364dd75765b21a5258a2bf476aec6f99e08d35f"
+  "hash": "49576d76df9c593cb916dcf2c90c597265a3d3ada16387b3871c478655eebed1"
 }

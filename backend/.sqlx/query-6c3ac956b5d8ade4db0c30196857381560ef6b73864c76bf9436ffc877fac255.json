@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, registration_id, platform_id, context_id, course_id, memberships_url,\n                  last_sync_at, last_sync_status, last_sync_error, last_sync_added,\n                  last_sync_removed, created_at, updated_at\n        FROM lti_nrps_contexts\n        WHERE course_id = $1\n        ORDER BY created_at",
+  "query": "INSERT INTO lti_nrps_contexts\n                    (id, registration_id, platform_id, context_id, course_id, memberships_url)\n                VALUES ($1, NULL, $2, $3, $4, $5)\n                ON CONFLICT (platform_id, context_id) WHERE platform_id IS NOT NULL\n                DO UPDATE SET memberships_url = EXCLUDED.memberships_url,\n                              course_id = EXCLUDED.course_id,\n                              updated_at = NOW()\n                RETURNING id, registration_id, platform_id, context_id, course_id, memberships_url,\n                          last_sync_at, last_sync_status, last_sync_error, last_sync_warning,\n                          last_sync_added, last_sync_removed, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -50,28 +50,37 @@
       },
       {
         "ordinal": 9,
+        "name": "last_sync_warning",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
         "name": "last_sync_added",
         "type_info": "Int4"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "last_sync_removed",
         "type_info": "Int4"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -86,9 +95,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "80c206907f5aee32711e4a4a14cdc2295e2b1a95ff4ed6fc921fd6c542a41c28"
+  "hash": "6c3ac956b5d8ade4db0c30196857381560ef6b73864c76bf9436ffc877fac255"
 }

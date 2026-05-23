@@ -69,6 +69,12 @@ export function EmptyChatGreeting({
           </p>
           <div className="flex flex-wrap justify-center gap-2">
             {suggestions!.map((q, i) => (
+              // Chips need to wrap rather than truncate on mobile: the
+              // default Button keeps `whitespace-nowrap` and `shrink-0`,
+              // which lets a long suggestion blow past the viewport and
+              // forces horizontal scroll. Override here only (not in the
+              // shared Button) so the rest of the app keeps the fixed
+              // single-line behaviour.
               <Button
                 key={`${i}-${q}`}
                 type="button"
@@ -76,9 +82,9 @@ export function EmptyChatGreeting({
                 size="sm"
                 onClick={() => onSuggestionClick?.(q)}
                 disabled={!onSuggestionClick}
-                className="rounded-full max-w-full"
+                className="rounded-2xl max-w-full h-auto min-h-7 py-1 whitespace-normal text-left break-words"
               >
-                <span className="truncate">{q}</span>
+                {q}
               </Button>
             ))}
           </div>

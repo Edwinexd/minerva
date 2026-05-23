@@ -98,6 +98,14 @@ struct MemberMessage {
 // Token + fetch
 // ---------------------------------------------------------------------------
 
+/// How far to backdate `iat` to absorb clock drift between this tool and the
+/// LTI platform. Moodle (and other firebase/php-jwt-based platforms) reject a
+/// client_assertion the instant our `iat` lands even slightly in their future,
+/// since the library's default leeway is zero. 60 seconds is the same buffer
+/// used by AWS, Google and the IMS reference tool; well inside our 5 minute
+/// `exp` window.
+const IAT_CLOCK_SKEW_TOLERANCE_SECS: i64 = 60;
+
 fn mint_client_assertion(
     state: &AppState,
     client_id: &str,
@@ -108,7 +116,7 @@ fn mint_client_assertion(
         iss: client_id.to_string(),
         sub: client_id.to_string(),
         aud: token_url.to_string(),
-        iat: now,
+        iat: now - IAT_CLOCK_SKEW_TOLERANCE_SECS,
         // Short-lived; the platform only needs it for the token exchange.
         exp: now + 300,
         jti: Uuid::new_v4().to_string(),

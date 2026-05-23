@@ -292,8 +292,11 @@ pub async fn embedding_search(
         // `fastembed_embedder::query_prefix_for_model`.
         let formatted_query =
             minerva_ingest::fastembed_embedder::format_query_for_model(embedding_model, query);
+        // `embed_query` (not `embed`): user-facing retrieval must beat
+        // any concurrent ingest run for the model mutex. See the
+        // priority-lane explanation on `FastEmbedder::embed_query`.
         let embeddings = fastembed
-            .embed(embedding_model, vec![formatted_query])
+            .embed_query(embedding_model, vec![formatted_query])
             .await?;
         embeddings
             .into_iter()
@@ -695,8 +698,11 @@ pub async fn expand_context_via_graph(
     let query_vector: Vec<f32> = if embedding_provider == "local" {
         let formatted_query =
             minerva_ingest::fastembed_embedder::format_query_for_model(embedding_model, query);
+        // Interactive path: use the priority lane so this doesn't
+        // queue behind in-flight ingest batches. See
+        // `FastEmbedder::embed_query`.
         match fastembed
-            .embed(embedding_model, vec![formatted_query])
+            .embed_query(embedding_model, vec![formatted_query])
             .await
             .map(|mut v| v.pop())
         {

@@ -8,6 +8,7 @@ use fastembed::{
 };
 use hf_hub::api::sync::ApiBuilder;
 use serde::Serialize;
+use tokio::sync::{mpsc, oneshot};
 
 /// Result of benchmarking a single embedding model.
 #[derive(Clone, Debug, Serialize)]
@@ -51,18 +52,150 @@ const ESTIMATED_MODEL_COST_BYTES: u64 = 800 * 1024 * 1024;
 /// * **Candle** for Qwen3-Embedding (separate `Qwen3TextEmbedding` API
 ///   enabled by the `qwen3` feature on fastembed).
 ///
-/// Wrapped in `Arc<Mutex<...>>` so the cache, in-flight embed callers,
-/// and benchmark callers can all share a single inner handle while the
-/// outer `Mutex` serializes inference on that one model.
+/// Wrapped in `Arc<Mutex<...>>` purely so the value can be cloned into
+/// the dispatcher task and into each per-job `spawn_blocking` closure.
+/// The mutex is never contended at runtime: exactly one dispatcher task
+/// per loaded model exists, and that task is the only thing that ever
+/// locks it (one job at a time). Without the dispatcher this used to be
+/// the actual serialization point for inference, which is what made
+/// chat embeds queue behind multi-batch ingest runs.
 #[derive(Clone)]
 enum LoadedModel {
     Fast(Arc<Mutex<TextEmbedding>>),
     Qwen3(Arc<Mutex<Qwen3TextEmbedding>>),
 }
 
+/// Priority level for one embed job submitted to a model's dispatcher.
+/// The dispatcher always drains `High` before `Low`, so interactive
+/// (chat) embeds jump the queue ahead of any pending ingest batches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Priority {
+    /// Interactive embed (chat-side query vectors). Pre-empts pending
+    /// ingest batches at every job boundary.
+    High,
+    /// Background embed (document ingestion). Yields to any waiting
+    /// `High` job between its 32-chunk batches.
+    Low,
+}
+
+/// One unit of work for the dispatcher: a batch of texts plus a
+/// oneshot reply channel. We send the result back over `reply` after
+/// `run_embed` completes, regardless of whether the caller is still
+/// waiting (a cancelled caller simply drops the receiver, and `send`
+/// returns Err which we ignore).
+struct EmbedJob {
+    texts: Vec<String>,
+    reply: oneshot::Sender<Result<Vec<Vec<f32>>, String>>,
+}
+
+/// Per-model job dispatcher. Owns the `LoadedModel` (via the cloned
+/// `Arc` inside) for as long as it exists, and serializes inference
+/// through a single tokio task that pulls from two priority channels.
+///
+/// **Why a per-model task instead of a shared mutex**: the previous
+/// design had every embed caller `spawn_blocking` directly against an
+/// `Arc<Mutex<TextEmbedding>>`. That mutex is `std::sync::Mutex`, which
+/// doesn't fair-queue, so a chat embed that arrived after an ingest
+/// `spawn_blocking` had just released the lock typically lost the next
+/// acquisition race to the ingest task's next batch. With hundreds of
+/// chunks per ingest run, a single chat query could wait many seconds.
+///
+/// The dispatcher fixes that by making priority explicit: the task
+/// loop does `tokio::select! { biased; high_rx.recv(); low_rx.recv() }`
+/// so any High job that's ready always beats any Low job. The worst
+/// case for a chat embed is now one in-flight batch of `EMBED_BATCH_SIZE`
+/// chunks, which for the recommended models is a few hundred ms.
+///
+/// **Lifetime**: the dispatcher task lives until both senders drop,
+/// which happens when the cache entry is evicted AND every in-flight
+/// caller's `Arc<ModelDispatcher>` clone has returned. The `else`
+/// arm of the `select!` then fires and the task exits, dropping the
+/// `LoadedModel` and releasing its RSS.
+struct ModelDispatcher {
+    high_tx: mpsc::UnboundedSender<EmbedJob>,
+    low_tx: mpsc::UnboundedSender<EmbedJob>,
+}
+
+impl ModelDispatcher {
+    /// Spawn the per-model dispatcher task and return a handle. The
+    /// caller stores this in the cache entry and hands clones to
+    /// `embed`/`embed_query` callers; the task itself owns the model
+    /// and lives until every clone (cache + in-flight callers) is
+    /// dropped.
+    fn spawn(model: LoadedModel) -> Arc<Self> {
+        let (high_tx, mut high_rx) = mpsc::unbounded_channel::<EmbedJob>();
+        let (low_tx, mut low_rx) = mpsc::unbounded_channel::<EmbedJob>();
+        tokio::spawn(async move {
+            while let Some(job) = next_job(&mut high_rx, &mut low_rx).await {
+                let model_for_blocking = model.clone();
+                let texts = job.texts;
+                let result =
+                    tokio::task::spawn_blocking(move || run_embed(&model_for_blocking, texts))
+                        .await
+                        .map_err(|e| format!("spawn_blocking failed: {}", e))
+                        .and_then(|r| r);
+                // If the caller's future was cancelled the receiver is
+                // gone; drop the result on the floor. The dispatcher
+                // itself stays healthy.
+                let _ = job.reply.send(result);
+            }
+        });
+        Arc::new(Self { high_tx, low_tx })
+    }
+
+    /// Submit one batch at the given priority and await the embedding
+    /// result. Failure modes: the dispatcher's senders are gone
+    /// (shouldn't happen while the caller holds the `Arc`), or the
+    /// reply channel was dropped (the worker task panicked).
+    async fn embed_batch(
+        &self,
+        texts: Vec<String>,
+        priority: Priority,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let job = EmbedJob {
+            texts,
+            reply: reply_tx,
+        };
+        let sender = match priority {
+            Priority::High => &self.high_tx,
+            Priority::Low => &self.low_tx,
+        };
+        sender
+            .send(job)
+            .map_err(|_| "embed dispatcher has shut down".to_string())?;
+        reply_rx
+            .await
+            .map_err(|_| "embed dispatcher dropped the reply channel".to_string())?
+    }
+}
+
+/// Pull the next job from the two priority channels, preferring `high`
+/// strictly over `low`. Returns `None` only when both senders have been
+/// dropped AND both channels are drained, which is the dispatcher's
+/// shutdown signal.
+///
+/// Factored out of the dispatcher loop so the priority semantics can
+/// be unit-tested without a real loaded model. `tokio::select!`'s
+/// `biased` keyword polls arms top-to-bottom: if a `High` job is
+/// ready it always wins; if only `Low` has something we take it; if
+/// both are empty but at least one sender is alive we park until one
+/// of them produces work.
+async fn next_job(
+    high_rx: &mut mpsc::UnboundedReceiver<EmbedJob>,
+    low_rx: &mut mpsc::UnboundedReceiver<EmbedJob>,
+) -> Option<EmbedJob> {
+    tokio::select! {
+        biased;
+        Some(j) = high_rx.recv() => Some(j),
+        Some(j) = low_rx.recv() => Some(j),
+        else => None,
+    }
+}
+
 struct CacheEntry {
     name: String,
-    model: LoadedModel,
+    dispatcher: Arc<ModelDispatcher>,
     /// Bytes added to process RSS when this model was loaded; measured by
     /// diffing `/proc/self/status:VmRSS` before and after init. Drives both
     /// eviction decisions and per-load logging. On hosts without a readable
@@ -99,7 +232,6 @@ struct CacheEntry {
 ///    the worker for N x (load + benchmark) minutes; only one
 ///    admin-triggered benchmark can be queued at a time, the rest are
 ///    rejected up front.
-#[derive(Default)]
 pub struct FastEmbedder {
     cache: tokio::sync::Mutex<Vec<CacheEntry>>,
     benchmarks: tokio::sync::Mutex<Vec<BenchmarkResult>>,
@@ -278,6 +410,17 @@ fn load_custom_model(spec: &CustomModelSpec) -> Result<TextEmbedding, String> {
     .map_err(|e| format!("user-defined init failed for {}: {}", spec.repo_id, e))
 }
 
+impl Default for FastEmbedder {
+    /// Same as `FastEmbedder::new()`; provided because clippy's
+    /// `new_without_default` lint flags any `new() -> Self` without a
+    /// matching `Default`. We can't `#[derive(Default)]` directly
+    /// because `cache_budget_bytes` needs `compute_budget_bytes()`
+    /// (cgroup-aware), not a zero default.
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FastEmbedder {
     pub fn new() -> Self {
         let cache_budget_bytes = compute_budget_bytes();
@@ -294,31 +437,70 @@ impl FastEmbedder {
         }
     }
 
-    /// Embed texts using the given model name. The model is loaded on first
-    /// use (may download weights). Subsequent calls for the same model hit
-    /// the cache. Calls for different models may evict LRU entries to stay
-    /// under the configured RSS budget.
+    /// Embed texts using the given model name at **background** priority.
+    /// Used by the ingestion pipeline. The model is loaded on first use
+    /// (may download weights); subsequent calls hit the cache. Calls for
+    /// different models may evict LRU entries to stay under the
+    /// configured RSS budget.
+    ///
+    /// Concurrent `embed_query` callers always run their jobs first,
+    /// because the per-model dispatcher drains its high-priority channel
+    /// before its low-priority one. The worst-case delay this imposes
+    /// on a chat embed is one in-flight batch of `EMBED_BATCH_SIZE`
+    /// chunks (a few hundred ms for the recommended models), not the
+    /// full ingest run.
     pub async fn embed(
         &self,
         model_name: &str,
         texts: Vec<String>,
     ) -> Result<Vec<Vec<f32>>, String> {
+        self.embed_with_priority(model_name, texts, Priority::Low)
+            .await
+    }
+
+    /// Embed texts at **interactive** priority. Used for chat-side query
+    /// vectors (RAG retrieval, graph-expansion partner search, FLARE
+    /// re-retrieval). Each batch jumps ahead of any pending ingest
+    /// batches at the dispatcher.
+    ///
+    /// Functionally identical to `embed` from the caller's point of
+    /// view; same return shape, same cache admission, same model
+    /// dispatch.
+    pub async fn embed_query(
+        &self,
+        model_name: &str,
+        texts: Vec<String>,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        self.embed_with_priority(model_name, texts, Priority::High)
+            .await
+    }
+
+    /// Shared body for `embed` and `embed_query`. Splits the input into
+    /// `EMBED_BATCH_SIZE` jobs and submits each to the model's
+    /// dispatcher at the chosen priority. The dispatcher serializes
+    /// jobs across all callers (every cached model has exactly one
+    /// dispatcher task), and the per-batch granularity is what gives
+    /// chat embeds their preemption point: an ingest call with N
+    /// chunks submits ceil(N / 32) low jobs, and a high job that
+    /// arrives mid-ingest only has to wait for the currently-running
+    /// batch to finish before its turn.
+    async fn embed_with_priority(
+        &self,
+        model_name: &str,
+        texts: Vec<String>,
+        priority: Priority,
+    ) -> Result<Vec<Vec<f32>>, String> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
 
-        let model = self.acquire(model_name).await?;
+        let dispatcher = self.acquire(model_name).await?;
 
         let mut all_embeddings: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
         for batch in texts.chunks(EMBED_BATCH_SIZE) {
-            let batch = batch.to_vec();
-            let model = model.clone();
-            let batch_embeddings = tokio::task::spawn_blocking(move || run_embed(&model, batch))
-                .await
-                .map_err(|e| format!("spawn_blocking failed: {}", e))??;
-            all_embeddings.extend(batch_embeddings);
+            let part = dispatcher.embed_batch(batch.to_vec(), priority).await?;
+            all_embeddings.extend(part);
         }
-
         Ok(all_embeddings)
     }
 
@@ -389,6 +571,13 @@ impl FastEmbedder {
     /// real embed; so the benchmark may evict an LRU entry, but the
     /// freshly-loaded benchmark target stays in cache (last_used is now)
     /// and is available to the worker if they share a model.
+    ///
+    /// Submits via `Priority::High` so the benchmark doesn't interleave
+    /// with concurrent ingest batches and report misleading numbers.
+    /// The two submissions (warmup + measurement) go through the same
+    /// dispatcher task sequentially, so the measurement is bounded by
+    /// real inference time on the same `LoadedModel` the warmup just
+    /// touched.
     async fn benchmark_inner(
         &self,
         model_name: &str,
@@ -397,21 +586,17 @@ impl FastEmbedder {
         let corpus: Vec<String> = BENCHMARK_CORPUS.iter().map(|s| s.to_string()).collect();
         let corpus_size = corpus.len();
 
-        let model = self.acquire(model_name).await?;
-        let texts = corpus.clone();
-        let model_for_blocking = model.clone();
+        let dispatcher = self.acquire(model_name).await?;
 
-        let secs = tokio::task::spawn_blocking(move || {
-            // Warmup run; first inference can be much slower than steady
-            // state (ONNX session init, candle kernel JIT, allocator
-            // touching pages for the first time, ...).
-            let _ = run_embed(&model_for_blocking, vec!["warmup".to_string()]);
-            let start = std::time::Instant::now();
-            run_embed(&model_for_blocking, texts)?;
-            Ok::<f64, String>(start.elapsed().as_secs_f64())
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking failed: {}", e))??;
+        // Warmup run; first inference can be much slower than steady
+        // state (ONNX session init, candle kernel JIT, allocator
+        // touching pages for the first time, ...).
+        let _ = dispatcher
+            .embed_batch(vec!["warmup".to_string()], Priority::High)
+            .await;
+        let start = std::time::Instant::now();
+        dispatcher.embed_batch(corpus, Priority::High).await?;
+        let secs = start.elapsed().as_secs_f64();
 
         let embeddings_per_second = corpus_size as f64 / secs;
         let total_ms = secs * 1000.0;
@@ -452,16 +637,22 @@ impl FastEmbedder {
     }
 
     /// Cache admission. If the requested model is in the cache, bump its
-    /// `last_used` and return a clone of the handle. Otherwise evict LRU
-    /// entries until the new model's estimated cost fits under the budget,
-    /// then load the model through the appropriate backend, measure the
-    /// RSS delta, and insert it.
-    async fn acquire(&self, model_name: &str) -> Result<LoadedModel, String> {
+    /// `last_used` and return a clone of its dispatcher handle.
+    /// Otherwise evict LRU entries until the new model's estimated cost
+    /// fits under the budget, then load the model through the
+    /// appropriate backend, spawn its dispatcher task, measure the RSS
+    /// delta, and insert it.
+    ///
+    /// Returns an `Arc<ModelDispatcher>` rather than a raw model handle
+    /// so the caller submits jobs through the per-model priority queue
+    /// instead of running inference inline. See `ModelDispatcher` for
+    /// the priority semantics.
+    async fn acquire(&self, model_name: &str) -> Result<Arc<ModelDispatcher>, String> {
         let mut cache = self.cache.lock().await;
 
         if let Some(idx) = cache.iter().position(|e| e.name == model_name) {
             cache[idx].last_used = Instant::now();
-            return Ok(cache[idx].model.clone());
+            return Ok(Arc::clone(&cache[idx].dispatcher));
         }
 
         // Pick an estimate for the new model's cost. If we've measured
@@ -545,9 +736,17 @@ impl FastEmbedder {
             _ => ESTIMATED_MODEL_COST_BYTES,
         };
 
+        // Spawn the per-model dispatcher and hand both the cache and
+        // the caller their own `Arc` clone. The task keeps running as
+        // long as either Arc lives; when the entry is evicted AND every
+        // in-flight caller has returned, both senders drop, the
+        // dispatcher's `select!` falls through to its `else` arm, the
+        // task exits, and `loaded` is finally dropped, freeing RSS.
+        let dispatcher = ModelDispatcher::spawn(loaded);
+
         cache.push(CacheEntry {
             name: model_name.to_string(),
-            model: loaded.clone(),
+            dispatcher: Arc::clone(&dispatcher),
             rss_cost_bytes: cost,
             last_used: Instant::now(),
         });
@@ -572,7 +771,7 @@ impl FastEmbedder {
             ),
         };
 
-        Ok(loaded)
+        Ok(dispatcher)
     }
 }
 
@@ -810,6 +1009,99 @@ mod tests {
             format_query_for_model("BAAI/bge-m3", "hello world"),
             "hello world",
         );
+    }
+
+    /// Build a sentinel `EmbedJob` whose `texts` field is a single
+    /// label, so tests can assert which job came out of `next_job`.
+    /// The reply channel is created and immediately dropped; we never
+    /// actually run inference in these tests.
+    fn make_job(label: &str) -> EmbedJob {
+        let (reply, _rx) = oneshot::channel();
+        EmbedJob {
+            texts: vec![label.to_string()],
+            reply,
+        }
+    }
+
+    fn job_label(job: &EmbedJob) -> &str {
+        &job.texts[0]
+    }
+
+    #[tokio::test]
+    async fn next_job_prefers_high_when_both_channels_ready() {
+        // The whole point of the priority lane: if there's a queued
+        // high job AND a queued low job at the moment the dispatcher
+        // becomes ready, the high one runs first. `biased` in
+        // `tokio::select!` is what guarantees this, so this test
+        // would catch a regression that removes `biased` (the
+        // select would then become arbitrary-order).
+        let (high_tx, mut high_rx) = mpsc::unbounded_channel();
+        let (low_tx, mut low_rx) = mpsc::unbounded_channel();
+
+        // Submit low first to rule out "we just got the first one
+        // sent." A wrong implementation that ignores priority and
+        // returns whichever channel was filled first would surface
+        // "low" here.
+        low_tx.send(make_job("low")).unwrap();
+        high_tx.send(make_job("high")).unwrap();
+
+        let first = next_job(&mut high_rx, &mut low_rx).await.unwrap();
+        assert_eq!(job_label(&first), "high");
+
+        let second = next_job(&mut high_rx, &mut low_rx).await.unwrap();
+        assert_eq!(job_label(&second), "low");
+    }
+
+    #[tokio::test]
+    async fn next_job_takes_low_when_high_is_empty() {
+        // Hot path for the steady-state ingest case: no chat traffic,
+        // dispatcher still has work to do, must not block on the high
+        // channel.
+        let (_high_tx, mut high_rx) = mpsc::unbounded_channel();
+        let (low_tx, mut low_rx) = mpsc::unbounded_channel();
+
+        low_tx.send(make_job("low-only")).unwrap();
+
+        let job = next_job(&mut high_rx, &mut low_rx).await.unwrap();
+        assert_eq!(job_label(&job), "low-only");
+    }
+
+    #[tokio::test]
+    async fn next_job_returns_none_when_both_senders_dropped() {
+        // Dispatcher shutdown signal: cache evicts the entry, all
+        // in-flight callers return, both `mpsc::UnboundedSender`s are
+        // dropped, both `recv()` calls return None, `select!`'s `else`
+        // arm fires, the dispatcher task exits. Without this the task
+        // would leak.
+        let (high_tx, mut high_rx) = mpsc::unbounded_channel::<EmbedJob>();
+        let (low_tx, mut low_rx) = mpsc::unbounded_channel::<EmbedJob>();
+        drop(high_tx);
+        drop(low_tx);
+
+        assert!(next_job(&mut high_rx, &mut low_rx).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn next_job_wakes_when_high_arrives_after_pending() {
+        // Verifies the dispatcher actually parks (rather than spinning
+        // or busy-erroring) when both channels are empty but senders
+        // are still alive. We start the future, send a high job while
+        // it's parked, and check it picks up.
+        let (high_tx, mut high_rx) = mpsc::unbounded_channel();
+        let (_low_tx, mut low_rx) = mpsc::unbounded_channel::<EmbedJob>();
+
+        let waiter = tokio::spawn(async move {
+            let job = next_job(&mut high_rx, &mut low_rx).await.unwrap();
+            job_label(&job).to_string()
+        });
+
+        // Give the spawned task a chance to actually park on the
+        // select. `yield_now` is enough here because both arms
+        // immediately return Pending and re-register their wakers.
+        tokio::task::yield_now().await;
+        high_tx.send(make_job("late-high")).unwrap();
+
+        assert_eq!(waiter.await.unwrap(), "late-high");
     }
 
     #[test]

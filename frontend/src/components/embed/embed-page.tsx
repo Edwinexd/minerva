@@ -374,7 +374,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
         )}
       </div>
 
-      <div className="flex-1 flex flex-col min-w-0 pl-12 md:pl-0">
+      <div className="flex-1 flex flex-col min-w-0 pt-12 md:pt-0">
         <EmbedChatWindow
           courseId={courseId}
           conversationId={activeConvId}

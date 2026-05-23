@@ -7,7 +7,10 @@ services:
     volumes:
       - minerva-data:/data
     environment:
-      - DATABASE_URL=postgres://minerva:minerva@localhost:5432/minerva
+      # Honors $DATABASE_URL from the shell (set by scripts/dev-db.sh +
+      # .envrc) so per-branch DBs apply to the dockerised backend too;
+      # falls back to the master DB when unset (CI, fresh clones).
+      - DATABASE_URL=${DATABASE_URL:-postgres://minerva:minerva@localhost:5432/minerva}
       - QDRANT_URL=http://localhost:6334
       - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}

@@ -27,6 +27,38 @@ git add .sqlx/
 Pre-commit runs `cargo check`/`clippy` with `SQLX_OFFLINE=true`, so forgetting
 this step fails locally before the commit lands.
 
+### Per-branch dev databases
+
+A migration on branch A used to leave branch B's `minerva` DB half-applied
+when you switched back (DROP-style migrations especially). `scripts/dev-db.sh`
++ `.envrc` (direnv) carve a separate `minerva_<branch-slug>` DB off the master
+`minerva` DB via postgres `CREATE DATABASE ... TEMPLATE` so each branch gets
+isolated state.
+
+- `master` keeps the existing `minerva` DB; nothing changes when you don't
+  branch.
+- Other branches lazily get `minerva_<slug>` on first `direnv` load,
+  cloned from the current `minerva` snapshot (instant, page-level copy).
+- `docker-compose.yml` honors `$DATABASE_URL`, so `docker compose up`
+  on a branch points the dockerised backend at the branch DB too.
+- `.envrc` runs on `cd`; needs `direnv allow` once per clone.
+
+Subcommands (all relative to repo root):
+
+```
+scripts/dev-db.sh url       # print DATABASE_URL for current branch
+scripts/dev-db.sh ensure    # create branch DB from master if missing
+scripts/dev-db.sh use       # ensure + 'export DATABASE_URL=...'
+scripts/dev-db.sh list      # list all minerva* DBs
+scripts/dev-db.sh refresh   # drop + reclone current branch DB from master
+scripts/dev-db.sh prune     # drop DBs for deleted local branches
+```
+
+Postgres refuses TEMPLATE-copy while the source has live connections, so
+`ensure`/`refresh` briefly `pg_terminate_backend` clients of `minerva`;
+sqlx pools auto-reconnect within a request. If you want a long-running
+branch DB to pick up new master changes mid-branch, run `refresh`.
+
 ## Container Image
 
 - **Registry:** ghcr.io/edwinexd/minerva (private)

@@ -80,6 +80,7 @@ pub fn course_router() -> Router<AppState> {
 pub fn admin_router() -> Router<AppState> {
     Router::new()
         .route("/lti/setup", get(admin_lti_setup))
+        .route("/lti/dynamic-register", get(dynamic_register))
         .route("/lti/platforms", get(list_platforms).post(create_platform))
         .route("/lti/platforms/{platform_id}", delete(delete_platform))
         .route(
@@ -1193,7 +1194,11 @@ fn build_admin_setup_response(base_url: &str) -> LtiSetupResponse {
     let config = build_moodle_config(base_url);
     LtiSetupResponse {
         steps: vec![
-            "In Moodle, go to Site administration → Plugins → Activity modules → External tool → Manage tools, then 'configure a tool manually'.".into(),
+            format!(
+                "Fast path: in Moodle, Site administration > Plugins > Activity modules > External tool > Manage tools, paste this URL into 'Tool URL to be added' and click Add: {}/api/admin/lti/dynamic-register . Moodle will auto-configure tool URL, login URL, JWKS, NRPS scope, name+email sharing, and the user_eppn custom parameter via LTI Dynamic Registration. The rest of the steps below are only needed if you prefer to configure the tool manually.",
+                base_url
+            ),
+            "Manual path: in Moodle, go to Site administration > Plugins > Activity modules > External tool > Manage tools, then 'configure a tool manually'.".into(),
             format!("Set Tool URL to: {}", config.tool_url),
             format!("Set LTI version to: {}", config.lti_version),
             format!("Set Public key type to: {}", config.public_key_type),
@@ -1215,6 +1220,351 @@ fn build_admin_setup_response(base_url: &str) -> LtiSetupResponse {
         ],
         moodle_tool_config: config,
     }
+}
+
+// ---------------------------------------------------------------------------
+// LTI 1.3 Dynamic Registration (IMS spec)
+// ---------------------------------------------------------------------------
+//
+// Lets an LMS admin paste a single tool URL into the LMS instead of manually
+// transcribing tool URL / login URL / JWKS URL / claims / privacy / scopes.
+// The LMS then drives the registration handshake server-to-server:
+//
+//   1. Admin pastes `<base>/api/admin/lti/dynamic-register` into the LMS.
+//   2. LMS opens it in a popup with `openid_configuration` (the platform's
+//      OIDC config URL) + `registration_token` (Bearer token authorising
+//      this single registration call).
+//   3. Tool GETs the OIDC config to discover the platform's endpoints,
+//      builds the LTI Tool Configuration JSON (privacy + scopes + claims +
+//      messages baked in), and POSTs it to the platform's
+//      `registration_endpoint` with the Bearer token.
+//   4. Platform responds with the assigned `client_id`.
+//   5. Tool persists as an `lti_platforms` row and returns an HTML page
+//      that posts `org.imsglobal.lti.close` back to the LMS popup parent
+//      (per spec, see https://www.imsglobal.org/spec/lti-dr/v1p0 section
+//      4.4.1) so the LMS knows the dialog can close.
+//
+// We require integrator auth on the tool side: the admin must already be
+// logged in to Minerva so we can attribute `lti_platforms.created_by`. The
+// LMS popup carries the Minerva session cookie automatically when opened in
+// the same browser, so a separate "tool admin login" step isn't usually
+// needed; if the admin isn't logged in, Apache + Shibboleth handles the
+// detour and replays the request with the same query params intact.
+
+#[derive(Debug, Deserialize)]
+struct DynamicRegistrationParams {
+    /// URL of the platform's OpenID Provider Configuration document.
+    /// MUST be HTTPS in production; we trust whatever the LMS sends us,
+    /// the `registration_token` is the real authentication.
+    openid_configuration: String,
+    /// Bearer token the platform issues to authenticate the one-shot
+    /// registration call. Optional per spec (some platforms don't gate the
+    /// registration endpoint); we forward it as `Authorization: Bearer ...`
+    /// when present.
+    #[serde(default)]
+    registration_token: Option<String>,
+}
+
+/// Minimal slice of the platform's OIDC Provider Configuration we consume.
+/// Per OpenID Connect Discovery 1.0 + the LTI Platform Configuration
+/// extension; we deserialize only the fields the registration handshake
+/// uses and let everything else pass through.
+#[derive(Debug, Deserialize)]
+struct PlatformOidcConfig {
+    issuer: String,
+    registration_endpoint: String,
+    authorization_endpoint: String,
+    token_endpoint: String,
+    jwks_uri: String,
+    #[serde(
+        rename = "https://purl.imsglobal.org/spec/lti-platform-configuration",
+        default
+    )]
+    lti_platform_configuration: Option<LtiPlatformConfiguration>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct LtiPlatformConfiguration {
+    /// e.g. "moodle", "canvas". Used as a fallback for the saved platform
+    /// `name` when the issuer hostname is non-obvious.
+    #[serde(default)]
+    product_family_code: Option<String>,
+}
+
+/// Build the LTI Tool Configuration JSON we POST to the platform's
+/// `registration_endpoint`. The fields here mirror the values our manual
+/// setup instructions tell admins to enter, with a couple of additions
+/// dynamic-only platforms can use (claims + messages + scopes), so a
+/// dynreg-driven install ends up with EXACTLY the same effective config as
+/// a hand-entered one, including identity sharing being on.
+fn build_dynreg_payload(base_url: &str) -> serde_json::Value {
+    let launch_url = format!("{}/lti/launch", base_url);
+    let host = base_url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("");
+    // NRPS scope is required for the roster sync. AGS scopes are listed
+    // even though Minerva does not currently push grades; including them
+    // is harmless and lets a future grade-passback integration light up
+    // without a re-registration. The platform may grant a subset.
+    let scope = [
+        "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem.readonly",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/score",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/result.readonly",
+    ]
+    .join(" ");
+    serde_json::json!({
+        "application_type": "web",
+        "response_types": ["id_token"],
+        "grant_types": ["implicit", "client_credentials"],
+        "initiate_login_uri": format!("{}/lti/login", base_url),
+        "redirect_uris": [launch_url.clone()],
+        "client_name": "Minerva",
+        "jwks_uri": format!("{}/lti/jwks", base_url),
+        "logo_uri": format!("{}/lti/icon.png", base_url),
+        "token_endpoint_auth_method": "private_key_jwt",
+        "scope": scope,
+        "https://purl.imsglobal.org/spec/lti-tool-configuration": {
+            "domain": host,
+            "target_link_uri": launch_url,
+            // Claims we ask the platform to share on every launch. Listing
+            // name/email/given_name/family_name is what flips the platform's
+            // per-tool privacy switches; without this list, Moodle defaults
+            // to hiding everything and the NRPS roster comes back with bare
+            // user ids (the exact failure the warning we surface elsewhere
+            // catches).
+            "claims": [
+                "iss", "sub",
+                "name", "given_name", "family_name", "email",
+                "https://purl.imsglobal.org/spec/lti/claim/roles",
+                "https://purl.imsglobal.org/spec/lti/claim/context",
+                "https://purl.imsglobal.org/spec/lti/claim/resource_link",
+            ],
+            "messages": [
+                {
+                    "type": "LtiResourceLinkRequest",
+                    "target_link_uri": launch_url,
+                }
+            ],
+            "custom_parameters": {
+                // Same value the manual setup wizard documents. Keeps
+                // launch-derived users in lockstep with NRPS-derived ones.
+                "user_eppn": "$User.username"
+            },
+            "description": "Minerva: course AI study assistant"
+        }
+    })
+}
+
+/// Pretty hostname out of a URL, for the saved platform `name`. Best-effort;
+/// falls back to the raw issuer on any parse weirdness.
+fn issuer_to_display_name(issuer: &str) -> String {
+    let host = issuer
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or(issuer);
+    host.to_string()
+}
+
+/// HTML page returned at the end of a successful (or already-registered)
+/// flow. Auto-posts the LTI-spec close message to the LMS popup parent and
+/// also shows a human-readable confirmation in case the popup is opened in
+/// a tab without an `opener`.
+fn dynreg_html(
+    status: axum::http::StatusCode,
+    title: &str,
+    banner: &str,
+    detail: &str,
+) -> Response {
+    // Inline styles so this works even if the SPA isn't reachable from the
+    // popup yet (e.g. the platform iframes us from an unusual origin).
+    let body = format!(
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>{title}</title><style>body{{font-family:system-ui,sans-serif;max-width:560px;margin:3rem auto;padding:0 1rem;color:#1e293b}}h1{{font-size:1.25rem}}.note{{color:#475569;font-size:0.9rem;white-space:pre-wrap;word-break:break-word}}button{{margin-top:1rem;padding:0.5rem 0.9rem;border-radius:6px;border:1px solid #1e293b;background:#fff;cursor:pointer}}.err{{color:#b91c1c}}</style></head><body><h1>{banner}</h1><p class=\"note\">{detail}</p><button onclick=\"(window.opener||window.parent).postMessage({{subject:'org.imsglobal.lti.close'}},'*');window.close();\">Close</button><script>try{{(window.opener||window.parent).postMessage({{subject:'org.imsglobal.lti.close'}},'*');}}catch(e){{}}</script></body></html>"
+    );
+    (
+        status,
+        [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        body,
+    )
+        .into_response()
+}
+
+fn dynreg_success_html(platform_name: &str, was_new: bool) -> Response {
+    let banner = if was_new {
+        format!(
+            "Minerva is now registered with <strong>{}</strong>.",
+            platform_name
+        )
+    } else {
+        format!(
+            "Minerva was already registered with <strong>{}</strong>; nothing to do.",
+            platform_name
+        )
+    };
+    dynreg_html(
+        axum::http::StatusCode::OK,
+        "LTI registration complete",
+        &banner,
+        "You can close this window. If the LMS dialog stays open, click the button below.",
+    )
+}
+
+fn dynreg_error_html(detail: &str) -> Response {
+    tracing::error!("lti dynreg failed: {}", detail);
+    dynreg_html(
+        axum::http::StatusCode::BAD_REQUEST,
+        "LTI registration failed",
+        "<span class=\"err\">Registration could not be completed.</span>",
+        detail,
+    )
+}
+
+/// GET /admin/lti/dynamic-register: the IMS LTI 1.3 Dynamic Registration
+/// flow entry point. The LMS opens this in a popup; we drive the rest of
+/// the handshake server-to-server. Errors are surfaced as HTML in the
+/// popup (not JSON) so the admin sees actionable text without having to
+/// crack open devtools.
+async fn dynamic_register(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Query(params): Query<DynamicRegistrationParams>,
+) -> Result<Response, AppError> {
+    // Auth check returns the standard 401/403 JSON; that's correct because
+    // an unauth'd hit means the admin isn't logged in to Minerva yet and
+    // needs the usual Shibboleth bounce, not a friendly HTML page.
+    require_site_integrator(&user)?;
+
+    match do_dynamic_register(&state, &user, &params).await {
+        Ok(resp) => Ok(resp),
+        Err(detail) => Ok(dynreg_error_html(&detail)),
+    }
+}
+
+async fn do_dynamic_register(
+    state: &AppState,
+    user: &User,
+    params: &DynamicRegistrationParams,
+) -> Result<Response, String> {
+    // 1. Fetch the platform's OIDC configuration. We trust the URL because
+    // the `registration_token` we'll send back to that platform's
+    // registration endpoint is the real authentication of this flow.
+    let oidc: PlatformOidcConfig = state
+        .http_client
+        .get(&params.openid_configuration)
+        .send()
+        .await
+        .map_err(|e| format!("GET {} failed: {}", params.openid_configuration, e))?
+        .error_for_status()
+        .map_err(|e| format!("OIDC config: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("OIDC config was not JSON: {}", e))?;
+
+    let issuer = oidc.issuer.trim_end_matches('/').to_string();
+
+    // 2. Build + POST the LTI Tool Configuration. The platform responds
+    // with the assigned `client_id` (and echoes back the rest of what we
+    // sent).
+    let payload = build_dynreg_payload(&state.config.base_url);
+    let mut req = state
+        .http_client
+        .post(&oidc.registration_endpoint)
+        .header(reqwest::header::CONTENT_TYPE, "application/json");
+    if let Some(token) = params
+        .registration_token
+        .as_deref()
+        .filter(|t| !t.is_empty())
+    {
+        req = req.bearer_auth(token);
+    }
+    let reg_resp = req
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("POST {} failed: {}", oidc.registration_endpoint, e))?;
+    let status = reg_resp.status();
+    if !status.is_success() {
+        let body = reg_resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "registration endpoint returned {}: {}",
+            status, body
+        ));
+    }
+    let reg_json: serde_json::Value = reg_resp
+        .json()
+        .await
+        .map_err(|e| format!("registration response was not JSON: {}", e))?;
+    let client_id = reg_json
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "registration response missing client_id".to_string())?
+        .to_string();
+
+    let product = oidc
+        .lti_platform_configuration
+        .as_ref()
+        .and_then(|p| p.product_family_code.clone());
+    let display_name = match product {
+        Some(p) if !p.is_empty() => format!("{} ({})", issuer_to_display_name(&issuer), p),
+        _ => issuer_to_display_name(&issuer),
+    };
+
+    // 3. If we already have a row for this (issuer, client_id) pair, treat
+    // it as a re-registration: keep the existing row, don't recreate. This
+    // makes the flow idempotent under accidental double-clicks.
+    let existing =
+        minerva_db::queries::lti::find_platform_by_issuer(&state.db, &issuer, &client_id)
+            .await
+            .map_err(|e| format!("db: {}", e))?;
+    if existing.is_some() {
+        return Ok(dynreg_success_html(&display_name, false));
+    }
+
+    // Collision guard: if a per-course registration already claims this
+    // (issuer, client_id), refuse rather than silently shadowing it.
+    if minerva_db::queries::lti::find_registration_by_issuer(&state.db, &issuer, &client_id)
+        .await
+        .map_err(|e| format!("db: {}", e))?
+        .is_some()
+    {
+        return Err(format!(
+            "a per-course registration already exists for issuer={} client_id={}; remove it before site-wide registering",
+            issuer, client_id
+        ));
+    }
+
+    let id = Uuid::new_v4();
+    minerva_db::queries::lti::create_platform(
+        &state.db,
+        id,
+        &minerva_db::queries::lti::CreatePlatform {
+            name: &display_name,
+            issuer: &issuer,
+            client_id: &client_id,
+            deployment_id: None,
+            auth_login_url: &oidc.authorization_endpoint,
+            auth_token_url: &oidc.token_endpoint,
+            platform_jwks_url: &oidc.jwks_uri,
+            created_by: user.id,
+            allowed_eppn_domains: None,
+        },
+    )
+    .await
+    .map_err(|e| format!("create_platform: {}", e))?;
+    tracing::info!(
+        "lti dynreg: registered platform {} (issuer={}, client_id={}) via dynamic registration",
+        id,
+        issuer,
+        client_id,
+    );
+
+    Ok(dynreg_success_html(&display_name, true))
 }
 
 #[derive(Debug, Serialize)]

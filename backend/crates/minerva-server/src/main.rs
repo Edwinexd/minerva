@@ -48,6 +48,37 @@ async fn main() -> anyhow::Result<()> {
     // Start the background document-processing worker.
     worker::start(state.clone(), config.max_concurrent_ingests);
 
+    // GDPR retention sweep for rule-attribute observations: drop rows whose
+    // `last_seen` is older than the TTL. Active users keep refreshing
+    // last_seen on every login, so this only purges values for users who
+    // haven't shown up in a week. Six-hour cadence is plenty; the row
+    // count is small (one per (attribute, value, user_id) triple) and a
+    // few hours of overshoot past the TTL is fine for a privacy-floor.
+    {
+        let db = state.db.clone();
+        tokio::spawn(async move {
+            const PRUNE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+            // First sweep runs immediately so a restart after a long
+            // downtime doesn't leave aged-out rows around for another
+            // six hours.
+            loop {
+                match minerva_db::queries::role_rule_attribute_observations::prune_older_than(
+                    &db,
+                    minerva_db::queries::role_rule_attribute_observations::OBSERVATION_TTL_DAYS,
+                )
+                .await
+                {
+                    Ok(0) => {}
+                    Ok(n) => {
+                        tracing::info!("pruned {} rule-attribute observation row(s) past TTL", n)
+                    }
+                    Err(e) => tracing::warn!("rule-attribute observation prune failed: {}", e),
+                }
+                tokio::time::sleep(PRUNE_INTERVAL).await;
+            }
+        });
+    }
+
     // Benchmark FastEmbed models in the background (doesn't block startup).
     // Only the small ONNX models in `STARTUP_BENCHMARK_MODELS` are warmed
     // here; loading every entry in `VALID_LOCAL_MODELS` (which now

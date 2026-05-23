@@ -30,6 +30,10 @@ pub fn router() -> Router<AppState> {
             "/role-rules/conditions/{cond_id}",
             delete(delete_rule_condition),
         )
+        .route(
+            "/role-rules/attribute-values",
+            get(list_role_rule_attribute_values),
+        )
         .route("/classification-stats", get(get_classification_stats))
         .route("/backfill-classifications", post(backfill_classifications))
         .route(
@@ -297,8 +301,12 @@ fn default_true() -> bool {
 
 fn validate_target_role(role: &str) -> Result<(), AppError> {
     // Admin promotion via rules is intentionally disallowed; admins must
-    // be in MINERVA_ADMINS so the env stays the source of truth.
-    if role != "teacher" && role != "student" {
+    // be in MINERVA_ADMINS so the env stays the source of truth. Integrator
+    // is allowed: it is a DB-granted superset of Teacher (site-wide
+    // integration powers, no user-management), so delegating it via a rule
+    // is the same trust boundary as granting Teacher via a rule plus an
+    // explicit "and trust them with site integrations" choice by the admin.
+    if role != "teacher" && role != "student" && role != "integrator" {
         return Err(AppError::bad_request("admin.target_role_invalid"));
     }
     Ok(())
@@ -442,6 +450,80 @@ async fn delete_rule_condition(
     }
     state.rules.reload(&state.db).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+#[derive(Serialize)]
+struct AttributeValueSuggestionResponse {
+    /// Concrete value observed on at least `MIN_SUGGESTION_USERS` distinct
+    /// users (post-`;`-split for multi-valued Shib headers). Suitable to
+    /// drop straight into a `contains` rule condition unchanged.
+    value: String,
+    /// Number of distinct users whose login produced this value. Surfaced
+    /// to the admin so they can see "ranked by how common" at a glance and
+    /// distinguish a popular affiliation from a borderline-singleton one.
+    user_count: i64,
+}
+
+#[derive(Serialize)]
+struct AttributeValuesResponse {
+    /// Per-attribute suggestion buckets, keyed by the attribute name (the
+    /// same identifier admins pick from the attribute dropdown). Attributes
+    /// with zero qualifying values are omitted entirely; the frontend falls
+    /// back to free-text-only for those.
+    by_attribute: std::collections::BTreeMap<String, Vec<AttributeValueSuggestionResponse>>,
+    /// Echo the threshold we filtered with so the UI can render an
+    /// accurate "suggestions are values observed on >= N users" caption
+    /// without having to hard-code the same constant in two places.
+    min_users: i64,
+}
+
+/// Suggestions are only surfaced once a value has been seen across at least
+/// this many distinct users. Two is the floor that lets a value be "shared"
+/// at all; a one-user observation would let an admin browsing this list
+/// fish out the affiliation/entitlement of a specific person without ever
+/// querying them by name. Bump if we ever want to be more conservative;
+/// the UI shows this number to the admin so the contract stays honest.
+const MIN_SUGGESTION_USERS: i64 = 2;
+
+async fn list_role_rule_attribute_values(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<AttributeValuesResponse>, AppError> {
+    require_admin(&user)?;
+
+    let rows =
+        minerva_db::queries::role_rule_attribute_observations::list_suggestions_above_threshold(
+            &state.db,
+            MIN_SUGGESTION_USERS,
+        )
+        .await?;
+
+    let mut by_attribute: std::collections::BTreeMap<
+        String,
+        Vec<AttributeValueSuggestionResponse>,
+    > = std::collections::BTreeMap::new();
+    for row in rows {
+        // Defensive filter: the SUPPORTED_ATTRIBUTES list is the contract
+        // for what the rule engine reads. A stale observation row for an
+        // attribute we no longer support (renamed header, etc.) would
+        // surface a useless suggestion; drop it here instead of leaking
+        // it to the UI.
+        if !SUPPORTED_ATTRIBUTES.contains(&row.attribute.as_str()) {
+            continue;
+        }
+        by_attribute
+            .entry(row.attribute)
+            .or_default()
+            .push(AttributeValueSuggestionResponse {
+                value: row.value,
+                user_count: row.user_count,
+            });
+    }
+
+    Ok(Json(AttributeValuesResponse {
+        by_attribute,
+        min_users: MIN_SUGGESTION_USERS,
+    }))
 }
 
 // ── Classification backfill (admin-scoped) ─────────────────────────

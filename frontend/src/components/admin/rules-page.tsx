@@ -1,15 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Trans, useTranslation } from "react-i18next"
-import { useState } from "react"
-import { adminRoleRulesQuery } from "@/lib/queries"
+import { useId, useMemo, useState } from "react"
+import {
+  adminRoleRuleAttributeValuesQuery,
+  adminRoleRulesQuery,
+} from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import {
   ROLE_RULE_ATTRIBUTES,
   ROLE_RULE_OPERATORS,
+  ROLE_RULE_TARGET_ROLES,
   type RoleRule,
   type RoleRuleAttribute,
+  type RoleRuleAttributeValueSuggestion,
   type RoleRuleOperator,
+  type RoleRuleTargetRole,
 } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import {
@@ -76,7 +82,7 @@ function CreateRuleForm() {
   const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
-  const [targetRole, setTargetRole] = useState<"teacher" | "student">("teacher")
+  const [targetRole, setTargetRole] = useState<RoleRuleTargetRole>("teacher")
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -114,13 +120,16 @@ function CreateRuleForm() {
       </div>
       <div className="space-y-1">
         <label className="text-xs font-medium">{t("rules.form.targetRole")}</label>
-        <Select value={targetRole} onValueChange={(v) => v && setTargetRole(v as typeof targetRole)}>
-          <SelectTrigger className="h-8 w-32 text-sm" aria-label={t("rules.form.targetRole")}>
+        <Select value={targetRole} onValueChange={(v) => v && setTargetRole(v as RoleRuleTargetRole)}>
+          <SelectTrigger className="h-8 w-36 text-sm" aria-label={t("rules.form.targetRole")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="teacher">{t("rules.form.teacher")}</SelectItem>
-            <SelectItem value="student">{t("rules.form.student")}</SelectItem>
+            {ROLE_RULE_TARGET_ROLES.map((role) => (
+              <SelectItem key={role} value={role}>
+                {t(`rules.form.${role}`)}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -254,6 +263,26 @@ function AddConditionForm({ ruleId }: { ruleId: string }) {
   const [operator, setOperator] = useState<RoleRuleOperator>("contains")
   const [value, setValue] = useState("")
 
+  // Pulled once at panel mount via the cached query; switching attributes
+  // is then instant. Soft-failure: if the suggestions endpoint errors we
+  // simply render no datalist and the admin types freely.
+  const { data: suggestionPayload } = useQuery(adminRoleRuleAttributeValuesQuery)
+
+  // Stable id for the datalist <-> input list= pairing. Each rule's form
+  // gets its own so two open forms don't fight over the same id.
+  const datalistId = useId()
+
+  // Suggestions for the currently-selected attribute, with regex / not_regex
+  // values automatically escaped so the admin can drop a suggestion straight
+  // into a regex condition without rewriting backslashes. The original
+  // (un-escaped) value is still readable in the option label via i18n so
+  // they can see what they're picking.
+  const suggestions: RoleRuleAttributeValueSuggestion[] = useMemo(() => {
+    const raw = suggestionPayload?.by_attribute[attribute] ?? []
+    if (operator !== "regex" && operator !== "not_regex") return raw
+    return raw.map((s) => ({ ...s, value: escapeForRegex(s.value) }))
+  }, [suggestionPayload, attribute, operator])
+
   const mutation = useMutation({
     mutationFn: () =>
       api.post(`/admin/role-rules/${ruleId}/conditions`, {
@@ -305,7 +334,25 @@ function AddConditionForm({ ruleId }: { ruleId: string }) {
         aria-label={t("rules.condition.valuePlaceholder")}
         value={value}
         onChange={(e) => setValue(e.target.value)}
+        list={suggestions.length > 0 ? datalistId : undefined}
       />
+      {suggestions.length > 0 && (
+        // Native <datalist> autocomplete: the input stays free-text, so an
+        // admin can still create a rule for a value we haven't observed yet
+        // (the suggestions only cover values seen on >= min_users users).
+        // The label shows the original value + observed user count; the
+        // option value is what gets dropped into the input (regex-escaped
+        // when the operator is regex/not_regex, raw otherwise).
+        <datalist id={datalistId}>
+          {suggestions.map((s) => (
+            <option
+              key={s.value}
+              value={s.value}
+              label={t("rules.condition.suggestionLabel", { count: s.user_count })}
+            />
+          ))}
+        </datalist>
+      )}
       <Button
         type="submit"
         size="sm"
@@ -314,9 +361,33 @@ function AddConditionForm({ ruleId }: { ruleId: string }) {
       >
         {t("rules.condition.add")}
       </Button>
+      {suggestionPayload && (
+        <span className="w-full text-[10px] text-muted-foreground">
+          {suggestions.length > 0
+            ? t("rules.condition.suggestionHint", {
+                count: suggestions.length,
+                minUsers: suggestionPayload.min_users,
+              })
+            : t("rules.condition.suggestionEmpty", {
+                minUsers: suggestionPayload.min_users,
+              })}
+        </span>
+      )}
       {mutation.isError && (
         <span className="text-destructive">{formatError(mutation.error)}</span>
       )}
     </form>
   )
+}
+
+/**
+ * Escape a literal string so it matches itself when used as a regex. Used
+ * when offering observed values as suggestions for the regex / not_regex
+ * operators: the admin is free to edit the escaped value into a broader
+ * pattern, but the default insert is a safe literal match. Mirrors the set
+ * of characters that have special meaning in Rust's `regex` crate (the
+ * backend's matcher).
+ */
+function escapeForRegex(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&")
 }

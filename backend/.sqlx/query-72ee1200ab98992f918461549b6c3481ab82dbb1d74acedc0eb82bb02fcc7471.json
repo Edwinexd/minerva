@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT attribute, value, COUNT(*)::BIGINT AS \"user_count!\"\n           FROM role_rule_attribute_observations\n           GROUP BY attribute, value\n           HAVING COUNT(*) >= $1\n           ORDER BY attribute ASC, COUNT(*) DESC, value ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attribute",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "value",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "72ee1200ab98992f918461549b6c3481ab82dbb1d74acedc0eb82bb02fcc7471"
+}

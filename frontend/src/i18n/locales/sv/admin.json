@@ -318,6 +318,7 @@
       "targetRole": "Målroll",
       "teacher": "lärare",
       "student": "student",
+      "integrator": "integratör",
       "createRule": "Skapa regel"
     },
     "card": {
@@ -336,7 +337,12 @@
       "add": "Lägg till",
       "removeLabel": "Ta bort villkor",
       "attributeLabel": "Attribut",
-      "operatorLabel": "Operator"
+      "operatorLabel": "Operator",
+      "suggestionLabel_one": "{{count}} användare",
+      "suggestionLabel_other": "{{count}} användare",
+      "suggestionHint_one": "{{count}} förslag (värden sedda på minst {{minUsers}} olika användare). Fritext accepteras fortfarande.",
+      "suggestionHint_other": "{{count}} förslag (värden sedda på minst {{minUsers}} olika användare). Fritext accepteras fortfarande.",
+      "suggestionEmpty": "Inga kända värden för detta attribut än (behöver minst {{minUsers}} olika användare). Skriv vilket värde som helst; förslag dyker upp när fler användare loggat in."
     }
   },
   "externalInvites": {

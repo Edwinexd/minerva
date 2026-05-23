@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM role_rule_attribute_observations\n           WHERE last_seen < NOW() - ($1 || ' days')::INTERVAL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a2ed7bd54ebc3c1dc74b610ecddfa31b9998c33b99e3417d8e2799510096f44"
+}

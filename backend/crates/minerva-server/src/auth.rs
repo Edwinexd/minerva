@@ -130,9 +130,50 @@ pub async fn auth_middleware(
         return Err(AppError::Forbidden);
     }
 
+    // Stash the (attribute, value) pairs we just saw so the admin UI can
+    // suggest concrete values when authoring role-rule conditions. Failure
+    // here is best-effort; it must not break auth. We log and move on.
+    if let Err(e) = observe_rule_attributes(&state.db, user.id, &attrs).await {
+        tracing::warn!(user = %user.id, error = %e, "failed to record rule-attribute observations");
+    }
+
     request.extensions_mut().insert(user);
 
     Ok(next.run(request).await)
+}
+
+/// Persist every observed (attribute, value) pair for the user, splitting
+/// multi-valued Shib headers on `;` so each atomic value is recorded
+/// separately. Matches the semantics `contains` uses at evaluation time, so
+/// any value the admin sees in the suggestion list will reliably match the
+/// header it came from.
+async fn observe_rule_attributes(
+    db: &sqlx::PgPool,
+    user_id: Uuid,
+    attrs: &HashMap<String, String>,
+) -> Result<(), sqlx::Error> {
+    let mut pairs: Vec<(String, String)> = Vec::with_capacity(attrs.len());
+    for attr in SUPPORTED_ATTRIBUTES {
+        let Some(raw) = attrs.get(*attr) else {
+            continue;
+        };
+        if raw.is_empty() {
+            continue;
+        }
+        // eppn / displayName are never semicolon-delimited in practice;
+        // splitting still produces a single-element vector so the code path
+        // stays uniform. Multi-valued attrs (affiliation, entitlement)
+        // explode into one row per element.
+        for piece in raw.split(';') {
+            let trimmed = piece.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            pairs.push(((*attr).to_string(), trimmed.to_string()));
+        }
+    }
+    minerva_db::queries::role_rule_attribute_observations::observe_for_user(db, user_id, &pairs)
+        .await
 }
 
 fn collect_rule_attrs(
@@ -334,15 +375,16 @@ mod tests {
 
     #[test]
     fn integrator_persists_across_logins() {
-        // Integrator is DB-granted (always with the manual lock set). The
-        // lock branch returns the stored role unchanged, and the ex-admin
-        // clamp must leave Integrator alone since it isn't env-sourced.
+        // Integrator is granted either by an admin (lock=true) or by a rule
+        // (lock=false). The lock branch returns the stored role unchanged,
+        // and the ex-admin clamp must leave Integrator alone since it isn't
+        // env-sourced.
         assert_eq!(
             decide_role(false, false, true, Some(UserRole::Integrator), None),
             UserRole::Integrator,
         );
-        // Unlocked (e.g. lock later cleared): rules cap at Teacher, and the
-        // additive merge keeps the higher-ranked stored Integrator.
+        // Unlocked: a Teacher-target rule still leaves a stored Integrator
+        // alone via the additive merge (max wins).
         assert_eq!(
             decide_role(
                 false,
@@ -351,6 +393,12 @@ mod tests {
                 Some(UserRole::Integrator),
                 Some(UserRole::Teacher)
             ),
+            UserRole::Integrator,
+        );
+        // Rules can now target Integrator directly; the merge picks it up
+        // unchanged when there's no stored role to combine with.
+        assert_eq!(
+            decide_role(false, false, false, None, Some(UserRole::Integrator)),
             UserRole::Integrator,
         );
         // Env admin still wins over a stored Integrator.

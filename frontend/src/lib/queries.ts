@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -383,6 +383,21 @@ export const courseKnowledgeGraphQuery = (courseId: string) =>
 export const adminRoleRulesQuery = queryOptions({
   queryKey: ["admin", "role-rules"],
   queryFn: () => api.get<RoleRule[]>("/admin/role-rules"),
+})
+
+/**
+ * Suggestion list for the rule-condition value field, grouped per attribute.
+ * The backend filters to values seen on at least `min_users` distinct users
+ * (privacy guard against fishing for one specific person's attributes) and
+ * orders each bucket by user count desc. Cached briefly so switching
+ * attributes in the form is instant; observations only grow when users
+ * actually log in, so freshness on the minute granularity is fine.
+ */
+export const adminRoleRuleAttributeValuesQuery = queryOptions({
+  queryKey: ["admin", "role-rules", "attribute-values"],
+  queryFn: () =>
+    api.get<RoleRuleAttributeValues>("/admin/role-rules/attribute-values"),
+  staleTime: 60 * 1000,
 })
 
 export const adminLtiSetupQuery = queryOptions({

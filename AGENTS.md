@@ -207,10 +207,11 @@ accounts (e.g. external collaborators).
 ## Role Auto-Promotion Rules
 
 Admin-managed rules at `/admin/rules` auto-promote users to a target role
-(`teacher` only; admins must be in `MINERVA_ADMINS`) at login when ALL
-their conditions match the user's Shibboleth attributes. Backed by
-`role_rules` + `role_rule_conditions` tables; evaluated in
-`auth_middleware::upsert_user` after the admin allowlist check.
+(`teacher`, `integrator`, or `student`; admins must be in `MINERVA_ADMINS`,
+never granted via rules) at login when ALL their conditions match the user's
+Shibboleth attributes. Backed by `role_rules` + `role_rule_conditions`
+tables; evaluated in `auth_middleware::upsert_user` after the admin
+allowlist check.
 
 - Operators: `contains` / `not_contains` (list-membership against
   `;`-joined multi-valued headers like `entitlement`/`affiliation`),
@@ -222,6 +223,19 @@ their conditions match the user's Shibboleth attributes. Backed by
 - Manual override wins: changing a role via `/admin/users` sets
   `users.role_manually_set = TRUE`; rules then leave the user alone
   until an admin clicks **Unlock** (DELETE `/admin/users/:id/role-lock`).
+- **Value suggestions**: the auth middleware records every observed
+  `(attribute, value)` pair (post-`;`-split, including `eppn` /
+  `displayName`) in `role_rule_attribute_observations`. The admin
+  condition form pulls `GET /admin/role-rules/attribute-values` and
+  offers a `<datalist>` autocomplete for values seen on at least 2
+  distinct users (privacy guard against fishing for one specific
+  person's attributes; `eppn` is unique per user so it naturally
+  never qualifies). Free text is still accepted; the suggestions are
+  convenience, not an allowlist. Regex / not_regex suggestions are
+  escaped literals. A startup-spawned tokio task prunes rows whose
+  `last_seen` is older than `OBSERVATION_TTL_DAYS` (currently 7 days)
+  every 6 hours; GDPR retention floor on inactive users' attribute
+  values. Active users keep refreshing `last_seen` every login.
 
 **Apache trust boundary:** the new attribute headers are unset `early`
 in `apache/minerva-app.conf` so a client cannot spoof them. The DSV

@@ -231,14 +231,46 @@ export interface RoleRuleCondition {
   value: string
 }
 
+/**
+ * Roles a role auto-promotion rule may grant. `admin` is excluded on
+ * purpose: admins are always env-sourced via MINERVA_ADMINS so a stale rule
+ * can't strand a permission. `integrator` (Teacher + site-wide integration
+ * powers) is allowed; the backend mirrors this in `validate_target_role`.
+ */
+export type RoleRuleTargetRole = "student" | "teacher" | "integrator"
+
+export const ROLE_RULE_TARGET_ROLES: RoleRuleTargetRole[] = [
+  "student",
+  "teacher",
+  "integrator",
+]
+
 export interface RoleRule {
   id: string
   name: string
-  target_role: "student" | "teacher"
+  target_role: RoleRuleTargetRole
   enabled: boolean
   created_at: string
   updated_at: string
   conditions: RoleRuleCondition[]
+}
+
+/**
+ * One suggested value for a rule-condition attribute. Returned by
+ * `/admin/role-rules/attribute-values` after filtering to values observed on
+ * at least `min_users` distinct users. The admin can still type any value;
+ * suggestions are an autocomplete convenience, not an allowlist.
+ */
+export interface RoleRuleAttributeValueSuggestion {
+  value: string
+  user_count: number
+}
+
+export interface RoleRuleAttributeValues {
+  /** Per-attribute suggestion buckets; attributes without enough observations are omitted. */
+  by_attribute: Partial<Record<RoleRuleAttribute, RoleRuleAttributeValueSuggestion[]>>
+  /** Distinct-user threshold the backend filtered with; surface in the UI hint. */
+  min_users: number
 }
 
 export interface UsageRecord {

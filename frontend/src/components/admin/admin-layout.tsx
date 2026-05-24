@@ -85,10 +85,22 @@ export function AdminLayout() {
         : []
   const visibleTabSet = new Set<TabValue>(visibleTabs)
 
+  // Most admin sub-pages put the tab name as the last path segment
+  // (`/admin/users` -> tab "users"), but a couple of focused sub-flows
+  // live under deeper paths (e.g. `/admin/lti-approve/<id>` belongs to
+  // the "lti" tab). Map those overrides explicitly; everything else
+  // falls back to last-segment matching.
+  const pathOverrideTab: TabValue | null = location.pathname.startsWith(
+    "/admin/lti-approve",
+  )
+    ? "lti"
+    : null
   const lastSegment = location.pathname.split("/").pop() || ""
-  const activeTab: TabValue = visibleTabSet.has(lastSegment as TabValue)
-    ? (lastSegment as TabValue)
-    : (visibleTabs[0] ?? "usage")
+  const activeTab: TabValue =
+    pathOverrideTab ??
+    (visibleTabSet.has(lastSegment as TabValue)
+      ? (lastSegment as TabValue)
+      : (visibleTabs[0] ?? "usage"))
 
   useDocumentTitle(
     `${tCommon("pageTitles.admin")} – ${tCommon(TAB_TITLE_KEYS[activeTab])}`,

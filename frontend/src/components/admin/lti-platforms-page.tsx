@@ -412,11 +412,11 @@ function PlatformRow({
           {t("ltiPlatforms.pendingExplain")}
         </div>
       )}
-      {orphaned && (
+      {orphaned && platform.invalid_client_since && (
         <div className="border-b border-amber-500/40 bg-amber-100/40 px-3 py-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
-          {t("ltiPlatforms.orphanedExplain", {
-            since: platform.invalid_client_since,
-          })}
+          {t("ltiPlatforms.orphanedExplainPrefix")}{" "}
+          <RelativeTime date={platform.invalid_client_since} />.{" "}
+          {t("ltiPlatforms.orphanedExplainSuffix")}
         </div>
       )}
       <div className="flex items-center justify-between gap-4 p-3">

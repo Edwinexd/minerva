@@ -163,10 +163,20 @@ export function LtiSetupScopePage() {
           <CardTitle>{t("ltiSetupScope.doneTitle")}</CardTitle>
           <CardDescription>{t("ltiSetupScope.doneBody")}</CardDescription>
         </CardHeader>
-        <CardContent>
-          <Button onClick={closePopup}>
-            {t("ltiSetupScope.closeButton")}
-          </Button>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            {t("ltiSetupScope.donePrompt")}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => window.open("/admin", "_blank", "noopener")}
+            >
+              {t("ltiSetupScope.openMinervaButton")}
+            </Button>
+            <Button variant="outline" onClick={closePopup}>
+              {t("ltiSetupScope.closeButton")}
+            </Button>
+          </div>
         </CardContent>
       </Card>
     )

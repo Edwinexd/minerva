@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at FROM lti_platforms WHERE issuer = $1 AND client_id = $2 AND activated_at IS NOT NULL",
+  "query": "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since FROM lti_platforms WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -67,12 +67,26 @@
         "ordinal": 12,
         "name": "activated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "last_health_check_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "last_health_check_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "invalid_client_since",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -88,8 +102,11 @@
       false,
       false,
       true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "3c8937109ab41783f5249a3569586eb0f750d5da2d516c06bb02e5c2b59bb94d"
+  "hash": "1d536d040a03309b439b639e708018d856fea6a1e8303d82b6a92984bb0f92fe"
 }

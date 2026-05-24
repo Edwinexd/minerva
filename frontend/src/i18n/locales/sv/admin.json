@@ -97,7 +97,9 @@
     "approveAndActivate": "Godkänn och aktivera",
     "approveEmptyConfirm": "Att godkänna med en tom lista över eppn-domäner innebär att plattformen kan utfärda lanseringar som påstår sig vara VILKEN eppn som helst (inklusive admin-konton). Är du säker?",
     "statusPending": "Väntar på godkännande",
+    "statusOrphaned": "Övergiven av LMS",
     "pendingExplain": "Installerad via LTI Dynamic Registration. Tills du godkänner den kan plattformen INTE autentisera lanseringar mot Minerva. Ej godkända plattformar tas bort automatiskt efter 7 dagar. Verifiera att issuer och client id nedan matchar det LMS du förväntar dig, godkänn sedan.",
+    "orphanedExplain": "LMS:et har avvisat våra client credentials sedan {{since}} (troligen för att verktyget togs bort på deras sida). Minerva kommer kaskadradera den här raden 30 dagar efter den tidsstämpeln; ta bort den manuellt om du vill bli av med den nu.",
     "showBindings": "Visa kopplingar",
     "hideBindings": "Dölj kopplingar",
     "noBindings": "Inga LMS-kurser har länkats till den här plattformen än.",
@@ -137,6 +139,8 @@
     "afterNote": "Efter detta måste en Minerva-integratör klicka Godkänn i Minerva för att aktivera plattformen. De kan justera ditt scope-förslag innan de godkänner.",
     "doneTitle": "Förslag registrerat",
     "doneBody": "Tack. En Minerva-integratör måste fortfarande godkänna plattformen i admin-gränssnittet innan den kan autentisera lanseringar.",
+    "donePrompt": "Om du också är en Minerva-integratör, öppna Minerva nu och godkänn plattformen. Annars, lämna över till en integratör och stäng det här fönstret.",
+    "openMinervaButton": "Öppna Minerva för att godkänna",
     "closeButton": "Stäng"
   },
   "usage": {

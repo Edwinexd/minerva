@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM lti_platforms WHERE invalid_client_since IS NOT NULL AND invalid_client_since < NOW() - make_interval(days => $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fa4a5accef18df227b556cad8c58e972e4c8057ead2d912960c0ee246e491566"
+}

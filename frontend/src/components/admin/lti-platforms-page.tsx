@@ -381,6 +381,7 @@ function PlatformRow({
   })
 
   const pending = platform.activated_at === null
+  const orphaned = !pending && platform.invalid_client_since !== null
 
   const submitApproval = () => {
     const domains = scopeInput
@@ -398,12 +399,21 @@ function PlatformRow({
   return (
     <div
       className={`rounded-md border ${
-        pending ? "border-amber-500/60 bg-amber-50/30 dark:bg-amber-950/20" : ""
+        pending || orphaned
+          ? "border-amber-500/60 bg-amber-50/30 dark:bg-amber-950/20"
+          : ""
       }`}
     >
       {pending && (
         <div className="border-b border-amber-500/40 bg-amber-100/40 px-3 py-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
           {t("ltiPlatforms.pendingExplain")}
+        </div>
+      )}
+      {orphaned && (
+        <div className="border-b border-amber-500/40 bg-amber-100/40 px-3 py-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
+          {t("ltiPlatforms.orphanedExplain", {
+            since: platform.invalid_client_since,
+          })}
         </div>
       )}
       <div className="flex items-center justify-between gap-4 p-3">
@@ -413,6 +423,11 @@ function PlatformRow({
             {pending && (
               <Badge variant="outline" className="border-amber-500 text-amber-700 dark:text-amber-300">
                 {t("ltiPlatforms.statusPending")}
+              </Badge>
+            )}
+            {orphaned && (
+              <Badge variant="outline" className="border-amber-500 text-amber-700 dark:text-amber-300">
+                {t("ltiPlatforms.statusOrphaned")}
               </Badge>
             )}
             <Badge variant="secondary">{platform.client_id}</Badge>

@@ -131,6 +131,17 @@ pub struct PlatformRow {
     /// `activated_at IS NOT NULL`: a pending row trusts an unvalidated
     /// JWKS source and so cannot be used to authenticate launches.
     pub activated_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Last time the platform-health worker probed this platform's
+    /// token endpoint (any outcome). NULL until the first probe runs.
+    pub last_health_check_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Coarse bucket from the probe response: `ok`, `invalid_client`,
+    /// `http_<code>`, `network`, `parse_error`. UI buckets on
+    /// `invalid_client` (orphan-LMS warning) vs other (just informational).
+    pub last_health_check_status: Option<String>,
+    /// Timestamp of the first `invalid_client` response after the most
+    /// recent `ok`. Reset to NULL on any `ok`. Transient errors do NOT
+    /// touch it. Drives the 30-day auto-delete sweep.
+    pub invalid_client_since: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub struct CreatePlatform<'a> {
@@ -160,7 +171,7 @@ pub async fn create_platform(
         PlatformRow,
         r#"INSERT INTO lti_platforms (id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, allowed_eppn_domains, activated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        RETURNING id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at"#,
+        RETURNING id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since"#,
         id,
         input.name,
         input.issuer,
@@ -183,7 +194,7 @@ pub async fn find_platform_by_id(
 ) -> Result<Option<PlatformRow>, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at FROM lti_platforms WHERE id = $1",
+        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since FROM lti_platforms WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -202,7 +213,7 @@ pub async fn find_platform_by_issuer(
 ) -> Result<Option<PlatformRow>, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at FROM lti_platforms WHERE issuer = $1 AND client_id = $2 AND activated_at IS NOT NULL",
+        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since FROM lti_platforms WHERE issuer = $1 AND client_id = $2 AND activated_at IS NOT NULL",
         issuer,
         client_id,
     )
@@ -213,7 +224,7 @@ pub async fn find_platform_by_issuer(
 pub async fn list_platforms(db: &PgPool) -> Result<Vec<PlatformRow>, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at FROM lti_platforms ORDER BY activated_at IS NOT NULL, name",
+        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since FROM lti_platforms ORDER BY activated_at IS NOT NULL, name",
     )
     .fetch_all(db)
     .await
@@ -289,6 +300,77 @@ pub async fn delete_stale_pending_platforms(
     .execute(db)
     .await?;
     Ok(result.rows_affected())
+}
+
+/// Record the outcome of a platform-health probe. `status` is one of
+/// `ok` | `invalid_client` | `http_<code>` | `network` | `parse_error`;
+/// the worker stamps `last_health_check_at = NOW()` regardless.
+///
+/// `invalid_client_since` follows these rules (also see the migration
+/// comment):
+///   * status = `ok`           -> cleared to NULL
+///   * status = `invalid_client` and previous value was NULL -> set to NOW()
+///   * status = `invalid_client` and previous value was non-NULL -> unchanged
+///     (preserve original detection time so the 30-day countdown is stable)
+///   * any other status        -> unchanged (transient errors don't move it)
+pub async fn record_platform_health(
+    db: &PgPool,
+    id: Uuid,
+    status: &str,
+) -> Result<(), sqlx::Error> {
+    let touch_invalid_since = status == "invalid_client";
+    let clear_invalid_since = status == "ok";
+    sqlx::query!(
+        r#"UPDATE lti_platforms
+           SET last_health_check_at = NOW(),
+               last_health_check_status = $2,
+               invalid_client_since = CASE
+                   WHEN $4 THEN NULL
+                   WHEN $3 AND invalid_client_since IS NULL THEN NOW()
+                   ELSE invalid_client_since
+               END,
+               updated_at = NOW()
+           WHERE id = $1"#,
+        id,
+        status,
+        touch_invalid_since,
+        clear_invalid_since,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Cascade-delete platforms that have been continuously rejecting our
+/// `client_credentials` for at least the supplied grace period. The
+/// platform's `lti_course_bindings` + `lti_nrps_contexts` are wiped by
+/// the existing FK cascades, so this is the single source of truth for
+/// "the LMS deleted us, clean it all up."
+pub async fn delete_long_orphaned_platforms(
+    db: &PgPool,
+    grace_days: i32,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query!(
+        "DELETE FROM lti_platforms WHERE invalid_client_since IS NOT NULL AND invalid_client_since < NOW() - make_interval(days => $1)",
+        grace_days,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// List every active (activated_at IS NOT NULL) platform the worker
+/// should probe. Skips pending rows because their token endpoint will
+/// already reject us (the LMS hasn't fully provisioned the tool yet on
+/// some platforms during the dynreg flow, and the row is pending on
+/// our side so the value of a probe is nil).
+pub async fn list_platforms_for_health_check(db: &PgPool) -> Result<Vec<PlatformRow>, sqlx::Error> {
+    sqlx::query_as!(
+        PlatformRow,
+        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since FROM lti_platforms WHERE activated_at IS NOT NULL"
+    )
+    .fetch_all(db)
+    .await
 }
 
 pub async fn delete_platform(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {

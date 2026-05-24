@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE lti_platforms\n           SET last_health_check_at = NOW(),\n               last_health_check_status = $2,\n               invalid_client_since = CASE\n                   WHEN $4 THEN NULL\n                   WHEN $3 AND invalid_client_since IS NULL THEN NOW()\n                   ELSE invalid_client_since\n               END,\n               updated_at = NOW()\n           WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dfc088ea7688cc9f3a5cf316d32c1b10b7a710e0c45c8d3ccbaaa2dfcb371090"
+}

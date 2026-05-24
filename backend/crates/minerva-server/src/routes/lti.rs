@@ -1693,6 +1693,16 @@ struct PlatformResponse {
     /// reviewed yet; launches against this row are refused). Non-null
     /// timestamp = active.
     activated_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Non-NULL means the platform's token endpoint has been continuously
+    /// rejecting our client_credentials since this timestamp. Drives the
+    /// "Orphaned by LMS" badge in the admin UI + the 30-day auto-delete.
+    /// NULL means healthy (or never probed).
+    invalid_client_since: Option<chrono::DateTime<chrono::Utc>>,
+    /// Most recent probe outcome (free-form bucket: `ok`, `invalid_client`,
+    /// `http_<code>`, `network`, `parse_error`). Surface for diagnosis;
+    /// UI mostly cares about `invalid_client_since` for the badge.
+    last_health_check_status: Option<String>,
+    last_health_check_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 fn platform_to_response(
@@ -1712,6 +1722,9 @@ fn platform_to_response(
         moodle_config: build_moodle_config(base_url),
         allowed_eppn_domains: p.allowed_eppn_domains.unwrap_or_default(),
         activated_at: p.activated_at,
+        invalid_client_since: p.invalid_client_since,
+        last_health_check_status: p.last_health_check_status,
+        last_health_check_at: p.last_health_check_at,
     }
 }
 

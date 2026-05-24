@@ -111,7 +111,7 @@ struct MemberMessage {
 /// `exp` window.
 const IAT_CLOCK_SKEW_TOLERANCE_SECS: i64 = 60;
 
-fn mint_client_assertion(
+pub(crate) fn mint_client_assertion(
     state: &AppState,
     client_id: &str,
     token_url: &str,
@@ -456,4 +456,86 @@ pub async fn reconcile_context(
         removed,
         warning,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Platform health probe (orphan-LMS detection)
+// ---------------------------------------------------------------------------
+
+/// Probe a platform's token endpoint with a throwaway `client_credentials`
+/// JWT. Used by the daily platform-health sweep to detect when the LMS
+/// has deleted our registration on its side (so we can clean up our row
+/// after a grace period). Returns the bucketed status string
+/// `record_platform_health` expects:
+///   * `ok`              -> token endpoint accepted the assertion
+///   * `invalid_client`  -> platform rejected the client_id (orphan)
+///   * `http_<code>`     -> other non-2xx (transient or platform bug)
+///   * `network`         -> request didn't complete (LMS down, DNS, etc.)
+///   * `parse_error`     -> response body wasn't parseable
+///
+/// We DO NOT use the access token here: the health probe only needs to
+/// know whether the platform still recognises us. Same scope the NRPS
+/// reconcile would ask for, since restricting to a scope the platform
+/// won't grant could itself trigger `invalid_client` on some platforms;
+/// using the always-valid NRPS scope keeps the probe a faithful proxy
+/// for "could a real NRPS sync succeed if we ran it now."
+pub async fn probe_platform_health(
+    state: &AppState,
+    platform: &minerva_db::queries::lti::PlatformRow,
+) -> String {
+    let assertion =
+        match mint_client_assertion(state, &platform.client_id, &platform.auth_token_url) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!(
+                    "lti health: mint failed for platform {}: {}",
+                    platform.id,
+                    e
+                );
+                return "parse_error".into();
+            }
+        };
+    let body = format!(
+        "grant_type=client_credentials&client_assertion_type={}&client_assertion={}&scope={}",
+        urlencoding::encode(CLIENT_ASSERTION_TYPE),
+        urlencoding::encode(&assertion),
+        urlencoding::encode(NRPS_SCOPE),
+    );
+    let resp = state
+        .http_client
+        .post(&platform.auth_token_url)
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
+        .body(body)
+        .send()
+        .await;
+    let resp = match resp {
+        Ok(r) => r,
+        Err(_) => return "network".into(),
+    };
+    let status = resp.status();
+    if status.is_success() {
+        return "ok".into();
+    }
+    // Try to read the OAuth2 error code. Per RFC 6749 the response body
+    // is `{"error": "invalid_client", ...}`. Some platforms also use 401
+    // without a body; treat those as `invalid_client` too because there
+    // is no other realistic interpretation of "token endpoint refused
+    // our client_credentials".
+    let text = resp.text().await.unwrap_or_default();
+    let parsed: Option<serde_json::Value> = serde_json::from_str(&text).ok();
+    let err_code = parsed
+        .as_ref()
+        .and_then(|v| v.get("error"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if err_code == "invalid_client"
+        || (status.as_u16() == 401 && err_code.is_empty())
+        || (status.as_u16() == 404 && err_code.is_empty())
+    {
+        return "invalid_client".into();
+    }
+    format!("http_{}", status.as_u16())
 }

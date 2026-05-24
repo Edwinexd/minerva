@@ -750,6 +750,15 @@ export interface LtiPlatform {
   /// authenticate launches until an integrator clicks Approve). Non-null =
   /// active, launches and NRPS work normally.
   activated_at: string | null
+  /// Non-null = the LMS has been continuously rejecting our
+  /// client_credentials since this timestamp ("invalid_client" or 401/404
+  /// from the token endpoint). Worker auto-deletes after 30 days; until
+  /// then the admin UI flags the row for manual review.
+  invalid_client_since: string | null
+  /// Most recent platform-health probe bucket: "ok" | "invalid_client" |
+  /// "http_<code>" | "network" | "parse_error". null = never probed yet.
+  last_health_check_status: string | null
+  last_health_check_at: string | null
 }
 
 export interface LtiNrpsStatus {

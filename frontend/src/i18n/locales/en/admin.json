@@ -97,7 +97,9 @@
     "approveAndActivate": "Approve and activate",
     "approveEmptyConfirm": "Approving with an empty eppn-domain list means this platform can mint launches claiming ANY eppn (including admin accounts). Are you sure?",
     "statusPending": "Pending approval",
+    "statusOrphaned": "Orphaned by LMS",
     "pendingExplain": "Installed via LTI Dynamic Registration. Until you approve it, this platform CANNOT authenticate launches against Minerva. Unapproved platforms are automatically deleted after 7 days. Verify the issuer and client id below match the LMS you expect, then approve.",
+    "orphanedExplain": "The LMS has been rejecting our client credentials since {{since}} (likely because the tool was deleted on their side). Minerva will cascade-delete this row 30 days after that timestamp; remove it manually if you want it gone now.",
     "showBindings": "Show bindings",
     "hideBindings": "Hide bindings",
     "noBindings": "No Moodle/Canvas courses have been linked to this platform yet.",
@@ -137,6 +139,8 @@
     "afterNote": "After this, a Minerva integrator must click Approve in Minerva to activate the platform. They can adjust the scope you set here before approving.",
     "doneTitle": "Suggestion recorded",
     "doneBody": "Thanks. A Minerva integrator must still approve this platform in the admin UI before it can authenticate launches.",
+    "donePrompt": "If you're also a Minerva integrator, open Minerva now to approve the platform. Otherwise, hand off to an integrator and close this window.",
+    "openMinervaButton": "Open Minerva to approve",
     "closeButton": "Close"
   },
   "usage": {

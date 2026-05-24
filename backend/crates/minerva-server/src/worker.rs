@@ -286,6 +286,71 @@ pub fn start(state: AppState, max_concurrent: usize) {
         });
     }
 
+    // Platform-health probe: every active platform's token endpoint is
+    // pinged daily with a throwaway client_credentials JWT. If the LMS
+    // rejects with `invalid_client` continuously for 30 days, the row
+    // is cascade-deleted (bindings + NRPS contexts go with it via FK).
+    // This is how we detect "the LMS admin deleted us"; the spec
+    // doesn't notify the tool, so we have to ask.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            const PROBE_INTERVAL: std::time::Duration =
+                std::time::Duration::from_secs(24 * 60 * 60);
+            const ORPHAN_GRACE_DAYS: i32 = 30;
+            loop {
+                tokio::time::sleep(PROBE_INTERVAL).await;
+                let platforms = match minerva_db::queries::lti::list_platforms_for_health_check(
+                    &state.db,
+                )
+                .await
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::error!("lti health: list query failed: {}", e);
+                        continue;
+                    }
+                };
+                for p in &platforms {
+                    let status = crate::lti_nrps::probe_platform_health(&state, p).await;
+                    if let Err(e) =
+                        minerva_db::queries::lti::record_platform_health(&state.db, p.id, &status)
+                            .await
+                    {
+                        tracing::error!(
+                            "lti health: failed to record probe for platform {}: {}",
+                            p.id,
+                            e
+                        );
+                        continue;
+                    }
+                    if status != "ok" {
+                        tracing::warn!(
+                            "lti health: platform {} ({}) probe -> {}",
+                            p.id,
+                            p.issuer,
+                            status
+                        );
+                    }
+                }
+                match minerva_db::queries::lti::delete_long_orphaned_platforms(
+                    &state.db,
+                    ORPHAN_GRACE_DAYS,
+                )
+                .await
+                {
+                    Ok(0) => {}
+                    Ok(n) => tracing::warn!(
+                        "lti health: cascade-deleted {} platform row(s) the LMS has been rejecting for {}+ days",
+                        n,
+                        ORPHAN_GRACE_DAYS
+                    ),
+                    Err(e) => tracing::error!("lti health: orphan delete failed: {}", e),
+                }
+            }
+        });
+    }
+
     tokio::spawn(async move {
         // Crash recovery: any document left in 'processing' was interrupted.
         match minerva_db::queries::documents::reset_stale_processing(&state.db).await {

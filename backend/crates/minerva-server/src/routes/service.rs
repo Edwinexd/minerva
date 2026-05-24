@@ -129,51 +129,79 @@ async fn submit_transcript(
             return Err(AppError::bad_request("service.transcript_empty"));
         }
 
-        // Save transcript as .txt file.
-        let dir = format!("{}/{}", state.config.docs_path, doc.course_id);
-        let txt_path = format!("{}/{}.txt", dir, doc.id);
-        tokio::fs::write(&txt_path, text.as_bytes())
-            .await
-            .map_err(|e| AppError::Internal(format!("failed to write transcript: {}", e)))?;
-
-        // Update DB: new filename, mime type, size, reset to pending.
-        // The classifier never sees filenames; it decides
-        // lecture_transcript vs lecture from the actual content (a VTT
-        // transcript is recognisable by its disfluencies and lack of
-        // structure). So we just swap .url for .txt without injecting
-        // any marker token.
-        let new_filename = doc
+        // Materialize the transcript as a child of the URL doc. The
+        // classifier never sees filenames; it decides lecture_transcript
+        // vs lecture from the actual content (a VTT transcript is
+        // recognisable by its disfluencies and lack of structure). So
+        // we just drop the `.url` suffix and append `.txt` without
+        // injecting any marker token.
+        let child_filename = doc
             .filename
             .strip_suffix(".url")
             .unwrap_or(&doc.filename)
             .to_string()
             + ".txt";
         let size_bytes = text.len() as i64;
-
         let content_hash = super::documents::compute_content_hash(text.as_bytes());
-        let updated = minerva_db::queries::documents::replace_with_transcript(
+
+        // Write file under the child's id so the parent URL stub stays
+        // intact on disk. If the DB transaction below fails we clean
+        // up the orphaned file before returning.
+        let child_id = Uuid::new_v4();
+        let dir = format!("{}/{}", state.config.docs_path, doc.course_id);
+        let txt_path = format!("{}/{}.txt", dir, child_id);
+        tokio::fs::write(&txt_path, text.as_bytes())
+            .await
+            .map_err(|e| AppError::Internal(format!("failed to write transcript: {}", e)))?;
+
+        let result = minerva_db::queries::documents::insert_tracked_child(
             &state.db,
             doc.id,
-            &new_filename,
-            "text/plain",
-            size_bytes,
-            Some(&content_hash),
+            "awaiting_transcript",
+            minerva_db::queries::documents::NewDocument {
+                id: child_id,
+                course_id: doc.course_id,
+                filename: &child_filename,
+                mime_type: "text/plain",
+                size_bytes,
+                uploaded_by: doc.uploaded_by,
+                // URL identity lives on the parent only; the per-course
+                // `source_url` unique index would otherwise collide.
+                // Consumers follow `parent_document_id` to recover the URL.
+                source_url: None,
+                content_hash: Some(&content_hash),
+                source_system: None,
+                source_ref: None,
+                parent_document_id: Some(doc.id),
+            },
         )
-        .await?;
+        .await;
 
-        if !updated {
-            return Err(AppError::bad_request("service.status_changed_concurrently"));
+        match result {
+            Ok(_) => {}
+            Err(sqlx::Error::RowNotFound) => {
+                let _ = tokio::fs::remove_file(&txt_path).await;
+                return Err(AppError::bad_request("service.status_changed_concurrently"));
+            }
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&txt_path).await;
+                return Err(e.into());
+            }
         }
 
         tracing::info!(
-            "transcript submitted for document {} ({} bytes), re-queued for ingestion",
+            "transcript submitted for url doc {} ({} bytes); materialized as child {} ({}), parent now tracked",
             doc.id,
             size_bytes,
+            child_id,
+            child_filename,
         );
 
-        Ok(Json(
-            serde_json::json!({ "status": "queued", "filename": new_filename }),
-        ))
+        Ok(Json(serde_json::json!({
+            "status": "queued",
+            "child_id": child_id,
+            "filename": child_filename,
+        })))
     } else if let Some(error) = &body.error {
         // Mark as failed so we don't retry.
         let _ = sqlx::query!(
@@ -354,9 +382,10 @@ async fn create_url_document(
     // content_hash of the URL bytes for cross-system dedup: two different
     // discovery paths landing on the same play.dsv.su.se URL now collapse
     // even if one of them omitted `source_url` (none currently do, but the
-    // hash is cheap insurance). Doesn't subsume `source_url` because the
-    // URL doc later gets its mime + bytes rewritten with the transcript;
-    // see `replace_with_transcript`.
+    // hash is cheap insurance). The URL doc stays `text/x-url` for its
+    // entire lifetime; the materialized transcript is a separate child
+    // doc (see `submit_transcript`), so the hash here is permanently the
+    // hash of the URL string, never re-targeted.
     let content_hash = super::documents::compute_content_hash(url.as_bytes());
     let insert_result = minerva_db::queries::documents::insert(
         &state.db,
@@ -371,6 +400,9 @@ async fn create_url_document(
             content_hash: Some(&content_hash),
             source_system: None,
             source_ref: None,
+            // The URL stub is itself a first-class doc; it's the *parent*
+            // for whatever the ingest pipeline materializes from it.
+            parent_document_id: None,
         },
     )
     .await;

@@ -4,6 +4,7 @@ mod config;
 mod error;
 mod ext_obfuscate;
 mod feature_flags;
+mod github_url;
 pub mod lti;
 mod lti_nrps;
 mod model_capabilities;

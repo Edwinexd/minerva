@@ -133,17 +133,55 @@ kubectl get pods -n minerva    # Check status
 gunzip -c /data0/minerva/backups/minerva-DATE.sql.gz | kubectl exec -i -n minerva deploy/postgres; psql -U minerva -d minerva
 ```
 
+## URL Document Routing
+
+Documents have a parent-child shape (column `documents.parent_document_id`,
+FK to `documents.id`, ON DELETE CASCADE; see migration
+`20260524000005_document_parent_link.sql`):
+
+- A `.url` stub (`text/x-url`) is a **first-class parent** doc; it never
+  changes mime/filename/bytes after creation, and is the permanent
+  record of "this URL was tracked from {when, by what source}".
+- When the ingest worker (or the transcript pipeline) materializes the
+  bytes behind a URL, it inserts a **child** doc with
+  `parent_document_id = url_doc.id`, writes the bytes under the child's
+  uuid, and flips the parent's `status` to `tracked`. The child is what
+  gets chunked, embedded, and shown in chat retrieval.
+- `delete_document` walks children first (clears their Qdrant vectors +
+  files on disk), then deletes the parent; the FK cascade removes the
+  child rows in the same transaction.
+
+When the ingest worker claims a `.url` stub the routing is:
+
+1. **GitHub PDF link** (`/raw/`, `/blob/`, `raw.githubusercontent.com`,
+   `/releases/download/{tag}/`, `/releases/latest/download/`; see
+   `github_url::detect`): downloaded inline by the worker,
+   magic-bytes-validated (`%PDF-`), capped at `MAX_UPLOAD_BYTES`. A
+   child doc is inserted (`application/pdf`, fresh uuid) and the parent
+   moves to `tracked`. Failures (404, oversized response, non-PDF body)
+   set the parent's `status = 'failed'` with a clear `error_msg`; no
+   child is created.
+2. **play.dsv.su.se link**: row moves to `awaiting_transcript`; the
+   external transcript pipeline (below) creates the child when it has
+   the VTT bytes.
+3. **Anything else**: row moves to `unsupported`.
+
+Children are exempt from the `(course_id, content_hash)` dedup index
+(their identity is their parent URL, not their bytes) and don't carry
+`source_url` themselves (the unique stub index would collide with
+the parent); consumers that need the URL follow `parent_document_id`.
+
 ## Transcript Pipeline (play.dsv.su.se)
 
 Indexes video transcripts from DSV Play into Minerva as searchable documents.
 
 **Flow:**
 1. Moodle sync uploads play.dsv.su.se URLs as `.url` files (`text/x-url` MIME type)
-2. Worker claims them, reads the URL, and routes: play.dsv.su.se → `awaiting_transcript`, others → `unsupported`
+2. Worker claims them, reads the URL, and routes per "URL Document Routing" above
 3. `transcripts.yml` workflow runs hourly, calls `GET /api/service/pending-transcripts`
 4. Python script (`scripts/fetch_transcripts.py`) uses `dsv-wrapper` to fetch VTT transcripts
 5. Script posts transcript text back via `POST /api/service/documents/{id}/transcript`
-6. Backend saves as `.txt`, changes mime to `text/plain`, resets to `pending`; the worker then claims, chunks, and embeds it
+6. Backend inserts a child doc (`text/plain`, status `pending`) under a fresh uuid, leaves the parent `.url` stub on disk and in the DB, and atomically flips the parent to `tracked`. The worker then claims the child, chunks, and embeds it.
 
 **Service API:** `/api/service/` routes use `MINERVA_SERVICE_API_KEY` (env var, not per-course). Separate from `/api/integration/` to avoid SSO routing.
 

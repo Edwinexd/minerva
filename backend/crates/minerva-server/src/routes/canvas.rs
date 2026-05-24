@@ -1024,6 +1024,7 @@ async fn create_file_doc(
             content_hash: Some(&content_hash),
             source_system: None,
             source_ref: None,
+            parent_document_id: None,
         },
     )
     .await?;
@@ -1148,6 +1149,7 @@ async fn sync_page(
             content_hash: Some(&content_hash),
             source_system: None,
             source_ref: None,
+            parent_document_id: None,
         },
     )
     .await?;
@@ -1228,6 +1230,7 @@ async fn sync_url(
             content_hash: Some(&content_hash),
             source_system: None,
             source_ref: None,
+            parent_document_id: None,
         },
     )
     .await;

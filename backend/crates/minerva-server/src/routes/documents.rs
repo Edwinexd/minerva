@@ -89,6 +89,12 @@ struct DocumentResponse {
     /// deleted. Orphaned docs are excluded from new retrievals but
     /// kept so chat-history citations resolve.
     orphaned_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Parent URL doc id for materialized children. `null` for first-class
+    /// docs (teacher uploads, Moodle syncs, URL stubs themselves), set
+    /// for the PDF / transcript an ingest worker produced from a URL
+    /// stub. The frontend uses this to surface "this PDF came from
+    /// {parent URL}" in the docs list.
+    parent_document_id: Option<Uuid>,
 }
 
 impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
@@ -113,6 +119,7 @@ impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
             source_system: row.source_system,
             source_ref: row.source_ref,
             orphaned_at: row.orphaned_at,
+            parent_document_id: row.parent_document_id,
         }
     }
 }
@@ -219,6 +226,9 @@ pub async fn upload_or_dedup(
             content_hash: Some(&content_hash),
             source_system,
             source_ref,
+            // Teacher / Moodle / Canvas uploads are first-class; only the
+            // worker materializing a `text/x-url` stub sets a parent.
+            parent_document_id: None,
         },
     )
     .await?;
@@ -563,8 +573,11 @@ async fn delete_document(
         return Err(AppError::NotFound);
     }
 
-    // Delete vectors from Qdrant first; if this fails we can retry safely
-    // without leaving orphaned vectors behind.
+    // URL parents cascade-delete their children at the DB level
+    // (ON DELETE CASCADE), but Qdrant vectors and on-disk files don't
+    // know about the cascade. Walk children first so a deleted URL stub
+    // doesn't leave orphaned PDF/transcript bytes + vectors behind.
+    let children = minerva_db::queries::documents::list_children(&state.db, doc_id).await?;
     let collection_name =
         minerva_ingest::pipeline::collection_name(course_id, course.embedding_version);
     let collection_exists = state
@@ -572,34 +585,41 @@ async fn delete_document(
         .collection_exists(&collection_name)
         .await
         .unwrap_or(false);
+
+    let mut all_ids: Vec<Uuid> = children.iter().map(|c| c.id).collect();
+    all_ids.push(doc_id);
+
     if collection_exists {
-        let filter =
-            qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
-                "document_id",
-                doc_id.to_string(),
-            )]);
-        state
-            .qdrant
-            .delete_points(
-                DeletePointsBuilder::new(&collection_name)
-                    .points(filter)
-                    .wait(true),
-            )
-            .await
-            .map_err(|e| AppError::Internal(format!("qdrant delete failed: {}", e)))?;
+        for id in &all_ids {
+            let filter =
+                qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
+                    "document_id",
+                    id.to_string(),
+                )]);
+            state
+                .qdrant
+                .delete_points(
+                    DeletePointsBuilder::new(&collection_name)
+                        .points(filter)
+                        .wait(true),
+                )
+                .await
+                .map_err(|e| AppError::Internal(format!("qdrant delete failed: {}", e)))?;
+        }
     }
 
-    // Delete from DB
+    // Delete the parent from DB; FK cascade removes child rows.
     minerva_db::queries::documents::delete(&state.db, doc_id).await?;
 
-    // Delete file from disk; try common extensions since we don't store the ext in DB.
-    for ext in &["pdf", "docx", "doc", "pptx", "ppt", "txt", "html", "url"] {
-        let file_path = format!(
-            "{}/{}/{}.{}",
-            state.config.docs_path, course_id, doc_id, ext
-        );
-        if tokio::fs::remove_file(&file_path).await.is_ok() {
-            break;
+    // Delete files from disk; try common extensions since we don't store
+    // the ext in DB. Walk every (parent + child) id so the cascade doesn't
+    // leak bytes onto the filesystem.
+    for id in &all_ids {
+        for ext in &["pdf", "docx", "doc", "pptx", "ppt", "txt", "html", "url"] {
+            let file_path = format!("{}/{}/{}.{}", state.config.docs_path, course_id, id, ext);
+            if tokio::fs::remove_file(&file_path).await.is_ok() {
+                break;
+            }
         }
     }
 

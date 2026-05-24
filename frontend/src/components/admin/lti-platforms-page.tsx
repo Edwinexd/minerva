@@ -139,6 +139,22 @@ export function LtiPlatformsPanel() {
                     <p className="text-xs text-muted-foreground">
                       {t("ltiPlatforms.manualSetupHint")}
                     </p>
+                    {setup.steps.length > 0 && (
+                      <div className="space-y-2">
+                        <Label className="text-xs font-medium uppercase text-muted-foreground tracking-wide">
+                          {t("ltiPlatforms.manualSetupStepsHeading")}
+                        </Label>
+                        <ol className="list-decimal space-y-1.5 pl-5 text-sm">
+                          {setup.steps.map((step, i) => (
+                            <li key={i}>{step}</li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+                    <Separator />
+                    <Label className="text-xs font-medium uppercase text-muted-foreground tracking-wide">
+                      {t("ltiPlatforms.manualSetupValuesHeading")}
+                    </Label>
                     {[
                       { label: t("ltiPlatforms.toolUrl"), value: config.tool_url, key: "tool_url" },
                       { label: t("ltiPlatforms.ltiVersion"), value: config.lti_version, key: "lti_version" },

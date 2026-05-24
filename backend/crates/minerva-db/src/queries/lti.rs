@@ -116,7 +116,11 @@ pub struct PlatformRow {
     pub auth_login_url: String,
     pub auth_token_url: String,
     pub platform_jwks_url: String,
-    pub created_by: Uuid,
+    /// NULL when the row was installed via LTI Dynamic Registration (the
+    /// `/lti/dynamic-register` endpoint is public so there's no logged-in
+    /// user to attribute it to). `Some(user.id)` when an integrator
+    /// created the platform manually via the admin UI.
+    pub created_by: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     /// NULL or empty = no eppn restriction. See the migration comment for
@@ -132,7 +136,9 @@ pub struct CreatePlatform<'a> {
     pub auth_login_url: &'a str,
     pub auth_token_url: &'a str,
     pub platform_jwks_url: &'a str,
-    pub created_by: Uuid,
+    /// `None` when installed via Dynamic Registration; `Some(user.id)` for
+    /// manual creates.
+    pub created_by: Option<Uuid>,
     pub allowed_eppn_domains: Option<&'a [String]>,
 }
 

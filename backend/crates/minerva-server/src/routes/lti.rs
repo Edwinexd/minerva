@@ -54,6 +54,12 @@ pub fn public_router() -> Router<AppState> {
         .route("/jwks", get(jwks))
         .route("/icon.svg", get(icon_svg))
         .route("/icon.png", get(icon_png))
+        // Dynamic Registration MUST live under /lti/* so Apache's Shib carve-
+        // out applies: the LMS popup hits this URL with `openid_configuration`
+        // + `registration_token` query params, and a Shib redirect dance
+        // here would both eat the query string and break the LTI spec's
+        // platform-driven trust model (registration_token is the auth).
+        .route("/dynamic-register", get(dynamic_register))
 }
 
 /// Public-but-not-LTI-protocol routes: the bind picker sits here because it's
@@ -80,7 +86,6 @@ pub fn course_router() -> Router<AppState> {
 pub fn admin_router() -> Router<AppState> {
     Router::new()
         .route("/lti/setup", get(admin_lti_setup))
-        .route("/lti/dynamic-register", get(dynamic_register))
         .route("/lti/platforms", get(list_platforms).post(create_platform))
         .route("/lti/platforms/{platform_id}", delete(delete_platform))
         .route(
@@ -1212,7 +1217,7 @@ fn build_admin_setup_response(base_url: &str) -> LtiSetupResponse {
         // auto-installs Minerva with NRPS scope + name/email sharing +
         // user_eppn custom parameter, so the manual steps below are only
         // needed when the LMS doesn't support Dynamic Registration.
-        dynamic_registration_url: Some(format!("{}/api/admin/lti/dynamic-register", base_url)),
+        dynamic_registration_url: Some(format!("{}/lti/dynamic-register", base_url)),
         steps: vec![
             "In Moodle, go to Site administration > Plugins > Activity modules > External tool > Manage tools, then 'configure a tool manually'.".into(),
             format!("Set Tool URL to: {}", config.tool_url),
@@ -1441,22 +1446,19 @@ fn dynreg_error_html(detail: &str) -> Response {
     )
 }
 
-/// GET /admin/lti/dynamic-register: the IMS LTI 1.3 Dynamic Registration
-/// flow entry point. The LMS opens this in a popup; we drive the rest of
-/// the handshake server-to-server. Errors are surfaced as HTML in the
-/// popup (not JSON) so the admin sees actionable text without having to
-/// crack open devtools.
+/// GET /lti/dynamic-register: the IMS LTI 1.3 Dynamic Registration flow
+/// entry point. The LMS opens this in a popup; we drive the rest of the
+/// handshake server-to-server. The endpoint is intentionally unauthenticated
+/// on the tool side: the platform's `registration_token` (which we forward
+/// to the platform's `registration_endpoint`) is the source of trust, and
+/// a Shibboleth bounce here would both eat the query string and break the
+/// spec's platform-driven flow. Errors are surfaced as HTML in the popup
+/// (not JSON) so the admin sees actionable text without devtools.
 async fn dynamic_register(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
     Query(params): Query<DynamicRegistrationParams>,
 ) -> Result<Response, AppError> {
-    // Auth check returns the standard 401/403 JSON; that's correct because
-    // an unauth'd hit means the admin isn't logged in to Minerva yet and
-    // needs the usual Shibboleth bounce, not a friendly HTML page.
-    require_site_integrator(&user)?;
-
-    match do_dynamic_register(&state, &user, &params).await {
+    match do_dynamic_register(&state, &params).await {
         Ok(resp) => Ok(resp),
         Err(detail) => Ok(dynreg_error_html(&detail)),
     }
@@ -1464,7 +1466,6 @@ async fn dynamic_register(
 
 async fn do_dynamic_register(
     state: &AppState,
-    user: &User,
     params: &DynamicRegistrationParams,
 ) -> Result<Response, String> {
     // 1. Fetch the platform's OIDC configuration. We trust the URL because
@@ -1567,7 +1568,10 @@ async fn do_dynamic_register(
             auth_login_url: &oidc.authorization_endpoint,
             auth_token_url: &oidc.token_endpoint,
             platform_jwks_url: &oidc.jwks_uri,
-            created_by: user.id,
+            // No logged-in user: dynreg is public by design (platform token
+            // is the source of trust). created_by stays NULL to mark this
+            // row as "installed via Dynamic Registration".
+            created_by: None,
             allowed_eppn_domains: None,
         },
     )
@@ -1699,7 +1703,7 @@ async fn create_platform(
             auth_login_url: &auth_login_url,
             auth_token_url: &auth_token_url,
             platform_jwks_url: &platform_jwks_url,
-            created_by: user.id,
+            created_by: Some(user.id),
             allowed_eppn_domains: domains_for_db,
         },
     )

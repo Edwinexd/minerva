@@ -125,7 +125,7 @@ class sync_materials extends \core\task\scheduled_task {
         // gaps, restore-from-backup) and runs even when no new items
         // were uploaded this round.
         try {
-            $currentrefs = self::current_source_refs($link->courseid, $allitems);
+            $currentrefs = self::current_source_refs($allitems);
             $orphaned = $client->reconcile_source_refs($link->minerva_course_id, $currentrefs);
             if (!empty($orphaned)) {
                 mtrace(
@@ -229,43 +229,30 @@ class sync_materials extends \core\task\scheduled_task {
 
     /**
      * Collect every source_ref the plugin currently considers "present"
-     * for this course. Includes both items already uploaded in past
-     * runs (from local_minerva_sync_log) AND items discovered this run
-     * but not yet uploaded. Excludes items whose sourceref is null
-     * (legacy sync_log rows from before slice 2 rolled out; those are
-     * reconciled out over time as the corresponding Moodle objects
-     * get edited or re-discovered).
+     * for this course, derived purely from what was discovered this run.
      *
-     * Used by sync_course() to post a reconcile sweep to Minerva at
-     * the end of each run, orphaning anything in Minerva whose Moodle
-     * source has disappeared since the last sync.
+     * Discovery is authoritative: find_all_resources re-walks every cm,
+     * book chapter, section, etc. on every run, so an item missing from
+     * `$discovered` means it's gone (deleted, hidden, or feature-toggled
+     * off ; e.g. forum sync flipped from on to off). Reconcile then
+     * orphans anything in Minerva whose source_ref isn't in this list.
      *
-     * @param int $courseid Moodle course id.
+     * Earlier versions also unioned in `local_minerva_sync_log` rows as
+     * a "still uploaded last time" fallback ; that broke the
+     * feature-toggle-off case (sync_forums: 1 -> 0 left the forum doc
+     * un-orphaned because its ref was still in sync_log). Trusting
+     * discovery alone matches the user-facing contract:
+     * "delete-in-Moodle = delete-in-Minerva, immediately."
+     *
      * @param \stdClass[] $discovered Items the current sync found (with sourceref).
      * @return string[] Deduped list of currently-known source_refs.
      */
-    public static function current_source_refs(int $courseid, array $discovered): array {
-        global $DB;
-
+    public static function current_source_refs(array $discovered): array {
         $refs = [];
-        // Discovered this run.
         foreach ($discovered as $item) {
             if (!empty($item->sourceref)) {
                 $refs[$item->sourceref] = true;
             }
-        }
-        // Previously uploaded (covers items that weren't re-discovered
-        // this run because they didn't actually change ; reconcile only
-        // orphans missing-from-the-list, so an unchanged item that's
-        // still in sync_log must appear).
-        $logrefs = $DB->get_fieldset_select(
-            'local_minerva_sync_log',
-            'sourceref',
-            'courseid = :courseid AND sourceref IS NOT NULL AND sourceref <> :empty',
-            ['courseid' => $courseid, 'empty' => '']
-        );
-        foreach ($logrefs as $r) {
-            $refs[$r] = true;
         }
         return array_keys($refs);
     }

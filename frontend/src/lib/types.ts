@@ -703,7 +703,19 @@ export interface MoodleToolConfig {
 
 export interface LtiSetup {
   moodle_tool_config: MoodleToolConfig
+  /**
+   * Step-by-step manual setup. Used as the fallback when the LMS doesn't
+   * support LTI Dynamic Registration, or when the admin clicks "manual
+   * setup" on the site-wide page.
+   */
   steps: string[]
+  /**
+   * Present on the site-wide admin response: pasting this URL into the
+   * LMS's "configure tool by URL" flow auto-installs the tool with the
+   * correct privacy, scopes, claims, and custom parameters. Absent on
+   * the per-course response (per-course flows can't use dynreg).
+   */
+  dynamic_registration_url?: string
 }
 
 export interface LtiRegistration {

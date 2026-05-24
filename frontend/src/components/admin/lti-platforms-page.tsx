@@ -84,48 +84,97 @@ export function LtiPlatformsPanel() {
           <CardTitle>{t("ltiPlatforms.setupTitle")}</CardTitle>
           <CardDescription>{t("ltiPlatforms.setupDescription")}</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {config ? (
-            <>
-              {[
-                { label: t("ltiPlatforms.toolUrl"), value: config.tool_url, key: "tool_url" },
-                { label: t("ltiPlatforms.ltiVersion"), value: config.lti_version, key: "lti_version" },
-                { label: t("ltiPlatforms.publicKeyType"), value: config.public_key_type, key: "public_key_type" },
-                { label: t("ltiPlatforms.publicKeysetUrl"), value: config.public_keyset_url, key: "keyset" },
-                { label: t("ltiPlatforms.initiateLoginUrl"), value: config.initiate_login_url, key: "login" },
-                { label: t("ltiPlatforms.redirectionUris"), value: config.redirection_uris, key: "redirect" },
-                { label: t("ltiPlatforms.customParameters"), value: config.custom_parameters, key: "custom" },
-                { label: t("ltiPlatforms.iconUrl"), value: config.icon_url, key: "icon" },
-              ].map(({ label, value, key }) => (
-                <div key={key} className="flex items-center justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <Label className="text-xs text-muted-foreground">{label}</Label>
-                    <code className="block text-sm bg-muted px-2 py-1 rounded truncate">{value}</code>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => copyToClipboard(value, key)}
-                  >
-                    {copiedField === key ? t("ltiPlatforms.copied") : tCommon("actions.copy")}
-                  </Button>
-                  <output className="sr-only">
-                    {copiedField === key ? t("ltiPlatforms.copied") : ""}
-                  </output>
-                </div>
-              ))}
-              <Separator />
-              <p className="text-sm text-muted-foreground">
-                {t("ltiPlatforms.siteLevelNote")}
-              </p>
-            </>
-          ) : (
+        <CardContent className="space-y-4">
+          {!setup ? (
             <div className="space-y-2">
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-full" />
             </div>
+          ) : (
+            <>
+              {setup.dynamic_registration_url && (
+                <div className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold">
+                      {t("ltiPlatforms.dynregHeading")}
+                    </h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {t("ltiPlatforms.dynregDescription")}
+                  </p>
+                  <div className="flex items-center justify-between gap-4">
+                    <code className="block flex-1 truncate rounded bg-background px-2 py-1 text-sm">
+                      {setup.dynamic_registration_url}
+                    </code>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => copyToClipboard(setup.dynamic_registration_url!, "dynreg")}
+                    >
+                      {copiedField === "dynreg"
+                        ? t("ltiPlatforms.copied")
+                        : tCommon("actions.copy")}
+                    </Button>
+                    <output className="sr-only">
+                      {copiedField === "dynreg" ? t("ltiPlatforms.copied") : ""}
+                    </output>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("ltiPlatforms.dynregMoodlePath")}
+                  </p>
+                </div>
+              )}
+
+              {config && (
+                <details className="group rounded-md border [&_summary::-webkit-details-marker]:hidden">
+                  <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-sm font-medium select-none">
+                    <span aria-hidden className="transition-transform group-open:rotate-90">
+                      ▶
+                    </span>
+                    {t("ltiPlatforms.manualSetupToggle")}
+                  </summary>
+                  <div className="space-y-3 border-t px-4 py-3">
+                    <p className="text-xs text-muted-foreground">
+                      {t("ltiPlatforms.manualSetupHint")}
+                    </p>
+                    {[
+                      { label: t("ltiPlatforms.toolUrl"), value: config.tool_url, key: "tool_url" },
+                      { label: t("ltiPlatforms.ltiVersion"), value: config.lti_version, key: "lti_version" },
+                      { label: t("ltiPlatforms.publicKeyType"), value: config.public_key_type, key: "public_key_type" },
+                      { label: t("ltiPlatforms.publicKeysetUrl"), value: config.public_keyset_url, key: "keyset" },
+                      { label: t("ltiPlatforms.initiateLoginUrl"), value: config.initiate_login_url, key: "login" },
+                      { label: t("ltiPlatforms.redirectionUris"), value: config.redirection_uris, key: "redirect" },
+                      { label: t("ltiPlatforms.customParameters"), value: config.custom_parameters, key: "custom" },
+                      { label: t("ltiPlatforms.iconUrl"), value: config.icon_url, key: "icon" },
+                    ].map(({ label, value, key }) => (
+                      <div key={key} className="flex items-center justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <Label className="text-xs text-muted-foreground">{label}</Label>
+                          <code className="block text-sm bg-muted px-2 py-1 rounded truncate">{value}</code>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0"
+                          onClick={() => copyToClipboard(value, key)}
+                        >
+                          {copiedField === key ? t("ltiPlatforms.copied") : tCommon("actions.copy")}
+                        </Button>
+                        <output className="sr-only">
+                          {copiedField === key ? t("ltiPlatforms.copied") : ""}
+                        </output>
+                      </div>
+                    ))}
+                    <Separator />
+                    <p className="text-sm text-muted-foreground">
+                      {t("ltiPlatforms.siteLevelNote")}
+                    </p>
+                  </div>
+                </details>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

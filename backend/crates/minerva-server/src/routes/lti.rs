@@ -632,15 +632,29 @@ async fn lti_setup(
 struct LtiSetupResponse {
     /// Values to enter in Moodle's "Add new LTI External tool" form.
     moodle_tool_config: MoodleToolConfig,
-    /// Step-by-step instructions for the teacher.
+    /// Step-by-step manual setup instructions (the fallback when the LMS
+    /// doesn't support LTI 1.3 Dynamic Registration or the admin prefers
+    /// to configure by hand).
     steps: Vec<String>,
+    /// `Some(url)` on the site-level admin response: the LTI 1.3 Dynamic
+    /// Registration entry point. Pasting this URL into Moodle's "configure
+    /// a tool by URL" auto-installs the tool with the correct privacy,
+    /// scopes, claims, and custom parameters. Frontend renders this as the
+    /// recommended path and tucks `steps` behind a "manual setup" disclosure.
+    /// `None` on the per-course teacher response (dynreg is site-level only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dynamic_registration_url: Option<String>,
 }
 
 fn build_setup_response(base_url: &str) -> LtiSetupResponse {
     let config = build_moodle_config(base_url);
     LtiSetupResponse {
+        // Per-course registration: Dynamic Registration not applicable
+        // (dynreg targets the site-level platform path), so the manual
+        // walkthrough is the only path here.
+        dynamic_registration_url: None,
         steps: vec![
-            "In Moodle, go to your course → More → LTI External tools → Add tool.".into(),
+            "In Moodle, go to your course > More > LTI External tools > Add tool.".into(),
             format!("Set Tool URL to: {}", config.tool_url),
             format!("Set LTI version to: {}", config.lti_version),
             format!("Set Public key type to: {}", config.public_key_type),
@@ -1193,12 +1207,14 @@ async fn admin_lti_setup(
 fn build_admin_setup_response(base_url: &str) -> LtiSetupResponse {
     let config = build_moodle_config(base_url);
     LtiSetupResponse {
+        // Recommended path: structured field so the frontend can lead with
+        // it. Pasting this URL into the LMS's "configure tool by URL" flow
+        // auto-installs Minerva with NRPS scope + name/email sharing +
+        // user_eppn custom parameter, so the manual steps below are only
+        // needed when the LMS doesn't support Dynamic Registration.
+        dynamic_registration_url: Some(format!("{}/api/admin/lti/dynamic-register", base_url)),
         steps: vec![
-            format!(
-                "Fast path: in Moodle, Site administration > Plugins > Activity modules > External tool > Manage tools, paste this URL into 'Tool URL to be added' and click Add: {}/api/admin/lti/dynamic-register . Moodle will auto-configure tool URL, login URL, JWKS, NRPS scope, name+email sharing, and the user_eppn custom parameter via LTI Dynamic Registration. The rest of the steps below are only needed if you prefer to configure the tool manually.",
-                base_url
-            ),
-            "Manual path: in Moodle, go to Site administration > Plugins > Activity modules > External tool > Manage tools, then 'configure a tool manually'.".into(),
+            "In Moodle, go to Site administration > Plugins > Activity modules > External tool > Manage tools, then 'configure a tool manually'.".into(),
             format!("Set Tool URL to: {}", config.tool_url),
             format!("Set LTI version to: {}", config.lti_version),
             format!("Set Public key type to: {}", config.public_key_type),

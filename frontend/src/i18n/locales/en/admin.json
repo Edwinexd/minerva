@@ -52,7 +52,12 @@
   },
   "ltiPlatforms": {
     "setupTitle": "Site-level Moodle/Canvas configuration",
-    "setupDescription": "Copy these values into Moodle's Site administration → Plugins → Activity modules → External tool → Manage tools, or the equivalent Canvas Developer Key. Any course in the LMS can then use this tool without per-course setup.",
+    "setupDescription": "Register Minerva as a site-wide LTI 1.3 tool. Any course on the LMS can then use it without per-course setup.",
+    "dynregHeading": "Quick setup (recommended)",
+    "dynregDescription": "Paste this URL into Moodle's 'configure a tool by URL' input. Moodle will auto-install Minerva with the correct privacy settings, NRPS scope, claims, and custom parameters. No manual field copying needed.",
+    "dynregMoodlePath": "In Moodle: Site administration > Plugins > Activity modules > External tool > Manage tools.",
+    "manualSetupToggle": "Or configure manually",
+    "manualSetupHint": "Only needed if your LMS doesn't support LTI Dynamic Registration, or to inspect the values dynreg would have set. Copy each value into the matching field in Moodle's manual tool configuration form.",
     "toolUrl": "Tool URL",
     "ltiVersion": "LTI version",
     "publicKeyType": "Public key type",

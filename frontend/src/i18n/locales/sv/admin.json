@@ -52,7 +52,12 @@
   },
   "ltiPlatforms": {
     "setupTitle": "Konfiguration på webbplatsnivå för Moodle/Canvas",
-    "setupDescription": "Kopiera värdena nedan till Moodle: Webbplatsadministration → Plugin → Aktivitetsmoduler → Externt verktyg → Hantera verktyg, eller motsvarande Developer Key i Canvas. Efter det kan vilken kurs som helst använda verktyget utan egen konfiguration.",
+    "setupDescription": "Registrera Minerva som ett LTI 1.3-verktyg på webbplatsnivå. Då kan vilken kurs som helst i LMS:et använda verktyget utan egen konfiguration.",
+    "dynregHeading": "Snabb installation (rekommenderas)",
+    "dynregDescription": "Klistra in den här URL:en i Moodles fält 'konfigurera ett verktyg via URL'. Moodle installerar då Minerva automatiskt med rätt sekretessinställningar, NRPS-scope, claims och anpassade parametrar. Inga fält behöver kopieras manuellt.",
+    "dynregMoodlePath": "I Moodle: Webbplatsadministration > Plugin > Aktivitetsmoduler > Externt verktyg > Hantera verktyg.",
+    "manualSetupToggle": "Eller konfigurera manuellt",
+    "manualSetupHint": "Behövs bara om ditt LMS inte stöder LTI Dynamic Registration, eller om du vill granska vilka värden dynreg skulle ha satt. Kopiera varje värde till motsvarande fält i Moodles formulär för manuell verktygskonfiguration.",
     "toolUrl": "Verktygs-URL",
     "ltiVersion": "LTI-version",
     "publicKeyType": "Publik nyckeltyp",

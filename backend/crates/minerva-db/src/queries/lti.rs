@@ -219,15 +219,76 @@ pub async fn list_platforms(db: &PgPool) -> Result<Vec<PlatformRow>, sqlx::Error
     .await
 }
 
-/// Activate a pending (dynreg-installed) platform. No-op if already active.
-pub async fn activate_platform(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+/// Activate a pending (dynreg-installed) platform. Optionally overwrites
+/// `allowed_eppn_domains` atomically with the activation. Pass `None` for
+/// `eppn_domains` to leave the existing value untouched (e.g. if the admin
+/// already set it via the dynreg scope form and is approving without
+/// changing). Pass `Some(empty_vec)` to deliberately clear the allowlist
+/// (= trust any eppn). No-op if already active.
+pub async fn activate_platform(
+    db: &PgPool,
+    id: Uuid,
+    eppn_domains: Option<&[String]>,
+) -> Result<bool, sqlx::Error> {
+    let result = match eppn_domains {
+        Some(domains) => {
+            sqlx::query!(
+                "UPDATE lti_platforms SET activated_at = NOW(), updated_at = NOW(), allowed_eppn_domains = $2 WHERE id = $1 AND activated_at IS NULL",
+                id,
+                if domains.is_empty() { None } else { Some(domains) },
+            )
+            .execute(db)
+            .await?
+        }
+        None => {
+            sqlx::query!(
+                "UPDATE lti_platforms SET activated_at = NOW(), updated_at = NOW() WHERE id = $1 AND activated_at IS NULL",
+                id,
+            )
+            .execute(db)
+            .await?
+        }
+    };
+    Ok(result.rows_affected() > 0)
+}
+
+/// Set the suggested eppn-domain scope on a pending (still NULL
+/// `activated_at`) platform. Called from the public dynreg scope-form
+/// endpoint, BEFORE the integrator has approved the row. No-op if the
+/// row is already active (the form should never reach an active row, but
+/// guard anyway). Pass an empty slice to leave domains NULL (= "any eppn"
+/// suggestion).
+pub async fn set_pending_platform_scope(
+    db: &PgPool,
+    id: Uuid,
+    eppn_domains: &[String],
+) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
-        "UPDATE lti_platforms SET activated_at = NOW(), updated_at = NOW() WHERE id = $1 AND activated_at IS NULL",
+        "UPDATE lti_platforms SET allowed_eppn_domains = $2, updated_at = NOW() WHERE id = $1 AND activated_at IS NULL",
         id,
+        if eppn_domains.is_empty() { None } else { Some(eppn_domains) },
     )
     .execute(db)
     .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// Delete pending platform rows whose `created_at` is older than the
+/// supplied interval. Called periodically from the worker to clean up
+/// unapproved dynreg installs (which could otherwise pile up if anyone
+/// can hit the public dynreg endpoint). Returns the number of rows
+/// deleted so the worker can log it.
+pub async fn delete_stale_pending_platforms(
+    db: &PgPool,
+    max_age_hours: i32,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query!(
+        "DELETE FROM lti_platforms WHERE activated_at IS NULL AND created_at < NOW() - make_interval(hours => $1)",
+        max_age_hours,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
 }
 
 pub async fn delete_platform(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {

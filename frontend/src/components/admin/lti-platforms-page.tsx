@@ -8,6 +8,7 @@ import {
   adminLtiSetupQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { copyToClipboard as copyText } from "@/lib/clipboard"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import type { LtiPlatform } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -70,8 +71,10 @@ export function LtiPlatformsPanel() {
   })
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) =>
-      api.post(`/admin/lti/platforms/${id}/approve`, {}),
+    mutationFn: ({ id, domains }: { id: string; domains: string[] }) =>
+      api.post(`/admin/lti/platforms/${id}/approve`, {
+        allowed_eppn_domains: domains,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "lti", "platforms"] })
     },
@@ -79,10 +82,14 @@ export function LtiPlatformsPanel() {
 
   const config = setup?.moodle_tool_config
 
-  function copyToClipboard(text: string, field: string) {
-    navigator.clipboard.writeText(text)
-    setCopiedField(field)
-    setTimeout(() => setCopiedField(null), 2000)
+  async function copyToClipboard(text: string, field: string) {
+    // Uses the shared helper so the button works on plain-HTTP LAN URLs
+    // (where navigator.clipboard is undefined). See lib/clipboard.ts.
+    const ok = await copyText(text)
+    if (ok) {
+      setCopiedField(field)
+      setTimeout(() => setCopiedField(null), 2000)
+    }
   }
 
   return (
@@ -328,7 +335,9 @@ export function LtiPlatformsPanel() {
                 platform={p}
                 onDelete={() => deleteMutation.mutate(p.id)}
                 deleting={deleteMutation.isPending}
-                onApprove={() => approveMutation.mutate(p.id)}
+                onApprove={(domains) =>
+                  approveMutation.mutate({ id: p.id, domains })
+                }
                 approving={approveMutation.isPending}
               />
             ))}
@@ -349,11 +358,17 @@ function PlatformRow({
   platform: LtiPlatform
   onDelete: () => void
   deleting: boolean
-  onApprove: () => void
+  onApprove: (domains: string[]) => void
   approving: boolean
 }) {
   const { t } = useTranslation("admin")
   const [open, setOpen] = useState(false)
+  const [showApproveForm, setShowApproveForm] = useState(false)
+  // Pre-fill from whatever the dynreg iframe captured (or empty if the
+  // LMS admin skipped the form).
+  const [scopeInput, setScopeInput] = useState(
+    platform.allowed_eppn_domains.join(", "),
+  )
   // Bindings fetched lazily so the list view stays cheap when there are many
   // platforms; admins typically only inspect one at a time.
   const { data: bindings, isLoading } = useQuery({
@@ -366,6 +381,19 @@ function PlatformRow({
   })
 
   const pending = platform.activated_at === null
+
+  const submitApproval = () => {
+    const domains = scopeInput
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    if (domains.length === 0) {
+      if (!window.confirm(t("ltiPlatforms.approveEmptyConfirm"))) {
+        return
+      }
+    }
+    onApprove(domains)
+  }
 
   return (
     <div
@@ -409,8 +437,15 @@ function PlatformRow({
         </div>
         <div className="flex shrink-0 gap-2">
           {pending && (
-            <Button variant="default" size="sm" onClick={onApprove} disabled={approving}>
-              {t("ltiPlatforms.approve")}
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => setShowApproveForm((v) => !v)}
+              disabled={approving}
+            >
+              {showApproveForm
+                ? t("ltiPlatforms.approveCancel")
+                : t("ltiPlatforms.approve")}
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={() => setOpen((o) => !o)}>
@@ -421,6 +456,31 @@ function PlatformRow({
           </Button>
         </div>
       </div>
+
+      {pending && showApproveForm && (
+        <div className="border-t border-amber-500/40 bg-amber-50/50 p-3 dark:bg-amber-950/30">
+          <div className="space-y-2">
+            <Label htmlFor={`scope-${platform.id}`} className="text-xs font-medium">
+              {t("ltiPlatforms.approveScopeLabel")}
+            </Label>
+            <Input
+              id={`scope-${platform.id}`}
+              value={scopeInput}
+              onChange={(e) => setScopeInput(e.target.value)}
+              placeholder="dsv.su.se, su.se"
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("ltiPlatforms.approveScopeHint")}
+            </p>
+            <div className="flex gap-2 pt-1">
+              <Button variant="default" size="sm" onClick={submitApproval} disabled={approving}>
+                {t("ltiPlatforms.approveAndActivate")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {open && (
         <div className="border-t p-3">

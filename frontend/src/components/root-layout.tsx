@@ -28,6 +28,10 @@ export function RootLayout() {
   // carrying only an HMAC bind token. Fetching /auth/me here would 401 and
   // trigger the Shib redirect loop, so treat it like embed pages.
   const isLtiBind = window.location.pathname.startsWith("/lti/bind")
+  // LTI Dynamic Registration's scope-suggestion form lives at /lti/setup/<id>;
+  // it loads inside the LMS popup (no Minerva session expected) so it ALSO
+  // must not trigger a Shib fetch. Same treatment as the bind picker.
+  const isLtiSetup = window.location.pathname.startsWith("/lti/setup")
 
   const embedParams = useMemo(() => {
     if (!isEmbed) return null
@@ -39,12 +43,12 @@ export function RootLayout() {
     }
   }, [isEmbed])
 
-  const { data: user } = useQuery({ ...userQuery, enabled: !isEmbed && !isLtiBind })
+  const { data: user } = useQuery({ ...userQuery, enabled: !isEmbed && !isLtiBind && !isLtiSetup })
   const { data: devConfig } = useQuery({
     queryKey: ["dev", "config"],
     queryFn: () => api.get<DevConfig>("/dev/config"),
     staleTime: Infinity,
-    enabled: !isEmbed && !isLtiBind,
+    enabled: !isEmbed && !isLtiBind && !isLtiSetup,
   })
 
   const { data: embedMe } = useQuery({

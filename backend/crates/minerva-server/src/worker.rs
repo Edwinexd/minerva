@@ -256,6 +256,36 @@ pub fn start(state: AppState, max_concurrent: usize) {
         });
     }
 
+    // Periodic cleanup of unapproved (dynreg-installed) platforms. Anyone
+    // can hit `/lti/dynamic-register` so pending rows could otherwise pile
+    // up indefinitely. After 7 days of no approval, drop them; the admin
+    // either intended to approve and lost track (in which case the LMS
+    // admin can re-run dynreg), or never intended to (spam / mistake).
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60 * 60); // hourly
+            const MAX_AGE_HOURS: i32 = 24 * 7;
+            loop {
+                tokio::time::sleep(SWEEP_INTERVAL).await;
+                match minerva_db::queries::lti::delete_stale_pending_platforms(
+                    &state.db,
+                    MAX_AGE_HOURS,
+                )
+                .await
+                {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!(
+                        "lti dynreg: dropped {} stale pending platform row(s) older than {}h",
+                        n,
+                        MAX_AGE_HOURS
+                    ),
+                    Err(e) => tracing::error!("lti dynreg: stale pending sweep failed: {}", e),
+                }
+            }
+        });
+    }
+
     tokio::spawn(async move {
         // Crash recovery: any document left in 'processing' was interrupted.
         match minerva_db::queries::documents::reset_stale_processing(&state.db).await {

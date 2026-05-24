@@ -30,6 +30,7 @@ import { Route as AdminExternalInvitesRouteImport } from "./routes/admin/externa
 import { Route as AdminCoursesRouteImport } from "./routes/admin/courses"
 import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
 import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
+import { Route as LtiSetupPlatformIdRouteImport } from "./routes/lti/setup.$platformId"
 import { Route as CourseCourseIdStudyRouteImport } from "./routes/course/$courseId/study"
 import { Route as CourseCourseIdNewRouteImport } from "./routes/course/$courseId/new"
 import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
@@ -151,6 +152,11 @@ const CourseCourseIdIndexRoute = CourseCourseIdIndexRouteImport.update({
 const TeacherCoursesCourseIdRoute = TeacherCoursesCourseIdRouteImport.update({
   id: "/teacher/courses/$courseId",
   path: "/teacher/courses/$courseId",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LtiSetupPlatformIdRoute = LtiSetupPlatformIdRouteImport.update({
+  id: "/lti/setup/$platformId",
+  path: "/lti/setup/$platformId",
   getParentRoute: () => rootRouteImport,
 } as any)
 const CourseCourseIdStudyRoute = CourseCourseIdStudyRouteImport.update({
@@ -277,6 +283,7 @@ export interface FileRoutesByFullPath {
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/course/$courseId/study": typeof CourseCourseIdStudyRoute
+  "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
@@ -316,6 +323,7 @@ export interface FileRoutesByTo {
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/course/$courseId/study": typeof CourseCourseIdStudyRoute
+  "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
   "/course/$courseId": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
   "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
@@ -356,6 +364,7 @@ export interface FileRoutesById {
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/course/$courseId/study": typeof CourseCourseIdStudyRoute
+  "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
@@ -398,6 +407,7 @@ export interface FileRouteTypes {
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
     | "/course/$courseId/study"
+    | "/lti/setup/$platformId"
     | "/teacher/courses/$courseId"
     | "/course/$courseId/"
     | "/teacher/courses/$courseId/api-keys"
@@ -437,6 +447,7 @@ export interface FileRouteTypes {
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
     | "/course/$courseId/study"
+    | "/lti/setup/$platformId"
     | "/course/$courseId"
     | "/teacher/courses/$courseId/api-keys"
     | "/teacher/courses/$courseId/canvas"
@@ -476,6 +487,7 @@ export interface FileRouteTypes {
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
     | "/course/$courseId/study"
+    | "/lti/setup/$platformId"
     | "/teacher/courses/$courseId"
     | "/course/$courseId/"
     | "/teacher/courses/$courseId/api-keys"
@@ -507,6 +519,7 @@ export interface RootRouteChildren {
   CourseCourseIdConversationIdRoute: typeof CourseCourseIdConversationIdRoute
   CourseCourseIdNewRoute: typeof CourseCourseIdNewRoute
   CourseCourseIdStudyRoute: typeof CourseCourseIdStudyRoute
+  LtiSetupPlatformIdRoute: typeof LtiSetupPlatformIdRoute
   TeacherCoursesCourseIdRoute: typeof TeacherCoursesCourseIdRouteWithChildren
   CourseCourseIdIndexRoute: typeof CourseCourseIdIndexRoute
 }
@@ -658,6 +671,13 @@ declare module "@tanstack/react-router" {
       path: "/teacher/courses/$courseId"
       fullPath: "/teacher/courses/$courseId"
       preLoaderRoute: typeof TeacherCoursesCourseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/lti/setup/$platformId": {
+      id: "/lti/setup/$platformId"
+      path: "/lti/setup/$platformId"
+      fullPath: "/lti/setup/$platformId"
+      preLoaderRoute: typeof LtiSetupPlatformIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/course/$courseId/study": {
@@ -866,6 +886,7 @@ const rootRouteChildren: RootRouteChildren = {
   CourseCourseIdConversationIdRoute: CourseCourseIdConversationIdRoute,
   CourseCourseIdNewRoute: CourseCourseIdNewRoute,
   CourseCourseIdStudyRoute: CourseCourseIdStudyRoute,
+  LtiSetupPlatformIdRoute: LtiSetupPlatformIdRoute,
   TeacherCoursesCourseIdRoute: TeacherCoursesCourseIdRouteWithChildren,
   CourseCourseIdIndexRoute: CourseCourseIdIndexRoute,
 }

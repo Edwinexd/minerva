@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM lti_platforms WHERE activated_at IS NULL AND created_at < NOW() - make_interval(hours => $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "35eceb179abf01e8c43c80cd38dc38a037409080f61a303effa48c09b9baa8a5"
+}

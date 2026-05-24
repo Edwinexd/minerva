@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE lti_platforms SET allowed_eppn_domains = $2, updated_at = NOW() WHERE id = $1 AND activated_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2985d5e766ae38a245d33acdeb47e0352f50ff36a9b46f96718b5799acebc821"
+}

@@ -2,6 +2,7 @@ import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { api } from "@/lib/api"
+import { copyToClipboard as copyText } from "@/lib/clipboard"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -135,11 +136,9 @@ export function InvitePage({ useParams }: { useParams: () => { courseId: string 
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    navigator.clipboard.writeText(
-                      `${window.location.origin}/join/${link.token}`,
-                    )
-                  }}
+                  onClick={() =>
+                    copyText(`${window.location.origin}/join/${link.token}`)
+                  }
                 >
                   {tCommon("actions.copy")}
                 </Button>

@@ -60,6 +60,14 @@ pub fn public_router() -> Router<AppState> {
         // here would both eat the query string and break the LTI spec's
         // platform-driven trust model (registration_token is the auth).
         .route("/dynamic-register", get(dynamic_register))
+        // Sibling endpoint: the dynreg success page POSTs the LMS admin's
+        // suggested eppn-domain scope here. Also public (form-driven, no
+        // auth) because the suggestion has no effect until a Minerva
+        // integrator approves the platform.
+        .route(
+            "/dynamic-register/{platform_id}/scope",
+            post(dynreg_record_scope),
+        )
 }
 
 /// Public-but-not-LTI-protocol routes: the bind picker sits here because it's
@@ -1397,20 +1405,41 @@ fn issuer_to_display_name(issuer: &str) -> String {
     host.to_string()
 }
 
-/// HTML page returned at the end of a successful (or already-registered)
-/// flow. Auto-posts the LTI-spec close message to the LMS popup parent and
-/// also shows a human-readable confirmation in case the popup is opened in
-/// a tab without an `opener`.
-fn dynreg_html(
-    status: axum::http::StatusCode,
-    title: &str,
-    banner: &str,
-    detail: &str,
-) -> Response {
-    // Inline styles so this works even if the SPA isn't reachable from the
-    // popup yet (e.g. the platform iframes us from an unusual origin).
+/// Shared inline CSS for dynreg pages. Inlined (not linked to the SPA's
+/// hashed bundle) because this iframe ships from a public `/lti/*` URL
+/// while the SPA's assets are under `/assets/*` and might be Shib-gated
+/// in proxy quirks; inline keeps the iframe self-contained.
+const DYNREG_PAGE_CSS: &str = r#"
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;color:#0f172a;background:#f8fafc;min-height:100vh;display:flex;flex-direction:column}
+header{background:#fff;border-bottom:1px solid #e2e8f0;padding:0.7rem 1.25rem;display:flex;align-items:center;gap:0.6rem}
+header img{height:24px;width:24px}
+header .name{font-weight:600;font-size:1rem}
+main{flex:1;max-width:680px;width:100%;margin:0 auto;padding:1.75rem 1.25rem}
+h1{font-size:1.2rem;margin:0 0 0.5rem}
+.note{color:#475569;font-size:0.9rem;white-space:pre-wrap;word-break:break-word;margin:0.5rem 0}
+.warn{background:#fffbeb;border:1px solid #f59e0b;padding:0.65rem 0.9rem;border-radius:6px;color:#78350f;margin:1.1rem 0;font-size:0.9rem}
+.warn strong{color:#78350f}
+.opt{display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0;font-size:0.92rem}
+code{background:#f1f5f9;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.9rem}
+input[type=text]{width:100%;padding:0.45rem 0.55rem;border:1px solid #cbd5e1;border-radius:4px;font:inherit}
+button{padding:0.55rem 1rem;border-radius:6px;border:0;background:#0f172a;color:#fff;cursor:pointer;font-weight:600;font-size:0.92rem}
+button.secondary{background:#fff;color:#0f172a;border:1px solid #cbd5e1;font-weight:400}
+button:hover{filter:brightness(1.05)}
+.hint{font-size:0.8rem;color:#64748b;margin-top:0.4rem}
+.err{color:#b91c1c}
+footer{border-top:1px solid #e2e8f0;background:#fff;padding:0.7rem 1.25rem;font-size:0.78rem;color:#64748b;display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.5rem}
+footer a{color:#475569}
+"#;
+
+/// Wrap iframe body content in Minerva's brand chrome (logo + name in the
+/// header, license + admin contact in the footer). External links open in
+/// a new tab so users locked inside Moodle's dynreg dialog don't end up
+/// navigating the iframe away from the flow.
+fn dynreg_page(title: &str, status: axum::http::StatusCode, content: &str) -> Response {
     let body = format!(
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>{title}</title><style>body{{font-family:system-ui,sans-serif;max-width:560px;margin:3rem auto;padding:0 1rem;color:#1e293b}}h1{{font-size:1.25rem}}.note{{color:#475569;font-size:0.9rem;white-space:pre-wrap;word-break:break-word}}button{{margin-top:1rem;padding:0.5rem 0.9rem;border-radius:6px;border:1px solid #1e293b;background:#fff;cursor:pointer}}.err{{color:#b91c1c}}</style></head><body><h1>{banner}</h1><p class=\"note\">{detail}</p><button onclick=\"(window.opener||window.parent).postMessage({{subject:'org.imsglobal.lti.close'}},'*');window.close();\">Close</button><script>try{{(window.opener||window.parent).postMessage({{subject:'org.imsglobal.lti.close'}},'*');}}catch(e){{}}</script></body></html>"
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title><style>{css}</style></head><body><header><img src=\"/lti/icon.svg\" alt=\"\"><span class=\"name\">Minerva</span></header><main>{content}</main><footer><span>Minerva &nbsp;\u{2022}&nbsp; AGPL-3.0</span><span><a target=\"_blank\" rel=\"noopener\" href=\"mailto:lambda@dsv.su.se\">lambda@dsv.su.se</a></span></footer></body></html>",
+        css = DYNREG_PAGE_CSS
     );
     (
         status,
@@ -1418,6 +1447,24 @@ fn dynreg_html(
         body,
     )
         .into_response()
+}
+
+/// Banner + detail page used for both success and error endpoints. Posts
+/// the IMS close message on load so the LMS popup auto-closes; a button
+/// is provided for the no-`opener` fallback.
+fn dynreg_html(
+    status: axum::http::StatusCode,
+    title: &str,
+    banner: &str,
+    detail: &str,
+) -> Response {
+    let content = format!(
+        r##"<h1>{banner}</h1>
+<p class="note">{detail}</p>
+<button onclick="(window.opener||window.parent).postMessage({{subject:'org.imsglobal.lti.close'}},'*');window.close();">Close</button>
+<script>try{{(window.opener||window.parent).postMessage({{subject:'org.imsglobal.lti.close'}},'*');}}catch(e){{}}</script>"##
+    );
+    dynreg_page(title, status, &content)
 }
 
 fn dynreg_success_html(platform_name: &str, was_new: bool) -> Response {
@@ -1593,7 +1640,37 @@ async fn do_dynamic_register(
         client_id,
     );
 
-    Ok(dynreg_success_html(&display_name, true))
+    // Pending row exists; before closing the LMS popup, hand off to the
+    // SPA so the scope-suggestion form renders inside Minerva's normal
+    // chrome (RootLayout + i18n + Tailwind components) instead of a
+    // hand-rolled HTML page. The SPA route at /lti/setup/<id> is
+    // included in RootLayout's no-auth-fetch carve-out (next to
+    // /lti/bind) and submits to /lti/dynamic-register/<id>/scope.
+    Ok(redirect_to_scope_setup(
+        &state.config.base_url,
+        id,
+        &display_name,
+        &issuer,
+    ))
+}
+
+/// Build the absolute redirect URL the dynreg flow lands on after the
+/// server-to-server handshake. `name` and `issuer` are passed in the
+/// query string so the SPA can render the form immediately without an
+/// extra info-fetch round trip.
+fn redirect_to_scope_setup(base_url: &str, id: Uuid, name: &str, issuer: &str) -> Response {
+    let location = format!(
+        "{}/lti/setup/{}?name={}&issuer={}",
+        base_url,
+        id,
+        urlencoding::encode(name),
+        urlencoding::encode(issuer),
+    );
+    (
+        axum::http::StatusCode::SEE_OTHER,
+        [(axum::http::header::LOCATION, location)],
+    )
+        .into_response()
 }
 
 #[derive(Debug, Serialize)]
@@ -1638,26 +1715,103 @@ fn platform_to_response(
     }
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct ApprovePlatformRequest {
+    /// Eppn-domain allowlist to set atomically with activation. Absent =
+    /// leave whatever the dynreg scope form already recorded; explicit
+    /// empty array = trust ANY eppn (admin opt-in). Same normalisation
+    /// rules as the manual platform create form.
+    #[serde(default)]
+    allowed_eppn_domains: Option<Vec<String>>,
+}
+
 /// POST /admin/lti/platforms/{id}/approve: mark a pending (dynreg-installed)
-/// platform as active. Idempotent: re-approving a live platform is a no-op
-/// and returns 200 so the UI's Approve button is safe to double-click.
+/// platform as active, optionally setting/overriding the eppn-domain scope.
+/// Idempotent: re-approving a live platform is a no-op and returns 200 so
+/// the UI's Approve button is safe to double-click.
 async fn approve_platform(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(platform_id): Path<Uuid>,
+    body: Option<Json<ApprovePlatformRequest>>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_site_integrator(&user)?;
-    let changed = minerva_db::queries::lti::activate_platform(&state.db, platform_id).await?;
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let normalised = match body.allowed_eppn_domains.as_ref() {
+        Some(raw) => Some(normalize_eppn_domains(raw)?),
+        None => None,
+    };
+    let changed =
+        minerva_db::queries::lti::activate_platform(&state.db, platform_id, normalised.as_deref())
+            .await?;
     if changed {
         tracing::info!(
-            "lti dynreg: platform {} approved by user {}",
+            "lti dynreg: platform {} approved by user {} (scope override: {:?})",
             platform_id,
-            user.id
+            user.id,
+            normalised
         );
     }
     Ok(Json(
         serde_json::json!({ "approved": true, "newly_activated": changed }),
     ))
+}
+
+/// POST /lti/dynamic-register/{id}/scope: PUBLIC endpoint called by the
+/// SPA scope-form submission (the `/lti/setup/<id>` route the dynreg
+/// handler 303s to). Records the LMS admin's suggested eppn domains on
+/// a PENDING platform row. No activation here: the suggestion has no
+/// effect until an integrator approves the row in Minerva, and they
+/// see + can override whatever was suggested here. JSON in / JSON out
+/// so the SPA can render its success state cleanly and post the IMS
+/// close message itself.
+#[derive(Debug, Deserialize)]
+struct DynregScopeBody {
+    /// Comma-separated list. Empty / whitespace => stored as NULL on
+    /// the row, which the admin will see as "any eppn" with the usual
+    /// warning.
+    #[serde(default)]
+    domains: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DynregScopeResponse {
+    recorded: bool,
+    domains: Vec<String>,
+}
+
+async fn dynreg_record_scope(
+    State(state): State<AppState>,
+    Path(platform_id): Path<Uuid>,
+    Json(body): Json<DynregScopeBody>,
+) -> Result<Json<DynregScopeResponse>, AppError> {
+    let raw: Vec<String> = body
+        .domains
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    // Reuse the same normaliser the admin-create path uses so invalid
+    // entries (no dot / whitespace) are caught here too. The SPA form
+    // suggests valid-looking values, but a hostile dynreg might POST
+    // arbitrary garbage.
+    let normalised = if raw.is_empty() {
+        Vec::new()
+    } else {
+        normalize_eppn_domains(&raw).unwrap_or_default()
+    };
+    let _ =
+        minerva_db::queries::lti::set_pending_platform_scope(&state.db, platform_id, &normalised)
+            .await?;
+    tracing::info!(
+        "lti dynreg: scope suggestion recorded for pending platform {}: {:?}",
+        platform_id,
+        normalised
+    );
+    Ok(Json(DynregScopeResponse {
+        recorded: true,
+        domains: normalised,
+    }))
 }
 
 async fn list_platforms(

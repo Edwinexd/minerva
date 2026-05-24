@@ -7,6 +7,7 @@ import {
   ltiSetupQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { copyToClipboard as copyText } from "@/lib/clipboard"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
@@ -78,10 +79,12 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
     },
   })
 
-  function copyToClipboard(text: string, field: string) {
-    navigator.clipboard.writeText(text)
-    setCopiedField(field)
-    setTimeout(() => setCopiedField(null), 2000)
+  async function copyToClipboard(text: string, field: string) {
+    const ok = await copyText(text)
+    if (ok) {
+      setCopiedField(field)
+      setTimeout(() => setCopiedField(null), 2000)
+    }
   }
 
   const config = setup?.moodle_tool_config

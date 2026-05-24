@@ -37,6 +37,12 @@ jobs:
           # the per-commit history of moodle-plugin/local/minerva
           # into a standalone branch.
           fetch-depth: 0
+          # Don't install the GITHUB_TOKEN extraheader on
+          # https://github.com/; otherwise its Authorization header
+          # beats the basic-auth credentials in our token-push URL and
+          # GitHub rejects the push as github-actions[bot] (which can
+          # only write to the current repo, not the mirror).
+          persist-credentials: false
 
       - name: Setup SSH key
         if: matrix.target.auth == 'ssh'

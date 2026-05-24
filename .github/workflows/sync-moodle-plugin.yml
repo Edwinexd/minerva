@@ -44,7 +44,9 @@ jobs:
           SSH_KEY: ${{ secrets.GITEA_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s' "$SSH_KEY" > ~/.ssh/id_ed25519
+          # printf '%s\n' (not '%s'): OpenSSH refuses to parse a key
+          # without the terminating newline ("error in libcrypto").
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan "${{ matrix.target.ssh_host }}" >> ~/.ssh/known_hosts 2>/dev/null
 
@@ -65,12 +67,16 @@ jobs:
         if: matrix.target.auth == 'token'
         env:
           TOKEN: ${{ secrets.MOODLE_SYNC_TOKEN }}
+          REMOTE: ${{ matrix.target.remote }}
         run: |
           # Inject the token only into the remote URL for this push;
-          # never written to disk or echoed.
-          remote="${{ matrix.target.remote }}"
-          remote_with_auth="${remote/https:\/\//https:\/\/x-access-token:$TOKEN@}"
-          git push --force "$remote_with_auth" "${{ steps.split.outputs.sha }}:refs/heads/master"
+          # never written to disk. ${VAR#prefix} strips a literal
+          # prefix (vs ${var/pattern/replacement} where forward-slash
+          # escaping inside the pattern is bash-flavour-dependent and
+          # silently no-ops if you get it wrong).
+          path="${REMOTE#https://}"
+          auth_url="https://x-access-token:${TOKEN}@${path}"
+          git push --force "$auth_url" "${{ steps.split.outputs.sha }}:refs/heads/master"
 
       - name: Push via ssh
         if: matrix.target.auth == 'ssh'

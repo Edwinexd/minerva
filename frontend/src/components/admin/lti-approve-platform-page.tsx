@@ -5,6 +5,10 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { Route as ApproveRoute } from "@/routes/admin/lti-approve.$platformId"
 import { adminLtiPlatformsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import {
+  DYNREG_CHANNEL,
+  type DynregBroadcastMessage,
+} from "@/lib/lti-dynreg-channel"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import { Badge } from "@/components/ui/badge"
@@ -59,6 +63,25 @@ export function LtiApprovePlatformPage() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "lti", "platforms"] })
+      // Tell any open dynreg popup (same origin, listening on this
+      // channel) that this specific platform is now approved, so it
+      // can dismiss its own LMS dialog without the user having to
+      // hunt for the original tab and click Close. No-op if no one
+      // is listening.
+      if (typeof BroadcastChannel !== "undefined") {
+        try {
+          const ch = new BroadcastChannel(DYNREG_CHANNEL)
+          const msg: DynregBroadcastMessage = {
+            type: "approved",
+            platformId,
+          }
+          ch.postMessage(msg)
+          ch.close()
+        } catch {
+          /* old browser without BroadcastChannel; the popup will
+           * stay open and the LMS admin can click Close themselves */
+        }
+      }
       navigate({ to: "/admin/lti" })
     },
   })

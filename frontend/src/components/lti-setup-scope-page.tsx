@@ -1,10 +1,14 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation } from "@tanstack/react-query"
 import { Route as SetupRoute } from "@/routes/lti/setup.$platformId"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { useDocumentTitle } from "@/lib/use-document-title"
-import { Button } from "@/components/ui/button"
+import {
+  DYNREG_CHANNEL,
+  type DynregBroadcastMessage,
+} from "@/lib/lti-dynreg-channel"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -154,6 +158,27 @@ export function LtiSetupScopePage() {
     window.close()
   }
 
+  // While the success card is showing, listen for the approve flow in
+  // another tab. If THIS platform gets approved, fire the LTI close
+  // postMessage so Moodle dismisses its dialog automatically. Mounted
+  // only after submission so we don't react to stale messages while the
+  // user is still filling in the form.
+  useEffect(() => {
+    if (!submitted) return
+    if (typeof BroadcastChannel === "undefined") return
+    const ch = new BroadcastChannel(DYNREG_CHANNEL)
+    const onMessage = (e: MessageEvent<DynregBroadcastMessage>) => {
+      if (e.data?.type === "approved" && e.data.platformId === platformId) {
+        closePopup()
+      }
+    }
+    ch.addEventListener("message", onMessage)
+    return () => {
+      ch.removeEventListener("message", onMessage)
+      ch.close()
+    }
+  }, [submitted, platformId])
+
   if (submitted) {
     return (
       <Card>
@@ -166,17 +191,14 @@ export function LtiSetupScopePage() {
             {t("ltiSetupScope.donePrompt")}
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() =>
-                window.open(
-                  `/admin/lti-approve/${encodeURIComponent(platformId)}`,
-                  "_blank",
-                  "noopener",
-                )
-              }
+            <a
+              href={`/admin/lti-approve/${encodeURIComponent(platformId)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonVariants()}
             >
               {t("ltiSetupScope.openMinervaButton")}
-            </Button>
+            </a>
             <Button variant="outline" onClick={closePopup}>
               {t("ltiSetupScope.closeButton")}
             </Button>

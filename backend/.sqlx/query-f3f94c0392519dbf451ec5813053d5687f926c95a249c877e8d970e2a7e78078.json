@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains FROM lti_platforms WHERE issuer = $1 AND client_id = $2",
+  "query": "INSERT INTO lti_platforms (id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, allowed_eppn_domains, activated_at)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n        RETURNING id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at",
   "describe": {
     "columns": [
       {
@@ -62,12 +62,26 @@
         "ordinal": 11,
         "name": "allowed_eppn_domains",
         "type_info": "TextArray"
+      },
+      {
+        "ordinal": 12,
+        "name": "activated_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Text",
-        "Text"
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "TextArray",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -82,8 +96,9 @@
       true,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "92196b8aff418c74b533d30e4934582b509e4c720685e108ba15eacda070d905"
+  "hash": "f3f94c0392519dbf451ec5813053d5687f926c95a249c877e8d970e2a7e78078"
 }

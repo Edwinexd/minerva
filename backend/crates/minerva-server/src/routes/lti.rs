@@ -89,6 +89,10 @@ pub fn admin_router() -> Router<AppState> {
         .route("/lti/platforms", get(list_platforms).post(create_platform))
         .route("/lti/platforms/{platform_id}", delete(delete_platform))
         .route(
+            "/lti/platforms/{platform_id}/approve",
+            post(approve_platform),
+        )
+        .route(
             "/lti/platforms/{platform_id}/bindings",
             get(list_platform_bindings),
         )
@@ -1573,6 +1577,11 @@ async fn do_dynamic_register(
             // row as "installed via Dynamic Registration".
             created_by: None,
             allowed_eppn_domains: None,
+            // Pending until an integrator clicks Approve. Until then the
+            // login + launch validators ignore the row, so a hostile dynreg
+            // (random Moodle pointing the URL at attacker-controlled JWKS)
+            // cannot impersonate users.
+            activated_at: None,
         },
     )
     .await
@@ -1603,6 +1612,10 @@ struct PlatformResponse {
     /// eppn (the legacy behaviour). Non-empty means a JWT-claimed eppn
     /// must end with `@<d>` for some `d` in this list.
     allowed_eppn_domains: Vec<String>,
+    /// NULL = pending approval (installed via dynreg, integrator hasn't
+    /// reviewed yet; launches against this row are refused). Non-null
+    /// timestamp = active.
+    activated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 fn platform_to_response(
@@ -1621,7 +1634,30 @@ fn platform_to_response(
         created_at: p.created_at,
         moodle_config: build_moodle_config(base_url),
         allowed_eppn_domains: p.allowed_eppn_domains.unwrap_or_default(),
+        activated_at: p.activated_at,
     }
+}
+
+/// POST /admin/lti/platforms/{id}/approve: mark a pending (dynreg-installed)
+/// platform as active. Idempotent: re-approving a live platform is a no-op
+/// and returns 200 so the UI's Approve button is safe to double-click.
+async fn approve_platform(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(platform_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_site_integrator(&user)?;
+    let changed = minerva_db::queries::lti::activate_platform(&state.db, platform_id).await?;
+    if changed {
+        tracing::info!(
+            "lti dynreg: platform {} approved by user {}",
+            platform_id,
+            user.id
+        );
+    }
+    Ok(Json(
+        serde_json::json!({ "approved": true, "newly_activated": changed }),
+    ))
 }
 
 async fn list_platforms(
@@ -1705,6 +1741,10 @@ async fn create_platform(
             platform_jwks_url: &platform_jwks_url,
             created_by: Some(user.id),
             allowed_eppn_domains: domains_for_db,
+            // Manual admin path: integrator entered the values themselves
+            // and signed off implicitly. Active immediately, preserving the
+            // existing pre-dynreg behaviour.
+            activated_at: Some(chrono::Utc::now()),
         },
     )
     .await

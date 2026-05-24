@@ -746,6 +746,10 @@ export interface LtiPlatform {
   /// Empty array = platform can launch for any claimed eppn. See backend
   /// `enforce_platform_eppn_domain` for matching rules.
   allowed_eppn_domains: string[]
+  /// null = pending approval (installed via Dynamic Registration; will not
+  /// authenticate launches until an integrator clicks Approve). Non-null =
+  /// active, launches and NRPS work normally.
+  activated_at: string | null
 }
 
 export interface LtiNrpsStatus {

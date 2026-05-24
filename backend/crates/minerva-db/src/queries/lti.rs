@@ -126,6 +126,11 @@ pub struct PlatformRow {
     /// NULL or empty = no eppn restriction. See the migration comment for
     /// matching rules (mirrors `site_integration_keys.allowed_eppn_domains`).
     pub allowed_eppn_domains: Option<Vec<String>>,
+    /// NULL = pending (installed via dynreg, not yet approved by an
+    /// integrator); non-NULL = active. Launch validators MUST filter on
+    /// `activated_at IS NOT NULL`: a pending row trusts an unvalidated
+    /// JWKS source and so cannot be used to authenticate launches.
+    pub activated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub struct CreatePlatform<'a> {
@@ -140,6 +145,10 @@ pub struct CreatePlatform<'a> {
     /// manual creates.
     pub created_by: Option<Uuid>,
     pub allowed_eppn_domains: Option<&'a [String]>,
+    /// Manual creates set this to `Some(NOW())` so the platform is active
+    /// immediately (existing UX). Dynreg installs leave it `None` so the
+    /// row is pending until an integrator approves it.
+    pub activated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub async fn create_platform(
@@ -149,9 +158,9 @@ pub async fn create_platform(
 ) -> Result<PlatformRow, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        r#"INSERT INTO lti_platforms (id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, allowed_eppn_domains)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains"#,
+        r#"INSERT INTO lti_platforms (id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, allowed_eppn_domains, activated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at"#,
         id,
         input.name,
         input.issuer,
@@ -162,6 +171,7 @@ pub async fn create_platform(
         input.platform_jwks_url,
         input.created_by,
         input.allowed_eppn_domains,
+        input.activated_at,
     )
     .fetch_one(db)
     .await
@@ -173,13 +183,18 @@ pub async fn find_platform_by_id(
 ) -> Result<Option<PlatformRow>, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains FROM lti_platforms WHERE id = $1",
+        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at FROM lti_platforms WHERE id = $1",
         id,
     )
     .fetch_optional(db)
     .await
 }
 
+/// Lookup used by the OIDC login + launch validators. Filters on
+/// `activated_at IS NOT NULL` so a pending (dynreg-installed, unapproved)
+/// platform CANNOT authenticate a launch, even if a hostile party knows
+/// its issuer+client_id. Admin-side listings should use [`list_platforms`]
+/// which intentionally returns pending rows so they can be approved.
 pub async fn find_platform_by_issuer(
     db: &PgPool,
     issuer: &str,
@@ -187,7 +202,7 @@ pub async fn find_platform_by_issuer(
 ) -> Result<Option<PlatformRow>, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains FROM lti_platforms WHERE issuer = $1 AND client_id = $2",
+        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at FROM lti_platforms WHERE issuer = $1 AND client_id = $2 AND activated_at IS NOT NULL",
         issuer,
         client_id,
     )
@@ -198,10 +213,21 @@ pub async fn find_platform_by_issuer(
 pub async fn list_platforms(db: &PgPool) -> Result<Vec<PlatformRow>, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains FROM lti_platforms ORDER BY name",
+        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at FROM lti_platforms ORDER BY activated_at IS NOT NULL, name",
     )
     .fetch_all(db)
     .await
+}
+
+/// Activate a pending (dynreg-installed) platform. No-op if already active.
+pub async fn activate_platform(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE lti_platforms SET activated_at = NOW(), updated_at = NOW() WHERE id = $1 AND activated_at IS NULL",
+        id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn delete_platform(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {

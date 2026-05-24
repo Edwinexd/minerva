@@ -69,6 +69,14 @@ export function LtiPlatformsPanel() {
     },
   })
 
+  const approveMutation = useMutation({
+    mutationFn: (id: string) =>
+      api.post(`/admin/lti/platforms/${id}/approve`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "lti", "platforms"] })
+    },
+  })
+
   const config = setup?.moodle_tool_config
 
   function copyToClipboard(text: string, field: string) {
@@ -320,6 +328,8 @@ export function LtiPlatformsPanel() {
                 platform={p}
                 onDelete={() => deleteMutation.mutate(p.id)}
                 deleting={deleteMutation.isPending}
+                onApprove={() => approveMutation.mutate(p.id)}
+                approving={approveMutation.isPending}
               />
             ))}
           </div>
@@ -333,10 +343,14 @@ function PlatformRow({
   platform,
   onDelete,
   deleting,
+  onApprove,
+  approving,
 }: {
   platform: LtiPlatform
   onDelete: () => void
   deleting: boolean
+  onApprove: () => void
+  approving: boolean
 }) {
   const { t } = useTranslation("admin")
   const [open, setOpen] = useState(false)
@@ -351,12 +365,28 @@ function PlatformRow({
     enabled: open,
   })
 
+  const pending = platform.activated_at === null
+
   return (
-    <div className="rounded-md border">
+    <div
+      className={`rounded-md border ${
+        pending ? "border-amber-500/60 bg-amber-50/30 dark:bg-amber-950/20" : ""
+      }`}
+    >
+      {pending && (
+        <div className="border-b border-amber-500/40 bg-amber-100/40 px-3 py-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
+          {t("ltiPlatforms.pendingExplain")}
+        </div>
+      )}
       <div className="flex items-center justify-between gap-4 p-3">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <span className="font-medium text-sm">{platform.name}</span>
+            {pending && (
+              <Badge variant="outline" className="border-amber-500 text-amber-700 dark:text-amber-300">
+                {t("ltiPlatforms.statusPending")}
+              </Badge>
+            )}
             <Badge variant="secondary">{platform.client_id}</Badge>
           </div>
           <div className="text-xs text-muted-foreground truncate">{platform.issuer}</div>
@@ -378,6 +408,11 @@ function PlatformRow({
           </div>
         </div>
         <div className="flex shrink-0 gap-2">
+          {pending && (
+            <Button variant="default" size="sm" onClick={onApprove} disabled={approving}>
+              {t("ltiPlatforms.approve")}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => setOpen((o) => !o)}>
             {open ? t("ltiPlatforms.hideBindings") : t("ltiPlatforms.showBindings")}
           </Button>

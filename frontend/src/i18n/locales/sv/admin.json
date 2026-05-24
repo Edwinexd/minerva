@@ -123,6 +123,18 @@
       "lastSync": "Senaste synk"
     }
   },
+  "ltiApprovePlatform": {
+    "title": "Godkänn LTI-plattform",
+    "description": "Verifiera att issuer och client id matchar det LMS du förväntar dig, sätt eppn-domän-scopet, godkänn sedan. Plattformen kan inte autentisera lanseringar förrän du har gjort det.",
+    "alreadyActiveTitle": "Plattformen är redan aktiv",
+    "alreadyActiveBody": "Någon annan har redan godkänt den här plattformen. Inget att göra; resten av plattformslistan finns via länken nedan.",
+    "notFoundTitle": "Plattformen hittades inte",
+    "notFoundBody": "Plattformen finns inte, är borttagen, eller så har du inte behörighet att se den. Den kan ha auto-städats efter 7 dagar utan godkännande.",
+    "nameLabel": "Namn",
+    "issuerLabel": "Issuer",
+    "clientIdLabel": "Client ID",
+    "backToList": "Tillbaka till alla plattformar"
+  },
   "ltiSetupScope": {
     "titleWithName": "Verktyget registrerat med {{name}}",
     "titleFallback": "Verktyget registrerat",

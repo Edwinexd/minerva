@@ -169,7 +169,13 @@ export function LtiSetupScopePage() {
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
-              onClick={() => window.open("/admin", "_blank", "noopener")}
+              onClick={() =>
+                window.open(
+                  `/admin/lti/approve/${encodeURIComponent(platformId)}`,
+                  "_blank",
+                  "noopener",
+                )
+              }
             >
               {t("ltiSetupScope.openMinervaButton")}
             </Button>

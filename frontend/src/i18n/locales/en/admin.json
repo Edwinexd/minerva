@@ -123,6 +123,18 @@
       "lastSync": "Last sync"
     }
   },
+  "ltiApprovePlatform": {
+    "title": "Approve LTI platform",
+    "description": "Verify the issuer and client id match the LMS you expected, set the eppn-domain trust scope, then approve. The platform cannot authenticate launches until you do.",
+    "alreadyActiveTitle": "Platform already active",
+    "alreadyActiveBody": "Someone else already approved this platform. No action needed; the rest of the platforms list is back at the link below.",
+    "notFoundTitle": "Platform not found",
+    "notFoundBody": "This platform doesn't exist, was deleted, or you don't have permission to see it. It may have been auto-cleaned up after going 7 days unapproved.",
+    "nameLabel": "Name",
+    "issuerLabel": "Issuer",
+    "clientIdLabel": "Client ID",
+    "backToList": "Back to all platforms"
+  },
   "ltiSetupScope": {
     "titleWithName": "Tool registered with {{name}}",
     "titleFallback": "Tool registered",

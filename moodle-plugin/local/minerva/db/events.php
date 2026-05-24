@@ -29,4 +29,14 @@ $observers = [
         'eventname' => '\core\event\course_deleted',
         'callback' => '\local_minerva\observer::course_deleted',
     ],
+    // Slice 2: low-latency delete mirroring. The periodic sync task's
+    // reconcile sweep would eventually catch these, but waiting up to
+    // a cron interval means students might see stale answers from
+    // material a teacher just deleted. We orphan immediately from the
+    // event so retrieval stops surfacing the removed material on the
+    // next chat turn.
+    [
+        'eventname' => '\core\event\course_module_deleted',
+        'callback' => '\local_minerva\observer::course_module_deleted',
+    ],
 ];

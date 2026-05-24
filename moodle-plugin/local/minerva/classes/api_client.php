@@ -183,7 +183,8 @@ class api_client {
         string $minervacid,
         string $filepath,
         string $filename,
-        string $mimetype = 'application/octet-stream'
+        string $mimetype = 'application/octet-stream',
+        ?string $sourceref = null
     ): object {
         $url = $this->baseurl . "/integration/courses/{$minervacid}/documents";
 
@@ -195,6 +196,14 @@ class api_client {
         $params = [
             'file' => new \CURLFile($filepath, $mimetype, $filename),
         ];
+        // Slice 2: identify uploads by their Moodle origin so the
+        // server can do orphan-on-replace + reconcile. The server
+        // requires both fields together; we always send 'moodle' as
+        // the system when a sourceref is provided.
+        if ($sourceref !== null && $sourceref !== '') {
+            $params['source_system'] = 'moodle';
+            $params['source_ref'] = $sourceref;
+        }
 
         $response = $curl->post($url, $params);
         $httpcode = $curl->get_info()['http_code'] ?? 0;
@@ -210,6 +219,51 @@ class api_client {
         }
 
         return json_decode($response);
+    }
+
+    /**
+     * Orphan a set of documents in a Minerva course by their Moodle
+     * source_refs. Used by the event observer for low-latency deletes
+     * (course_module_deleted etc.); the periodic reconcile is the
+     * safety net.
+     *
+     * @param string $minervacid Minerva course UUID.
+     * @param string[] $sourcerefs Refs whose Moodle objects no longer exist.
+     * @return int Number of docs flipped to orphaned by the server.
+     */
+    public function orphan_by_source_refs(string $minervacid, array $sourcerefs): int {
+        if (empty($sourcerefs)) {
+            return 0;
+        }
+        $resp = $this->request('POST', "/integration/courses/{$minervacid}/documents/orphan", [
+            'source_system' => 'moodle',
+            'source_refs' => array_values($sourcerefs),
+        ]);
+        if (is_object($resp) && isset($resp->orphaned)) {
+            return (int) $resp->orphaned;
+        }
+        return 0;
+    }
+
+    /**
+     * Reconcile-sweep: tell the server the full set of source_refs we
+     * currently have. The server orphans every active 'moodle'-system
+     * doc in the course whose source_ref is NOT in the list. Returns
+     * the ids of docs newly orphaned by this sweep (for logging).
+     *
+     * @param string $minervacid Minerva course UUID.
+     * @param string[] $currentrefs Full list of currently-existing source_refs.
+     * @return string[] UUIDs of docs orphaned by this call.
+     */
+    public function reconcile_source_refs(string $minervacid, array $currentrefs): array {
+        $resp = $this->request('POST', "/integration/courses/{$minervacid}/documents/reconcile", [
+            'source_system' => 'moodle',
+            'source_refs' => array_values($currentrefs),
+        ]);
+        if (is_object($resp) && isset($resp->orphaned_ids) && is_array($resp->orphaned_ids)) {
+            return array_map('strval', $resp->orphaned_ids);
+        }
+        return [];
     }
 
     /**

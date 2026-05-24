@@ -74,6 +74,21 @@ struct DocumentResponse {
     kind_rationale: Option<String>,
     kind_locked_by_teacher: bool,
     classified_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Originating system: `"moodle"` / `"canvas"` for plugin uploads,
+    /// `"manual"` for teacher-tagged UI uploads, `null` for untagged
+    /// UI uploads. Shown in the docs UI so teachers can tell at a glance
+    /// which docs are auto-managed.
+    source_system: Option<String>,
+    /// Opaque per-source identity. Teachers can edit this via PATCH on
+    /// `"manual"`-system docs to group versions or repurpose a slot
+    /// (re-uploading a new file with the same `source_ref` orphans the
+    /// old one).
+    source_ref: Option<String>,
+    /// Soft-orphan timestamp. Always `null` for active docs; populated
+    /// when the doc has been superseded or its upstream source was
+    /// deleted. Orphaned docs are excluded from new retrievals but
+    /// kept so chat-history citations resolve.
+    orphaned_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
@@ -95,6 +110,9 @@ impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
             kind_rationale: row.kind_rationale,
             kind_locked_by_teacher: row.kind_locked_by_teacher,
             classified_at: row.classified_at,
+            source_system: row.source_system,
+            source_ref: row.source_ref,
+            orphaned_at: row.orphaned_at,
         }
     }
 }
@@ -134,6 +152,28 @@ pub async fn upload_or_dedup(
 ) -> Result<minerva_db::queries::documents::DocumentRow, AppError> {
     let content_hash = compute_content_hash(bytes);
 
+    // Source-identity branch (slice 2): the plugin tells us which Moodle
+    // object this upload represents. When that object already has an
+    // active doc with *different* bytes, the Moodle-side material was
+    // edited; orphan the previous doc so the source-identity unique
+    // index is free for the new row. The previous doc's chunks stay
+    // in Qdrant + DB so old chat-history citations still resolve; the
+    // retrieval-time filter (`orphaned_doc_ids`) keeps them out of new
+    // turns. If the existing doc has the same bytes, we fall through
+    // to the content-hash dedup below and return that same row.
+    if let (Some(sys), Some(sref)) = (source_system, source_ref) {
+        if let Some(prev) = minerva_db::queries::documents::find_active_by_source_ref(
+            &state.db, course_id, sys, sref,
+        )
+        .await?
+        {
+            if prev.content_hash.as_deref() == Some(content_hash.as_str()) {
+                return Ok(prev);
+            }
+            minerva_db::queries::documents::orphan(&state.db, prev.id).await?;
+        }
+    }
+
     if let Some(existing) = minerva_db::queries::documents::find_active_by_content_hash(
         &state.db,
         course_id,
@@ -142,11 +182,14 @@ pub async fn upload_or_dedup(
     .await?
     {
         // Same bytes already in this course as an active doc; reuse it.
-        // We don't reconcile `source_url` / `source_system` / `source_ref`
-        // here: a duplicate upload with a different source identity is rare
-        // (and slice 2's source-identity branch handles that case
-        // separately via `find_active_by_source_ref` before falling through
-        // to content-hash lookup).
+        // Slice 2 caveat: when a `source_ref` collision was orphaned
+        // above and the new bytes match a *different* active doc, we
+        // return that other doc and do NOT re-tag it with the
+        // caller's source_ref (per-doc source_ref is a single value;
+        // a many-to-many table would change the schema shape and is
+        // out of scope for this slice). Net effect: cross-source
+        // content collisions stay tracked under whichever source
+        // first registered them.
         return Ok(existing);
     }
 
@@ -217,24 +260,53 @@ async fn upload_document(
         return Err(AppError::Forbidden);
     }
 
-    // Read the file from multipart
-    let field = multipart
-        .next_field()
-        .await
-        .map_err(|e| {
-            AppError::bad_request_with("doc.multipart_error", [("detail", e.to_string())])
-        })?
-        .ok_or_else(|| AppError::bad_request("doc.no_file"))?;
+    // Teacher-facing upload accepts an optional `source_ref` multipart
+    // field. When set, the doc is tagged with `source_system = "manual"`
+    // (UI uploads, as opposed to the integration `"moodle"` /
+    // `"canvas"` paths). This gives teachers a manual versioning
+    // story: re-uploading a new file under the same `source_ref`
+    // orphans the previous active doc and the new one supersedes it,
+    // mirroring the plugin's update flow. Empty `source_ref` =
+    // untagged, no source-identity behavior.
+    let mut file_bytes: Option<axum::body::Bytes> = None;
+    let mut filename = String::from("document");
+    let mut content_type = String::from("application/octet-stream");
+    let mut source_ref: Option<String> = None;
 
-    let filename = field.file_name().unwrap_or("document").to_string();
-    let content_type = field
-        .content_type()
-        .unwrap_or("application/octet-stream")
-        .to_string();
-    let data = field
-        .bytes()
-        .await
-        .map_err(|e| AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())]))?;
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        AppError::bad_request_with("doc.multipart_error", [("detail", e.to_string())])
+    })? {
+        match field.name() {
+            // Accept both the named `file` field (recommended) and an
+            // unnamed first field (legacy / curl-friendly callers).
+            Some("file") | None => {
+                filename = field.file_name().unwrap_or("document").to_string();
+                content_type = field
+                    .content_type()
+                    .unwrap_or("application/octet-stream")
+                    .to_string();
+                file_bytes = Some(field.bytes().await.map_err(|e| {
+                    AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())])
+                })?);
+            }
+            Some("source_ref") => {
+                let v = field.text().await.map_err(|e| {
+                    AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())])
+                })?;
+                let v = v.trim();
+                if !v.is_empty() {
+                    source_ref = Some(v.to_string());
+                }
+            }
+            Some(_) => {
+                // Unknown fields are dropped silently so callers stay
+                // forward-compatible with future additions.
+                let _ = field.bytes().await;
+            }
+        }
+    }
+
+    let data = file_bytes.ok_or_else(|| AppError::bad_request("doc.no_file"))?;
 
     let size_bytes = data.len() as i64;
     if size_bytes > MAX_UPLOAD_BYTES {
@@ -251,6 +323,7 @@ async fn upload_document(
     // dragging the same PDF in twice) returns the existing doc instead
     // of inserting a duplicate. See `upload_or_dedup` for the full
     // contract.
+    let source_system = source_ref.as_ref().map(|_| "manual");
     let row = upload_or_dedup(
         &state,
         course_id,
@@ -259,8 +332,8 @@ async fn upload_document(
         &data,
         user.id,
         None,
-        None,
-        None,
+        source_system,
+        source_ref.as_deref(),
     )
     .await?;
 
@@ -393,6 +466,19 @@ async fn upload_mbz(
 #[derive(Deserialize)]
 struct PatchDocumentBody {
     displayable: Option<bool>,
+    /// Teacher-editable source reference. Two-state semantics:
+    ///
+    /// - field absent (`None`): leave source_ref unchanged.
+    /// - field present + empty: clear the source_ref (back to untagged).
+    /// - field present + non-empty: set source_ref; auto-tags
+    ///   source_system="manual" when the doc had no system yet.
+    ///
+    /// Plugin-owned docs (source_system in {"moodle","canvas"}) are
+    /// protected: the route returns 409 rather than letting a teacher
+    /// re-tag them, since that would silently break the plugin's
+    /// reconcile semantics on the next sweep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_ref: Option<String>,
 }
 
 async fn patch_document(
@@ -421,6 +507,34 @@ async fn patch_document(
 
     if let Some(displayable) = body.displayable {
         minerva_db::queries::documents::update_displayable(&state.db, doc_id, displayable).await?;
+    }
+
+    if let Some(new_ref_raw) = body.source_ref {
+        // Refuse to edit refs owned by a plugin: changing them would
+        // silently break the next reconcile sweep ("the moodle plugin
+        // listed source_ref X; minerva has Y; orphan everything").
+        // Teachers can re-tag UI uploads and other manually-tagged
+        // docs freely.
+        let owner = doc.source_system.as_deref();
+        let editable = matches!(owner, None | Some("manual"));
+        if !editable {
+            return Err(AppError::bad_request_with(
+                "doc.source_ref_plugin_owned",
+                [("source_system", owner.unwrap_or("").to_string())],
+            ));
+        }
+        let trimmed = new_ref_raw.trim();
+        let new_ref: Option<&str> = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        };
+        // Setting source_ref auto-tags source_system="manual"; clearing
+        // it also clears source_system so the row goes back to looking
+        // like an untagged UI upload.
+        let new_sys: Option<&str> = new_ref.map(|_| "manual");
+        minerva_db::queries::documents::set_source_identity(&state.db, doc_id, new_sys, new_ref)
+            .await?;
     }
 
     Ok(Json(serde_json::json!({ "ok": true })))

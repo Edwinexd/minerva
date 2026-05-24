@@ -962,4 +962,13 @@ export interface Document {
   kind_rationale: string | null
   kind_locked_by_teacher: boolean
   classified_at: string | null
+  // Slice 2: source-identity columns. `source_system` is "moodle" /
+  // "canvas" for plugin uploads, "manual" for teacher-tagged UI
+  // uploads, null for untagged. Teachers can edit `source_ref` on
+  // null- and "manual"-system docs via PATCH; plugin-owned refs are
+  // protected server-side (PATCH returns 4xx). `orphaned_at` is set
+  // when the doc has been superseded or its upstream source deleted.
+  source_system: string | null
+  source_ref: string | null
+  orphaned_at: string | null
 }

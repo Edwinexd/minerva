@@ -174,6 +174,72 @@ pub async fn orphan(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
     Ok(result.rows_affected() > 0)
 }
 
+/// Soft-orphan every active doc in `(course_id, source_system)` whose
+/// `source_ref` is in `source_refs`. Used by the slice-2 per-event
+/// orphan endpoint (Moodle observer fires when a course module or
+/// activity is deleted; the plugin posts the source_refs it just
+/// killed). Returns the number of rows flipped.
+pub async fn orphan_by_source_refs(
+    db: &PgPool,
+    course_id: Uuid,
+    source_system: &str,
+    source_refs: &[String],
+) -> Result<u64, sqlx::Error> {
+    if source_refs.is_empty() {
+        return Ok(0);
+    }
+    let result = sqlx::query!(
+        r#"UPDATE documents
+           SET orphaned_at = NOW()
+           WHERE course_id = $1
+             AND source_system = $2
+             AND source_ref = ANY($3)
+             AND orphaned_at IS NULL"#,
+        course_id,
+        source_system,
+        source_refs,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Reconcile-sweep helper: orphan every active doc in
+/// `(course_id, source_system)` whose `source_ref` is NOT in
+/// `keep_source_refs`. Returns the ids of newly-orphaned rows so the
+/// caller can log / trace what got swept. Docs without a `source_ref`
+/// (manually uploaded via the UI) and docs from a different
+/// `source_system` are left alone: reconcile is scoped to the caller's
+/// own source system so the Moodle plugin can't accidentally orphan
+/// Canvas-sourced or hand-uploaded docs.
+pub async fn reconcile_active_source_refs(
+    db: &PgPool,
+    course_id: Uuid,
+    source_system: &str,
+    keep_source_refs: &[String],
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    // ANY($3) with an empty array is treated as a never-matching list
+    // by Postgres, so passing an empty `keep_source_refs` correctly
+    // orphans every active doc for the given source system. That's the
+    // intended semantic: "I have zero objects from this system; please
+    // orphan everything you have."
+    let rows = sqlx::query!(
+        r#"UPDATE documents
+           SET orphaned_at = NOW()
+           WHERE course_id = $1
+             AND source_system = $2
+             AND orphaned_at IS NULL
+             AND NOT (source_ref = ANY($3))
+           RETURNING id"#,
+        course_id,
+        source_system,
+        keep_source_refs,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.id).collect())
+}
+
 /// IDs of orphaned documents in a course. Mirrors `hidden_document_ids`
 /// in shape and serves the same role for the retrieval-time filter in
 /// `strategy::common`. Returns `String` (not `Uuid`) because callers
@@ -190,6 +256,34 @@ pub async fn orphaned_doc_ids(
     .fetch_all(db)
     .await?;
     Ok(rows.into_iter().map(|id| id.to_string()).collect())
+}
+
+/// Update a doc's source identity. Both `source_system` and
+/// `source_ref` move together (always set both or both to NULL) so the
+/// `(course, source_system, source_ref)` active-row unique index never
+/// sees a half-populated row. Used by the teacher-facing PATCH to let
+/// teachers tag / un-tag UI uploads with a manual versioning ref;
+/// plugin-owned docs are protected at the route layer.
+///
+/// Setting a `source_ref` that collides with another active doc's
+/// `(source_system, source_ref)` will raise a unique-violation; the
+/// caller surfaces that as a 4xx so the teacher knows the slot is
+/// already taken.
+pub async fn set_source_identity(
+    db: &PgPool,
+    id: Uuid,
+    source_system: Option<&str>,
+    source_ref: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE documents SET source_system = $2, source_ref = $3 WHERE id = $1",
+        id,
+        source_system,
+        source_ref,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// Set the `content_hash` for a doc that didn't have one. Used by the

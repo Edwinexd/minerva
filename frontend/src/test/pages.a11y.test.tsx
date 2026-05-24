@@ -182,6 +182,9 @@ const documents: Document[] = [
     kind_rationale: null,
     kind_locked_by_teacher: false,
     classified_at: null,
+    source_system: null,
+    source_ref: null,
+    orphaned_at: null,
   },
 ]
 

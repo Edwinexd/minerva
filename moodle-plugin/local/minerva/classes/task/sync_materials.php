@@ -79,18 +79,40 @@ class sync_materials extends \core\task\scheduled_task {
             return;
         }
 
-        $items = self::find_unsynced_resources($course, $link->courseid);
+        // Discover everything currently on the Moodle side. We need
+        // BOTH the unsynced subset (to upload) AND the full set (to
+        // build the reconcile sweep's source_refs list); compute the
+        // full set first, then filter.
+        $allitems = self::find_all_resources($course, $link->courseid);
+        $items = self::filter_unsynced($link->courseid, $allitems);
 
-        if (empty($items)) {
+        if (!empty($items)) {
+            $uploaded = self::upload_items($client, $link, $items, function (string $msg): void {
+                mtrace('  ' . $msg);
+            });
+            mtrace("  Course {$link->courseid} -> Minerva {$link->minerva_course_id}: uploaded {$uploaded} new resource(s).");
+        } else {
             mtrace("  Course {$link->courseid}: no new materials.");
-            return;
         }
 
-        $uploaded = self::upload_items($client, $link, $items, function (string $msg): void {
-            mtrace('  ' . $msg);
-        });
-
-        mtrace("  Course {$link->courseid} -> Minerva {$link->minerva_course_id}: uploaded {$uploaded} new resource(s).");
+        // Reconcile sweep: tell Minerva the full set of source_refs
+        // we still see. Anything the server has under
+        // (course, source_system='moodle') that's not in the list
+        // gets orphaned and excluded from new retrievals. Catches
+        // everything the observer missed (bulk delete, plugin-disabled
+        // gaps, restore-from-backup) and runs even when no new items
+        // were uploaded this round.
+        try {
+            $currentrefs = self::current_source_refs($link->courseid, $allitems);
+            $orphaned = $client->reconcile_source_refs($link->minerva_course_id, $currentrefs);
+            if (!empty($orphaned)) {
+                mtrace(
+                    "  Course {$link->courseid}: reconcile orphaned " . count($orphaned) . ' stale doc(s).'
+                );
+            }
+        } catch (\Exception $e) {
+            mtrace("  Course {$link->courseid}: reconcile failed: " . $e->getMessage());
+        }
     }
 
     /**
@@ -98,7 +120,8 @@ class sync_materials extends \core\task\scheduled_task {
      * sync log. Returns the number uploaded successfully.
      *
      * Each item is a \stdClass with:
-     *   - contenthash: string (stable dedup key)
+     *   - contenthash: string (stable client-side dedup key, optimisation only)
+     *   - sourceref:   string (Moodle origin identity sent to server as source_ref)
      *   - filename:    string (filename sent to Minerva)
      *   - mimetype:    string
      *   - display:     string (short label for UI)
@@ -148,12 +171,14 @@ class sync_materials extends \core\task\scheduled_task {
                     $link->minerva_course_id,
                     $tmpfile,
                     $item->filename,
-                    $item->mimetype
+                    $item->mimetype,
+                    $item->sourceref ?? null
                 );
 
                 $record = new \stdClass();
                 $record->courseid = $link->courseid;
                 $record->contenthash = $item->contenthash;
+                $record->sourceref = $item->sourceref ?? null;
                 $record->filename = $item->filename;
                 $record->minerva_doc_id = $result->id ?? '';
                 $record->timecreated = time();
@@ -181,7 +206,53 @@ class sync_materials extends \core\task\scheduled_task {
     }
 
     /**
-     * Find course resources that haven't been synced yet.
+     * Collect every source_ref the plugin currently considers "present"
+     * for this course. Includes both items already uploaded in past
+     * runs (from local_minerva_sync_log) AND items discovered this run
+     * but not yet uploaded. Excludes items whose sourceref is null
+     * (legacy sync_log rows from before slice 2 rolled out; those are
+     * reconciled out over time as the corresponding Moodle objects
+     * get edited or re-discovered).
+     *
+     * Used by sync_course() to post a reconcile sweep to Minerva at
+     * the end of each run, orphaning anything in Minerva whose Moodle
+     * source has disappeared since the last sync.
+     *
+     * @param int $courseid Moodle course id.
+     * @param \stdClass[] $discovered Items the current sync found (with sourceref).
+     * @return string[] Deduped list of currently-known source_refs.
+     */
+    public static function current_source_refs(int $courseid, array $discovered): array {
+        global $DB;
+
+        $refs = [];
+        // Discovered this run.
+        foreach ($discovered as $item) {
+            if (!empty($item->sourceref)) {
+                $refs[$item->sourceref] = true;
+            }
+        }
+        // Previously uploaded (covers items that weren't re-discovered
+        // this run because they didn't actually change ; reconcile only
+        // orphans missing-from-the-list, so an unchanged item that's
+        // still in sync_log must appear).
+        $logrefs = $DB->get_fieldset_select(
+            'local_minerva_sync_log',
+            'sourceref',
+            'courseid = :courseid AND sourceref IS NOT NULL AND sourceref <> :empty',
+            ['courseid' => $courseid, 'empty' => '']
+        );
+        foreach ($logrefs as $r) {
+            $refs[$r] = true;
+        }
+        return array_keys($refs);
+    }
+
+    /**
+     * Discover every Moodle resource the plugin currently considers
+     * syncable, regardless of whether it has been uploaded before.
+     * Each item gets a stable `sourceref` so the slice-2 server side
+     * can do orphan-on-replace + reconcile.
      *
      * Discovers three kinds of sources across visible activities:
      *   1. Stored files in module `content` file areas
@@ -193,9 +264,9 @@ class sync_materials extends \core\task\scheduled_task {
      *
      * @param object $course Moodle course object.
      * @param int $courseid Moodle course ID.
-     * @return \stdClass[] Unsynced items.
+     * @return \stdClass[] All current items, deduped.
      */
-    public static function find_unsynced_resources(object $course, int $courseid): array {
+    public static function find_all_resources(object $course, int $courseid): array {
         global $DB;
 
         $modinfo = get_fast_modinfo($course);
@@ -230,7 +301,8 @@ class sync_materials extends \core\task\scheduled_task {
                         $pagerec->name ?: $cm->name,
                         $pagerec->content,
                         (int) $pagerec->contentformat,
-                        $modcontext
+                        $modcontext,
+                        (int) $cm->id
                     );
                     if ($item) {
                         $items[] = $item;
@@ -256,7 +328,8 @@ class sync_materials extends \core\task\scheduled_task {
                             $label,
                             $chapter->content,
                             (int) $chapter->contentformat,
-                            $modcontext
+                            $modcontext,
+                            (int) $cm->id
                         );
                         if ($item) {
                             $items[] = $item;
@@ -279,7 +352,8 @@ class sync_materials extends \core\task\scheduled_task {
                         $cm->name,
                         $labelrec->intro,
                         (int) $labelrec->introformat,
-                        $modcontext
+                        $modcontext,
+                        (int) $cm->id
                     );
                     if ($item) {
                         $items[] = $item;
@@ -302,7 +376,8 @@ class sync_materials extends \core\task\scheduled_task {
                         ($resrec->name ?: $cm->name) . ' (description)',
                         $resrec->intro,
                         (int) $resrec->introformat,
-                        $modcontext
+                        $modcontext,
+                        (int) $cm->id
                     );
                     if ($item) {
                         $items[] = $item;
@@ -335,14 +410,33 @@ class sync_materials extends \core\task\scheduled_task {
                 $label . ' (section summary)',
                 $section->summary,
                 (int) ($section->summaryformat ?? FORMAT_HTML),
-                $coursecontext
+                $coursecontext,
+                null
             );
             if ($item) {
                 $items[] = $item;
             }
         }
 
-        // Filter out items already synced (by content hash).
+        return $items;
+    }
+
+    /**
+     * Filter out items already uploaded in a previous sync (matched by
+     * client-side contenthash). Client-side filtering is now an
+     * optimisation only ; the server enforces dedup authoritatively
+     * via the (course, content_hash) partial unique index. Without
+     * this filter the plugin would re-POST every item every run; the
+     * server would dedup correctly but we'd burn one HTTP request per
+     * item per cron tick.
+     *
+     * @param int $courseid Moodle course ID.
+     * @param \stdClass[] $items All current items from find_all_resources().
+     * @return \stdClass[] Items the local sync log doesn't yet know about.
+     */
+    public static function filter_unsynced(int $courseid, array $items): array {
+        global $DB;
+
         $alreadysynced = $DB->get_records_menu(
             'local_minerva_sync_log',
             ['courseid' => $courseid],
@@ -356,8 +450,20 @@ class sync_materials extends \core\task\scheduled_task {
                 $fresh[] = $item;
             }
         }
-
         return $fresh;
+    }
+
+    /**
+     * Backwards-compatible shim for the manual sync.php UI which still
+     * wants "what's new". Equivalent to find_all_resources +
+     * filter_unsynced.
+     *
+     * @param object $course
+     * @param int $courseid
+     * @return \stdClass[]
+     */
+    public static function find_unsynced_resources(object $course, int $courseid): array {
+        return self::filter_unsynced($courseid, self::find_all_resources($course, $courseid));
     }
 
     /**
@@ -395,6 +501,19 @@ class sync_materials extends \core\task\scheduled_task {
             $item->sizelabel = display_size($file->get_filesize());
             $item->file = $file;
             $item->payload = null;
+            // Source identity for the slice-2 server: cm + filepath +
+            // filename. Stable across file replacements (Moodle keeps
+            // the path/name the same when a teacher swaps the bytes
+            // behind a resource), so a replaced file flips the
+            // server's content_hash branch and orphans the old row
+            // with the matching source_ref instead of creating an
+            // orphan + new pair.
+            $item->sourceref = sprintf(
+                'mod_file:cm:%d:%s%s',
+                $cm->id,
+                $file->get_filepath(),
+                $file->get_filename()
+            );
             $items[] = $item;
         }
     }
@@ -418,6 +537,11 @@ class sync_materials extends \core\task\scheduled_task {
         $item->sizelabel = '';
         $item->file = null;
         $item->payload = $urlrecord->externalurl;
+        // Source identity ties to the cm, so a teacher editing the URL
+        // (different externalurl, same cm) is treated as a content
+        // change and the previous Minerva doc is orphaned via the
+        // source_ref branch in upload_or_dedup.
+        $item->sourceref = 'url:cm:' . $cm->id;
         return $item;
     }
 
@@ -439,7 +563,8 @@ class sync_materials extends \core\task\scheduled_task {
         string $title,
         ?string $content,
         int $format,
-        \context $context
+        \context $context,
+        ?int $cmid
     ): ?\stdClass {
         if ($content === null || trim(strip_tags($content)) === '') {
             return null;
@@ -473,6 +598,21 @@ class sync_materials extends \core\task\scheduled_task {
         $item->sizelabel = display_size(strlen($document));
         $item->file = null;
         $item->payload = $document;
+        // Source identity prefers cm-scoped refs when the item maps
+        // to a specific course module (pages, labels, book chapters,
+        // resource intros all do); section summaries have no cm and
+        // fall back to (type, instanceid). Editing the underlying
+        // Moodle object keeps the same source_ref but changes the
+        // content_hash; the server orphans the previous doc and
+        // takes the new one as the active version for that slot.
+        if ($cmid !== null && $type !== 'book_chapter') {
+            $item->sourceref = $type . ':cm:' . $cmid;
+        } else {
+            // Book chapters: each chapter is its own unit even within
+            // one cm. Section summaries: keyed by section id (the
+            // course-level identity, not the cm).
+            $item->sourceref = $type . ':' . $instanceid;
+        }
         return $item;
     }
 

@@ -393,7 +393,8 @@
       "suggestionLabel_other": "{{count}} users",
       "suggestionHint_one": "{{count}} suggestion (values seen on at least {{minUsers}} different users). Free text still accepted.",
       "suggestionHint_other": "{{count}} suggestions (values seen on at least {{minUsers}} different users). Free text still accepted.",
-      "suggestionEmpty": "No known values for this attribute yet (need at least {{minUsers}} different users). Type any value; it'll start suggesting once more users log in."
+      "suggestionEmpty": "No known values for this attribute yet (need at least {{minUsers}} different users). Type any value; it'll start suggesting once more users log in.",
+      "suggestionNoMatch": "No suggestions match. Keep typing to add as free text."
     }
   },
   "externalInvites": {

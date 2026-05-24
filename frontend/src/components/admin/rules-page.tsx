@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Trans, useTranslation } from "react-i18next"
-import { useId, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import {
   adminRoleRuleAttributeValuesQuery,
   adminRoleRulesQuery,
@@ -34,6 +34,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Autocomplete,
+  AutocompleteContent,
+  AutocompleteEmpty,
+  AutocompleteInput,
+  AutocompleteItem,
+  AutocompleteList,
+} from "@/components/ui/autocomplete"
 
 export function RoleRulesPanel() {
   const { t } = useTranslation("admin")
@@ -265,18 +273,14 @@ function AddConditionForm({ ruleId }: { ruleId: string }) {
 
   // Pulled once at panel mount via the cached query; switching attributes
   // is then instant. Soft-failure: if the suggestions endpoint errors we
-  // simply render no datalist and the admin types freely.
+  // simply render no suggestion popup and the admin types freely.
   const { data: suggestionPayload } = useQuery(adminRoleRuleAttributeValuesQuery)
-
-  // Stable id for the datalist <-> input list= pairing. Each rule's form
-  // gets its own so two open forms don't fight over the same id.
-  const datalistId = useId()
 
   // Suggestions for the currently-selected attribute, with regex / not_regex
   // values automatically escaped so the admin can drop a suggestion straight
   // into a regex condition without rewriting backslashes. The original
-  // (un-escaped) value is still readable in the option label via i18n so
-  // they can see what they're picking.
+  // (un-escaped) value would not match the literal Shib header bytes once
+  // dropped into the input, hence escaping is mandatory not cosmetic.
   const suggestions: RoleRuleAttributeValueSuggestion[] = useMemo(() => {
     const raw = suggestionPayload?.by_attribute[attribute] ?? []
     if (operator !== "regex" && operator !== "not_regex") return raw
@@ -328,31 +332,55 @@ function AddConditionForm({ ruleId }: { ruleId: string }) {
           ))}
         </SelectContent>
       </Select>
-      <input
-        className="h-7 flex-1 min-w-[14rem] rounded border bg-background px-2 font-mono text-xs"
-        placeholder={t("rules.condition.valuePlaceholder")}
-        aria-label={t("rules.condition.valuePlaceholder")}
+      {/*
+        Combobox-style autocomplete: input stays free-text (admins can author
+        rules for values we haven't observed yet, since the suggestion list
+        only covers values seen on >= min_users distinct users), but selecting
+        a suggestion drops the bare value into the input. The "N users" badge
+        in each option is metadata, not the option value. The native
+        <datalist> conflates the two: Chrome renders the option's label
+        attribute and hides the actual value entirely, which is why this form
+        was previously showing three identical "2 users" rows in the dropdown.
+
+        `items` is the same array we render below; Base UI filters as the
+        admin types using `itemToStringValue` to know which field to match
+        against. We always render Empty inside the list so a stray keystroke
+        that filters everything out gets a hint instead of an empty popup.
+      */}
+      <Autocomplete
+        items={suggestions}
+        itemToStringValue={(s: RoleRuleAttributeValueSuggestion) => s.value}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
-        list={suggestions.length > 0 ? datalistId : undefined}
-      />
-      {suggestions.length > 0 && (
-        // Native <datalist> autocomplete: the input stays free-text, so an
-        // admin can still create a rule for a value we haven't observed yet
-        // (the suggestions only cover values seen on >= min_users users).
-        // The label shows the original value + observed user count; the
-        // option value is what gets dropped into the input (regex-escaped
-        // when the operator is regex/not_regex, raw otherwise).
-        <datalist id={datalistId}>
-          {suggestions.map((s) => (
-            <option
-              key={s.value}
-              value={s.value}
-              label={t("rules.condition.suggestionLabel", { count: s.user_count })}
-            />
-          ))}
-        </datalist>
-      )}
+        onValueChange={setValue}
+        openOnInputClick
+      >
+        <AutocompleteInput
+          className="h-7 flex-1 min-w-[14rem] font-mono text-xs"
+          placeholder={t("rules.condition.valuePlaceholder")}
+          aria-label={t("rules.condition.valuePlaceholder")}
+        />
+        {suggestions.length > 0 && (
+          <AutocompleteContent>
+            <AutocompleteEmpty>
+              {t("rules.condition.suggestionNoMatch")}
+            </AutocompleteEmpty>
+            <AutocompleteList>
+              {(item: RoleRuleAttributeValueSuggestion) => (
+                <AutocompleteItem key={item.value} value={item}>
+                  <span className="flex-1 truncate font-mono text-xs">
+                    {item.value}
+                  </span>
+                  <Badge variant="secondary" className="shrink-0 text-[10px]">
+                    {t("rules.condition.suggestionLabel", {
+                      count: item.user_count,
+                    })}
+                  </Badge>
+                </AutocompleteItem>
+              )}
+            </AutocompleteList>
+          </AutocompleteContent>
+        )}
+      </Autocomplete>
       <Button
         type="submit"
         size="sm"

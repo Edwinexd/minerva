@@ -393,7 +393,8 @@
       "suggestionLabel_other": "{{count}} användare",
       "suggestionHint_one": "{{count}} förslag (värden sedda på minst {{minUsers}} olika användare). Fritext accepteras fortfarande.",
       "suggestionHint_other": "{{count}} förslag (värden sedda på minst {{minUsers}} olika användare). Fritext accepteras fortfarande.",
-      "suggestionEmpty": "Inga kända värden för detta attribut än (behöver minst {{minUsers}} olika användare). Skriv vilket värde som helst; förslag dyker upp när fler användare loggat in."
+      "suggestionEmpty": "Inga kända värden för detta attribut än (behöver minst {{minUsers}} olika användare). Skriv vilket värde som helst; förslag dyker upp när fler användare loggat in.",
+      "suggestionNoMatch": "Inga förslag matchar. Fortsätt skriva för att lägga till som fritext."
     }
   },
   "externalInvites": {

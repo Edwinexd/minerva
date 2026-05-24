@@ -147,7 +147,7 @@
     "customLabel": "Ytterligare domäner",
     "customHint": "Kommaseparerat. Läggs till utöver det som är ikryssat ovan.",
     "emptyWarn": "Att skicka in utan ikryssade rutor och utan ytterligare domäner gör att Minerva litar på VILKEN eppn som helst som det här LMS:et anger (rekommenderas inte).",
-    "submit": "Registrera förslag och avsluta",
+    "submit": "Spara förslag",
     "skip": "Hoppa över (admin sätter scope senare)",
     "afterNote": "Efter detta måste en Minerva-integratör klicka Godkänn i Minerva för att aktivera plattformen. De kan justera ditt scope-förslag innan de godkänner.",
     "doneTitle": "Förslag registrerat",

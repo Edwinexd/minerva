@@ -147,7 +147,7 @@
     "customLabel": "Additional domains",
     "customHint": "Comma-separated. Added on top of any boxes ticked above.",
     "emptyWarn": "Submitting with nothing ticked and no additional domains means Minerva will trust ANY eppn this LMS claims (not recommended).",
-    "submit": "Record suggestion and finish",
+    "submit": "Save suggestion",
     "skip": "Skip (admin sets scope later)",
     "afterNote": "After this, a Minerva integrator must click Approve in Minerva to activate the platform. They can adjust the scope you set here before approving.",
     "doneTitle": "Suggestion recorded",

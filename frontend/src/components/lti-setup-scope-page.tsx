@@ -118,16 +118,14 @@ export function LtiSetupScopePage() {
     },
     onSuccess: () => {
       setSubmitted(true)
-      // IMS LTI Dynamic Registration spec: tool must post this to close
-      // the LMS-side dialog.
-      try {
-        ;(window.opener || window.parent)?.postMessage(
-          { subject: "org.imsglobal.lti.close" },
-          "*",
-        )
-      } catch {
-        /* ignore: same-origin failure or no parent */
-      }
+      // Intentionally do NOT post `org.imsglobal.lti.close` here. The LMS
+      // closes its dialog the instant that message arrives, which would
+      // mean the user never sees the success state with the "Open
+      // Minerva to approve" / "Close" buttons. The close happens only
+      // when the user clicks Close (or the "Open Minerva to approve"
+      // flow finishes and they come back here). Spec-compliant: the
+      // close message is "the tool tells the LMS we're done"; nothing
+      // says it has to fire instantly.
     },
   })
 

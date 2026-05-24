@@ -381,7 +381,10 @@ function PlatformRow({
   })
 
   const pending = platform.activated_at === null
-  const orphaned = !pending && platform.invalid_client_since !== null
+  // `!= null` (not `!==`) so an older backend response that omits the
+  // health fields entirely doesn't trip the orphan UI. Only a non-null
+  // timestamp counts as "orphaned" here.
+  const orphaned = !pending && platform.invalid_client_since != null
 
   const submitApproval = () => {
     const domains = scopeInput

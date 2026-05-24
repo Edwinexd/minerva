@@ -34,6 +34,7 @@ import { Route as LtiSetupPlatformIdRouteImport } from "./routes/lti/setup.$plat
 import { Route as CourseCourseIdStudyRouteImport } from "./routes/course/$courseId/study"
 import { Route as CourseCourseIdNewRouteImport } from "./routes/course/$courseId/new"
 import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
+import { Route as AdminLtiApprovePlatformIdRouteImport } from "./routes/admin/lti-approve.$platformId"
 import { Route as TeacherCoursesCourseIdIndexRouteImport } from "./routes/teacher/courses.$courseId/index"
 import { Route as TeacherCoursesCourseIdUsageRouteImport } from "./routes/teacher/courses.$courseId/usage"
 import { Route as TeacherCoursesCourseIdStudyRouteImport } from "./routes/teacher/courses.$courseId/study"
@@ -48,7 +49,6 @@ import { Route as TeacherCoursesCourseIdConversationsRouteImport } from "./route
 import { Route as TeacherCoursesCourseIdConfigRouteImport } from "./routes/teacher/courses.$courseId/config"
 import { Route as TeacherCoursesCourseIdCanvasRouteImport } from "./routes/teacher/courses.$courseId/canvas"
 import { Route as TeacherCoursesCourseIdApiKeysRouteImport } from "./routes/teacher/courses.$courseId/api-keys"
-import { Route as AdminLtiApprovePlatformIdRouteImport } from "./routes/admin/lti.approve.$platformId"
 
 const DataHandlingRoute = DataHandlingRouteImport.update({
   id: "/data-handling",
@@ -176,6 +176,12 @@ const CourseCourseIdConversationIdRoute =
     path: "/course/$courseId/$conversationId",
     getParentRoute: () => rootRouteImport,
   } as any)
+const AdminLtiApprovePlatformIdRoute =
+  AdminLtiApprovePlatformIdRouteImport.update({
+    id: "/lti-approve/$platformId",
+    path: "/lti-approve/$platformId",
+    getParentRoute: () => AdminRoute,
+  } as any)
 const TeacherCoursesCourseIdIndexRoute =
   TeacherCoursesCourseIdIndexRouteImport.update({
     id: "/",
@@ -260,12 +266,6 @@ const TeacherCoursesCourseIdApiKeysRoute =
     path: "/api-keys",
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
-const AdminLtiApprovePlatformIdRoute =
-  AdminLtiApprovePlatformIdRouteImport.update({
-    id: "/approve/$platformId",
-    path: "/approve/$platformId",
-    getParentRoute: () => AdminLtiRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
@@ -276,7 +276,7 @@ export interface FileRoutesByFullPath {
   "/admin/courses": typeof AdminCoursesRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/integrations": typeof AdminIntegrationsRoute
-  "/admin/lti": typeof AdminLtiRouteWithChildren
+  "/admin/lti": typeof AdminLtiRoute
   "/admin/rules": typeof AdminRulesRoute
   "/admin/study": typeof AdminStudyRoute
   "/admin/system": typeof AdminSystemRoute
@@ -287,13 +287,13 @@ export interface FileRoutesByFullPath {
   "/lti/bind": typeof LtiBindRoute
   "/admin/": typeof AdminIndexRoute
   "/teacher/": typeof TeacherIndexRoute
+  "/admin/lti-approve/$platformId": typeof AdminLtiApprovePlatformIdRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/course/$courseId/study": typeof CourseCourseIdStudyRoute
   "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
-  "/admin/lti/approve/$platformId": typeof AdminLtiApprovePlatformIdRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
   "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
   "/teacher/courses/$courseId/config": typeof TeacherCoursesCourseIdConfigRoute
@@ -317,7 +317,7 @@ export interface FileRoutesByTo {
   "/admin/courses": typeof AdminCoursesRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/integrations": typeof AdminIntegrationsRoute
-  "/admin/lti": typeof AdminLtiRouteWithChildren
+  "/admin/lti": typeof AdminLtiRoute
   "/admin/rules": typeof AdminRulesRoute
   "/admin/study": typeof AdminStudyRoute
   "/admin/system": typeof AdminSystemRoute
@@ -328,12 +328,12 @@ export interface FileRoutesByTo {
   "/lti/bind": typeof LtiBindRoute
   "/admin": typeof AdminIndexRoute
   "/teacher": typeof TeacherIndexRoute
+  "/admin/lti-approve/$platformId": typeof AdminLtiApprovePlatformIdRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/course/$courseId/study": typeof CourseCourseIdStudyRoute
   "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
   "/course/$courseId": typeof CourseCourseIdIndexRoute
-  "/admin/lti/approve/$platformId": typeof AdminLtiApprovePlatformIdRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
   "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
   "/teacher/courses/$courseId/config": typeof TeacherCoursesCourseIdConfigRoute
@@ -359,7 +359,7 @@ export interface FileRoutesById {
   "/admin/courses": typeof AdminCoursesRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/integrations": typeof AdminIntegrationsRoute
-  "/admin/lti": typeof AdminLtiRouteWithChildren
+  "/admin/lti": typeof AdminLtiRoute
   "/admin/rules": typeof AdminRulesRoute
   "/admin/study": typeof AdminStudyRoute
   "/admin/system": typeof AdminSystemRoute
@@ -370,13 +370,13 @@ export interface FileRoutesById {
   "/lti/bind": typeof LtiBindRoute
   "/admin/": typeof AdminIndexRoute
   "/teacher/": typeof TeacherIndexRoute
+  "/admin/lti-approve/$platformId": typeof AdminLtiApprovePlatformIdRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/course/$courseId/study": typeof CourseCourseIdStudyRoute
   "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
-  "/admin/lti/approve/$platformId": typeof AdminLtiApprovePlatformIdRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
   "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
   "/teacher/courses/$courseId/config": typeof TeacherCoursesCourseIdConfigRoute
@@ -414,13 +414,13 @@ export interface FileRouteTypes {
     | "/lti/bind"
     | "/admin/"
     | "/teacher/"
+    | "/admin/lti-approve/$platformId"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
     | "/course/$courseId/study"
     | "/lti/setup/$platformId"
     | "/teacher/courses/$courseId"
     | "/course/$courseId/"
-    | "/admin/lti/approve/$platformId"
     | "/teacher/courses/$courseId/api-keys"
     | "/teacher/courses/$courseId/canvas"
     | "/teacher/courses/$courseId/config"
@@ -455,12 +455,12 @@ export interface FileRouteTypes {
     | "/lti/bind"
     | "/admin"
     | "/teacher"
+    | "/admin/lti-approve/$platformId"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
     | "/course/$courseId/study"
     | "/lti/setup/$platformId"
     | "/course/$courseId"
-    | "/admin/lti/approve/$platformId"
     | "/teacher/courses/$courseId/api-keys"
     | "/teacher/courses/$courseId/canvas"
     | "/teacher/courses/$courseId/config"
@@ -496,13 +496,13 @@ export interface FileRouteTypes {
     | "/lti/bind"
     | "/admin/"
     | "/teacher/"
+    | "/admin/lti-approve/$platformId"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
     | "/course/$courseId/study"
     | "/lti/setup/$platformId"
     | "/teacher/courses/$courseId"
     | "/course/$courseId/"
-    | "/admin/lti/approve/$platformId"
     | "/teacher/courses/$courseId/api-keys"
     | "/teacher/courses/$courseId/canvas"
     | "/teacher/courses/$courseId/config"
@@ -714,6 +714,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof CourseCourseIdConversationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/admin/lti-approve/$platformId": {
+      id: "/admin/lti-approve/$platformId"
+      path: "/lti-approve/$platformId"
+      fullPath: "/admin/lti-approve/$platformId"
+      preLoaderRoute: typeof AdminLtiApprovePlatformIdRouteImport
+      parentRoute: typeof AdminRoute
+    }
     "/teacher/courses/$courseId/": {
       id: "/teacher/courses/$courseId/"
       path: "/"
@@ -812,52 +819,35 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof TeacherCoursesCourseIdApiKeysRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/admin/lti/approve/$platformId": {
-      id: "/admin/lti/approve/$platformId"
-      path: "/approve/$platformId"
-      fullPath: "/admin/lti/approve/$platformId"
-      preLoaderRoute: typeof AdminLtiApprovePlatformIdRouteImport
-      parentRoute: typeof AdminLtiRoute
-    }
   }
 }
-
-interface AdminLtiRouteChildren {
-  AdminLtiApprovePlatformIdRoute: typeof AdminLtiApprovePlatformIdRoute
-}
-
-const AdminLtiRouteChildren: AdminLtiRouteChildren = {
-  AdminLtiApprovePlatformIdRoute: AdminLtiApprovePlatformIdRoute,
-}
-
-const AdminLtiRouteWithChildren = AdminLtiRoute._addFileChildren(
-  AdminLtiRouteChildren,
-)
 
 interface AdminRouteChildren {
   AdminCoursesRoute: typeof AdminCoursesRoute
   AdminExternalInvitesRoute: typeof AdminExternalInvitesRoute
   AdminIntegrationsRoute: typeof AdminIntegrationsRoute
-  AdminLtiRoute: typeof AdminLtiRouteWithChildren
+  AdminLtiRoute: typeof AdminLtiRoute
   AdminRulesRoute: typeof AdminRulesRoute
   AdminStudyRoute: typeof AdminStudyRoute
   AdminSystemRoute: typeof AdminSystemRoute
   AdminUsageRoute: typeof AdminUsageRoute
   AdminUsersRoute: typeof AdminUsersRoute
   AdminIndexRoute: typeof AdminIndexRoute
+  AdminLtiApprovePlatformIdRoute: typeof AdminLtiApprovePlatformIdRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminCoursesRoute: AdminCoursesRoute,
   AdminExternalInvitesRoute: AdminExternalInvitesRoute,
   AdminIntegrationsRoute: AdminIntegrationsRoute,
-  AdminLtiRoute: AdminLtiRouteWithChildren,
+  AdminLtiRoute: AdminLtiRoute,
   AdminRulesRoute: AdminRulesRoute,
   AdminStudyRoute: AdminStudyRoute,
   AdminSystemRoute: AdminSystemRoute,
   AdminUsageRoute: AdminUsageRoute,
   AdminUsersRoute: AdminUsersRoute,
   AdminIndexRoute: AdminIndexRoute,
+  AdminLtiApprovePlatformIdRoute: AdminLtiApprovePlatformIdRoute,
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)

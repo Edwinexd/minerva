@@ -171,7 +171,7 @@ export function LtiSetupScopePage() {
             <Button
               onClick={() =>
                 window.open(
-                  `/admin/lti/approve/${encodeURIComponent(platformId)}`,
+                  `/admin/lti-approve/${encodeURIComponent(platformId)}`,
                   "_blank",
                   "noopener",
                 )

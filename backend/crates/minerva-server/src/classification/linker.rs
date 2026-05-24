@@ -1487,6 +1487,10 @@ mod tests {
                 kind_rationale: None,
                 kind_locked_by_teacher: false,
                 classified_at: None,
+                content_hash: None,
+                source_system: None,
+                source_ref: None,
+                orphaned_at: None,
                 pooled_embedding: None,
             }
         }

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET orphaned_at = NOW() WHERE id = $1 AND orphaned_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e39deeb7c0c816bb33f2febf1b1cd66a6f27c9815608db5d43d80c4e5c9633c2"
+}

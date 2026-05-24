@@ -98,6 +98,13 @@ pub async fn run(
     let collection_name =
         minerva_ingest::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
 
+    // Drop chunks from orphaned docs before any partition; see
+    // `simple.rs` for the rationale. Computed once per turn and
+    // re-used for the model's tool-driven retrievals below.
+    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.course_id)
+        .await
+        .unwrap_or_default();
+
     // 1. Seed retrieval (identical to simple/parallel/flare's preamble).
     let raw_chunks = common::rag_lookup(
         &http_client,
@@ -110,6 +117,7 @@ pub async fn run(
         ctx.min_score,
         &ctx.embedding_provider,
         &ctx.embedding_model,
+        &orphaned,
     )
     .await;
 
@@ -167,6 +175,7 @@ pub async fn run(
             &ctx.embedding_model,
             &ctx.user_content,
             &rag.context,
+            &orphaned,
         )
         .await;
         // Only surface the KG-expansion event when it actually
@@ -216,8 +225,16 @@ pub async fn run(
         kg_enabled: ctx.kg_enabled,
     };
     let config = ResearchConfig::defaults(use_logprobs);
-    let mut research =
-        research_phase::run(&ctx, config, catalog_flags, rag.context.clone(), cap, &tx).await;
+    let mut research = research_phase::run(
+        &ctx,
+        config,
+        catalog_flags,
+        rag.context.clone(),
+        cap,
+        &orphaned,
+        &tx,
+    )
+    .await;
 
     // Prepend the server-initiated retrievals (seed RAG, optional
     // KG expansion) so the persisted message and the in-progress

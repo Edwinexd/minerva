@@ -59,6 +59,12 @@ pub struct ToolDispatchCtx<'a> {
     /// course-level `max_chunks` here ; that ceiling already lives
     /// on the seed retrieval path.
     pub min_score: f32,
+    /// Per-turn set of orphaned doc ids. Threaded through every
+    /// retrieval primitive (`rag_lookup` / `keyword_lookup`) so the
+    /// model's tool-driven searches see exactly the same active
+    /// corpus as the strategy's seed retrieval. Computed once per
+    /// turn by the strategy and reused for every tool call.
+    pub orphaned_doc_ids: &'a std::collections::HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -298,6 +304,7 @@ async fn run_semantic_search(
         ctx.min_score,
         ctx.embedding_provider,
         ctx.embedding_model,
+        ctx.orphaned_doc_ids,
     )
     .await;
     let model_message = format_chunks_for_model(&chunks);
@@ -312,12 +319,18 @@ async fn run_keyword_search(
     ctx: &ToolDispatchCtx<'_>,
 ) -> Result<ToolOutcome, ToolError> {
     let k = args.k.unwrap_or(10).clamp(1, 20);
-    let chunks = common::keyword_lookup(ctx.qdrant, ctx.collection_name, &args.query, k as u64)
-        .await
-        .map_err(|e| ToolError::Backend {
-            tool: "keyword_search",
-            reason: e,
-        })?;
+    let chunks = common::keyword_lookup(
+        ctx.qdrant,
+        ctx.collection_name,
+        &args.query,
+        k as u64,
+        ctx.orphaned_doc_ids,
+    )
+    .await
+    .map_err(|e| ToolError::Backend {
+        tool: "keyword_search",
+        reason: e,
+    })?;
     let model_message = format_chunks_for_model(&chunks);
     Ok(ToolOutcome {
         chunks,

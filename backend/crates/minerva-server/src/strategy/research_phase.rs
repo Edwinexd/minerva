@@ -226,6 +226,15 @@ async fn emit_thinking_done(tx: &mpsc::Sender<Result<Event, AppError>>, duration
 /// Entry point. Drives the research loop until it hits `stop` (or a
 /// cap), then returns the accumulated chunks + transcript for the
 /// writeup phase.
+///
+/// `orphaned_doc_ids` is the per-turn set of soft-orphaned documents
+/// (Moodle activity edited / deleted upstream). It's threaded into every
+/// retrieval primitive that the research loop can drive: model-issued
+/// `semantic_search` / `keyword_search` tool calls AND mid-stream FLARE
+/// injections, so stale chunks never resurface no matter which path
+/// the model takes. The caller (currently `tool_use::run`) pre-fetches
+/// it once via `documents::orphaned_doc_ids` and reuses it for the
+/// strategy's own seed retrieval too.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     ctx: &GenerationContext,
@@ -233,6 +242,7 @@ pub async fn run(
     catalog_flags: ToolCatalogFlags,
     initial_chunks: Vec<RagChunk>,
     per_response_token_cap: i64,
+    orphaned_doc_ids: &std::collections::HashSet<String>,
     tx: &mpsc::Sender<Result<Event, AppError>>,
 ) -> ResearchOutput {
     let started_at = std::time::Instant::now();
@@ -251,6 +261,7 @@ pub async fn run(
         embedding_model: &ctx.embedding_model,
         course_id: ctx.course_id,
         min_score: ctx.min_score,
+        orphaned_doc_ids,
     };
 
     let catalog = tools::assemble_catalog(catalog_flags);
@@ -490,6 +501,7 @@ pub async fn run(
                     config.flare_similarity_threshold.max(ctx.min_score),
                     &ctx.embedding_provider,
                     &ctx.embedding_model,
+                    orphaned_doc_ids,
                 )
                 .await;
                 let mut added = 0usize;

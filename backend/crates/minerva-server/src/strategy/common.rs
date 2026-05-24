@@ -117,6 +117,35 @@ pub fn chunks_for_client(chunks: &[RagChunk], hidden_doc_ids: &HashSet<String>) 
         .collect()
 }
 
+/// Drop any chunks whose source document has been soft-orphaned.
+///
+/// Applied to every strategy's retrieval before partition / context
+/// build. Orphaning is the model for "Moodle edited or removed this
+/// material"; the doc row is kept so chat-history citations
+/// (`messages.chunks_used`) still resolve, but new turns must not
+/// surface stale content. Runs unconditionally (no KG flag gate)
+/// because retrieval correctness, not classification policy, is the
+/// concern here.
+pub fn filter_orphaned(chunks: Vec<RagChunk>, orphaned_doc_ids: &HashSet<String>) -> Vec<RagChunk> {
+    if orphaned_doc_ids.is_empty() {
+        return chunks;
+    }
+    chunks
+        .into_iter()
+        .filter(|c| {
+            let drop = orphaned_doc_ids.contains(&c.document_id);
+            if drop {
+                tracing::debug!(
+                    "rag: dropping chunk from orphaned doc {} (filename {})",
+                    c.document_id,
+                    c.filename
+                );
+            }
+            !drop
+        })
+        .collect()
+}
+
 // ── Qdrant payload helpers ──────────────────────────────────────────
 
 /// Scroll every chunk for one document out of `collection_name` and
@@ -272,6 +301,13 @@ pub fn partition_chunks(
 /// Run a nearest-neighbour search against Qdrant, dispatching to either
 /// local FastEmbed or OpenAI embeddings depending on the course's
 /// `embedding_provider`.
+///
+/// `excluded_doc_ids` is pushed into Qdrant as a `must_not` payload filter
+/// on `document_id`. Doing the exclusion server-side (rather than
+/// post-filtering the result list) preserves the "top-N" contract: when a
+/// caller asks for the 10 best chunks and 3 of the global top-10 belong
+/// to orphaned docs, Qdrant returns the *next* 3 active candidates so the
+/// caller still gets 10 chunks, not 7.
 #[allow(clippy::too_many_arguments)]
 pub async fn embedding_search(
     client: &reqwest::Client,
@@ -284,6 +320,7 @@ pub async fn embedding_search(
     score_threshold: Option<f32>,
     embedding_provider: &str,
     embedding_model: &str,
+    excluded_doc_ids: &HashSet<String>,
 ) -> Result<Vec<ScoredPoint>, String> {
     let vector = if embedding_provider == "local" {
         // Apply the model's query-side prefix (e.g. `query: ` for
@@ -319,6 +356,15 @@ pub async fn embedding_search(
     let mut builder = SearchPointsBuilder::new(collection_name, vector, limit).with_payload(true);
     if let Some(threshold) = score_threshold {
         builder = builder.score_threshold(threshold);
+    }
+    if !excluded_doc_ids.is_empty() {
+        use qdrant_client::qdrant::{Condition, Filter};
+        // `must_not` + `match_any` translates to "document_id not in (...)"
+        // server-side. HNSW skips matching points entirely, so the top-N
+        // contract is preserved: see the doc comment above.
+        let excluded: Vec<String> = excluded_doc_ids.iter().cloned().collect();
+        let filter = Filter::must_not([Condition::matches("document_id", excluded)]);
+        builder = builder.filter(filter);
     }
     qdrant
         .search_points(builder)
@@ -633,6 +679,7 @@ pub async fn expand_context_via_graph(
     embedding_model: &str,
     query: &str,
     base_context: &[RagChunk],
+    orphaned_doc_ids: &HashSet<String>,
 ) -> Vec<RagChunk> {
     if base_context.is_empty() {
         return Vec::new();
@@ -670,7 +717,9 @@ pub async fn expand_context_via_graph(
     };
 
     // Flatten partners across all source docs, dedup, drop any
-    // that are already in base_context.
+    // that are already in base_context, and skip any whose target
+    // doc is orphaned. Filtering here (before the per-partner
+    // Qdrant call) avoids a wasted search round-trip per orphan.
     let already_in_context: HashSet<String> =
         base_context.iter().map(|c| c.document_id.clone()).collect();
     let mut expansion_targets: Vec<uuid::Uuid> = Vec::new();
@@ -678,7 +727,11 @@ pub async fn expand_context_via_graph(
     for src in &source_doc_ids {
         if let Some(partners) = partners_map.get(src) {
             for p in partners {
-                if targets_seen.insert(*p) && !already_in_context.contains(&p.to_string()) {
+                let p_str = p.to_string();
+                if targets_seen.insert(*p)
+                    && !already_in_context.contains(&p_str)
+                    && !orphaned_doc_ids.contains(&p_str)
+                {
                     expansion_targets.push(*p);
                     if expansion_targets.len() >= GRAPH_EXPAND_TOTAL_CHUNKS {
                         break;
@@ -817,12 +870,20 @@ pub async fn rag_lookup(
     min_score: f32,
     embedding_provider: &str,
     embedding_model: &str,
+    orphaned_doc_ids: &HashSet<String>,
 ) -> Vec<RagChunk> {
     let threshold = if min_score > 0.0 {
         Some(min_score)
     } else {
         None
     };
+    // Orphan exclusion is enforced *inside* Qdrant via `excluded_doc_ids`
+    // on the search call below: this keeps the "top-N" contract intact
+    // (the next-best active chunks are returned in place of orphaned
+    // ones, rather than the caller silently getting fewer than N
+    // results). The post-search `filter_orphaned` is a belt-and-braces
+    // pass in case a chunk slips through (e.g. a doc that was orphaned
+    // between query build and response).
     match embedding_search(
         client,
         openai_key,
@@ -834,13 +895,17 @@ pub async fn rag_lookup(
         threshold,
         embedding_provider,
         embedding_model,
+        orphaned_doc_ids,
     )
     .await
     {
-        Ok(points) => points
-            .iter()
-            .filter_map(scored_point_to_rag_chunk)
-            .collect(),
+        Ok(points) => {
+            let chunks: Vec<RagChunk> = points
+                .iter()
+                .filter_map(scored_point_to_rag_chunk)
+                .collect();
+            filter_orphaned(chunks, orphaned_doc_ids)
+        }
         Err(e) => {
             tracing::warn!("{}, skipping RAG", e);
             Vec::new()
@@ -872,6 +937,7 @@ pub async fn keyword_lookup(
     collection_name: &str,
     query: &str,
     limit: u64,
+    orphaned_doc_ids: &HashSet<String>,
 ) -> Result<Vec<RagChunk>, String> {
     use qdrant_client::qdrant::{Condition, Filter, ScrollPointsBuilder};
     // `Condition::matches_text` wraps a `MatchText` filter; Qdrant
@@ -883,10 +949,25 @@ pub async fn keyword_lookup(
     // way searching "deadline" finds chunks discussing deadlines,
     // AND searching "syllabus" finds chunks from a file named
     // `syllabus.pdf` regardless of body content.
-    let filter = Filter::should([
-        Condition::matches_text("text", query.to_string()),
-        Condition::matches_text("filename", query.to_string()),
-    ]);
+    //
+    // The orphan exclusion goes into `must_not` so it composes with
+    // `should` correctly: scroll returns chunks matching any of the
+    // `should` clauses AND none of the `must_not` clauses: i.e.
+    // matching content from non-orphaned docs only. Same top-N
+    // preservation as `embedding_search`.
+    let mut filter = Filter {
+        should: vec![
+            Condition::matches_text("text", query.to_string()),
+            Condition::matches_text("filename", query.to_string()),
+        ],
+        ..Default::default()
+    };
+    if !orphaned_doc_ids.is_empty() {
+        let excluded: Vec<String> = orphaned_doc_ids.iter().cloned().collect();
+        filter
+            .must_not
+            .push(Condition::matches("document_id", excluded));
+    }
     let response = qdrant
         .scroll(
             ScrollPointsBuilder::new(collection_name)
@@ -912,7 +993,7 @@ pub async fn keyword_lookup(
             })
         })
         .collect();
-    Ok(chunks)
+    Ok(filter_orphaned(chunks, orphaned_doc_ids))
 }
 
 /// Stream a Cerebras completion to the client via tx, appending tokens to full_text.

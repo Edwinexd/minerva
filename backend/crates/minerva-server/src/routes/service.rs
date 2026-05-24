@@ -150,12 +150,14 @@ async fn submit_transcript(
             + ".txt";
         let size_bytes = text.len() as i64;
 
+        let content_hash = super::documents::compute_content_hash(text.as_bytes());
         let updated = minerva_db::queries::documents::replace_with_transcript(
             &state.db,
             doc.id,
             &new_filename,
             "text/plain",
             size_bytes,
+            Some(&content_hash),
         )
         .await?;
 
@@ -349,15 +351,27 @@ async fn create_url_document(
         .map_err(|e| AppError::Internal(format!("failed to write url file: {}", e)))?;
 
     let size_bytes = url.len() as i64;
+    // content_hash of the URL bytes for cross-system dedup: two different
+    // discovery paths landing on the same play.dsv.su.se URL now collapse
+    // even if one of them omitted `source_url` (none currently do, but the
+    // hash is cheap insurance). Doesn't subsume `source_url` because the
+    // URL doc later gets its mime + bytes rewritten with the transcript;
+    // see `replace_with_transcript`.
+    let content_hash = super::documents::compute_content_hash(url.as_bytes());
     let insert_result = minerva_db::queries::documents::insert(
         &state.db,
-        doc_id,
-        course_id,
-        &filename,
-        "text/x-url",
-        size_bytes,
-        course.owner_id,
-        Some(&url),
+        minerva_db::queries::documents::NewDocument {
+            id: doc_id,
+            course_id,
+            filename: &filename,
+            mime_type: "text/x-url",
+            size_bytes,
+            uploaded_by: course.owner_id,
+            source_url: Some(&url),
+            content_hash: Some(&content_hash),
+            source_system: None,
+            source_ref: None,
+        },
     )
     .await;
 

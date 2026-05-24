@@ -25,7 +25,19 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let collection_name =
         minerva_ingest::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
 
-    // RAG lookup (blocks before streaming starts)
+    // Orphan filter runs first and unconditionally: an orphaned doc
+    // (Moodle activity deleted, page edited, etc.) must never appear in
+    // a new turn regardless of KG status. Soft-orphan instead of hard
+    // delete because chat history's `chunks_used` cites doc ids we
+    // still need to resolve client-side. Computed once and threaded
+    // into every RAG primitive that runs this turn (rag_lookup +
+    // keyword_lookup + tool dispatch); see `common::rag_lookup`.
+    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.course_id)
+        .await
+        .unwrap_or_default();
+
+    // RAG lookup (blocks before streaming starts). Orphaned chunks
+    // are filtered inside.
     let raw_chunks = common::rag_lookup(
         &http_client,
         &ctx.openai_api_key,
@@ -37,6 +49,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         ctx.min_score,
         &ctx.embedding_provider,
         &ctx.embedding_model,
+        &orphaned,
     )
     .await;
 
@@ -89,6 +102,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             &ctx.embedding_model,
             &ctx.user_content,
             &rag.context,
+            &orphaned,
         )
         .await;
         rag.context.extend(extra);

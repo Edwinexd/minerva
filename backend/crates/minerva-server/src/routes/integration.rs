@@ -333,34 +333,28 @@ async fn upload_document(
         ));
     }
 
-    let doc_id = Uuid::new_v4();
-
-    // Save file to disk
-    let dir = format!("{}/{}", state.config.docs_path, course_id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
-
-    let ext = super::documents::extension_from_filename(&filename);
-    let file_path = format!("{}/{}.{}", dir, doc_id, ext);
-    tokio::fs::write(&file_path, &data)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;
-
-    // Get course owner as uploader
+    // Get course owner as uploader for plugin-driven uploads. Course
+    // existence was verified above; this lookup is cheap (PK).
     let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Insert as 'pending'. The background worker will pick it up.
-    let row = minerva_db::queries::documents::insert(
-        &state.db,
-        doc_id,
+    // Idempotent upload: same bytes in the same course collapse to one
+    // active doc. The plugin's local sync_log is now an optimization,
+    // not the source of truth: re-installs, multi-worker races, and
+    // duplicated activities across Moodle sections all converge here.
+    // `source_system` / `source_ref` stay None this slice; slice 2
+    // wires the plugin to send them so update-with-orphan can supersede
+    // the previous row when the Moodle object's content changes.
+    let row = super::documents::upload_or_dedup(
+        &state,
         course_id,
         &filename,
         &content_type,
-        size_bytes,
+        &data,
         course.owner_id,
+        None,
+        None,
         None,
     )
     .await?;

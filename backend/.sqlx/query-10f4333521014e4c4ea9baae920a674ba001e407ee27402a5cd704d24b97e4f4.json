@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET content_hash = $2 WHERE id = $1 AND content_hash IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "10f4333521014e4c4ea9baae920a674ba001e407ee27402a5cd704d24b97e4f4"
+}

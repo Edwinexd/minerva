@@ -99,6 +99,89 @@ impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
     }
 }
 
+/// SHA-256 (hex) of arbitrary bytes. Stable, deterministic, used as the
+/// server-side dedup key across every upload entry point.
+pub fn compute_content_hash(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
+
+/// Idempotent upload helper used by every route that ingests a document.
+///
+/// Path: compute the bytes' sha256 → if `(course_id, content_hash)` matches
+/// an active row, return it without touching disk; else write the file under
+/// `{docs_path}/{course_id}/{new_doc_id}.{ext}` and insert. The on-disk file
+/// for a dedup hit stays where it already was under the existing doc's id;
+/// callers do not need to clean up.
+///
+/// `source_system` / `source_ref` are wired through for slice 2 (Moodle source
+/// identity); slice 1 callers pass `None`. `source_url` is the legacy
+/// per-URL idempotency key already used by the URL-stub flow; we still pass
+/// it through unchanged.
+#[allow(clippy::too_many_arguments)]
+pub async fn upload_or_dedup(
+    state: &AppState,
+    course_id: Uuid,
+    filename: &str,
+    mime_type: &str,
+    bytes: &[u8],
+    uploaded_by: Uuid,
+    source_url: Option<&str>,
+    source_system: Option<&str>,
+    source_ref: Option<&str>,
+) -> Result<minerva_db::queries::documents::DocumentRow, AppError> {
+    let content_hash = compute_content_hash(bytes);
+
+    if let Some(existing) = minerva_db::queries::documents::find_active_by_content_hash(
+        &state.db,
+        course_id,
+        &content_hash,
+    )
+    .await?
+    {
+        // Same bytes already in this course as an active doc; reuse it.
+        // We don't reconcile `source_url` / `source_system` / `source_ref`
+        // here: a duplicate upload with a different source identity is rare
+        // (and slice 2's source-identity branch handles that case
+        // separately via `find_active_by_source_ref` before falling through
+        // to content-hash lookup).
+        return Ok(existing);
+    }
+
+    let doc_id = Uuid::new_v4();
+    let dir = format!("{}/{}", state.config.docs_path, course_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
+
+    let ext = extension_from_filename(filename);
+    let file_path = format!("{}/{}.{}", dir, doc_id, ext);
+    tokio::fs::write(&file_path, bytes)
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;
+
+    let size_bytes = bytes.len() as i64;
+    let row = minerva_db::queries::documents::insert(
+        &state.db,
+        minerva_db::queries::documents::NewDocument {
+            id: doc_id,
+            course_id,
+            filename,
+            mime_type,
+            size_bytes,
+            uploaded_by,
+            source_url,
+            content_hash: Some(&content_hash),
+            source_system,
+            source_ref,
+        },
+    )
+    .await?;
+    Ok(row)
+}
+
 async fn list_documents(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -164,31 +247,19 @@ async fn upload_document(
         ));
     }
 
-    let doc_id = Uuid::new_v4();
-
-    // Save file to disk
-    let docs_path = &state.config.docs_path;
-    let dir = format!("{}/{}", docs_path, course_id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
-
-    let ext = extension_from_filename(&filename);
-    let file_path = format!("{}/{}.{}", dir, doc_id, ext);
-    tokio::fs::write(&file_path, &data)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;
-
-    // Insert document record as 'pending'. The background worker will pick it
-    // up and process it with bounded concurrency.
-    let row = minerva_db::queries::documents::insert(
-        &state.db,
-        doc_id,
+    // Server-side dedup: re-uploading the same bytes (e.g. a teacher
+    // dragging the same PDF in twice) returns the existing doc instead
+    // of inserting a duplicate. See `upload_or_dedup` for the full
+    // contract.
+    let row = upload_or_dedup(
+        &state,
         course_id,
         &filename,
         &content_type,
-        size_bytes,
+        &data,
         user.id,
+        None,
+        None,
         None,
     )
     .await?;
@@ -277,40 +348,30 @@ async fn upload_mbz(
                 AppError::bad_request_with("doc.mbz_parse_failed", [("detail", e.to_string())])
             })?;
 
-    let docs_path = &state.config.docs_path;
-    let dir = format!("{}/{}", docs_path, course_id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
-
     let mut imported: usize = 0;
     for item in &import.items {
-        let doc_id = Uuid::new_v4();
-        let ext = extension_from_filename(&item.filename);
-        let file_path = format!("{}/{}.{}", dir, doc_id, ext);
-
-        let size_bytes: i64 = match &item.body {
-            minerva_ingest::moodle::ItemBody::Inline(bytes) => {
-                tokio::fs::write(&file_path, bytes).await.map_err(|e| {
-                    AppError::Internal(format!("failed to write {}: {}", item.filename, e))
-                })?;
-                bytes.len() as i64
-            }
+        // Read bytes into memory so we can hash them for dedup. .mbz items
+        // are individual course resources (bounded by Moodle's per-file
+        // cap, in practice ≪ MAX_UPLOAD_BYTES); buffering them here is
+        // fine even on the biggest backups we've seen in production.
+        let bytes: Vec<u8> = match &item.body {
+            minerva_ingest::moodle::ItemBody::Inline(bytes) => bytes.clone(),
             minerva_ingest::moodle::ItemBody::File(src) => {
-                tokio::fs::copy(src, &file_path).await.map_err(|e| {
-                    AppError::Internal(format!("failed to copy {}: {}", item.filename, e))
-                })? as i64
+                tokio::fs::read(src).await.map_err(|e| {
+                    AppError::Internal(format!("failed to read {}: {}", item.filename, e))
+                })?
             }
         };
 
-        minerva_db::queries::documents::insert(
-            &state.db,
-            doc_id,
+        upload_or_dedup(
+            &state,
             course_id,
             &item.filename,
             &item.mime,
-            size_bytes,
+            &bytes,
             user.id,
+            None,
+            None,
             None,
         )
         .await?;
@@ -551,6 +612,11 @@ async fn search_chunks(
     let limit = params.limit.unwrap_or(10);
     let client = reqwest::Client::new();
 
+    // Admin search UI: exclude orphaned docs at the Qdrant layer so the
+    // top-N contract is preserved (same reasoning as the chat path).
+    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&state.db, course_id)
+        .await
+        .unwrap_or_default();
     let scored_points = crate::strategy::common::embedding_search(
         &client,
         &state.config.openai_api_key,
@@ -562,6 +628,7 @@ async fn search_chunks(
         None,
         &course.embedding_provider,
         &course.embedding_model,
+        &orphaned,
     )
     .await
     .map_err(AppError::Internal)?;

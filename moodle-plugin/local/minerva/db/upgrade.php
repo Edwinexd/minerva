@@ -52,5 +52,18 @@ function xmldb_local_minerva_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026052401, 'local', 'minerva');
     }
 
+    // Slice 3: per-course forum sync opt-in. Default OFF so existing
+    // installations don't suddenly start indexing student posts; the
+    // teacher must visit Manage and tick the box (which is itself
+    // gated on the site-level enable_forum_sync flag).
+    if ($oldversion < 2026052402) {
+        $table = new xmldb_table('local_minerva_links');
+        $field = new xmldb_field('sync_forums', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'minerva_api_key');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+        upgrade_plugin_savepoint(true, 2026052402, 'local', 'minerva');
+    }
+
     return true;
 }

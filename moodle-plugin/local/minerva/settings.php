@@ -62,5 +62,19 @@ if ($hassiteconfig) {
         1
     ));
 
+    // Slice 3: site-level kill switch for forum sync. Default ON so
+    // installations get the feature out of the box, but admins can flip
+    // it off across the whole site for compliance or policy reasons.
+    // Per-course sync is OFF by default and only togglable when this
+    // is ON (enforced in manage.php's checkbox + the sync task's
+    // gate); flipping this OFF immediately disables forum sync on all
+    // courses regardless of their per-link setting.
+    $settings->add(new admin_setting_configcheckbox(
+        'local_minerva/enable_forum_sync',
+        get_string('settings_enable_forum_sync', 'local_minerva'),
+        get_string('settings_enable_forum_sync_desc', 'local_minerva'),
+        1
+    ));
+
     $ADMIN->add('localplugins', $settings);
 }

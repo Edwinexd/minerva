@@ -80,3 +80,19 @@ $string['privacy:metadata'] = 'The Minerva plugin sends the teacher\'s user iden
 
 // Tasks.
 $string['task_sync_materials'] = 'Sync materials to Minerva';
+
+// Slice 3: forum sync (two-level opt-in).
+$string['settings_enable_forum_sync'] = 'Enable forum sync';
+$string['settings_enable_forum_sync_desc'] = 'When ON, course teachers can opt-in to ingest teacher-answered forum threads into Minerva (with student names scrubbed from posts). When OFF, the per-course toggle is hidden and no forum content reaches Minerva, regardless of per-course settings.';
+$string['forum_sync_section_title'] = 'Forum conversations';
+$string['forum_sync_status_on'] = 'Forum sync is ENABLED for this course.';
+$string['forum_sync_status_off'] = 'Forum sync is OFF for this course.';
+$string['forum_sync_blurb'] = 'When enabled, threads where a teacher has posted at least once are uploaded to Minerva, one document per forum. Student names from the course roster are stripped from post bodies before upload.';
+$string['forum_sync_enable_btn'] = 'Sync conversations in this course';
+$string['forum_sync_disable_btn'] = 'Stop syncing conversations';
+$string['forum_sync_enable_confirm'] = 'Teacher-answered forum threads will be uploaded to Minerva (with student names removed). Continue?';
+$string['forum_sync_disable_confirm'] = 'No further forum content will be sent to Minerva. Already-uploaded forum docs stay until the next reconcile sweep marks them stale. Continue?';
+$string['forum_sync_enabled_course'] = 'Forum sync enabled for this course.';
+$string['forum_sync_disabled_course'] = 'Forum sync disabled for this course.';
+$string['forum_sync_disabled_site'] = 'Forum sync is disabled site-wide; ask an administrator to enable it first.';
+$string['task_sync_forums'] = 'Sync forum conversations to Minerva';

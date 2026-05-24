@@ -84,6 +84,28 @@ class sync_materials extends \core\task\scheduled_task {
         // build the reconcile sweep's source_refs list); compute the
         // full set first, then filter.
         $allitems = self::find_all_resources($course, $link->courseid);
+
+        // Slice 3: append forum-derived items when both the site-level
+        // admin flag and the per-link teacher toggle are on. Forum
+        // items share the same item shape and source-identity scheme
+        // as everything else, so they flow through upload_items() +
+        // reconcile() unchanged. The gate is centralised in
+        // forum_collector::should_sync so it stays consistent with
+        // the UI affordance in manage.php.
+        if (\local_minerva\forum_collector::should_sync($link)) {
+            try {
+                $forumitems = \local_minerva\forum_collector::collect($course, $link->courseid);
+                if (!empty($forumitems)) {
+                    $allitems = array_merge($allitems, $forumitems);
+                    mtrace(
+                        "  Course {$link->courseid}: forum sync added " . count($forumitems) . ' forum doc(s).'
+                    );
+                }
+            } catch (\Throwable $t) {
+                mtrace("  Course {$link->courseid}: forum sync failed: " . $t->getMessage());
+            }
+        }
+
         $items = self::filter_unsynced($link->courseid, $allitems);
 
         if (!empty($items)) {

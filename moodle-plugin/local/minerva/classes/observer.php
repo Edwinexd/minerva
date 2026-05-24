@@ -24,7 +24,7 @@ namespace local_minerva;
  * deletion, where we clean up our own link + sync-log rows.
  *
  * @package    local_minerva
- * @copyright  2026 DSV, Stockholm University
+ * @copyright  2026 Edwin Sundberg
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class observer {

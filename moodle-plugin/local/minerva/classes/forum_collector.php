@@ -40,7 +40,7 @@ namespace local_minerva;
  * the slice-2 orphan-on-replace path so retrieval stays current.
  *
  * @package    local_minerva
- * @copyright  2026 DSV, Stockholm University
+ * @copyright  2026 Edwin Sundberg
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class forum_collector {

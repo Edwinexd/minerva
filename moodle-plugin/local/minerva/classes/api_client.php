@@ -22,7 +22,7 @@ namespace local_minerva;
  * Talks to the /api/integration/* endpoints using the configured API key.
  *
  * @package    local_minerva
- * @copyright  2026 DSV, Stockholm University
+ * @copyright  2026 Edwin Sundberg
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class api_client {

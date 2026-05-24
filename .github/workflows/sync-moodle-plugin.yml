@@ -5,26 +5,74 @@ on:
     branches: [master]
     paths:
       - "moodle-plugin/local/minerva/**"
+  workflow_dispatch:
 
 jobs:
   sync:
-    name: Sync to moodle-local_minerva
+    name: Sync to ${{ matrix.target.name }}
     runs-on: ubuntu-latest
+    # fail-fast=false: a transient outage on one mirror shouldn't block
+    # the other from getting the update; each target is independent.
+    strategy:
+      fail-fast: false
+      matrix:
+        # One entry per downstream mirror. `auth` selects which credential
+        # block runs (steps gate on it), so each target only ever sees its
+        # own secret in env. Adding a new mirror = one matrix entry plus,
+        # if it needs a new auth strategy, one conditional step.
+        target:
+          - name: github
+            auth: token
+            # secret: MOODLE_SYNC_TOKEN (consumed by the token-push step)
+            remote: https://github.com/Edwinexd/moodle-local_minerva.git
+          - name: gitea
+            auth: ssh
+            # secret: GITEA_SSH_KEY (consumed by the ssh-setup step)
+            ssh_host: gitea.dsv.su.se
+            remote: git@gitea.dsv.su.se:edsu8469/moodle-local_minerva.git
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history required so `git subtree split` can rewrite
+          # the per-commit history of moodle-plugin/local/minerva
+          # into a standalone branch.
+          fetch-depth: 0
 
-      - name: Push plugin to target repo
+      - name: Setup SSH key
+        if: matrix.target.auth == 'ssh'
+        env:
+          SSH_KEY: ${{ secrets.GITEA_SSH_KEY }}
         run: |
-          cd moodle-plugin/local/minerva
+          mkdir -p ~/.ssh
+          printf '%s' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan "${{ matrix.target.ssh_host }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-          git init --initial-branch=master
+      - name: Split subtree
+        id: split
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add -A
-          git commit -m "Sync from Edwinexd/minerva@${GITHUB_SHA::7}"
+          # Per-commit history preserving split: SHAs are deterministic
+          # from the source history, so the force-push is safe (the
+          # downstream branch always reflects the same upstream state).
+          SUBTREE_SHA=$(git subtree split --prefix=moodle-plugin/local/minerva HEAD)
+          echo "Subtree HEAD: $SUBTREE_SHA"
+          echo "sha=$SUBTREE_SHA" >> "$GITHUB_OUTPUT"
 
-          git remote add target "https://x-access-token:${TOKEN}@github.com/Edwinexd/moodle-local_minerva.git"
-          git push target master --force
+      - name: Push via token
+        if: matrix.target.auth == 'token'
         env:
           TOKEN: ${{ secrets.MOODLE_SYNC_TOKEN }}
+        run: |
+          # Inject the token only into the remote URL for this push;
+          # never written to disk or echoed.
+          remote="${{ matrix.target.remote }}"
+          remote_with_auth="${remote/https:\/\//https:\/\/x-access-token:$TOKEN@}"
+          git push --force "$remote_with_auth" "${{ steps.split.outputs.sha }}:refs/heads/master"
+
+      - name: Push via ssh
+        if: matrix.target.auth == 'ssh'
+        run: |
+          git push --force "${{ matrix.target.remote }}" "${{ steps.split.outputs.sha }}:refs/heads/master"

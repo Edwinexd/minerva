@@ -26,7 +26,7 @@ use local_minerva\api_client;
  * chapters / mod_label / mod_resource intros / section summaries.
  *
  * @package    local_minerva
- * @copyright  2026 DSV, Stockholm University
+ * @copyright  2026 Edwin Sundberg
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class sync_materials extends \core\task\scheduled_task {

@@ -38,7 +38,7 @@ require_once($CFG->libdir . '/formslib.php');
  *     resolve which course the key is scoped to.
  *
  * @package    local_minerva
- * @copyright  2026 DSV, Stockholm University
+ * @copyright  2026 Edwin Sundberg
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class link_course_form extends \moodleform {

@@ -6,8 +6,10 @@ Deployment pipeline and production access for Minerva.
 
 - **Dev stack:** `docker compose -f docker-compose.yml up -d` (backend, frontend, postgres, qdrant)
 - **Moodle test:** `docker compose -f docker-compose.moodle.yml up -d` (local Moodle instance, port 8088, admin/Admin123!)
-- **Moodle plugin repo:** `Edwinexd/moodle-local_minerva`, auto-synced from `moodle-plugin/local/minerva/` via `sync-moodle-plugin.yml` workflow (requires `MOODLE_SYNC_TOKEN` secret). That mirror is a single squashed commit per sync.
-- **Gitea mirror:** `gitea.dsv.su.se/edsu8469/moodle-local_minerva`, auto-synced from the same subdirectory via `sync-moodle-plugin-gitea.yml`. Uses `git subtree split` to preserve per-commit history (force-push because split SHAs are derived from source history); requires `GITEA_SSH_KEY` secret with push access.
+- **Moodle plugin mirrors:** `sync-moodle-plugin.yml` is a single matrix-strategy workflow that pushes `moodle-plugin/local/minerva/` to every downstream mirror on every change. Each matrix entry declares its own auth strategy (token vs ssh) so only the relevant secret enters env per run; `fail-fast: false` so one mirror outage doesn't block the other.
+  - `Edwinexd/moodle-local_minerva` (GitHub) ; HTTPS push, `MOODLE_SYNC_TOKEN` secret.
+  - `gitea.dsv.su.se/edsu8469/moodle-local_minerva` (Gitea) ; SSH push, `GITEA_SSH_KEY` secret.
+  - Both mirrors use `git subtree split --prefix=moodle-plugin/local/minerva HEAD` so per-commit history is preserved (force-push is safe ; split SHAs are deterministic from the source history). To add a third mirror: append a matrix entry and, if it needs a new auth shape, one more conditional step.
 
 ### SQLx offline cache
 

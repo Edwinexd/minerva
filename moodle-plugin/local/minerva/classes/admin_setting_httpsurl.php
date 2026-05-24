@@ -24,7 +24,7 @@ namespace local_minerva;
  * to a public host would leak it.
  *
  * @package    local_minerva
- * @copyright  2026 DSV, Stockholm University
+ * @copyright  2026 Edwin Sundberg
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class admin_setting_httpsurl extends \admin_setting_configtext {

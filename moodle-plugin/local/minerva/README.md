@@ -4,7 +4,9 @@ Local plugin that connects Moodle to a [Minerva](https://github.com/Edwinexd/min
 
 ## Features
 
-- **Course linking**: teachers link a Moodle course to a Minerva course by pasting a per-course API key. The scoped course is resolved automatically from the key.
+- **Course linking**: two modes, picked automatically from settings.
+  - **Legacy** (default): teacher pastes a per-course API key; the scoped course is resolved automatically from the key.
+  - **Site integration** (when admins set `site_api_key`): teacher picks from a dropdown of Minerva courses they own or teach; the plugin mints the per-course key on their behalf via `/api/integration/site/provision` and stores it like any other per-course key.
 - **Site-wide Minerva URL**: admins can lock the Minerva URL so teachers only need to enter the API key. Non-https URLs are rejected (with a carve-out for loopback, `host.docker.internal`, and bare single-label hostnames used inside container networks).
 - **Material sync**: uploads course content (stored files, mod_url targets, mod_page, mod_book chapters, mod_label intros, mod_resource intros, and section summaries) to Minerva for RAG processing. Runs on demand and twice an hour (at 15 and 45 past).
 - **Source-identity tracking**: every uploaded resource is tagged with a stable `source_ref` (e.g. `page:cm:42`, `mod_file:cm:7:/lecture3.pdf`). When the underlying Moodle object changes, the previous Minerva doc is soft-orphaned and the new one supersedes it; when the object is deleted, the doc is orphaned too. Orphaned docs are excluded from new chat retrievals but kept so existing chat-history citations still resolve.
@@ -20,8 +22,8 @@ Local plugin that connects Moodle to a [Minerva](https://github.com/Edwinexd/min
 
 > **Enrolment / membership is not handled by this plugin.** Course membership is provisioned by Minerva itself on LTI launch (and reconciled via NRPS), so the plugin only pushes materials.
 - **Housekeeping**:
-  - Unlinking a course also clears the per-course sync log so a re-link does a full re-upload.
-  - "Reset sync log" button for the same effect without unlinking.
+  - Unlinking a course also clears the per-course sync log; the next sync re-discovers every Moodle object and re-POSTs it. The Minerva server's `(course, content_hash)` dedup index decides what's actually new, so unchanged bytes are no-ops on the server side.
+  - "Reset sync log" button does the same without unlinking. Useful when the local optimisation cache and Minerva's view have drifted (e.g. after a manual delete on the Minerva side).
   - `course_deleted` observer cleans up link and sync-log rows automatically.
 
 ## Requirements
@@ -60,8 +62,8 @@ The task respects the `autosync_materials` admin toggle. The reconcile sweep run
 
 ## Capabilities
 
-- `local/minerva:manage`: configure the Minerva link for a course (default: editing teacher, manager). Also gates the per-course "Sync conversations" toggle.
-- `local/minerva:syncmaterials`: trigger a material sync or reset the sync log (default: editing teacher, manager).
+- `local/minerva:manage`: required to view the manage page at all and to link / unlink the course (default: editing teacher, manager).
+- `local/minerva:syncmaterials`: required for the per-course controls rendered on the manage page ; "Sync materials", "Reset sync log", and the "Sync conversations" forum toggle. The manage page only renders these for users who hold this capability (default: editing teacher, manager).
 
 ## Source-identity reference
 

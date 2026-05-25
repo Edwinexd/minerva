@@ -180,8 +180,14 @@ export function AegisSuggestionsBanner({
       ? "blocked"
       : "idle"
 
+  // `block` is load-bearing: <output> defaults to display: inline, so without
+  // it the `bg-*` / `border-*` utilities below render against zero inline
+  // content (the children all set their own block/flex) and the banner
+  // collapses to two thin colored lines. The a11y pass that swapped the
+  // wrapping <div role="status"> for the semantic <output> didn't carry this
+  // over. Don't drop it without re-checking the banner visually in chat.
   const containerClass = cn(
-    "rounded-md border",
+    "block rounded-md border",
     compactState === "blocked"
       ? "border-rose-300 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-800"
       : "border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800",

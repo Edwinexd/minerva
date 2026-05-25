@@ -11,7 +11,44 @@
       "lti": "LTI",
       "integrations": "Plugin Integrations",
       "study": "Study Mode",
-      "system": "System"
+      "system": "System",
+      "devTools": "Dev Tools"
+    }
+  },
+  "devTools": {
+    "loading": "Checking dev mode...",
+    "notDevTitle": "Dev mode is off",
+    "notDevDescription": "This panel is only available when the server runs with MINERVA_DEV_MODE=true.",
+    "reseedTitle": "Reseed fixture data",
+    "reseedDescription": "Wipes the previously-seeded users, courses, documents, conversations, and messages, then re-inserts them from scratch. Hand-created rows are not touched.",
+    "destructiveLabel": "Destructive:",
+    "destructiveBody": "any rows tagged by a previous seed run are deleted, including their on-disk document bytes and Qdrant collections.",
+    "reseedButton": "Reseed now",
+    "reseeding": "Reseeding...",
+    "fixtureUsersTitle": "Fixture users",
+    "fixtureUsersDescription": "The seeder always creates exactly this cast. Switch into any of them via the dev user switcher in the header (paste the eppn).",
+    "fixtureUsersTip": "The calling admin (you) is not in this list; you stay logged in as yourself, and the fixture courses key off your id for ownership / membership.",
+    "fixtureCoursesTitle": "Fixture courses",
+    "fixtureCoursesDescription": "Four courses spanning the configuration matrix you most often need to switch between.",
+    "columns": {
+      "eppn": "Eppn",
+      "role": "Role",
+      "notes": "Notes"
+    },
+    "report": {
+      "successHeading": "Reseed complete (run as {{eppn}}).",
+      "wipedHeading": "Wiped",
+      "seededHeading": "Seeded",
+      "users": "{{n}} users",
+      "courses": "{{n}} courses",
+      "documents": "{{n}} documents",
+      "members": "{{n}} memberships",
+      "conversations": "{{n}} conversations",
+      "messages": "{{n}} messages",
+      "invites": "{{n}} external invites",
+      "dirs": "{{n}} course doc dirs",
+      "qdrant": "{{n}} Qdrant collections",
+      "embeddingNote": "Documents are queued for embedding via the local fastembed provider; they will become searchable in chat over the next ~10-30s."
     }
   },
   "integrationKeys": {

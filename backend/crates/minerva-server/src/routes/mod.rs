@@ -3,6 +3,7 @@ mod api_keys;
 pub(crate) mod canvas;
 mod chat;
 mod courses;
+mod dev;
 pub(crate) mod documents;
 pub mod embed;
 mod external_auth;
@@ -85,7 +86,11 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/admin", lti::admin_router())
         .nest("/admin", integration_admin::router())
         .nest("/admin", study::admin_router())
-        .nest("/admin", system::router());
+        .nest("/admin", system::router())
+        // Dev-mode routes (e.g. /admin/dev/seed). Each handler
+        // gates on `MINERVA_DEV_MODE` so the routes return 404 in
+        // prod even though the surrounding router still mounts them.
+        .nest("/admin", dev::router());
 
     let authed = authed
         .merge(usage::admin_router())

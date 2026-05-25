@@ -11,7 +11,44 @@
       "lti": "LTI",
       "integrations": "Plugin-integrationer",
       "study": "Studieläge",
-      "system": "System"
+      "system": "System",
+      "devTools": "Dev-verktyg"
+    }
+  },
+  "devTools": {
+    "loading": "Kontrollerar dev-läge...",
+    "notDevTitle": "Dev-läge är av",
+    "notDevDescription": "Denna panel är endast tillgänglig när servern körs med MINERVA_DEV_MODE=true.",
+    "reseedTitle": "Återskapa fixturdata",
+    "reseedDescription": "Raderar tidigare seedade användare, kurser, dokument, konversationer och meddelanden och skapar dem på nytt. Handskapade rader berörs inte.",
+    "destructiveLabel": "Destruktivt:",
+    "destructiveBody": "alla rader som taggats av en tidigare seed-körning raderas, inklusive dokumentens filer på disk och Qdrant-collections.",
+    "reseedButton": "Återskapa nu",
+    "reseeding": "Återskapar...",
+    "fixtureUsersTitle": "Fixturanvändare",
+    "fixtureUsersDescription": "Seederingen skapar alltid exakt denna uppsättning. Växla till någon av dem via dev-användarväljaren i headern (klistra in epp-namnet).",
+    "fixtureUsersTip": "Den anropande administratören (du) finns inte i listan; du förblir inloggad som dig själv, och fixturkurserna nyttjar ditt id för ägarskap / medlemskap.",
+    "fixtureCoursesTitle": "Fixturkurser",
+    "fixtureCoursesDescription": "Fyra kurser som täcker den konfigurationsmatris du oftast behöver växla mellan.",
+    "columns": {
+      "eppn": "Epp-namn",
+      "role": "Roll",
+      "notes": "Noteringar"
+    },
+    "report": {
+      "successHeading": "Återskapning klar (kördes som {{eppn}}).",
+      "wipedHeading": "Raderat",
+      "seededHeading": "Seedat",
+      "users": "{{n}} användare",
+      "courses": "{{n}} kurser",
+      "documents": "{{n}} dokument",
+      "members": "{{n}} medlemskap",
+      "conversations": "{{n}} konversationer",
+      "messages": "{{n}} meddelanden",
+      "invites": "{{n}} externa inbjudningar",
+      "dirs": "{{n}} dokumentmappar",
+      "qdrant": "{{n}} Qdrant-collections",
+      "embeddingNote": "Dokumenten köas för embedding via den lokala fastembed-providern; de blir sökbara i chatten inom cirka 10-30 sekunder."
     }
   },
   "integrationKeys": {

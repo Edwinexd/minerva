@@ -1,6 +1,7 @@
 mod auth;
 mod classification;
 mod config;
+mod dev_seed;
 mod error;
 mod ext_obfuscate;
 mod feature_flags;

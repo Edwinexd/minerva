@@ -27,6 +27,7 @@ import { Route as AdminRulesRouteImport } from "./routes/admin/rules"
 import { Route as AdminLtiRouteImport } from "./routes/admin/lti"
 import { Route as AdminIntegrationsRouteImport } from "./routes/admin/integrations"
 import { Route as AdminExternalInvitesRouteImport } from "./routes/admin/external-invites"
+import { Route as AdminDevToolsRouteImport } from "./routes/admin/dev-tools"
 import { Route as AdminCoursesRouteImport } from "./routes/admin/courses"
 import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
 import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
@@ -138,6 +139,11 @@ const AdminIntegrationsRoute = AdminIntegrationsRouteImport.update({
 const AdminExternalInvitesRoute = AdminExternalInvitesRouteImport.update({
   id: "/external-invites",
   path: "/external-invites",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminDevToolsRoute = AdminDevToolsRouteImport.update({
+  id: "/dev-tools",
+  path: "/dev-tools",
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminCoursesRoute = AdminCoursesRouteImport.update({
@@ -274,6 +280,7 @@ export interface FileRoutesByFullPath {
   "/admin": typeof AdminRouteWithChildren
   "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
+  "/admin/dev-tools": typeof AdminDevToolsRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/integrations": typeof AdminIntegrationsRoute
   "/admin/lti": typeof AdminLtiRoute
@@ -315,6 +322,7 @@ export interface FileRoutesByTo {
   "/acknowledgements": typeof AcknowledgementsRoute
   "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
+  "/admin/dev-tools": typeof AdminDevToolsRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/integrations": typeof AdminIntegrationsRoute
   "/admin/lti": typeof AdminLtiRoute
@@ -357,6 +365,7 @@ export interface FileRoutesById {
   "/admin": typeof AdminRouteWithChildren
   "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
+  "/admin/dev-tools": typeof AdminDevToolsRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
   "/admin/integrations": typeof AdminIntegrationsRoute
   "/admin/lti": typeof AdminLtiRoute
@@ -401,6 +410,7 @@ export interface FileRouteTypes {
     | "/admin"
     | "/data-handling"
     | "/admin/courses"
+    | "/admin/dev-tools"
     | "/admin/external-invites"
     | "/admin/integrations"
     | "/admin/lti"
@@ -442,6 +452,7 @@ export interface FileRouteTypes {
     | "/acknowledgements"
     | "/data-handling"
     | "/admin/courses"
+    | "/admin/dev-tools"
     | "/admin/external-invites"
     | "/admin/integrations"
     | "/admin/lti"
@@ -483,6 +494,7 @@ export interface FileRouteTypes {
     | "/admin"
     | "/data-handling"
     | "/admin/courses"
+    | "/admin/dev-tools"
     | "/admin/external-invites"
     | "/admin/integrations"
     | "/admin/lti"
@@ -665,6 +677,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminExternalInvitesRouteImport
       parentRoute: typeof AdminRoute
     }
+    "/admin/dev-tools": {
+      id: "/admin/dev-tools"
+      path: "/dev-tools"
+      fullPath: "/admin/dev-tools"
+      preLoaderRoute: typeof AdminDevToolsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     "/admin/courses": {
       id: "/admin/courses"
       path: "/courses"
@@ -824,6 +843,7 @@ declare module "@tanstack/react-router" {
 
 interface AdminRouteChildren {
   AdminCoursesRoute: typeof AdminCoursesRoute
+  AdminDevToolsRoute: typeof AdminDevToolsRoute
   AdminExternalInvitesRoute: typeof AdminExternalInvitesRoute
   AdminIntegrationsRoute: typeof AdminIntegrationsRoute
   AdminLtiRoute: typeof AdminLtiRoute
@@ -838,6 +858,7 @@ interface AdminRouteChildren {
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminCoursesRoute: AdminCoursesRoute,
+  AdminDevToolsRoute: AdminDevToolsRoute,
   AdminExternalInvitesRoute: AdminExternalInvitesRoute,
   AdminIntegrationsRoute: AdminIntegrationsRoute,
   AdminLtiRoute: AdminLtiRoute,

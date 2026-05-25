@@ -19,7 +19,8 @@
       "lti": "LTI",
       "integrations": "Integrations",
       "study": "Study mode",
-      "system": "System"
+      "system": "System",
+      "devTools": "Dev tools"
     },
     "teacherCourse": "Teacher: {{course}}",
     "course": "{{course}}",

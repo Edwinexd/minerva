@@ -1,7 +1,11 @@
 FROM node:26-alpine
 
 WORKDIR /app
-COPY package.json package-lock.json ./
+# .npmrc carries `legacy-peer-deps=true` (jsx-a11y still caps its peer
+# at eslint 9). Must land BEFORE `npm ci`, otherwise resolution fails
+# with ERESOLVE. Mirrors what Dockerfile.prod already does for the
+# same reason ; this dev image was the missing half of that fix.
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci
 COPY . .
 

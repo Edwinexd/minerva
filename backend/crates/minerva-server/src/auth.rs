@@ -280,77 +280,7 @@ async fn upsert_user(
     )
     .await?;
 
-    // Drain Daisy pending memberships. Best-effort: a database hiccup
-    // here must not lock the user out, so we log and proceed. Auth
-    // already succeeded; pendings will drain on the next login.
-    if let Err(e) = drain_daisy_pendings(state, &row).await {
-        tracing::warn!(user = %row.id, error = %e, "failed to drain pending course memberships");
-    }
-
     Ok(user_from_row(row))
-}
-
-/// Convert every `pending_course_memberships` row that matches this
-/// user's primary eppn (or any of their aliases) into a real
-/// `course_members` row. Promote the user to `courses.owner_id` on the
-/// first eligible row when the course currently sits on the env-var
-/// fallback owner.
-///
-/// Idempotent: `add_member` is `ON CONFLICT DO UPDATE SET role`, so a
-/// drain that races with another path just refreshes the role and
-/// dequeues the pending. Pending rows are deleted last (per-row) so a
-/// mid-drain failure leaves the un-processed rows in the queue for
-/// the next login.
-async fn drain_daisy_pendings(
-    state: &AppState,
-    user: &minerva_db::queries::users::UserRow,
-) -> Result<(), sqlx::Error> {
-    let aliases = minerva_db::queries::user_eppn_aliases::list_for_user(&state.db, user.id).await?;
-    let mut eppns: Vec<String> = Vec::with_capacity(aliases.len() + 1);
-    eppns.push(user.eppn.clone());
-    eppns.extend(aliases.into_iter().map(|a| a.eppn));
-
-    let pendings =
-        minerva_db::queries::pending_course_memberships::list_for_eppns(&state.db, &eppns).await?;
-    if pendings.is_empty() {
-        return Ok(());
-    }
-
-    // Resolve the fallback owner once. Missing fallback (no admins
-    // configured + no MINERVA_DAISY_FALLBACK_OWNER_EPPN) just means we
-    // skip owner promotion; teacher-membership conversion still runs.
-    let fallback_owner_id = if let Some(fallback_eppn) = &state.config.daisy_fallback_owner_eppn {
-        minerva_db::queries::users::find_by_eppn(&state.db, fallback_eppn)
-            .await?
-            .map(|u| u.id)
-    } else {
-        None
-    };
-
-    for p in pendings {
-        minerva_db::queries::courses::add_member(&state.db, p.course_id, user.id, &p.role).await?;
-
-        if p.eligible_for_owner {
-            if let Some(fallback) = fallback_owner_id {
-                let _ = minerva_db::queries::courses::swap_owner_from_fallback(
-                    &state.db,
-                    p.course_id,
-                    fallback,
-                    user.id,
-                )
-                .await?;
-                // The first eligible drain wins. Subsequent eligible
-                // pendings still convert to teacher memberships above;
-                // `swap_owner_from_fallback` no-ops because owner_id is
-                // no longer == fallback. No flag needed; the DB
-                // guards the transition.
-            }
-        }
-
-        let _ = minerva_db::queries::pending_course_memberships::delete(&state.db, p.id).await?;
-    }
-
-    Ok(())
 }
 
 /// Pure role-decision dispatch, separated from `upsert_user` so the

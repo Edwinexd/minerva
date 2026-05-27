@@ -120,7 +120,6 @@ function PendingTableCard({ data }: { data: DaisyPendingListResponse }) {
         courses_created: number
         courses_updated: number
         members_added: number
-        pending_memberships_added: number
         aliases_registered: number
         errors: string[]
       }>("/admin/daisy-pending/apply", { ids }),
@@ -372,7 +371,6 @@ function ApplyResultSummary({
     courses_created: number
     courses_updated: number
     members_added: number
-    pending_memberships_added: number
     aliases_registered: number
     errors: string[]
   }
@@ -385,7 +383,6 @@ function ApplyResultSummary({
           created: result.courses_created,
           updated: result.courses_updated,
           members: result.members_added,
-          pendings: result.pending_memberships_added,
           aliases: result.aliases_registered,
         })}
       </div>

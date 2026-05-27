@@ -177,21 +177,9 @@ async fn apply_pending(
         return Ok(Json(summary));
     }
 
-    // Same fallback + embedding lookups the service-API auto-apply
-    // path uses; the admin path needs them too because apply_one
-    // doesn't fetch them itself.
-    let fallback_eppn = state
-        .config
-        .daisy_fallback_owner_eppn
-        .as_deref()
-        .ok_or_else(|| AppError::Internal("MINERVA_DAISY_FALLBACK_OWNER_EPPN unresolved".into()))?;
-    let fallback_owner = minerva_db::queries::users::find_by_eppn(&state.db, fallback_eppn)
-        .await?
-        .ok_or_else(|| {
-            AppError::Internal(format!(
-                "daisy fallback owner eppn {fallback_eppn} not present in users table"
-            ))
-        })?;
+    // apply_one resolves the owner itself via
+    // `users::find_or_create_by_eppn` from the kursansvarig Daisy
+    // surfaced; we only need the admin-default embedding model here.
     let default_embedding_model =
         minerva_db::queries::embedding_models::current_default(&state.db).await?;
 
@@ -235,7 +223,6 @@ async fn apply_pending(
         match apply_one(
             &state,
             &payload,
-            fallback_owner.id,
             default_embedding_model.as_deref(),
             &mut summary,
         )
@@ -262,12 +249,11 @@ async fn apply_pending(
     }
 
     tracing::info!(
-        "daisy admin apply: requested={} created={} updated={} members_added={} pending={} aliases={} errors={}",
+        "daisy admin apply: requested={} created={} updated={} members_added={} aliases={} errors={}",
         summary.courses_received,
         summary.courses_created,
         summary.courses_updated,
         summary.members_added,
-        summary.pending_memberships_added,
         summary.aliases_registered,
         summary.errors.len(),
     );

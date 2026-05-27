@@ -687,7 +687,7 @@
     "selectAllAria": "Select all pending imports on this page",
     "selectRowAria": "Select pending import for {{name}}",
     "unsetSemester": "Unscheduled / Ad-hoc",
-    "applyResult": "Applied: {{created}} created, {{updated}} updated, {{members}} members added, {{pendings}} queued for login, {{aliases}} aliases registered.",
+    "applyResult": "Applied: {{created}} created, {{updated}} updated, {{members}} members added, {{aliases}} aliases registered.",
     "applyErrorsHeading_one": "{{count}} error",
     "applyErrorsHeading_other": "{{count}} errors"
   }

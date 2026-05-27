@@ -530,9 +530,12 @@ pub struct DaisyCourseInput<'a> {
     pub info_url: Option<&'a str>,
     pub syllabus_url: Option<&'a str>,
     pub unit: Option<&'a str>,
-    /// Fallback owner applied only on INSERT. Subsequent syncs leave
-    /// `owner_id` untouched here; see `swap_owner_from_fallback`.
-    pub fallback_owner_id: Uuid,
+    /// Owner stamped on INSERT only. Subsequent syncs leave the
+    /// course's `owner_id` untouched (admin reassignments win
+    /// permanently). The route layer resolves this via
+    /// `users::find_or_create_by_eppn` from the kursansvarig Daisy
+    /// surfaced, so it's always a real human, never a placeholder.
+    pub owner_id: Uuid,
     /// Per-student daily token cap stamped on INSERT. Same default the
     /// manual course-creation endpoint uses.
     pub daily_token_limit: i64,
@@ -596,7 +599,7 @@ pub async fn upsert_from_daisy(
                 updated_at = NOW()
             RETURNING id, (xmax = 0) AS "inserted!: bool""#,
             input.name,
-            input.fallback_owner_id,
+            input.owner_id,
             input.daily_token_limit,
             model,
             input.semester_label,
@@ -633,7 +636,7 @@ pub async fn upsert_from_daisy(
                 updated_at = NOW()
             RETURNING id, (xmax = 0) AS "inserted!: bool""#,
             input.name,
-            input.fallback_owner_id,
+            input.owner_id,
             input.daily_token_limit,
             input.semester_label,
             input.momenttillf_id,
@@ -675,33 +678,6 @@ pub async fn find_by_daisy_momenttillf_id(
     )
     .fetch_optional(db)
     .await
-}
-
-/// Atomic owner swap: only succeeds when the course currently sits on
-/// `fallback_owner_id`. Returns TRUE iff a row was updated. Used by
-/// the auth-middleware drain to promote the first real course-
-/// responsible to owner; subsequent calls become no-ops once a real
-/// human owns the course.
-pub async fn swap_owner_from_fallback(
-    db: &PgPool,
-    course_id: Uuid,
-    fallback_owner_id: Uuid,
-    new_owner_id: Uuid,
-) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query!(
-        r#"UPDATE courses
-           SET owner_id = $3, updated_at = NOW()
-           WHERE id = $1
-             AND owner_id = $2
-             AND auto_managed = TRUE
-             AND active = true"#,
-        course_id,
-        fallback_owner_id,
-        new_owner_id,
-    )
-    .execute(db)
-    .await?;
-    Ok(result.rows_affected() > 0)
 }
 
 /// Bump `daisy_last_synced_at` without mutating anything else. Used

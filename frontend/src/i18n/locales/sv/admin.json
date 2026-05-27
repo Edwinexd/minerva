@@ -687,7 +687,7 @@
     "selectAllAria": "Markera alla väntande importer på sidan",
     "selectRowAria": "Markera väntande import för {{name}}",
     "unsetSemester": "Ej schemalagt / Ad-hoc",
-    "applyResult": "Applicerade: {{created}} skapade, {{updated}} uppdaterade, {{members}} medlemmar tillagda, {{pendings}} köade vid inloggning, {{aliases}} alias registrerade.",
+    "applyResult": "Applicerade: {{created}} skapade, {{updated}} uppdaterade, {{members}} medlemmar tillagda, {{aliases}} alias registrerade.",
     "applyErrorsHeading_one": "{{count}} fel",
     "applyErrorsHeading_other": "{{count}} fel"
   }

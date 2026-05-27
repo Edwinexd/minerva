@@ -619,7 +619,6 @@ pub(super) struct DaisyImportSummary {
     pub courses_created: usize,
     pub courses_updated: usize,
     pub members_added: usize,
-    pub pending_memberships_added: usize,
     pub aliases_registered: usize,
     pub designations_created: usize,
     /// Staging path: rows written to `daisy_pending_imports` for
@@ -752,20 +751,21 @@ mod daisy_import_tests {
 /// username resolution via staff profile pages); the backend only
 /// reasons about Minerva-side identity and idempotency.
 ///
-/// Per-course flow:
-///   1. Resolve the fallback owner from `MINERVA_DAISY_FALLBACK_OWNER_EPPN`
-///      (or the first MINERVA_ADMINS entry). If missing, the whole batch
-///      fails; we can't create courses without an owner.
-///   2. Upsert by `daisy_momenttillf_id` via
-///      `courses::upsert_from_daisy`.
-///   3. On CREATE only: insert a `play_designations` row so
-///      transcript discovery picks the course up on the next
-///      transcripts.yml run.
-///   4. For each participant: resolve their canonical eppn (primary or
-///      alias of an existing user). If found, additively add to
-///      `course_members` and register any other eppns they hold as
-///      aliases. If not found, queue one `pending_course_memberships`
-///      row per eppn (so a future login via any of them drains).
+/// Per-course flow (when `daisy_settings.auto_apply` is OFF, the
+/// default, this stages the row in `daisy_pending_imports` instead
+/// and the admin promotes via `/admin/daisy`):
+///   1. Resolve every participant to a Minerva user via
+///      `users::find_or_create_by_eppn`; secondary eppns become
+///      `user_eppn_aliases`. Same pattern the auth middleware uses
+///      for never-seen Shib eppns on first login.
+///   2. Pick the first kursansvarig-eligible participant as owner.
+///      Refuse the course if Daisy listed none (no random fallback
+///      user; the staged row stays for admin attention).
+///   3. Upsert by `daisy_momenttillf_id` via
+///      `courses::upsert_from_daisy` (owner stamped on INSERT only).
+///   4. On CREATE: insert a `play_designations` row so transcript
+///      discovery picks the course up on the next transcripts.yml run.
+///   5. Additively add all resolved participants as course members.
 ///
 /// Errors per course are collected into `summary.errors` and the
 /// import continues; a single broken course shouldn't take down the
@@ -790,25 +790,9 @@ async fn import_daisy_courses(
     };
 
     if auto_apply {
-        // Resolve the env-var fallback owner + default embedding
-        // model up-front. Only the apply path needs them; staging
-        // writes are pure metadata snapshots with no owner attached
-        // until the admin clicks Apply.
-        let fallback_eppn = state
-            .config
-            .daisy_fallback_owner_eppn
-            .as_deref()
-            .ok_or_else(|| {
-                AppError::Internal("MINERVA_DAISY_FALLBACK_OWNER_EPPN unresolved".into())
-            })?;
-        let fallback_owner = minerva_db::queries::users::find_by_eppn(&state.db, fallback_eppn)
-            .await?
-            .ok_or_else(|| {
-                AppError::Internal(format!(
-                    "daisy fallback owner eppn {fallback_eppn} not present in users table; \
-                     ensure they have logged in at least once"
-                ))
-            })?;
+        // Only the apply path needs the embedding-model default;
+        // staging writes are pure metadata snapshots with no
+        // settings stamped until an admin promotes them.
         let default_embedding_model =
             minerva_db::queries::embedding_models::current_default(&state.db).await?;
 
@@ -816,7 +800,6 @@ async fn import_daisy_courses(
             match apply_one(
                 &state,
                 &input,
-                fallback_owner.id,
                 default_embedding_model.as_deref(),
                 &mut summary,
             )
@@ -854,13 +837,12 @@ async fn import_daisy_courses(
     }
 
     tracing::info!(
-        "daisy import: received={} staged={} created={} updated={} members_added={} pending={} aliases={} auto_apply={}",
+        "daisy import: received={} staged={} created={} updated={} members_added={} aliases={} auto_apply={}",
         summary.courses_received,
         summary.courses_staged,
         summary.courses_created,
         summary.courses_updated,
         summary.members_added,
-        summary.pending_memberships_added,
         summary.aliases_registered,
         auto_apply,
     );
@@ -922,23 +904,40 @@ async fn stage_one(
     Ok(())
 }
 
-/// Apply a payload directly to the live `courses` table; the
-/// pre-staging behaviour. Called from two paths now:
-///   * `import_daisy_courses` when `daisy_settings.auto_apply` is ON,
-///     so the sync skips the staging step (used once the workflow is
-///     trusted in steady state).
-///   * `apply_daisy_pending` (admin route) after the admin reviews
-///     a staged row and clicks Apply.
+/// Resolved Daisy participant ready for membership/owner assignment.
+struct ResolvedParticipant {
+    user_id: Uuid,
+    /// Minerva `course_members.role` value ("teacher" or "ta").
+    role: &'static str,
+    /// TRUE when Daisy listed this person as kurs-/delkursansvarig
+    /// AND they're employed staff (not a student-handledare). The
+    /// first one we see becomes the course owner.
+    eligible_for_owner: bool,
+}
+
+/// Apply a payload directly to the live `courses` table. Called from:
+///   * `import_daisy_courses` when `daisy_settings.auto_apply` is ON.
+///   * `daisy_admin::apply_pending` after manual review.
 ///
-/// Identical behaviour at both call sites: upsert the course by
-/// `daisy_momenttillf_id`, seed a play_designations row on CREATE,
-/// additively sync the participant list (registering aliases +
-/// queuing pendings for unresolved staff), and swap ownership to
-/// the first course-responsible we can see.
+/// Two-phase per call:
+///   1. Resolve every participant to a Minerva `user_id`, creating
+///      a fresh row via `users::find_or_create_by_eppn` for anyone
+///      Daisy lists who hasn't visited Minerva yet (same pattern the
+///      auth middleware uses on first Shib launch). Identify the
+///      owner candidate from the first kursansvarig-eligible row.
+///   2. Upsert the course (with the resolved owner on INSERT;
+///      existing rows keep their owner untouched), seed the play
+///      designation on CREATE, additively add every resolved
+///      participant as a course member.
+///
+/// Refuses to apply if Daisy listed zero owner-eligible participants
+/// (kursansvarig with a staff profile). The course stays in the
+/// staging table for admin attention; the alternative would be
+/// inventing a "random" owner, which we'd then need machinery to
+/// swap later.
 pub(super) async fn apply_one(
     state: &AppState,
     input: &DaisyCourseInputPayload,
-    fallback_owner_id: Uuid,
     default_embedding_model: Option<&str>,
     summary: &mut DaisyImportSummary,
 ) -> Result<(), AppError> {
@@ -949,61 +948,15 @@ pub(super) async fn apply_one(
         return Err(AppError::bad_request("daisy.course_missing_required"));
     }
 
-    // Keep the user-facing name simple: just the Daisy `name`. The
-    // frontend shows `beteckning` separately via the semester badge.
-    let outcome = minerva_db::queries::courses::upsert_from_daisy(
-        &state.db,
-        &minerva_db::queries::courses::DaisyCourseInput {
-            momenttillf_id,
-            beteckning,
-            name,
-            semester_label: input.semester_label.as_deref(),
-            info_url: input.info_url.as_deref(),
-            syllabus_url: input.syllabus_url.as_deref(),
-            unit: input.unit.as_deref(),
-            fallback_owner_id,
-            daily_token_limit: crate::system_defaults::course_daily_token_limit(&state.db).await,
-            embedding_model: default_embedding_model,
-        },
-    )
-    .await?;
+    // Phase 1: resolve participants. For each, find_or_create the
+    // Minerva user row + register secondary eppns as aliases.
+    // `default_owner_cap` is read once for any users we create; existing
+    // users keep whatever cap they already have (find_or_create's
+    // grandfathering semantics).
+    let default_owner_cap = crate::system_defaults::owner_daily_token_limit(&state.db).await;
+    let mut resolved: Vec<ResolvedParticipant> = Vec::with_capacity(input.participants.len());
 
-    if outcome.created {
-        summary.courses_created += 1;
-
-        // Seed the play_designations row so transcript discovery
-        // picks the course up the next hour. Unique on (course_id,
-        // designation); a duplicate is harmless (just means the row
-        // already existed via a prior manual setup).
-        match minerva_db::queries::play_designations::insert(
-            &state.db,
-            Uuid::new_v4(),
-            outcome.course.id,
-            beteckning,
-            fallback_owner_id,
-        )
-        .await
-        {
-            Ok(_) => summary.designations_created += 1,
-            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
-                // Already present (very unlikely on a fresh CREATE,
-                // but possible if a teacher pre-registered it). Quiet.
-            }
-            Err(e) => return Err(e.into()),
-        }
-    } else {
-        summary.courses_updated += 1;
-    }
-
-    // Roster sync. Additive only: never remove a member who's no
-    // longer in Daisy. add_member is ON CONFLICT DO UPDATE SET role,
-    // so role changes between syncs (TA → teacher) propagate; but we
-    // never demote a manually-added human (since add_member with the
-    // resolved Daisy role would only ever stay the same or upgrade).
     for participant in &input.participants {
-        if participant.eppns.is_empty() {
-            continue;
-        }
         let eppns: Vec<String> = participant
             .eppns
             .iter()
@@ -1016,86 +969,133 @@ pub(super) async fn apply_one(
         let (role, eligible_for_owner) =
             minerva_role_for(&participant.kind, &participant.daisy_roles);
 
-        // Find a Minerva user that already owns any of these eppns
-        // (primary or alias). First hit wins; alias hits are NOT
-        // promoted here (we don't want a Daisy sync to silently swap
-        // a user's primary eppn out from under them; the auth path
-        // does that explicitly when SAML hands us the alias).
-        let mut resolved_user_id: Option<Uuid> = None;
+        // Prefer an existing user found via any of the participant's
+        // eppns (primary or alias). If none of the eppns resolve, we
+        // create a row keyed on the canonical (first) eppn. Newly
+        // created users land with role="student"; the auth
+        // middleware's rule engine upgrades them on first Shib login
+        // based on Shib attributes we don't have here.
+        let mut user_id: Option<Uuid> = None;
         for eppn in &eppns {
             if let Some((row, _via_alias)) =
                 minerva_db::queries::users::find_by_eppn_or_alias(&state.db, eppn).await?
             {
-                resolved_user_id = Some(row.id);
+                user_id = Some(row.id);
                 break;
             }
         }
-
-        if let Some(user_id) = resolved_user_id {
-            // Real Minerva user; add as member (idempotent).
-            minerva_db::queries::courses::add_member(&state.db, outcome.course.id, user_id, role)
+        let user_id = match user_id {
+            Some(id) => id,
+            None => {
+                let (row, created) = minerva_db::queries::users::find_or_create_by_eppn(
+                    &state.db,
+                    &eppns[0],
+                    participant.display_name.as_deref(),
+                    "student",
+                    default_owner_cap,
+                )
                 .await?;
-            summary.members_added += 1;
-
-            // Register every additional eppn as an alias of this user.
-            // No-op when an eppn is already the user's primary or
-            // already an alias somewhere; the helper's docs cover the
-            // edge cases.
-            for eppn in &eppns {
-                match minerva_db::queries::user_eppn_aliases::register(&state.db, user_id, eppn)
-                    .await
-                {
-                    Ok(true) => summary.aliases_registered += 1,
-                    Ok(false) => {}
-                    Err(e) => {
-                        tracing::warn!(
-                            user = %user_id,
-                            eppn = %eppn,
-                            error = %e,
-                            "daisy import: alias register failed (continuing)",
-                        );
-                    }
+                if created {
+                    tracing::info!(
+                        eppn = %eppns[0],
+                        display_name = ?participant.display_name,
+                        "daisy import: created Minerva user for Daisy-resolved staff",
+                    );
                 }
+                row.id
             }
+        };
 
-            // If they're course-responsible and the course currently sits
-            // on the fallback owner, swap ownership now. (The login
-            // drain path also does this for users who haven't logged
-            // in yet; doing it here for users who have logged in
-            // avoids a stale-owner window until they next visit.)
-            if eligible_for_owner {
-                let _ = minerva_db::queries::courses::swap_owner_from_fallback(
-                    &state.db,
-                    outcome.course.id,
-                    fallback_owner_id,
-                    user_id,
-                )
-                .await?;
-            }
-        } else {
-            // No Minerva user yet. Queue one pending row per eppn so
-            // a future login via any of them drains.
-            for eppn in &eppns {
-                minerva_db::queries::pending_course_memberships::upsert(
-                    &state.db,
-                    &minerva_db::queries::pending_course_memberships::PendingUpsert {
-                        course_id: outcome.course.id,
-                        eppn,
-                        display_name: participant.display_name.as_deref(),
-                        role,
-                        eligible_for_owner,
-                        daisy_roles: &participant.daisy_roles,
-                        daisy_momenttillf_id: Some(momenttillf_id),
-                    },
-                )
-                .await?;
-                summary.pending_memberships_added += 1;
+        // Register every other eppn as an alias of this user.
+        for alias_eppn in eppns.iter().skip(1) {
+            match minerva_db::queries::user_eppn_aliases::register(&state.db, user_id, alias_eppn)
+                .await
+            {
+                Ok(true) => summary.aliases_registered += 1,
+                Ok(false) => {}
+                Err(e) => tracing::warn!(
+                    user = %user_id,
+                    eppn = %alias_eppn,
+                    error = %e,
+                    "daisy import: alias register failed (continuing)",
+                ),
             }
         }
+
+        resolved.push(ResolvedParticipant {
+            user_id,
+            role,
+            eligible_for_owner,
+        });
     }
 
-    // Bump the synced-at timestamp at the end so a partial failure
-    // leaves the row pointing at its previous successful sync.
+    // Owner = the first kursansvarig-staff we resolved. If Daisy
+    // lists none we refuse to create the course; the admin can
+    // either wait for Daisy to surface a kursansvarig on a future
+    // sync or dismiss the staged row.
+    let Some(owner_id) = resolved
+        .iter()
+        .find(|p| p.eligible_for_owner)
+        .map(|p| p.user_id)
+    else {
+        return Err(AppError::bad_request("daisy.no_resolvable_owner"));
+    };
+
+    // Phase 2: upsert the course. Owner is stamped only on INSERT;
+    // re-applies leave whatever owner the course currently has
+    // (admin-edited ownership wins permanently).
+    let outcome = minerva_db::queries::courses::upsert_from_daisy(
+        &state.db,
+        &minerva_db::queries::courses::DaisyCourseInput {
+            momenttillf_id,
+            beteckning,
+            name,
+            semester_label: input.semester_label.as_deref(),
+            info_url: input.info_url.as_deref(),
+            syllabus_url: input.syllabus_url.as_deref(),
+            unit: input.unit.as_deref(),
+            owner_id,
+            daily_token_limit: crate::system_defaults::course_daily_token_limit(&state.db).await,
+            embedding_model: default_embedding_model,
+        },
+    )
+    .await?;
+
+    if outcome.created {
+        summary.courses_created += 1;
+
+        // Seed the play_designations row so transcript discovery
+        // picks the course up the next hour. Unique on (course_id,
+        // designation); a duplicate is harmless.
+        match minerva_db::queries::play_designations::insert(
+            &state.db,
+            Uuid::new_v4(),
+            outcome.course.id,
+            beteckning,
+            owner_id,
+        )
+        .await
+        {
+            Ok(_) => summary.designations_created += 1,
+            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+                // Pre-registered manually; quiet.
+            }
+            Err(e) => return Err(e.into()),
+        }
+    } else {
+        summary.courses_updated += 1;
+    }
+
+    // Add every resolved participant as a course member. Additive
+    // only: add_member is ON CONFLICT DO UPDATE SET role, so a TA→
+    // teacher promotion lands, but the membership itself never gets
+    // removed by re-sync.
+    for p in &resolved {
+        minerva_db::queries::courses::add_member(&state.db, outcome.course.id, p.user_id, p.role)
+            .await?;
+        summary.members_added += 1;
+    }
+
     minerva_db::queries::courses::touch_daisy_synced(&state.db, outcome.course.id).await?;
     Ok(())
 }

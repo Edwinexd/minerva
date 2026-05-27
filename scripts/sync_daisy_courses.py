@@ -248,17 +248,27 @@ def post_batch(
 def merge_summary(into: dict, batch_summary: dict) -> None:
     """Sum counters across batches; concat per-course error strings.
     Mirrors `DaisyImportSummary` on the backend so the printed total
-    matches what a single-shot POST would have returned."""
+    matches what a single-shot POST would have returned. Also carries
+    `staged_for_review` (a bool, not a counter) through so the final
+    print can tell the human whether everything landed in the
+    `daisy_pending_imports` staging table or was applied directly."""
     for k in (
         "courses_received",
         "courses_created",
         "courses_updated",
+        "courses_staged",
         "members_added",
-        "pending_memberships_added",
         "aliases_registered",
         "designations_created",
     ):
         into[k] = into.get(k, 0) + batch_summary.get(k, 0)
+    # Bool: last batch wins. In practice the toggle is read once per
+    # request on the backend, so every batch in a run carries the
+    # same value; if it ever drifts mid-run the safest interpretation
+    # is "anything went to staging at least once", which is what the
+    # OR-style behaviour below preserves.
+    if batch_summary.get("staged_for_review"):
+        into["staged_for_review"] = True
     into.setdefault("errors", []).extend(batch_summary.get("errors", []))
 
 
@@ -319,6 +329,7 @@ def main() -> None:
             batches_sent += 1
             print(
                 f"  batch {batches_sent}: {len(batch)} courses -> "
+                f"staged={batch_summary.get('courses_staged', 0)}, "
                 f"created={batch_summary.get('courses_created', 0)}, "
                 f"updated={batch_summary.get('courses_updated', 0)}, "
                 f"members+={batch_summary.get('members_added', 0)}"

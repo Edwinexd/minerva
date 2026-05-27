@@ -1,0 +1,40 @@
+name: Sync Daisy Courses
+
+# Daily walk of DSV course offerings (current + next semester) via
+# dsv-wrapper, posting resolved metadata + staff rosters to Minerva's
+# /api/service/daisy-courses endpoint. Separate from transcripts.yml
+# (which still runs hourly) because Daisy enumeration is much heavier:
+# paginated course search + per-course detail + per-course roster +
+# per-person profile fetches. Once a day is plenty for term-roster
+# drift.
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+# Don't double-run if a manual dispatch races the cron tick.
+concurrency:
+  group: daisy-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests git+https://github.com/Edwinexd/dsv-wrapper.git
+
+      - name: Sync Daisy -> Minerva
+        env:
+          MINERVA_API_URL: https://minerva.dsv.su.se
+          MINERVA_SERVICE_API_KEY: ${{ secrets.MINERVA_SERVICE_API_KEY }}
+          SU_USERNAME: ${{ secrets.SU_USERNAME }}
+          SU_PASSWORD: ${{ secrets.SU_PASSWORD }}
+        run: python scripts/sync_daisy_courses.py

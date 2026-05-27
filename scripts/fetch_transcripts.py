@@ -166,6 +166,18 @@ def discover_designations(
         )
 
 
+# Hard cap on transcripts processed per hourly run. Each item is
+# ~2 seconds (Play multiplayer page fetch + VTT download + Minerva
+# POST + worker enqueue), so 500 fits inside the cron's hourly
+# window with margin for the discovery phase that runs before this
+# one. A backlog larger than this drains across subsequent ticks.
+# Tunable via `MINERVA_TRANSCRIPTS_MAX_PER_RUN` so an operator can
+# raise it temporarily when burning down a first-Daisy-sync spike.
+MAX_TRANSCRIPTS_PER_RUN = int(
+    os.environ.get("MINERVA_TRANSCRIPTS_MAX_PER_RUN", "500")
+)
+
+
 def fetch_pending_transcripts(
     client: PlayClient,
     api_url: str,
@@ -182,7 +194,20 @@ def fetch_pending_transcripts(
         print("No pending play.dsv.su.se transcripts.")
         return
 
-    print(f"Found {len(play_docs)} pending play.dsv.su.se document(s).")
+    total_pending = len(play_docs)
+    if total_pending > MAX_TRANSCRIPTS_PER_RUN:
+        # Stable-order slice (server already returns
+        # FIFO-ish by created_at). Oldest pendings drain first
+        # so a teacher who set up a course in week N doesn't get
+        # stuck behind a fresh week-N+1 backlog.
+        play_docs = play_docs[:MAX_TRANSCRIPTS_PER_RUN]
+        print(
+            f"Found {total_pending} pending play.dsv.su.se document(s); "
+            f"processing first {len(play_docs)} this run "
+            f"(set MINERVA_TRANSCRIPTS_MAX_PER_RUN to override)."
+        )
+    else:
+        print(f"Found {len(play_docs)} pending play.dsv.su.se document(s).")
 
     for doc in play_docs:
         doc_id = doc["id"]

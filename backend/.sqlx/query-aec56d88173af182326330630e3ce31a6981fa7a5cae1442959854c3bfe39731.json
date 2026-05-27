@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE courses\n           SET owner_id = $3, updated_at = NOW()\n           WHERE id = $1\n             AND owner_id = $2\n             AND auto_managed = TRUE\n             AND active = true",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aec56d88173af182326330630e3ce31a6981fa7a5cae1442959854c3bfe39731"
+}

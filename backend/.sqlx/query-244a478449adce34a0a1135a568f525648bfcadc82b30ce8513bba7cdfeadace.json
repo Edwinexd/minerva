@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_eppn_aliases SET last_seen_at = NOW() WHERE eppn = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "244a478449adce34a0a1135a568f525648bfcadc82b30ce8513bba7cdfeadace"
+}

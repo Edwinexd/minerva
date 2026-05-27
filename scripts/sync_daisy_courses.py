@@ -60,33 +60,38 @@ def current_and_next_semesters(today: date) -> list[Semester]:
     ]
 
 
-# Realm prefixes Daisy uses on staff `usernames`. Only the SU-side
-# realms are safe to translate into Minerva eppns; KTH users can't auth
-# via SU Shibboleth so suffixing their login with `@su.se` would just
-# create a phantom user that never matches a real Shib session.
-# Unknown / unprefixed usernames are skipped on the same principle:
-# we never invent a realm we don't have evidence for.
-_SU_REALMS = {"su", "dsv"}
+# Realm suffixes whose eppns auth via Minerva's SU Shibboleth. Daisy
+# stores its `usernames` field as full eppns already (`edwin@SU.SE`,
+# `edwin@dsv.su.se`, occasionally `someone@kth.se`). We accept any
+# `@*.su.se` realm and skip everything else, since KTH / LU / etc.
+# eppns can't authenticate against SU's IdP. Anything without an `@`
+# is also skipped; we never invent a realm we don't have evidence
+# for.
+_SU_REALM_SUFFIXES = (".su.se",)
 
 
 def eppn_from_username(raw: str) -> str | None:
-    """Translate a Daisy staff login (e.g. `dsv:edsu8469`) into the
-    Shibboleth eppn Minerva expects (`edsu8469@su.se`).
+    """Translate a Daisy staff login into the Shibboleth eppn Minerva
+    expects.
 
-    Returns None when the realm prefix is missing or names a realm we
-    can't authenticate from Minerva's SU Shibboleth (e.g. `kth:foo`).
-    The caller treats None as "skip this login"; the rest of the
-    person's usernames may still resolve.
+    Daisy stores usernames as full eppns already (`edwin@SU.SE`,
+    `edwin@dsv.su.se`, occasionally `someone@kth.se`); we just
+    lowercase and gate on the realm being inside SU's Shibboleth.
+    Returns None for missing-@ inputs, foreign realms, or empty
+    local-parts; the caller treats None as "skip this login" and
+    the person's other usernames may still resolve.
     """
-    raw = raw.strip()
-    if ":" not in raw:
+    raw = raw.strip().lower()
+    if "@" not in raw:
         return None
-    realm, _, bare = raw.partition(":")
-    realm = realm.strip().lower()
-    bare = bare.strip().lower()
-    if not bare or realm not in _SU_REALMS:
+    local, _, realm = raw.rpartition("@")
+    if not local or not realm:
         return None
-    return f"{bare}@su.se"
+    # Allow `@su.se` and any DSV-style subdomain (`@dsv.su.se`).
+    # Excludes other Swedish unis (`@kth.se`, `@lu.se`, ...).
+    if realm != "su.se" and not realm.endswith(_SU_REALM_SUFFIXES):
+        return None
+    return raw
 
 
 def resolve_participant(

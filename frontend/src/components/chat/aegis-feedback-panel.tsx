@@ -79,7 +79,11 @@ function dateGroupLabel(
   yesterday.setDate(now.getDate() - 1)
   if (sameDay(d, yesterday)) return yesterdayLabel
 
-  return d.toLocaleDateString(locale, { month: "long", day: "numeric" })
+  // Intl.DateTimeFormat (not Date.prototype.toLocaleDateString) because
+  // the eslint rule bans the latter project-wide: a raw locale string in
+  // the DOM strands the precise ISO from assistive tech. The result here
+  // is fine because the caller wraps it in a <time dateTime={iso}> header.
+  return new Intl.DateTimeFormat(locale, { month: "long", day: "numeric" }).format(d)
 }
 
 export function AegisFeedbackPanel({
@@ -309,8 +313,12 @@ function HistorySection({
 }) {
   const { t } = useTranslation("student")
 
-  // Group consecutive entries with the same date label.
-  const groups: { label: string; items: PromptAnalysis[] }[] = []
+  // Group consecutive entries with the same date label. We also
+  // stash the first entry's ISO timestamp per group so the header
+  // can be rendered as a <time> element (the coarse "Today" /
+  // "Yesterday" / "May 27" string stays human-friendly while the
+  // precise datetime is still exposed to assistive tech).
+  const groups: { label: string; iso: string; items: PromptAnalysis[] }[] = []
   for (const entry of entries) {
     if (!entry.created_at) continue // live entries (shouldn't appear in history)
     const label = dateGroupLabel(
@@ -323,7 +331,7 @@ function HistorySection({
     if (last && last.label === label) {
       last.items.push(entry)
     } else {
-      groups.push({ label, items: [entry] })
+      groups.push({ label, iso: entry.created_at, items: [entry] })
     }
   }
 
@@ -334,9 +342,12 @@ function HistorySection({
       </div>
       {groups.map((group) => (
         <div key={group.label} className="space-y-2">
-          <div className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+          <time
+            dateTime={group.iso}
+            className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase block"
+          >
             {group.label}
-          </div>
+          </time>
           {group.items.map((a) => (
             <HistoryRow key={a.id} analysis={a} />
           ))}

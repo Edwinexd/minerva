@@ -66,6 +66,34 @@ export default defineConfig([
           message:
             'No emoji / decorative-symbol glyphs in JSX. Use a lucide-react icon.',
         },
+        // Dates must reach the DOM as a <time> element (or <relative-time>
+        // via the <RelativeTime> wrapper in @/components/relative-time), not
+        // as raw stringified text. Without a `datetime` attribute, assistive
+        // tech and machine readers only see the locale-formatted display
+        // string ("5/27/2026, 6:59:22 PM") with no reliable way to recover
+        // the precise ISO instant. The two selectors below catch the two
+        // patterns this repo has historically slipped on:
+        //
+        //   1. Any `.toLocaleDateString()` / `.toLocaleTimeString()` call.
+        //      These methods exist only on `Date`, so banning them outright
+        //      is safe (no false positives on numbers).
+        //   2. The inline `new Date(x).toLocaleString()` chain. We can't
+        //      ban `.toLocaleString()` categorically because numeric
+        //      `.toLocaleString()` is widely used for token-count
+        //      thousands-separators, so we narrow on the `new Date(...)`
+        //      receiver shape that has produced every actual bug.
+        {
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.property.name=/^toLocale(Date|Time)String$/]",
+          message:
+            'Use <RelativeTime date={...} /> from @/components/relative-time (or a <time dateTime={iso}> element) instead of toLocaleDateString/toLocaleTimeString. Raw locale strings strand the precise ISO from assistive tech and machine readers.',
+        },
+        {
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.object.type='NewExpression'][callee.object.callee.name='Date'][callee.property.name='toLocaleString']",
+          message:
+            'Use <RelativeTime date={...} /> from @/components/relative-time (or a <time dateTime={iso}> element) instead of new Date(x).toLocaleString(). Raw locale strings strand the precise ISO from assistive tech and machine readers.',
+        },
       ],
     },
   },

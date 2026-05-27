@@ -595,7 +595,7 @@
     "rowState": {
       "set": "Set by admin",
       "fallback": "Using fallback",
-      "updatedAt": "Last edited {{date}}"
+      "updatedAtPrefix": "Last edited"
     },
     "fallbackHint": "Fallback: {{value}}",
     "envVarHint": "Env var: {{name}}",

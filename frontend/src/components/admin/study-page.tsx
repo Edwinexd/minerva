@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react"
@@ -1129,12 +1129,16 @@ function DetailTaskBlock({
   )
 }
 
-function formatTs(s: string | null): string {
+function formatTs(s: string | null): ReactNode {
   if (!s) return "-"
   // Compact ISO-without-seconds for the table; the full timestamp
-  // is in the JSONL export anyway.
+  // is in the JSONL export anyway. Wrap in a <time> element so
+  // assistive tech and machine-readable consumers get the precise
+  // ISO via the datetime attribute.
   try {
-    return new Date(s).toISOString().slice(0, 16).replace("T", " ")
+    const d = new Date(s)
+    const compact = d.toISOString().slice(0, 16).replace("T", " ")
+    return <time dateTime={d.toISOString()}>{compact}</time>
   } catch {
     return s
   }

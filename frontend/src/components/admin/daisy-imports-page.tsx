@@ -20,6 +20,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Label } from "@/components/ui/label"
+import { RelativeTime } from "@/components/relative-time"
 
 /**
  * Admin review page for Daisy auto-imports.
@@ -348,7 +349,7 @@ function PendingRow({
           ))}
       </td>
       <td className="px-2 py-2 text-xs text-muted-foreground">
-        {new Date(row.first_seen_at).toLocaleDateString()}
+        <RelativeTime date={row.first_seen_at} />
       </td>
       <td className="px-2 py-2 text-right">
         <Button

@@ -42,6 +42,7 @@ import {
 import { useState } from "react"
 import type { Course } from "@/lib/types"
 import { MODEL_DISPLAY } from "@/lib/embedding-models"
+import { RelativeTime } from "@/components/relative-time"
 
 // MODEL_DISPLAY now lives in @/lib/embedding-models so the admin
 // courses table can use the same friendly names without duplicating
@@ -73,9 +74,11 @@ function DaisyMetaCard({ course }: { course: Course }) {
   const { t } = useTranslation("teacher")
   const meta = course.daisy
   if (!meta) return null
-  const lastSynced = meta.last_synced_at
-    ? new Date(meta.last_synced_at).toLocaleString()
-    : t("daisyMeta.neverSynced")
+  const lastSynced = meta.last_synced_at ? (
+    <RelativeTime date={meta.last_synced_at} />
+  ) : (
+    t("daisyMeta.neverSynced")
+  )
   return (
     <Card>
       <CardHeader>

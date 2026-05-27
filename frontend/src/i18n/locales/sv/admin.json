@@ -595,7 +595,7 @@
     "rowState": {
       "set": "Satt av admin",
       "fallback": "Använder standard",
-      "updatedAt": "Senast ändrad {{date}}"
+      "updatedAtPrefix": "Senast ändrad"
     },
     "fallbackHint": "Standard: {{value}}",
     "envVarHint": "Miljövariabel: {{name}}",

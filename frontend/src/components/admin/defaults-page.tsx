@@ -5,6 +5,7 @@ import React from "react"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { modelsQuery } from "@/lib/queries"
+import { RelativeTime } from "@/components/relative-time"
 import {
   Card,
   CardContent,
@@ -225,9 +226,8 @@ function DefaultRow({
           )}
           {entry.updated_at && (
             <span>
-              {t("defaults.rowState.updatedAt", {
-                date: new Date(entry.updated_at).toLocaleString(),
-              })}
+              {t("defaults.rowState.updatedAtPrefix")}{" "}
+              <RelativeTime date={entry.updated_at} />
             </span>
           )}
         </div>

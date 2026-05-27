@@ -1,4 +1,4 @@
-//! Cerebras llama3.1-8b-backed document classifier.
+//! Cerebras gpt-oss-120b-backed document classifier.
 
 use async_trait::async_trait;
 use minerva_ingest::classifier::{ClassifiedKind, Classifier};
@@ -10,15 +10,16 @@ use super::types::{DocumentKind, ALL_KINDS};
 use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
 
-/// Cerebras model name for ingest-time classification work. We migrated
-/// off gpt-oss-120b for the document classifier on the same reasoning as
-/// the extraction-guard binary classifiers: a JSON-schema-constrained
-/// 9-way label is well within llama3.1-8b's range, and the prompt-token
-/// cost across a course's documents is the dominant ingest-time spend.
-/// llama3.1-8b doesn't accept `reasoning_effort` (Cerebras 400s the
-/// param), so we drop it from the body; structured outputs +
-/// `temperature: 0` are the rails that keep the JSON shape correct.
-const CLASSIFIER_MODEL: &str = "llama3.1-8b";
+/// Cerebras model name for ingest-time classification work. Cerebras
+/// deprecated llama3.1-8b (the previous small-model classifier here)
+/// and qwen-3-235b-a22b-instruct-2507; gpt-oss-120b is the surviving
+/// hosted option and what every classifier path in this crate now
+/// targets. A JSON-schema-constrained 9-way label is well within
+/// gpt-oss-120b's range, structured outputs + `temperature: 0` are
+/// the rails that keep the JSON shape correct, and `reasoning_effort:
+/// "low"` (set in the body) keeps latency in the same ballpark as the
+/// old llama call.
+const CLASSIFIER_MODEL: &str = "gpt-oss-120b";
 
 /// Soft cap on excerpt length sent to the model. Head/tail split so
 /// the model sees both the introductory framing and any "submit /
@@ -33,9 +34,9 @@ const CLASSIFIER_MODEL: &str = "llama3.1-8b";
 /// confidence outputs flow through to the teacher unchanged; they show
 /// up in the UI alongside `suspicious_flags` so a human can intervene.
 /// (We previously did a high-effort retry here when confidence dropped
-/// below 0.6; that lever depended on `reasoning_effort=high`, which
-/// llama3.1-8b doesn't accept, and a deterministic re-call at
-/// temperature 0 would just return the same answer.)
+/// below 0.6; that lever depended on `reasoning_effort=high` on
+/// gpt-oss, but a deterministic re-call at temperature 0 would just
+/// return the same answer, so the retry was dropped.)
 const MAX_EXCERPT_CHARS: usize = 10_000;
 const HEAD_FRACTION: f64 = 0.85;
 
@@ -66,12 +67,15 @@ impl CerebrasClassifier {
             .replace("{excerpt}", excerpt);
 
         // Cerebras supports OpenAI-style `response_format: json_schema`
-        // on llama3.1-8b. `reasoning_effort` is gpt-oss-only and gets
-        // 400'd here, so it's omitted. Schema mirrors prompts.rs's
+        // on gpt-oss-120b. `reasoning_effort: "low"` keeps latency in
+        // the same ballpark as the deprecated llama3.1-8b path that
+        // used to run this classifier; the structured-output rails do
+        // the heavy lifting on shape. Schema mirrors prompts.rs's
         // contract.
         let body = serde_json::json!({
             "model": CLASSIFIER_MODEL,
             "temperature": 0.0,
+            "reasoning_effort": "low",
             "messages": [
                 { "role": "system", "content": CLASSIFIER_SYSTEM_PROMPT },
                 { "role": "user", "content": user },
@@ -106,10 +110,10 @@ impl CerebrasClassifier {
             .map_err(|e| format!("classifier: response not JSON: {e}"))?;
 
         // Best-effort token-spend bookkeeping. The dashboard buckets
-        // by (category, model); a future migration back to a multi-
-        // model classifier (e.g. gpt-oss-120b fallback for low-
-        // confidence cases) would automatically split into separate
-        // rows.
+        // by (category, model); a future migration to a multi-model
+        // classifier (e.g. a smaller-model fallback for routine cases
+        // or a high-effort retry for low-confidence ones) would
+        // automatically split into separate rows.
         record_cerebras_usage(
             &self.db,
             course_id,
@@ -168,15 +172,14 @@ impl Classifier for CerebrasClassifier {
 
         let excerpt = truncate_for_classification(text);
 
-        // Single pass on llama3.1-8b. Earlier versions did a second
+        // Single pass on gpt-oss-120b. Earlier versions did a second
         // high-effort retry when confidence < 0.6, on the basis that
-        // `reasoning_effort=high` would coax a stronger answer out of
-        // gpt-oss-120b. llama3.1-8b doesn't accept the parameter, and
-        // re-calling at temperature 0 returns the same JSON, so the
-        // retry would just double-charge the course for an identical
-        // verdict. Low-confidence outputs flow through with their
-        // `suspicious_flags`; the teacher dashboard surfaces both so
-        // a human can step in when the model is unsure.
+        // `reasoning_effort: "high"` would coax a stronger answer.
+        // Re-calling at temperature 0 returns the same JSON regardless
+        // of effort, though, so the retry would just double-charge the
+        // course for an identical verdict. Low-confidence outputs flow
+        // through with their `suspicious_flags`; the teacher dashboard
+        // surfaces both so a human can step in when the model is unsure.
         self.call(course_id, mime_type, &excerpt)
             .await
             .map_err(|e| format!("classifier: call failed: {e}"))

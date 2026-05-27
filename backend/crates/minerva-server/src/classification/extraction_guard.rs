@@ -23,14 +23,14 @@
 //!    intercepted, not silent swap).
 //!
 //! All three run on the chat hot path. Intent + output check
-//! keep latency bounded with tight `max_completion_tokens` and
-//! `temperature: 0.0`. Soft-fail throughout: a transient
+//! keep latency bounded with tight `max_completion_tokens`,
+//! `temperature: 0.0`, and `reasoning_effort: "low"` (we're back
+//! on gpt-oss-120b across the classifier stack after Cerebras
+//! deprecated llama3.1-8b, which is the only model that ever
+//! 400'd on that parameter). Soft-fail throughout: a transient
 //! Cerebras hiccup never blocks a chat turn; worst case we
 //! treat the verdict as "not extraction" / "not solution" and
-//! continue. (We previously sent `reasoning_effort: "low"` here
-//! too; Cerebras now hard-rejects that parameter on llama3.1-8b
-//! with a 400, and it never did anything for non-reasoning
-//! models anyway.)
+//! continue.
 
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -40,30 +40,35 @@ use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
 
 // ── Cerebras model selection ───────────────────────────────────────
 //
-// Three of the four guard calls are simple binary-classification
-// tasks (intent / output / engagement) where a small fast model is
-// the right tool. The intent classifier in particular runs on
-// EVERY chat turn when the feature flag is on, so its latency is
-// the single most important number in this whole module. Cerebras
-// already hosts llama3.1-8b in the catalog (see health.rs); using
-// it cuts ~10x off the prompt-cost and a meaningful chunk of
-// latency vs. gpt-oss-120b without measurable quality loss for
-// JSON-schema-constrained binary decisions.
+// All four guard calls run on gpt-oss-120b now. Three of them
+// (intent / output / engagement) are simple binary-classification
+// tasks where a smaller fast model would historically have been
+// the right tool ; we ran them on llama3.1-8b for cost / latency
+// until Cerebras deprecated that model, at which point the whole
+// classifier stack in this crate collapsed onto gpt-oss-120b. The
+// intent classifier in particular runs on EVERY chat turn when
+// the feature flag is on, so its latency is the single most
+// important number in this whole module; the call bodies set
+// `reasoning_effort: "low"` to keep it bounded.
 //
-// The rewrite call is different: it produces user-visible prose
+// The rewrite call is unchanged: it produces user-visible prose
 // (the Socratic question + policy-note), runs only when the
 // output check tripped (rare), and the model's writing quality
 // directly affects whether the student's experience feels coherent.
-// We keep gpt-oss-120b for that path.
+// Kept as a separate constant so the rewrite path can move (back
+// to a larger model, to a smaller one, ...) independently from
+// the classifiers.
 
-/// Tiny model for the always-on / conditional binary classifiers.
-/// Cheapest in the Cerebras catalog. JSON-schema-constrained
-/// outputs + temperature 0 keep it on rails.
-const GUARD_CLASSIFIER_MODEL: &str = "llama3.1-8b";
+/// Model for the always-on / conditional binary classifiers.
+/// JSON-schema-constrained outputs + temperature 0 +
+/// `reasoning_effort: "low"` (set per call body) keep it on rails
+/// and bounded for latency.
+const GUARD_CLASSIFIER_MODEL: &str = "gpt-oss-120b";
 
-/// Larger model for the rewrite path only; runs rarely (only
-/// when the output check trips) and produces text the student
-/// reads, so quality matters.
+/// Model for the rewrite path; runs rarely (only when the output
+/// check trips) and produces text the student reads, so quality
+/// matters. Same string as `GUARD_CLASSIFIER_MODEL` today; kept
+/// separate so the rewrite path can diverge independently.
 const GUARD_REWRITE_MODEL: &str = "gpt-oss-120b";
 
 /// How many recent user messages the intent classifier sees. Five
@@ -154,6 +159,7 @@ pub async fn classify_intent(
     let body = serde_json::json!({
         "model": GUARD_CLASSIFIER_MODEL,
         "temperature": 0.0,
+        "reasoning_effort": "low",
         "max_completion_tokens": INTENT_MAX_TOKENS,
         "messages": [
             { "role": "system", "content": INTENT_SYSTEM_PROMPT },
@@ -282,6 +288,7 @@ pub async fn check_output_for_solution(
     let body = serde_json::json!({
         "model": GUARD_CLASSIFIER_MODEL,
         "temperature": 0.0,
+        "reasoning_effort": "low",
         "max_completion_tokens": OUTPUT_CHECK_MAX_TOKENS,
         "messages": [
             { "role": "system", "content": OUTPUT_CHECK_SYSTEM_PROMPT },
@@ -510,6 +517,7 @@ pub async fn classify_engagement(
     let body = serde_json::json!({
         "model": GUARD_CLASSIFIER_MODEL,
         "temperature": 0.0,
+        "reasoning_effort": "low",
         "max_completion_tokens": OUTPUT_CHECK_MAX_TOKENS,
         "messages": [
             { "role": "system", "content": ENGAGEMENT_SYSTEM_PROMPT },

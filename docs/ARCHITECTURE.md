@@ -77,7 +77,10 @@ Inline citations: replies carry `[n]` badges (naked-digit + filename-form
 variants both accepted); the right-rail sources panel reports actually-cited
 sources first with a toggle for the uncited remainder.
 
-Classifiers run on `llama3.1-8b` for latency. Token spend lands in
+Classifiers run on `gpt-oss-120b` at `reasoning_effort: low` (the previous
+cheaper `llama3.1-8b` path was deprecated by Cerebras; everything in the
+classifier stack collapsed onto gpt-oss as a result, and low effort keeps
+the latency profile roughly where it was). Token spend lands in
 `course_token_usage` under per-feature categories so daily caps
 (per-student-per-course + per-owner aggregate) cover Aegis, the
 extraction guard, and the writeup phase as cleanly as they cover the main

@@ -10,8 +10,11 @@
 //! catches per-chunk leaks within otherwise-safe documents.
 //!
 //! Cost / latency budget:
-//! * Per-chunk: one cheap llama3.1-8b call, ~100 tokens in / 5 tokens
-//!   out, target round-trip ~150-250ms each.
+//! * Per-chunk: one gpt-oss-120b call at `reasoning_effort: "low"`,
+//!   ~100 tokens in / 5 tokens out, target round-trip ~200-350ms
+//!   each. (Previously llama3.1-8b; that model was deprecated by
+//!   Cerebras so the path collapsed onto gpt-oss alongside every
+//!   other classifier here.)
 //! * The strategy fans out concurrently across all retrieved chunks via
 //!   `futures::future::join_all`, so total wall-clock is roughly the
 //!   slowest single call (not the sum).
@@ -67,16 +70,14 @@ pub fn snapshot_stats() -> AdversarialStats {
 }
 
 /// Cerebras model used for the per-chunk check. Binary
-/// classification with a 4-token output cap; exactly the kind of
-/// small-model task where llama3.1-8b is the right tool. Cheaper,
-/// faster (matters here: this filter runs per-chunk and fans out
-/// across all retrieved chunks every chat turn, against an 800ms
-/// total budget). The body deliberately omits `reasoning_effort`:
-/// the parameter is gpt-oss-only and Cerebras 400s the request
-/// when llama sees it; the previous body included it and was
-/// silently failing on every call (4xx -> Err -> fail-open without
-/// recording usage, so the dashboard didn't even surface the calls).
-const ADVERSARIAL_MODEL: &str = "llama3.1-8b";
+/// classification with a 4-token output cap; this filter runs
+/// per-chunk and fans out across all retrieved chunks every chat
+/// turn, against an 800ms total budget, so latency matters. The
+/// previous llama3.1-8b path was the cheapest option on Cerebras
+/// but is now deprecated; gpt-oss-120b at `reasoning_effort: "low"`
+/// (set in the body below) keeps the latency profile and unifies
+/// the classifier stack on a single hosted model.
+const ADVERSARIAL_MODEL: &str = "gpt-oss-120b";
 
 /// Total wall-clock budget for the whole filter (across all chunks
 /// fanned out concurrently). On timeout the filter fails open.
@@ -111,6 +112,7 @@ async fn is_solution_chunk(
     let body = serde_json::json!({
         "model": ADVERSARIAL_MODEL,
         "temperature": 0.0,
+        "reasoning_effort": "low",
         "max_tokens": 4,
         "messages": [
             { "role": "system", "content": ADVERSARIAL_SYSTEM_PROMPT },

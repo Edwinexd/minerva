@@ -254,7 +254,7 @@ def ingest_pipeline() -> graphviz.Digraph:
         c.attr(label="Ingest worker", **CLUSTER_BASE)
         _box(c, "gate", "mime / source router", shape="diamond", bold=False)
         _box(c, "extract", "poppler / extractor")
-        _box(c, "classify", "kind classifier", subtitle="llama3.1-8b")
+        _box(c, "classify", "kind classifier", subtitle="gpt-oss-120b")
         _box(c, "chunk", "chunker")
         _box(c, "embed", "embedder", subtitle="OpenAI or fastembed")
         _box(c, "kg", "KG linker", subtitle="cross-doc edges")
@@ -299,7 +299,7 @@ def chat_pipeline() -> graphviz.Digraph:
     with g.subgraph(name="cluster_aegis") as c:
         c.attr(label="Aegis (pre-send, off hot path)", **CLUSTER_BASE)
         _box(c, "aegis_analyze", "analyze draft",
-             subtitle="llama3.1-8b, debounced keystrokes")
+             subtitle="gpt-oss-120b, debounced keystrokes")
         _box(c, "aegis_rewrite", "rewrite on Use ideas",
              subtitle="gpt-oss-120b")
         c.edge("aegis_analyze", "aegis_rewrite",
@@ -308,7 +308,7 @@ def chat_pipeline() -> graphviz.Digraph:
     with g.subgraph(name="cluster_pre") as c:
         c.attr(label="Pre-generation guard", **CLUSTER_BASE)
         _box(c, "intent", "intent classifier", shape="diamond",
-             subtitle="llama3.1-8b", bold=False)
+             subtitle="gpt-oss-120b", bold=False)
         _box(c, "lift", "kg_state refusal lift")
         _box(c, "strat", "strategy", shape="diamond", bold=False)
 
@@ -351,7 +351,7 @@ def chat_pipeline() -> graphviz.Digraph:
         c.attr(label="Post-generation guard (extraction_guard flag)",
                **CLUSTER_BASE)
         _box(c, "out_class", "output classifier", shape="diamond",
-             subtitle="per chunk, llama3.1-8b", bold=False)
+             subtitle="per chunk, gpt-oss-120b", bold=False)
         _box(c, "rewrite", "Socratic rewrite", subtitle="gpt-oss-120b")
         _box(c, "out", "stream to student\n+ inline [n] citations",
              shape="stadium")

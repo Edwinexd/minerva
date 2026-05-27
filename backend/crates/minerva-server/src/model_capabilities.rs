@@ -284,8 +284,14 @@ mod tests {
 
     #[tokio::test]
     async fn validate_rejects_flare_on_logprob_less_model() {
-        let cache = CapabilityCache::for_tests(&[("llama3.1-8b", TOOLS_ONLY)]);
-        let result = validate_config(&cache, "llama3.1-8b", "flare", false).await;
+        // Fictional model name: the assertion is about capability
+        // shape, not about a specific Cerebras catalog entry. (We
+        // used to name a real "logprobs unsupported" Cerebras model
+        // here, but Cerebras deprecated that family; the test stays
+        // useful as long as the name string is just an opaque key
+        // into the capability cache.)
+        let cache = CapabilityCache::for_tests(&[("tools-only-model", TOOLS_ONLY)]);
+        let result = validate_config(&cache, "tools-only-model", "flare", false).await;
         assert_eq!(result, Err(CapabilityMismatch::LogprobsUnsupported));
     }
 
@@ -301,12 +307,10 @@ mod tests {
 
     #[tokio::test]
     async fn validate_accepts_flare_plus_tools_on_full_model() {
-        let cache = CapabilityCache::for_tests(&[("qwen-3-235b-a22b-instruct-2507", FULL)]);
-        assert!(
-            validate_config(&cache, "qwen-3-235b-a22b-instruct-2507", "flare", true)
-                .await
-                .is_ok()
-        );
+        let cache = CapabilityCache::for_tests(&[("gpt-oss-120b", FULL)]);
+        assert!(validate_config(&cache, "gpt-oss-120b", "flare", true)
+            .await
+            .is_ok());
     }
 
     #[tokio::test]

@@ -1172,7 +1172,7 @@ mod stream_integration_tests {
         GenerationContext {
             course_name: "Test Course".to_string(),
             custom_prompt: None,
-            model: "qwen-3-235b-a22b-instruct-2507".to_string(),
+            model: "gpt-oss-120b".to_string(),
             temperature: 0.3,
             max_chunks: 10,
             min_score: 0.0,

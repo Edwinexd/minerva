@@ -126,9 +126,12 @@ pub async fn embedding_models(
 }
 
 fn fallback_models() -> Vec<Value> {
-    vec![
-        json!({ "id": "qwen-3-235b-a22b-instruct-2507", "name": "Qwen 3 235B A22B Instruct" }),
-        json!({ "id": "llama3.1-8b", "name": "Llama 3.1 8B" }),
-        json!({ "id": "gpt-oss-120b", "name": "GPT OSS 120B" }),
-    ]
+    // Used only when the Cerebras `/v1/models` endpoint is unreachable
+    // or returns garbage. Lists the model(s) we actually expect every
+    // backend in this codebase to default to, so a teacher opening the
+    // course config picker during an upstream outage at least sees a
+    // working option. Cerebras deprecated qwen-3-235b-a22b-instruct-2507
+    // and llama3.1-8b; they're intentionally not in this fallback even
+    // though older databases may still reference them.
+    vec![json!({ "id": "gpt-oss-120b", "name": "GPT OSS 120B" })]
 }

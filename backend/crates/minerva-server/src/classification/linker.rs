@@ -23,10 +23,12 @@
 //! enumerating doc IDs in chain-of-thought before reaching JSON, ran
 //! out of budget, returned empty. Per-pair gives the model a tiny
 //! decision space, runs in parallel, and isolates each pair from
-//! sibling failures. The same shape now serves us on llama3.1-8b: a
-//! tight binary-ish decision per call with structured output is
-//! exactly the regime where a fast small model performs as well as a
-//! reasoning model, at a fraction of the prompt cost.
+//! sibling failures. The shape carried through a brief stint on
+//! llama3.1-8b (since deprecated by Cerebras) and is back on
+//! gpt-oss-120b at `reasoning_effort: "low"`: a tight binary-ish
+//! decision per call with structured output is the regime where
+//! low-effort prompting performs as well as full reasoning, at a
+//! fraction of the prompt cost.
 //!
 //! **Filenames are NOT used anywhere in this module.** Real DSV
 //! course filenames are unreliable (stale templates, copy/paste,
@@ -49,15 +51,15 @@ use crate::strategy::common::{
 };
 use minerva_db::queries::course_token_usage::CATEGORY_LINKER;
 
-/// Cerebras model for the per-pair link decision. Migrated from
-/// gpt-oss-120b to llama3.1-8b on the same logic as the document
-/// classifier and extraction-guard binary classifiers: a structured
-/// output (single enum + confidence + rationale) with `temperature: 0`
-/// is well within the small model's competence, and at ~10x cheaper
-/// per call the savings dominate over a course's worth of pair
-/// dispatches. llama3.1-8b doesn't accept `reasoning_effort`; the
-/// per-pair call body omits it.
-const LINKER_MODEL: &str = "llama3.1-8b";
+/// Cerebras model for the per-pair link decision. Briefly ran on
+/// llama3.1-8b for cost; that model has been deprecated by Cerebras
+/// so the dispatch is back on gpt-oss-120b. A structured output
+/// (single enum + confidence + rationale) with `temperature: 0` and
+/// `reasoning_effort: "low"` (set in the body) is well within
+/// gpt-oss's competence and keeps per-pair cost / latency bounded;
+/// the same shape that worked on the small model continues to work
+/// here.
+const LINKER_MODEL: &str = "gpt-oss-120b";
 
 /// Drop edges the model emits below this confidence.
 ///
@@ -66,9 +68,9 @@ const LINKER_MODEL: &str = "llama3.1-8b";
 /// the prompt nudged it toward "don't guess". The model defaults to
 /// silence under uncertainty, so the floor needs to be permissive
 /// enough that it'll commit to a reasonable guess and let the
-/// downstream similarity filter do calibration. Kept at 0.5 after
-/// the move to llama3.1-8b; if anything the smaller model is more
-/// willing to commit, so the floor isn't currently binding.
+/// downstream similarity filter do calibration. Held at 0.5 across
+/// the brief llama3.1-8b stint and back on gpt-oss-120b; the floor
+/// isn't currently binding in either regime.
 const MIN_EDGE_CONFIDENCE: f32 = 0.5;
 
 /// Embedding-similarity floor for candidate generation. Pairs below
@@ -121,7 +123,7 @@ const MAX_DOCS_PER_CALL: usize = 300;
 /// the actual problem. 1500 captures the problem statement on
 /// almost every DSV doc we've inspected. Total prompt size with
 /// 47 candidate-included docs * 1500 chars ≈ 70KB of content,
-/// well inside llama3.1-8b's 128K window on Cerebras.
+/// well inside gpt-oss-120b's 128K window on Cerebras.
 const EXCERPT_CHARS: usize = 1500;
 
 const LINKER_SYSTEM_PROMPT: &str = r#"You evaluate ONE pair of course documents and decide if they're related.
@@ -1217,9 +1219,12 @@ async fn classify_one_pair(
     let body = serde_json::json!({
         "model": LINKER_MODEL,
         "temperature": 0.0,
-        // No `reasoning_effort`: llama3.1-8b doesn't accept it and
-        // Cerebras 400s the request when it's present. Structured
-        // output + temperature 0 are the rails.
+        // `reasoning_effort: "low"` keeps per-pair latency bounded;
+        // the decision is a single enum + confidence + rationale and
+        // doesn't need deeper reasoning. Restores the latency profile
+        // of the prior llama3.1-8b call without the model being
+        // available.
+        "reasoning_effort": "low",
         // Tight ceiling; the response is at most ~150 tokens of
         // JSON. Generous overhead for the model's brief CoT but
         // small enough to fail fast on a runaway.

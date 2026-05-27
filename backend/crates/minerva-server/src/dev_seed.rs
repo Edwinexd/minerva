@@ -470,7 +470,7 @@ async fn upsert_seed_user(
 }
 
 /// Course config the seeder cares about. Everything else stays at the
-/// SQL column defaults (model = llama-3.3-70b, temperature 0.3, etc.).
+/// SQL column defaults (model = gpt-oss-120b, temperature 0.3, etc.).
 struct SeedCourse<'a> {
     name: &'a str,
     description: Option<&'a str>,

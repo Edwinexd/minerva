@@ -33,10 +33,13 @@ use crate::strategy::common::{
     cerebras_request_with_retry, record_cerebras_usage, scroll_doc_chunks,
 };
 
-/// Same llama3.1-8b the document classifier uses; JSON-schema
-/// constrained output is well within its range and prompt cost is
-/// dominated by the per-doc excerpts.
-const SUGGEST_MODEL: &str = "llama3.1-8b";
+/// Same gpt-oss-120b the document classifier uses; JSON-schema
+/// constrained output is well within its range and the prompt cost
+/// is dominated by the per-doc excerpts. (Previously llama3.1-8b for
+/// cost; that model was deprecated by Cerebras so the path collapsed
+/// onto gpt-oss alongside every other classifier in this crate.
+/// `reasoning_effort: "low"` on the call body keeps latency bounded.)
+const SUGGEST_MODEL: &str = "gpt-oss-120b";
 
 const SOURCE_DOC_LIMIT: i64 = 3;
 const CHUNKS_PER_DOC: usize = 3;
@@ -158,6 +161,7 @@ async fn regenerate(
     let body = serde_json::json!({
         "model": SUGGEST_MODEL,
         "temperature": 0.3,
+        "reasoning_effort": "low",
         "messages": [
             { "role": "system", "content": SYSTEM_PROMPT },
             { "role": "user", "content": format!("{USER_TEMPLATE_PREFIX}\n\n{grounding}") },

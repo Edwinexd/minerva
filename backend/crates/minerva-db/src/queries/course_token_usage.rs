@@ -69,7 +69,9 @@ pub async fn record(
 /// Aggregate row returned by the dashboard query: one bucket per
 /// (category, model) with the sum of tokens since `since`. The
 /// model split lets the dashboard show "of the linker's spend, X%
-/// went to gpt-oss-120b vs Y% to llama3.1-8b" if we ever mix.
+/// went to gpt-oss-120b vs Y% to <future smaller model>" if we
+/// ever re-introduce a cost-split (Cerebras deprecated the original
+/// llama3.1-8b cheap path, so right now everything is gpt-oss).
 #[derive(Debug, Clone, Serialize)]
 pub struct CategoryAggregate {
     pub category: String,

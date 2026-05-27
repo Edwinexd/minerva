@@ -61,16 +61,43 @@ const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
 /// exceed any legitimate processing time (largest transcripts + model load).
 const STALE_THRESHOLD_SECS: i64 = 600;
 
-/// How often the Canvas auto-sync loop checks for due connections. Effective
-/// lag is at most this plus `canvas_auto_sync_interval_hours`, so a 24h
-/// interval never drifts more than ~25h in practice.
-const CANVAS_AUTO_SYNC_CHECK_INTERVAL: std::time::Duration =
-    std::time::Duration::from_secs(60 * 60);
+/// How often we wake any of the periodic-sync background tasks (Canvas
+/// auto-sync, LTI NRPS reconcile, LTI platform-health probe). The actual
+/// cadence each task enforces is DB-driven via a "find what's due" query
+/// at every tick; the tick is just how often we ASK. Short tick = restart-
+/// safe (a freshly deployed pod's first cycle fires within 60 s instead
+/// of up to a day later, which mattered for the 24 h health probe loop
+/// when pod restarts were more frequent than the probe interval) and
+/// admin edits to the per-task interval settings propagate within 60 s
+/// instead of waiting up to the old sleep window.
+///
+/// Implemented via `tokio::time::interval` with `MissedTickBehavior::Delay`
+/// so a slow tick (e.g. NRPS reconciling a backlog) shortens the next
+/// tick to "now" rather than firing the missed ticks back-to-back.
+const SCHEDULE_TICK: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// How often the LTI NRPS reconcile loop checks for due contexts. Same
-/// rationale as the Canvas check interval: effective lag is at most this
-/// plus `lti_nrps_sync_interval_hours`.
-const LTI_NRPS_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+/// How long between platform-health probes for any single platform. The
+/// 30-day grace in `delete_long_orphaned_platforms` is calibrated against
+/// this cadence (~30 consecutive `invalid_client` results before the row
+/// is cascade-deleted). The worker queries `find_platforms_due_for_health_check`
+/// at every `SCHEDULE_TICK`, so the actual lag for any one platform is at
+/// most this + 60 s.
+const PLATFORM_HEALTH_PROBE_INTERVAL_HOURS: i32 = 24;
+
+/// Grace period before a platform that's been continuously returning
+/// `invalid_client` is cascade-deleted (taking its bindings + NRPS
+/// contexts with it via FK). See `record_platform_health` for how the
+/// `invalid_client_since` timestamp is maintained.
+const PLATFORM_ORPHAN_GRACE_DAYS: i32 = 30;
+
+/// Build a `tokio::time::interval` calibrated for one of the periodic-sync
+/// tasks. `Delay` (not `Burst`) so a slow tick doesn't cause a burst of
+/// catch-up ticks once the slow run finishes.
+fn schedule_ticker() -> tokio::time::Interval {
+    let mut t = tokio::time::interval(SCHEDULE_TICK);
+    t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    t
+}
 
 /// Start the background document-processing worker.
 ///
@@ -115,16 +142,17 @@ pub fn start(state: AppState, max_concurrent: usize) {
     // whose last_synced_at is older than the configured interval. Runs
     // sequentially across due connections so we don't stampede Canvas.
     //
-    // `interval_hours` is read from `system_defaults` *inside* the loop
-    // so an admin's edit on `/admin/defaults` takes effect on the next
-    // check-tick without a restart. 0 disables the sync entirely for
-    // this tick; we re-check on the next iteration in case the admin
-    // re-enables it.
+    // Ticks every SCHEDULE_TICK (60 s); `find_due_for_auto_sync` is the
+    // source of truth for "is anything actually due". `interval_hours`
+    // is read from `system_defaults` per tick so admin edits propagate
+    // within 60 s; 0 disables the sync (still queries each tick in case
+    // it's flipped back on).
     {
         let state = state.clone();
         tokio::spawn(async move {
+            let mut ticker = schedule_ticker();
             loop {
-                tokio::time::sleep(CANVAS_AUTO_SYNC_CHECK_INTERVAL).await;
+                ticker.tick().await;
                 let interval_hours =
                     crate::system_defaults::canvas_auto_sync_interval_hours(&state.db).await;
                 if interval_hours <= 0 {
@@ -181,14 +209,16 @@ pub fn start(state: AppState, max_concurrent: usize) {
     // due contexts so we don't stampede a platform's token + membership
     // endpoints. Removal is LTI-sourced-only (see lti_nrps::reconcile_context).
     //
-    // Like the Canvas sweep above, `nrps_interval_hours` is read from
-    // `system_defaults` per-tick so admin edits propagate without a
-    // restart. 0 = skip this tick.
+    // Ticks every SCHEDULE_TICK; `find_due_for_sync` decides what's due.
+    // `nrps_interval_hours` is read from `system_defaults` per tick so
+    // admin edits propagate within 60 s; 0 = skip the run for this tick
+    // (we still query each tick in case it's flipped back on).
     {
         let state = state.clone();
         tokio::spawn(async move {
+            let mut ticker = schedule_ticker();
             loop {
-                tokio::time::sleep(LTI_NRPS_CHECK_INTERVAL).await;
+                ticker.tick().await;
                 let nrps_interval_hours =
                     crate::system_defaults::lti_nrps_sync_interval_hours(&state.db).await;
                 if nrps_interval_hours <= 0 {
@@ -305,31 +335,37 @@ pub fn start(state: AppState, max_concurrent: usize) {
     }
 
     // Platform-health probe: every active platform's token endpoint is
-    // pinged daily with a throwaway client_credentials JWT. If the LMS
+    // pinged ~daily with a throwaway client_credentials JWT. If the LMS
     // rejects with `invalid_client` continuously for 30 days, the row
     // is cascade-deleted (bindings + NRPS contexts go with it via FK).
     // This is how we detect "the LMS admin deleted us"; the spec
     // doesn't notify the tool, so we have to ask.
+    //
+    // Ticks every SCHEDULE_TICK; `find_platforms_due_for_health_check`
+    // returns only platforms whose last probe is older than
+    // `PLATFORM_HEALTH_PROBE_INTERVAL_HOURS`. Previously this loop
+    // slept 24 h between probes, meaning a pod that restarted more
+    // often than that NEVER probed and the 30-day orphan clock never
+    // started. The short-tick + DB-due query makes restarts safe.
     {
         let state = state.clone();
         tokio::spawn(async move {
-            const PROBE_INTERVAL: std::time::Duration =
-                std::time::Duration::from_secs(24 * 60 * 60);
-            const ORPHAN_GRACE_DAYS: i32 = 30;
+            let mut ticker = schedule_ticker();
             loop {
-                tokio::time::sleep(PROBE_INTERVAL).await;
-                let platforms = match minerva_db::queries::lti::list_platforms_for_health_check(
+                ticker.tick().await;
+                let due = match minerva_db::queries::lti::find_platforms_due_for_health_check(
                     &state.db,
+                    PLATFORM_HEALTH_PROBE_INTERVAL_HOURS,
                 )
                 .await
                 {
                     Ok(p) => p,
                     Err(e) => {
-                        tracing::error!("lti health: list query failed: {}", e);
+                        tracing::error!("lti health: due query failed: {}", e);
                         continue;
                     }
                 };
-                for p in &platforms {
+                for p in &due {
                     let status = crate::lti_nrps::probe_platform_health(&state, p).await;
                     if let Err(e) =
                         minerva_db::queries::lti::record_platform_health(&state.db, p.id, &status)
@@ -351,9 +387,11 @@ pub fn start(state: AppState, max_concurrent: usize) {
                         );
                     }
                 }
+                // Cheap when no platforms qualify (indexed on
+                // `invalid_client_since`); fine to run on every tick.
                 match minerva_db::queries::lti::delete_long_orphaned_platforms(
                     &state.db,
-                    ORPHAN_GRACE_DAYS,
+                    PLATFORM_ORPHAN_GRACE_DAYS,
                 )
                 .await
                 {
@@ -361,7 +399,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
                     Ok(n) => tracing::warn!(
                         "lti health: cascade-deleted {} platform row(s) the LMS has been rejecting for {}+ days",
                         n,
-                        ORPHAN_GRACE_DAYS
+                        PLATFORM_ORPHAN_GRACE_DAYS
                     ),
                     Err(e) => tracing::error!("lti health: orphan delete failed: {}", e),
                 }

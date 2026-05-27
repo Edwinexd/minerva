@@ -163,6 +163,15 @@
       "lastSync": "Senaste synk"
     }
   },
+  "ltiDiagnostics": {
+    "overscopedTitle": "Felinställd LTI-registrering",
+    "overscopedLede": "En kurs-specifik LTI-registrering på Minerva-sidan tar emot lanseringar från {{count}} olika LMS-kurser. Varje lansering hamnar i samma Minerva-kurs oavsett vilken LMS-kurs användaren kom ifrån. Detta innebär nästan alltid att LMS-sidan är installerad på sajt-nivå men Minerva-sidan registrerades per kurs.",
+    "overscopedTargetLabel": "Alla lanseringar hamnar i:",
+    "overscopedFirstSeen": "Första felaktiga lansering",
+    "overscopedContextsLabel": "Observerade LMS-kontext-id:n:",
+    "overscopedFixLabel": "Åtgärd:",
+    "overscopedFixBody": "Ta bort den kurs-specifika registreringen och registrera om verktyget som en sajt-plattform (Site administration > LTI). Alternativt: dela upp i en kurs-specifik registrering per LMS-kontext."
+  },
   "ltiApprovePlatform": {
     "title": "Godkänn LTI-plattform",
     "description": "Verifiera att issuer och client id matchar det LMS du förväntar dig, sätt eppn-domän-scopet, godkänn sedan. Plattformen kan inte autentisera lanseringar förrän du har gjort det.",

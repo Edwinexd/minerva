@@ -835,6 +835,31 @@ export interface LtiPlatformBinding {
   created_at: string
 }
 
+/// A per-course `lti_registrations` row that's getting launches from
+/// more than one LMS context_id. The Minerva-side scope is per-course,
+/// but the LMS-side install is functioning as site-level: every launch
+/// from every LMS course funnels into the SAME Minerva course. Almost
+/// always a setup mistake; fix is to convert the registration into a
+/// site-level platform + bindings, or to split it into separate
+/// registrations per LMS context.
+export interface LtiOverscopedRegistration {
+  registration_id: string
+  registration_name: string
+  issuer: string
+  client_id: string
+  minerva_course_id: string
+  minerva_course_name: string
+  /// All distinct LMS context_id values observed so far (>= 2).
+  observed_context_ids: string[]
+  /// Earliest NRPS context creation time for any observed context; a
+  /// rough "since when has this been wrong" signal.
+  first_observed_at: string
+}
+
+export interface LtiDiagnostics {
+  overscoped_registrations: LtiOverscopedRegistration[]
+}
+
 /// Site-level platform binding as seen from the course/teacher angle: same
 /// (platform, context) -> course link, but joined with the platform metadata
 /// the teacher actually cares about (name, issuer, client_id) since they

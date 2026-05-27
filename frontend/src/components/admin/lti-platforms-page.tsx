@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useState } from "react"
 import {
+  adminLtiDiagnosticsQuery,
   adminLtiPlatformBindingsQuery,
   adminLtiPlatformNrpsQuery,
   adminLtiPlatformsQuery,
@@ -10,7 +11,7 @@ import {
 import { api } from "@/lib/api"
 import { copyToClipboard as copyText } from "@/lib/clipboard"
 import { useApiErrorMessage } from "@/lib/use-api-error"
-import type { LtiPlatform } from "@/lib/types"
+import type { LtiOverscopedRegistration, LtiPlatform } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -33,6 +34,11 @@ export function LtiPlatformsPanel() {
   const formatError = useApiErrorMessage()
   const { data: setup } = useQuery(adminLtiSetupQuery)
   const { data: platforms, isLoading } = useQuery(adminLtiPlatformsQuery)
+  // Setup-health warnings (currently: per-course registrations that are
+  // serving more than one LMS context). Rendered above the platforms
+  // list so it's visible regardless of which platform card is open.
+  const { data: diagnostics } = useQuery(adminLtiDiagnosticsQuery)
+  const overscoped = diagnostics?.overscoped_registrations ?? []
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState("")
   const [issuer, setIssuer] = useState("")
@@ -94,6 +100,13 @@ export function LtiPlatformsPanel() {
 
   return (
     <div className="space-y-6">
+      {overscoped.length > 0 && (
+        <div className="space-y-3">
+          {overscoped.map((r) => (
+            <OverscopedRegistrationWarning key={r.registration_id} reg={r} />
+          ))}
+        </div>
+      )}
       <Card>
         <CardHeader>
           <CardTitle>{t("ltiPlatforms.setupTitle")}</CardTitle>
@@ -604,6 +617,69 @@ function PlatformRow({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/// Inline warning card for a per-course LTI registration that's getting
+/// launches from > 1 LMS context. Renders above the platforms list so
+/// the integrator sees it on page load regardless of which platform
+/// card they're inspecting. Reads from the `ltiDiagnostics` i18n
+/// namespace; never gated on UI feature flags because a config mistake
+/// here silently funnels every LMS course into the same Minerva
+/// course and we want that loud.
+function OverscopedRegistrationWarning({
+  reg,
+}: {
+  reg: LtiOverscopedRegistration
+}) {
+  const { t } = useTranslation("admin")
+  return (
+    <div
+      role="alert"
+      className="space-y-3 rounded-md border border-destructive/60 bg-destructive/5 p-4 text-sm"
+    >
+      <div className="flex items-center gap-2">
+        <Badge variant="destructive">{t("ltiDiagnostics.overscopedTitle")}</Badge>
+        <span className="font-mono text-xs text-muted-foreground">
+          {reg.registration_name} ({reg.issuer} / {reg.client_id})
+        </span>
+      </div>
+      <p>
+        {t("ltiDiagnostics.overscopedLede", {
+          count: reg.observed_context_ids.length,
+        })}
+      </p>
+      <div className="space-y-1">
+        <div className="text-xs text-muted-foreground">
+          {t("ltiDiagnostics.overscopedTargetLabel")}{" "}
+          <span className="font-medium text-foreground">
+            {reg.minerva_course_name}
+          </span>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {t("ltiDiagnostics.overscopedFirstSeen")}:{" "}
+          <RelativeTime date={reg.first_observed_at} />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <div className="text-xs font-medium text-muted-foreground">
+          {t("ltiDiagnostics.overscopedContextsLabel")}
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {reg.observed_context_ids.map((cid) => (
+            <Badge key={cid} variant="outline" className="font-mono text-xs">
+              {cid}
+            </Badge>
+          ))}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">
+          {t("ltiDiagnostics.overscopedFixLabel")}
+        </span>{" "}
+        {t("ltiDiagnostics.overscopedFixBody")}
+      </p>
     </div>
   )
 }

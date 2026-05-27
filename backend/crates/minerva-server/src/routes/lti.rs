@@ -94,6 +94,7 @@ pub fn course_router() -> Router<AppState> {
 pub fn admin_router() -> Router<AppState> {
     Router::new()
         .route("/lti/setup", get(admin_lti_setup))
+        .route("/lti/diagnostics", get(lti_diagnostics))
         .route("/lti/platforms", get(list_platforms).post(create_platform))
         .route("/lti/platforms/{platform_id}", delete(delete_platform))
         .route(
@@ -1219,6 +1220,65 @@ async fn admin_lti_setup(
 ) -> Result<Json<LtiSetupResponse>, AppError> {
     require_site_integrator(&user)?;
     Ok(Json(build_admin_setup_response(&state.config.base_url)))
+}
+
+// ---------------------------------------------------------------------------
+// Setup diagnostics (mis-scoped registrations)
+// ---------------------------------------------------------------------------
+
+/// One per-course `lti_registrations` row that's being asked to do
+/// site-level work: the same registration has handled launches from more
+/// than one LMS context. Every launch routes to the same Minerva course
+/// regardless of which LMS context originated it, so this is almost
+/// certainly an admin/teacher misconfiguration (the LMS tool was set up
+/// at site level on the LMS, but the Minerva side was set up per-course).
+#[derive(Debug, Serialize)]
+struct OverscopedRegistrationResponse {
+    registration_id: Uuid,
+    registration_name: String,
+    issuer: String,
+    client_id: String,
+    /// Minerva course every launch funnels into.
+    minerva_course_id: Uuid,
+    minerva_course_name: String,
+    /// All distinct LMS context_id values observed so far (>= 2).
+    observed_context_ids: Vec<String>,
+    /// Approximate "since when"; earliest NRPS context creation time
+    /// among the observed contexts.
+    first_observed_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct LtiDiagnosticsResponse {
+    overscoped_registrations: Vec<OverscopedRegistrationResponse>,
+}
+
+/// GET /admin/lti/diagnostics; flags LTI setups that are wired wrong.
+/// Currently surfaces a single class of problem: per-course registrations
+/// receiving launches from more than one LMS context (i.e. the LMS side
+/// is site-level but the Minerva side is per-course). The recommended
+/// fix is in the UI; this endpoint just returns the raw data.
+async fn lti_diagnostics(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<LtiDiagnosticsResponse>, AppError> {
+    require_site_integrator(&user)?;
+    let rows = minerva_db::queries::lti::find_overscoped_registrations(&state.db).await?;
+    Ok(Json(LtiDiagnosticsResponse {
+        overscoped_registrations: rows
+            .into_iter()
+            .map(|r| OverscopedRegistrationResponse {
+                registration_id: r.registration_id,
+                registration_name: r.registration_name,
+                issuer: r.issuer,
+                client_id: r.client_id,
+                minerva_course_id: r.minerva_course_id,
+                minerva_course_name: r.minerva_course_name,
+                observed_context_ids: r.observed_context_ids,
+                first_observed_at: r.first_observed_at,
+            })
+            .collect(),
+    }))
 }
 
 fn build_admin_setup_response(base_url: &str) -> LtiSetupResponse {

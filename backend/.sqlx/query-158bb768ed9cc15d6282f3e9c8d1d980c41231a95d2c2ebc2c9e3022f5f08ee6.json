@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since FROM lti_platforms WHERE activated_at IS NOT NULL",
+  "query": "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since\n        FROM lti_platforms\n        WHERE activated_at IS NOT NULL\n          AND (last_health_check_at IS NULL\n               OR last_health_check_at < NOW() - make_interval(hours => $1))\n        ORDER BY last_health_check_at NULLS FIRST",
   "describe": {
     "columns": [
       {
@@ -85,7 +85,9 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Int4"
+      ]
     },
     "nullable": [
       false,
@@ -106,5 +108,5 @@
       true
     ]
   },
-  "hash": "0ba15168ee2791f2ef660588779154d4453fde6b802146b85cd1005dcbab8272"
+  "hash": "158bb768ed9cc15d6282f3e9c8d1d980c41231a95d2c2ebc2c9e3022f5f08ee6"
 }

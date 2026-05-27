@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            r.id AS \"registration_id!\",\n            r.name AS \"registration_name!\",\n            r.issuer AS \"issuer!\",\n            r.client_id AS \"client_id!\",\n            r.course_id AS \"minerva_course_id!\",\n            c.name AS \"minerva_course_name!\",\n            ARRAY_AGG(DISTINCT nc.context_id ORDER BY nc.context_id) AS \"observed_context_ids!\",\n            MIN(nc.created_at) AS \"first_observed_at!\"\n        FROM lti_registrations r\n        JOIN lti_nrps_contexts nc ON nc.registration_id = r.id\n        JOIN courses c ON c.id = r.course_id\n        GROUP BY r.id, r.name, r.issuer, r.client_id, r.course_id, c.name\n        HAVING COUNT(DISTINCT nc.context_id) > 1\n        ORDER BY MIN(nc.created_at)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "registration_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "registration_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "issuer!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "client_id!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "minerva_course_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "minerva_course_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "observed_context_ids!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 7,
+        "name": "first_observed_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "f9701d1dab17521b2b9185e5db1bd9172cd001bb4c5366e183f62e4643864284"
+}

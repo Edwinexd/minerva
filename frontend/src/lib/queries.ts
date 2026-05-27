@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiDiagnostics, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -453,6 +453,17 @@ export const adminLtiSetupQuery = queryOptions({
 export const adminLtiPlatformsQuery = queryOptions({
   queryKey: ["admin", "lti", "platforms"],
   queryFn: () => api.get<LtiPlatform[]>("/admin/lti/platforms"),
+})
+
+/// Setup-health warnings across the LTI subsystem. Currently surfaces
+/// per-course registrations that are receiving launches from more than
+/// one LMS context (i.e. the LMS-side install is site-level but the
+/// Minerva-side scope is per-course). Cheap join + grouping in pg; the
+/// page polls only on mount, since these are config issues that don't
+/// change without admin action.
+export const adminLtiDiagnosticsQuery = queryOptions({
+  queryKey: ["admin", "lti", "diagnostics"],
+  queryFn: () => api.get<LtiDiagnostics>("/admin/lti/diagnostics"),
 })
 
 export const adminIntegrationKeysQuery = queryOptions({

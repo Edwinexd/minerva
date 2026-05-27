@@ -359,15 +359,25 @@ pub async fn delete_long_orphaned_platforms(
     Ok(result.rows_affected())
 }
 
-/// List every active (activated_at IS NOT NULL) platform the worker
-/// should probe. Skips pending rows because their token endpoint will
-/// already reject us (the LMS hasn't fully provisioned the tool yet on
-/// some platforms during the dynreg flow, and the row is pending on
-/// our side so the value of a probe is nil).
-pub async fn list_platforms_for_health_check(db: &PgPool) -> Result<Vec<PlatformRow>, sqlx::Error> {
+/// Active platforms (activated_at IS NOT NULL) whose health hasn't been
+/// probed in at least `interval_hours`. Used by the worker's short-tick
+/// scheduler: the DB decides what's due, the worker just asks every
+/// minute and probes whatever comes back (usually zero). Pending rows
+/// are skipped because their token endpoint will reject us until the
+/// integrator approves the row; probing them adds noise without value.
+pub async fn find_platforms_due_for_health_check(
+    db: &PgPool,
+    interval_hours: i32,
+) -> Result<Vec<PlatformRow>, sqlx::Error> {
     sqlx::query_as!(
         PlatformRow,
-        "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since FROM lti_platforms WHERE activated_at IS NOT NULL"
+        r#"SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since
+        FROM lti_platforms
+        WHERE activated_at IS NOT NULL
+          AND (last_health_check_at IS NULL
+               OR last_health_check_at < NOW() - make_interval(hours => $1))
+        ORDER BY last_health_check_at NULLS FIRST"#,
+        interval_hours,
     )
     .fetch_all(db)
     .await
@@ -492,6 +502,79 @@ pub async fn list_bindings_for_course(
         WHERE b.course_id = $1
         ORDER BY b.created_at DESC"#,
         course_id,
+    )
+    .fetch_all(db)
+    .await
+}
+
+//; LTI setup diagnostics
+//
+// The launch dispatcher (see `do_login_initiation`) resolves (issuer,
+// client_id) to either a per-course registration OR a site-level platform.
+// A per-course registration is hard-bound to a single Minerva course,
+// regardless of which LMS context the launch comes from. So if the LMS
+// admin installs the tool at the site level (one tool, many courses) but
+// the Minerva side only has a per-course `lti_registrations` row, every
+// launch from every LMS course funnels into the SAME Minerva course,
+// usually silently, often noticed long after.
+//
+// `find_overscoped_registrations` flags this by counting distinct LMS
+// `context_id`s observed for each per-course registration via the NRPS
+// context table (which is populated on first launch when the platform
+// advertises a `names_role_service` claim). >1 distinct LMS context for
+// a single Minerva-side per-course registration = the registration is
+// being asked to do site-level work. The fix is either to convert it
+// into an `lti_platforms` row + bindings, or to add separate per-course
+// registrations for each LMS context.
+//
+// Caveat: detection requires NRPS to be enabled on the tool in the LMS
+// (otherwise no context rows accumulate). If NRPS is off this query
+// silently misses overscoped registrations, but that's the same gap
+// `last_sync_status` already has and the user-visible fix-up flow is
+// identical.
+
+/// A per-course `lti_registrations` row that has accumulated NRPS
+/// launches from more than one LMS `context_id`. The smoking gun for
+/// "the LMS-side install is site-level but the Minerva-side scope is
+/// per-course." See module-level doc above for the why.
+#[derive(Debug)]
+pub struct OverscopedRegistrationRow {
+    pub registration_id: Uuid,
+    pub registration_name: String,
+    pub issuer: String,
+    pub client_id: String,
+    /// Minerva course the registration is hard-bound to. Every launch
+    /// from every distinct LMS context below resolves to THIS course.
+    pub minerva_course_id: Uuid,
+    pub minerva_course_name: String,
+    /// All distinct LMS `context_id`s observed for this registration.
+    /// Length is always >= 2 (the query's `HAVING` clause).
+    pub observed_context_ids: Vec<String>,
+    /// Earliest NRPS context creation time for any of the observed
+    /// contexts; a rough "since when has this been wrong" signal.
+    pub first_observed_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn find_overscoped_registrations(
+    db: &PgPool,
+) -> Result<Vec<OverscopedRegistrationRow>, sqlx::Error> {
+    sqlx::query_as!(
+        OverscopedRegistrationRow,
+        r#"SELECT
+            r.id AS "registration_id!",
+            r.name AS "registration_name!",
+            r.issuer AS "issuer!",
+            r.client_id AS "client_id!",
+            r.course_id AS "minerva_course_id!",
+            c.name AS "minerva_course_name!",
+            ARRAY_AGG(DISTINCT nc.context_id ORDER BY nc.context_id) AS "observed_context_ids!",
+            MIN(nc.created_at) AS "first_observed_at!"
+        FROM lti_registrations r
+        JOIN lti_nrps_contexts nc ON nc.registration_id = r.id
+        JOIN courses c ON c.id = r.course_id
+        GROUP BY r.id, r.name, r.issuer, r.client_id, r.course_id, c.name
+        HAVING COUNT(DISTINCT nc.context_id) > 1
+        ORDER BY MIN(nc.created_at)"#,
     )
     .fetch_all(db)
     .await

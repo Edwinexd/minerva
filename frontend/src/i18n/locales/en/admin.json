@@ -163,6 +163,15 @@
       "lastSync": "Last sync"
     }
   },
+  "ltiDiagnostics": {
+    "overscopedTitle": "Mis-scoped LTI registration",
+    "overscopedLede": "A per-course LTI registration on the Minerva side is receiving launches from {{count}} different LMS courses. Every launch funnels into the same Minerva course regardless of which LMS course the user came from. Almost always means the LMS-side install is site-level but the Minerva-side was set up per-course.",
+    "overscopedTargetLabel": "All launches end up in:",
+    "overscopedFirstSeen": "First wrong launch observed",
+    "overscopedContextsLabel": "Observed LMS context ids:",
+    "overscopedFixLabel": "Fix:",
+    "overscopedFixBody": "Delete this per-course registration and re-register the tool as a site-level platform (Site administration > LTI). Or split it into one per-course registration per LMS context."
+  },
   "ltiApprovePlatform": {
     "title": "Approve LTI platform",
     "description": "Verify the issuer and client id match the LMS you expected, set the eppn-domain trust scope, then approve. The platform cannot authenticate launches until you do.",

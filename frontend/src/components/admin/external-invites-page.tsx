@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { useState } from "react"
 import { externalAuthInvitesQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { copyToClipboard as copyText } from "@/lib/clipboard"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import type { ExternalAuthInvite, ExternalAuthInviteCreated } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -167,9 +168,10 @@ function CreatedInviteCallout({
   const [copied, setCopied] = useState(false)
 
   const copy = async () => {
-    await navigator.clipboard.writeText(invite.url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    if (await copyText(invite.url)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
   }
 
   return (

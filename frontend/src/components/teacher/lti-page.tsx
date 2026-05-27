@@ -7,6 +7,7 @@ import {
   ltiSetupQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { copyToClipboard as copyText } from "@/lib/clipboard"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
@@ -78,10 +79,12 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
     },
   })
 
-  function copyToClipboard(text: string, field: string) {
-    navigator.clipboard.writeText(text)
-    setCopiedField(field)
-    setTimeout(() => setCopiedField(null), 2000)
+  async function copyToClipboard(text: string, field: string) {
+    const ok = await copyText(text)
+    if (ok) {
+      setCopiedField(field)
+      setTimeout(() => setCopiedField(null), 2000)
+    }
   }
 
   const config = setup?.moodle_tool_config
@@ -318,6 +321,11 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
                     ) : (
                       <Badge variant="outline">{t("lti.nrpsStatusPending")}</Badge>
                     )}
+                    {ctx.last_sync_warning && (
+                      <Badge variant="outline" className="border-amber-500 text-amber-700 dark:text-amber-400">
+                        {t("lti.nrpsStatusWarning")}
+                      </Badge>
+                    )}
                     {ctx.last_sync_at ? (
                       <span className="text-xs text-muted-foreground">
                         <RelativeTime date={ctx.last_sync_at} />
@@ -339,6 +347,11 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
                   {ctx.last_sync_status === "error" && ctx.last_sync_error && (
                     <div className="text-xs text-destructive break-all">
                       {ctx.last_sync_error}
+                    </div>
+                  )}
+                  {ctx.last_sync_warning && (
+                    <div className="text-xs text-amber-700 dark:text-amber-400 break-words">
+                      {ctx.last_sync_warning}
                     </div>
                   )}
                 </div>

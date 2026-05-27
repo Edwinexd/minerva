@@ -24,6 +24,11 @@ pub struct NrpsContextRow {
     pub last_sync_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_sync_status: Option<String>,
     pub last_sync_error: Option<String>,
+    /// Actionable, human-readable note independent of `last_sync_status`: a
+    /// sync can be `ok` and still surface a warning here (e.g. the platform
+    /// answered 200 OK but isn't sharing any identity claims, leaving every
+    /// member to fall back to a synthetic eppn).
+    pub last_sync_warning: Option<String>,
     pub last_sync_added: Option<i32>,
     pub last_sync_removed: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -60,8 +65,8 @@ pub async fn upsert_context(
                               course_id = EXCLUDED.course_id,
                               updated_at = NOW()
                 RETURNING id, registration_id, platform_id, context_id, course_id, memberships_url,
-                          last_sync_at, last_sync_status, last_sync_error, last_sync_added,
-                          last_sync_removed, created_at, updated_at"#,
+                          last_sync_at, last_sync_status, last_sync_error, last_sync_warning,
+                          last_sync_added, last_sync_removed, created_at, updated_at"#,
                 id,
                 registration_id,
                 context_id,
@@ -82,8 +87,8 @@ pub async fn upsert_context(
                               course_id = EXCLUDED.course_id,
                               updated_at = NOW()
                 RETURNING id, registration_id, platform_id, context_id, course_id, memberships_url,
-                          last_sync_at, last_sync_status, last_sync_error, last_sync_added,
-                          last_sync_removed, created_at, updated_at"#,
+                          last_sync_at, last_sync_status, last_sync_error, last_sync_warning,
+                          last_sync_added, last_sync_removed, created_at, updated_at"#,
                 id,
                 platform_id,
                 context_id,
@@ -105,8 +110,8 @@ pub async fn find_due_for_sync(
     sqlx::query_as!(
         NrpsContextRow,
         r#"SELECT id, registration_id, platform_id, context_id, course_id, memberships_url,
-                  last_sync_at, last_sync_status, last_sync_error, last_sync_added,
-                  last_sync_removed, created_at, updated_at
+                  last_sync_at, last_sync_status, last_sync_error, last_sync_warning,
+                  last_sync_added, last_sync_removed, created_at, updated_at
         FROM lti_nrps_contexts
         WHERE last_sync_at IS NULL
            OR last_sync_at < NOW() - make_interval(hours => $1)
@@ -124,8 +129,8 @@ pub async fn list_contexts_for_course(
     sqlx::query_as!(
         NrpsContextRow,
         r#"SELECT id, registration_id, platform_id, context_id, course_id, memberships_url,
-                  last_sync_at, last_sync_status, last_sync_error, last_sync_added,
-                  last_sync_removed, created_at, updated_at
+                  last_sync_at, last_sync_status, last_sync_error, last_sync_warning,
+                  last_sync_added, last_sync_removed, created_at, updated_at
         FROM lti_nrps_contexts
         WHERE course_id = $1
         ORDER BY created_at"#,
@@ -142,8 +147,8 @@ pub async fn list_contexts_for_platform(
     sqlx::query_as!(
         NrpsContextRow,
         r#"SELECT id, registration_id, platform_id, context_id, course_id, memberships_url,
-                  last_sync_at, last_sync_status, last_sync_error, last_sync_added,
-                  last_sync_removed, created_at, updated_at
+                  last_sync_at, last_sync_status, last_sync_error, last_sync_warning,
+                  last_sync_added, last_sync_removed, created_at, updated_at
         FROM lti_nrps_contexts
         WHERE platform_id = $1
         ORDER BY created_at"#,
@@ -154,13 +159,16 @@ pub async fn list_contexts_for_platform(
 }
 
 /// Record the outcome of a reconcile run. `status` is 'ok' or 'error';
-/// `error` is NULL on success. Counts are NULL when the run errored before
-/// it could determine them.
+/// `error` is NULL on success. `warning` is independent of status: a
+/// successful run can still carry an actionable note about the platform
+/// (e.g. identity claims missing across the entire roster). Counts are NULL
+/// when the run errored before it could determine them.
 pub async fn record_sync_result(
     db: &PgPool,
     id: Uuid,
     status: &str,
     error: Option<&str>,
+    warning: Option<&str>,
     added: Option<i32>,
     removed: Option<i32>,
 ) -> Result<(), sqlx::Error> {
@@ -169,13 +177,15 @@ pub async fn record_sync_result(
            SET last_sync_at = NOW(),
                last_sync_status = $2,
                last_sync_error = $3,
-               last_sync_added = $4,
-               last_sync_removed = $5,
+               last_sync_warning = $4,
+               last_sync_added = $5,
+               last_sync_removed = $6,
                updated_at = NOW()
            WHERE id = $1"#,
         id,
         status,
         error,
+        warning,
         added,
         removed,
     )

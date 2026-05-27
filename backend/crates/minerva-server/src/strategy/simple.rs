@@ -25,7 +25,19 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let collection_name =
         minerva_ingest::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
 
-    // RAG lookup (blocks before streaming starts)
+    // Orphan filter runs first and unconditionally: an orphaned doc
+    // (Moodle activity deleted, page edited, etc.) must never appear in
+    // a new turn regardless of KG status. Soft-orphan instead of hard
+    // delete because chat history's `chunks_used` cites doc ids we
+    // still need to resolve client-side. Computed once and threaded
+    // into every RAG primitive that runs this turn (rag_lookup +
+    // keyword_lookup + tool dispatch); see `common::rag_lookup`.
+    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.course_id)
+        .await
+        .unwrap_or_default();
+
+    // RAG lookup (blocks before streaming starts). Orphaned chunks
+    // are filtered inside.
     let raw_chunks = common::rag_lookup(
         &http_client,
         &ctx.openai_api_key,
@@ -37,6 +49,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         ctx.min_score,
         &ctx.embedding_provider,
         &ctx.embedding_model,
+        &orphaned,
     )
     .await;
 
@@ -89,6 +102,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             &ctx.embedding_model,
             &ctx.user_content,
             &rag.context,
+            &orphaned,
         )
         .await;
         rag.context.extend(extra);
@@ -111,6 +125,23 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &rag.context,
     )
     .await;
+
+    // Per-turn extraction signal. The simple strategy doesn't have
+    // a thinking stream to suppress (no research phase emits), but
+    // `chunks_used` still needs gating on flagged turns: the seed
+    // RAG is keyed off the student's pasted assignment text and
+    // may include the assignment_brief itself or a TA-uploaded
+    // solution PDF. Without this, the SSE `done` event ships those
+    // chunks live (common::finalize gate keys off `thinking_hidden`)
+    // and the persisted column stays false so the read-time gate
+    // in chat.rs / embed.rs serves them on refresh too. Tracks
+    // `flagged_this_turn` (per-turn intent OR proximity), NOT the
+    // sticky `constraint_active`, to avoid blanking sources on
+    // every benign follow-up after a single past trip.
+    let suppress_thinking = guard_decision
+        .as_ref()
+        .map(|g| g.flagged_this_turn)
+        .unwrap_or(false);
 
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
         .await
@@ -191,6 +222,17 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         None,
         None,
         None,
+        // No live thinking stream to gate on this path, but the
+        // SSE `done` event still ships `chunks_used` and the
+        // persisted column drives the read-time owner-suppression
+        // gate in chat.rs / embed.rs. On a flagged turn the seed
+        // RAG can include the assignment_brief or a TA-uploaded
+        // solution PDF, so we mirror the tool_use path's gate:
+        // persist thinking_hidden=true when the guard fired
+        // per-turn, blanking `chunks_used` in both the SSE done
+        // event (via common::finalize) and on GET (via the read-
+        // time gate).
+        suppress_thinking,
     )
     .await;
 }

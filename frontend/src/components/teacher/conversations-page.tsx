@@ -726,6 +726,13 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
     thinkingActive: tStudent("chat.thinkingActive"),
     thinkingDone: tStudent("chat.thinkingDone"),
     thinkingDoneWithDuration: tStudent("chat.thinkingDoneWithDuration"),
+    // The teacher view never gets a `hidden=true` ThinkingBlock
+    // (the read-time gate keeps the full transcript visible for
+    // is_teacher viewers), but the label type requires the keys
+    // anyway; pull from the same student namespace so a future
+    // call site that does pass `hidden` still resolves correctly.
+    thinkingHidden: tStudent("chat.thinkingHidden"),
+    thinkingHiddenBody: tStudent("chat.thinkingHiddenBody"),
     toolCallsAriaLabel: tStudent("chat.toolCallsAriaLabel"),
   }
   const queryClient = useQueryClient()

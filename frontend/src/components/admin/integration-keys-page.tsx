@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useState } from "react"
 import { adminIntegrationKeysQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { copyToClipboard as copyText } from "@/lib/clipboard"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import type { SiteIntegrationKey, SiteIntegrationKeyCreated } from "@/lib/types"
 import { RelativeTime } from "@/components/relative-time"
@@ -199,9 +200,10 @@ function CreatedKeyCallout({
   const { t } = useTranslation("admin")
   const [copied, setCopied] = useState(false)
   const copy = async () => {
-    await navigator.clipboard.writeText(created.key)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    if (await copyText(created.key)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
   }
 
   return (

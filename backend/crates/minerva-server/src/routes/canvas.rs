@@ -965,12 +965,14 @@ async fn sync_file(
         tokio::fs::write(&file_path, &data)
             .await
             .map_err(|e| AppError::Internal(format!("write failed: {}", e)))?;
+        let content_hash = super::documents::compute_content_hash(&data);
         minerva_db::queries::documents::reset_for_resync(
             &state.db,
             doc_id,
             &file.display_name,
             content_type,
             size_bytes,
+            Some(&content_hash),
         )
         .await?;
         minerva_db::queries::canvas::upsert_sync_log(
@@ -1008,15 +1010,22 @@ async fn create_file_doc(
         .await
         .map_err(|e| AppError::Internal(format!("write failed: {}", e)))?;
 
+    let content_hash = super::documents::compute_content_hash(data);
     minerva_db::queries::documents::insert(
         &state.db,
-        doc_id,
-        conn.course_id,
-        &file.display_name,
-        content_type,
-        data.len() as i64,
-        owner_id,
-        None,
+        minerva_db::queries::documents::NewDocument {
+            id: doc_id,
+            course_id: conn.course_id,
+            filename: &file.display_name,
+            mime_type: content_type,
+            size_bytes: data.len() as i64,
+            uploaded_by: owner_id,
+            source_url: None,
+            content_hash: Some(&content_hash),
+            source_system: None,
+            source_ref: None,
+            parent_document_id: None,
+        },
     )
     .await?;
 
@@ -1095,12 +1104,14 @@ async fn sync_page(
             tokio::fs::write(&file_path, &data)
                 .await
                 .map_err(|e| AppError::Internal(format!("write failed: {}", e)))?;
+            let content_hash = super::documents::compute_content_hash(&data);
             minerva_db::queries::documents::reset_for_resync(
                 &state.db,
                 doc_id,
                 &filename,
                 content_type,
                 size_bytes,
+                Some(&content_hash),
             )
             .await?;
             minerva_db::queries::canvas::upsert_sync_log(
@@ -1124,15 +1135,22 @@ async fn sync_page(
         .await
         .map_err(|e| AppError::Internal(format!("write failed: {}", e)))?;
 
+    let content_hash = super::documents::compute_content_hash(&data);
     minerva_db::queries::documents::insert(
         &state.db,
-        doc_id,
-        conn.course_id,
-        &filename,
-        content_type,
-        size_bytes,
-        owner_id,
-        None,
+        minerva_db::queries::documents::NewDocument {
+            id: doc_id,
+            course_id: conn.course_id,
+            filename: &filename,
+            mime_type: content_type,
+            size_bytes,
+            uploaded_by: owner_id,
+            source_url: None,
+            content_hash: Some(&content_hash),
+            source_system: None,
+            source_ref: None,
+            parent_document_id: None,
+        },
     )
     .await?;
 
@@ -1198,15 +1216,22 @@ async fn sync_url(
         .map_err(|e| AppError::Internal(format!("write failed: {}", e)))?;
 
     let filename = format!("{}.url", safe_filename(&item.display_name));
+    let content_hash = super::documents::compute_content_hash(url.as_bytes());
     let insert = minerva_db::queries::documents::insert(
         &state.db,
-        doc_id,
-        course_id,
-        &filename,
-        "text/x-url",
-        url.len() as i64,
-        owner_id,
-        Some(url.as_str()),
+        minerva_db::queries::documents::NewDocument {
+            id: doc_id,
+            course_id,
+            filename: &filename,
+            mime_type: "text/x-url",
+            size_bytes: url.len() as i64,
+            uploaded_by: owner_id,
+            source_url: Some(url.as_str()),
+            content_hash: Some(&content_hash),
+            source_system: None,
+            source_ref: None,
+            parent_document_id: None,
+        },
     )
     .await;
 

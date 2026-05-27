@@ -18,7 +18,8 @@
       "externalInvites": "External invites",
       "lti": "LTI",
       "integrations": "Integrations",
-      "system": "System"
+      "system": "System",
+      "devTools": "Dev tools"
     },
     "teacherCourse": "Teacher: {{course}}",
     "course": "{{course}}",
@@ -27,7 +28,9 @@
     "acknowledgements": "Acknowledgements",
     "accessibility": "Accessibility statement",
     "join": "Join course",
-    "ltiBind": "Link course"
+    "ltiBind": "Link course",
+    "ltiSetup": "Tool registration",
+    "ltiApprove": "Approve platform"
   },
   "footer": {
     "licenseLead": "is licensed under"

@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.2.0 (2026-05-24)
+
+- **Server-side dedup**: every upload now carries a stable Moodle source_ref so Minerva can keep at most one active document per Moodle object. Re-uploading the same bytes (same hash, same ref) is now idempotent against the server and no longer relies on the client-side `local_minerva_sync_log` as the source of truth.
+- **Orphan-on-replace**: editing a Moodle page / label / file / etc. orphans the previous Minerva doc and uploads a new one under the same source_ref. Orphaned docs stay around so old chat-history citations still resolve, but are excluded from new retrievals.
+- **Low-latency delete mirroring**: `course_module_deleted` observer now POSTs the affected source_refs to Minerva's `/orphan` endpoint, so deleting an activity in Moodle stops it surfacing in chat answers immediately (not on the next cron tick).
+- **Reconcile sweep**: every sync run posts the current set of source_refs to Minerva; anything not in the list gets orphaned. Catches what the observer missed (bulk delete, restore-from-backup gaps, plugin-disabled windows, opt-in toggle flips). Reconcile is discovery-only ; the local sync_log is no longer consulted as a keep-list fallback, so toggling a feature off does orphan its prior uploads.
+- **Forum sync (two-level opt-in)**: new admin setting `enable_forum_sync` (default ON) gates a per-course teacher toggle (default OFF). When both are on, teacher-answered discussions are serialised as one HTML doc per forum (source_ref `forum:<id>`).
+  - Only discussions where a teacher (`editingteacher` or `teacher` role) has posted at least once are included. Student-only threads are skipped.
+  - Student names from the course roster (firstname, lastname, ext: username local-part) are stripped from post bodies before upload, replaced with `[student]`. Teacher names are preserved. Length floor of 3 characters prevents false positives on very short names.
+  - Site-level kill switch wins: flipping `enable_forum_sync` OFF removes the per-course toggle from the UI and the sync task skips forums regardless of per-course value. Any previously-uploaded forum docs are orphaned by the reconcile sweep on the next run.
+- New `local_minerva_sync_log.sourceref` column (added via upgrade) so the plugin can observer-delete by source_ref without re-discovering the cm.
+- New `local_minerva_links.sync_forums` column for the per-course toggle.
+
 ## v1.1.0 (2026-05-22)
 
 - Drop enrolment/membership sync entirely. Course membership is now provisioned by Minerva on LTI launch (and reconciled via NRPS), so the plugin no longer adds or removes members.

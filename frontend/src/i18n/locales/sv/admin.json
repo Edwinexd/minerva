@@ -10,7 +10,44 @@
       "externalInvites": "Externa inbjudningar",
       "lti": "LTI",
       "integrations": "Plugin-integrationer",
-      "system": "System"
+      "system": "System",
+      "devTools": "Dev-verktyg"
+    }
+  },
+  "devTools": {
+    "loading": "Kontrollerar dev-läge...",
+    "notDevTitle": "Dev-läge är av",
+    "notDevDescription": "Denna panel är endast tillgänglig när servern körs med MINERVA_DEV_MODE=true.",
+    "reseedTitle": "Återskapa fixturdata",
+    "reseedDescription": "Raderar tidigare seedade användare, kurser, dokument, konversationer och meddelanden och skapar dem på nytt. Handskapade rader berörs inte.",
+    "destructiveLabel": "Destruktivt:",
+    "destructiveBody": "alla rader som taggats av en tidigare seed-körning raderas, inklusive dokumentens filer på disk och Qdrant-collections.",
+    "reseedButton": "Återskapa nu",
+    "reseeding": "Återskapar...",
+    "fixtureUsersTitle": "Fixturanvändare",
+    "fixtureUsersDescription": "Seederingen skapar alltid exakt denna uppsättning. Växla till någon av dem via dev-användarväljaren i headern (klistra in epp-namnet).",
+    "fixtureUsersTip": "Den anropande administratören (du) finns inte i listan; du förblir inloggad som dig själv, och fixturkurserna nyttjar ditt id för ägarskap / medlemskap.",
+    "fixtureCoursesTitle": "Fixturkurser",
+    "fixtureCoursesDescription": "Fyra kurser som täcker den konfigurationsmatris du oftast behöver växla mellan.",
+    "columns": {
+      "eppn": "Epp-namn",
+      "role": "Roll",
+      "notes": "Noteringar"
+    },
+    "report": {
+      "successHeading": "Återskapning klar (kördes som {{eppn}}).",
+      "wipedHeading": "Raderat",
+      "seededHeading": "Seedat",
+      "users": "{{n}} användare",
+      "courses": "{{n}} kurser",
+      "documents": "{{n}} dokument",
+      "members": "{{n}} medlemskap",
+      "conversations": "{{n}} konversationer",
+      "messages": "{{n}} meddelanden",
+      "invites": "{{n}} externa inbjudningar",
+      "dirs": "{{n}} dokumentmappar",
+      "qdrant": "{{n}} Qdrant-collections",
+      "embeddingNote": "Dokumenten köas för embedding via den lokala fastembed-providern; de blir sökbara i chatten inom cirka 10-30 sekunder."
     }
   },
   "integrationKeys": {
@@ -51,7 +88,14 @@
   },
   "ltiPlatforms": {
     "setupTitle": "Konfiguration på webbplatsnivå för Moodle/Canvas",
-    "setupDescription": "Kopiera värdena nedan till Moodle: Webbplatsadministration → Plugin → Aktivitetsmoduler → Externt verktyg → Hantera verktyg, eller motsvarande Developer Key i Canvas. Efter det kan vilken kurs som helst använda verktyget utan egen konfiguration.",
+    "setupDescription": "Registrera Minerva som ett LTI 1.3-verktyg på webbplatsnivå. Då kan vilken kurs som helst i LMS:et använda verktyget utan egen konfiguration.",
+    "dynregHeading": "Snabb installation (rekommenderas)",
+    "dynregDescription": "Klistra in den här URL:en i Moodles fält 'konfigurera ett verktyg via URL'. Moodle installerar då Minerva automatiskt med rätt sekretessinställningar, NRPS-scope, claims och anpassade parametrar. Inga fält behöver kopieras manuellt.",
+    "dynregMoodlePath": "I Moodle: Webbplatsadministration > Plugin > Aktivitetsmoduler > Externt verktyg > Hantera verktyg.",
+    "manualSetupToggle": "Eller konfigurera manuellt",
+    "manualSetupHint": "Behövs bara om ditt LMS inte stöder LTI Dynamic Registration, eller om du vill granska vilka värden dynreg skulle ha satt. Följ stegen nedan; värdena längst ner är snabbkopia-fält för varje steg.",
+    "manualSetupStepsHeading": "Steg",
+    "manualSetupValuesHeading": "Snabbkopia",
     "toolUrl": "Verktygs-URL",
     "ltiVersion": "LTI-version",
     "publicKeyType": "Publik nyckeltyp",
@@ -82,6 +126,17 @@
     "savePlatform": "Spara plattform",
     "empty": "Inga plattformar registrerade än.",
     "remove": "Ta bort",
+    "approve": "Godkänn",
+    "approveCancel": "Avbryt",
+    "approveScopeLabel": "Tillåtna eppn-domäner",
+    "approveScopeHint": "Kommaseparerad lista över domänsuffix som plattformen får lansera användare för (t.ex. 'dsv.su.se, su.se'). Förifyllt med vad LMS-administratören föreslog i dynreg-popupen, om något. Lämna tomt ENDAST om du medvetet vill lita på vilken eppn som helst (osäkert).",
+    "approveAndActivate": "Godkänn och aktivera",
+    "approveEmptyConfirm": "Att godkänna med en tom lista över eppn-domäner innebär att plattformen kan utfärda lanseringar som påstår sig vara VILKEN eppn som helst (inklusive admin-konton). Är du säker?",
+    "statusPending": "Väntar på godkännande",
+    "statusOrphaned": "Övergiven av LMS",
+    "pendingExplain": "Installerad via LTI Dynamic Registration. Tills du godkänner den kan plattformen INTE autentisera lanseringar mot Minerva. Ej godkända plattformar tas bort automatiskt efter 7 dagar. Verifiera att issuer och client id nedan matchar det LMS du förväntar dig, godkänn sedan.",
+    "orphanedExplainPrefix": "LMS:et har avvisat våra client credentials sedan",
+    "orphanedExplainSuffix": "Trolig orsak: verktyget togs bort på deras sida. Minerva kommer kaskadradera den här raden 30 dagar efter den tidsstämpeln; ta bort den manuellt om du vill bli av med den nu.",
     "showBindings": "Visa kopplingar",
     "hideBindings": "Dölj kopplingar",
     "noBindings": "Inga LMS-kurser har länkats till den här plattformen än.",
@@ -95,6 +150,7 @@
     "nrpsStatusOk": "Synkad",
     "nrpsStatusError": "Fel",
     "nrpsStatusPending": "Väntar",
+    "nrpsStatusWarning": "Behöver åtgärdas",
     "nrpsNeverSynced": "Inte synkad ännu",
     "nrpsCounts": "{{added}} tillagda, {{removed}} borttagna",
     "nrpsColumns": {
@@ -103,6 +159,38 @@
       "changes": "Senaste ändringar",
       "lastSync": "Senaste synk"
     }
+  },
+  "ltiApprovePlatform": {
+    "title": "Godkänn LTI-plattform",
+    "description": "Verifiera att issuer och client id matchar det LMS du förväntar dig, sätt eppn-domän-scopet, godkänn sedan. Plattformen kan inte autentisera lanseringar förrän du har gjort det.",
+    "alreadyActiveTitle": "Plattformen är redan aktiv",
+    "alreadyActiveBody": "Någon annan har redan godkänt den här plattformen. Inget att göra; resten av plattformslistan finns via länken nedan.",
+    "notFoundTitle": "Plattformen hittades inte",
+    "notFoundBody": "Plattformen finns inte, är borttagen, eller så har du inte behörighet att se den. Den kan ha auto-städats efter 7 dagar utan godkännande.",
+    "nameLabel": "Namn",
+    "issuerLabel": "Issuer",
+    "clientIdLabel": "Client ID",
+    "backToList": "Tillbaka till alla plattformar"
+  },
+  "ltiSetupScope": {
+    "titleWithName": "Verktyget registrerat med {{name}}",
+    "titleFallback": "Verktyget registrerat",
+    "lede": "Ett sista steg innan plattformen kan autentisera lanseringar.",
+    "warnHeading": "Förtroende-scope:",
+    "warnBody": "vilka eppn-domäner ska Minerva lita på att plattformen får lansera användare för? Välj snävt: om LMS:et komprometteras kan det utfärda lanseringar med vilken eppn som helst inom scopet.",
+    "legend": "Tillåtna eppn-domäner",
+    "noPresets": "Inga förslag tillgängliga för den här issuern. Lägg till domäner i fältet nedan.",
+    "customLabel": "Ytterligare domäner",
+    "customHint": "Kommaseparerat. Läggs till utöver det som är ikryssat ovan.",
+    "emptyWarn": "Att skicka in utan ikryssade rutor och utan ytterligare domäner gör att Minerva litar på VILKEN eppn som helst som det här LMS:et anger (rekommenderas inte).",
+    "submit": "Spara förslag",
+    "skip": "Hoppa över (admin sätter scope senare)",
+    "afterNote": "Efter detta måste en Minerva-integratör klicka Godkänn i Minerva för att aktivera plattformen. De kan justera ditt scope-förslag innan de godkänner.",
+    "doneTitle": "Förslag registrerat",
+    "doneBody": "Tack. En Minerva-integratör måste fortfarande godkänna plattformen i admin-gränssnittet innan den kan autentisera lanseringar.",
+    "donePrompt": "Om du också är en Minerva-integratör, öppna Minerva nu och godkänn plattformen. Annars, lämna över till en integratör och stäng det här fönstret.",
+    "openMinervaButton": "Öppna Minerva för att godkänna",
+    "closeButton": "Stäng"
   },
   "usage": {
     "totalTokens": "Totalt antal tokens",
@@ -251,7 +339,8 @@
       "suggestionLabel_other": "{{count}} användare",
       "suggestionHint_one": "{{count}} förslag (värden sedda på minst {{minUsers}} olika användare). Fritext accepteras fortfarande.",
       "suggestionHint_other": "{{count}} förslag (värden sedda på minst {{minUsers}} olika användare). Fritext accepteras fortfarande.",
-      "suggestionEmpty": "Inga kända värden för detta attribut än (behöver minst {{minUsers}} olika användare). Skriv vilket värde som helst; förslag dyker upp när fler användare loggat in."
+      "suggestionEmpty": "Inga kända värden för detta attribut än (behöver minst {{minUsers}} olika användare). Skriv vilket värde som helst; förslag dyker upp när fler användare loggat in.",
+      "suggestionNoMatch": "Inga förslag matchar. Fortsätt skriva för att lägga till som fritext."
     }
   },
   "externalInvites": {

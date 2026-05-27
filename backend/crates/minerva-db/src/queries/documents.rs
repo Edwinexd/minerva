@@ -35,6 +35,31 @@ pub struct DocumentRow {
     /// linker for embedding-based candidate generation. NULL until
     /// the pipeline (or a lazy backfill in the linker) populates it.
     pub pooled_embedding: Option<Vec<f32>>,
+    /// SHA-256 (hex) of the uploaded bytes. Server-computed on upload;
+    /// NULL for legacy rows until the startup backfill task reads the
+    /// file from disk and fills it in. Drives the active-row partial
+    /// unique index `idx_documents_course_content_hash_active`.
+    pub content_hash: Option<String>,
+    /// Originating system identifier (e.g. `"moodle"`). NULL for docs
+    /// uploaded directly through the Minerva UI.
+    pub source_system: Option<String>,
+    /// Opaque per-plugin identity (e.g. `"cm:42"`, `"forum:7"`). Lets
+    /// the plugin tell the server which Moodle object a doc maps to
+    /// so re-uploads can supersede the previous row and reconcile
+    /// sweeps can orphan deleted sources.
+    pub source_ref: Option<String>,
+    /// When set, the doc is excluded from new retrievals but kept
+    /// around so chat-history citations (`messages.chunks_used`) still
+    /// resolve. Documents are immutable: replacement = orphan old +
+    /// insert new.
+    pub orphaned_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Parent URL doc for materialized children. NULL for first-class
+    /// docs (teacher uploads, Moodle-synced files, URL stubs themselves).
+    /// SET for the PDF / transcript / etc. that an ingest worker spawned
+    /// from a `text/x-url` stub. Cascades on parent delete; partial unique
+    /// index ensures only one active child per parent. See migration
+    /// `20260524000005_document_parent_link.sql`.
+    pub parent_document_id: Option<Uuid>,
 }
 
 // Note: sqlx::query_as! macros require literal SQL strings, so the column
@@ -43,32 +68,283 @@ pub struct DocumentRow {
 // the row struct vs query column mismatch but won't catch a column missing
 // from a SELECT that still happens to compile.
 
-#[allow(clippy::too_many_arguments)]
-pub async fn insert(
-    db: &PgPool,
-    id: Uuid,
-    course_id: Uuid,
-    filename: &str,
-    mime_type: &str,
-    size_bytes: i64,
-    uploaded_by: Uuid,
-    source_url: Option<&str>,
-) -> Result<DocumentRow, sqlx::Error> {
+/// Parameters for inserting a new document row.
+///
+/// Plain struct rather than a builder because every field is required to
+/// be a conscious decision at the call site (most are `Option`, signalling
+/// "leave empty"). The previous positional-argument signature grew to 7
+/// args; adding `content_hash` / `source_system` / `source_ref` would have
+/// pushed it to 10 and made every call site harder to read.
+pub struct NewDocument<'a> {
+    pub id: Uuid,
+    pub course_id: Uuid,
+    pub filename: &'a str,
+    pub mime_type: &'a str,
+    pub size_bytes: i64,
+    pub uploaded_by: Uuid,
+    /// Origin URL for URL-sourced docs (preserved across the
+    /// awaiting_transcript transition).
+    pub source_url: Option<&'a str>,
+    /// SHA-256 (hex) of the bytes the caller is about to write. None when
+    /// the caller doesn't know the bytes yet (e.g. the URL-stub creation
+    /// path before transcript fetch). The startup backfill fills these in
+    /// for legacy rows.
+    pub content_hash: Option<&'a str>,
+    /// Originating system name; pass `Some("moodle")` from the plugin so
+    /// reconcile sweeps can scope themselves correctly.
+    pub source_system: Option<&'a str>,
+    /// Opaque per-plugin identity. Combined with `course_id` +
+    /// `source_system` to form the active-row unique constraint.
+    pub source_ref: Option<&'a str>,
+    /// Parent URL doc for materialized children. None for first-class
+    /// docs; Some when this insert is the materialization of a URL
+    /// stub (worker downloading a GitHub PDF, transcript pipeline
+    /// posting back VTT text).
+    pub parent_document_id: Option<Uuid>,
+}
+
+pub async fn insert(db: &PgPool, doc: NewDocument<'_>) -> Result<DocumentRow, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding"#,
-        id,
-        course_id,
-        filename,
-        mime_type,
-        size_bytes,
-        uploaded_by,
-        source_url,
+        r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url, content_hash, source_system, source_ref, parent_document_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id"#,
+        doc.id,
+        doc.course_id,
+        doc.filename,
+        doc.mime_type,
+        doc.size_bytes,
+        doc.uploaded_by,
+        doc.source_url,
+        doc.content_hash,
+        doc.source_system,
+        doc.source_ref,
+        doc.parent_document_id,
     )
     .fetch_one(db)
     .await
+}
+
+/// Idempotent dedup lookup: returns the existing **active first-class**
+/// doc for this course with the given `content_hash`, if any. Orphaned
+/// rows are ignored so re-uploading after an orphan creates a fresh row.
+///
+/// URL-materialized children (`parent_document_id IS NOT NULL`) are
+/// excluded because their identity is their parent URL, not their
+/// content. A teacher uploading the same PDF a worker happened to fetch
+/// from a URL gets their own independent first-class doc rather than
+/// being silently linked to the URL's child.
+pub async fn find_active_by_content_hash(
+    db: &PgPool,
+    course_id: Uuid,
+    content_hash: &str,
+) -> Result<Option<DocumentRow>, sqlx::Error> {
+    sqlx::query_as!(
+        DocumentRow,
+        r#"SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id
+           FROM documents
+           WHERE course_id = $1
+             AND content_hash = $2
+             AND orphaned_at IS NULL
+             AND parent_document_id IS NULL"#,
+        course_id,
+        content_hash,
+    )
+    .fetch_optional(db)
+    .await
+}
+
+/// Look up the active doc matching a source identity. Slice 2's
+/// orphan-on-replace path calls this to find the previous row to
+/// orphan before inserting the new one with the same `source_ref`.
+pub async fn find_active_by_source_ref(
+    db: &PgPool,
+    course_id: Uuid,
+    source_system: &str,
+    source_ref: &str,
+) -> Result<Option<DocumentRow>, sqlx::Error> {
+    sqlx::query_as!(
+        DocumentRow,
+        r#"SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id
+           FROM documents
+           WHERE course_id = $1
+             AND source_system = $2
+             AND source_ref = $3
+             AND orphaned_at IS NULL"#,
+        course_id,
+        source_system,
+        source_ref,
+    )
+    .fetch_optional(db)
+    .await
+}
+
+/// Soft-orphan a single document. Idempotent: returns true if a row
+/// was actually flipped (false when the doc was already orphaned or
+/// the id doesn't exist). The doc, its chunks, and its file on disk
+/// are intentionally left alone; only retrieval excludes it.
+pub async fn orphan(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE documents SET orphaned_at = NOW() WHERE id = $1 AND orphaned_at IS NULL",
+        id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Soft-orphan every active doc in `(course_id, source_system)` whose
+/// `source_ref` is in `source_refs`. Used by the slice-2 per-event
+/// orphan endpoint (Moodle observer fires when a course module or
+/// activity is deleted; the plugin posts the source_refs it just
+/// killed). Returns the number of rows flipped.
+pub async fn orphan_by_source_refs(
+    db: &PgPool,
+    course_id: Uuid,
+    source_system: &str,
+    source_refs: &[String],
+) -> Result<u64, sqlx::Error> {
+    if source_refs.is_empty() {
+        return Ok(0);
+    }
+    let result = sqlx::query!(
+        r#"UPDATE documents
+           SET orphaned_at = NOW()
+           WHERE course_id = $1
+             AND source_system = $2
+             AND source_ref = ANY($3)
+             AND orphaned_at IS NULL"#,
+        course_id,
+        source_system,
+        source_refs,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Reconcile-sweep helper: orphan every active doc in
+/// `(course_id, source_system)` whose `source_ref` is NOT in
+/// `keep_source_refs`. Returns the ids of newly-orphaned rows so the
+/// caller can log / trace what got swept. Docs without a `source_ref`
+/// (manually uploaded via the UI) and docs from a different
+/// `source_system` are left alone: reconcile is scoped to the caller's
+/// own source system so the Moodle plugin can't accidentally orphan
+/// Canvas-sourced or hand-uploaded docs.
+pub async fn reconcile_active_source_refs(
+    db: &PgPool,
+    course_id: Uuid,
+    source_system: &str,
+    keep_source_refs: &[String],
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    // ANY($3) with an empty array is treated as a never-matching list
+    // by Postgres, so passing an empty `keep_source_refs` correctly
+    // orphans every active doc for the given source system. That's the
+    // intended semantic: "I have zero objects from this system; please
+    // orphan everything you have."
+    let rows = sqlx::query!(
+        r#"UPDATE documents
+           SET orphaned_at = NOW()
+           WHERE course_id = $1
+             AND source_system = $2
+             AND orphaned_at IS NULL
+             AND NOT (source_ref = ANY($3))
+           RETURNING id"#,
+        course_id,
+        source_system,
+        keep_source_refs,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.id).collect())
+}
+
+/// IDs of orphaned documents in a course. Mirrors `hidden_document_ids`
+/// in shape and serves the same role for the retrieval-time filter in
+/// `strategy::common`. Returns `String` (not `Uuid`) because callers
+/// compare against `RagChunk::document_id`, which is a string payload
+/// from Qdrant.
+pub async fn orphaned_doc_ids(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<std::collections::HashSet<String>, sqlx::Error> {
+    let rows = sqlx::query_scalar!(
+        "SELECT id FROM documents WHERE course_id = $1 AND orphaned_at IS NOT NULL",
+        course_id,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|id| id.to_string()).collect())
+}
+
+/// Update a doc's source identity. Both `source_system` and
+/// `source_ref` move together (always set both or both to NULL) so the
+/// `(course, source_system, source_ref)` active-row unique index never
+/// sees a half-populated row. Used by the teacher-facing PATCH to let
+/// teachers tag / un-tag UI uploads with a manual versioning ref;
+/// plugin-owned docs are protected at the route layer.
+///
+/// Setting a `source_ref` that collides with another active doc's
+/// `(source_system, source_ref)` will raise a unique-violation; the
+/// caller surfaces that as a 4xx so the teacher knows the slot is
+/// already taken.
+pub async fn set_source_identity(
+    db: &PgPool,
+    id: Uuid,
+    source_system: Option<&str>,
+    source_ref: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE documents SET source_system = $2, source_ref = $3 WHERE id = $1",
+        id,
+        source_system,
+        source_ref,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Set the `content_hash` for a doc that didn't have one. Used by the
+/// startup backfill task to populate legacy rows. Refuses to overwrite
+/// an existing hash (caller bug if it tries).
+pub async fn set_content_hash_if_null(
+    db: &PgPool,
+    id: Uuid,
+    content_hash: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE documents SET content_hash = $2 WHERE id = $1 AND content_hash IS NULL",
+        id,
+        content_hash,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Active (non-orphaned) docs in a course that still need a
+/// `content_hash`. Used by the startup backfill task. Bounded by
+/// `limit` so a huge installation doesn't load the whole table.
+pub async fn list_active_missing_content_hash(
+    db: &PgPool,
+    limit: i64,
+) -> Result<Vec<(Uuid, Uuid, String, String)>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, course_id, filename, mime_type
+           FROM documents
+           WHERE content_hash IS NULL
+             AND orphaned_at IS NULL
+           ORDER BY created_at ASC
+           LIMIT $1"#,
+        limit,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.id, r.course_id, r.filename, r.mime_type))
+        .collect())
 }
 
 /// Lightweight projection of a document for callers that only need
@@ -109,7 +385,7 @@ pub async fn list_latest_ready_by_course(
 pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
         course_id,
     )
     .fetch_all(db)
@@ -119,7 +395,7 @@ pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<Document
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE id = $1",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -135,7 +411,7 @@ pub async fn find_by_course_source_url(
 ) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE course_id = $1 AND source_url = $2",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE course_id = $1 AND source_url = $2",
         course_id,
         source_url,
     )
@@ -179,6 +455,20 @@ pub async fn delete(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
     Ok(result.rows_affected() > 0)
 }
 
+/// List every doc whose `parent_document_id = $1`. Used by
+/// `delete_document` to clean up Qdrant vectors + on-disk files for
+/// every child before the FK cascade removes the child rows, and by
+/// the docs UI to surface the parent-child relationship.
+pub async fn list_children(db: &PgPool, parent_id: Uuid) -> Result<Vec<DocumentRow>, sqlx::Error> {
+    sqlx::query_as!(
+        DocumentRow,
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE parent_document_id = $1 ORDER BY created_at ASC",
+        parent_id,
+    )
+    .fetch_all(db)
+    .await
+}
+
 /// Atomically claim up to `limit` pending documents for processing.
 /// Uses `FOR UPDATE SKIP LOCKED` so multiple workers won't grab the same row.
 pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, sqlx::Error> {
@@ -193,7 +483,7 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding"#,
+        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id"#,
         limit as i64,
     )
     .fetch_all(db)
@@ -205,7 +495,7 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
 pub async fn list_awaiting_transcripts(db: &PgPool) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
     )
     .fetch_all(db)
     .await
@@ -227,12 +517,14 @@ pub async fn reset_for_resync(
     filename: &str,
     mime_type: &str,
     size_bytes: i64,
+    content_hash: Option<&str>,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"UPDATE documents
            SET filename = $1,
                mime_type = $2,
                size_bytes = $3,
+               content_hash = $5,
                status = 'pending',
                error_msg = NULL,
                chunk_count = NULL,
@@ -248,31 +540,69 @@ pub async fn reset_for_resync(
         mime_type,
         size_bytes,
         id,
+        content_hash,
     )
     .execute(db)
     .await?;
     Ok(result.rows_affected() > 0)
 }
 
-/// Update a document's filename, mime_type, size, and reset status to 'pending'.
-/// Used when replacing a URL stub with actual transcript content.
-pub async fn replace_with_transcript(
+/// Atomically materialize a child doc for a URL stub: insert the child
+/// row (with `parent_document_id` set) and flip the parent's status to
+/// `tracked` in the same transaction. Either both happen or neither.
+///
+/// The parent's previous status is asserted via `expected_parent_status`
+/// so this can't race with a concurrent state change (e.g. the worker
+/// sweeper resetting a wedged row). Returns `RowNotFound` if the parent
+/// isn't in that status; the caller's bytes-on-disk write should be
+/// rolled back (the orphaned file gets removed) in that case.
+///
+/// Status semantics:
+/// * GitHub PDF flow → caller passes `expected_parent_status = "processing"`
+///   (worker just claimed the row).
+/// * Transcript flow → caller passes `"awaiting_transcript"` (set when
+///   the worker triaged the URL as a play.dsv link earlier).
+pub async fn insert_tracked_child(
     db: &PgPool,
-    id: Uuid,
-    filename: &str,
-    mime_type: &str,
-    size_bytes: i64,
-) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query!(
-        "UPDATE documents SET filename = $1, mime_type = $2, size_bytes = $3, status = 'pending', error_msg = NULL, chunk_count = NULL, processed_at = NULL WHERE id = $4 AND status = 'awaiting_transcript'",
-        filename,
-        mime_type,
-        size_bytes,
-        id,
+    parent_id: Uuid,
+    expected_parent_status: &str,
+    new_doc: NewDocument<'_>,
+) -> Result<DocumentRow, sqlx::Error> {
+    let mut tx = db.begin().await?;
+
+    let updated = sqlx::query!(
+        "UPDATE documents SET status = 'tracked', error_msg = NULL, processing_started_at = NULL, processed_at = NOW() WHERE id = $1 AND status = $2",
+        parent_id,
+        expected_parent_status,
     )
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
-    Ok(result.rows_affected() > 0)
+    if updated.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound);
+    }
+
+    let child = sqlx::query_as!(
+        DocumentRow,
+        r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url, content_hash, source_system, source_ref, parent_document_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id"#,
+        new_doc.id,
+        new_doc.course_id,
+        new_doc.filename,
+        new_doc.mime_type,
+        new_doc.size_bytes,
+        new_doc.uploaded_by,
+        new_doc.source_url,
+        new_doc.content_hash,
+        new_doc.source_system,
+        new_doc.source_ref,
+        new_doc.parent_document_id,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(child)
 }
 
 /// Reset documents stuck in 'processing' back to 'pending'.
@@ -422,7 +752,7 @@ pub async fn list_needing_classification(
 ) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding FROM documents WHERE classified_at IS NULL AND kind_locked_by_teacher = FALSE AND status = 'ready' ORDER BY created_at ASC LIMIT $1",
+        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE classified_at IS NULL AND kind_locked_by_teacher = FALSE AND status = 'ready' ORDER BY created_at ASC LIMIT $1",
         limit,
     )
     .fetch_all(db)

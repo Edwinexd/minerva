@@ -130,6 +130,41 @@ pub async fn flag_kinds_by_conversation(
     Ok(out)
 }
 
+/// Set of `turn_index` values that have a flag of the given kind on
+/// this conversation. Drives the read-time suppression of
+/// `thinking_transcript` / `tool_events` for the conversation owner
+/// on the detail route: a turn where the extraction guard rewrote the
+/// reply still has the unredacted research transcript persisted (the
+/// teacher dashboard needs that as evidence), so the student
+/// re-opening the conversation would otherwise read the drafted
+/// solution that the visible rewrite was supposed to hide.
+///
+/// Rows with NULL `turn_index` are filtered out: today's guard always
+/// stamps a turn, but a future flag kind without one would otherwise
+/// silently degrade to "match no message" instead of being a clear
+/// caller error.
+///
+/// Returned as a HashSet so the route handler can do O(1) membership
+/// checks while walking messages.
+pub async fn turn_indexes_with_flag(
+    db: &PgPool,
+    conversation_id: Uuid,
+    flag: &str,
+) -> Result<std::collections::HashSet<i32>, sqlx::Error> {
+    let rows: Vec<i32> = sqlx::query_scalar!(
+        r#"SELECT turn_index AS "turn_index!"
+           FROM conversation_flags
+           WHERE conversation_id = $1
+             AND flag = $2
+             AND turn_index IS NOT NULL"#,
+        conversation_id,
+        flag,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
+
 /// Look up a single flag by id, used by the route layer to validate
 /// the `(course, conversation, flag)` triple matches the URL before
 /// acking. Returns None for unknown ids.

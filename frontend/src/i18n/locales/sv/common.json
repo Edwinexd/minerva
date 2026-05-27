@@ -18,7 +18,8 @@
       "externalInvites": "Externa inbjudningar",
       "lti": "LTI",
       "integrations": "Integrationer",
-      "system": "System"
+      "system": "System",
+      "devTools": "Dev-verktyg"
     },
     "teacherCourse": "Lärare: {{course}}",
     "course": "{{course}}",
@@ -27,7 +28,9 @@
     "acknowledgements": "Tack till",
     "accessibility": "Tillgänglighetsredogörelse",
     "join": "Gå med i kurs",
-    "ltiBind": "Länka kurs"
+    "ltiBind": "Länka kurs",
+    "ltiSetup": "Verktygsregistrering",
+    "ltiApprove": "Godkänn plattform"
   },
   "footer": {
     "licenseLead": "är licensierad under"

@@ -1,0 +1,118 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens, thinking_hidden, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "conversation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "chunks_used",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "model_used",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "tokens_prompt",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "tokens_completion",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "generation_ms",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "retrieval_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "thinking_transcript",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "tool_events",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 12,
+        "name": "thinking_ms",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "research_prompt_tokens",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "research_completion_tokens",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "thinking_hidden",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "176f3da58e9d2d4ea3bbab4b8a380aba1d0aed680b90d9654e454e4a551b9d08"
+}

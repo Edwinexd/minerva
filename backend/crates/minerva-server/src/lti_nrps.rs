@@ -37,10 +37,15 @@ const CLIENT_ASSERTION_TYPE: &str = "urn:ietf:params:oauth:client-assertion-type
 /// the reconcile forever.
 const MAX_PAGES: usize = 50;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SyncOutcome {
     pub added: i32,
     pub removed: i32,
+    /// Actionable warning surfaced even on success. `None` for a clean run;
+    /// `Some(text)` when the sync revealed an LMS-side misconfiguration the
+    /// admin should fix (e.g. identity claims absent for every active member
+    /// in the roster).
+    pub warning: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -98,7 +103,15 @@ struct MemberMessage {
 // Token + fetch
 // ---------------------------------------------------------------------------
 
-fn mint_client_assertion(
+/// How far to backdate `iat` to absorb clock drift between this tool and the
+/// LTI platform. Moodle (and other firebase/php-jwt-based platforms) reject a
+/// client_assertion the instant our `iat` lands even slightly in their future,
+/// since the library's default leeway is zero. 60 seconds is the same buffer
+/// used by AWS, Google and the IMS reference tool; well inside our 5 minute
+/// `exp` window.
+const IAT_CLOCK_SKEW_TOLERANCE_SECS: i64 = 60;
+
+pub(crate) fn mint_client_assertion(
     state: &AppState,
     client_id: &str,
     token_url: &str,
@@ -108,7 +121,7 @@ fn mint_client_assertion(
         iss: client_id.to_string(),
         sub: client_id.to_string(),
         aud: token_url.to_string(),
-        iat: now,
+        iat: now - IAT_CLOCK_SKEW_TOLERANCE_SECS,
         // Short-lived; the platform only needs it for the token exchange.
         exp: now + 300,
         jti: Uuid::new_v4().to_string(),
@@ -313,6 +326,7 @@ pub async fn reconcile_context(
             return Ok(SyncOutcome {
                 added: 0,
                 removed: 0,
+                warning: None,
             })
         }
     };
@@ -324,6 +338,14 @@ pub async fn reconcile_context(
 
     let mut added = 0i32;
     let mut active_user_ids: HashSet<Uuid> = HashSet::new();
+    // Track how many Active members we processed and how many of those
+    // fell through to the synthetic-eppn fallback (no `user_eppn` custom
+    // claim AND no `email`). When ALL active members are synthetic, the
+    // LMS has identity-sharing locked down and the admin needs to flip
+    // the relevant tool-privacy switches; we surface this as a warning
+    // independent of the sync's success/error status below.
+    let mut active_count: i32 = 0;
+    let mut synthetic_count: i32 = 0;
 
     for m in &members {
         // Absent status means Active per spec; anything else means the user
@@ -331,8 +353,12 @@ pub async fn reconcile_context(
         if m.status.as_deref().unwrap_or("Active") != "Active" {
             continue;
         }
+        active_count += 1;
 
         let (eppn, is_claimed) = resolve_member_eppn(m, &cfg.source_identifier);
+        if !is_claimed {
+            synthetic_count += 1;
+        }
         // A real (claimed) eppn must satisfy the platform's allowlist, same
         // as on launch; the synthetic fallback is exempt.
         if is_claimed && !eppn_in_allowlist(&cfg.allowed_eppn_domains, &eppn) {
@@ -411,5 +437,105 @@ pub async fn reconcile_context(
         minerva_db::queries::lti_nrps::delete_membership(db, ctx.id, row.user_id).await?;
     }
 
-    Ok(SyncOutcome { added, removed })
+    // Identity-sharing health check. Fires only on a non-empty roster where
+    // EVERY active member fell through to the synthetic-eppn fallback (so
+    // we're confident this is platform-side privacy lockdown, not a per-user
+    // hole). A partial population is left alone: that's a different problem
+    // (a specific member missing fields), not a tool-config one.
+    let warning = if active_count > 0 && synthetic_count == active_count {
+        Some(format!(
+            "The LMS did not share identity claims for any of the {} active member(s) in this roster (no `name`, `email`, or `user_eppn` custom claim). Members were added with synthetic ids and will NOT match the same person if they ever log in directly via Shibboleth. To fix: in the LMS tool settings, enable identity sharing for this tool. In Moodle: External tool > Privacy > set 'Share launcher's name with tool' and 'Share launcher's email with tool' to 'Always'. The setup instructions at /admin/lti/setup document this.",
+            active_count
+        ))
+    } else {
+        None
+    };
+
+    Ok(SyncOutcome {
+        added,
+        removed,
+        warning,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Platform health probe (orphan-LMS detection)
+// ---------------------------------------------------------------------------
+
+/// Probe a platform's token endpoint with a throwaway `client_credentials`
+/// JWT. Used by the daily platform-health sweep to detect when the LMS
+/// has deleted our registration on its side (so we can clean up our row
+/// after a grace period). Returns the bucketed status string
+/// `record_platform_health` expects:
+///   * `ok`              -> token endpoint accepted the assertion
+///   * `invalid_client`  -> platform rejected the client_id (orphan)
+///   * `http_<code>`     -> other non-2xx (transient or platform bug)
+///   * `network`         -> request didn't complete (LMS down, DNS, etc.)
+///   * `parse_error`     -> response body wasn't parseable
+///
+/// We DO NOT use the access token here: the health probe only needs to
+/// know whether the platform still recognises us. Same scope the NRPS
+/// reconcile would ask for, since restricting to a scope the platform
+/// won't grant could itself trigger `invalid_client` on some platforms;
+/// using the always-valid NRPS scope keeps the probe a faithful proxy
+/// for "could a real NRPS sync succeed if we ran it now."
+pub async fn probe_platform_health(
+    state: &AppState,
+    platform: &minerva_db::queries::lti::PlatformRow,
+) -> String {
+    let assertion =
+        match mint_client_assertion(state, &platform.client_id, &platform.auth_token_url) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!(
+                    "lti health: mint failed for platform {}: {}",
+                    platform.id,
+                    e
+                );
+                return "parse_error".into();
+            }
+        };
+    let body = format!(
+        "grant_type=client_credentials&client_assertion_type={}&client_assertion={}&scope={}",
+        urlencoding::encode(CLIENT_ASSERTION_TYPE),
+        urlencoding::encode(&assertion),
+        urlencoding::encode(NRPS_SCOPE),
+    );
+    let resp = state
+        .http_client
+        .post(&platform.auth_token_url)
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
+        .body(body)
+        .send()
+        .await;
+    let resp = match resp {
+        Ok(r) => r,
+        Err(_) => return "network".into(),
+    };
+    let status = resp.status();
+    if status.is_success() {
+        return "ok".into();
+    }
+    // Try to read the OAuth2 error code. Per RFC 6749 the response body
+    // is `{"error": "invalid_client", ...}`. Some platforms also use 401
+    // without a body; treat those as `invalid_client` too because there
+    // is no other realistic interpretation of "token endpoint refused
+    // our client_credentials".
+    let text = resp.text().await.unwrap_or_default();
+    let parsed: Option<serde_json::Value> = serde_json::from_str(&text).ok();
+    let err_code = parsed
+        .as_ref()
+        .and_then(|v| v.get("error"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if err_code == "invalid_client"
+        || (status.as_u16() == 401 && err_code.is_empty())
+        || (status.as_u16() == 404 && err_code.is_empty())
+    {
+        return "invalid_client".into();
+    }
+    format!("http_{}", status.as_u16())
 }

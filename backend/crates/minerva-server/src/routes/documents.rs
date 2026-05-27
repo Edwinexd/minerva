@@ -74,6 +74,27 @@ struct DocumentResponse {
     kind_rationale: Option<String>,
     kind_locked_by_teacher: bool,
     classified_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Originating system: `"moodle"` / `"canvas"` for plugin uploads,
+    /// `"manual"` for teacher-tagged UI uploads, `null` for untagged
+    /// UI uploads. Shown in the docs UI so teachers can tell at a glance
+    /// which docs are auto-managed.
+    source_system: Option<String>,
+    /// Opaque per-source identity. Teachers can edit this via PATCH on
+    /// `"manual"`-system docs to group versions or repurpose a slot
+    /// (re-uploading a new file with the same `source_ref` orphans the
+    /// old one).
+    source_ref: Option<String>,
+    /// Soft-orphan timestamp. Always `null` for active docs; populated
+    /// when the doc has been superseded or its upstream source was
+    /// deleted. Orphaned docs are excluded from new retrievals but
+    /// kept so chat-history citations resolve.
+    orphaned_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Parent URL doc id for materialized children. `null` for first-class
+    /// docs (teacher uploads, Moodle syncs, URL stubs themselves), set
+    /// for the PDF / transcript an ingest worker produced from a URL
+    /// stub. The frontend uses this to surface "this PDF came from
+    /// {parent URL}" in the docs list.
+    parent_document_id: Option<Uuid>,
 }
 
 impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
@@ -95,8 +116,123 @@ impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
             kind_rationale: row.kind_rationale,
             kind_locked_by_teacher: row.kind_locked_by_teacher,
             classified_at: row.classified_at,
+            source_system: row.source_system,
+            source_ref: row.source_ref,
+            orphaned_at: row.orphaned_at,
+            parent_document_id: row.parent_document_id,
         }
     }
+}
+
+/// SHA-256 (hex) of arbitrary bytes. Stable, deterministic, used as the
+/// server-side dedup key across every upload entry point.
+pub fn compute_content_hash(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
+
+/// Idempotent upload helper used by every route that ingests a document.
+///
+/// Path: compute the bytes' sha256 → if `(course_id, content_hash)` matches
+/// an active row, return it without touching disk; else write the file under
+/// `{docs_path}/{course_id}/{new_doc_id}.{ext}` and insert. The on-disk file
+/// for a dedup hit stays where it already was under the existing doc's id;
+/// callers do not need to clean up.
+///
+/// `source_system` / `source_ref` are wired through for slice 2 (Moodle source
+/// identity); slice 1 callers pass `None`. `source_url` is the legacy
+/// per-URL idempotency key already used by the URL-stub flow; we still pass
+/// it through unchanged.
+#[allow(clippy::too_many_arguments)]
+pub async fn upload_or_dedup(
+    state: &AppState,
+    course_id: Uuid,
+    filename: &str,
+    mime_type: &str,
+    bytes: &[u8],
+    uploaded_by: Uuid,
+    source_url: Option<&str>,
+    source_system: Option<&str>,
+    source_ref: Option<&str>,
+) -> Result<minerva_db::queries::documents::DocumentRow, AppError> {
+    let content_hash = compute_content_hash(bytes);
+
+    // Source-identity branch (slice 2): the plugin tells us which Moodle
+    // object this upload represents. When that object already has an
+    // active doc with *different* bytes, the Moodle-side material was
+    // edited; orphan the previous doc so the source-identity unique
+    // index is free for the new row. The previous doc's chunks stay
+    // in Qdrant + DB so old chat-history citations still resolve; the
+    // retrieval-time filter (`orphaned_doc_ids`) keeps them out of new
+    // turns. If the existing doc has the same bytes, we fall through
+    // to the content-hash dedup below and return that same row.
+    if let (Some(sys), Some(sref)) = (source_system, source_ref) {
+        if let Some(prev) = minerva_db::queries::documents::find_active_by_source_ref(
+            &state.db, course_id, sys, sref,
+        )
+        .await?
+        {
+            if prev.content_hash.as_deref() == Some(content_hash.as_str()) {
+                return Ok(prev);
+            }
+            minerva_db::queries::documents::orphan(&state.db, prev.id).await?;
+        }
+    }
+
+    if let Some(existing) = minerva_db::queries::documents::find_active_by_content_hash(
+        &state.db,
+        course_id,
+        &content_hash,
+    )
+    .await?
+    {
+        // Same bytes already in this course as an active doc; reuse it.
+        // Slice 2 caveat: when a `source_ref` collision was orphaned
+        // above and the new bytes match a *different* active doc, we
+        // return that other doc and do NOT re-tag it with the
+        // caller's source_ref (per-doc source_ref is a single value;
+        // a many-to-many table would change the schema shape and is
+        // out of scope for this slice). Net effect: cross-source
+        // content collisions stay tracked under whichever source
+        // first registered them.
+        return Ok(existing);
+    }
+
+    let doc_id = Uuid::new_v4();
+    let dir = format!("{}/{}", state.config.docs_path, course_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
+
+    let ext = extension_from_filename(filename);
+    let file_path = format!("{}/{}.{}", dir, doc_id, ext);
+    tokio::fs::write(&file_path, bytes)
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;
+
+    let size_bytes = bytes.len() as i64;
+    let row = minerva_db::queries::documents::insert(
+        &state.db,
+        minerva_db::queries::documents::NewDocument {
+            id: doc_id,
+            course_id,
+            filename,
+            mime_type,
+            size_bytes,
+            uploaded_by,
+            source_url,
+            content_hash: Some(&content_hash),
+            source_system,
+            source_ref,
+            // Teacher / Moodle / Canvas uploads are first-class; only the
+            // worker materializing a `text/x-url` stub sets a parent.
+            parent_document_id: None,
+        },
+    )
+    .await?;
+    Ok(row)
 }
 
 async fn list_documents(
@@ -134,24 +270,53 @@ async fn upload_document(
         return Err(AppError::Forbidden);
     }
 
-    // Read the file from multipart
-    let field = multipart
-        .next_field()
-        .await
-        .map_err(|e| {
-            AppError::bad_request_with("doc.multipart_error", [("detail", e.to_string())])
-        })?
-        .ok_or_else(|| AppError::bad_request("doc.no_file"))?;
+    // Teacher-facing upload accepts an optional `source_ref` multipart
+    // field. When set, the doc is tagged with `source_system = "manual"`
+    // (UI uploads, as opposed to the integration `"moodle"` /
+    // `"canvas"` paths). This gives teachers a manual versioning
+    // story: re-uploading a new file under the same `source_ref`
+    // orphans the previous active doc and the new one supersedes it,
+    // mirroring the plugin's update flow. Empty `source_ref` =
+    // untagged, no source-identity behavior.
+    let mut file_bytes: Option<axum::body::Bytes> = None;
+    let mut filename = String::from("document");
+    let mut content_type = String::from("application/octet-stream");
+    let mut source_ref: Option<String> = None;
 
-    let filename = field.file_name().unwrap_or("document").to_string();
-    let content_type = field
-        .content_type()
-        .unwrap_or("application/octet-stream")
-        .to_string();
-    let data = field
-        .bytes()
-        .await
-        .map_err(|e| AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())]))?;
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        AppError::bad_request_with("doc.multipart_error", [("detail", e.to_string())])
+    })? {
+        match field.name() {
+            // Accept both the named `file` field (recommended) and an
+            // unnamed first field (legacy / curl-friendly callers).
+            Some("file") | None => {
+                filename = field.file_name().unwrap_or("document").to_string();
+                content_type = field
+                    .content_type()
+                    .unwrap_or("application/octet-stream")
+                    .to_string();
+                file_bytes = Some(field.bytes().await.map_err(|e| {
+                    AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())])
+                })?);
+            }
+            Some("source_ref") => {
+                let v = field.text().await.map_err(|e| {
+                    AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())])
+                })?;
+                let v = v.trim();
+                if !v.is_empty() {
+                    source_ref = Some(v.to_string());
+                }
+            }
+            Some(_) => {
+                // Unknown fields are dropped silently so callers stay
+                // forward-compatible with future additions.
+                let _ = field.bytes().await;
+            }
+        }
+    }
+
+    let data = file_bytes.ok_or_else(|| AppError::bad_request("doc.no_file"))?;
 
     let size_bytes = data.len() as i64;
     if size_bytes > MAX_UPLOAD_BYTES {
@@ -164,32 +329,21 @@ async fn upload_document(
         ));
     }
 
-    let doc_id = Uuid::new_v4();
-
-    // Save file to disk
-    let docs_path = &state.config.docs_path;
-    let dir = format!("{}/{}", docs_path, course_id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
-
-    let ext = extension_from_filename(&filename);
-    let file_path = format!("{}/{}.{}", dir, doc_id, ext);
-    tokio::fs::write(&file_path, &data)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;
-
-    // Insert document record as 'pending'. The background worker will pick it
-    // up and process it with bounded concurrency.
-    let row = minerva_db::queries::documents::insert(
-        &state.db,
-        doc_id,
+    // Server-side dedup: re-uploading the same bytes (e.g. a teacher
+    // dragging the same PDF in twice) returns the existing doc instead
+    // of inserting a duplicate. See `upload_or_dedup` for the full
+    // contract.
+    let source_system = source_ref.as_ref().map(|_| "manual");
+    let row = upload_or_dedup(
+        &state,
         course_id,
         &filename,
         &content_type,
-        size_bytes,
+        &data,
         user.id,
         None,
+        source_system,
+        source_ref.as_deref(),
     )
     .await?;
 
@@ -277,40 +431,30 @@ async fn upload_mbz(
                 AppError::bad_request_with("doc.mbz_parse_failed", [("detail", e.to_string())])
             })?;
 
-    let docs_path = &state.config.docs_path;
-    let dir = format!("{}/{}", docs_path, course_id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
-
     let mut imported: usize = 0;
     for item in &import.items {
-        let doc_id = Uuid::new_v4();
-        let ext = extension_from_filename(&item.filename);
-        let file_path = format!("{}/{}.{}", dir, doc_id, ext);
-
-        let size_bytes: i64 = match &item.body {
-            minerva_ingest::moodle::ItemBody::Inline(bytes) => {
-                tokio::fs::write(&file_path, bytes).await.map_err(|e| {
-                    AppError::Internal(format!("failed to write {}: {}", item.filename, e))
-                })?;
-                bytes.len() as i64
-            }
+        // Read bytes into memory so we can hash them for dedup. .mbz items
+        // are individual course resources (bounded by Moodle's per-file
+        // cap, in practice ≪ MAX_UPLOAD_BYTES); buffering them here is
+        // fine even on the biggest backups we've seen in production.
+        let bytes: Vec<u8> = match &item.body {
+            minerva_ingest::moodle::ItemBody::Inline(bytes) => bytes.clone(),
             minerva_ingest::moodle::ItemBody::File(src) => {
-                tokio::fs::copy(src, &file_path).await.map_err(|e| {
-                    AppError::Internal(format!("failed to copy {}: {}", item.filename, e))
-                })? as i64
+                tokio::fs::read(src).await.map_err(|e| {
+                    AppError::Internal(format!("failed to read {}: {}", item.filename, e))
+                })?
             }
         };
 
-        minerva_db::queries::documents::insert(
-            &state.db,
-            doc_id,
+        upload_or_dedup(
+            &state,
             course_id,
             &item.filename,
             &item.mime,
-            size_bytes,
+            &bytes,
             user.id,
+            None,
+            None,
             None,
         )
         .await?;
@@ -332,6 +476,19 @@ async fn upload_mbz(
 #[derive(Deserialize)]
 struct PatchDocumentBody {
     displayable: Option<bool>,
+    /// Teacher-editable source reference. Two-state semantics:
+    ///
+    /// - field absent (`None`): leave source_ref unchanged.
+    /// - field present + empty: clear the source_ref (back to untagged).
+    /// - field present + non-empty: set source_ref; auto-tags
+    ///   source_system="manual" when the doc had no system yet.
+    ///
+    /// Plugin-owned docs (source_system in {"moodle","canvas"}) are
+    /// protected: the route returns 409 rather than letting a teacher
+    /// re-tag them, since that would silently break the plugin's
+    /// reconcile semantics on the next sweep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_ref: Option<String>,
 }
 
 async fn patch_document(
@@ -362,6 +519,34 @@ async fn patch_document(
         minerva_db::queries::documents::update_displayable(&state.db, doc_id, displayable).await?;
     }
 
+    if let Some(new_ref_raw) = body.source_ref {
+        // Refuse to edit refs owned by a plugin: changing them would
+        // silently break the next reconcile sweep ("the moodle plugin
+        // listed source_ref X; minerva has Y; orphan everything").
+        // Teachers can re-tag UI uploads and other manually-tagged
+        // docs freely.
+        let owner = doc.source_system.as_deref();
+        let editable = matches!(owner, None | Some("manual"));
+        if !editable {
+            return Err(AppError::bad_request_with(
+                "doc.source_ref_plugin_owned",
+                [("source_system", owner.unwrap_or("").to_string())],
+            ));
+        }
+        let trimmed = new_ref_raw.trim();
+        let new_ref: Option<&str> = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        };
+        // Setting source_ref auto-tags source_system="manual"; clearing
+        // it also clears source_system so the row goes back to looking
+        // like an untagged UI upload.
+        let new_sys: Option<&str> = new_ref.map(|_| "manual");
+        minerva_db::queries::documents::set_source_identity(&state.db, doc_id, new_sys, new_ref)
+            .await?;
+    }
+
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -388,8 +573,11 @@ async fn delete_document(
         return Err(AppError::NotFound);
     }
 
-    // Delete vectors from Qdrant first; if this fails we can retry safely
-    // without leaving orphaned vectors behind.
+    // URL parents cascade-delete their children at the DB level
+    // (ON DELETE CASCADE), but Qdrant vectors and on-disk files don't
+    // know about the cascade. Walk children first so a deleted URL stub
+    // doesn't leave orphaned PDF/transcript bytes + vectors behind.
+    let children = minerva_db::queries::documents::list_children(&state.db, doc_id).await?;
     let collection_name =
         minerva_ingest::pipeline::collection_name(course_id, course.embedding_version);
     let collection_exists = state
@@ -397,34 +585,41 @@ async fn delete_document(
         .collection_exists(&collection_name)
         .await
         .unwrap_or(false);
+
+    let mut all_ids: Vec<Uuid> = children.iter().map(|c| c.id).collect();
+    all_ids.push(doc_id);
+
     if collection_exists {
-        let filter =
-            qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
-                "document_id",
-                doc_id.to_string(),
-            )]);
-        state
-            .qdrant
-            .delete_points(
-                DeletePointsBuilder::new(&collection_name)
-                    .points(filter)
-                    .wait(true),
-            )
-            .await
-            .map_err(|e| AppError::Internal(format!("qdrant delete failed: {}", e)))?;
+        for id in &all_ids {
+            let filter =
+                qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
+                    "document_id",
+                    id.to_string(),
+                )]);
+            state
+                .qdrant
+                .delete_points(
+                    DeletePointsBuilder::new(&collection_name)
+                        .points(filter)
+                        .wait(true),
+                )
+                .await
+                .map_err(|e| AppError::Internal(format!("qdrant delete failed: {}", e)))?;
+        }
     }
 
-    // Delete from DB
+    // Delete the parent from DB; FK cascade removes child rows.
     minerva_db::queries::documents::delete(&state.db, doc_id).await?;
 
-    // Delete file from disk; try common extensions since we don't store the ext in DB.
-    for ext in &["pdf", "docx", "doc", "pptx", "ppt", "txt", "html", "url"] {
-        let file_path = format!(
-            "{}/{}/{}.{}",
-            state.config.docs_path, course_id, doc_id, ext
-        );
-        if tokio::fs::remove_file(&file_path).await.is_ok() {
-            break;
+    // Delete files from disk; try common extensions since we don't store
+    // the ext in DB. Walk every (parent + child) id so the cascade doesn't
+    // leak bytes onto the filesystem.
+    for id in &all_ids {
+        for ext in &["pdf", "docx", "doc", "pptx", "ppt", "txt", "html", "url"] {
+            let file_path = format!("{}/{}/{}.{}", state.config.docs_path, course_id, id, ext);
+            if tokio::fs::remove_file(&file_path).await.is_ok() {
+                break;
+            }
         }
     }
 
@@ -551,6 +746,11 @@ async fn search_chunks(
     let limit = params.limit.unwrap_or(10);
     let client = reqwest::Client::new();
 
+    // Admin search UI: exclude orphaned docs at the Qdrant layer so the
+    // top-N contract is preserved (same reasoning as the chat path).
+    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&state.db, course_id)
+        .await
+        .unwrap_or_default();
     let scored_points = crate::strategy::common::embedding_search(
         &client,
         &state.config.openai_api_key,
@@ -562,6 +762,7 @@ async fn search_chunks(
         None,
         &course.embedding_provider,
         &course.embedding_model,
+        &orphaned,
     )
     .await
     .map_err(AppError::Internal)?;

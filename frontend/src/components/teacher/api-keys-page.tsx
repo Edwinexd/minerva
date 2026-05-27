@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { apiKeysQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
+import { copyToClipboard as copyText } from "@/lib/clipboard"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
@@ -96,10 +97,11 @@ export function ApiKeysPage({ useParams }: { useParams: () => { courseId: string
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  navigator.clipboard.writeText(newKey.key)
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 2000)
+                onClick={async () => {
+                  if (await copyText(newKey.key)) {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  }
                 }}
               >
                 {copied ? t("apiKeys.copied") : tCommon("actions.copy")}

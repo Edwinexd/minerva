@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, registration_id, platform_id, context_id, course_id, memberships_url,\n                  last_sync_at, last_sync_status, last_sync_error, last_sync_warning,\n                  last_sync_added, last_sync_removed, created_at, updated_at\n        FROM lti_nrps_contexts\n        WHERE platform_id = $1\n        ORDER BY created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "registration_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "platform_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "context_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "memberships_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_sync_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_sync_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_sync_error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_sync_warning",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "last_sync_added",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_sync_removed",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "72a368fb394b299b232047535cdd11fceec226fe31b1d4c05dd423ea8d956f88"
+}

@@ -375,6 +375,7 @@
     "nrpsStatusOk": "Synkad",
     "nrpsStatusError": "Fel",
     "nrpsStatusPending": "Väntar",
+    "nrpsStatusWarning": "Behöver åtgärdas",
     "nrpsNeverSynced": "Inte synkad ännu",
     "nrpsCounts": "{{added}} tillagda, {{removed}} borttagna",
     "siteBindingsTitle": "LTI-länkar på siteinstans",

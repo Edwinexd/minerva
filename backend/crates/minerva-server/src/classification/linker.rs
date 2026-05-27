@@ -1487,7 +1487,12 @@ mod tests {
                 kind_rationale: None,
                 kind_locked_by_teacher: false,
                 classified_at: None,
+                content_hash: None,
+                source_system: None,
+                source_ref: None,
+                orphaned_at: None,
                 pooled_embedding: None,
+                parent_document_id: None,
             }
         }
         let docs_owned = [mk(1), mk(2), mk(3), mk(4)];

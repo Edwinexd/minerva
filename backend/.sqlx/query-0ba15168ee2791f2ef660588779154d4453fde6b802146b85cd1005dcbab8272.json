@@ -1,0 +1,110 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, name, issuer, client_id, deployment_id, auth_login_url, auth_token_url, platform_jwks_url, created_by, created_at, updated_at, allowed_eppn_domains, activated_at, last_health_check_at, last_health_check_status, invalid_client_since FROM lti_platforms WHERE activated_at IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "client_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "deployment_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "auth_login_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "auth_token_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "platform_jwks_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "allowed_eppn_domains",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 12,
+        "name": "activated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "last_health_check_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "last_health_check_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "invalid_client_since",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "0ba15168ee2791f2ef660588779154d4453fde6b802146b85cd1005dcbab8272"
+}

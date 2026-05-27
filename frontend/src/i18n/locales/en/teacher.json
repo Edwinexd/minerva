@@ -375,6 +375,7 @@
     "nrpsStatusOk": "Synced",
     "nrpsStatusError": "Error",
     "nrpsStatusPending": "Pending",
+    "nrpsStatusWarning": "Needs attention",
     "nrpsNeverSynced": "Not synced yet",
     "nrpsCounts": "{{added}} added, {{removed}} removed",
     "siteBindingsTitle": "Site-level LTI links",

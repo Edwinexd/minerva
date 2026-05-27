@@ -103,6 +103,14 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // Adversarial filter runs on the initial chunks before they enter
     // the loop's accumulator; mid-loop retrievals get the same pass
     // (see retrieve_more closure below).
+    // Orphan filter runs unconditionally (independent of KG / adversarial
+    // gates): retrievals must never surface chunks from docs the plugin /
+    // teacher has marked as superseded or deleted upstream. Computed once
+    // and threaded into seed + inner-loop FLARE retrievals; see
+    // `common::rag_lookup`.
+    let orphaned_doc_ids = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.course_id)
+        .await
+        .unwrap_or_default();
     let initial_chunks_raw = common::rag_lookup(
         &http_client,
         &ctx.openai_api_key,
@@ -114,6 +122,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         ctx.min_score,
         &ctx.embedding_provider,
         &ctx.embedding_model,
+        &orphaned_doc_ids,
     )
     .await;
     // Adversarial filter is part of the KG bundle (defence in depth on
@@ -152,6 +161,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             &ctx.embedding_model,
             &ctx.user_content,
             &initial_chunks,
+            &orphaned_doc_ids,
         )
         .await;
         initial_chunks.extend(extra);
@@ -197,6 +207,18 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     )
     .await;
 
+    // Per-turn extraction signal. FLARE-without-tools has no
+    // thinking stream to suppress, but `chunks_used` still needs
+    // gating on flagged turns (the seed RAG can include the
+    // assignment_brief / solution PDF on a paste-extract). Tracks
+    // `flagged_this_turn` (per-turn intent OR proximity), not the
+    // sticky `constraint_active`, so benign follow-up questions
+    // after a past paste don't lose their sources panel.
+    let suppress_thinking = guard_decision
+        .as_ref()
+        .map(|g| g.flagged_this_turn)
+        .unwrap_or(false);
+
     let loop_cfg = RunLoopConfig {
         course_name: &ctx.course_name,
         custom_prompt: &ctx.custom_prompt,
@@ -211,6 +233,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         kg_enabled: ctx.kg_enabled,
     };
     let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
+    // Shared with the inner-loop closure: every mid-stream FLARE
+    // retrieval also filters orphaned docs. We compute this once per
+    // turn (outer scope above) and clone the small string set into
+    // the closure rather than re-querying per FLARE sentence.
+    let orphaned_for_loop = orphaned_doc_ids.clone();
     let output = run_loop(&http_client, &loop_cfg, initial_chunks, &tx, |sentence| {
         let http_client = http_client.clone();
         let openai_key = ctx.openai_api_key.clone();
@@ -223,6 +250,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         let embedding_model = ctx.embedding_model.clone();
         let course_id = ctx.course_id;
         let kg_enabled = ctx.kg_enabled;
+        let orphaned = orphaned_for_loop.clone();
         async move {
             let raw = flare_retrieve(
                 &http_client,
@@ -235,6 +263,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 flare_threshold,
                 &embedding_provider,
                 &embedding_model,
+                &orphaned,
             )
             .await;
             // Mid-stream adversarial filter: same KG gate as the
@@ -270,6 +299,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                     &embedding_model,
                     &sentence,
                     &filtered,
+                    &orphaned,
                 )
                 .await;
                 filtered.extend(extra);
@@ -333,6 +363,15 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         None,
         None,
         None,
+        // No live thinking stream on this path, but the SSE `done`
+        // event still ships `chunks_used` and the persisted column
+        // drives the read-time owner-suppression gate in chat.rs /
+        // embed.rs. Persist thinking_hidden=true when the guard
+        // fired per-turn so the seed-RAG chunks (potentially the
+        // assignment_brief / TA-uploaded solution PDF) get blanked
+        // in both the SSE done event and on GET. Mirrors the same
+        // gate logic on the tool_use and simple paths.
+        suppress_thinking,
     )
     .await;
 }
@@ -988,6 +1027,8 @@ fn is_sentence_boundary(text: &str) -> bool {
 }
 
 /// Search Qdrant with a similarity threshold for FLARE retrieval.
+/// Orphaned-doc chunks are filtered after parsing so mid-stream FLARE
+/// retrievals stay consistent with the seed `rag_lookup` path.
 #[allow(clippy::too_many_arguments)]
 async fn flare_retrieve(
     client: &reqwest::Client,
@@ -1000,8 +1041,9 @@ async fn flare_retrieve(
     score_threshold: f32,
     embedding_provider: &str,
     embedding_model: &str,
+    orphaned_doc_ids: &std::collections::HashSet<String>,
 ) -> Vec<RagChunk> {
-    match common::embedding_search(
+    let chunks = match common::embedding_search(
         client,
         openai_key,
         fastembed,
@@ -1012,6 +1054,7 @@ async fn flare_retrieve(
         Some(score_threshold),
         embedding_provider,
         embedding_model,
+        orphaned_doc_ids,
     )
     .await
     {
@@ -1031,7 +1074,8 @@ async fn flare_retrieve(
             tracing::warn!("flare: {}", e);
             Vec::new()
         }
-    }
+    };
+    common::filter_orphaned(chunks, orphaned_doc_ids)
 }
 
 fn truncate_for_log(s: &str, max_len: usize) -> String {

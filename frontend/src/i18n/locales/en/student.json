@@ -32,6 +32,8 @@
     "thinkingActive": "Thinking…",
     "thinkingDone": "Thinking",
     "thinkingDoneWithDuration": "Thought for {{seconds}}s",
+    "thinkingHidden": "Reasoning hidden by integrity guard",
+    "thinkingHiddenBody": "The tutor's reasoning for this turn was held back under the course's academic-integrity policy. Your teacher can still see what was generated.",
     "toolCallsAriaLabel": "Tools the assistant called during research"
   },
   "message": {

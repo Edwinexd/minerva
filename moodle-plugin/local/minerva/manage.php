@@ -21,7 +21,7 @@
  * Credentials are stored per course link, not globally.
  *
  * @package    local_minerva
- * @copyright  2026 DSV, Stockholm University
+ * @copyright  2026 Edwin Sundberg
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -74,6 +74,25 @@ if ($action === 'resetsync') {
         null,
         \core\output\notification::NOTIFY_SUCCESS
     );
+}
+
+// Slice 3: per-course forum sync toggle. Gated on the site-level
+// `enable_forum_sync` admin setting; if the admin has it OFF this
+// action 4xxs even if the teacher knows the URL ; the UI hides the
+// control too, so this is defence in depth.
+if ($action === 'syncforums') {
+    if (!get_config('local_minerva', 'enable_forum_sync')) {
+        throw new \moodle_exception('forum_sync_disabled_site', 'local_minerva');
+    }
+    $value = optional_param('value', 0, PARAM_BOOL) ? 1 : 0;
+    $linkrow = $DB->get_record('local_minerva_links', ['courseid' => $courseid], '*', MUST_EXIST);
+    $linkrow->sync_forums = $value;
+    $linkrow->timemodified = time();
+    $DB->update_record('local_minerva_links', $linkrow);
+    $msg = $value
+        ? get_string('forum_sync_enabled_course', 'local_minerva')
+        : get_string('forum_sync_disabled_course', 'local_minerva');
+    redirect($pageurl, $msg, null, \core\output\notification::NOTIFY_SUCCESS);
 }
 
 echo $OUTPUT->header();
@@ -137,6 +156,50 @@ if ($link) {
         );
         $resetbtn->add_confirm_action(get_string('reset_sync_log_confirm', 'local_minerva'));
         echo $OUTPUT->render($resetbtn);
+
+        // Slice 3: forum sync toggle. Only visible when the site-level
+        // setting allows it ; we don't even render the control when
+        // it's globally off, so teachers don't see a perpetually-
+        // disabled checkbox they can never use. With the site setting
+        // on, teachers see a clear per-course toggle that explains the
+        // privacy posture (teacher-answered threads only, PII-scrubbed).
+        if (get_config('local_minerva', 'enable_forum_sync')) {
+            $enabled = !empty($link->sync_forums);
+            $togglelabel = $enabled
+                ? get_string('forum_sync_disable_btn', 'local_minerva')
+                : get_string('forum_sync_enable_btn', 'local_minerva');
+            $confirmstr = $enabled
+                ? get_string('forum_sync_disable_confirm', 'local_minerva')
+                : get_string('forum_sync_enable_confirm', 'local_minerva');
+            $togglebtn = new \core\output\single_button(
+                new moodle_url($pageurl, [
+                    'action' => 'syncforums',
+                    'value' => $enabled ? 0 : 1,
+                ]),
+                $togglelabel,
+                'post'
+            );
+            $togglebtn->add_confirm_action($confirmstr);
+            echo html_writer::tag(
+                'div',
+                html_writer::tag('strong', get_string('forum_sync_section_title', 'local_minerva')) .
+                    html_writer::empty_tag('br') .
+                    html_writer::tag(
+                        'span',
+                        $enabled
+                            ? get_string('forum_sync_status_on', 'local_minerva')
+                            : get_string('forum_sync_status_off', 'local_minerva')
+                    ) .
+                    html_writer::empty_tag('br') .
+                    html_writer::tag(
+                        'small',
+                        get_string('forum_sync_blurb', 'local_minerva'),
+                        ['class' => 'text-muted']
+                    ),
+                ['class' => 'mt-3 mb-2']
+            );
+            echo $OUTPUT->render($togglebtn);
+        }
     }
 } else {
     // Link form: just URL (if not locked) + API key.

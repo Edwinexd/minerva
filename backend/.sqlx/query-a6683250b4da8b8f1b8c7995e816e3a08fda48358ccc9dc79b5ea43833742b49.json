@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents\n           SET orphaned_at = NOW()\n           WHERE course_id = $1\n             AND source_system = $2\n             AND source_ref = ANY($3)\n             AND orphaned_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a6683250b4da8b8f1b8c7995e816e3a08fda48358ccc9dc79b5ea43833742b49"
+}

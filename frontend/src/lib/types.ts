@@ -519,6 +519,18 @@ export interface Message {
    * Same null semantics as `research_prompt_tokens`.
    */
   research_completion_tokens: number | null
+  /**
+   * True when the extraction guard's constraint was active for this
+   * turn. Server reads it from the `messages.thinking_hidden` column
+   * and ORs in pre-migration historical signals (a turn with an
+   * `extraction_rewrote` flag) for the conversation owner. Frontend
+   * renders the disclosure as a placeholder when true: the
+   * `thinking_transcript` and `tool_events` fields are blanked out
+   * on the server side for the owner, so the disclosure component
+   * keys off this flag rather than transcript-presence to decide
+   * whether to render "[Reasoning hidden under integrity guard]".
+   */
+  thinking_hidden: boolean
   created_at: string
 }
 
@@ -595,7 +607,19 @@ export interface MoodleToolConfig {
 
 export interface LtiSetup {
   moodle_tool_config: MoodleToolConfig
+  /**
+   * Step-by-step manual setup. Used as the fallback when the LMS doesn't
+   * support LTI Dynamic Registration, or when the admin clicks "manual
+   * setup" on the site-wide page.
+   */
   steps: string[]
+  /**
+   * Present on the site-wide admin response: pasting this URL into the
+   * LMS's "configure tool by URL" flow auto-installs the tool with the
+   * correct privacy, scopes, claims, and custom parameters. Absent on
+   * the per-course response (per-course flows can't use dynreg).
+   */
+  dynamic_registration_url?: string
 }
 
 export interface LtiRegistration {
@@ -626,6 +650,19 @@ export interface LtiPlatform {
   /// Empty array = platform can launch for any claimed eppn. See backend
   /// `enforce_platform_eppn_domain` for matching rules.
   allowed_eppn_domains: string[]
+  /// null = pending approval (installed via Dynamic Registration; will not
+  /// authenticate launches until an integrator clicks Approve). Non-null =
+  /// active, launches and NRPS work normally.
+  activated_at: string | null
+  /// Non-null = the LMS has been continuously rejecting our
+  /// client_credentials since this timestamp ("invalid_client" or 401/404
+  /// from the token endpoint). Worker auto-deletes after 30 days; until
+  /// then the admin UI flags the row for manual review.
+  invalid_client_since: string | null
+  /// Most recent platform-health probe bucket: "ok" | "invalid_client" |
+  /// "http_<code>" | "network" | "parse_error". null = never probed yet.
+  last_health_check_status: string | null
+  last_health_check_at: string | null
 }
 
 export interface LtiNrpsStatus {
@@ -637,6 +674,12 @@ export interface LtiNrpsStatus {
   last_sync_at: string | null
   last_sync_status: "ok" | "error" | null
   last_sync_error: string | null
+  /**
+   * Independent of last_sync_status. A sync can be "ok" and still carry an
+   * actionable note (e.g. the LMS isn't sharing identity claims for any
+   * member, so they were all added with synthetic ids).
+   */
+  last_sync_warning: string | null
   last_sync_added: number | null
   last_sync_removed: number | null
 }
@@ -823,4 +866,13 @@ export interface Document {
   kind_rationale: string | null
   kind_locked_by_teacher: boolean
   classified_at: string | null
+  // Slice 2: source-identity columns. `source_system` is "moodle" /
+  // "canvas" for plugin uploads, "manual" for teacher-tagged UI
+  // uploads, null for untagged. Teachers can edit `source_ref` on
+  // null- and "manual"-system docs via PATCH; plugin-owned refs are
+  // protected server-side (PATCH returns 4xx). `orphaned_at` is set
+  // when the doc has been superseded or its upstream source deleted.
+  source_system: string | null
+  source_ref: string | null
+  orphaned_at: string | null
 }

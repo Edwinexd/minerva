@@ -54,6 +54,20 @@ pub fn public_router() -> Router<AppState> {
         .route("/jwks", get(jwks))
         .route("/icon.svg", get(icon_svg))
         .route("/icon.png", get(icon_png))
+        // Dynamic Registration MUST live under /lti/* so Apache's Shib carve-
+        // out applies: the LMS popup hits this URL with `openid_configuration`
+        // + `registration_token` query params, and a Shib redirect dance
+        // here would both eat the query string and break the LTI spec's
+        // platform-driven trust model (registration_token is the auth).
+        .route("/dynamic-register", get(dynamic_register))
+        // Sibling endpoint: the dynreg success page POSTs the LMS admin's
+        // suggested eppn-domain scope here. Also public (form-driven, no
+        // auth) because the suggestion has no effect until a Minerva
+        // integrator approves the platform.
+        .route(
+            "/dynamic-register/{platform_id}/scope",
+            post(dynreg_record_scope),
+        )
 }
 
 /// Public-but-not-LTI-protocol routes: the bind picker sits here because it's
@@ -82,6 +96,10 @@ pub fn admin_router() -> Router<AppState> {
         .route("/lti/setup", get(admin_lti_setup))
         .route("/lti/platforms", get(list_platforms).post(create_platform))
         .route("/lti/platforms/{platform_id}", delete(delete_platform))
+        .route(
+            "/lti/platforms/{platform_id}/approve",
+            post(approve_platform),
+        )
         .route(
             "/lti/platforms/{platform_id}/bindings",
             get(list_platform_bindings),
@@ -631,15 +649,29 @@ async fn lti_setup(
 struct LtiSetupResponse {
     /// Values to enter in Moodle's "Add new LTI External tool" form.
     moodle_tool_config: MoodleToolConfig,
-    /// Step-by-step instructions for the teacher.
+    /// Step-by-step manual setup instructions (the fallback when the LMS
+    /// doesn't support LTI 1.3 Dynamic Registration or the admin prefers
+    /// to configure by hand).
     steps: Vec<String>,
+    /// `Some(url)` on the site-level admin response: the LTI 1.3 Dynamic
+    /// Registration entry point. Pasting this URL into Moodle's "configure
+    /// a tool by URL" auto-installs the tool with the correct privacy,
+    /// scopes, claims, and custom parameters. Frontend renders this as the
+    /// recommended path and tucks `steps` behind a "manual setup" disclosure.
+    /// `None` on the per-course teacher response (dynreg is site-level only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dynamic_registration_url: Option<String>,
 }
 
 fn build_setup_response(base_url: &str) -> LtiSetupResponse {
     let config = build_moodle_config(base_url);
     LtiSetupResponse {
+        // Per-course registration: Dynamic Registration not applicable
+        // (dynreg targets the site-level platform path), so the manual
+        // walkthrough is the only path here.
+        dynamic_registration_url: None,
         steps: vec![
-            "In Moodle, go to your course → More → LTI External tools → Add tool.".into(),
+            "In Moodle, go to your course > More > LTI External tools > Add tool.".into(),
             format!("Set Tool URL to: {}", config.tool_url),
             format!("Set LTI version to: {}", config.lti_version),
             format!("Set Public key type to: {}", config.public_key_type),
@@ -1192,8 +1224,14 @@ async fn admin_lti_setup(
 fn build_admin_setup_response(base_url: &str) -> LtiSetupResponse {
     let config = build_moodle_config(base_url);
     LtiSetupResponse {
+        // Recommended path: structured field so the frontend can lead with
+        // it. Pasting this URL into the LMS's "configure tool by URL" flow
+        // auto-installs Minerva with NRPS scope + name/email sharing +
+        // user_eppn custom parameter, so the manual steps below are only
+        // needed when the LMS doesn't support Dynamic Registration.
+        dynamic_registration_url: Some(format!("{}/lti/dynamic-register", base_url)),
         steps: vec![
-            "In Moodle, go to Site administration → Plugins → Activity modules → External tool → Manage tools, then 'configure a tool manually'.".into(),
+            "In Moodle, go to Site administration > Plugins > Activity modules > External tool > Manage tools, then 'configure a tool manually'.".into(),
             format!("Set Tool URL to: {}", config.tool_url),
             format!("Set LTI version to: {}", config.lti_version),
             format!("Set Public key type to: {}", config.public_key_type),
@@ -1217,6 +1255,424 @@ fn build_admin_setup_response(base_url: &str) -> LtiSetupResponse {
     }
 }
 
+// ---------------------------------------------------------------------------
+// LTI 1.3 Dynamic Registration (IMS spec)
+// ---------------------------------------------------------------------------
+//
+// Lets an LMS admin paste a single tool URL into the LMS instead of manually
+// transcribing tool URL / login URL / JWKS URL / claims / privacy / scopes.
+// The LMS then drives the registration handshake server-to-server:
+//
+//   1. Admin pastes `<base>/api/admin/lti/dynamic-register` into the LMS.
+//   2. LMS opens it in a popup with `openid_configuration` (the platform's
+//      OIDC config URL) + `registration_token` (Bearer token authorising
+//      this single registration call).
+//   3. Tool GETs the OIDC config to discover the platform's endpoints,
+//      builds the LTI Tool Configuration JSON (privacy + scopes + claims +
+//      messages baked in), and POSTs it to the platform's
+//      `registration_endpoint` with the Bearer token.
+//   4. Platform responds with the assigned `client_id`.
+//   5. Tool persists as an `lti_platforms` row and returns an HTML page
+//      that posts `org.imsglobal.lti.close` back to the LMS popup parent
+//      (per spec, see https://www.imsglobal.org/spec/lti-dr/v1p0 section
+//      4.4.1) so the LMS knows the dialog can close.
+//
+// We require integrator auth on the tool side: the admin must already be
+// logged in to Minerva so we can attribute `lti_platforms.created_by`. The
+// LMS popup carries the Minerva session cookie automatically when opened in
+// the same browser, so a separate "tool admin login" step isn't usually
+// needed; if the admin isn't logged in, Apache + Shibboleth handles the
+// detour and replays the request with the same query params intact.
+
+#[derive(Debug, Deserialize)]
+struct DynamicRegistrationParams {
+    /// URL of the platform's OpenID Provider Configuration document.
+    /// MUST be HTTPS in production; we trust whatever the LMS sends us,
+    /// the `registration_token` is the real authentication.
+    openid_configuration: String,
+    /// Bearer token the platform issues to authenticate the one-shot
+    /// registration call. Optional per spec (some platforms don't gate the
+    /// registration endpoint); we forward it as `Authorization: Bearer ...`
+    /// when present.
+    #[serde(default)]
+    registration_token: Option<String>,
+}
+
+/// Minimal slice of the platform's OIDC Provider Configuration we consume.
+/// Per OpenID Connect Discovery 1.0 + the LTI Platform Configuration
+/// extension; we deserialize only the fields the registration handshake
+/// uses and let everything else pass through.
+#[derive(Debug, Deserialize)]
+struct PlatformOidcConfig {
+    issuer: String,
+    registration_endpoint: String,
+    authorization_endpoint: String,
+    token_endpoint: String,
+    jwks_uri: String,
+    #[serde(
+        rename = "https://purl.imsglobal.org/spec/lti-platform-configuration",
+        default
+    )]
+    lti_platform_configuration: Option<LtiPlatformConfiguration>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct LtiPlatformConfiguration {
+    /// e.g. "moodle", "canvas". Used as a fallback for the saved platform
+    /// `name` when the issuer hostname is non-obvious.
+    #[serde(default)]
+    product_family_code: Option<String>,
+}
+
+/// Build the LTI Tool Configuration JSON we POST to the platform's
+/// `registration_endpoint`. The fields here mirror the values our manual
+/// setup instructions tell admins to enter, with a couple of additions
+/// dynamic-only platforms can use (claims + messages + scopes), so a
+/// dynreg-driven install ends up with EXACTLY the same effective config as
+/// a hand-entered one, including identity sharing being on.
+fn build_dynreg_payload(base_url: &str) -> serde_json::Value {
+    let launch_url = format!("{}/lti/launch", base_url);
+    let host = base_url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("");
+    // NRPS scope is required for the roster sync. AGS scopes are listed
+    // even though Minerva does not currently push grades; including them
+    // is harmless and lets a future grade-passback integration light up
+    // without a re-registration. The platform may grant a subset.
+    let scope = [
+        "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem.readonly",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/score",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/result.readonly",
+    ]
+    .join(" ");
+    serde_json::json!({
+        "application_type": "web",
+        "response_types": ["id_token"],
+        "grant_types": ["implicit", "client_credentials"],
+        "initiate_login_uri": format!("{}/lti/login", base_url),
+        "redirect_uris": [launch_url.clone()],
+        "client_name": "Minerva",
+        "jwks_uri": format!("{}/lti/jwks", base_url),
+        "logo_uri": format!("{}/lti/icon.png", base_url),
+        "token_endpoint_auth_method": "private_key_jwt",
+        "scope": scope,
+        "https://purl.imsglobal.org/spec/lti-tool-configuration": {
+            "domain": host,
+            "target_link_uri": launch_url,
+            // Claims we ask the platform to share on every launch. Listing
+            // name/email/given_name/family_name is what flips the platform's
+            // per-tool privacy switches; without this list, Moodle defaults
+            // to hiding everything and the NRPS roster comes back with bare
+            // user ids (the exact failure the warning we surface elsewhere
+            // catches).
+            "claims": [
+                "iss", "sub",
+                "name", "given_name", "family_name", "email",
+                "https://purl.imsglobal.org/spec/lti/claim/roles",
+                "https://purl.imsglobal.org/spec/lti/claim/context",
+                "https://purl.imsglobal.org/spec/lti/claim/resource_link",
+            ],
+            "messages": [
+                {
+                    "type": "LtiResourceLinkRequest",
+                    "target_link_uri": launch_url,
+                }
+            ],
+            "custom_parameters": {
+                // Same value the manual setup wizard documents. Keeps
+                // launch-derived users in lockstep with NRPS-derived ones.
+                "user_eppn": "$User.username"
+            },
+            "description": "Minerva: course AI study assistant"
+        }
+    })
+}
+
+/// Pretty hostname out of a URL, for the saved platform `name`. Best-effort;
+/// falls back to the raw issuer on any parse weirdness.
+fn issuer_to_display_name(issuer: &str) -> String {
+    let host = issuer
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or(issuer);
+    host.to_string()
+}
+
+/// Shared inline CSS for dynreg pages. Inlined (not linked to the SPA's
+/// hashed bundle) because this iframe ships from a public `/lti/*` URL
+/// while the SPA's assets are under `/assets/*` and might be Shib-gated
+/// in proxy quirks; inline keeps the iframe self-contained.
+const DYNREG_PAGE_CSS: &str = r#"
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;color:#0f172a;background:#f8fafc;min-height:100vh;display:flex;flex-direction:column}
+header{background:#fff;border-bottom:1px solid #e2e8f0;padding:0.7rem 1.25rem;display:flex;align-items:center;gap:0.6rem}
+header img{height:24px;width:24px}
+header .name{font-weight:600;font-size:1rem}
+main{flex:1;max-width:680px;width:100%;margin:0 auto;padding:1.75rem 1.25rem}
+h1{font-size:1.2rem;margin:0 0 0.5rem}
+.note{color:#475569;font-size:0.9rem;white-space:pre-wrap;word-break:break-word;margin:0.5rem 0}
+.warn{background:#fffbeb;border:1px solid #f59e0b;padding:0.65rem 0.9rem;border-radius:6px;color:#78350f;margin:1.1rem 0;font-size:0.9rem}
+.warn strong{color:#78350f}
+.opt{display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0;font-size:0.92rem}
+code{background:#f1f5f9;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.9rem}
+input[type=text]{width:100%;padding:0.45rem 0.55rem;border:1px solid #cbd5e1;border-radius:4px;font:inherit}
+button{padding:0.55rem 1rem;border-radius:6px;border:0;background:#0f172a;color:#fff;cursor:pointer;font-weight:600;font-size:0.92rem}
+button.secondary{background:#fff;color:#0f172a;border:1px solid #cbd5e1;font-weight:400}
+button:hover{filter:brightness(1.05)}
+.hint{font-size:0.8rem;color:#64748b;margin-top:0.4rem}
+.err{color:#b91c1c}
+footer{border-top:1px solid #e2e8f0;background:#fff;padding:0.7rem 1.25rem;font-size:0.78rem;color:#64748b;display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.5rem}
+footer a{color:#475569}
+"#;
+
+/// Wrap iframe body content in Minerva's brand chrome (logo + name in the
+/// header, license + admin contact in the footer). External links open in
+/// a new tab so users locked inside Moodle's dynreg dialog don't end up
+/// navigating the iframe away from the flow.
+fn dynreg_page(title: &str, status: axum::http::StatusCode, content: &str) -> Response {
+    let body = format!(
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title><style>{css}</style></head><body><header><img src=\"/lti/icon.svg\" alt=\"\"><span class=\"name\">Minerva</span></header><main>{content}</main><footer><span>Minerva &nbsp;\u{2022}&nbsp; AGPL-3.0</span><span><a target=\"_blank\" rel=\"noopener\" href=\"mailto:lambda@dsv.su.se\">lambda@dsv.su.se</a></span></footer></body></html>",
+        css = DYNREG_PAGE_CSS
+    );
+    (
+        status,
+        [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        body,
+    )
+        .into_response()
+}
+
+/// Banner + detail page used for both success and error endpoints. Posts
+/// the IMS close message on load so the LMS popup auto-closes; a button
+/// is provided for the no-`opener` fallback.
+fn dynreg_html(
+    status: axum::http::StatusCode,
+    title: &str,
+    banner: &str,
+    detail: &str,
+) -> Response {
+    let content = format!(
+        r##"<h1>{banner}</h1>
+<p class="note">{detail}</p>
+<button onclick="(window.opener||window.parent).postMessage({{subject:'org.imsglobal.lti.close'}},'*');window.close();">Close</button>
+<script>try{{(window.opener||window.parent).postMessage({{subject:'org.imsglobal.lti.close'}},'*');}}catch(e){{}}</script>"##
+    );
+    dynreg_page(title, status, &content)
+}
+
+fn dynreg_success_html(platform_name: &str, was_new: bool) -> Response {
+    let banner = if was_new {
+        format!(
+            "Minerva is now registered with <strong>{}</strong>.",
+            platform_name
+        )
+    } else {
+        format!(
+            "Minerva was already registered with <strong>{}</strong>; nothing to do.",
+            platform_name
+        )
+    };
+    dynreg_html(
+        axum::http::StatusCode::OK,
+        "LTI registration complete",
+        &banner,
+        "You can close this window. If the LMS dialog stays open, click the button below.",
+    )
+}
+
+fn dynreg_error_html(detail: &str) -> Response {
+    tracing::error!("lti dynreg failed: {}", detail);
+    dynreg_html(
+        axum::http::StatusCode::BAD_REQUEST,
+        "LTI registration failed",
+        "<span class=\"err\">Registration could not be completed.</span>",
+        detail,
+    )
+}
+
+/// GET /lti/dynamic-register: the IMS LTI 1.3 Dynamic Registration flow
+/// entry point. The LMS opens this in a popup; we drive the rest of the
+/// handshake server-to-server. The endpoint is intentionally unauthenticated
+/// on the tool side: the platform's `registration_token` (which we forward
+/// to the platform's `registration_endpoint`) is the source of trust, and
+/// a Shibboleth bounce here would both eat the query string and break the
+/// spec's platform-driven flow. Errors are surfaced as HTML in the popup
+/// (not JSON) so the admin sees actionable text without devtools.
+async fn dynamic_register(
+    State(state): State<AppState>,
+    Query(params): Query<DynamicRegistrationParams>,
+) -> Result<Response, AppError> {
+    match do_dynamic_register(&state, &params).await {
+        Ok(resp) => Ok(resp),
+        Err(detail) => Ok(dynreg_error_html(&detail)),
+    }
+}
+
+async fn do_dynamic_register(
+    state: &AppState,
+    params: &DynamicRegistrationParams,
+) -> Result<Response, String> {
+    // 1. Fetch the platform's OIDC configuration. We trust the URL because
+    // the `registration_token` we'll send back to that platform's
+    // registration endpoint is the real authentication of this flow.
+    let oidc: PlatformOidcConfig = state
+        .http_client
+        .get(&params.openid_configuration)
+        .send()
+        .await
+        .map_err(|e| format!("GET {} failed: {}", params.openid_configuration, e))?
+        .error_for_status()
+        .map_err(|e| format!("OIDC config: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("OIDC config was not JSON: {}", e))?;
+
+    let issuer = oidc.issuer.trim_end_matches('/').to_string();
+
+    // 2. Build + POST the LTI Tool Configuration. The platform responds
+    // with the assigned `client_id` (and echoes back the rest of what we
+    // sent).
+    let payload = build_dynreg_payload(&state.config.base_url);
+    let mut req = state
+        .http_client
+        .post(&oidc.registration_endpoint)
+        .header(reqwest::header::CONTENT_TYPE, "application/json");
+    if let Some(token) = params
+        .registration_token
+        .as_deref()
+        .filter(|t| !t.is_empty())
+    {
+        req = req.bearer_auth(token);
+    }
+    let reg_resp = req
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("POST {} failed: {}", oidc.registration_endpoint, e))?;
+    let status = reg_resp.status();
+    if !status.is_success() {
+        let body = reg_resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "registration endpoint returned {}: {}",
+            status, body
+        ));
+    }
+    let reg_json: serde_json::Value = reg_resp
+        .json()
+        .await
+        .map_err(|e| format!("registration response was not JSON: {}", e))?;
+    let client_id = reg_json
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "registration response missing client_id".to_string())?
+        .to_string();
+
+    let product = oidc
+        .lti_platform_configuration
+        .as_ref()
+        .and_then(|p| p.product_family_code.clone());
+    let display_name = match product {
+        Some(p) if !p.is_empty() => format!("{} ({})", issuer_to_display_name(&issuer), p),
+        _ => issuer_to_display_name(&issuer),
+    };
+
+    // 3. If we already have a row for this (issuer, client_id) pair, treat
+    // it as a re-registration: keep the existing row, don't recreate. This
+    // makes the flow idempotent under accidental double-clicks.
+    let existing =
+        minerva_db::queries::lti::find_platform_by_issuer(&state.db, &issuer, &client_id)
+            .await
+            .map_err(|e| format!("db: {}", e))?;
+    if existing.is_some() {
+        return Ok(dynreg_success_html(&display_name, false));
+    }
+
+    // Collision guard: if a per-course registration already claims this
+    // (issuer, client_id), refuse rather than silently shadowing it.
+    if minerva_db::queries::lti::find_registration_by_issuer(&state.db, &issuer, &client_id)
+        .await
+        .map_err(|e| format!("db: {}", e))?
+        .is_some()
+    {
+        return Err(format!(
+            "a per-course registration already exists for issuer={} client_id={}; remove it before site-wide registering",
+            issuer, client_id
+        ));
+    }
+
+    let id = Uuid::new_v4();
+    minerva_db::queries::lti::create_platform(
+        &state.db,
+        id,
+        &minerva_db::queries::lti::CreatePlatform {
+            name: &display_name,
+            issuer: &issuer,
+            client_id: &client_id,
+            deployment_id: None,
+            auth_login_url: &oidc.authorization_endpoint,
+            auth_token_url: &oidc.token_endpoint,
+            platform_jwks_url: &oidc.jwks_uri,
+            // No logged-in user: dynreg is public by design (platform token
+            // is the source of trust). created_by stays NULL to mark this
+            // row as "installed via Dynamic Registration".
+            created_by: None,
+            allowed_eppn_domains: None,
+            // Pending until an integrator clicks Approve. Until then the
+            // login + launch validators ignore the row, so a hostile dynreg
+            // (random Moodle pointing the URL at attacker-controlled JWKS)
+            // cannot impersonate users.
+            activated_at: None,
+        },
+    )
+    .await
+    .map_err(|e| format!("create_platform: {}", e))?;
+    tracing::info!(
+        "lti dynreg: registered platform {} (issuer={}, client_id={}) via dynamic registration",
+        id,
+        issuer,
+        client_id,
+    );
+
+    // Pending row exists; before closing the LMS popup, hand off to the
+    // SPA so the scope-suggestion form renders inside Minerva's normal
+    // chrome (RootLayout + i18n + Tailwind components) instead of a
+    // hand-rolled HTML page. The SPA route at /lti/setup/<id> is
+    // included in RootLayout's no-auth-fetch carve-out (next to
+    // /lti/bind) and submits to /lti/dynamic-register/<id>/scope.
+    Ok(redirect_to_scope_setup(
+        &state.config.base_url,
+        id,
+        &display_name,
+        &issuer,
+    ))
+}
+
+/// Build the absolute redirect URL the dynreg flow lands on after the
+/// server-to-server handshake. `name` and `issuer` are passed in the
+/// query string so the SPA can render the form immediately without an
+/// extra info-fetch round trip.
+fn redirect_to_scope_setup(base_url: &str, id: Uuid, name: &str, issuer: &str) -> Response {
+    let location = format!(
+        "{}/lti/setup/{}?name={}&issuer={}",
+        base_url,
+        id,
+        urlencoding::encode(name),
+        urlencoding::encode(issuer),
+    );
+    (
+        axum::http::StatusCode::SEE_OTHER,
+        [(axum::http::header::LOCATION, location)],
+    )
+        .into_response()
+}
+
 #[derive(Debug, Serialize)]
 struct PlatformResponse {
     id: Uuid,
@@ -1233,6 +1689,20 @@ struct PlatformResponse {
     /// eppn (the legacy behaviour). Non-empty means a JWT-claimed eppn
     /// must end with `@<d>` for some `d` in this list.
     allowed_eppn_domains: Vec<String>,
+    /// NULL = pending approval (installed via dynreg, integrator hasn't
+    /// reviewed yet; launches against this row are refused). Non-null
+    /// timestamp = active.
+    activated_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Non-NULL means the platform's token endpoint has been continuously
+    /// rejecting our client_credentials since this timestamp. Drives the
+    /// "Orphaned by LMS" badge in the admin UI + the 30-day auto-delete.
+    /// NULL means healthy (or never probed).
+    invalid_client_since: Option<chrono::DateTime<chrono::Utc>>,
+    /// Most recent probe outcome (free-form bucket: `ok`, `invalid_client`,
+    /// `http_<code>`, `network`, `parse_error`). Surface for diagnosis;
+    /// UI mostly cares about `invalid_client_since` for the badge.
+    last_health_check_status: Option<String>,
+    last_health_check_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 fn platform_to_response(
@@ -1251,7 +1721,110 @@ fn platform_to_response(
         created_at: p.created_at,
         moodle_config: build_moodle_config(base_url),
         allowed_eppn_domains: p.allowed_eppn_domains.unwrap_or_default(),
+        activated_at: p.activated_at,
+        invalid_client_since: p.invalid_client_since,
+        last_health_check_status: p.last_health_check_status,
+        last_health_check_at: p.last_health_check_at,
     }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ApprovePlatformRequest {
+    /// Eppn-domain allowlist to set atomically with activation. Absent =
+    /// leave whatever the dynreg scope form already recorded; explicit
+    /// empty array = trust ANY eppn (admin opt-in). Same normalisation
+    /// rules as the manual platform create form.
+    #[serde(default)]
+    allowed_eppn_domains: Option<Vec<String>>,
+}
+
+/// POST /admin/lti/platforms/{id}/approve: mark a pending (dynreg-installed)
+/// platform as active, optionally setting/overriding the eppn-domain scope.
+/// Idempotent: re-approving a live platform is a no-op and returns 200 so
+/// the UI's Approve button is safe to double-click.
+async fn approve_platform(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(platform_id): Path<Uuid>,
+    body: Option<Json<ApprovePlatformRequest>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_site_integrator(&user)?;
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let normalised = match body.allowed_eppn_domains.as_ref() {
+        Some(raw) => Some(normalize_eppn_domains(raw)?),
+        None => None,
+    };
+    let changed =
+        minerva_db::queries::lti::activate_platform(&state.db, platform_id, normalised.as_deref())
+            .await?;
+    if changed {
+        tracing::info!(
+            "lti dynreg: platform {} approved by user {} (scope override: {:?})",
+            platform_id,
+            user.id,
+            normalised
+        );
+    }
+    Ok(Json(
+        serde_json::json!({ "approved": true, "newly_activated": changed }),
+    ))
+}
+
+/// POST /lti/dynamic-register/{id}/scope: PUBLIC endpoint called by the
+/// SPA scope-form submission (the `/lti/setup/<id>` route the dynreg
+/// handler 303s to). Records the LMS admin's suggested eppn domains on
+/// a PENDING platform row. No activation here: the suggestion has no
+/// effect until an integrator approves the row in Minerva, and they
+/// see + can override whatever was suggested here. JSON in / JSON out
+/// so the SPA can render its success state cleanly and post the IMS
+/// close message itself.
+#[derive(Debug, Deserialize)]
+struct DynregScopeBody {
+    /// Comma-separated list. Empty / whitespace => stored as NULL on
+    /// the row, which the admin will see as "any eppn" with the usual
+    /// warning.
+    #[serde(default)]
+    domains: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DynregScopeResponse {
+    recorded: bool,
+    domains: Vec<String>,
+}
+
+async fn dynreg_record_scope(
+    State(state): State<AppState>,
+    Path(platform_id): Path<Uuid>,
+    Json(body): Json<DynregScopeBody>,
+) -> Result<Json<DynregScopeResponse>, AppError> {
+    let raw: Vec<String> = body
+        .domains
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    // Reuse the same normaliser the admin-create path uses so invalid
+    // entries (no dot / whitespace) are caught here too. The SPA form
+    // suggests valid-looking values, but a hostile dynreg might POST
+    // arbitrary garbage.
+    let normalised = if raw.is_empty() {
+        Vec::new()
+    } else {
+        normalize_eppn_domains(&raw).unwrap_or_default()
+    };
+    let _ =
+        minerva_db::queries::lti::set_pending_platform_scope(&state.db, platform_id, &normalised)
+            .await?;
+    tracing::info!(
+        "lti dynreg: scope suggestion recorded for pending platform {}: {:?}",
+        platform_id,
+        normalised
+    );
+    Ok(Json(DynregScopeResponse {
+        recorded: true,
+        domains: normalised,
+    }))
 }
 
 async fn list_platforms(
@@ -1333,8 +1906,12 @@ async fn create_platform(
             auth_login_url: &auth_login_url,
             auth_token_url: &auth_token_url,
             platform_jwks_url: &platform_jwks_url,
-            created_by: user.id,
+            created_by: Some(user.id),
             allowed_eppn_domains: domains_for_db,
+            // Manual admin path: integrator entered the values themselves
+            // and signed off implicitly. Active immediately, preserving the
+            // existing pre-dynreg behaviour.
+            activated_at: Some(chrono::Utc::now()),
         },
     )
     .await
@@ -1469,6 +2046,11 @@ struct NrpsStatusResponse {
     last_sync_at: Option<chrono::DateTime<chrono::Utc>>,
     last_sync_status: Option<String>,
     last_sync_error: Option<String>,
+    /// Independent of `last_sync_status`: a sync can be `ok` and still carry
+    /// an actionable note (e.g. LMS-side identity sharing disabled). The UI
+    /// surfaces this with its own badge so admins notice it without first
+    /// having to read backend logs.
+    last_sync_warning: Option<String>,
     last_sync_added: Option<i32>,
     last_sync_removed: Option<i32>,
 }
@@ -1486,6 +2068,7 @@ fn nrps_to_response(r: minerva_db::queries::lti_nrps::NrpsContextRow) -> NrpsSta
         last_sync_at: r.last_sync_at,
         last_sync_status: r.last_sync_status,
         last_sync_error: r.last_sync_error,
+        last_sync_warning: r.last_sync_warning,
         last_sync_added: r.last_sync_added,
         last_sync_removed: r.last_sync_removed,
     }

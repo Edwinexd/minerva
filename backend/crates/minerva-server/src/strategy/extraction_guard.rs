@@ -148,7 +148,28 @@ pub struct GuardDecision {
     /// True iff the intent classifier said is_extraction OR the
     /// multi-turn proximity threshold tripped OR the prior turn
     /// was active and engagement hasn't lifted it.
+    ///
+    /// Controls the post-generation `intercept_reply` output check.
+    /// NOT the right signal for "should the thinking stream + sources
+    /// panel be hidden on this turn": once tripped this stays sticky
+    /// across innocent follow-ups, which would force every
+    /// subsequent benign turn into the placeholder UX. Use
+    /// `flagged_this_turn` for the live-suppression decision instead.
     pub constraint_active: bool,
+    /// Whether THIS specific turn produced a per-turn extraction
+    /// signal: the intent classifier said is_extraction OR the
+    /// multi-turn proximity threshold tripped on this turn's RAG.
+    /// Excludes the sticky `prev_active` carry-over.
+    ///
+    /// The right gate for hiding the research transcript / sources
+    /// panel from the student on a guarded turn: a single past
+    /// paste shouldn't keep blanking sources across innocent
+    /// follow-up questions. The sticky `constraint_active` still
+    /// governs the writeup-time output check via `intercept_reply`,
+    /// which is the right place for stickiness (the student might
+    /// still be drifting toward an extraction even on an innocent-
+    /// looking turn).
+    pub flagged_this_turn: bool,
     /// Excerpts the output check feeds the model so it can compare
     /// the assistant's reply against what the assignment actually
     /// asked. Drawn from `rag_signals` + the in-scope assignment
@@ -193,9 +214,15 @@ pub async fn evaluate_for_turn(
 
     let turn_index = compute_turn_index(history);
 
-    // Intent classifier sees the last N user messages, oldest
-    // first, with the current turn's input as the most recent.
-    let recent_user_messages = recent_user_messages(history, user_content, INTENT_HISTORY_TURNS);
+    // Intent classifier sees the last N user messages from history,
+    // oldest first. `history` already contains the current turn's
+    // user message (run_chat_message persists the user row before
+    // loading history; see compute_turn_index for the same lifecycle
+    // assumption), so we don't pass `user_content` separately ; doing
+    // so would duplicate the latest prompt in the classifier window.
+    // `user_content` is still used below for the engagement classifier
+    // pairing against the prior assistant message.
+    let recent_user_messages = recent_user_messages(history, INTENT_HISTORY_TURNS);
     let intent =
         extraction_guard::classify_intent(http, api_key, db, course_id, &recent_user_messages)
             .await;
@@ -490,10 +517,18 @@ pub async fn evaluate_for_turn(
     // the caller.
     let _ = engagement_verdict;
 
+    // Per-turn signal independent of the sticky `prev_active`. Used
+    // by the strategies to decide whether to hide the live thinking
+    // stream + sources panel ON THIS TURN specifically; the sticky
+    // `constraint_active` continues to govern the writeup-time
+    // output check.
+    let flagged_this_turn = intent.is_extraction || proximity_active;
+
     Some(GuardDecision {
         turn_index,
         intent,
         constraint_active,
+        flagged_this_turn,
         assignment_excerpts: rag_signals.iter().map(|c| c.text.clone()).collect(),
         in_scope_assignment_doc_ids: state.constraint_assignment_doc_ids.clone(),
     })
@@ -611,24 +646,36 @@ pub async fn intercept_reply(
 
 fn compute_turn_index(history: &[minerva_db::queries::conversations::MessageRow]) -> i32 {
     // Each conversational turn = one user message + one assistant
-    // reply. The current turn (the one we're evaluating) hasn't
-    // been persisted yet, so count user messages already in
-    // history and add 1 for "this one".
-    let prior_user_count = history.iter().filter(|m| m.role == "user").count();
-    (prior_user_count + 1) as i32
+    // reply. `history` is loaded AFTER the current user message has
+    // already been persisted (run_chat_message in routes/chat.rs
+    // inserts the user row before passing history into the strategy),
+    // so the turn we're evaluating is the Nth user message inside
+    // history; just count them.
+    //
+    // Must match the convention `assistant_ids_on_turns` (chat.rs)
+    // and the frontend teacher dashboard walker
+    // (conversations-page.tsx) use when joining flags to messages:
+    // walk in order, increment on each user, the assistant that
+    // follows user N has turn N. An off-by-one here breaks the
+    // read-time owner-suppression gate's REWROTE_FLAG fallback AND
+    // the teacher dashboard's per-turn badges.
+    history.iter().filter(|m| m.role == "user").count() as i32
 }
 
 fn recent_user_messages(
     history: &[minerva_db::queries::conversations::MessageRow],
-    current_user_content: &str,
     last_n: usize,
 ) -> Vec<String> {
+    // `history` already contains the current turn's user message
+    // (see compute_turn_index), so there's no separate
+    // `current_user_content` to append. Doing so would duplicate
+    // the latest prompt adjacent to itself in the classifier window
+    // and shrink the effective lookback by one turn.
     let mut out: Vec<String> = history
         .iter()
         .filter(|m| m.role == "user")
         .map(|m| m.content.clone())
         .collect();
-    out.push(current_user_content.to_string());
     if out.len() > last_n {
         let drop = out.len() - last_n;
         out.drain(0..drop);
@@ -780,7 +827,11 @@ mod tests {
     }
 
     #[test]
-    fn recent_user_messages_takes_last_n_with_current() {
+    fn recent_user_messages_takes_last_n_from_history() {
+        // `history` already contains the current turn's user message
+        // when `evaluate_for_turn` is called (the chat route persists
+        // the user row before loading history), so the function just
+        // takes the last N user messages from it.
         use minerva_db::queries::conversations::MessageRow;
         let mk = |role: &str, content: &str| MessageRow {
             id: Uuid::nil(),
@@ -798,10 +849,17 @@ mod tests {
             thinking_ms: None,
             research_prompt_tokens: None,
             research_completion_tokens: None,
+            thinking_hidden: false,
             created_at: chrono::Utc::now(),
         };
-        let h = vec![mk("user", "u1"), mk("assistant", "a1"), mk("user", "u2")];
-        let v = recent_user_messages(&h, "u3", 5);
+        let h = vec![
+            mk("user", "u1"),
+            mk("assistant", "a1"),
+            mk("user", "u2"),
+            mk("assistant", "a2"),
+            mk("user", "u3"),
+        ];
+        let v = recent_user_messages(&h, 5);
         assert_eq!(
             v,
             vec!["u1".to_string(), "u2".to_string(), "u3".to_string()]
@@ -809,7 +867,42 @@ mod tests {
     }
 
     #[test]
-    fn turn_index_counts_user_messages_plus_one() {
+    fn recent_user_messages_caps_at_last_n() {
+        use minerva_db::queries::conversations::MessageRow;
+        let mk = |role: &str, content: &str| MessageRow {
+            id: Uuid::nil(),
+            conversation_id: Uuid::nil(),
+            role: role.to_string(),
+            content: content.to_string(),
+            chunks_used: None,
+            model_used: None,
+            tokens_prompt: None,
+            tokens_completion: None,
+            generation_ms: None,
+            retrieval_count: None,
+            thinking_transcript: None,
+            tool_events: None,
+            thinking_ms: None,
+            research_prompt_tokens: None,
+            research_completion_tokens: None,
+            thinking_hidden: false,
+            created_at: chrono::Utc::now(),
+        };
+        let h = vec![
+            mk("user", "u1"),
+            mk("user", "u2"),
+            mk("user", "u3"),
+            mk("user", "u4"),
+        ];
+        let v = recent_user_messages(&h, 2);
+        // Oldest two dropped; preserves chronological order.
+        assert_eq!(v, vec!["u3".to_string(), "u4".to_string()]);
+    }
+
+    #[test]
+    fn turn_index_counts_user_messages_in_history() {
+        // `history` already contains the just-persisted current user
+        // message, so the count IS the turn index (1-based).
         use minerva_db::queries::conversations::MessageRow;
         let mk = |role: &str| MessageRow {
             id: Uuid::nil(),
@@ -827,10 +920,22 @@ mod tests {
             thinking_ms: None,
             research_prompt_tokens: None,
             research_completion_tokens: None,
+            thinking_hidden: false,
             created_at: chrono::Utc::now(),
         };
-        let h = vec![mk("user"), mk("assistant"), mk("user"), mk("assistant")];
-        // Two prior user messages -> the next turn is turn 3.
+        // History at the time of evaluating turn 3: u1,a1,u2,a2,u3.
+        // Three user messages -> this is turn 3.
+        let h = vec![
+            mk("user"),
+            mk("assistant"),
+            mk("user"),
+            mk("assistant"),
+            mk("user"),
+        ];
         assert_eq!(compute_turn_index(&h), 3);
+
+        // First turn: just the freshly-inserted u1.
+        let first = vec![mk("user")];
+        assert_eq!(compute_turn_index(&first), 1);
     }
 }

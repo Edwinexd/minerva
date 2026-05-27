@@ -5,26 +5,86 @@ on:
     branches: [master]
     paths:
       - "moodle-plugin/local/minerva/**"
+  workflow_dispatch:
 
 jobs:
   sync:
-    name: Sync to moodle-local_minerva
+    name: Sync to ${{ matrix.target.name }}
     runs-on: ubuntu-latest
+    # fail-fast=false: a transient outage on one mirror shouldn't block
+    # the other from getting the update; each target is independent.
+    strategy:
+      fail-fast: false
+      matrix:
+        # One entry per downstream mirror. `auth` selects which credential
+        # block runs (steps gate on it), so each target only ever sees its
+        # own secret in env. Adding a new mirror = one matrix entry plus,
+        # if it needs a new auth strategy, one conditional step.
+        target:
+          - name: github
+            auth: token
+            # secret: MOODLE_SYNC_TOKEN (consumed by the token-push step)
+            remote: https://github.com/Edwinexd/moodle-local_minerva.git
+          - name: gitea
+            auth: ssh
+            # secret: GITEA_SSH_KEY (consumed by the ssh-setup step)
+            ssh_host: gitea.dsv.su.se
+            remote: git@gitea.dsv.su.se:edsu8469/moodle-local_minerva.git
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history required so `git subtree split` can rewrite
+          # the per-commit history of moodle-plugin/local/minerva
+          # into a standalone branch.
+          fetch-depth: 0
+          # Don't install the GITHUB_TOKEN extraheader on
+          # https://github.com/; otherwise its Authorization header
+          # beats the basic-auth credentials in our token-push URL and
+          # GitHub rejects the push as github-actions[bot] (which can
+          # only write to the current repo, not the mirror).
+          persist-credentials: false
 
-      - name: Push plugin to target repo
+      - name: Setup SSH key
+        if: matrix.target.auth == 'ssh'
+        env:
+          SSH_KEY: ${{ secrets.GITEA_SSH_KEY }}
         run: |
-          cd moodle-plugin/local/minerva
+          mkdir -p ~/.ssh
+          # printf '%s\n' (not '%s'): OpenSSH refuses to parse a key
+          # without the terminating newline ("error in libcrypto").
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan "${{ matrix.target.ssh_host }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-          git init --initial-branch=master
+      - name: Split subtree
+        id: split
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add -A
-          git commit -m "Sync from Edwinexd/minerva@${GITHUB_SHA::7}"
+          # Per-commit history preserving split: SHAs are deterministic
+          # from the source history, so the force-push is safe (the
+          # downstream branch always reflects the same upstream state).
+          SUBTREE_SHA=$(git subtree split --prefix=moodle-plugin/local/minerva HEAD)
+          echo "Subtree HEAD: $SUBTREE_SHA"
+          echo "sha=$SUBTREE_SHA" >> "$GITHUB_OUTPUT"
 
-          git remote add target "https://x-access-token:${TOKEN}@github.com/Edwinexd/moodle-local_minerva.git"
-          git push target master --force
+      - name: Push via token
+        if: matrix.target.auth == 'token'
         env:
           TOKEN: ${{ secrets.MOODLE_SYNC_TOKEN }}
+          REMOTE: ${{ matrix.target.remote }}
+        run: |
+          # Inject the token only into the remote URL for this push;
+          # never written to disk. ${VAR#prefix} strips a literal
+          # prefix (vs ${var/pattern/replacement} where forward-slash
+          # escaping inside the pattern is bash-flavour-dependent and
+          # silently no-ops if you get it wrong).
+          path="${REMOTE#https://}"
+          auth_url="https://x-access-token:${TOKEN}@${path}"
+          git push --force "$auth_url" "${{ steps.split.outputs.sha }}:refs/heads/master"
+
+      - name: Push via ssh
+        if: matrix.target.auth == 'ssh'
+        run: |
+          git push --force "${{ matrix.target.remote }}" "${{ steps.split.outputs.sha }}:refs/heads/master"

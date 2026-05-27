@@ -10,7 +10,44 @@
       "externalInvites": "External Invites",
       "lti": "LTI",
       "integrations": "Plugin Integrations",
-      "system": "System"
+      "system": "System",
+      "devTools": "Dev Tools"
+    }
+  },
+  "devTools": {
+    "loading": "Checking dev mode...",
+    "notDevTitle": "Dev mode is off",
+    "notDevDescription": "This panel is only available when the server runs with MINERVA_DEV_MODE=true.",
+    "reseedTitle": "Reseed fixture data",
+    "reseedDescription": "Wipes the previously-seeded users, courses, documents, conversations, and messages, then re-inserts them from scratch. Hand-created rows are not touched.",
+    "destructiveLabel": "Destructive:",
+    "destructiveBody": "any rows tagged by a previous seed run are deleted, including their on-disk document bytes and Qdrant collections.",
+    "reseedButton": "Reseed now",
+    "reseeding": "Reseeding...",
+    "fixtureUsersTitle": "Fixture users",
+    "fixtureUsersDescription": "The seeder always creates exactly this cast. Switch into any of them via the dev user switcher in the header (paste the eppn).",
+    "fixtureUsersTip": "The calling admin (you) is not in this list; you stay logged in as yourself, and the fixture courses key off your id for ownership / membership.",
+    "fixtureCoursesTitle": "Fixture courses",
+    "fixtureCoursesDescription": "Four courses spanning the configuration matrix you most often need to switch between.",
+    "columns": {
+      "eppn": "Eppn",
+      "role": "Role",
+      "notes": "Notes"
+    },
+    "report": {
+      "successHeading": "Reseed complete (run as {{eppn}}).",
+      "wipedHeading": "Wiped",
+      "seededHeading": "Seeded",
+      "users": "{{n}} users",
+      "courses": "{{n}} courses",
+      "documents": "{{n}} documents",
+      "members": "{{n}} memberships",
+      "conversations": "{{n}} conversations",
+      "messages": "{{n}} messages",
+      "invites": "{{n}} external invites",
+      "dirs": "{{n}} course doc dirs",
+      "qdrant": "{{n}} Qdrant collections",
+      "embeddingNote": "Documents are queued for embedding via the local fastembed provider; they will become searchable in chat over the next ~10-30s."
     }
   },
   "integrationKeys": {
@@ -51,7 +88,14 @@
   },
   "ltiPlatforms": {
     "setupTitle": "Site-level Moodle/Canvas configuration",
-    "setupDescription": "Copy these values into Moodle's Site administration → Plugins → Activity modules → External tool → Manage tools, or the equivalent Canvas Developer Key. Any course in the LMS can then use this tool without per-course setup.",
+    "setupDescription": "Register Minerva as a site-wide LTI 1.3 tool. Any course on the LMS can then use it without per-course setup.",
+    "dynregHeading": "Quick setup (recommended)",
+    "dynregDescription": "Paste this URL into Moodle's 'configure a tool by URL' input. Moodle will auto-install Minerva with the correct privacy settings, NRPS scope, claims, and custom parameters. No manual field copying needed.",
+    "dynregMoodlePath": "In Moodle: Site administration > Plugins > Activity modules > External tool > Manage tools.",
+    "manualSetupToggle": "Or configure manually",
+    "manualSetupHint": "Only needed if your LMS doesn't support LTI Dynamic Registration, or to inspect the values dynreg would have set. Follow the steps below; the values at the bottom are quick-copy fields for each step.",
+    "manualSetupStepsHeading": "Steps",
+    "manualSetupValuesHeading": "Quick-copy values",
     "toolUrl": "Tool URL",
     "ltiVersion": "LTI version",
     "publicKeyType": "Public key type",
@@ -82,6 +126,17 @@
     "savePlatform": "Save platform",
     "empty": "No platforms registered yet.",
     "remove": "Remove",
+    "approve": "Approve",
+    "approveCancel": "Cancel",
+    "approveScopeLabel": "Allowed eppn domains",
+    "approveScopeHint": "Comma-separated list of domain suffixes the platform may launch users for (e.g. 'dsv.su.se, su.se'). Pre-filled with what the LMS admin suggested in the dynreg popup, if anything. Leave blank ONLY if you intentionally want to trust every claimed eppn (unsafe).",
+    "approveAndActivate": "Approve and activate",
+    "approveEmptyConfirm": "Approving with an empty eppn-domain list means this platform can mint launches claiming ANY eppn (including admin accounts). Are you sure?",
+    "statusPending": "Pending approval",
+    "statusOrphaned": "Orphaned by LMS",
+    "pendingExplain": "Installed via LTI Dynamic Registration. Until you approve it, this platform CANNOT authenticate launches against Minerva. Unapproved platforms are automatically deleted after 7 days. Verify the issuer and client id below match the LMS you expect, then approve.",
+    "orphanedExplainPrefix": "The LMS has been rejecting our client credentials since",
+    "orphanedExplainSuffix": "Likely cause: the tool was deleted on their side. Minerva will cascade-delete this row 30 days after that timestamp; remove it manually if you want it gone now.",
     "showBindings": "Show bindings",
     "hideBindings": "Hide bindings",
     "noBindings": "No Moodle/Canvas courses have been linked to this platform yet.",
@@ -95,6 +150,7 @@
     "nrpsStatusOk": "Synced",
     "nrpsStatusError": "Error",
     "nrpsStatusPending": "Pending",
+    "nrpsStatusWarning": "Needs attention",
     "nrpsNeverSynced": "Not synced yet",
     "nrpsCounts": "{{added}} added, {{removed}} removed",
     "nrpsColumns": {
@@ -103,6 +159,38 @@
       "changes": "Last changes",
       "lastSync": "Last sync"
     }
+  },
+  "ltiApprovePlatform": {
+    "title": "Approve LTI platform",
+    "description": "Verify the issuer and client id match the LMS you expected, set the eppn-domain trust scope, then approve. The platform cannot authenticate launches until you do.",
+    "alreadyActiveTitle": "Platform already active",
+    "alreadyActiveBody": "Someone else already approved this platform. No action needed; the rest of the platforms list is back at the link below.",
+    "notFoundTitle": "Platform not found",
+    "notFoundBody": "This platform doesn't exist, was deleted, or you don't have permission to see it. It may have been auto-cleaned up after going 7 days unapproved.",
+    "nameLabel": "Name",
+    "issuerLabel": "Issuer",
+    "clientIdLabel": "Client ID",
+    "backToList": "Back to all platforms"
+  },
+  "ltiSetupScope": {
+    "titleWithName": "Tool registered with {{name}}",
+    "titleFallback": "Tool registered",
+    "lede": "One last step before this platform can authenticate launches.",
+    "warnHeading": "Trust scope:",
+    "warnBody": "which eppn domains should Minerva trust this platform to launch users for? Choose narrowly: if the LMS is compromised, it can mint launches claiming any eppn within scope.",
+    "legend": "Allowed eppn domains",
+    "noPresets": "No suggestions available for this issuer. Add domains in the field below.",
+    "customLabel": "Additional domains",
+    "customHint": "Comma-separated. Added on top of any boxes ticked above.",
+    "emptyWarn": "Submitting with nothing ticked and no additional domains means Minerva will trust ANY eppn this LMS claims (not recommended).",
+    "submit": "Save suggestion",
+    "skip": "Skip (admin sets scope later)",
+    "afterNote": "After this, a Minerva integrator must click Approve in Minerva to activate the platform. They can adjust the scope you set here before approving.",
+    "doneTitle": "Suggestion recorded",
+    "doneBody": "Thanks. A Minerva integrator must still approve this platform in the admin UI before it can authenticate launches.",
+    "donePrompt": "If you're also a Minerva integrator, open Minerva now to approve the platform. Otherwise, hand off to an integrator and close this window.",
+    "openMinervaButton": "Open Minerva to approve",
+    "closeButton": "Close"
   },
   "usage": {
     "totalTokens": "Total Tokens",
@@ -251,7 +339,8 @@
       "suggestionLabel_other": "{{count}} users",
       "suggestionHint_one": "{{count}} suggestion (values seen on at least {{minUsers}} different users). Free text still accepted.",
       "suggestionHint_other": "{{count}} suggestions (values seen on at least {{minUsers}} different users). Free text still accepted.",
-      "suggestionEmpty": "No known values for this attribute yet (need at least {{minUsers}} different users). Type any value; it'll start suggesting once more users log in."
+      "suggestionEmpty": "No known values for this attribute yet (need at least {{minUsers}} different users). Type any value; it'll start suggesting once more users log in.",
+      "suggestionNoMatch": "No suggestions match. Keep typing to add as free text."
     }
   },
   "externalInvites": {

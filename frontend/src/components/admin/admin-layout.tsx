@@ -11,6 +11,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { api } from "@/lib/api"
+
+interface DevConfig {
+  dev_mode: boolean
+}
 
 const TAB_VALUES = [
   "usage",
@@ -21,6 +26,11 @@ const TAB_VALUES = [
   "lti",
   "integrations",
   "system",
+  // Dev-only. Visibility is gated on `devConfig.dev_mode` below; the
+  // server's /dev/config returns `dev_mode: false` in prod so the tab
+  // simply never enters `visibleTabs` there. Listed last so the tab
+  // order is stable for everyone else.
+  "dev-tools",
 ] as const
 
 type TabValue = (typeof TAB_VALUES)[number]
@@ -39,6 +49,7 @@ const TAB_ROUTES = {
   lti: "/admin/lti",
   integrations: "/admin/integrations",
   system: "/admin/system",
+  "dev-tools": "/admin/dev-tools",
 } as const satisfies Record<TabValue, string>
 
 const TAB_LABEL_KEYS: Record<TabValue, string> = {
@@ -50,6 +61,7 @@ const TAB_LABEL_KEYS: Record<TabValue, string> = {
   lti: "layout.tabs.lti",
   integrations: "layout.tabs.integrations",
   system: "layout.tabs.system",
+  "dev-tools": "layout.tabs.devTools",
 }
 
 const TAB_TITLE_KEYS: Record<TabValue, string> = {
@@ -61,6 +73,7 @@ const TAB_TITLE_KEYS: Record<TabValue, string> = {
   lti: "pageTitles.adminTab.lti",
   integrations: "pageTitles.adminTab.integrations",
   system: "pageTitles.adminTab.system",
+  "dev-tools": "pageTitles.adminTab.devTools",
 }
 
 export function AdminLayout() {
@@ -70,21 +83,45 @@ export function AdminLayout() {
   const { t: tCommon } = useTranslation("common")
   const { data: user } = useQuery(userQuery)
 
+  // `dev-tools` only ever appears in dev mode; outside dev mode the
+  // backend's /dev/config returns `dev_mode: false` and the tab is
+  // dropped from `visibleTabs` for everyone (including the admin).
+  // Same query is already cached at the root layout (Infinity stale)
+  // so this is a free read of the existing result.
+  const { data: devConfig } = useQuery({
+    queryKey: ["dev", "config"],
+    queryFn: () => api.get<DevConfig>("/dev/config"),
+    staleTime: Infinity,
+  })
+
   // Admins see every tab; integrators are limited to their two site-wide
   // surfaces. Anyone else shouldn't reach this layout (the nav entry and the
   // /admin redirect both gate on role), but fall back to no tabs to be safe.
-  const visibleTabs: readonly TabValue[] =
+  const visibleTabs: readonly TabValue[] = (
     user?.role === "admin"
       ? TAB_VALUES
       : user?.role === "integrator"
         ? INTEGRATOR_TABS
         : []
+  ).filter((tab) => tab !== "dev-tools" || devConfig?.dev_mode === true)
   const visibleTabSet = new Set<TabValue>(visibleTabs)
 
+  // Most admin sub-pages put the tab name as the last path segment
+  // (`/admin/users` -> tab "users"), but a couple of focused sub-flows
+  // live under deeper paths (e.g. `/admin/lti-approve/<id>` belongs to
+  // the "lti" tab). Map those overrides explicitly; everything else
+  // falls back to last-segment matching.
+  const pathOverrideTab: TabValue | null = location.pathname.startsWith(
+    "/admin/lti-approve",
+  )
+    ? "lti"
+    : null
   const lastSegment = location.pathname.split("/").pop() || ""
-  const activeTab: TabValue = visibleTabSet.has(lastSegment as TabValue)
-    ? (lastSegment as TabValue)
-    : (visibleTabs[0] ?? "usage")
+  const activeTab: TabValue =
+    pathOverrideTab ??
+    (visibleTabSet.has(lastSegment as TabValue)
+      ? (lastSegment as TabValue)
+      : (visibleTabs[0] ?? "usage"))
 
   useDocumentTitle(
     `${tCommon("pageTitles.admin")} – ${tCommon(TAB_TITLE_KEYS[activeTab])}`,

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO seeds (table_name, pk) VALUES ($1, $2)\n         ON CONFLICT (table_name, pk) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "97dd1986d9de5574fc6a94c0fbc102b2bceb5d55d9fcc4815a8d8827f6c35399"
+}

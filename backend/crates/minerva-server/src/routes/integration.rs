@@ -39,6 +39,17 @@ pub fn router() -> Router<AppState> {
                     super::documents::MAX_UPLOAD_BYTES as usize,
                 )),
         )
+        // Slice-2 source-identity sweep endpoints. Both are scoped to
+        // the caller's `source_system` so the Moodle plugin can never
+        // orphan Canvas-sourced or hand-uploaded docs.
+        .route(
+            "/courses/{course_id}/documents/orphan",
+            post(orphan_by_source),
+        )
+        .route(
+            "/courses/{course_id}/documents/reconcile",
+            post(reconcile_documents),
+        )
         .route("/courses/{course_id}/embed-token", post(create_embed_token))
         // Site-level provisioning: authenticated with a site integration key
         // (see site_integration_keys table / admin UI). Lets the LMS plugin
@@ -288,7 +299,20 @@ async fn list_documents(
     ))
 }
 
-/// Upload a document to a course (multipart form with a PDF file).
+/// Upload a document to a course (multipart form).
+///
+/// Multipart fields:
+///   * `file` (required): the document bytes. Filename and content-type
+///     come from the multipart headers.
+///   * `source_system` (optional, slice 2): originating system, e.g.
+///     `"moodle"`. Must be present when `source_ref` is.
+///   * `source_ref` (optional, slice 2): opaque per-plugin identity,
+///     e.g. `"cm:42"` or `"forum:7"`. When set, the route does the
+///     orphan-on-replace flow described in `upload_or_dedup`: an
+///     existing active doc with the same source identity but
+///     different content_hash is soft-orphaned before the new row is
+///     inserted, so retrieval excludes the stale material while chat
+///     history that cites it still resolves.
 async fn upload_document(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -301,23 +325,60 @@ async fn upload_document(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let field = multipart
-        .next_field()
-        .await
-        .map_err(|e| {
-            AppError::bad_request_with("doc.multipart_error", [("detail", e.to_string())])
-        })?
-        .ok_or_else(|| AppError::bad_request("doc.no_file"))?;
+    let mut file_bytes: Option<axum::body::Bytes> = None;
+    let mut filename = String::from("document");
+    let mut content_type = String::from("application/octet-stream");
+    let mut source_system: Option<String> = None;
+    let mut source_ref: Option<String> = None;
 
-    let filename = field.file_name().unwrap_or("document").to_string();
-    let content_type = field
-        .content_type()
-        .unwrap_or("application/octet-stream")
-        .to_string();
-    let data = field
-        .bytes()
-        .await
-        .map_err(|e| AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())]))?;
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        AppError::bad_request_with("doc.multipart_error", [("detail", e.to_string())])
+    })? {
+        match field.name() {
+            Some("file") => {
+                filename = field.file_name().unwrap_or("document").to_string();
+                content_type = field
+                    .content_type()
+                    .unwrap_or("application/octet-stream")
+                    .to_string();
+                file_bytes = Some(field.bytes().await.map_err(|e| {
+                    AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())])
+                })?);
+            }
+            Some("source_system") => {
+                let v = field.text().await.map_err(|e| {
+                    AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())])
+                })?;
+                let v = v.trim();
+                if !v.is_empty() {
+                    source_system = Some(v.to_string());
+                }
+            }
+            Some("source_ref") => {
+                let v = field.text().await.map_err(|e| {
+                    AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())])
+                })?;
+                let v = v.trim();
+                if !v.is_empty() {
+                    source_ref = Some(v.to_string());
+                }
+            }
+            _ => {
+                // Skip unknown fields rather than failing: lets older
+                // plugin versions and future field additions interop
+                // without lock-stepping releases.
+                let _ = field.bytes().await;
+            }
+        }
+    }
+
+    let data = file_bytes.ok_or_else(|| AppError::bad_request("doc.no_file"))?;
+
+    // source_system + source_ref must be set together (XOR is a caller
+    // bug; reject with a clear error rather than silently dropping one).
+    if source_system.is_some() != source_ref.is_some() {
+        return Err(AppError::bad_request("doc.source_identity_partial"));
+    }
 
     let size_bytes = data.len() as i64;
     if size_bytes > super::documents::MAX_UPLOAD_BYTES {
@@ -333,35 +394,26 @@ async fn upload_document(
         ));
     }
 
-    let doc_id = Uuid::new_v4();
-
-    // Save file to disk
-    let dir = format!("{}/{}", state.config.docs_path, course_id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
-
-    let ext = super::documents::extension_from_filename(&filename);
-    let file_path = format!("{}/{}.{}", dir, doc_id, ext);
-    tokio::fs::write(&file_path, &data)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;
-
-    // Get course owner as uploader
+    // Get course owner as uploader for plugin-driven uploads. Course
+    // existence was verified above; this lookup is cheap (PK).
     let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // Insert as 'pending'. The background worker will pick it up.
-    let row = minerva_db::queries::documents::insert(
-        &state.db,
-        doc_id,
+    // Idempotent upload: same bytes in the same course collapse to one
+    // active doc. The plugin's local sync_log is now an optimization,
+    // not the source of truth: re-installs, multi-worker races, and
+    // duplicated activities across Moodle sections all converge here.
+    let row = super::documents::upload_or_dedup(
+        &state,
         course_id,
         &filename,
         &content_type,
-        size_bytes,
+        &data,
         course.owner_id,
         None,
+        source_system.as_deref(),
+        source_ref.as_deref(),
     )
     .await?;
 
@@ -372,6 +424,102 @@ async fn upload_document(
         chunk_count: row.chunk_count,
         created_at: row.created_at,
     }))
+}
+
+#[derive(Deserialize)]
+struct OrphanRequest {
+    /// Originating system, e.g. `"moodle"`. Scopes the orphan to docs
+    /// the caller actually owns; a plugin can never accidentally
+    /// orphan another system's docs or UI-uploaded ones.
+    source_system: String,
+    /// Source identifiers whose backing Moodle objects no longer
+    /// exist. Typically driven by an event observer
+    /// (`course_module_deleted`, `mod_forum_post_deleted`, etc.).
+    /// Empty list is allowed (no-op) so the plugin doesn't have to
+    /// special-case bursts of events that compact to zero.
+    source_refs: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct OrphanResponse {
+    /// Number of active rows that flipped to orphaned. Already-orphaned
+    /// rows and refs that don't exist contribute zero.
+    orphaned: u64,
+}
+
+/// Soft-orphan a set of documents by source identity. Mirrors the
+/// event-driven side of the slice-2 delete-mirroring story: when the
+/// Moodle plugin sees a course module disappear, it posts the
+/// affected `source_ref`s here for low-latency removal. The periodic
+/// `reconcile` endpoint is the safety net for missed events.
+async fn orphan_by_source(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<OrphanRequest>,
+) -> Result<Json<OrphanResponse>, AppError> {
+    authenticate_for_course(&state, &headers, course_id).await?;
+
+    if body.source_system.trim().is_empty() {
+        return Err(AppError::bad_request("doc.source_system_empty"));
+    }
+
+    let n = minerva_db::queries::documents::orphan_by_source_refs(
+        &state.db,
+        course_id,
+        &body.source_system,
+        &body.source_refs,
+    )
+    .await?;
+    Ok(Json(OrphanResponse { orphaned: n }))
+}
+
+#[derive(Deserialize)]
+struct ReconcileRequest {
+    /// Originating system the caller speaks for; reconcile only
+    /// touches active docs with this `source_system`. UI-uploaded
+    /// docs (NULL source_system) and other-system docs are never
+    /// orphaned by this sweep.
+    source_system: String,
+    /// Full list of `source_ref`s currently present upstream. Empty
+    /// list = orphan every active doc this caller previously
+    /// registered (the caller is telling us "I have nothing now").
+    source_refs: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ReconcileResponse {
+    /// IDs of docs flipped to orphaned in this sweep. Returned so the
+    /// plugin can log what got removed and operators can correlate
+    /// with Moodle activity history.
+    orphaned_ids: Vec<Uuid>,
+}
+
+/// Periodic-sweep reconcile: orphan every active doc whose
+/// `source_ref` is *not* in the caller's `source_refs` list, scoped
+/// to `source_system`. This catches everything the event observer
+/// missed (bulk delete, restore-from-backup gaps, plugin-disabled
+/// windows). Idempotent: re-running with the same list is a no-op.
+async fn reconcile_documents(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(course_id): Path<Uuid>,
+    Json(body): Json<ReconcileRequest>,
+) -> Result<Json<ReconcileResponse>, AppError> {
+    authenticate_for_course(&state, &headers, course_id).await?;
+
+    if body.source_system.trim().is_empty() {
+        return Err(AppError::bad_request("doc.source_system_empty"));
+    }
+
+    let orphaned_ids = minerva_db::queries::documents::reconcile_active_source_refs(
+        &state.db,
+        course_id,
+        &body.source_system,
+        &body.source_refs,
+    )
+    .await?;
+    Ok(Json(ReconcileResponse { orphaned_ids }))
 }
 
 //; Embed tokens --

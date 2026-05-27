@@ -1,9 +1,11 @@
 mod auth;
 mod classification;
 mod config;
+mod dev_seed;
 mod error;
 mod ext_obfuscate;
 mod feature_flags;
+mod github_url;
 pub mod lti;
 mod lti_nrps;
 mod model_capabilities;
@@ -75,6 +77,80 @@ async fn main() -> anyhow::Result<()> {
                     Err(e) => tracing::warn!("rule-attribute observation prune failed: {}", e),
                 }
                 tokio::time::sleep(PRUNE_INTERVAL).await;
+            }
+        });
+    }
+
+    // One-shot backfill of `documents.content_hash` for pre-existing rows.
+    // The column was added in the slice-1 schema migration; new uploads
+    // populate it server-side, but legacy rows stay NULL until something
+    // reads the file back off disk and hashes it. Until then, the partial
+    // unique index `(course_id, content_hash) WHERE content_hash IS NOT NULL`
+    // simply skips them, so they don't conflict, but server-side dedup
+    // doesn't work for those docs either. We rate-limit to one batch /
+    // second so an installation with 10k legacy rows doesn't saturate
+    // disk I/O on a single pod restart. Self-terminates when the table
+    // is fully backfilled.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            const BATCH: i64 = 50;
+            loop {
+                let rows = match minerva_db::queries::documents::list_active_missing_content_hash(
+                    &state.db, BATCH,
+                )
+                .await
+                {
+                    Ok(rows) if rows.is_empty() => {
+                        tracing::info!("content_hash backfill complete");
+                        return;
+                    }
+                    Ok(rows) => rows,
+                    Err(e) => {
+                        tracing::warn!("content_hash backfill query failed: {}", e);
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        continue;
+                    }
+                };
+
+                for (doc_id, course_id, filename, _mime_type) in rows {
+                    let ext = routes::documents::extension_from_filename(&filename);
+                    let path = format!("{}/{}/{}.{}", config.docs_path, course_id, doc_id, ext);
+                    let bytes = match tokio::fs::read(&path).await {
+                        Ok(b) => b,
+                        Err(e) => {
+                            // Files can legitimately be missing for failed
+                            // uploads or post-delete races; log at debug and
+                            // skip rather than blocking the whole sweep.
+                            tracing::debug!(
+                                "content_hash backfill: skip doc {} (read {} failed: {})",
+                                doc_id,
+                                path,
+                                e
+                            );
+                            continue;
+                        }
+                    };
+                    let hash = routes::documents::compute_content_hash(&bytes);
+                    if let Err(e) = minerva_db::queries::documents::set_content_hash_if_null(
+                        &state.db, doc_id, &hash,
+                    )
+                    .await
+                    {
+                        // Most likely a unique-index collision against an
+                        // active row that already has this hash: another
+                        // active doc in the same course has the same
+                        // bytes (a pre-existing duplicate the backfill
+                        // can't dedup retroactively without orphaning).
+                        // Log and move on; the row stays NULL.
+                        tracing::debug!("content_hash backfill: doc {} skip ({})", doc_id, e);
+                    }
+                }
+
+                // One batch per second is enough to drain a 10k-doc
+                // installation in ~3 minutes without contending with
+                // live uploads.
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
         });
     }

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET status = 'tracked', error_msg = NULL, processing_started_at = NULL, processed_at = NOW() WHERE id = $1 AND status = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "135746a2747afdc3a45ef4c0f1ebb97157d0a9b88e724afc284203e92adeb08a"
+}

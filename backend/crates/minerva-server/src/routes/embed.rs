@@ -13,6 +13,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::pin::Pin;
 use uuid::Uuid;
 
@@ -152,6 +153,11 @@ struct MessageResponse {
     /// Research-phase completion-token share of `tokens_completion`;
     /// mirrors the chat-route field.
     research_completion_tokens: Option<i32>,
+    /// True iff the extraction guard's constraint was active for this
+    /// turn ; same signal as the Shibboleth chat route. Frontend uses
+    /// it to render the `[Reasoning hidden under integrity guard]`
+    /// placeholder for the disclosure on this turn.
+    thinking_hidden: bool,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -331,6 +337,51 @@ async fn get_conversation(
     let prompt_analyses = load_prompt_analyses_for_conversation(&state.db, cid).await;
     let ps = Pseudonymizer::for_viewer(&state.db, &viewer, &state.config.hmac_secret).await?;
 
+    // Read-time suppression of `thinking_transcript` / `tool_events`
+    // / `chunks_used` on guarded turns. Applied unconditionally even
+    // though `fetch_conversation_for_view` can return is_teacher=true
+    // for this caller (a course teacher / admin DOES land in this
+    // handler when they open a pinned exemplar conversation through
+    // the LTI iframe).
+    //
+    // Intentional over-suppression: the embed surface is a student-
+    // facing iframe ; pinned conversations leak the original
+    // student's pseudonym to anyone with course-member access, and
+    // we don't want the iframe to also leak unredacted research-
+    // phase reasoning that the rewrite suppressed for the original
+    // owner. Teachers reviewing flag evidence go through the
+    // Shibboleth dashboard (routes/chat.rs::get_conversation, which
+    // DOES branch on is_teacher and serves the full transcript) ;
+    // the embed iframe is not the audit surface. `_is_teacher` is
+    // deliberately discarded for that reason.
+    //
+    // Two sources, same shape as the chat route's get_conversation:
+    //   1. `messages.thinking_hidden` column ; populated at
+    //      `common::finalize` time when the guard was active.
+    //   2. `extraction_rewrote` flag at the turn's index ; the
+    //      pre-migration historical signal.
+    let suppress_thinking_ids: HashSet<Uuid> = {
+        let mut ids: HashSet<Uuid> = messages
+            .iter()
+            .filter(|m| m.role == "assistant" && m.thinking_hidden)
+            .map(|m| m.id)
+            .collect();
+        let rewritten_turns = minerva_db::queries::conversation_flags::turn_indexes_with_flag(
+            &state.db,
+            cid,
+            crate::strategy::extraction_guard::REWROTE_FLAG,
+        )
+        .await
+        .unwrap_or_default();
+        if !rewritten_turns.is_empty() {
+            ids.extend(crate::routes::chat::assistant_ids_on_turns(
+                &messages,
+                &rewritten_turns,
+            ));
+        }
+        ids
+    };
+
     Ok(Json(ConversationDetailResponse {
         messages: messages
             .into_iter()
@@ -338,13 +389,30 @@ async fn get_conversation(
                 id: m.id,
                 role: m.role,
                 content: m.content,
-                chunks_used: m.chunks_used,
+                // `chunks_used` gated on the same set as the thinking
+                // disclosure ; mirrors chat.rs (embed always treats
+                // viewer as owner-equivalent, so the gate is
+                // unconditional once we're in the embed route).
+                chunks_used: if suppress_thinking_ids.contains(&m.id) {
+                    None
+                } else {
+                    m.chunks_used
+                },
                 model_used: m.model_used,
-                thinking_transcript: m.thinking_transcript,
-                tool_events: m.tool_events,
+                thinking_transcript: if suppress_thinking_ids.contains(&m.id) {
+                    None
+                } else {
+                    m.thinking_transcript
+                },
+                tool_events: if suppress_thinking_ids.contains(&m.id) {
+                    None
+                } else {
+                    m.tool_events
+                },
                 thinking_ms: m.thinking_ms,
                 research_prompt_tokens: m.research_prompt_tokens,
                 research_completion_tokens: m.research_completion_tokens,
+                thinking_hidden: suppress_thinking_ids.contains(&m.id),
                 created_at: m.created_at,
             })
             .collect(),

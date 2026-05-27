@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="local/minerva/db" VERSION="2026041501" COMMENT="Minerva plugin tables">
+<XMLDB PATH="local/minerva/db" VERSION="2026052402" COMMENT="Minerva plugin tables">
   <TABLES>
     <TABLE NAME="local_minerva_links" COMMENT="Links between Moodle courses and Minerva courses">
       <FIELDS>
@@ -9,6 +9,7 @@
         <FIELD NAME="minerva_course_name" TYPE="char" LENGTH="255" NOTNULL="false" COMMENT="Cached name of the Minerva course"/>
         <FIELD NAME="minerva_api_url" TYPE="char" LENGTH="512" NOTNULL="true" COMMENT="Minerva API base URL for this course"/>
         <FIELD NAME="minerva_api_key" TYPE="char" LENGTH="255" NOTNULL="true" COMMENT="Minerva API key for this course"/>
+        <FIELD NAME="sync_forums" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" COMMENT="Per-course opt-in for forum sync. Default OFF; only togglable when site-level enable_forum_sync is ON. Both flags AND together at sync time."/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true"/>
       </FIELDS>
@@ -25,6 +26,7 @@
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
         <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true"/>
         <FIELD NAME="contenthash" TYPE="char" LENGTH="40" NOTNULL="true" COMMENT="SHA1 hash of the synced file"/>
+        <FIELD NAME="sourceref" TYPE="char" LENGTH="255" NOTNULL="false" COMMENT="Stable Moodle-side identity sent to server as source_ref (e.g. cm:42, page:7); NULL on rows from before slice-2 rollout"/>
         <FIELD NAME="filename" TYPE="char" LENGTH="255" NOTNULL="true"/>
         <FIELD NAME="minerva_doc_id" TYPE="char" LENGTH="36" NOTNULL="false" COMMENT="Minerva document UUID"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true"/>
@@ -34,6 +36,7 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="courseid_hash" UNIQUE="true" FIELDS="courseid, contenthash"/>
+        <INDEX NAME="courseid_sourceref" UNIQUE="false" FIELDS="courseid, sourceref"/>
       </INDEXES>
     </TABLE>
   </TABLES>

@@ -271,6 +271,21 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
     },
   })
 
+  // Slice 2: teacher-editable source_ref. Server caps which docs
+  // accept the edit (returns 4xx for plugin-owned source_systems);
+  // the UI gates the affordance up front so teachers don't see a
+  // disabled-looking button. Empty string clears the ref + system
+  // (back to untagged); non-empty sets system="manual" server-side.
+  const setSourceRefMutation = useMutation({
+    mutationFn: ({ docId, sourceRef }: { docId: string; sourceRef: string }) =>
+      api.patch(`/courses/${courseId}/documents/${docId}`, { source_ref: sourceRef }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "documents"],
+      })
+    },
+  })
+
   const setKindMutation = useMutation({
     mutationFn: ({ docId, kind }: { docId: string; kind: DocumentKind }) =>
       api.patch(`/courses/${courseId}/documents/${docId}/kind`, { kind }),
@@ -576,6 +591,29 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                   </Badge>
                 )}
                 <Badge variant={statusColor(doc.status)}>{doc.status}</Badge>
+                {doc.orphaned_at && (
+                  <Badge
+                    variant="secondary"
+                    title={t("documents.orphanedTitle", {
+                      defaultValue:
+                        "Excluded from new retrievals; kept so chat history still resolves.",
+                    })}
+                  >
+                    {t("documents.orphaned", { defaultValue: "orphaned" })}
+                  </Badge>
+                )}
+                {doc.source_system && doc.source_ref && (
+                  <Badge
+                    variant="outline"
+                    title={`${doc.source_system}: ${doc.source_ref}`}
+                  >
+                    {doc.source_system}
+                    {":"}
+                    {doc.source_ref.length > 24
+                      ? `${doc.source_ref.slice(0, 21)}…`
+                      : doc.source_ref}
+                  </Badge>
+                )}
                 {doc.error_msg && (
                   <span className="text-xs text-destructive" title={doc.error_msg}>
                     {t("documents.errorLabel")}
@@ -598,6 +636,41 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                 ) : (
                   <Badge variant="outline">{doc.displayable ? t("documents.visible") : t("documents.hidden")}</Badge>
                 )}
+                {canMutate &&
+                  (doc.source_system === null || doc.source_system === "manual") && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      title={t("documents.editSourceRefTitle", {
+                        defaultValue:
+                          "Tag this doc with a stable reference. Re-uploading a new file under the same reference will orphan this one.",
+                      })}
+                      onClick={() => {
+                        // window.prompt is intentionally primitive: the
+                        // affordance is a single short string, and full
+                        // dialog scaffolding would dwarf the feature.
+                        const current = doc.source_ref ?? ""
+                        const next = window.prompt(
+                          t("documents.editSourceRefPrompt", {
+                            defaultValue:
+                              "Source reference (empty to clear). Used as the versioning slot: re-uploading with the same reference orphans this doc.",
+                          }),
+                          current,
+                        )
+                        if (next === null) return
+                        if (next === current) return
+                        setSourceRefMutation.mutate({
+                          docId: doc.id,
+                          sourceRef: next.trim(),
+                        })
+                      }}
+                      disabled={setSourceRefMutation.isPending}
+                    >
+                      {doc.source_ref
+                        ? t("documents.editSourceRef", { defaultValue: "Edit ref" })
+                        : t("documents.addSourceRef", { defaultValue: "Add ref" })}
+                    </Button>
+                  )}
                 {canMutate && (
                   <Button
                     variant="ghost"

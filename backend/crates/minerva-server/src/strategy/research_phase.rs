@@ -223,9 +223,45 @@ async fn emit_thinking_done(tx: &mpsc::Sender<Result<Event, AppError>>, duration
         .await;
 }
 
+/// One-shot signal that the research phase ran but its user-visible
+/// stream was suppressed by the extraction guard. Emitted in place of
+/// the usual `thinking_token` / `tool_call` / `tool_result` events;
+/// the closing `thinking_done` still fires so the frontend's
+/// research-vs-writeup state machine stays consistent across guarded
+/// and non-guarded turns. Frontend handler renders a placeholder
+/// disclosure ("[Reasoning hidden under integrity guard for this
+/// turn]") instead of the live transcript.
+pub(super) async fn emit_thinking_hidden(tx: &mpsc::Sender<Result<Event, AppError>>) {
+    let _ = tx
+        .send(Ok(Event::default().data(
+            serde_json::json!({"type": "thinking_hidden"}).to_string(),
+        )))
+        .await;
+}
+
 /// Entry point. Drives the research loop until it hits `stop` (or a
 /// cap), then returns the accumulated chunks + transcript for the
 /// writeup phase.
+///
+/// `orphaned_doc_ids` is the per-turn set of soft-orphaned documents
+/// (Moodle activity edited / deleted upstream). It's threaded into every
+/// retrieval primitive that the research loop can drive: model-issued
+/// `semantic_search` / `keyword_search` tool calls AND mid-stream FLARE
+/// injections, so stale chunks never resurface no matter which path
+/// the model takes. The caller (currently `tool_use::run`) pre-fetches
+/// it once via `documents::orphaned_doc_ids` and reuses it for the
+/// strategy's own seed retrieval too.
+///
+/// `suppress_thinking_stream` is the extraction-guard gate: when true,
+/// the research loop runs server-side as normal (tools dispatch,
+/// chunks accumulate, transcript builds up for the teacher audit
+/// trail and the post-generation output check) but the user-visible
+/// SSE events (`thinking_token` / `tool_call` / `tool_result`) are
+/// dropped on the floor. A one-shot `{"type":"thinking_hidden"}`
+/// event is emitted at start instead so the frontend can render the
+/// placeholder; the closing `thinking_done` event still fires so the
+/// frontend's research/writeup state machine stays consistent across
+/// guarded and non-guarded turns.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     ctx: &GenerationContext,
@@ -233,12 +269,23 @@ pub async fn run(
     catalog_flags: ToolCatalogFlags,
     initial_chunks: Vec<RagChunk>,
     per_response_token_cap: i64,
+    orphaned_doc_ids: &std::collections::HashSet<String>,
+    suppress_thinking_stream: bool,
     tx: &mpsc::Sender<Result<Event, AppError>>,
 ) -> ResearchOutput {
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name =
         minerva_ingest::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
+
+    // Tell the frontend up front that the disclosure should render
+    // as a placeholder for this turn. Done before any other SSE
+    // emit so the placeholder shows the instant research starts,
+    // not after the first would-be `thinking_token` would have
+    // landed.
+    if suppress_thinking_stream {
+        emit_thinking_hidden(tx).await;
+    }
 
     let dispatch_ctx = ToolDispatchCtx {
         http_client: &http_client,
@@ -251,6 +298,7 @@ pub async fn run(
         embedding_model: &ctx.embedding_model,
         course_id: ctx.course_id,
         min_score: ctx.min_score,
+        orphaned_doc_ids,
     };
 
     let catalog = tools::assemble_catalog(catalog_flags);
@@ -342,6 +390,7 @@ pub async fn run(
             &catalog,
             tx,
             &mut transcript,
+            suppress_thinking_stream,
         )
         .await
         {
@@ -409,7 +458,15 @@ pub async fn run(
                 } else {
                     let args_value: serde_json::Value =
                         serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-                    emit_tool_call(tx, &call.name, &args_value).await;
+                    // emit_* gated on the guard's suppression flag so
+                    // we never leak the model's tool calls / results
+                    // to the client on a guarded turn. Dispatch and
+                    // tool_events accumulation still happen so the
+                    // teacher dashboard's audit trail is preserved
+                    // and the writeup phase still sees the chunks.
+                    if !suppress_thinking_stream {
+                        emit_tool_call(tx, &call.name, &args_value).await;
+                    }
                     match tools::dispatch(&call.name, &call.arguments, &dispatch_ctx, catalog_flags)
                         .await
                     {
@@ -429,7 +486,9 @@ pub async fn run(
                             let result_value: serde_json::Value =
                                 serde_json::from_str(&outcome.model_message)
                                     .unwrap_or(serde_json::Value::Null);
-                            emit_tool_result(tx, &call.name, &summary, &result_value).await;
+                            if !suppress_thinking_stream {
+                                emit_tool_result(tx, &call.name, &summary, &result_value).await;
+                            }
                             tool_events.push(ToolEventRecord {
                                 name: call.name.clone(),
                                 args: args_value.clone(),
@@ -444,7 +503,9 @@ pub async fn run(
                             let summary = summarise_for_event(&msg);
                             let result_value: serde_json::Value =
                                 serde_json::from_str(&msg).unwrap_or(serde_json::Value::Null);
-                            emit_tool_result(tx, &call.name, &summary, &result_value).await;
+                            if !suppress_thinking_stream {
+                                emit_tool_result(tx, &call.name, &summary, &result_value).await;
+                            }
                             tool_events.push(ToolEventRecord {
                                 name: call.name.clone(),
                                 args: serde_json::from_str(&call.arguments)
@@ -490,6 +551,7 @@ pub async fn run(
                     config.flare_similarity_threshold.max(ctx.min_score),
                     &ctx.embedding_provider,
                     &ctx.embedding_model,
+                    orphaned_doc_ids,
                 )
                 .await;
                 let mut added = 0usize;
@@ -550,8 +612,10 @@ pub async fn run(
                         .collect();
                     let result_value = serde_json::Value::Array(result_chunks);
                     let summary = format!("{} chunks added", added);
-                    emit_tool_call(tx, "flare_auto_retrieve", &flare_args).await;
-                    emit_tool_result(tx, "flare_auto_retrieve", &summary, &result_value).await;
+                    if !suppress_thinking_stream {
+                        emit_tool_call(tx, "flare_auto_retrieve", &flare_args).await;
+                        emit_tool_result(tx, "flare_auto_retrieve", &summary, &result_value).await;
+                    }
                     tool_events.push(ToolEventRecord {
                         name: "flare_auto_retrieve".to_string(),
                         args: flare_args,
@@ -734,6 +798,7 @@ async fn stream_research_turn(
     catalog: &[serde_json::Value],
     tx: &mpsc::Sender<Result<Event, AppError>>,
     transcript: &mut String,
+    suppress_thinking_stream: bool,
 ) -> Result<TurnOutcome, String> {
     let mut body = serde_json::json!({
         "model": ctx.model,
@@ -845,9 +910,17 @@ async fn stream_research_turn(
             if let Some(delta_content) = choice["delta"]["content"].as_str() {
                 if !delta_content.is_empty() {
                     content.push_str(delta_content);
+                    // `transcript` keeps accumulating server-side even
+                    // when we suppress the live emit ; the teacher
+                    // dashboard reads it through the persisted column,
+                    // and the post-generation output check (writeup +
+                    // intercept_reply) needs it intact server-side
+                    // even if the student never sees the prose.
                     transcript.push_str(delta_content);
                     sentence_buffer.push_str(delta_content);
-                    emit_thinking_token(tx, delta_content).await;
+                    if !suppress_thinking_stream {
+                        emit_thinking_token(tx, delta_content).await;
+                    }
 
                     if config.use_logprobs {
                         if let Some(logprobs_content) = choice["logprobs"]["content"].as_array() {
@@ -1209,6 +1282,7 @@ mod stream_integration_tests {
             &catalog,
             &tx,
             &mut transcript,
+            false,
         )
         .await
         .expect("stream should succeed");
@@ -1283,6 +1357,7 @@ mod stream_integration_tests {
             &catalog,
             &tx,
             &mut transcript,
+            false,
         )
         .await
         .expect("stream should succeed");

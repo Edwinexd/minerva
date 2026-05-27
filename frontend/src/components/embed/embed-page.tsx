@@ -1,23 +1,17 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Menu, X } from "lucide-react"
-import { PrivacyAckBanner } from "@/components/privacy-ack"
 import { useDocumentTitle } from "@/lib/use-document-title"
-import { ChatTranscript } from "@/components/chat/chat-transcript"
 import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
 import { ConversationList } from "@/components/chat/conversation-list"
-import { EmptyChatGreeting } from "@/components/chat/empty-chat-greeting"
-import { TeacherNoteInline } from "@/components/chat/teacher-note-inline"
-import { useChatStream } from "@/components/chat/use-chat-stream"
-import { AegisFeedbackPanel } from "@/components/chat/aegis-feedback-panel"
-import { AegisShieldFilled } from "@/components/icons/aegis-shield-filled"
-import { AegisSuggestionsBanner } from "@/components/chat/aegis-suggestions-banner"
-import { useAegisLiveAnalyzer } from "@/components/chat/use-aegis-live-analyzer"
-import { useAegisMode } from "@/components/chat/use-aegis-mode"
-import { useAegisPanelVisible } from "@/components/chat/use-aegis-panel-visible"
-import type { AegisSuggestion, PromptAnalysis, TeacherNote } from "@/lib/types"
+import {
+  ChatSurface,
+  type ChatSurfaceAdapter,
+  type ChatSurfaceLabels,
+  type ChatSurfaceLayout,
+} from "@/components/chat/chat-surface"
+import type { PromptAnalysis, TeacherNote } from "@/lib/types"
 
 //; Types for embed API responses --
 
@@ -75,6 +69,14 @@ interface EmbedMessage {
   thinking_transcript: string | null
   tool_events: PersistedToolEvent[] | null
   thinking_ms: number | null
+  /**
+   * True when the extraction guard suppressed this turn's thinking
+   * stream. Server-side gate on the embed conversation-detail
+   * route fills this from `messages.thinking_hidden` ORed with the
+   * pre-migration historical signal; the embed surface always
+   * treats the viewer as owner so suppression is unconditional.
+   */
+  thinking_hidden: boolean
   created_at: string
 }
 
@@ -374,7 +376,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
         )}
       </div>
 
-      <div className="flex-1 flex flex-col min-w-0 pl-12 md:pl-0">
+      <div className="flex-1 flex flex-col min-w-0 pt-12 md:pt-0">
         <EmbedChatWindow
           courseId={courseId}
           conversationId={activeConvId}
@@ -396,6 +398,13 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
 
 //; Chat window --
 
+/**
+ * Embed-side ChatSurface wrapper. Owns the embed-specific bits
+ * (token-in-body auth, manual `useState` data layer, `auth` i18n
+ * namespace with a few `student` aegis strings borrowed) and hands
+ * everything else to the shared `<ChatSurface>` in
+ * `components/chat/chat-surface.tsx`.
+ */
 function EmbedChatWindow({
   courseId,
   conversationId,
@@ -443,81 +452,20 @@ function EmbedChatWindow({
   const { t: tStudent } = useTranslation("student")
   const [messages, setMessages] = useState<EmbedMessage[]>([])
   const [notes, setNotes] = useState<TeacherNote[]>([])
-  // Aegis analyses live in component state alongside `messages`
-  // because the embed view doesn't run on React Query; we hand-
-  // load conversation detail on every conversation change. Same
-  // soft-fail-to-empty fallback the route uses on the server side.
   const [promptAnalyses, setPromptAnalyses] = useState<PromptAnalysis[]>([])
   const [loading, setLoading] = useState(true)
-  const [input, setInput] = useState("")
-  const stream = useChatStream(t("embed.unknownError"))
-  const { send, reset, setError } = stream
-
-  // Subject-expertise mode shared with the panel toggle (see
-  // chat-page for the rationale). Read-only here; the setter
-  // is the panel's concern.
-  const [aegisMode] = useAegisMode()
-  const [panelVisible, setPanelVisible] = useAegisPanelVisible()
-
-  // Live aegis analyzer. Auth flow differs from the Shibboleth
-  // chat: the embed token rides in the request body alongside the
-  // content, since iframes can't ship cookies cross-origin and
-  // EventSource doesn't allow custom headers (we mirror that
-  // shape for plain JSON POSTs to keep the body contract uniform).
-  const fetchLiveAnalysis = useCallback(
-    async (
-      content: string,
-      previousSuggestions: AegisSuggestion[],
-      signal: AbortSignal,
-    ): Promise<PromptAnalysis | null> => {
-      const res = await fetch(`/api/embed/course/${courseId}/aegis/analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content,
-          token,
-          conversation_id: conversationId,
-          mode: aegisMode,
-          // Live-iteration context; mirrors chat-page. The server
-          // slots these onto the current-draft trail entry so the
-          // already-addressed check can drop kinds the analyzer
-          // just coached on a near-identical earlier version of
-          // the same draft.
-          previous_suggestions: previousSuggestions,
-        }),
-        signal,
-      })
-      if (!res.ok) return null
-      return (await res.json()) as PromptAnalysis | null
-    },
-    [courseId, conversationId, token, aegisMode],
-  )
-  const liveAnalyzer = useAegisLiveAnalyzer(
-    input,
-    aegisEnabled,
-    fetchLiveAnalysis,
-    // Mode is in the resetKey so toggling Beginner/Expert wipes
-    // the cached verdict; otherwise the analyzer's draft-match
-    // short-circuit would serve the previous mode's result. See
-    // the chat-page comment for the full rationale.
-    `${courseId}:${conversationId ?? "new"}:${aegisMode}`,
-  )
 
   // Load messages when conversation changes. When conversationId is null,
   // the user clicked "New chat" and no conv row exists yet; render an
   // empty thread with the input ready (lazy creation happens on first send).
-  // The live analyzer wipes its own cached verdict via its resetKey so
-  // we don't poke it from here.
   //
-  // The synchronous resets (reset/setInput/setMessages/setNotes/etc.)
-  // happen during render via the adjust-state-on-prop-change pattern;
-  // the genuine async fetch stays in the effect below. See
+  // The synchronous resets (setMessages/setNotes/etc.) happen during
+  // render via the adjust-state-on-prop-change pattern; the genuine
+  // async fetch stays in the effect below. See
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
   const [prevConversationId, setPrevConversationId] = useState(conversationId)
   if (conversationId !== prevConversationId) {
     setPrevConversationId(conversationId)
-    reset()
-    setInput("")
     if (conversationId === null) {
       setMessages([])
       setNotes([])
@@ -539,73 +487,101 @@ function EmbedChatWindow({
           setLoading(false)
         }
       })
-      .catch((e) => {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : t("embed.failedToLoadMessages"))
-          setLoading(false)
-        }
+      .catch(() => {
+        // The shared surface owns the SSE error line; load failures
+        // here just leave the transcript empty. Cosmetic enough that
+        // we don't surface a toast.
+        if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [courseId, conversationId, token, t, setError])
+  }, [courseId, conversationId, token])
 
-  // Index notes the same way the regular chat page does: per-message
-  // notes render right after that bubble; conversation-level notes
-  // (no message_id) render once above the thread.
-  const notesByMessage = new Map<string, TeacherNote[]>()
-  const conversationNotes: TeacherNote[] = []
-  for (const note of notes) {
-    if (note.message_id) {
-      const existing = notesByMessage.get(note.message_id) ?? []
-      existing.push(note)
-      notesByMessage.set(note.message_id, existing)
-    } else {
-      conversationNotes.push(note)
-    }
-  }
+  // ---- ChatSurface adapter ----
 
-  /**
-   * Returns the conversation id this send landed in (the existing one
-   * for an append, or the server-assigned one for a brand-new conv
-   * signaled via the first SSE event), or null if the send failed
-   * before any conv was created.
-   */
-  const sendMessage = async (
-    content: string,
-    existingConvId: string | null,
-  ): Promise<string | null> => {
-    // Existing conv -> append endpoint. New conv -> course-level
-    // create-with-message endpoint, which generates the id server-side
-    // and returns it as the first SSE event.
-    const url = existingConvId
-      ? `/api/embed/course/${courseId}/conversations/${existingConvId}/message`
-      : `/api/embed/course/${courseId}/conversations`
-
-    // Snapshot the live analysis on submit so the panel state at
-    // the moment of Send is what the History row records.
-    const analysisAtSend = liveAnalyzer.consume()
-
-    let landedConvId: string | null = existingConvId
-    const ok = await send(
-      content,
-      () =>
+  const buildSendFetch = useCallback<
+    ChatSurfaceAdapter<EmbedMessage>["buildSendFetch"]
+  >(
+    ({ content, existingConvId, analysisAtSend }) => {
+      const url = existingConvId
+        ? `/api/embed/course/${courseId}/conversations/${existingConvId}/message`
+        : `/api/embed/course/${courseId}/conversations`
+      return () =>
         fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          // Token rides in the body for the SSE POST: EventSource can't
-          // add custom headers and the URL gets logged.
+          // Token rides in the body for the SSE POST: EventSource
+          // can't add custom headers and the URL gets logged.
           body: JSON.stringify({
             content,
             token,
             prompt_analysis: analysisAtSend,
           }),
+        })
+    },
+    [courseId, token],
+  )
+
+  const fetchLiveAnalysis = useCallback<
+    ChatSurfaceAdapter<EmbedMessage>["fetchLiveAnalysis"]
+  >(
+    async (content, previousSuggestions, mode, signal) => {
+      const res = await fetch(`/api/embed/course/${courseId}/aegis/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content,
+          token,
+          conversation_id: conversationId,
+          mode,
+          // Live-iteration context; mirrors chat-page. The server
+          // slots these onto the current-draft trail entry so the
+          // already-addressed check can drop kinds the analyzer
+          // just coached on a near-identical earlier version of the
+          // same draft.
+          previous_suggestions: previousSuggestions,
         }),
-      (data) => {
-        if (data.type === "conversation_created" && typeof data.id === "string") {
-          landedConvId = data.id
+        signal,
+      })
+      if (!res.ok) return null
+      return (await res.json()) as PromptAnalysis | null
+    },
+    [courseId, conversationId, token],
+  )
+
+  const fetchRewrite = useCallback<
+    ChatSurfaceAdapter<EmbedMessage>["fetchRewrite"]
+  >(
+    async (draft, selected, mode) => {
+      try {
+        const res = await fetch(`/api/embed/course/${courseId}/aegis/rewrite`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: draft,
+            token,
+            suggestions: selected,
+            mode,
+          }),
+        })
+        if (!res.ok) {
+          console.warn("aegis rewrite failed:", res.status)
+          return null
         }
-      },
-    )
-    if (ok && landedConvId) {
+        const body = (await res.json()) as { content: string }
+        const rewritten = body.content?.trim() ?? ""
+        return rewritten || null
+      } catch (e) {
+        console.warn("aegis rewrite error:", e)
+        return null
+      }
+    },
+    [courseId, token],
+  )
+
+  const onAfterSend = useCallback<
+    ChatSurfaceAdapter<EmbedMessage>["onAfterSend"]
+  >(
+    async (landedConvId) => {
       // Reload from the server so the persisted assistant reply
       // (with metadata) replaces the optimistic streamed copy.
       try {
@@ -620,135 +596,9 @@ function EmbedChatWindow({
         // Silent
       }
       onMessageSent()
-    }
-    return ok ? landedConvId : null
-  }
-
-  // Soft-block intercept (matches chat-page). The analyzer runs on
-  // Send so fast typers who press Enter before the debounce fires
-  // still get a chance to see suggestions; if any come back, the
-  // Send button re-labels to "Send as-is" and a small inline note
-  // appears. Pressing Send again with the same draft dispatches.
-  // Resets when the input changes or after a successful send.
-  const [confirmDraftSend, setConfirmDraftSend] = useState<string | null>(null)
-  const [submitChecking, setSubmitChecking] = useState(false)
-
-  const dispatchSend = (msg: string) => {
-    setInput("")
-    setConfirmDraftSend(null)
-    ;(async () => {
-      const landedConvId = await sendMessage(msg, conversationId)
-      if (landedConvId && conversationId === null) {
-        onConversationCreated(landedConvId)
-      }
-    })()
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim() || stream.streaming || submitChecking) return
-    const msg = input
-
-    if (confirmDraftSend === msg) {
-      dispatchSend(msg)
-      return
-    }
-    if (!aegisEnabled) {
-      dispatchSend(msg)
-      return
-    }
-
-    setSubmitChecking(true)
-    const verdict = await liveAnalyzer.analyzeNow(msg)
-    setSubmitChecking(false)
-    if (verdict && verdict.suggestions.length > 0) {
-      setConfirmDraftSend(msg)
-      return
-    }
-    dispatchSend(msg)
-  }
-
-  const sendNeedsConfirm =
-    confirmDraftSend !== null && confirmDraftSend === input
-
-  // Banner state; mirrors chat-page. The rewrite call uses the
-  // embed-token-in-body auth flow rather than cookies + dev-user.
-  const [bannerDismissedFor, setBannerDismissedFor] = useState<string | null>(
-    null,
+    },
+    [courseId, token, onMessageSent],
   )
-  const [rewriting, setRewriting] = useState(false)
-
-  // Reset both `confirmDraftSend` and `bannerDismissedFor` whenever
-  // the draft diverges from the snapshot we last reset against.
-  // Adjust-state-on-prop-change during render; see
-  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
-  const [prevDraftInput, setPrevDraftInput] = useState(input)
-  if (input !== prevDraftInput) {
-    setPrevDraftInput(input)
-    if (confirmDraftSend !== null && confirmDraftSend !== input) {
-      setConfirmDraftSend(null)
-    }
-    if (bannerDismissedFor !== null && bannerDismissedFor !== input) {
-      setBannerDismissedFor(null)
-    }
-  }
-  const liveSuggestions = liveAnalyzer.analysis?.suggestions ?? []
-  const showBanner =
-    aegisEnabled &&
-    liveSuggestions.length > 0 &&
-    bannerDismissedFor !== input
-
-  // Preview-and-apply flow mirrors chat-page; see the long
-  // commentary there for the rationale (TL;DR: pilot users
-  // disliked the auto-rewrite-and-send "Use ideas" button; this
-  // flow returns control by previewing the rewrite read-only and
-  // letting the student apply it to the input themselves).
-  const handlePreviewIdeas = async (
-    selected: AegisSuggestion[],
-  ): Promise<string | null> => {
-    if (rewriting) return null
-    const draft = input
-    if (!draft.trim() || selected.length === 0) return null
-    setRewriting(true)
-    try {
-      const res = await fetch(`/api/embed/course/${courseId}/aegis/rewrite`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: draft,
-          token,
-          suggestions: selected,
-          mode: aegisMode,
-        }),
-      })
-      if (!res.ok) {
-        console.warn("aegis rewrite failed:", res.status)
-        return null
-      }
-      const body = (await res.json()) as { content: string }
-      const rewritten = body.content?.trim() ?? ""
-      return rewritten || null
-    } catch (e) {
-      console.warn("aegis rewrite error:", e)
-      return null
-    } finally {
-      setRewriting(false)
-    }
-  }
-
-  const handleApplyRewrite = (rewritten: string) => {
-    if (!rewritten.trim()) return
-    setInput(rewritten)
-    setConfirmDraftSend(rewritten)
-    // Drop the cached old verdict so the banner hides naturally
-    // during the ~400ms wait for the rewritten input's own analyze
-    // call rather than briefly flashing the previous draft's
-    // suggestions. Replaces the older `setBannerDismissedFor` call
-    // here which suppressed the banner past apply even when the
-    // new verdict had genuinely new ideas; see the chat-page
-    // counterpart for the full rationale.
-    liveAnalyzer.reset()
-  }
 
   const bubbleLabels: ChatBubbleLabels = {
     sourceCount: (count) => t("embed.sources", { count }),
@@ -758,203 +608,68 @@ function EmbedChatWindow({
     // sits in front of students who don't need to see model accounting.
   }
 
-  // Greeting hero in place of the transcript on a fresh iframe
-  // launch (no conv selected, nothing pending or streaming). The
-  // first send fills `pendingUserMsg` and the transcript takes
-  // over from there.
-  const showGreeting =
-    conversationId === null && !stream.streaming && !stream.pendingUserMsg
+  const labels: ChatSurfaceLabels = {
+    bubble: bubbleLabels,
+    thinking: {
+      thinkingActive: t("embed.thinkingActive"),
+      thinkingDone: t("embed.thinkingDone"),
+      thinkingDoneWithDuration: t("embed.thinkingDoneWithDuration"),
+      thinkingHidden: t("embed.thinkingHidden"),
+      thinkingHiddenBody: t("embed.thinkingHiddenBody"),
+      toolCallsAriaLabel: t("embed.toolCallsAriaLabel"),
+    },
+    assistantResponse: t("embed.assistantResponseLabel"),
+    unknownError: t("embed.unknownError"),
+    send: t("embed.send"),
+    inputPlaceholder: t("embed.inputPlaceholder"),
+    aegisChecking: tStudent("aegis.checking"),
+    aegisSendAsIs: tStudent("aegis.sendAsIs"),
+    aegisPendingTitle: tStudent("aegis.pendingTitle"),
+    aegisLooksGoodTitle: tStudent("aegis.looksGoodTitle"),
+    aegisEmptyTitle: tStudent("aegis.emptyTitle"),
+    aegisShowPanel: tStudent("aegis.showPanel"),
+    aegisShowPanelButton: tStudent("aegis.showPanelButton"),
+    disclaimerBefore: t("embed.disclosurePrefix"),
+    disclaimerLink: t("embed.disclosureLink"),
+    disclaimerAfter: t("embed.disclosureSuffix"),
+    teacherNote: t("embed.teacherNote"),
+  }
 
-  return (
-    <div className="relative flex flex-1 min-h-0 gap-2">
-      <div className="flex-1 flex flex-col min-w-0">
-      <div className="flex-1 overflow-y-auto px-4">
-        {showGreeting ? (
-          <div className="h-full flex items-center justify-center">
-            <EmptyChatGreeting
-              displayName={displayName}
-              courseName={courseName}
-              suggestions={suggestedQuestions}
-              onSuggestionClick={(q) => setInput(q)}
-            />
-          </div>
-        ) : (
-        <ChatTranscript<EmbedMessage>
-          messages={messages}
-          isLoading={loading}
-          pendingUserMsg={stream.pendingUserMsg}
-          streaming={stream.streaming}
-          streamedTokens={stream.streamedTokens}
-          error={stream.error}
-          thinkingTokens={stream.thinkingTokens}
-          toolEvents={stream.toolEvents}
-          thinkingActive={stream.thinkingActive}
-          thinkingDurationMs={stream.thinkingDurationMs}
-          bubbleLabels={bubbleLabels}
-          thinkingLabels={{
-            thinkingActive: t("embed.thinkingActive"),
-            thinkingDone: t("embed.thinkingDone"),
-            thinkingDoneWithDuration: t("embed.thinkingDoneWithDuration"),
-            toolCallsAriaLabel: t("embed.toolCallsAriaLabel"),
-          }}
-          getPersistedThinking={(msg) => ({
-            thinking_transcript: msg.thinking_transcript,
-            tool_events: msg.tool_events
-              ? msg.tool_events.map((e) => ({
-                  name: e.name,
-                  args: e.args,
-                  resultSummary: e.result_summary,
-                  result: e.result,
-                }))
-              : null,
-            thinking_ms: msg.thinking_ms,
-          })}
-          assistantResponseLabel={t("embed.assistantResponseLabel")}
-          renderBeforeMessages={() =>
-            conversationNotes.length > 0 ? (
-              <div className="space-y-2">
-                {conversationNotes.map((note) => (
-                  <TeacherNoteInline
-                    key={note.id}
-                    note={note}
-                    label={t("embed.teacherNote")}
-                  />
-                ))}
-              </div>
-            ) : null
-          }
-          renderAfterMessage={(msg) =>
-            notesByMessage.get(msg.id)?.map((note) => (
-              <TeacherNoteInline
-                key={note.id}
-                note={note}
-                label={t("embed.teacherNote")}
-              />
-            ))
-          }
-        />
-        )}
-      </div>
+  const layout: ChatSurfaceLayout = {
+    outerGap: "gap-2",
+    transcriptScroll: "px-4",
+    inputBlock: "p-4",
+    // Iframe canvas can't spare 320px below md, so the panel
+    // switches to drawer earlier than the Shibboleth chat page
+    // (which uses `lg`).
+    aegisDrawerBreakpoint: "md",
+    // Embed leaves conv-level notes inline; the sticky bar reads
+    // oddly against Moodle's surrounding chrome.
+    stickyConversationNotes: false,
+  }
 
-      {!readOnly && (
-        <div className="p-4 border-t space-y-2">
-          {needsPrivacyAck && <PrivacyAckBanner onAcknowledge={onAcknowledgePrivacy} />}
-          {showBanner && (
-            <AegisSuggestionsBanner
-              suggestions={liveSuggestions}
-              blocked={sendNeedsConfirm}
-              working={rewriting}
-              onPreview={handlePreviewIdeas}
-              onApply={handleApplyRewrite}
-              onDismiss={() => setBannerDismissedFor(input)}
-            />
-          )}
-          {aegisEnabled && !showBanner && (
-            // Persistent status row above the input, present whenever
-            // aegis is on and the suggestions banner isn't taking the
-            // slot. Three states (pending / clean verdict / idle) so
-            // the iframe student sees a clear "aegis is on" signal at
-            // all times, including before the analyzer has anything
-            // to say. See chat-page.tsx for the full rationale.
-            <output
-              aria-live="polite"
-              className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
-            >
-              <AegisShieldFilled
-                className={`w-4 h-4 shrink-0 ${liveAnalyzer.pending ? "animate-pulse" : ""}`}
-              />
-              <span>
-                {liveAnalyzer.pending
-                  ? tStudent("aegis.pendingTitle")
-                  : liveAnalyzer.analysis &&
-                      liveAnalyzer.analysis.suggestions.length === 0
-                    ? tStudent("aegis.looksGoodTitle")
-                    : tStudent("aegis.emptyTitle")}
-              </span>
-            </output>
-          )}
-          <form onSubmit={handleSubmit} className="flex gap-2">
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={t("embed.inputPlaceholder")}
-              disabled={stream.streaming || needsPrivacyAck}
-              className="flex-1"
-            />
-            <Button
-              type="submit"
-              variant={sendNeedsConfirm ? "outline" : "default"}
-              disabled={
-                stream.streaming ||
-                !input.trim() ||
-                needsPrivacyAck ||
-                submitChecking
-              }
-            >
-              {submitChecking
-                ? tStudent("aegis.checking")
-                : sendNeedsConfirm
-                  ? tStudent("aegis.sendAsIs")
-                  : t("embed.send")}
-            </Button>
-          </form>
-          <p className="text-xs text-muted-foreground text-center">
-            {t("embed.disclosurePrefix")}
-            <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">{t("embed.disclosureLink")}</a>
-            {t("embed.disclosureSuffix")}
-          </p>
-        </div>
-      )}
-      </div>
-      {aegisEnabled && panelVisible && (
-        <>
-          {/*
-            Below-md backdrop for the drawer. The embed iframe is
-            typically narrower than the Shibboleth chat, so the
-            in-flow rail switches to a drawer earlier (md vs lg
-            on chat-page).
-          */}
-          <div
-            className="md:hidden fixed inset-0 z-30 bg-background/60"
-            onClick={() => setPanelVisible(false)}
-            aria-hidden="true"
-          />
-          {/*
-            Right-rail Feedback panel. Two layouts driven off the
-            same element:
-              * md+   -> in-flow column to the right of the chat.
-              * <md   -> fixed drawer from the right edge.
-            Same component as the Shibboleth route to keep visual
-            + behavioural parity; only the breakpoint differs
-            (the iframe canvas can't spare 320px below md).
-          */}
-          <aside
-            className="fixed inset-y-0 right-0 z-40 w-72 max-w-[90vw] bg-background border-l flex flex-col py-3 pr-3 md:static md:inset-auto md:z-auto md:w-72 md:max-w-none md:shrink-0 md:py-0 md:pr-0 md:bg-transparent"
-          >
-            <AegisFeedbackPanel
-              analyses={promptAnalyses}
-              onHide={() => setPanelVisible(false)}
-            />
-          </aside>
-        </>
-      )}
-      {aegisEnabled && !panelVisible && (
-        // "Bring Aegis back" pill. Renders at every breakpoint --
-        // the panel adapts (drawer below md, in-flow rail at md+)
-        // so a phone-width iframe student has the same affordance
-        // as a desktop one. Pill chrome (bg, border, shadow,
-        // label) so it reads as a real button.
-        <button
-          type="button"
-          onClick={() => setPanelVisible(true)}
-          className="absolute top-2 right-2 z-20 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          title={tStudent("aegis.showPanel")}
-          aria-label={tStudent("aegis.showPanel")}
-        >
-          <AegisShieldFilled size={16} className="rounded-sm shrink-0" />
-          <span>{tStudent("aegis.showPanelButton")}</span>
-        </button>
-      )}
-    </div>
-  )
+  const adapter: ChatSurfaceAdapter<EmbedMessage> = {
+    courseId,
+    conversationId,
+    messages,
+    notes,
+    promptAnalyses,
+    isLoading: loading,
+    courseName,
+    displayName,
+    suggestions: suggestedQuestions,
+    needsPrivacyAck,
+    onAcknowledgePrivacy,
+    buildSendFetch,
+    fetchLiveAnalysis,
+    fetchRewrite,
+    onAfterSend,
+    onConversationCreated,
+    readOnly,
+    aegisEnabled,
+    labels,
+    layout,
+  }
+
+  return <ChatSurface adapter={adapter} />
 }

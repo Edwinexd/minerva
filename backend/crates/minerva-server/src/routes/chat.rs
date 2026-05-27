@@ -188,6 +188,14 @@ struct MessageResponse {
     /// research_completion_tokens`. NULL on legacy single-pass
     /// messages and on user messages.
     research_completion_tokens: Option<i32>,
+    /// True iff the extraction guard's constraint was active for this
+    /// turn's research phase. Owner viewers get `thinking_transcript`
+    /// and `tool_events` blanked out above in addition; this flag is
+    /// the frontend's signal to render a `[Reasoning hidden under
+    /// integrity guard]` placeholder for the disclosure rather than
+    /// either showing the live transcript or omitting the disclosure
+    /// entirely (which is the legacy single-pass shape).
+    thinking_hidden: bool,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -1003,6 +1011,53 @@ async fn get_conversation(
         Vec::new()
     };
 
+    // Read-time suppression of `thinking_transcript` / `tool_events`
+    // for the conversation owner on turns where the extraction guard
+    // was active. The persisted columns stay populated server-side
+    // (teacher dashboard needs the evidence to judge the guard), so
+    // without this gate a student re-opening the conversation can
+    // expand the "Thinking" disclosure and read the drafted solution
+    // the visible rewrite was supposed to hide. Teachers see
+    // everything, same path as the flag-rows fetch above.
+    //
+    // Two signals combine (union, not intersection):
+    //
+    //   1. `messages.thinking_hidden` ; populated in
+    //      `common::finalize` whenever `GuardDecision.constraint_active`
+    //      held for the turn. Covers every turn persisted since
+    //      migration 20260526000001 and the GO-forward case, including
+    //      guarded turns where the writeup happened to be clean and
+    //      no `extraction_rewrote` flag fired.
+    //   2. `extraction_rewrote` flag at the turn's index ; the
+    //      pre-migration signal for historical rows whose
+    //      `thinking_hidden` defaults to false because the column
+    //      didn't exist when they were persisted.
+    //
+    // Soft-fail to empty on a flag-query DB error: degrades to
+    // "no historical suppression" rather than 500-ing the whole
+    // detail view, since the column-based signal still works and
+    // the visible rewrite is the primary defense.
+    let suppress_thinking_ids: HashSet<Uuid> = if is_teacher {
+        HashSet::new()
+    } else {
+        let mut ids: HashSet<Uuid> = messages
+            .iter()
+            .filter(|m| m.role == "assistant" && m.thinking_hidden)
+            .map(|m| m.id)
+            .collect();
+        let rewritten_turns = minerva_db::queries::conversation_flags::turn_indexes_with_flag(
+            &state.db,
+            cid,
+            strategy::extraction_guard::REWROTE_FLAG,
+        )
+        .await
+        .unwrap_or_default();
+        if !rewritten_turns.is_empty() {
+            ids.extend(assistant_ids_on_turns(&messages, &rewritten_turns));
+        }
+        ids
+    };
+
     // Aegis prompt analyses. Visible to whoever can see the
     // conversation (owner + teacher); the shared loader handles
     // soft-fail-to-empty so a DB hiccup doesn't 500 the detail.
@@ -1058,17 +1113,40 @@ async fn get_conversation(
                 id: m.id,
                 role: m.role,
                 content: m.content,
-                chunks_used: m.chunks_used,
+                // `chunks_used` gated on the same set as the thinking
+                // disclosure: on a guarded turn the retrieved chunks
+                // can contain the very assignment text the student
+                // pasted or, worst case, a TA-uploaded solution PDF.
+                // The teacher branch keeps `suppress_thinking_ids`
+                // empty so audit on this column survives for them.
+                chunks_used: if suppress_thinking_ids.contains(&m.id) {
+                    None
+                } else {
+                    m.chunks_used
+                },
                 model_used: m.model_used,
                 tokens_prompt: m.tokens_prompt,
                 tokens_completion: m.tokens_completion,
                 generation_ms: m.generation_ms,
                 retrieval_count: m.retrieval_count,
-                thinking_transcript: m.thinking_transcript,
-                tool_events: m.tool_events,
+                thinking_transcript: if suppress_thinking_ids.contains(&m.id) {
+                    None
+                } else {
+                    m.thinking_transcript
+                },
+                tool_events: if suppress_thinking_ids.contains(&m.id) {
+                    None
+                } else {
+                    m.tool_events
+                },
                 thinking_ms: m.thinking_ms,
                 research_prompt_tokens: m.research_prompt_tokens,
                 research_completion_tokens: m.research_completion_tokens,
+                // Frontend uses this to render the placeholder when
+                // suppression is in effect. True iff the message was
+                // captured in `suppress_thinking_ids` above: either
+                // the column flagged it or a REWROTE_FLAG matches.
+                thinking_hidden: suppress_thinking_ids.contains(&m.id),
                 created_at: m.created_at,
             })
             .collect(),
@@ -1114,6 +1192,34 @@ async fn get_conversation(
             .collect(),
         prompt_analyses,
     }))
+}
+
+/// Walk a conversation's messages in order and return the set of
+/// assistant message ids whose `turn_index` falls in `turns`. Turn
+/// index counting matches `strategy::extraction_guard::compute_turn_index`:
+/// each user message advances the counter, and the assistant reply
+/// that follows it inherits the post-increment value.
+///
+/// Pulled out as a free function so the read-time suppression in
+/// `get_conversation` is unit-testable without standing up a DB or
+/// route harness; the route handler just calls this with the rewritten
+/// turn set fetched from `conversation_flags`. The embed route
+/// (`routes::embed::get_conversation`) reuses the same helper to keep
+/// its owner-view suppression in lockstep.
+pub(crate) fn assistant_ids_on_turns(
+    messages: &[minerva_db::queries::conversations::MessageRow],
+    turns: &HashSet<i32>,
+) -> HashSet<Uuid> {
+    let mut out = HashSet::new();
+    let mut turn: i32 = 0;
+    for m in messages {
+        if m.role == "user" {
+            turn += 1;
+        } else if m.role == "assistant" && turns.contains(&turn) {
+            out.insert(m.id);
+        }
+    }
+    out
 }
 
 #[derive(Deserialize)]
@@ -1696,6 +1802,10 @@ pub(super) async fn run_chat_message(
         None,
         None,
         None,
+        // `thinking_hidden` is meaningful only for assistant messages
+        // (the extraction guard suppresses thinking in the assistant
+        // reply); user messages never carry thinking, so false.
+        false,
     )
     .await?;
 
@@ -2334,4 +2444,122 @@ async fn verify_course_teacher_access(
     }
 
     Ok(course)
+}
+
+#[cfg(test)]
+mod assistant_ids_on_turns_tests {
+    //! Read-time-suppression turn arithmetic. Covers the cases the
+    //! extraction-guard owner-view gate cares about: matching the
+    //! right assistant message when the rewrite fired in the middle
+    //! of a longer conversation, never matching user messages, and
+    //! tolerating gaps / unusual orderings without panicking.
+    use super::*;
+    use chrono::Utc;
+    use minerva_db::queries::conversations::MessageRow;
+
+    fn mk(role: &str, id: Uuid) -> MessageRow {
+        MessageRow {
+            id,
+            conversation_id: Uuid::nil(),
+            role: role.to_string(),
+            content: String::new(),
+            chunks_used: None,
+            model_used: None,
+            tokens_prompt: None,
+            tokens_completion: None,
+            generation_ms: None,
+            retrieval_count: None,
+            thinking_transcript: None,
+            tool_events: None,
+            thinking_ms: None,
+            research_prompt_tokens: None,
+            research_completion_tokens: None,
+            thinking_hidden: false,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn matches_only_the_assistant_on_a_rewritten_turn() {
+        let u1 = Uuid::from_u128(1);
+        let a1 = Uuid::from_u128(2);
+        let u2 = Uuid::from_u128(3);
+        let a2 = Uuid::from_u128(4);
+        let u3 = Uuid::from_u128(5);
+        let a3 = Uuid::from_u128(6);
+        let msgs = vec![
+            mk("user", u1),
+            mk("assistant", a1),
+            mk("user", u2),
+            mk("assistant", a2),
+            mk("user", u3),
+            mk("assistant", a3),
+        ];
+        // Rewrite happened on turn 2 only.
+        let turns: HashSet<i32> = [2].into_iter().collect();
+        let out = assistant_ids_on_turns(&msgs, &turns);
+        assert_eq!(out.len(), 1);
+        assert!(out.contains(&a2));
+        // Other turns' assistants are untouched.
+        assert!(!out.contains(&a1));
+        assert!(!out.contains(&a3));
+    }
+
+    #[test]
+    fn never_matches_user_messages_even_when_turn_matches() {
+        let u1 = Uuid::from_u128(1);
+        let a1 = Uuid::from_u128(2);
+        let msgs = vec![mk("user", u1), mk("assistant", a1)];
+        let turns: HashSet<i32> = [1].into_iter().collect();
+        let out = assistant_ids_on_turns(&msgs, &turns);
+        assert!(!out.contains(&u1));
+        assert!(out.contains(&a1));
+    }
+
+    #[test]
+    fn empty_turn_set_returns_empty() {
+        let msgs = vec![
+            mk("user", Uuid::from_u128(1)),
+            mk("assistant", Uuid::from_u128(2)),
+        ];
+        let out = assistant_ids_on_turns(&msgs, &HashSet::new());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn handles_multiple_rewritten_turns() {
+        let msgs = vec![
+            mk("user", Uuid::from_u128(1)),
+            mk("assistant", Uuid::from_u128(2)),
+            mk("user", Uuid::from_u128(3)),
+            mk("assistant", Uuid::from_u128(4)),
+            mk("user", Uuid::from_u128(5)),
+            mk("assistant", Uuid::from_u128(6)),
+        ];
+        let turns: HashSet<i32> = [1, 3].into_iter().collect();
+        let out = assistant_ids_on_turns(&msgs, &turns);
+        assert_eq!(out.len(), 2);
+        assert!(out.contains(&Uuid::from_u128(2)));
+        assert!(out.contains(&Uuid::from_u128(6)));
+    }
+
+    #[test]
+    fn assistant_without_preceding_user_does_not_match_turn_zero() {
+        // Defensive: if some prior bug left an orphan assistant row
+        // before any user message, turn counter is still 0 and a
+        // rewritten-turn entry for 0 would erroneously match it.
+        // The guard always stamps turn_index >= 1, so requiring a
+        // matching turn naturally excludes orphans without an extra
+        // guard.
+        let a_orphan = Uuid::from_u128(99);
+        let msgs = vec![
+            mk("assistant", a_orphan),
+            mk("user", Uuid::from_u128(1)),
+            mk("assistant", Uuid::from_u128(2)),
+        ];
+        let turns: HashSet<i32> = [1].into_iter().collect();
+        let out = assistant_ids_on_turns(&msgs, &turns);
+        assert!(!out.contains(&a_orphan));
+        assert!(out.contains(&Uuid::from_u128(2)));
+    }
 }

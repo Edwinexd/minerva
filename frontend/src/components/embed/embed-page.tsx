@@ -69,6 +69,14 @@ interface EmbedMessage {
   thinking_transcript: string | null
   tool_events: PersistedToolEvent[] | null
   thinking_ms: number | null
+  /**
+   * True when the extraction guard suppressed this turn's thinking
+   * stream. Server-side gate on the embed conversation-detail
+   * route fills this from `messages.thinking_hidden` ORed with the
+   * pre-migration historical signal; the embed surface always
+   * treats the viewer as owner so suppression is unconditional.
+   */
+  thinking_hidden: boolean
   created_at: string
 }
 
@@ -606,6 +614,8 @@ function EmbedChatWindow({
       thinkingActive: t("embed.thinkingActive"),
       thinkingDone: t("embed.thinkingDone"),
       thinkingDoneWithDuration: t("embed.thinkingDoneWithDuration"),
+      thinkingHidden: t("embed.thinkingHidden"),
+      thinkingHiddenBody: t("embed.thinkingHiddenBody"),
       toolCallsAriaLabel: t("embed.toolCallsAriaLabel"),
     },
     assistantResponse: t("embed.assistantResponseLabel"),

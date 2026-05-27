@@ -207,6 +207,18 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     )
     .await;
 
+    // Per-turn extraction signal. FLARE-without-tools has no
+    // thinking stream to suppress, but `chunks_used` still needs
+    // gating on flagged turns (the seed RAG can include the
+    // assignment_brief / solution PDF on a paste-extract). Tracks
+    // `flagged_this_turn` (per-turn intent OR proximity), not the
+    // sticky `constraint_active`, so benign follow-up questions
+    // after a past paste don't lose their sources panel.
+    let suppress_thinking = guard_decision
+        .as_ref()
+        .map(|g| g.flagged_this_turn)
+        .unwrap_or(false);
+
     let loop_cfg = RunLoopConfig {
         course_name: &ctx.course_name,
         custom_prompt: &ctx.custom_prompt,
@@ -351,6 +363,15 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         None,
         None,
         None,
+        // No live thinking stream on this path, but the SSE `done`
+        // event still ships `chunks_used` and the persisted column
+        // drives the read-time owner-suppression gate in chat.rs /
+        // embed.rs. Persist thinking_hidden=true when the guard
+        // fired per-turn so the seed-RAG chunks (potentially the
+        // assignment_brief / TA-uploaded solution PDF) get blanked
+        // in both the SSE done event and on GET. Mirrors the same
+        // gate logic on the tool_use and simple paths.
+        suppress_thinking,
     )
     .await;
 }

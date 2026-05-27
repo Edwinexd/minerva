@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)\n        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens, created_at",
+  "query": "INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens, thinking_hidden)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)\n        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens, thinking_hidden, created_at",
   "describe": {
     "columns": [
       {
@@ -80,6 +80,11 @@
       },
       {
         "ordinal": 15,
+        "name": "thinking_hidden",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -100,7 +105,8 @@
         "Jsonb",
         "Int4",
         "Int4",
-        "Int4"
+        "Int4",
+        "Bool"
       ]
     },
     "nullable": [
@@ -119,8 +125,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "7e130f4a614bc0eb673d8b3747f14a9e818d6d0851f167668a8fafc6d16f6da3"
+  "hash": "9f062841b48aa1bca155f94f6bbef79c39a115462ebd95a4b9b0f9d8699d1d68"
 }

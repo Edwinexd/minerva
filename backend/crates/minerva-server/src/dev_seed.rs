@@ -395,6 +395,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             None,
             None,
             None,
+            false,
         )
         .await?;
         track(state, "messages", user_msg_id).await?;
@@ -418,6 +419,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             None,
             None,
             None,
+            false,
         )
         .await?;
         track(state, "messages", asst_msg_id).await?;

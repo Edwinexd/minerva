@@ -34,6 +34,20 @@ export interface ThinkingBlockLabels {
    * `thinking_ms` column).
    */
   thinkingDone: string
+  /**
+   * Trigger text when the extraction guard suppressed the live
+   * thinking stream for this turn. Used when `hidden === true`.
+   * Renders both on the in-progress disclosure (during a guarded
+   * turn) and on the persisted disclosure (after refresh on a
+   * message with `thinking_hidden === true`).
+   */
+  thinkingHidden: string
+  /**
+   * Body text rendered inside the hidden-disclosure when expanded.
+   * Explains why the transcript is empty so the student doesn't
+   * read the empty body as a UI bug.
+   */
+  thinkingHiddenBody: string
   /** aria-label for the toolbar listing tool calls. */
   toolCallsAriaLabel: string
 }
@@ -48,6 +62,15 @@ export interface ThinkingBlockProps {
    * messages without a stored duration.
    */
   durationMs: number | null
+  /**
+   * Extraction guard suppressed the thinking stream for this turn
+   * (live, via a `thinking_hidden` SSE event ; or historical, via
+   * the `messages.thinking_hidden` column on a past message).
+   * When true, `thinkingTokens` and `toolEvents` are empty (server
+   * never sent them on this turn) and the disclosure renders a
+   * placeholder body explaining the policy gate.
+   */
+  hidden?: boolean
   /**
    * Override the initial open state. When the parent knows this
    * disclosure belongs to the most-recent message and was just
@@ -64,6 +87,7 @@ export function ThinkingBlock({
   toolEvents,
   active,
   durationMs,
+  hidden = false,
   defaultOpen,
   labels,
 }: ThinkingBlockProps) {
@@ -86,8 +110,12 @@ export function ThinkingBlock({
   // Trigger text: while streaming -> "Thinking...", once done and
   // we have a duration -> "Thought for {{seconds}}s", otherwise
   // fall back to "Thinking" (legacy messages without `thinking_ms`).
+  // When the extraction guard suppressed the stream, ignore active
+  // and duration entirely and show the policy-gate label instead.
   let trigger: string
-  if (active) {
+  if (hidden) {
+    trigger = labels.thinkingHidden
+  } else if (active) {
     trigger = labels.thinkingActive
   } else if (durationMs !== null) {
     const seconds = (durationMs / 1000).toFixed(1)
@@ -146,7 +174,16 @@ export function ThinkingBlock({
         )}
       </summary>
       <div className="mt-1.5 space-y-1.5">
-        {toolEvents.length > 0 && (
+        {hidden && (
+          // Placeholder body for guarded turns. The transcript and
+          // tool list are empty by construction (server didn't emit
+          // them) ; the body text tells the student why they're
+          // empty so the disclosure doesn't read as a UI bug.
+          <p className="italic text-muted-foreground">
+            {labels.thinkingHiddenBody}
+          </p>
+        )}
+        {!hidden && toolEvents.length > 0 && (
           <ul
             aria-label={labels.toolCallsAriaLabel}
             className="space-y-1"
@@ -213,7 +250,7 @@ export function ThinkingBlock({
             ))}
           </ul>
         )}
-        {thinkingTokens && (
+        {!hidden && thinkingTokens && (
           // Expanded thinking content reads at the regular message
           // body font size (no `text-xs`, no italics). Use the full
           // foreground colour for contrast against the muted card

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT turn_index AS \"turn_index!\"\n           FROM conversation_flags\n           WHERE conversation_id = $1\n             AND flag = $2\n             AND turn_index IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "turn_index!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "bc2d1c76c8bc12344d4e81f0688cf4977cd62e9476f9a77468429be2cafd32ef"
+}

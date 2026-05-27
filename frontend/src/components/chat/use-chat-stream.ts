@@ -48,6 +48,16 @@ export interface ChatStreamState {
    * Used to render "Thought for Ns" on the disclosure.
    */
   thinkingDurationMs: number | null
+  /**
+   * True when the backend emitted a `thinking_hidden` SSE event on
+   * this turn (extraction guard's constraint was active). The
+   * disclosure renders a placeholder instead of the live transcript
+   * / tool-call list; the underlying `thinkingTokens` and
+   * `toolEvents` buffers stay empty for the duration of the turn
+   * (the server doesn't emit those events when the guard is on, so
+   * there's nothing to gate client-side).
+   */
+  thinkingHidden: boolean
 }
 
 export interface ToolEvent {
@@ -109,6 +119,7 @@ export function useChatStream(
   const [thinkingDurationMs, setThinkingDurationMs] = useState<number | null>(
     null,
   )
+  const [thinkingHidden, setThinkingHidden] = useState(false)
 
   const reset = () => {
     setStreaming(false)
@@ -119,6 +130,7 @@ export function useChatStream(
     setToolEvents([])
     setThinkingActive(false)
     setThinkingDurationMs(null)
+    setThinkingHidden(false)
   }
 
   const send = async (
@@ -134,6 +146,7 @@ export function useChatStream(
     setToolEvents([])
     setThinkingActive(false)
     setThinkingDurationMs(null)
+    setThinkingHidden(false)
 
     let success = true
     try {
@@ -217,6 +230,14 @@ export function useChatStream(
                   if (typeof data.duration_ms === "number") {
                     setThinkingDurationMs(data.duration_ms)
                   }
+                } else if (data.type === "thinking_hidden") {
+                  // Extraction guard suppressed the live thinking
+                  // stream for this turn. No `thinking_token`,
+                  // `tool_call`, or `tool_result` events will arrive
+                  // ; `thinkingActive` stays false and the buffers
+                  // stay empty. The disclosure reads `thinkingHidden`
+                  // to render a placeholder instead.
+                  setThinkingHidden(true)
                 } else if (data.type === "error") {
                   setError(data.error)
                   success = false
@@ -276,6 +297,7 @@ export function useChatStream(
     toolEvents,
     thinkingActive,
     thinkingDurationMs,
+    thinkingHidden,
     send,
     reset,
     setError,

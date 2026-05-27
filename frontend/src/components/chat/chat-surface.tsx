@@ -247,6 +247,7 @@ function defaultGetPersistedThinking<
       result?: unknown
     }> | null
     thinking_ms?: number | null
+    thinking_hidden?: boolean
   },
 >(msg: M): PersistedThinking | null {
   return {
@@ -260,6 +261,7 @@ function defaultGetPersistedThinking<
         }))
       : null,
     thinking_ms: msg.thinking_ms ?? null,
+    thinking_hidden: msg.thinking_hidden ?? false,
   }
 }
 
@@ -571,6 +573,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
               toolEvents={stream.toolEvents}
               thinkingActive={stream.thinkingActive}
               thinkingDurationMs={stream.thinkingDurationMs}
+              thinkingHidden={stream.thinkingHidden}
               bubbleLabels={labels.bubble}
               thinkingLabels={labels.thinking}
               getPersistedThinking={getThinking}

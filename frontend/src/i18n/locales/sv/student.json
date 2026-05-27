@@ -32,6 +32,8 @@
     "thinkingActive": "Tänker…",
     "thinkingDone": "Tankebana",
     "thinkingDoneWithDuration": "Tänkte i {{seconds}}s",
+    "thinkingHidden": "Tankebana dold av integritetsskydd",
+    "thinkingHiddenBody": "Tutorns resonemang för denna fråga hölls inne enligt kursens regler om akademisk hederlighet. Din lärare kan fortfarande se vad som genererades.",
     "toolCallsAriaLabel": "Verktyg som assistenten anropade under research-fasen"
   },
   "message": {

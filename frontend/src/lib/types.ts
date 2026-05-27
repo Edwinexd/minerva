@@ -627,6 +627,18 @@ export interface Message {
    * Same null semantics as `research_prompt_tokens`.
    */
   research_completion_tokens: number | null
+  /**
+   * True when the extraction guard's constraint was active for this
+   * turn. Server reads it from the `messages.thinking_hidden` column
+   * and ORs in pre-migration historical signals (a turn with an
+   * `extraction_rewrote` flag) for the conversation owner. Frontend
+   * renders the disclosure as a placeholder when true: the
+   * `thinking_transcript` and `tool_events` fields are blanked out
+   * on the server side for the owner, so the disclosure component
+   * keys off this flag rather than transcript-presence to decide
+   * whether to render "[Reasoning hidden under integrity guard]".
+   */
+  thinking_hidden: boolean
   created_at: string
 }
 

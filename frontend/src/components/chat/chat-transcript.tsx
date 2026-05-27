@@ -35,6 +35,15 @@ export interface PersistedThinking {
    * disclosure falls back to a generic "Thinking" label then.
    */
   thinking_ms: number | null
+  /**
+   * True when the extraction guard's constraint was active for this
+   * turn (the server-side gate on the conversation-detail route
+   * fills this from `messages.thinking_hidden` ORed with
+   * pre-migration historical signals). Forces the disclosure to
+   * render as a placeholder regardless of whether
+   * `thinking_transcript` / `tool_events` happen to be empty.
+   */
+  thinking_hidden: boolean
 }
 
 export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
@@ -64,6 +73,13 @@ export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
    * (those use the per-message `thinking_ms` instead).
    */
   thinkingDurationMs?: number | null
+  /**
+   * Live signal that the extraction guard suppressed this turn's
+   * thinking stream (backend emitted a `thinking_hidden` SSE
+   * event). The streaming disclosure renders as a placeholder when
+   * true; the buffers above stay empty for the turn's duration.
+   */
+  thinkingHidden?: boolean
   bubbleLabels: ChatBubbleLabels
   /** Labels for the collapsible "Thinking" disclosure. */
   thinkingLabels?: ThinkingBlockLabels
@@ -96,6 +112,7 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
   toolEvents,
   thinkingActive,
   thinkingDurationMs,
+  thinkingHidden,
   bubbleLabels,
   thinkingLabels,
   getPersistedThinking,
@@ -181,7 +198,12 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
             persisted &&
             ((persisted.thinking_transcript &&
               persisted.thinking_transcript.length > 0) ||
-              (persisted.tool_events && persisted.tool_events.length > 0))
+              (persisted.tool_events && persisted.tool_events.length > 0) ||
+              // A guarded turn has the transcript+events blanked out
+              // server-side but the disclosure should still render
+              // (as a placeholder) so the student gets the policy
+              // signal alongside the rewritten reply.
+              persisted.thinking_hidden)
           const isMostRecentAssistant = msg.id === lastAssistantId
           // The thinking disclosure and its bubble are grouped in
           // a single wrapper with a very tight internal gap so
@@ -199,6 +221,7 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
                         toolEvents={persisted?.tool_events || []}
                         active={false}
                         durationMs={persisted?.thinking_ms ?? null}
+                        hidden={persisted?.thinking_hidden ?? false}
                         defaultOpen={isMostRecentAssistant}
                         labels={thinkingLabels}
                       />
@@ -225,7 +248,9 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
       )}
       {streaming && (
         <div className="space-y-1">
-          {(thinkingTokens || (toolEvents && toolEvents.length > 0)) &&
+          {(thinkingTokens ||
+            (toolEvents && toolEvents.length > 0) ||
+            thinkingHidden) &&
             thinkingLabels && (
               <div className="flex justify-start">
                 <div className="max-w-[80%]">
@@ -234,6 +259,7 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
                     toolEvents={toolEvents || []}
                     active={!!thinkingActive}
                     durationMs={thinkingDurationMs ?? null}
+                    hidden={!!thinkingHidden}
                     labels={thinkingLabels}
                   />
                 </div>

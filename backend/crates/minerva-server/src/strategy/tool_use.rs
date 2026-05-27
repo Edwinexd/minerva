@@ -9,16 +9,20 @@
 //! Pipeline:
 //!
 //! 1. Seed retrieval ; same path as the legacy strategies
-//!    (`rag_lookup` + KG expansion + adversarial filter +
-//!    partition).
-//! 2. Extraction-guard pre-evaluation.
-//! 3. Research phase (`research_phase::run`) emitting `thinking_*`
+//!    (`rag_lookup` + adversarial filter + partition).
+//! 2. Build prelim retrieval records + KG expansion. Records held
+//!    in memory ; no SSE emit yet.
+//! 3. Extraction-guard pre-evaluation against the seed + KG-
+//!    expanded RAG view.
+//! 4. Emit the prelim retrieval records over SSE, gated by the
+//!    guard's per-turn `flagged_this_turn` signal.
+//! 5. Research phase (`research_phase::run`) emitting `thinking_*`
 //!    SSE events to the client and accumulating chunks via tool
 //!    calls.
-//! 4. Writeup phase (`writeup::run`) emitting the user-facing
+//! 6. Writeup phase (`writeup::run`) emitting the user-facing
 //!    `token` SSE stream.
-//! 5. Extraction-guard post-intercept on the writeup.
-//! 6. `common::finalize`.
+//! 7. Extraction-guard post-intercept on the writeup.
+//! 8. Surface chunk set + `common::finalize`.
 //!
 //! All shared with the legacy paths so behaviour deltas are
 //! limited to steps 3 and 4.
@@ -38,13 +42,18 @@ use crate::error::AppError;
 /// RAG, KG expansion). These don't go through the model-visible
 /// tool catalog, but from the user's perspective they're still
 /// retrievals and should show up in the "Thinking" disclosure
-/// alongside the model-initiated tool calls. We additionally emit
-/// the matching `tool_call` / `tool_result` SSE pair so the
-/// disclosure renders them live during streaming, then prepend the
-/// record onto `research.tool_events` after the research phase
-/// completes so they get persisted on the message.
-async fn record_server_retrieval(
-    tx: &tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, AppError>>,
+/// alongside the model-initiated tool calls.
+///
+/// This is a pure builder ; it does NOT emit any SSE events. Live
+/// emit is deferred to `emit_server_retrieval` below, called AFTER
+/// the extraction-guard decision lands so we know whether to gate
+/// the user-visible retrieval events for this turn. (Building the
+/// records first lets the guard see the full KG-expanded RAG view
+/// while still being able to suppress prelim emits when the guard
+/// trips.) The persisted record is always returned so the teacher
+/// dashboard's audit trail keeps the seed/KG retrievals regardless
+/// of suppression.
+fn build_server_retrieval_record(
     name: &str,
     args: serde_json::Value,
     chunks: &[RagChunk],
@@ -61,14 +70,26 @@ async fn record_server_retrieval(
     } else {
         format!("{} chunks", chunks.len())
     };
-    research_phase::emit_tool_call(tx, name, &args).await;
-    research_phase::emit_tool_result(tx, name, &summary, &result_value).await;
     ToolEventRecord {
         name: name.to_string(),
         args,
         result_summary: summary,
         result: result_value,
     }
+}
+
+/// Emit the SSE `tool_call` / `tool_result` pair for a previously-
+/// built server-retrieval record. Called after the extraction guard
+/// has run so we can gate the emit on the per-turn signal. The
+/// record itself (returned by `build_server_retrieval_record`) is
+/// always persisted regardless of whether we emit live.
+async fn emit_server_retrieval(
+    tx: &tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, AppError>>,
+    record: &ToolEventRecord,
+) {
+    research_phase::emit_tool_call(tx, &record.name, &record.args).await;
+    research_phase::emit_tool_result(tx, &record.name, &record.result_summary, &record.result)
+        .await;
 }
 
 /// Per-response token cap mirroring `flare.rs`. Same multiplier
@@ -141,26 +162,27 @@ pub async fn run(
         .await;
     }
 
-    // Surface the seed retrieval as a tool event. From the user's
-    // POV this is "the system fetched relevant chunks before the
-    // model started thinking" ; same role any model-initiated
-    // tool call plays, just kicked off server-side on the
-    // student's question. Done AFTER the kind-aware partition and
-    // adversarial filter so the visible result matches what the
-    // model actually sees in context.
+    // 2. Build the prelim retrieval records (seed + optional KG
+    //    expansion) BEFORE the guard evaluation and BEFORE emitting
+    //    anything to the SSE channel. Deferring the live emit lets
+    //    the guard see the full KG-expanded RAG view for its
+    //    proximity classifier (the proximity check reads rag_context
+    //    for lecture/reading chunks and maps them via `applied_in`
+    //    to assignment doc ids; if KG expansion isn't in yet, those
+    //    KG-derived assignment partners are silently invisible to
+    //    the sliding-window check and slow multi-turn extractions
+    //    slip through). The records themselves are always persisted
+    //    onto `tool_events` for the teacher dashboard regardless of
+    //    whether we end up emitting live to the student.
     let mut prelim_events: Vec<ToolEventRecord> = Vec::new();
-    prelim_events.push(
-        record_server_retrieval(
-            &tx,
-            "initial_retrieve",
-            serde_json::json!({
-                "query": ctx.user_content.clone(),
-                "trigger": "user_question",
-            }),
-            &rag.context,
-        )
-        .await,
-    );
+    prelim_events.push(build_server_retrieval_record(
+        "initial_retrieve",
+        serde_json::json!({
+            "query": ctx.user_content.clone(),
+            "trigger": "user_question",
+        }),
+        &rag.context,
+    ));
 
     if ctx.kg_enabled {
         let extra = common::expand_context_via_graph(
@@ -183,26 +205,25 @@ pub async fn run(
         // chunks already covered the KG neighbourhood and there's
         // nothing useful to disclose.
         if !extra.is_empty() {
-            prelim_events.push(
-                record_server_retrieval(
-                    &tx,
-                    "kg_expand",
-                    serde_json::json!({
-                        "trigger": "knowledge_graph_neighbours",
-                        "seeded_from_chunks": rag.context.len(),
-                    }),
-                    &extra,
-                )
-                .await,
-            );
+            prelim_events.push(build_server_retrieval_record(
+                "kg_expand",
+                serde_json::json!({
+                    "trigger": "knowledge_graph_neighbours",
+                    "seeded_from_chunks": rag.context.len(),
+                }),
+                &extra,
+            ));
         }
         rag.context.extend(extra);
     }
 
-    // 2. Extraction-guard pre-eval against the seed view. The
-    //    research phase can drag more chunks in later via tool
-    //    calls; the guard's intent classifier only sees the seed
-    //    partition, which is also what the legacy paths feed it.
+    // 3. Extraction-guard pre-eval against the full seed + KG-
+    //    expanded view. The proximity classifier reads `rag_context`
+    //    for lecture / reading kinds and maps them via `applied_in`
+    //    to assignment doc ids ; running this AFTER KG expansion
+    //    ensures KG-derived assignment partners enter the sliding-
+    //    window `assignments_near` set. (The intent classifier is
+    //    unaffected ; it reads recent user messages, not RAG.)
     let guard_decision = super::extraction_guard::evaluate_for_turn(
         &ctx.db,
         &http_client,
@@ -216,7 +237,42 @@ pub async fn run(
     )
     .await;
 
-    // 3. Research phase. Seeds the chunk accumulator with the
+    // Should we hide the live thinking stream + sources panel for
+    // this turn? We key on `flagged_this_turn` (per-turn intent OR
+    // proximity signal), NOT the sticky `constraint_active`. The
+    // sticky bit keeps the writeup-time output check armed across
+    // benign follow-up turns (which is correct ; the student may
+    // still be drifting toward an extraction), but using it for
+    // *live* suppression would force every innocent question after
+    // a single past paste-extract into the "[Reasoning hidden by
+    // integrity guard]" placeholder + empty sources panel ; UX cost
+    // and an unintended information disclosure that "this
+    // conversation was flagged".
+    //
+    // When true: the research phase runs server-side as normal (so
+    // the teacher dashboard's audit trail is preserved) but
+    // suppresses the user-visible `thinking_token` / `tool_call` /
+    // `tool_result` SSE stream and emits a one-shot
+    // `thinking_hidden` event in its place; the frontend renders a
+    // placeholder for the disclosure.
+    let suppress_thinking = guard_decision
+        .as_ref()
+        .map(|g| g.flagged_this_turn)
+        .unwrap_or(false);
+
+    // 4. Emit the prelim retrieval records live (gated by the
+    //    guard's per-turn signal). Done AFTER guard eval so we
+    //    never leak chunks the retriever pulled on a guarded turn ;
+    //    on a flagged turn the seed RAG is keyed off the student's
+    //    pasted assignment text and the chunks may contain the
+    //    assignment_brief itself or a TA-uploaded solution PDF.
+    if !suppress_thinking {
+        for record in &prelim_events {
+            emit_server_retrieval(&tx, record).await;
+        }
+    }
+
+    // 5. Research phase. Seeds the chunk accumulator with the
     //    initial partition's `context` (signals are excluded from
     //    LLM context by definition; tool calls can still surface
     //    relevant content if needed).
@@ -232,6 +288,7 @@ pub async fn run(
         rag.context.clone(),
         cap,
         &orphaned,
+        suppress_thinking,
         &tx,
     )
     .await;
@@ -257,18 +314,35 @@ pub async fn run(
         research.chunks.len(),
     );
 
-    // 4. Writeup phase. Single clean streaming pass; tokens flow
+    // 6. Writeup phase. Single clean streaming pass; tokens flow
     //    to the client as `{"type":"token", ...}` (same shape as
     //    the legacy strategies).
+    //
+    // On a guarded turn (`suppress_thinking` true) we feed the
+    // writeup an EMPTY research transcript instead of
+    // `research.transcript`. The transcript is the research agent's
+    // bullet-point handoff, which `build_writeup_system_prompt`
+    // tells the writeup model to "treat as established facts and
+    // build on directly"; if the research model wrote the assignment
+    // solution into those bullets (which is exactly what an
+    // extraction-flagged turn invites), passing it through hands the
+    // writeup model a launder-this-into-pedagogical-prose blueprint
+    // and the post-generation output check is the only thing
+    // standing between that and the student. Cutting the feed kills
+    // the pathway at its source ; the writeup composes from the raw
+    // citable chunks (still present) plus the tool-call summary
+    // (metadata only, no model prose). The empty-transcript branch
+    // in `build_writeup_system_prompt` already drops the
+    // "Research agent findings" section cleanly when this is "".
+    let writeup_transcript = if suppress_thinking {
+        ""
+    } else {
+        &research.transcript
+    };
     let writeup_output = match writeup::run(
         &ctx,
         &research.chunks,
-        // The research agent's actual narrative (its bullet-point
-        // findings) is what the writeup model should lean on. The
-        // tool log is metadata about HOW those findings were
-        // produced and is still surfaced so the writeup model can
-        // see what was searched.
-        &research.transcript,
+        writeup_transcript,
         &research.research_summary,
         &tx,
     )
@@ -286,9 +360,12 @@ pub async fn run(
         }
     };
 
-    // 5. Post-generation extraction-guard intercept. Operates on
+    // 7. Post-generation extraction-guard intercept. Operates on
     //    a clean single-pass writeup (much better signal than the
-    //    legacy FLARE path's multi-restart full_text).
+    //    legacy FLARE path's multi-restart full_text). Keys off the
+    //    sticky `constraint_active` (not `flagged_this_turn`), so a
+    //    student drifting toward an extraction on a turn that
+    //    didn't itself fire is still caught at the output stage.
     let final_text = super::extraction_guard::intercept_reply(
         &ctx.db,
         &http_client,
@@ -302,10 +379,19 @@ pub async fn run(
     )
     .await;
 
-    // 6. Surface the consolidated chunk set to the client. Mirrors
+    // 8. Surface the consolidated chunk set to the client. Mirrors
     //    the legacy strategies' sources panel ; students see every
     //    document that informed the answer, both seed-RAG and the
     //    ones the model pulled in via tool calls.
+    //
+    // Always built and persisted ; `messages.chunks_used` is part
+    // of the teacher dashboard's audit trail and they need it even
+    // on a guarded turn (to see what the retriever pulled when the
+    // guard fired). Suppression for the student happens at the SSE
+    // layer (finalize omits `chunks_used` from the `done` event
+    // when `thinking_hidden`) and at read time in chat.rs /
+    // embed.rs (owner viewers get null on GET, teachers see the
+    // full set). Same shape as the thinking_transcript handling.
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
         .await
         .unwrap_or_default();
@@ -367,6 +453,12 @@ pub async fn run(
         Some(research.duration_ms.clamp(0, i32::MAX as i64) as i32),
         Some(research_prompt_tokens),
         Some(research_completion_tokens),
+        // `thinking_hidden` is the persisted record of whether the
+        // guard was active for this turn; the read-time gate on
+        // `get_conversation` uses it to blank the disclosure for the
+        // owner even on refresh long after the SSE stream closed.
+        // True iff we suppressed the live thinking stream above.
+        suppress_thinking,
     )
     .await;
 }

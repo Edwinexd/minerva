@@ -1107,6 +1107,13 @@ pub async fn stream_cerebras_to_client(
 /// course's `tool_use_enabled` is true and a research phase ran;
 /// legacy strategies pass `None` for both, which keeps the message
 /// row's new columns NULL and the frontend renders no disclosure.
+///
+/// `thinking_hidden` is set true when the extraction guard's constraint
+/// was active for this turn's research phase. The transcript / events
+/// columns above STILL get populated when the strategy gathered them
+/// (teacher audit), but the read-time conversation-detail route blanks
+/// them out for the conversation owner when this flag is true. Legacy
+/// strategies that never run a research phase pass `false`.
 #[allow(clippy::too_many_arguments)]
 pub async fn finalize(
     ctx: &super::GenerationContext,
@@ -1123,6 +1130,7 @@ pub async fn finalize(
     thinking_ms: Option<i32>,
     research_prompt_tokens: Option<i32>,
     research_completion_tokens: Option<i32>,
+    thinking_hidden: bool,
 ) {
     let assistant_msg_id = uuid::Uuid::new_v4();
     let _ = minerva_db::queries::conversations::insert_message(
@@ -1142,6 +1150,7 @@ pub async fn finalize(
         thinking_ms,
         research_prompt_tokens,
         research_completion_tokens,
+        thinking_hidden,
     )
     .await;
 
@@ -1174,6 +1183,20 @@ pub async fn finalize(
     )
     .await;
 
+    // On a guarded turn the `done` event omits `chunks_used` ; the
+    // seed RAG is keyed off the student's pasted assignment text, so
+    // the retrieved chunks may contain the assignment_brief itself
+    // or, on courses where a TA uploaded an answer key, the
+    // solutions PDF. Rendering those in the student's sources panel
+    // is the same leak shape we already plugged for the thinking
+    // trace. Persistence above is unchanged (teacher dashboard
+    // needs the audit trail of what the retriever pulled when the
+    // guard fired); read-time gates in chat.rs / embed.rs blank
+    // the field on GET for owner viewers, symmetrical with this
+    // SSE-time gate. `rag_injected` and `retrieval_count` stay so
+    // the frontend can render "1 source" counts without exposing
+    // chunk content.
+    let done_chunks = if thinking_hidden { None } else { chunks_json };
     let _ = tx
         .send(Ok(Event::default().data(
             serde_json::json!({
@@ -1183,7 +1206,7 @@ pub async fn finalize(
                 "research_prompt_tokens": research_prompt_tokens,
                 "research_completion_tokens": research_completion_tokens,
                 "rag_injected": rag_injected,
-                "chunks_used": chunks_json,
+                "chunks_used": done_chunks,
                 "generation_ms": generation_ms,
                 "retrieval_count": retrieval_count,
             })

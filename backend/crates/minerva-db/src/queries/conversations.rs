@@ -90,6 +90,14 @@ pub struct MessageRow {
     /// Writeup completion share is `tokens_completion -
     /// research_completion_tokens`.
     pub research_completion_tokens: Option<i32>,
+    /// True iff the extraction guard's constraint was active for this
+    /// turn's research phase. The columns above (`thinking_transcript`,
+    /// `tool_events`) stay populated so the teacher dashboard retains
+    /// audit; the read-time gate on the conversation-detail route
+    /// blanks them out for the conversation owner when this is true.
+    /// Default FALSE; pre-migration rows (and every legacy single-pass
+    /// message) have it false.
+    pub thinking_hidden: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -411,7 +419,7 @@ pub async fn list_messages(
 ) -> Result<Vec<MessageRow>, sqlx::Error> {
     sqlx::query_as!(
         MessageRow,
-        "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
+        "SELECT id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens, thinking_hidden, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
         conversation_id,
     )
     .fetch_all(db)
@@ -436,6 +444,7 @@ pub async fn insert_message(
     thinking_ms: Option<i32>,
     research_prompt_tokens: Option<i32>,
     research_completion_tokens: Option<i32>,
+    thinking_hidden: bool,
 ) -> Result<MessageRow, sqlx::Error> {
     // Also update conversation timestamp
     let _ = sqlx::query!(
@@ -447,9 +456,9 @@ pub async fn insert_message(
 
     sqlx::query_as!(
         MessageRow,
-        r#"INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens, created_at"#,
+        r#"INSERT INTO messages (id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens, thinking_hidden)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        RETURNING id, conversation_id, role, content, chunks_used, model_used, tokens_prompt, tokens_completion, generation_ms, retrieval_count, thinking_transcript, tool_events, thinking_ms, research_prompt_tokens, research_completion_tokens, thinking_hidden, created_at"#,
         id,
         conversation_id,
         role,
@@ -465,6 +474,7 @@ pub async fn insert_message(
         thinking_ms,
         research_prompt_tokens,
         research_completion_tokens,
+        thinking_hidden,
     )
     .fetch_one(db)
     .await

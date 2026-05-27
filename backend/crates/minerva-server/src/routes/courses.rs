@@ -109,47 +109,6 @@ fn validate_semester_label(raw: &str) -> Result<String, AppError> {
     Ok(trimmed)
 }
 
-#[cfg(test)]
-mod semester_label_tests {
-    use super::validate_semester_label;
-
-    #[test]
-    fn accepts_canonical_labels() {
-        assert_eq!(validate_semester_label("VT2026").unwrap(), "VT2026");
-        assert_eq!(validate_semester_label("HT2099").unwrap(), "HT2099");
-    }
-
-    #[test]
-    fn normalises_case_and_trims_whitespace() {
-        // Teachers type the label by hand; we accept any case and
-        // surrounding spaces but store the canonical upper-case form.
-        assert_eq!(validate_semester_label("  vt2026 ").unwrap(), "VT2026");
-        assert_eq!(validate_semester_label("Ht2027").unwrap(), "HT2027");
-    }
-
-    #[test]
-    fn rejects_wrong_shape() {
-        // Common typos: 2-digit year, 5-digit year, wrong season,
-        // missing season, embedded space.
-        for bad in [
-            "VT26", "VT20266", "ST2026", "2026", "VT 2026", "VTVT26", "", "  ",
-        ] {
-            assert!(
-                validate_semester_label(bad).is_err(),
-                "expected {bad:?} to be rejected",
-            );
-        }
-    }
-
-    #[test]
-    fn rejects_out_of_range_years() {
-        // Guard against e.g. "VT0026" passing because the digits
-        // happen to fit. Range is [2000, 2100).
-        assert!(validate_semester_label("VT1999").is_err());
-        assert!(validate_semester_label("HT2100").is_err());
-    }
-}
-
 #[derive(Serialize)]
 struct CourseResponse {
     id: Uuid,
@@ -885,4 +844,45 @@ async fn decline_role_suggestion(
     minerva_db::queries::role_suggestions::mark_declined(&state.db, suggestion.id, user.id).await?;
 
     Ok(Json(serde_json::json!({ "declined": true })))
+}
+
+#[cfg(test)]
+mod semester_label_tests {
+    use super::validate_semester_label;
+
+    #[test]
+    fn accepts_canonical_labels() {
+        assert_eq!(validate_semester_label("VT2026").unwrap(), "VT2026");
+        assert_eq!(validate_semester_label("HT2099").unwrap(), "HT2099");
+    }
+
+    #[test]
+    fn normalises_case_and_trims_whitespace() {
+        // Teachers type the label by hand; we accept any case and
+        // surrounding spaces but store the canonical upper-case form.
+        assert_eq!(validate_semester_label("  vt2026 ").unwrap(), "VT2026");
+        assert_eq!(validate_semester_label("Ht2027").unwrap(), "HT2027");
+    }
+
+    #[test]
+    fn rejects_wrong_shape() {
+        // Common typos: 2-digit year, 5-digit year, wrong season,
+        // missing season, embedded space.
+        for bad in [
+            "VT26", "VT20266", "ST2026", "2026", "VT 2026", "VTVT26", "", "  ",
+        ] {
+            assert!(
+                validate_semester_label(bad).is_err(),
+                "expected {bad:?} to be rejected",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_out_of_range_years() {
+        // Guard against e.g. "VT0026" passing because the digits
+        // happen to fit. Range is [2000, 2100).
+        assert!(validate_semester_label("VT1999").is_err());
+        assert!(validate_semester_label("HT2100").is_err());
+    }
 }

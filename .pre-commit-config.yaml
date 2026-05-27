@@ -122,7 +122,11 @@ repos:
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: bash -c 'cd backend && SQLX_OFFLINE=true cargo clippy -- -D warnings'
+        # --all-targets matches CI's invocation; without it clippy skips
+        # the test target and misses lints like `items_after_test_module`
+        # (a test module followed by non-test items in the same file)
+        # that only fire when the test build runs.
+        entry: bash -c 'cd backend && SQLX_OFFLINE=true cargo clippy --all-targets -- -D warnings'
         language: system
         pass_filenames: false
         files: \.rs$|Cargo\.toml$

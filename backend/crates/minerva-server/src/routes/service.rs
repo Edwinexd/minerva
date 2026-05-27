@@ -969,7 +969,15 @@ pub(super) async fn apply_one(
 
     // Phase 2: upsert the course. Owner is stamped only on INSERT;
     // re-applies leave whatever owner the course currently has
-    // (admin-edited ownership wins permanently).
+    // (admin-edited ownership wins permanently). Course-AI defaults
+    // are pulled from `system_defaults` so a Daisy import respects
+    // /admin/defaults edits identically to a manual POST /courses
+    // (these fields also stamp on INSERT only, so teacher tweaks
+    // post-import survive re-syncs).
+    let model = crate::system_defaults::course_model(&state.db).await;
+    let strategy = crate::system_defaults::course_strategy(&state.db).await;
+    let embedding_provider = crate::system_defaults::course_embedding_provider(&state.db).await;
+    let system_prompt = crate::system_defaults::course_system_prompt(&state.db).await;
     let outcome = minerva_db::queries::courses::upsert_from_daisy(
         &state.db,
         &minerva_db::queries::courses::DaisyCourseInput {
@@ -982,7 +990,18 @@ pub(super) async fn apply_one(
             unit: input.unit.as_deref(),
             owner_id,
             daily_token_limit: crate::system_defaults::course_daily_token_limit(&state.db).await,
+            model: Some(model.as_str()),
+            temperature: Some(crate::system_defaults::course_temperature(&state.db).await),
+            context_ratio: Some(crate::system_defaults::course_context_ratio(&state.db).await),
+            max_chunks: Some(crate::system_defaults::course_max_chunks(&state.db).await),
+            min_score: Some(crate::system_defaults::course_min_score(&state.db).await),
+            strategy: Some(strategy.as_str()),
+            tool_use_enabled: Some(
+                crate::system_defaults::course_tool_use_enabled(&state.db).await,
+            ),
+            embedding_provider: Some(embedding_provider.as_str()),
             embedding_model: default_embedding_model,
+            system_prompt: system_prompt.as_deref(),
         },
     )
     .await?;

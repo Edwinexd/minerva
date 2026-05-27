@@ -518,6 +518,13 @@ pub async fn get_member_role(
 /// `dsv_wrapper.DaisyCourse` fields the Minerva backend cares about;
 /// the python sync script flattens the dsv-wrapper model into this
 /// shape before posting to `/api/service/daisy-courses`.
+///
+/// Every admin-tunable course-AI knob is carried here as
+/// `Option<&'a str>` / `Option<numeric>` so the route layer can wire
+/// `system_defaults` reads through to the INSERT exactly the way
+/// the manual `POST /courses` endpoint does. `None` falls through
+/// to the migration's literal default; the route layer should only
+/// pass `None` from legacy / test paths.
 pub struct DaisyCourseInput<'a> {
     /// Daisy momenttillfID. Dedup key for the upsert.
     pub momenttillf_id: &'a str,
@@ -536,12 +543,21 @@ pub struct DaisyCourseInput<'a> {
     /// `users::find_or_create_by_eppn` from the kursansvarig Daisy
     /// surfaced, so it's always a real human, never a placeholder.
     pub owner_id: Uuid,
-    /// Per-student daily token cap stamped on INSERT. Same default the
-    /// manual course-creation endpoint uses.
+    /// Per-student daily token cap, sourced from
+    /// `system_defaults::course_daily_token_limit` by the route layer.
+    /// Applied on INSERT only.
     pub daily_token_limit: i64,
-    /// Resolved admin-default embedding model, or `None` to fall
-    /// through to the courses-table column DEFAULT.
+    /// Admin-default chat model (`system_defaults::course_model`).
+    pub model: Option<&'a str>,
+    pub temperature: Option<f64>,
+    pub context_ratio: Option<f64>,
+    pub max_chunks: Option<i32>,
+    pub min_score: Option<f32>,
+    pub strategy: Option<&'a str>,
+    pub tool_use_enabled: Option<bool>,
+    pub embedding_provider: Option<&'a str>,
     pub embedding_model: Option<&'a str>,
+    pub system_prompt: Option<&'a str>,
 }
 
 pub struct DaisyUpsertOutcome {
@@ -554,107 +570,91 @@ pub struct DaisyUpsertOutcome {
 
 /// Idempotently upsert a course by Daisy momenttillfID.
 ///
-/// INSERT path: stamps `auto_managed = TRUE`, owner = fallback,
-/// `daisy_last_synced_at = NOW()`. UPDATE path: refreshes `name`,
-/// `semester_label`, and the `daisy_*` metadata columns; bumps
-/// `daisy_last_synced_at`. Never touches `owner_id`, `description`,
-/// the model/strategy fields, or any teacher-tunable column.
+/// INSERT path: stamps `auto_managed = TRUE`,
+/// `daisy_last_synced_at = NOW()`, every admin-tunable course-AI
+/// default via `COALESCE($N, '<literal>')` (same pattern + same
+/// literals as `create()` so the two flows produce identical rows
+/// when the caller supplies the same admin-default values).
+/// UPDATE path: refreshes `name`, `course_code`, `semester_label`,
+/// and the `daisy_*` metadata columns + bumps `daisy_last_synced_at`.
+/// Never touches `owner_id`, `description`, or any teacher-tunable
+/// AI column (admin-edited values + teacher overrides win permanently
+/// once a course is live).
 ///
 /// The `(xmax = 0)` trick distinguishes INSERT from UPDATE: postgres
 /// sets `xmax = 0` for a freshly inserted row and the conflict-target
-/// xact id otherwise. Wrapping it in CAST() avoids the macro's bool
-/// inference complaining about the system column.
+/// xact id otherwise. The second SELECT keeps `CourseRow` as the
+/// single source of truth for the column list rather than duplicating
+/// it in the RETURNING clause.
 pub async fn upsert_from_daisy(
     db: &PgPool,
     input: &DaisyCourseInput<'_>,
 ) -> Result<DaisyUpsertOutcome, sqlx::Error> {
-    // Two-step: do the conflict-aware INSERT, then re-fetch the row.
-    // We can't fold both into one `RETURNING` because sqlx generates a
-    // distinct anonymous record type per `query!` site, and the
-    // embedding_model branch must omit a column entirely (postgres
-    // won't expose column DEFAULT in an INSERT expression). The
-    // second SELECT is cheap and lets us keep `CourseRow` as the
-    // single source of truth for the column list.
-    let inserted_id_and_flag = if let Some(model) = input.embedding_model {
-        let row = sqlx::query!(
-            r#"INSERT INTO courses (
-                id, name, owner_id, daily_token_limit, embedding_model,
-                semester_label, daisy_momenttillf_id, daisy_info_url,
-                daisy_syllabus_url, daisy_unit, daisy_last_synced_at,
-                auto_managed, course_code
-            ) VALUES (
-                gen_random_uuid(), $1, $2, $3, $4,
-                $5, $6, $7, $8, $9, NOW(), TRUE, $10
-            )
-            ON CONFLICT (daisy_momenttillf_id)
-                WHERE daisy_momenttillf_id IS NOT NULL
-            DO UPDATE SET
-                name = EXCLUDED.name,
-                course_code = COALESCE(EXCLUDED.course_code, courses.course_code),
-                semester_label = COALESCE(EXCLUDED.semester_label, courses.semester_label),
-                daisy_info_url = COALESCE(EXCLUDED.daisy_info_url, courses.daisy_info_url),
-                daisy_syllabus_url = COALESCE(EXCLUDED.daisy_syllabus_url, courses.daisy_syllabus_url),
-                daisy_unit = COALESCE(EXCLUDED.daisy_unit, courses.daisy_unit),
-                daisy_last_synced_at = NOW(),
-                updated_at = NOW()
-            RETURNING id, (xmax = 0) AS "inserted!: bool""#,
-            input.name,
-            input.owner_id,
-            input.daily_token_limit,
-            model,
-            input.semester_label,
-            input.momenttillf_id,
-            input.info_url,
-            input.syllabus_url,
-            input.unit,
-            input.beteckning,
+    let row = sqlx::query!(
+        r#"INSERT INTO courses (
+            id, name, owner_id, daily_token_limit,
+            model, temperature, context_ratio, max_chunks, min_score,
+            strategy, tool_use_enabled, embedding_provider, embedding_model,
+            system_prompt, semester_label,
+            daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url,
+            daisy_unit, daisy_last_synced_at, auto_managed, course_code
+        ) VALUES (
+            gen_random_uuid(), $1, $2, $3,
+            COALESCE($4, 'gpt-oss-120b'),
+            COALESCE($5::DOUBLE PRECISION, 0.3),
+            COALESCE($6::DOUBLE PRECISION, 0.7),
+            COALESCE($7::INTEGER, 10),
+            COALESCE($8::REAL, 0.0),
+            COALESCE($9, 'simple'),
+            COALESCE($10::BOOLEAN, FALSE),
+            COALESCE($11, 'local'),
+            COALESCE($12, 'sentence-transformers/all-MiniLM-L6-v2'),
+            $13, $14,
+            $15, $16, $17,
+            $18, NOW(), TRUE, $19
         )
-        .fetch_one(db)
-        .await?;
-        (row.id, row.inserted)
-    } else {
-        let row = sqlx::query!(
-            r#"INSERT INTO courses (
-                id, name, owner_id, daily_token_limit,
-                semester_label, daisy_momenttillf_id, daisy_info_url,
-                daisy_syllabus_url, daisy_unit, daisy_last_synced_at,
-                auto_managed, course_code
-            ) VALUES (
-                gen_random_uuid(), $1, $2, $3,
-                $4, $5, $6, $7, $8, NOW(), TRUE, $9
-            )
-            ON CONFLICT (daisy_momenttillf_id)
-                WHERE daisy_momenttillf_id IS NOT NULL
-            DO UPDATE SET
-                name = EXCLUDED.name,
-                course_code = COALESCE(EXCLUDED.course_code, courses.course_code),
-                semester_label = COALESCE(EXCLUDED.semester_label, courses.semester_label),
-                daisy_info_url = COALESCE(EXCLUDED.daisy_info_url, courses.daisy_info_url),
-                daisy_syllabus_url = COALESCE(EXCLUDED.daisy_syllabus_url, courses.daisy_syllabus_url),
-                daisy_unit = COALESCE(EXCLUDED.daisy_unit, courses.daisy_unit),
-                daisy_last_synced_at = NOW(),
-                updated_at = NOW()
-            RETURNING id, (xmax = 0) AS "inserted!: bool""#,
-            input.name,
-            input.owner_id,
-            input.daily_token_limit,
-            input.semester_label,
-            input.momenttillf_id,
-            input.info_url,
-            input.syllabus_url,
-            input.unit,
-            input.beteckning,
-        )
-        .fetch_one(db)
-        .await?;
-        (row.id, row.inserted)
-    };
+        ON CONFLICT (daisy_momenttillf_id)
+            WHERE daisy_momenttillf_id IS NOT NULL
+        DO UPDATE SET
+            name = EXCLUDED.name,
+            course_code = COALESCE(EXCLUDED.course_code, courses.course_code),
+            semester_label = COALESCE(EXCLUDED.semester_label, courses.semester_label),
+            daisy_info_url = COALESCE(EXCLUDED.daisy_info_url, courses.daisy_info_url),
+            daisy_syllabus_url = COALESCE(EXCLUDED.daisy_syllabus_url, courses.daisy_syllabus_url),
+            daisy_unit = COALESCE(EXCLUDED.daisy_unit, courses.daisy_unit),
+            daisy_last_synced_at = NOW(),
+            updated_at = NOW()
+        RETURNING id, (xmax = 0) AS "inserted!: bool""#,
+        input.name,
+        input.owner_id,
+        input.daily_token_limit,
+        input.model,
+        input.temperature,
+        input.context_ratio,
+        input.max_chunks,
+        input.min_score,
+        input.strategy,
+        input.tool_use_enabled,
+        input.embedding_provider,
+        input.embedding_model,
+        input.system_prompt,
+        input.semester_label,
+        input.momenttillf_id,
+        input.info_url,
+        input.syllabus_url,
+        input.unit,
+        input.beteckning,
+    )
+    .fetch_one(db)
+    .await?;
 
-    let (course_id, created) = inserted_id_and_flag;
-    let course = find_by_id(db, course_id)
+    let course = find_by_id(db, row.id)
         .await?
         .ok_or(sqlx::Error::RowNotFound)?;
-    Ok(DaisyUpsertOutcome { course, created })
+    Ok(DaisyUpsertOutcome {
+        course,
+        created: row.inserted,
+    })
 }
 
 /// Find a course by its Daisy momenttillfID. None when the offering

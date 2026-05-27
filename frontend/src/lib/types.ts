@@ -51,6 +51,32 @@ export interface Course {
    * tabs, badges, and dialogs.
    */
   feature_flags: CourseFeatureFlags
+  /**
+   * `VT2026` / `HT2025` etc. Set by the Daisy auto-import phase;
+   * drives the per-semester grouping on the My Courses page. Null
+   * for ad-hoc / manually-created courses.
+   */
+  semester_label: string | null
+  /**
+   * Daisy linkage block when this course was auto-imported. Drives
+   * the "Auto-managed by Daisy sync" badge + info / syllabus links
+   * on the course settings page.
+   */
+  daisy: DaisyMeta | null
+  /**
+   * TRUE when this course was created by the Daisy auto-import
+   * phase. Used by the frontend to show a status badge and (later)
+   * gate UI affordances that shouldn't fight the sync.
+   */
+  auto_managed: boolean
+}
+
+export interface DaisyMeta {
+  momenttillf_id: string
+  info_url: string | null
+  syllabus_url: string | null
+  unit: string | null
+  last_synced_at: string | null
 }
 
 export interface CourseFeatureFlags {

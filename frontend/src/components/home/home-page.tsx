@@ -38,6 +38,13 @@ export function Home() {
   const studentCourses = courses?.filter((c) => c.my_role === "student") ?? []
   const hasBoth = teacherCourses.length > 0 && studentCourses.length > 0
 
+  // Group teacher courses by `semester_label` so VT2026, HT2026, ...
+  // each get their own header. Most teachers carry the same handful
+  // of courses across multiple semesters; surfacing the term up-front
+  // keeps the "current vs. last year" mental model obvious.
+  const teacherBySemester = groupBySemester(teacherCourses)
+  const studentBySemester = groupBySemester(studentCourses)
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -83,17 +90,20 @@ export function Home() {
       )}
 
       {!isLoading && teacherCourses.length > 0 && (
-        <CourseSection
-          title={hasBoth ? t("home.teacherSection") : null}
-          courses={teacherCourses}
+        <SemesterGroupedSections
+          // Top-level role heading only when both teacher + student
+          // cards are visible; otherwise the page is already a single
+          // role context and the extra subheading is just noise.
+          topTitle={hasBoth ? t("home.teacherSection") : null}
+          groups={teacherBySemester}
           variant="teacher"
         />
       )}
 
       {!isLoading && studentCourses.length > 0 && (
-        <CourseSection
-          title={hasBoth ? t("home.studentSection") : null}
-          courses={studentCourses}
+        <SemesterGroupedSections
+          topTitle={hasBoth ? t("home.studentSection") : null}
+          groups={studentBySemester}
           variant="student"
           showUnread
         />
@@ -104,6 +114,100 @@ export function Home() {
           {canCreate ? t("home.emptyTeacher") : t("home.emptyStudent")}
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Bucket a flat course list by `semester_label` and return groups
+ * sorted by recency (VT2027 > HT2026 > VT2026 > ...). Courses
+ * lacking a semester label fall into a sentinel "" group that
+ * renders last under an "Ad-hoc" heading.
+ *
+ * The sort key extracts the year from `YYYY` and the season order
+ * (HT > VT within a year because Aug-Dec lands later in the calendar
+ * than Jan-Jun). Anything malformed (shouldn't happen post-server-
+ * validation, but be defensive) sorts to the end.
+ */
+function semesterSortKey(label: string): number {
+  if (!label) return -Infinity
+  const m = label.match(/^(VT|HT)(\d{4})$/)
+  if (!m) return -Infinity
+  const year = parseInt(m[2], 10)
+  // HT (autumn) chronologically follows VT (spring) of the same year.
+  const seasonOffset = m[1] === "HT" ? 0.5 : 0
+  return year + seasonOffset
+}
+
+function groupBySemester(courses: Course[]): Array<{
+  label: string
+  courses: Course[]
+}> {
+  const buckets = new Map<string, Course[]>()
+  for (const c of courses) {
+    const key = c.semester_label ?? ""
+    if (!buckets.has(key)) buckets.set(key, [])
+    buckets.get(key)!.push(c)
+  }
+  const entries = Array.from(buckets.entries()).map(([label, courses]) => ({
+    label,
+    courses,
+  }))
+  // Newest semester first; "Ad-hoc" (empty key) always last so it
+  // doesn't hijack the visual hierarchy when most of a teacher's
+  // courses are semester-tagged.
+  entries.sort((a, b) => {
+    if (a.label === "" && b.label !== "") return 1
+    if (b.label === "" && a.label !== "") return -1
+    return semesterSortKey(b.label) - semesterSortKey(a.label)
+  })
+  return entries
+}
+
+function SemesterGroupedSections({
+  topTitle,
+  groups,
+  variant,
+  showUnread = false,
+}: {
+  topTitle: string | null
+  groups: Array<{ label: string; courses: Course[] }>
+  variant: "teacher" | "student"
+  showUnread?: boolean
+}) {
+  const { t } = useTranslation("common")
+  // When every course in this role bucket lives in a single semester
+  // (or in the "ad-hoc" bucket), the semester heading is redundant
+  // with the page context. Collapse it back to a flat list so the
+  // pre-Daisy presentation is preserved for teachers who haven't
+  // adopted any auto-imported courses yet.
+  const flat = groups.length <= 1
+  if (flat) {
+    return (
+      <CourseSection
+        title={topTitle}
+        courses={groups[0]?.courses ?? []}
+        variant={variant}
+        showUnread={showUnread}
+      />
+    )
+  }
+  return (
+    <div className="space-y-8">
+      {topTitle && (
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+          {topTitle}
+        </h2>
+      )}
+      {groups.map((g) => (
+        <CourseSection
+          key={g.label || "_adhoc"}
+          title={g.label === "" ? t("home.adhocSection") : g.label}
+          courses={g.courses}
+          variant={variant}
+          showUnread={showUnread}
+        />
+      ))}
     </div>
   )
 }

@@ -93,6 +93,7 @@
     "loadFailed": "Failed to load courses: {{error}}",
     "teacherSection": "Courses you teach",
     "studentSection": "Courses you're enrolled in",
+    "adhocSection": "Ad-hoc",
     "emptyTeacher": "No courses yet. Create your first course to get started.",
     "emptyStudent": "You haven't been added to a course yet. Ask your teacher for an invite link.",
     "clickToChat": "Click to start chatting",

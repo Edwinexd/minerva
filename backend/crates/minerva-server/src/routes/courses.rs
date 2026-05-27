@@ -113,6 +113,27 @@ struct CourseResponse {
     /// default). Frontend reads this to decide whether to show
     /// KG-related tabs / badges / dialogs.
     feature_flags: CourseFeatureFlagsView,
+    /// `VT2026` / `HT2025` etc. Set by the Daisy auto-import phase;
+    /// drives the per-semester grouping on the My Courses page. NULL
+    /// for ad-hoc (manually-created) courses.
+    semester_label: Option<String>,
+    /// Daisy metadata block, present when this course was auto-imported
+    /// from Daisy. Frontend uses these to render the "Auto-managed by
+    /// Daisy sync" badge + info/syllabus links on the settings page.
+    daisy: Option<DaisyMetaView>,
+    /// TRUE when the course was created by the Daisy auto-import phase
+    /// (membership sync stays additive on these; teachers shouldn't
+    /// fight the import). Mirrors `courses.auto_managed`.
+    auto_managed: bool,
+}
+
+#[derive(Serialize)]
+struct DaisyMetaView {
+    momenttillf_id: String,
+    info_url: Option<String>,
+    syllabus_url: Option<String>,
+    unit: Option<String>,
+    last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Per-course feature-flag snapshot, resolved through the runtime
@@ -149,6 +170,19 @@ impl CourseResponse {
         my_role: Option<String>,
         feature_flags: CourseFeatureFlagsView,
     ) -> Self {
+        // Compose the Daisy view only when we have a momenttillf_id;
+        // a course with a manually-stamped `semester_label` but no
+        // Daisy linkage shouldn't carry a phantom daisy block.
+        let daisy = row
+            .daisy_momenttillf_id
+            .clone()
+            .map(|momenttillf_id| DaisyMetaView {
+                momenttillf_id,
+                info_url: row.daisy_info_url.clone(),
+                syllabus_url: row.daisy_syllabus_url.clone(),
+                unit: row.daisy_unit.clone(),
+                last_synced_at: row.daisy_last_synced_at,
+            });
         Self {
             id: row.id,
             name: row.name,
@@ -171,6 +205,9 @@ impl CourseResponse {
             updated_at: row.updated_at,
             my_role,
             feature_flags,
+            semester_label: row.semester_label,
+            daisy,
+            auto_managed: row.auto_managed,
         }
     }
 }

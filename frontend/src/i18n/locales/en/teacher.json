@@ -470,5 +470,19 @@
     "colRequests": "Requests",
     "colDate": "Date",
     "dailyBreakdown": "Daily breakdown"
+  },
+  "daisyMeta": {
+    "title": "Daisy linkage",
+    "description": "This course was created and is kept in sync with Daisy. Fields below are read-only here; edit them in Daisy and the next nightly sync will pull the change in.",
+    "badge": "Auto-managed",
+    "badgeTooltip": "Membership and metadata are kept in sync nightly by the Daisy auto-import.",
+    "momenttillfId": "Daisy ID",
+    "semester": "Semester",
+    "unit": "Unit",
+    "infoUrl": "Course page",
+    "syllabusUrl": "Syllabus",
+    "openExternal": "Open in Daisy",
+    "lastSynced": "Last sync",
+    "neverSynced": "Never"
   }
 }

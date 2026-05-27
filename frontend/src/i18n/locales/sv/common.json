@@ -93,6 +93,7 @@
     "loadFailed": "Kunde inte läsa in kurser: {{error}}",
     "teacherSection": "Kurser du undervisar i",
     "studentSection": "Kurser du är anmäld till",
+    "adhocSection": "Övrigt",
     "emptyTeacher": "Inga kurser än. Skapa din första kurs för att komma igång.",
     "emptyStudent": "Du har inte lagts till i någon kurs än. Be din lärare om en inbjudningslänk.",
     "clickToChat": "Klicka för att börja chatta",

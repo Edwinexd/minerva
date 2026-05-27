@@ -53,8 +53,104 @@ export function ConfigPage({ useParams }: { useParams: () => { courseId: string 
   if (!course) return null
   return (
     <div className="space-y-6">
+      {course.daisy && <DaisyMetaCard course={course} />}
       <CourseConfigForm course={course} />
       <KgTokenUsageCard courseId={courseId} />
+    </div>
+  )
+}
+
+/**
+ * Read-only "Auto-managed by Daisy sync" card. Renders when the
+ * course was created by the daily Daisy import (`course.daisy` is
+ * non-null). The fields here mirror what `sync_daisy_courses.py`
+ * pushes nightly; the teacher can't edit any of them inline (every
+ * field is canonically managed by Daisy and would just be overwritten
+ * on the next sync). Outbound links land on the public Daisy pages
+ * so a teacher can spot-check the offering without leaving Minerva.
+ */
+function DaisyMetaCard({ course }: { course: Course }) {
+  const { t } = useTranslation("teacher")
+  const meta = course.daisy
+  if (!meta) return null
+  const lastSynced = meta.last_synced_at
+    ? new Date(meta.last_synced_at).toLocaleString()
+    : t("daisyMeta.neverSynced")
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle>{t("daisyMeta.title")}</CardTitle>
+          <span
+            className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground"
+            title={t("daisyMeta.badgeTooltip")}
+          >
+            {t("daisyMeta.badge")}
+          </span>
+        </div>
+        <CardDescription>{t("daisyMeta.description")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <DaisyMetaRow
+          label={t("daisyMeta.momenttillfId")}
+          value={meta.momenttillf_id}
+        />
+        {course.semester_label && (
+          <DaisyMetaRow
+            label={t("daisyMeta.semester")}
+            value={course.semester_label}
+          />
+        )}
+        {meta.unit && (
+          <DaisyMetaRow label={t("daisyMeta.unit")} value={meta.unit} />
+        )}
+        {meta.info_url && (
+          <DaisyMetaRow
+            label={t("daisyMeta.infoUrl")}
+            value={
+              <a
+                href={meta.info_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                {t("daisyMeta.openExternal")}
+              </a>
+            }
+          />
+        )}
+        {meta.syllabus_url && (
+          <DaisyMetaRow
+            label={t("daisyMeta.syllabusUrl")}
+            value={
+              <a
+                href={meta.syllabus_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                {t("daisyMeta.openExternal")}
+              </a>
+            }
+          />
+        )}
+        <DaisyMetaRow label={t("daisyMeta.lastSynced")} value={lastSynced} />
+      </CardContent>
+    </Card>
+  )
+}
+
+function DaisyMetaRow({
+  label,
+  value,
+}: {
+  label: string
+  value: React.ReactNode
+}) {
+  return (
+    <div className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium break-all">{value}</span>
     </div>
   )
 }

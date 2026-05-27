@@ -17,7 +17,6 @@ pub mod linker_decisions;
 pub mod lti;
 pub mod lti_nrps;
 pub mod message_feedback;
-pub mod pending_course_memberships;
 pub mod play_course_catalog;
 pub mod play_designations;
 pub mod prompt_analyses;

@@ -585,9 +585,8 @@ pub(super) struct DaisyParticipantInput {
     /// `user_eppn_aliases` once we know which Minerva user they map to.
     pub eppns: Vec<String>,
     pub display_name: Option<String>,
-    /// Free-text role labels from Daisy. Stored verbatim on
-    /// `pending_course_memberships.daisy_roles`; used here only to
-    /// decide `eligible_for_owner`.
+    /// Free-text role labels from Daisy. Used here only to decide
+    /// `eligible_for_owner`; not persisted on the course row itself.
     pub daisy_roles: Vec<String>,
     /// `"staff"` or `"student"`. Determines the Minerva
     /// `course_members.role` we add: staff → teacher, student → ta.

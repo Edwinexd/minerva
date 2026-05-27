@@ -46,16 +46,37 @@ pub struct Config {
     /// members, remove ones who left). Measured in hours; 0 disables the
     /// background loop entirely.
     pub lti_nrps_sync_interval_hours: i32,
+    /// Fallback owner for Daisy-auto-imported courses, applied only on
+    /// INSERT. When the cron sync identifies a real kursansvarig who's
+    /// present in Minerva (or one logs in for the first time and drains
+    /// a pending row flagged `eligible_for_owner`), ownership swaps to
+    /// the real human via `swap_owner_from_fallback`. Defaults to the
+    /// first MINERVA_ADMINS entry; explicit override via
+    /// MINERVA_DAISY_FALLBACK_OWNER_EPPN takes precedence.
+    pub daisy_fallback_owner_eppn: Option<String>,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self, env::VarError> {
-        let admin_usernames = env::var("MINERVA_ADMINS")
+        let admin_usernames: Vec<String> = env::var("MINERVA_ADMINS")
             .unwrap_or_default()
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
+
+        // Resolve the Daisy fallback owner before moving admin_usernames
+        // into the struct: explicit env override wins, otherwise the
+        // first admin gets the default `@su.se` suffix.
+        let daisy_fallback_owner_eppn = env::var("MINERVA_DAISY_FALLBACK_OWNER_EPPN")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_lowercase())
+            .or_else(|| {
+                admin_usernames
+                    .first()
+                    .map(|u| format!("{}@su.se", u.to_lowercase()))
+            });
 
         Ok(Self {
             host: env::var("MINERVA_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
@@ -106,6 +127,7 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(6),
+            daisy_fallback_owner_eppn,
         })
     }
 

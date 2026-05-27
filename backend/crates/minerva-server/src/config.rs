@@ -47,11 +47,11 @@ pub struct Config {
     /// background loop entirely.
     pub lti_nrps_sync_interval_hours: i32,
     /// Fallback owner for Daisy-auto-imported courses, applied only on
-    /// INSERT. When the cron sync identifies a real kursansvarig who's
-    /// present in Minerva (or one logs in for the first time and drains
-    /// a pending row flagged `eligible_for_owner`), ownership swaps to
-    /// the real human via `swap_owner_from_fallback`. Defaults to the
-    /// first MINERVA_ADMINS entry; explicit override via
+    /// INSERT. When the cron sync identifies a real course-responsible
+    /// who's present in Minerva (or one logs in for the first time and
+    /// drains a pending row flagged `eligible_for_owner`), ownership
+    /// swaps to the real human via `swap_owner_from_fallback`. Defaults
+    /// to the first MINERVA_ADMINS entry; explicit override via
     /// MINERVA_DAISY_FALLBACK_OWNER_EPPN takes precedence.
     pub daisy_fallback_owner_eppn: Option<String>,
 }

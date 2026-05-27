@@ -51,7 +51,8 @@ pub struct CourseRow {
     pub daisy_last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
     /// TRUE when the row was created by the Daisy auto-import phase;
     /// membership stays additive and owner is the env-var fallback
-    /// until a real kursansvarig is identified and present in Minerva.
+    /// until a real course-responsible is identified and present in
+    /// Minerva.
     pub auto_managed: bool,
     /// Course code (e.g. `PROG2`). Stable identifier across name
     /// renames; populated by the Daisy auto-import from the
@@ -655,9 +656,9 @@ pub async fn find_by_daisy_momenttillf_id(
 
 /// Atomic owner swap: only succeeds when the course currently sits on
 /// `fallback_owner_id`. Returns TRUE iff a row was updated. Used by
-/// the auth-middleware drain to promote the first real kursansvarig
-/// to owner; subsequent calls become no-ops once a real human owns
-/// the course.
+/// the auth-middleware drain to promote the first real course-
+/// responsible to owner; subsequent calls become no-ops once a real
+/// human owns the course.
 pub async fn swap_owner_from_fallback(
     db: &PgPool,
     course_id: Uuid,

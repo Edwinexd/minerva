@@ -41,9 +41,9 @@ pub struct PendingUpsert<'a> {
 /// Upsert a pending row. Subsequent calls for the same (course, eppn)
 /// refresh `display_name`, `role`, `eligible_for_owner`, and
 /// `daisy_roles`; the OR-aggregation on `eligible_for_owner` is
-/// deliberate (once a person is identified as kursansvarig on this
-/// course, a later sync that doesn't see them in that role shouldn't
-/// retroactively demote them in the pending queue).
+/// deliberate (once a person is identified as course-responsible on
+/// this course, a later sync that doesn't see them in that role
+/// shouldn't retroactively demote them in the pending queue).
 pub async fn upsert(db: &PgPool, input: &PendingUpsert<'_>) -> Result<PendingRow, sqlx::Error> {
     sqlx::query_as!(
         PendingRow,

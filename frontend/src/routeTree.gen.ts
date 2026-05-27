@@ -29,6 +29,7 @@ import { Route as AdminIntegrationsRouteImport } from "./routes/admin/integratio
 import { Route as AdminExternalInvitesRouteImport } from "./routes/admin/external-invites"
 import { Route as AdminDevToolsRouteImport } from "./routes/admin/dev-tools"
 import { Route as AdminDefaultsRouteImport } from "./routes/admin/defaults"
+import { Route as AdminDaisyRouteImport } from "./routes/admin/daisy"
 import { Route as AdminCoursesRouteImport } from "./routes/admin/courses"
 import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
 import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
@@ -150,6 +151,11 @@ const AdminDevToolsRoute = AdminDevToolsRouteImport.update({
 const AdminDefaultsRoute = AdminDefaultsRouteImport.update({
   id: "/defaults",
   path: "/defaults",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminDaisyRoute = AdminDaisyRouteImport.update({
+  id: "/daisy",
+  path: "/daisy",
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminCoursesRoute = AdminCoursesRouteImport.update({
@@ -286,6 +292,7 @@ export interface FileRoutesByFullPath {
   "/admin": typeof AdminRouteWithChildren
   "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
+  "/admin/daisy": typeof AdminDaisyRoute
   "/admin/defaults": typeof AdminDefaultsRoute
   "/admin/dev-tools": typeof AdminDevToolsRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
@@ -329,6 +336,7 @@ export interface FileRoutesByTo {
   "/acknowledgements": typeof AcknowledgementsRoute
   "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
+  "/admin/daisy": typeof AdminDaisyRoute
   "/admin/defaults": typeof AdminDefaultsRoute
   "/admin/dev-tools": typeof AdminDevToolsRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
@@ -373,6 +381,7 @@ export interface FileRoutesById {
   "/admin": typeof AdminRouteWithChildren
   "/data-handling": typeof DataHandlingRoute
   "/admin/courses": typeof AdminCoursesRoute
+  "/admin/daisy": typeof AdminDaisyRoute
   "/admin/defaults": typeof AdminDefaultsRoute
   "/admin/dev-tools": typeof AdminDevToolsRoute
   "/admin/external-invites": typeof AdminExternalInvitesRoute
@@ -419,6 +428,7 @@ export interface FileRouteTypes {
     | "/admin"
     | "/data-handling"
     | "/admin/courses"
+    | "/admin/daisy"
     | "/admin/defaults"
     | "/admin/dev-tools"
     | "/admin/external-invites"
@@ -462,6 +472,7 @@ export interface FileRouteTypes {
     | "/acknowledgements"
     | "/data-handling"
     | "/admin/courses"
+    | "/admin/daisy"
     | "/admin/defaults"
     | "/admin/dev-tools"
     | "/admin/external-invites"
@@ -505,6 +516,7 @@ export interface FileRouteTypes {
     | "/admin"
     | "/data-handling"
     | "/admin/courses"
+    | "/admin/daisy"
     | "/admin/defaults"
     | "/admin/dev-tools"
     | "/admin/external-invites"
@@ -703,6 +715,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminDefaultsRouteImport
       parentRoute: typeof AdminRoute
     }
+    "/admin/daisy": {
+      id: "/admin/daisy"
+      path: "/daisy"
+      fullPath: "/admin/daisy"
+      preLoaderRoute: typeof AdminDaisyRouteImport
+      parentRoute: typeof AdminRoute
+    }
     "/admin/courses": {
       id: "/admin/courses"
       path: "/courses"
@@ -862,6 +881,7 @@ declare module "@tanstack/react-router" {
 
 interface AdminRouteChildren {
   AdminCoursesRoute: typeof AdminCoursesRoute
+  AdminDaisyRoute: typeof AdminDaisyRoute
   AdminDefaultsRoute: typeof AdminDefaultsRoute
   AdminDevToolsRoute: typeof AdminDevToolsRoute
   AdminExternalInvitesRoute: typeof AdminExternalInvitesRoute
@@ -878,6 +898,7 @@ interface AdminRouteChildren {
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminCoursesRoute: AdminCoursesRoute,
+  AdminDaisyRoute: AdminDaisyRoute,
   AdminDefaultsRoute: AdminDefaultsRoute,
   AdminDevToolsRoute: AdminDevToolsRoute,
   AdminExternalInvitesRoute: AdminExternalInvitesRoute,

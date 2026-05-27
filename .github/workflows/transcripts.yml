@@ -5,6 +5,15 @@ on:
     - cron: "0 * * * *"
   workflow_dispatch:
 
+# Serialise runs. After the first Daisy sync the queue can hold
+# thousands of pending transcripts; one slow hourly pass can spill
+# past 60 min and the next cron tick would otherwise fire a second
+# python process against the same SU credentials, racing for the
+# same pending rows.
+concurrency:
+  group: fetch-transcripts
+  cancel-in-progress: false
+
 jobs:
   fetch-transcripts:
     runs-on: ubuntu-latest

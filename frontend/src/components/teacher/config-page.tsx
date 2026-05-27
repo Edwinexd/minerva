@@ -53,8 +53,104 @@ export function ConfigPage({ useParams }: { useParams: () => { courseId: string 
   if (!course) return null
   return (
     <div className="space-y-6">
+      {course.daisy && <DaisyMetaCard course={course} />}
       <CourseConfigForm course={course} />
       <KgTokenUsageCard courseId={courseId} />
+    </div>
+  )
+}
+
+/**
+ * Read-only "Auto-managed by Daisy sync" card. Renders when the
+ * course was created by the daily Daisy import (`course.daisy` is
+ * non-null). The fields here mirror what `sync_daisy_courses.py`
+ * pushes nightly; the teacher can't edit any of them inline (every
+ * field is canonically managed by Daisy and would just be overwritten
+ * on the next sync). Outbound links land on the public Daisy pages
+ * so a teacher can spot-check the offering without leaving Minerva.
+ */
+function DaisyMetaCard({ course }: { course: Course }) {
+  const { t } = useTranslation("teacher")
+  const meta = course.daisy
+  if (!meta) return null
+  const lastSynced = meta.last_synced_at
+    ? new Date(meta.last_synced_at).toLocaleString()
+    : t("daisyMeta.neverSynced")
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle>{t("daisyMeta.title")}</CardTitle>
+          <span
+            className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground"
+            title={t("daisyMeta.badgeTooltip")}
+          >
+            {t("daisyMeta.badge")}
+          </span>
+        </div>
+        <CardDescription>{t("daisyMeta.description")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <DaisyMetaRow
+          label={t("daisyMeta.momenttillfId")}
+          value={meta.momenttillf_id}
+        />
+        {course.semester_label && (
+          <DaisyMetaRow
+            label={t("daisyMeta.semester")}
+            value={course.semester_label}
+          />
+        )}
+        {meta.unit && (
+          <DaisyMetaRow label={t("daisyMeta.unit")} value={meta.unit} />
+        )}
+        {meta.info_url && (
+          <DaisyMetaRow
+            label={t("daisyMeta.infoUrl")}
+            value={
+              <a
+                href={meta.info_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                {t("daisyMeta.openExternal")}
+              </a>
+            }
+          />
+        )}
+        {meta.syllabus_url && (
+          <DaisyMetaRow
+            label={t("daisyMeta.syllabusUrl")}
+            value={
+              <a
+                href={meta.syllabus_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                {t("daisyMeta.openExternal")}
+              </a>
+            }
+          />
+        )}
+        <DaisyMetaRow label={t("daisyMeta.lastSynced")} value={lastSynced} />
+      </CardContent>
+    </Card>
+  )
+}
+
+function DaisyMetaRow({
+  label,
+  value,
+}: {
+  label: string
+  value: React.ReactNode
+}) {
+  return (
+    <div className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium break-all">{value}</span>
     </div>
   )
 }
@@ -196,6 +292,14 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [embeddingProvider, setEmbeddingProvider] = useState(course.embedding_provider)
   const [embeddingModel, setEmbeddingModel] = useState(course.embedding_model)
   const [dailyTokenLimit, setDailyTokenLimit] = useState(course.daily_token_limit)
+  // Backfill / rename of the per-semester grouping label. Empty
+  // string means "no change" on submit (we only POST a label when
+  // the field is non-empty, since UpdateCourseRequest treats the
+  // missing key as a no-op). Daisy-imported courses can be relabelled
+  // here, but the next sync rewrites the value, so the input is
+  // gated to non-auto-managed rows + admins.
+  const [semesterLabel, setSemesterLabel] = useState(course.semester_label ?? "")
+  const semesterLabelEditable = !course.auto_managed
   // Two-step save: any provider/model change opens this dialog so the
   // teacher acknowledges the re-ingestion. Other field changes save
   // immediately. The dialog is keyed off the *baseline* values from
@@ -212,21 +316,33 @@ function CourseConfigForm({ course }: { course: Course }) {
     },
   })
 
-  const buildPayload = () => ({
-    name,
-    description: description || null,
-    context_ratio: contextRatio,
-    temperature,
-    model,
-    system_prompt: systemPrompt || null,
-    max_chunks: maxChunks,
-    min_score: minScore,
-    strategy,
-    tool_use_enabled: toolUseEnabled,
-    embedding_provider: embeddingProvider,
-    embedding_model: embeddingModel,
-    daily_token_limit: dailyTokenLimit,
-  })
+  const buildPayload = () => {
+    const trimmedSemester = semesterLabel.trim().toUpperCase()
+    const baseline = (course.semester_label ?? "").toUpperCase()
+    return {
+      name,
+      description: description || null,
+      context_ratio: contextRatio,
+      temperature,
+      model,
+      system_prompt: systemPrompt || null,
+      max_chunks: maxChunks,
+      min_score: minScore,
+      strategy,
+      tool_use_enabled: toolUseEnabled,
+      embedding_provider: embeddingProvider,
+      embedding_model: embeddingModel,
+      daily_token_limit: dailyTokenLimit,
+      // Only include the key when the editable value actually changed
+      // (and the field is editable in the first place). UpdateCourseRequest
+      // treats a missing key as "no change"; sending the existing value
+      // would be a harmless COALESCE round-trip but also defeats the
+      // server-side validation for blank "" inputs on existing labels.
+      ...(semesterLabelEditable && trimmedSemester && trimmedSemester !== baseline
+        ? { semester_label: trimmedSemester }
+        : {}),
+    }
+  }
 
   // The backend only rotates when provider or model differ from the
   // currently-persisted values, so mirror that condition here. A
@@ -282,6 +398,38 @@ function CourseConfigForm({ course }: { course: Course }) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="semester_label">
+              {t("config.semesterLabel")}
+              {!course.semester_label && (
+                <span className="ml-2 text-xs text-muted-foreground">
+                  ({t("config.semesterBackfillHint")})
+                </span>
+              )}
+            </Label>
+            <Input
+              id="semester_label"
+              value={semesterLabel}
+              onChange={(e) => setSemesterLabel(e.target.value)}
+              placeholder="VT2026"
+              // Mirrors the server-side regex; lets the browser flag
+              // a typo before the round-trip.
+              pattern="(?:VT|HT|vt|ht)\d{4}"
+              title={t("config.semesterFormatHint")}
+              // Daisy-managed courses get their semester rewritten on
+              // every nightly sync; let the field stay visible so the
+              // current value is obvious, but disable editing so a
+              // teacher doesn't waste effort on a change that won't
+              // survive the next cron tick.
+              disabled={readOnly || !semesterLabelEditable}
+            />
+            <p className="text-xs text-muted-foreground">
+              {!semesterLabelEditable
+                ? t("config.semesterManagedByDaisy")
+                : t("config.semesterFormatHint")}
+            </p>
           </div>
 
           <Separator />

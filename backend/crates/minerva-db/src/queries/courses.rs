@@ -33,6 +33,32 @@ pub struct CourseRow {
     pub active: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Free-text `VT2026` / `HT2025`. NULL for ad-hoc courses; populated
+    /// by the Daisy auto-import phase for every imported offering. Drives
+    /// the per-semester grouping on the My Courses page.
+    pub semester_label: Option<String>,
+    /// Daisy momenttillfID (e.g. `7620`). Primary dedup key for the
+    /// auto-import upsert; NULL on courses created manually.
+    pub daisy_momenttillf_id: Option<String>,
+    /// Public Daisy info URL for the offering (momentinfo.Momentinfo).
+    pub daisy_info_url: Option<String>,
+    /// External syllabus URL (utbildning.su.se planarkiv) sourced from
+    /// the Daisy detail page.
+    pub daisy_syllabus_url: Option<String>,
+    /// Owning unit at DSV, e.g. `ACT`. Detail-page only.
+    pub daisy_unit: Option<String>,
+    /// Wall-clock of the last successful Daisy sync that touched this row.
+    pub daisy_last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// TRUE when the row was created by the Daisy auto-import phase;
+    /// membership stays additive and owner is the env-var fallback
+    /// until a real course-responsible is identified and present in
+    /// Minerva.
+    pub auto_managed: bool,
+    /// Course code (e.g. `PROG2`). Stable identifier across name
+    /// renames; populated by the Daisy auto-import from the
+    /// `beteckning` field on the Daisy side. NULL on historical /
+    /// ad-hoc courses without a Daisy linkage.
+    pub course_code: Option<String>,
 }
 
 /// Every column the admin-tunable `system_defaults` registry covers
@@ -58,6 +84,11 @@ pub struct CreateCourse {
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
     pub system_prompt: Option<String>,
+    /// Required for new courses. The route layer validates the format
+    /// (VT|HT + 4-digit year); pre-existing rows from before this
+    /// column existed are nullable to keep historical data intact,
+    /// but every new INSERT carries a value.
+    pub semester_label: String,
 }
 
 pub struct UpdateCourse {
@@ -74,6 +105,11 @@ pub struct UpdateCourse {
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
     pub daily_token_limit: Option<i64>,
+    /// Admin / owner backfill of the per-semester grouping label.
+    /// Outer `Option` distinguishes "no change" (None) from "set
+    /// to value" (Some). We don't expose a way to clear the label
+    /// back to NULL through the API; once stamped it stays stamped.
+    pub semester_label: Option<String>,
 }
 
 pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<CourseRow, sqlx::Error> {
@@ -84,13 +120,17 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
     // from `system_defaults`, so the literals here only matter for
     // `dev_seed` + tests which knowingly pass `None`. The literals
     // mirror the values in the courses-table migrations; drifting them
-    // would only affect those legacy callers.
+    // would only affect those legacy callers. `semester_label` is the
+    // one mandatory field beyond the original schema; the Daisy
+    // auto-import + manual /courses POST both validate the format
+    // before reaching this layer.
     sqlx::query_as!(
         CourseRow,
         r#"INSERT INTO courses (
             id, name, description, owner_id, daily_token_limit,
             model, temperature, context_ratio, max_chunks, min_score,
-            strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt
+            strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt,
+            semester_label
         ) VALUES (
             $1, $2, $3, $4, $5,
             COALESCE($6, 'gpt-oss-120b'),
@@ -102,9 +142,10 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             COALESCE($12::BOOLEAN, FALSE),
             COALESCE($13, 'local'),
             COALESCE($14, 'sentence-transformers/all-MiniLM-L6-v2'),
-            $15
+            $15,
+            $16
         )
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code"#,
         id,
         input.name,
         input.description,
@@ -120,6 +161,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
         input.embedding_provider.as_deref(),
         input.embedding_model.as_deref(),
         input.system_prompt.as_deref(),
+        input.semester_label,
     )
     .fetch_one(db)
     .await
@@ -128,7 +170,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code FROM courses WHERE id = $1 AND active = true",
         id,
     )
     .fetch_optional(db)
@@ -138,7 +180,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx
 pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
         owner_id,
     )
     .fetch_all(db)
@@ -148,7 +190,7 @@ pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at
+        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed, c.course_code
         FROM courses c
         JOIN course_members cm ON cm.course_id = c.id
         WHERE cm.user_id = $1 AND c.active = true
@@ -165,7 +207,7 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_for_teacher(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed, c.course_code
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -187,7 +229,7 @@ pub async fn list_for_teacher_strict(
 ) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed, c.course_code
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -202,7 +244,7 @@ pub async fn list_for_teacher_strict(
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code FROM courses WHERE active = true ORDER BY updated_at DESC",
     )
     .fetch_all(db)
     .await
@@ -229,9 +271,10 @@ pub async fn update(
             embedding_provider = COALESCE($12, embedding_provider),
             embedding_model = COALESCE($13, embedding_model),
             min_score = COALESCE($14, min_score),
+            semester_label = COALESCE($15, semester_label),
             updated_at = NOW()
         WHERE id = $1 AND active = true
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code"#,
         id,
         input.name,
         input.description,
@@ -246,6 +289,7 @@ pub async fn update(
         input.embedding_provider,
         input.embedding_model,
         input.min_score,
+        input.semester_label,
     )
     .fetch_optional(db)
     .await
@@ -468,4 +512,207 @@ pub async fn get_member_role(
     )
     .fetch_optional(db)
     .await
+}
+
+/// Input bag for `upsert_from_daisy`. Mirrors the subset of
+/// `dsv_wrapper.DaisyCourse` fields the Minerva backend cares about;
+/// the python sync script flattens the dsv-wrapper model into this
+/// shape before posting to `/api/service/daisy-courses`.
+pub struct DaisyCourseInput<'a> {
+    /// Daisy momenttillfID. Dedup key for the upsert.
+    pub momenttillf_id: &'a str,
+    /// Course code, e.g. `PROG2`. Used as the Minerva course name's
+    /// short prefix and as the play designation `beteckning`.
+    pub beteckning: &'a str,
+    /// Human course name (Swedish).
+    pub name: &'a str,
+    pub semester_label: Option<&'a str>,
+    pub info_url: Option<&'a str>,
+    pub syllabus_url: Option<&'a str>,
+    pub unit: Option<&'a str>,
+    /// Fallback owner applied only on INSERT. Subsequent syncs leave
+    /// `owner_id` untouched here; see `swap_owner_from_fallback`.
+    pub fallback_owner_id: Uuid,
+    /// Per-student daily token cap stamped on INSERT. Same default the
+    /// manual course-creation endpoint uses.
+    pub daily_token_limit: i64,
+    /// Resolved admin-default embedding model, or `None` to fall
+    /// through to the courses-table column DEFAULT.
+    pub embedding_model: Option<&'a str>,
+}
+
+pub struct DaisyUpsertOutcome {
+    pub course: CourseRow,
+    /// TRUE on a fresh INSERT, FALSE when an existing row was refreshed.
+    /// Used by the import endpoint to decide whether to also auto-create
+    /// the matching `play_designations` row.
+    pub created: bool,
+}
+
+/// Idempotently upsert a course by Daisy momenttillfID.
+///
+/// INSERT path: stamps `auto_managed = TRUE`, owner = fallback,
+/// `daisy_last_synced_at = NOW()`. UPDATE path: refreshes `name`,
+/// `semester_label`, and the `daisy_*` metadata columns; bumps
+/// `daisy_last_synced_at`. Never touches `owner_id`, `description`,
+/// the model/strategy fields, or any teacher-tunable column.
+///
+/// The `(xmax = 0)` trick distinguishes INSERT from UPDATE: postgres
+/// sets `xmax = 0` for a freshly inserted row and the conflict-target
+/// xact id otherwise. Wrapping it in CAST() avoids the macro's bool
+/// inference complaining about the system column.
+pub async fn upsert_from_daisy(
+    db: &PgPool,
+    input: &DaisyCourseInput<'_>,
+) -> Result<DaisyUpsertOutcome, sqlx::Error> {
+    // Two-step: do the conflict-aware INSERT, then re-fetch the row.
+    // We can't fold both into one `RETURNING` because sqlx generates a
+    // distinct anonymous record type per `query!` site, and the
+    // embedding_model branch must omit a column entirely (postgres
+    // won't expose column DEFAULT in an INSERT expression). The
+    // second SELECT is cheap and lets us keep `CourseRow` as the
+    // single source of truth for the column list.
+    let inserted_id_and_flag = if let Some(model) = input.embedding_model {
+        let row = sqlx::query!(
+            r#"INSERT INTO courses (
+                id, name, owner_id, daily_token_limit, embedding_model,
+                semester_label, daisy_momenttillf_id, daisy_info_url,
+                daisy_syllabus_url, daisy_unit, daisy_last_synced_at,
+                auto_managed, course_code
+            ) VALUES (
+                gen_random_uuid(), $1, $2, $3, $4,
+                $5, $6, $7, $8, $9, NOW(), TRUE, $10
+            )
+            ON CONFLICT (daisy_momenttillf_id)
+                WHERE daisy_momenttillf_id IS NOT NULL
+            DO UPDATE SET
+                name = EXCLUDED.name,
+                course_code = COALESCE(EXCLUDED.course_code, courses.course_code),
+                semester_label = COALESCE(EXCLUDED.semester_label, courses.semester_label),
+                daisy_info_url = COALESCE(EXCLUDED.daisy_info_url, courses.daisy_info_url),
+                daisy_syllabus_url = COALESCE(EXCLUDED.daisy_syllabus_url, courses.daisy_syllabus_url),
+                daisy_unit = COALESCE(EXCLUDED.daisy_unit, courses.daisy_unit),
+                daisy_last_synced_at = NOW(),
+                updated_at = NOW()
+            RETURNING id, (xmax = 0) AS "inserted!: bool""#,
+            input.name,
+            input.fallback_owner_id,
+            input.daily_token_limit,
+            model,
+            input.semester_label,
+            input.momenttillf_id,
+            input.info_url,
+            input.syllabus_url,
+            input.unit,
+            input.beteckning,
+        )
+        .fetch_one(db)
+        .await?;
+        (row.id, row.inserted)
+    } else {
+        let row = sqlx::query!(
+            r#"INSERT INTO courses (
+                id, name, owner_id, daily_token_limit,
+                semester_label, daisy_momenttillf_id, daisy_info_url,
+                daisy_syllabus_url, daisy_unit, daisy_last_synced_at,
+                auto_managed, course_code
+            ) VALUES (
+                gen_random_uuid(), $1, $2, $3,
+                $4, $5, $6, $7, $8, NOW(), TRUE, $9
+            )
+            ON CONFLICT (daisy_momenttillf_id)
+                WHERE daisy_momenttillf_id IS NOT NULL
+            DO UPDATE SET
+                name = EXCLUDED.name,
+                course_code = COALESCE(EXCLUDED.course_code, courses.course_code),
+                semester_label = COALESCE(EXCLUDED.semester_label, courses.semester_label),
+                daisy_info_url = COALESCE(EXCLUDED.daisy_info_url, courses.daisy_info_url),
+                daisy_syllabus_url = COALESCE(EXCLUDED.daisy_syllabus_url, courses.daisy_syllabus_url),
+                daisy_unit = COALESCE(EXCLUDED.daisy_unit, courses.daisy_unit),
+                daisy_last_synced_at = NOW(),
+                updated_at = NOW()
+            RETURNING id, (xmax = 0) AS "inserted!: bool""#,
+            input.name,
+            input.fallback_owner_id,
+            input.daily_token_limit,
+            input.semester_label,
+            input.momenttillf_id,
+            input.info_url,
+            input.syllabus_url,
+            input.unit,
+            input.beteckning,
+        )
+        .fetch_one(db)
+        .await?;
+        (row.id, row.inserted)
+    };
+
+    let (course_id, created) = inserted_id_and_flag;
+    let course = find_by_id(db, course_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    Ok(DaisyUpsertOutcome { course, created })
+}
+
+/// Find a course by its Daisy momenttillfID. None when the offering
+/// hasn't been imported yet.
+pub async fn find_by_daisy_momenttillf_id(
+    db: &PgPool,
+    momenttillf_id: &str,
+) -> Result<Option<CourseRow>, sqlx::Error> {
+    sqlx::query_as!(
+        CourseRow,
+        r#"SELECT id, name, description, owner_id, context_ratio, temperature,
+           model, system_prompt, max_chunks, min_score, strategy,
+           tool_use_enabled, embedding_provider, embedding_model,
+           embedding_version, daily_token_limit, active, created_at,
+           updated_at, semester_label, daisy_momenttillf_id,
+           daisy_info_url, daisy_syllabus_url, daisy_unit,
+           daisy_last_synced_at, auto_managed, course_code
+        FROM courses
+        WHERE daisy_momenttillf_id = $1 AND active = true"#,
+        momenttillf_id,
+    )
+    .fetch_optional(db)
+    .await
+}
+
+/// Atomic owner swap: only succeeds when the course currently sits on
+/// `fallback_owner_id`. Returns TRUE iff a row was updated. Used by
+/// the auth-middleware drain to promote the first real course-
+/// responsible to owner; subsequent calls become no-ops once a real
+/// human owns the course.
+pub async fn swap_owner_from_fallback(
+    db: &PgPool,
+    course_id: Uuid,
+    fallback_owner_id: Uuid,
+    new_owner_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"UPDATE courses
+           SET owner_id = $3, updated_at = NOW()
+           WHERE id = $1
+             AND owner_id = $2
+             AND auto_managed = TRUE
+             AND active = true"#,
+        course_id,
+        fallback_owner_id,
+        new_owner_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Bump `daisy_last_synced_at` without mutating anything else. Used
+/// after the per-course upsert finishes its membership additions, so
+/// the timestamp reflects the full sync rather than just the row write.
+pub async fn touch_daisy_synced(db: &PgPool, course_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE courses SET daisy_last_synced_at = NOW() WHERE id = $1",
+        course_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
 }

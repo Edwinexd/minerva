@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE daisy_settings\n           SET auto_apply = $1, updated_at = NOW(), updated_by = $2\n           WHERE id = 1\n           RETURNING auto_apply, updated_at, updated_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "auto_apply",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "c5140d567e3d5840efc199c231a9305a0290d653c26fa52beb1d1466aa04fac3"
+}

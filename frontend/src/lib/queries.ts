@@ -289,6 +289,50 @@ export const adminUsersQuery = queryOptions({
   queryFn: () => api.get<AdminUser[]>("/admin/users"),
 })
 
+export interface DaisyPendingParticipant {
+  display_name: string | null
+  /**
+   * Resolved SU eppns for this participant, newest-first. The first
+   * entry is the canonical primary; the rest land as
+   * `user_eppn_aliases` when this row is applied.
+   */
+  eppns: string[]
+  daisy_roles: string[]
+  kind: string
+}
+
+export interface DaisyPendingImport {
+  id: string
+  momenttillf_id: string
+  course_code: string
+  name: string
+  semester_label: string
+  daisy_info_url: string | null
+  daisy_syllabus_url: string | null
+  daisy_unit: string | null
+  participant_count: number
+  participants: DaisyPendingParticipant[]
+  /**
+   * Null = brand-new offering (Apply will INSERT). Set = the
+   * `courses.id` an Apply would refresh.
+   */
+  existing_course_id: string | null
+  first_seen_at: string
+  last_seen_at: string
+}
+
+export interface DaisyPendingListResponse {
+  auto_apply: boolean
+  auto_apply_updated_at: string
+  auto_apply_updated_by: string | null
+  pending: DaisyPendingImport[]
+}
+
+export const daisyPendingQuery = queryOptions({
+  queryKey: ["admin", "daisy-pending"],
+  queryFn: () => api.get<DaisyPendingListResponse>("/admin/daisy-pending"),
+})
+
 export const adminUsageQuery = queryOptions({
   queryKey: ["admin", "usage"],
   queryFn: () => api.get<UsageRecord[]>("/usage"),

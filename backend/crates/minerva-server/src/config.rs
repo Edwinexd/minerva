@@ -45,16 +45,40 @@ pub struct Config {
     // *seeds* for fresh installs via `crate::system_defaults::seed_all`,
     // but the runtime reads come from the DB so an admin can edit them
     // live in /admin/defaults without a redeploy.
+    //
+    /// Fallback owner for Daisy-auto-imported courses, applied only on
+    /// INSERT. When the cron sync identifies a real course-responsible
+    /// who's present in Minerva (or one logs in for the first time and
+    /// drains a pending row flagged `eligible_for_owner`), ownership
+    /// swaps to the real human via `swap_owner_from_fallback`. Defaults
+    /// to the first MINERVA_ADMINS entry; explicit override via
+    /// MINERVA_DAISY_FALLBACK_OWNER_EPPN takes precedence. Stays on
+    /// the env-config side (not `system_defaults`) because the value
+    /// must be readable at boot before any DB query runs.
+    pub daisy_fallback_owner_eppn: Option<String>,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self, env::VarError> {
-        let admin_usernames = env::var("MINERVA_ADMINS")
+        let admin_usernames: Vec<String> = env::var("MINERVA_ADMINS")
             .unwrap_or_default()
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
+
+        // Resolve the Daisy fallback owner before moving admin_usernames
+        // into the struct: explicit env override wins, otherwise the
+        // first admin gets the default `@su.se` suffix.
+        let daisy_fallback_owner_eppn = env::var("MINERVA_DAISY_FALLBACK_OWNER_EPPN")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_lowercase())
+            .or_else(|| {
+                admin_usernames
+                    .first()
+                    .map(|u| format!("{}@su.se", u.to_lowercase()))
+            });
 
         Ok(Self {
             host: env::var("MINERVA_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
@@ -89,6 +113,7 @@ impl Config {
             service_api_key: env::var("MINERVA_SERVICE_API_KEY")
                 .ok()
                 .filter(|s| !s.is_empty()),
+            daisy_fallback_owner_eppn,
         })
     }
 

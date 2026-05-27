@@ -35,6 +35,35 @@ pub async fn find_by_eppn(db: &PgPool, eppn: &str) -> Result<Option<UserRow>, sq
     .await
 }
 
+/// Look up a user by inbound eppn, falling back to the alias table.
+///
+/// Returns `(user, via_alias)` where `via_alias` is TRUE iff the
+/// match came from `user_eppn_aliases` rather than the primary
+/// `users.eppn`. Callers (auth middleware) use that flag to
+/// invoke `user_eppn_aliases::swap_primary_with_alias`; promoting
+/// the most-recently-used eppn to primary keeps the user-facing
+/// "current SU login" view in sync with reality without ever losing
+/// the old logins.
+pub async fn find_by_eppn_or_alias(
+    db: &PgPool,
+    eppn: &str,
+) -> Result<Option<(UserRow, bool)>, sqlx::Error> {
+    if let Some(row) = find_by_eppn(db, eppn).await? {
+        return Ok(Some((row, false)));
+    }
+    let Some(user_id) =
+        crate::queries::user_eppn_aliases::find_user_by_alias_eppn(db, eppn).await?
+    else {
+        return Ok(None);
+    };
+    let row = find_by_id(db, user_id).await?.ok_or_else(|| {
+        // An alias pointing at a missing user is a referential-integrity
+        // bug; the FK has ON DELETE CASCADE so this should never happen.
+        sqlx::Error::RowNotFound
+    })?;
+    Ok(Some((row, true)))
+}
+
 /// Find a user by eppn, or create one with the given defaults if none exists.
 /// Returns `(user, created)` where `created` is true iff this call inserted
 /// the row. Race-safe via `ON CONFLICT (eppn) DO NOTHING RETURNING`: if a

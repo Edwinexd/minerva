@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at\n        FROM courses c\n        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1 OR cm.role = 'teacher')\n        ORDER BY c.updated_at DESC",
+  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed, c.course_code\n        FROM courses c\n        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1 OR cm.role = 'teacher')\n        ORDER BY c.updated_at DESC",
   "describe": {
     "columns": [
       {
@@ -97,6 +97,46 @@
         "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "semester_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "daisy_momenttillf_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "daisy_info_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "daisy_syllabus_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "daisy_unit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "daisy_last_synced_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 25,
+        "name": "auto_managed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 26,
+        "name": "course_code",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -123,8 +163,16 @@
       false,
       false,
       false,
-      false
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
     ]
   },
-  "hash": "d86026767875e1b4ba75deebc3dfc6adbfc01998cd79dc63461bfd703bf60c85"
+  "hash": "3c0b6a01a9898aa0e70d989c348c8b69925ed3543084d6b12db114fac4ef9e7d"
 }

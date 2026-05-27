@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM user_eppn_aliases WHERE user_id = $1 AND eppn = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e00a9295842e9182fbdb2b1e8c869b288a39f0076b23d637f28614c681ebda9a"
+}

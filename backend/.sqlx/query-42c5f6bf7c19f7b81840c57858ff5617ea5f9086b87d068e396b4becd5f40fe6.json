@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at FROM courses WHERE id = $1 AND active = true",
+  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code FROM courses WHERE active = true ORDER BY updated_at DESC",
   "describe": {
     "columns": [
       {
@@ -97,12 +97,50 @@
         "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "semester_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "daisy_momenttillf_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "daisy_info_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "daisy_syllabus_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "daisy_unit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "daisy_last_synced_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 25,
+        "name": "auto_managed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 26,
+        "name": "course_code",
+        "type_info": "Text"
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -123,8 +161,16 @@
       false,
       false,
       false,
-      false
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
     ]
   },
-  "hash": "6bd10ba92e5c80e816b8b15ba6fb876d0b94a0641e0f942532ddb32b3aa3664d"
+  "hash": "42c5f6bf7c19f7b81840c57858ff5617ea5f9086b87d068e396b4becd5f40fe6"
 }

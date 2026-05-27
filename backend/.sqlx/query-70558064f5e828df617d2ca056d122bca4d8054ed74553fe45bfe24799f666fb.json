@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO courses (\n            id, name, description, owner_id, daily_token_limit,\n            model, temperature, context_ratio, max_chunks, min_score,\n            strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt\n        ) VALUES (\n            $1, $2, $3, $4, $5,\n            COALESCE($6, 'gpt-oss-120b'),\n            COALESCE($7::DOUBLE PRECISION, 0.3),\n            COALESCE($8::DOUBLE PRECISION, 0.7),\n            COALESCE($9::INTEGER, 10),\n            COALESCE($10::REAL, 0.0),\n            COALESCE($11, 'simple'),\n            COALESCE($12::BOOLEAN, FALSE),\n            COALESCE($13, 'local'),\n            COALESCE($14, 'sentence-transformers/all-MiniLM-L6-v2'),\n            $15\n        )\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at",
+  "query": "UPDATE courses SET\n            name = COALESCE($2, name),\n            description = COALESCE($3, description),\n            context_ratio = COALESCE($4, context_ratio),\n            temperature = COALESCE($5, temperature),\n            model = COALESCE($6, model),\n            system_prompt = COALESCE($7, system_prompt),\n            max_chunks = COALESCE($8, max_chunks),\n            strategy = COALESCE($9, strategy),\n            tool_use_enabled = COALESCE($10, tool_use_enabled),\n            daily_token_limit = COALESCE($11, daily_token_limit),\n            embedding_provider = COALESCE($12, embedding_provider),\n            embedding_model = COALESCE($13, embedding_model),\n            min_score = COALESCE($14, min_score),\n            semester_label = COALESCE($15, semester_label),\n            updated_at = NOW()\n        WHERE id = $1 AND active = true\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code",
   "describe": {
     "columns": [
       {
@@ -97,6 +97,46 @@
         "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "semester_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "daisy_momenttillf_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "daisy_info_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "daisy_syllabus_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "daisy_unit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "daisy_last_synced_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 25,
+        "name": "auto_managed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 26,
+        "name": "course_code",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -104,17 +144,17 @@
         "Uuid",
         "Text",
         "Text",
-        "Uuid",
-        "Int8",
+        "Float8",
+        "Float8",
         "Text",
-        "Float8",
-        "Float8",
+        "Text",
         "Int4",
-        "Float4",
         "Text",
         "Bool",
+        "Int8",
         "Text",
         "Text",
+        "Float4",
         "Text"
       ]
     },
@@ -137,8 +177,16 @@
       false,
       false,
       false,
-      false
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
     ]
   },
-  "hash": "02986ed17c1a54f7a9015453c73a1602e58d07dfa168237847350b121ddc2a3d"
+  "hash": "70558064f5e828df617d2ca056d122bca4d8054ed74553fe45bfe24799f666fb"
 }

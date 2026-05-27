@@ -14,6 +14,7 @@
       "usage": "Användning",
       "users": "Användare",
       "courses": "Kurser",
+      "daisy": "Daisy-importer",
       "rules": "Rollregler",
       "externalInvites": "Externa inbjudningar",
       "lti": "LTI",
@@ -94,6 +95,7 @@
     "loadFailed": "Kunde inte läsa in kurser: {{error}}",
     "teacherSection": "Kurser du undervisar i",
     "studentSection": "Kurser du är anmäld till",
+    "adhocSection": "Övrigt",
     "emptyTeacher": "Inga kurser än. Skapa din första kurs för att komma igång.",
     "emptyStudent": "Du har inte lagts till i någon kurs än. Be din lärare om en inbjudningslänk.",
     "clickToChat": "Klicka för att börja chatta",
@@ -109,6 +111,9 @@
       "namePlaceholder": "t.ex. Prog2 VT 2026",
       "descriptionLabel": "Beskrivning",
       "descriptionPlaceholder": "Valfri beskrivning",
+      "semesterLabel": "Termin",
+      "semesterPlaceholder": "VT2026",
+      "semesterHint": "Använd VT (vårtermin) eller HT (hösttermin) plus 4-siffrigt år, t.ex. VT2026, HT2026.",
       "submit": "Skapa",
       "submitting": "Skapar…"
     }
@@ -136,11 +141,12 @@
       "body": "Konversationer och meddelanden sparas så länge kursen finns kvar."
     },
     "integrations": {
-      "heading": "Integrationer med Canvas/Moodle/Play (lärare)",
+      "heading": "Integrationer med Canvas/Moodle/Play/Daisy (lärare)",
       "canvas": "<strong>Canvas:</strong> Minerva hämtar endast kursfiler och sidinnehåll (inga inlämningar, deltagarlistor eller betyg). Din Canvas API-token lagras i klartext i Minerva-databasen; återkalla den i Minerva eller Canvas för att koppla bort.",
       "moodle": "<strong>Moodle-plugin:</strong> skickar kursmaterial (filer, HTML för sidor/böcker/etiketter, URL:er) och en lista över anmälda studenter (eppn + visningsnamn) till Minerva.",
       "lti": "<strong>LTI-starter:</strong> när Moodle eller Canvas startar Minerva i en iframe skickar plattformen studentens identifierare och (om konfigurerat) visningsnamn till Minerva. En användarrad skapas vid första starten.",
-      "play": "<strong>Play (play.dsv.su.se):</strong> när ett `.url`-dokument pekar på Play hämtas VTT-transkriptet och lagras som sökbar text i kursen."
+      "play": "<strong>Play (play.dsv.su.se):</strong> när ett `.url`-dokument pekar på Play hämtas VTT-transkriptet och lagras som sökbar text i kursen.",
+      "daisy": "<strong>Daisy (daisy.dsv.su.se):</strong> ett nattligt jobb listar DSV:s kurstillfällen för innevarande och nästa termin och skapar motsvarande Minerva-kurser. För varje kurs hämtas den publika listan över undervisande personal (namn och de SU-/DSV-användarnamn Daisy publicerar för dem), varje användarnamn översätts till ett Minerva-eppn och personerna läggs till som lärare på kursen. Daisy listar flera historiska användarnamn per person; sekundära användarnamn lagras som eppn-alias så att en framtida inloggning med något av dem hamnar på samma Minerva-användare. Inga studentlistor eller betyg läses."
     },
     "contact": {
       "heading": "Kontakt",

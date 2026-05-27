@@ -33,6 +33,10 @@
     "readOnly": "Read-only: TAs can view but not edit course configuration.",
     "nameLabel": "Course Name",
     "descriptionLabel": "Description",
+    "semesterLabel": "Semester",
+    "semesterFormatHint": "Use VT (spring) or HT (autumn) plus a 4-digit year, e.g. VT2026.",
+    "semesterBackfillHint": "not set yet; please backfill",
+    "semesterManagedByDaisy": "Managed by the Daisy auto-import; edits here will be overwritten on the next nightly sync.",
     "contextRatioLabel": "RAG Context Ratio: {{percent}}%",
     "contextRatioHelp": "How much of the context window is used for RAG chunks vs conversation history",
     "temperatureLabel": "Temperature: {{value}}",
@@ -470,5 +474,19 @@
     "colRequests": "Requests",
     "colDate": "Date",
     "dailyBreakdown": "Daily breakdown"
+  },
+  "daisyMeta": {
+    "title": "Daisy linkage",
+    "description": "This course was created and is kept in sync with Daisy. Fields below are read-only here; edit them in Daisy and the next nightly sync will pull the change in.",
+    "badge": "Auto-managed",
+    "badgeTooltip": "Membership and metadata are kept in sync nightly by the Daisy auto-import.",
+    "momenttillfId": "Daisy ID",
+    "semester": "Semester",
+    "unit": "Unit",
+    "infoUrl": "Course page",
+    "syllabusUrl": "Syllabus",
+    "openExternal": "Open in Daisy",
+    "lastSynced": "Last sync",
+    "neverSynced": "Never"
   }
 }

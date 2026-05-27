@@ -14,6 +14,7 @@
       "usage": "Usage",
       "users": "Users",
       "courses": "Courses",
+      "daisy": "Daisy imports",
       "rules": "Role rules",
       "externalInvites": "External invites",
       "lti": "LTI",
@@ -94,6 +95,7 @@
     "loadFailed": "Failed to load courses: {{error}}",
     "teacherSection": "Courses you teach",
     "studentSection": "Courses you're enrolled in",
+    "adhocSection": "Ad-hoc",
     "emptyTeacher": "No courses yet. Create your first course to get started.",
     "emptyStudent": "You haven't been added to a course yet. Ask your teacher for an invite link.",
     "clickToChat": "Click to start chatting",
@@ -109,6 +111,9 @@
       "namePlaceholder": "e.g. Prog2 Spring 2026",
       "descriptionLabel": "Description",
       "descriptionPlaceholder": "Optional description",
+      "semesterLabel": "Semester",
+      "semesterPlaceholder": "VT2026",
+      "semesterHint": "Use VT (spring) or HT (autumn) plus a 4-digit year, e.g. VT2026, HT2026.",
       "submit": "Create",
       "submitting": "Creating…"
     }
@@ -136,11 +141,12 @@
       "body": "Conversations and messages are retained for as long as the course exists."
     },
     "integrations": {
-      "heading": "Canvas / Moodle / Play integrations (teachers)",
+      "heading": "Canvas / Moodle / Play / Daisy integrations (teachers)",
       "canvas": "<strong>Canvas:</strong> Minerva pulls course files and page content only (no submissions, rosters, or grades). Your Canvas API token is stored in the Minerva database in plaintext; revoke it in Minerva or Canvas to disconnect.",
       "moodle": "<strong>Moodle plugin:</strong> pushes course materials (files, page/book/label HTML, URLs) and a list of enrolled students (eppn + display name) to Minerva.",
       "lti": "<strong>LTI launches:</strong> when Moodle or Canvas launches Minerva in an iframe, the platform passes the student's identifier and (if configured) display name to Minerva. A user row is created on first launch.",
-      "play": "<strong>Play (play.dsv.su.se):</strong> when a `.url` document points at Play, the VTT transcript is fetched and stored as searchable text inside the course."
+      "play": "<strong>Play (play.dsv.su.se):</strong> when a `.url` document points at Play, the VTT transcript is fetched and stored as searchable text inside the course.",
+      "daisy": "<strong>Daisy (daisy.dsv.su.se):</strong> a nightly job lists DSV course offerings for the current and next semester and creates the matching Minerva courses. For each course it pulls the public list of teaching staff (name and the SU/DSV usernames Daisy publishes for them), turns each username into a Minerva eppn, and adds those people as course teachers. Daisy lists multiple historical logins per person; secondary ones are stored as eppn aliases so a future login under any of them resolves to the same Minerva user. No student rosters or grades are read."
     },
     "contact": {
       "heading": "Contact",

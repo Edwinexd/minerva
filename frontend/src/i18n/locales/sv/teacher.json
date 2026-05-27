@@ -33,6 +33,10 @@
     "readOnly": "Skrivskyddad: TA:er kan se men inte redigera kurskonfigurationen.",
     "nameLabel": "Kursnamn",
     "descriptionLabel": "Beskrivning",
+    "semesterLabel": "Termin",
+    "semesterFormatHint": "Använd VT (vårtermin) eller HT (hösttermin) plus 4-siffrigt år, t.ex. VT2026.",
+    "semesterBackfillHint": "ej satt än; fyll i",
+    "semesterManagedByDaisy": "Hanteras av Daisy-importen; ändringar här skrivs över vid nästa nattsynk.",
     "contextRatioLabel": "RAG-kontextandel: {{percent}}%",
     "contextRatioHelp": "Hur stor del av kontextfönstret som används för RAG-stycken kontra konversationshistorik",
     "temperatureLabel": "Temperatur: {{value}}",
@@ -470,5 +474,19 @@
     "colRequests": "Förfrågningar",
     "colDate": "Datum",
     "dailyBreakdown": "Fördelning per dag"
+  },
+  "daisyMeta": {
+    "title": "Daisy-koppling",
+    "description": "Den här kursen skapades och hålls synkad med Daisy. Fälten nedan är skrivskyddade här; redigera dem i Daisy så hämtas ändringen vid nästa nattsynk.",
+    "badge": "Automatiskt hanterad",
+    "badgeTooltip": "Medlemskap och metadata synkas varje natt av Daisy-importen.",
+    "momenttillfId": "Daisy-ID",
+    "semester": "Termin",
+    "unit": "Enhet",
+    "infoUrl": "Kurssida",
+    "syllabusUrl": "Kursplan",
+    "openExternal": "Öppna i Daisy",
+    "lastSynced": "Senaste synk",
+    "neverSynced": "Aldrig"
   }
 }

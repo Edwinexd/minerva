@@ -490,12 +490,40 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
     .await
 }
 
-/// List documents awaiting external transcript processing.
-/// These are play.dsv.su.se URL documents that the worker has triaged.
-pub async fn list_awaiting_transcripts(db: &PgPool) -> Result<Vec<DocumentRow>, sqlx::Error> {
+/// List documents awaiting external transcript processing, cursor-paginated.
+///
+/// `after` is the `(created_at, id)` pair of the last row from the
+/// previous page; the next page starts strictly after that key.
+/// `None` returns the first page. We use a composite key (rather
+/// than just `id` or just `created_at`) because:
+///   * `id` is a v4 UUID; random order, useless as a chronological cursor.
+///   * `created_at` alone could collide on bulk inserts from the Daisy
+///     auto-import, where the same statement timestamps several docs.
+///
+/// The row-wise `(created_at, id) > ($1, $2)` predicate gives a total
+/// order that matches `ORDER BY created_at ASC, id ASC` exactly.
+///
+/// `limit` is clamped by the caller; this function trusts the value.
+pub async fn list_awaiting_transcripts_page(
+    db: &PgPool,
+    after: Option<(chrono::DateTime<chrono::Utc>, Uuid)>,
+    limit: i64,
+) -> Result<Vec<DocumentRow>, sqlx::Error> {
+    let (after_created_at, after_id) = match after {
+        Some((t, i)) => (Some(t), Some(i)),
+        None => (None, None),
+    };
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE status = 'awaiting_transcript' ORDER BY created_at ASC",
+        r#"SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id
+        FROM documents
+        WHERE status = 'awaiting_transcript'
+          AND ($1::timestamptz IS NULL OR (created_at, id) > ($1, $2))
+        ORDER BY created_at ASC, id ASC
+        LIMIT $3"#,
+        after_created_at,
+        after_id,
+        limit,
     )
     .fetch_all(db)
     .await

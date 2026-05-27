@@ -1,0 +1,96 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO daisy_pending_imports\n            (momenttillf_id, course_code, name, semester_label,\n             daisy_info_url, daisy_syllabus_url, daisy_unit,\n             participants, existing_course_id)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n        ON CONFLICT (momenttillf_id) DO UPDATE SET\n            course_code = EXCLUDED.course_code,\n            name = EXCLUDED.name,\n            semester_label = EXCLUDED.semester_label,\n            daisy_info_url = EXCLUDED.daisy_info_url,\n            daisy_syllabus_url = EXCLUDED.daisy_syllabus_url,\n            daisy_unit = EXCLUDED.daisy_unit,\n            participants = EXCLUDED.participants,\n            existing_course_id = EXCLUDED.existing_course_id,\n            last_seen_at = NOW()\n        RETURNING id, momenttillf_id, course_code, name, semester_label,\n                  daisy_info_url, daisy_syllabus_url, daisy_unit,\n                  participants AS \"participants!: JsonValue\",\n                  existing_course_id, first_seen_at, last_seen_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "momenttillf_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "course_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "semester_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "daisy_info_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "daisy_syllabus_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "daisy_unit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "participants!: JsonValue",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "existing_course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "first_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2acf5b94c1db7be677a1ae11a0adc263c697d8f76ad14deccbae0d5dbd4bd7eb"
+}

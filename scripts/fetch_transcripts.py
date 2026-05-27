@@ -166,83 +166,159 @@ def discover_designations(
         )
 
 
+# Cursor page size. The backend caps this at 1024; 512 is the
+# sweet spot for the script's memory footprint (only one batch's
+# worth of doc metadata + transcript text held at a time) without
+# the per-page round-trip overhead eating into the hourly window.
+# Tunable via `MINERVA_TRANSCRIPTS_PAGE_SIZE` for the occasional
+# manual burn-through.
+TRANSCRIPTS_PAGE_SIZE = int(
+    os.environ.get("MINERVA_TRANSCRIPTS_PAGE_SIZE", "512")
+)
+
+
+def _process_pending_doc(
+    client: PlayClient,
+    api_url: str,
+    headers: dict,
+    doc: dict,
+) -> None:
+    """Fetch the VTT for one pending doc and submit (or mark failed).
+    Extracted so the cursor loop in `fetch_pending_transcripts` stays
+    readable; behaviour is identical to the previous flat loop."""
+    doc_id = doc["id"]
+    url = doc["url"]
+    filename = doc["filename"]
+
+    presentation_id = extract_presentation_id(url)
+    if not presentation_id:
+        print(f"  [{filename}] Could not extract presentation ID from: {url}")
+        resp = requests.post(
+            f"{api_url}/api/service/documents/{doc_id}/transcript",
+            headers=headers,
+            json={"error": f"could not extract presentation ID from URL: {url}"},
+        )
+        resp.raise_for_status()
+        return
+
+    print(f"  [{filename}] Fetching transcript for {presentation_id}...")
+
+    try:
+        transcript = client.get_transcript_text(presentation_id)
+    except PresentationNotReadyError as e:
+        # Either the recording itself is still being processed (non-dict
+        # /presentation/{uuid} envelope) or the video is ready but
+        # captions haven't been generated yet. Both are transient; leave
+        # the doc in awaiting_transcript so the next hourly run retries
+        # once Play finishes processing. PresentationNotReadyError is
+        # the parent of TranscriptNotReadyError, so it covers both.
+        print(f"  [{filename}] Not ready yet, will retry next run: {e}")
+        return
+    except Exception as e:
+        error_msg = str(e)
+        print(f"  [{filename}] Failed: {error_msg}")
+        resp = requests.post(
+            f"{api_url}/api/service/documents/{doc_id}/transcript",
+            headers=headers,
+            json={"error": error_msg},
+        )
+        resp.raise_for_status()
+        return
+
+    if not transcript or not transcript.strip():
+        print(f"  [{filename}] Empty transcript, marking as failed.")
+        resp = requests.post(
+            f"{api_url}/api/service/documents/{doc_id}/transcript",
+            headers=headers,
+            json={"error": "transcript is empty (no subtitles)"},
+        )
+        resp.raise_for_status()
+        return
+
+    resp = requests.post(
+        f"{api_url}/api/service/documents/{doc_id}/transcript",
+        headers=headers,
+        json={"text": transcript},
+    )
+    resp.raise_for_status()
+    result = resp.json()
+    print(
+        f"  [{filename}] Submitted ({len(transcript)} chars) -> {result.get('status')}"
+    )
+
+
 def fetch_pending_transcripts(
     client: PlayClient,
     api_url: str,
     headers: dict,
 ) -> None:
-    """Transcript phase: fetch VTT for documents in awaiting_transcript state."""
-    resp = requests.get(f"{api_url}/api/service/pending-transcripts", headers=headers)
-    resp.raise_for_status()
-    pending = resp.json()
+    """Transcript phase: drain every `awaiting_transcript` doc via
+    cursor-paginated fetches. Memory peak is one page's worth of doc
+    metadata + the current item's transcript text; the backlog itself
+    is unbounded.
 
-    play_docs = [doc for doc in pending if "play.dsv.su.se" in doc.get("url", "")]
+    Cursor design (see `pending_transcripts` route): we order by
+    `(created_at, id)` ASC and pass the last item's pair as
+    `after_created_at` / `after_id` on the next request. Items that
+    stay in `awaiting_transcript` after processing (e.g.
+    PresentationNotReadyError leaves the doc unchanged) are NOT
+    re-visited within the same run; the cursor moves strictly forward.
+    Next hour's cron starts fresh and picks them up if Play has
+    finished processing by then.
+    """
+    after_created_at: str | None = None
+    after_id: str | None = None
+    total_seen = 0
+    total_processed = 0
 
-    if not play_docs:
-        print("No pending play.dsv.su.se transcripts.")
-        return
+    while True:
+        params: dict[str, str | int] = {"limit": TRANSCRIPTS_PAGE_SIZE}
+        if after_created_at is not None and after_id is not None:
+            params["after_created_at"] = after_created_at
+            params["after_id"] = after_id
 
-    print(f"Found {len(play_docs)} pending play.dsv.su.se document(s).")
-
-    for doc in play_docs:
-        doc_id = doc["id"]
-        url = doc["url"]
-        filename = doc["filename"]
-
-        presentation_id = extract_presentation_id(url)
-        if not presentation_id:
-            print(f"  [{filename}] Could not extract presentation ID from: {url}")
-            resp = requests.post(
-                f"{api_url}/api/service/documents/{doc_id}/transcript",
-                headers=headers,
-                json={"error": f"could not extract presentation ID from URL: {url}"},
-            )
-            resp.raise_for_status()
-            continue
-
-        print(f"  [{filename}] Fetching transcript for {presentation_id}...")
-
-        try:
-            transcript = client.get_transcript_text(presentation_id)
-        except PresentationNotReadyError as e:
-            # Either the recording itself is still being processed (non-dict
-            # /presentation/{uuid} envelope) or the video is ready but
-            # captions haven't been generated yet. Both are transient; leave
-            # the doc in awaiting_transcript so the next hourly run retries
-            # once Play finishes processing. PresentationNotReadyError is
-            # the parent of TranscriptNotReadyError, so it covers both.
-            print(f"  [{filename}] Not ready yet, will retry next run: {e}")
-            continue
-        except Exception as e:
-            error_msg = str(e)
-            print(f"  [{filename}] Failed: {error_msg}")
-            resp = requests.post(
-                f"{api_url}/api/service/documents/{doc_id}/transcript",
-                headers=headers,
-                json={"error": error_msg},
-            )
-            resp.raise_for_status()
-            continue
-
-        if not transcript or not transcript.strip():
-            print(f"  [{filename}] Empty transcript, marking as failed.")
-            resp = requests.post(
-                f"{api_url}/api/service/documents/{doc_id}/transcript",
-                headers=headers,
-                json={"error": "transcript is empty (no subtitles)"},
-            )
-            resp.raise_for_status()
-            continue
-
-        resp = requests.post(
-            f"{api_url}/api/service/documents/{doc_id}/transcript",
+        resp = requests.get(
+            f"{api_url}/api/service/pending-transcripts",
             headers=headers,
-            json={"text": transcript},
+            params=params,
         )
         resp.raise_for_status()
-        result = resp.json()
+        page = resp.json()
+        if not page:
+            break
+
+        # Advance cursor past the WHOLE page even if we end up skipping
+        # the non-play docs below; that way the next request never
+        # rewinds, and items we couldn't handle this iteration get a
+        # fresh look on the next cron tick.
+        last = page[-1]
+        after_created_at = last["created_at"]
+        after_id = last["id"]
+        total_seen += len(page)
+
+        # Filter to play.dsv.su.se docs only; other URL providers
+        # (GitHub PDF, future origins) use different code paths.
+        play_docs = [doc for doc in page if "play.dsv.su.se" in doc.get("url", "")]
+        if play_docs:
+            print(
+                f"Page of {len(page)} pending docs "
+                f"({len(play_docs)} play.dsv.su.se); processing..."
+            )
+            for doc in play_docs:
+                _process_pending_doc(client, api_url, headers, doc)
+                total_processed += 1
+        # A page strictly smaller than the requested limit means we've
+        # reached the end of the queue; one more empty round-trip would
+        # be wasteful.
+        if len(page) < TRANSCRIPTS_PAGE_SIZE:
+            break
+
+    if total_seen == 0:
+        print("No pending play.dsv.su.se transcripts.")
+    else:
         print(
-            f"  [{filename}] Submitted ({len(transcript)} chars) -> {result.get('status')}"
+            f"Drained {total_processed} play.dsv.su.se transcript(s) "
+            f"across {total_seen} pending row(s) total."
         )
 
 

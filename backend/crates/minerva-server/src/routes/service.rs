@@ -14,6 +14,17 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::state::AppState;
 
+/// Body cap on `/api/service/daisy-courses`. Each course carries
+/// nested participants (name + 1-2 eppns + free-text role list), so
+/// row size is ~1.5 KB rather than the catalog endpoint's ~50 B per
+/// entry. At today's DSV scale a single semester batch is ~250 KB;
+/// the 20 MB ceiling leaves room for an order-of-magnitude growth
+/// (cross-department sync, larger course rosters) before the
+/// chunker in `scripts/sync_daisy_courses.py` would need to drop
+/// its batch size. The script still chunks at 25 courses per POST
+/// to bound backend memory + per-request handler latency regardless.
+const DAISY_IMPORT_MAX_BYTES: usize = 20 * 1_000_000;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/pending-transcripts", get(pending_transcripts))
@@ -31,6 +42,11 @@ pub fn router() -> Router<AppState> {
             post(create_url_document),
         )
         .route("/play-courses", put(replace_play_course_catalog))
+        .route(
+            "/daisy-courses",
+            post(import_daisy_courses)
+                .layer(axum::extract::DefaultBodyLimit::max(DAISY_IMPORT_MAX_BYTES)),
+        )
 }
 
 /// Authenticate using the global service API key (MINERVA_SERVICE_API_KEY).
@@ -62,17 +78,73 @@ struct PendingTranscriptInfo {
     course_id: Uuid,
     filename: String,
     url: String,
+    /// Last component of the cursor key. The script echoes this back
+    /// as `after_created_at` on the next page request, paired with
+    /// `id` as `after_id`. RFC3339 / ISO 8601 via serde.
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Deserialize)]
+struct PendingTranscriptsQuery {
+    /// Page size cap. Defaults to 512, clamped to 1024. The python
+    /// caller picks 512 to bound in-process memory; admins running
+    /// the script by hand can crank it higher.
+    limit: Option<i64>,
+    /// First half of the cursor: `created_at` of the last item from
+    /// the previous page. RFC3339. Pair with `after_id`.
+    after_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Second half of the cursor: `id` of the last item from the
+    /// previous page. UUID. Tiebreaks ties on `created_at` when
+    /// several docs were inserted by the same statement.
+    after_id: Option<Uuid>,
+}
+
+const PENDING_TRANSCRIPTS_DEFAULT_LIMIT: i64 = 512;
+const PENDING_TRANSCRIPTS_MAX_LIMIT: i64 = 1024;
+
 /// List URL documents that are waiting for external transcript processing.
-/// Returns the URL content from each `.url` file so the caller knows what to fetch.
+/// Returns the URL content from each `.url` file so the caller knows
+/// what to fetch. Cursor-paginated; ordered by `(created_at, id)` ASC.
+/// To drain everything, the caller loops:
+///   1. GET `/pending-transcripts?limit=512` (no cursor)
+///   2. process all returned items; remember the last item's
+///      `(created_at, id)`.
+///   3. GET `/pending-transcripts?limit=512&after_created_at=...&after_id=...`
+///   4. repeat until the response is empty.
+///
+/// Items that fail to process during a run (e.g. Play hasn't finished
+/// processing the recording yet) stay in `awaiting_transcript` status
+/// and so re-appear on the *next* hourly cron, but never re-appear
+/// within the same run; the cursor moves strictly forward.
 async fn pending_transcripts(
     State(state): State<AppState>,
     headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<PendingTranscriptsQuery>,
 ) -> Result<Json<Vec<PendingTranscriptInfo>>, AppError> {
     authenticate_service(&state, &headers)?;
 
-    let docs = minerva_db::queries::documents::list_awaiting_transcripts(&state.db).await?;
+    // Clamp the limit. A caller asking for `limit=0` would otherwise
+    // get an empty response and infinite-loop in the script; a
+    // negative limit is a postgres error. We coerce to the default
+    // for both pathological cases.
+    let limit = q
+        .limit
+        .filter(|n| *n > 0)
+        .unwrap_or(PENDING_TRANSCRIPTS_DEFAULT_LIMIT)
+        .min(PENDING_TRANSCRIPTS_MAX_LIMIT);
+
+    // Cursor: both halves required together, or neither. A half-
+    // specified cursor is a client bug and we reject it loudly rather
+    // than silently treating it as "first page".
+    let after = match (q.after_created_at, q.after_id) {
+        (Some(t), Some(i)) => Some((t, i)),
+        (None, None) => None,
+        _ => return Err(AppError::bad_request("service.cursor_half_specified")),
+    };
+
+    let docs =
+        minerva_db::queries::documents::list_awaiting_transcripts_page(&state.db, after, limit)
+            .await?;
     let mut result = Vec::new();
 
     for doc in docs {
@@ -90,6 +162,7 @@ async fn pending_transcripts(
             course_id: doc.course_id,
             filename: doc.filename,
             url,
+            created_at: doc.created_at,
         });
     }
 
@@ -491,4 +564,538 @@ async fn replace_play_course_catalog(
     Ok(Json(
         serde_json::json!({ "submitted": n, "upserted": upserted }),
     ))
+}
+
+//; Daisy course auto-import --
+
+/// One staff member from the Daisy momentinfo page, post-username
+/// resolution. The python sync script resolves every login a person
+/// holds via `daisy.get_staff_details(person_id).usernames` and
+/// flattens them into `eppns` (in newest-first order). `kind`
+/// distinguishes employed staff from student-handledare so the role
+/// mapping below stays predictable.
+///
+/// `Serialize` is derived (not just `Deserialize`) so the staging
+/// path can store the participants list as JSONB and the admin
+/// Apply path can round-trip them back into the same struct.
+#[derive(Deserialize, Serialize)]
+pub(super) struct DaisyParticipantInput {
+    /// One or more SU eppns, newest first. The first entry is treated
+    /// as the canonical (primary) login; the rest are registered as
+    /// `user_eppn_aliases` once we know which Minerva user they map to.
+    pub eppns: Vec<String>,
+    pub display_name: Option<String>,
+    /// Free-text role labels from Daisy. Stored verbatim on
+    /// `pending_course_memberships.daisy_roles`; used here only to
+    /// decide `eligible_for_owner`.
+    pub daisy_roles: Vec<String>,
+    /// `"staff"` or `"student"`. Determines the Minerva
+    /// `course_members.role` we add: staff → teacher, student → ta.
+    /// Only `"staff"` is eligible for owner promotion (a student
+    /// handledare should never become course owner).
+    pub kind: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(super) struct DaisyCourseInputPayload {
+    pub momenttillf_id: String,
+    pub beteckning: String,
+    pub name: String,
+    /// Required for both the staging and apply paths. Marked `Option`
+    /// for backwards-compat with any client that omits it, but the
+    /// handler rejects None with `daisy.course_missing_semester`.
+    pub semester_label: Option<String>,
+    pub info_url: Option<String>,
+    pub syllabus_url: Option<String>,
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub participants: Vec<DaisyParticipantInput>,
+}
+
+#[derive(Serialize, Default)]
+pub(super) struct DaisyImportSummary {
+    pub courses_received: usize,
+    /// Auto-apply path: rows written straight to `courses`.
+    pub courses_created: usize,
+    pub courses_updated: usize,
+    pub members_added: usize,
+    pub pending_memberships_added: usize,
+    pub aliases_registered: usize,
+    pub designations_created: usize,
+    /// Staging path: rows written to `daisy_pending_imports` for
+    /// admin review. Set when `daisy_settings.auto_apply` is FALSE.
+    pub courses_staged: usize,
+    /// TRUE when this request hit the staging path (everything in
+    /// `courses_staged` rather than `courses_created`/`updated`).
+    /// Lets the python caller distinguish "staged for review" from
+    /// "applied". When auto_apply is ON, all counters live in the
+    /// applied-side fields above and this stays FALSE.
+    pub staged_for_review: bool,
+    pub errors: Vec<String>,
+}
+
+/// Normalize an inbound eppn the same way `auth_middleware` does so
+/// alias / primary lookups line up across the two paths. Lowercased;
+/// empty / whitespace-only rejected by the caller.
+fn normalize_eppn(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
+
+/// True when one of the Daisy role labels marks this person as the
+/// course-responsible (Swedish: kurs-/delkursansvarig). Only staff
+/// (kind == "staff") get promoted to owner; student-handledare are
+/// course-listed but never own.
+///
+/// The literal strings we match against are Daisy data values, not
+/// Minerva identifiers; comparison is fully case-insensitive because
+/// Daisy occasionally rewords or recases its role headings, and
+/// silently losing owner-promotion the next time they do would be a
+/// hard-to-diagnose failure mode.
+fn is_course_responsible(daisy_roles: &[String]) -> bool {
+    daisy_roles.iter().any(|r| {
+        let lower = r.trim().to_lowercase();
+        lower.starts_with("kurs-/delkursansvarig") || lower == "kursansvarig"
+    })
+}
+
+/// Map (kind, daisy_roles) onto a Minerva `course_members.role` plus
+/// the `eligible_for_owner` flag. Daisy distinguishes employed staff
+/// (`/anstalld/anstalldinfo.jspa`) from student-handledare
+/// (`/anstalld/student/studentinfo.jspa`); the python script sends
+/// that via `kind`. Anything we don't recognise becomes `teacher` so
+/// the import doesn't silently drop course members.
+fn minerva_role_for(kind: &str, daisy_roles: &[String]) -> (&'static str, bool) {
+    match kind {
+        "student" => ("ta", false),
+        _ => ("teacher", is_course_responsible(daisy_roles)),
+    }
+}
+
+#[cfg(test)]
+mod daisy_import_tests {
+    use super::{is_course_responsible, minerva_role_for, normalize_eppn};
+
+    fn s(v: &str) -> String {
+        v.to_string()
+    }
+
+    #[test]
+    fn normalize_lowercases_and_trims() {
+        assert_eq!(normalize_eppn(" Alice@SU.SE "), "alice@su.se");
+    }
+
+    #[test]
+    fn course_responsible_recognises_canonical_and_legacy_labels() {
+        // The canonical Daisy heading is "Kurs-/delkursansvarig".
+        // Some older offerings use the shorter "kursansvarig". Both
+        // should promote the staff person to owner-eligible; anything
+        // else stays a plain teacher.
+        assert!(is_course_responsible(&[s("Kurs-/delkursansvarig")]));
+        assert!(is_course_responsible(&[s("kursansvarig")]));
+        // Case-insensitive on the shorter form (the longer one is
+        // matched via starts_with on a verbatim prefix, so casing is
+        // preserved upstream).
+        assert!(is_course_responsible(&[s("KURSANSVARIG")]));
+        // Unrelated roles must not trigger owner promotion.
+        assert!(!is_course_responsible(&[s("Examination")]));
+        assert!(!is_course_responsible(&[
+            s("Administration"),
+            s("Handledare")
+        ]));
+        // Empty role list is fine; just means we don't promote.
+        assert!(!is_course_responsible(&[]));
+    }
+
+    #[test]
+    fn role_mapping_staff_course_responsible_is_owner_eligible() {
+        let (role, owner) = minerva_role_for("staff", &[s("Kurs-/delkursansvarig")]);
+        assert_eq!(role, "teacher");
+        assert!(owner);
+    }
+
+    #[test]
+    fn role_mapping_staff_non_owner_role_is_plain_teacher() {
+        let (role, owner) = minerva_role_for("staff", &[s("Examination")]);
+        assert_eq!(role, "teacher");
+        assert!(!owner);
+    }
+
+    #[test]
+    fn role_mapping_student_handledare_is_ta_never_owner() {
+        // A student-handledare should never end up as course owner
+        // even if Daisy lists them under the course-responsible
+        // heading by accident (the kind=="student" branch wins).
+        let (role, owner) = minerva_role_for("student", &[s("Handledare")]);
+        assert_eq!(role, "ta");
+        assert!(!owner);
+        let (role, owner) = minerva_role_for("student", &[s("Kurs-/delkursansvarig")]);
+        assert_eq!(role, "ta");
+        assert!(!owner);
+    }
+
+    #[test]
+    fn unrecognised_kind_falls_through_to_teacher() {
+        // Defence against new dsv-wrapper kinds we haven't enumerated:
+        // we'd rather over-grant teacher than silently drop a course
+        // member. Owner eligibility still depends on the role labels.
+        let (role, owner) = minerva_role_for("future_kind", &[s("Examination")]);
+        assert_eq!(role, "teacher");
+        assert!(!owner);
+    }
+}
+
+/// Idempotently bulk-import Daisy course offerings + participants.
+///
+/// Called daily by `.github/workflows/daisy-sync.yml`
+/// (`scripts/sync_daisy_courses.py`). The python side handles all the
+/// dsv-wrapper interaction (course search, participants fetch,
+/// username resolution via staff profile pages); the backend only
+/// reasons about Minerva-side identity and idempotency.
+///
+/// Per-course flow:
+///   1. Resolve the fallback owner from `MINERVA_DAISY_FALLBACK_OWNER_EPPN`
+///      (or the first MINERVA_ADMINS entry). If missing, the whole batch
+///      fails; we can't create courses without an owner.
+///   2. Upsert by `daisy_momenttillf_id` via
+///      `courses::upsert_from_daisy`.
+///   3. On CREATE only: insert a `play_designations` row so
+///      transcript discovery picks the course up on the next
+///      transcripts.yml run.
+///   4. For each participant: resolve their canonical eppn (primary or
+///      alias of an existing user). If found, additively add to
+///      `course_members` and register any other eppns they hold as
+///      aliases. If not found, queue one `pending_course_memberships`
+///      row per eppn (so a future login via any of them drains).
+///
+/// Errors per course are collected into `summary.errors` and the
+/// import continues; a single broken course shouldn't take down the
+/// daily sync.
+async fn import_daisy_courses(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Vec<DaisyCourseInputPayload>>,
+) -> Result<Json<DaisyImportSummary>, AppError> {
+    authenticate_service(&state, &headers)?;
+
+    // Read the auto-apply toggle once per request. It can in theory
+    // flip mid-batch if an admin times their click perfectly, but the
+    // sync re-runs daily so a transient mismatch self-heals. Locking
+    // it for the whole batch keeps the per-course dispatch simple.
+    let auto_apply = minerva_db::queries::daisy_settings::auto_apply_enabled(&state.db).await?;
+
+    let mut summary = DaisyImportSummary {
+        courses_received: body.len(),
+        staged_for_review: !auto_apply,
+        ..Default::default()
+    };
+
+    if auto_apply {
+        // Resolve the env-var fallback owner + default embedding
+        // model up-front. Only the apply path needs them; staging
+        // writes are pure metadata snapshots with no owner attached
+        // until the admin clicks Apply.
+        let fallback_eppn = state
+            .config
+            .daisy_fallback_owner_eppn
+            .as_deref()
+            .ok_or_else(|| {
+                AppError::Internal("MINERVA_DAISY_FALLBACK_OWNER_EPPN unresolved".into())
+            })?;
+        let fallback_owner = minerva_db::queries::users::find_by_eppn(&state.db, fallback_eppn)
+            .await?
+            .ok_or_else(|| {
+                AppError::Internal(format!(
+                    "daisy fallback owner eppn {fallback_eppn} not present in users table; \
+                     ensure they have logged in at least once"
+                ))
+            })?;
+        let default_embedding_model =
+            minerva_db::queries::embedding_models::current_default(&state.db).await?;
+
+        for input in body {
+            match apply_one(
+                &state,
+                &input,
+                fallback_owner.id,
+                default_embedding_model.as_deref(),
+                &mut summary,
+            )
+            .await
+            {
+                Ok(()) => {}
+                Err(e) => {
+                    summary
+                        .errors
+                        .push(format!("{}: {}", input.momenttillf_id, e));
+                    tracing::warn!(
+                        momenttillf_id = %input.momenttillf_id,
+                        error = %e,
+                        "daisy apply: per-course failure",
+                    );
+                }
+            }
+        }
+    } else {
+        for input in body {
+            match stage_one(&state, &input, &mut summary).await {
+                Ok(()) => {}
+                Err(e) => {
+                    summary
+                        .errors
+                        .push(format!("{}: {}", input.momenttillf_id, e));
+                    tracing::warn!(
+                        momenttillf_id = %input.momenttillf_id,
+                        error = %e,
+                        "daisy stage: per-course failure",
+                    );
+                }
+            }
+        }
+    }
+
+    tracing::info!(
+        "daisy import: received={} staged={} created={} updated={} members_added={} pending={} aliases={} auto_apply={}",
+        summary.courses_received,
+        summary.courses_staged,
+        summary.courses_created,
+        summary.courses_updated,
+        summary.members_added,
+        summary.pending_memberships_added,
+        summary.aliases_registered,
+        auto_apply,
+    );
+    Ok(Json(summary))
+}
+
+/// Write the payload to `daisy_pending_imports` for admin review.
+/// Idempotent on `momenttillf_id`: a subsequent sync overwrites the
+/// staged metadata + participants snapshot (and updates the linked
+/// `existing_course_id` if a manual apply happened between syncs).
+/// The actual `courses` table is untouched here; the admin Apply
+/// route does that via `apply_one` on the staged row.
+async fn stage_one(
+    state: &AppState,
+    input: &DaisyCourseInputPayload,
+    summary: &mut DaisyImportSummary,
+) -> Result<(), AppError> {
+    let momenttillf_id = input.momenttillf_id.trim();
+    let beteckning = input.beteckning.trim();
+    let name = input.name.trim();
+    let semester_label = input.semester_label.as_deref().unwrap_or("").trim();
+    if momenttillf_id.is_empty() || beteckning.is_empty() || name.is_empty() {
+        return Err(AppError::bad_request("daisy.course_missing_required"));
+    }
+    if semester_label.is_empty() {
+        return Err(AppError::bad_request("daisy.course_missing_semester"));
+    }
+
+    // Snapshot the resolved-participant list verbatim. The admin
+    // Apply route deserialises it back into a Vec<DaisyParticipantInput>
+    // and routes it through apply_one; the round-trip is exercised by
+    // the (de)serialise derive pair on both structs.
+    let participants_json = serde_json::to_value(&input.participants)
+        .map_err(|e| AppError::Internal(format!("serialise participants: {e}")))?;
+
+    // If a course with this momenttillf_id already exists, surface
+    // the link so the admin UI can render "Update" instead of "New".
+    let existing_course_id =
+        minerva_db::queries::courses::find_by_daisy_momenttillf_id(&state.db, momenttillf_id)
+            .await?
+            .map(|c| c.id);
+
+    minerva_db::queries::daisy_pending_imports::upsert(
+        &state.db,
+        &minerva_db::queries::daisy_pending_imports::StageInput {
+            momenttillf_id,
+            course_code: beteckning,
+            name,
+            semester_label,
+            daisy_info_url: input.info_url.as_deref(),
+            daisy_syllabus_url: input.syllabus_url.as_deref(),
+            daisy_unit: input.unit.as_deref(),
+            participants: &participants_json,
+            existing_course_id,
+        },
+    )
+    .await?;
+    summary.courses_staged += 1;
+    Ok(())
+}
+
+/// Apply a payload directly to the live `courses` table; the
+/// pre-staging behaviour. Called from two paths now:
+///   * `import_daisy_courses` when `daisy_settings.auto_apply` is ON,
+///     so the sync skips the staging step (used once the workflow is
+///     trusted in steady state).
+///   * `apply_daisy_pending` (admin route) after the admin reviews
+///     a staged row and clicks Apply.
+///
+/// Identical behaviour at both call sites: upsert the course by
+/// `daisy_momenttillf_id`, seed a play_designations row on CREATE,
+/// additively sync the participant list (registering aliases +
+/// queuing pendings for unresolved staff), and swap ownership to
+/// the first course-responsible we can see.
+pub(super) async fn apply_one(
+    state: &AppState,
+    input: &DaisyCourseInputPayload,
+    fallback_owner_id: Uuid,
+    default_embedding_model: Option<&str>,
+    summary: &mut DaisyImportSummary,
+) -> Result<(), AppError> {
+    let momenttillf_id = input.momenttillf_id.trim();
+    let beteckning = input.beteckning.trim();
+    let name = input.name.trim();
+    if momenttillf_id.is_empty() || beteckning.is_empty() || name.is_empty() {
+        return Err(AppError::bad_request("daisy.course_missing_required"));
+    }
+
+    // Keep the user-facing name simple: just the Daisy `name`. The
+    // frontend shows `beteckning` separately via the semester badge.
+    let outcome = minerva_db::queries::courses::upsert_from_daisy(
+        &state.db,
+        &minerva_db::queries::courses::DaisyCourseInput {
+            momenttillf_id,
+            beteckning,
+            name,
+            semester_label: input.semester_label.as_deref(),
+            info_url: input.info_url.as_deref(),
+            syllabus_url: input.syllabus_url.as_deref(),
+            unit: input.unit.as_deref(),
+            fallback_owner_id,
+            daily_token_limit: crate::system_defaults::course_daily_token_limit(&state.db).await,
+            embedding_model: default_embedding_model,
+        },
+    )
+    .await?;
+
+    if outcome.created {
+        summary.courses_created += 1;
+
+        // Seed the play_designations row so transcript discovery
+        // picks the course up the next hour. Unique on (course_id,
+        // designation); a duplicate is harmless (just means the row
+        // already existed via a prior manual setup).
+        match minerva_db::queries::play_designations::insert(
+            &state.db,
+            Uuid::new_v4(),
+            outcome.course.id,
+            beteckning,
+            fallback_owner_id,
+        )
+        .await
+        {
+            Ok(_) => summary.designations_created += 1,
+            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+                // Already present (very unlikely on a fresh CREATE,
+                // but possible if a teacher pre-registered it). Quiet.
+            }
+            Err(e) => return Err(e.into()),
+        }
+    } else {
+        summary.courses_updated += 1;
+    }
+
+    // Roster sync. Additive only: never remove a member who's no
+    // longer in Daisy. add_member is ON CONFLICT DO UPDATE SET role,
+    // so role changes between syncs (TA → teacher) propagate; but we
+    // never demote a manually-added human (since add_member with the
+    // resolved Daisy role would only ever stay the same or upgrade).
+    for participant in &input.participants {
+        if participant.eppns.is_empty() {
+            continue;
+        }
+        let eppns: Vec<String> = participant
+            .eppns
+            .iter()
+            .map(|e| normalize_eppn(e))
+            .filter(|e| !e.is_empty())
+            .collect();
+        if eppns.is_empty() {
+            continue;
+        }
+        let (role, eligible_for_owner) =
+            minerva_role_for(&participant.kind, &participant.daisy_roles);
+
+        // Find a Minerva user that already owns any of these eppns
+        // (primary or alias). First hit wins; alias hits are NOT
+        // promoted here (we don't want a Daisy sync to silently swap
+        // a user's primary eppn out from under them; the auth path
+        // does that explicitly when SAML hands us the alias).
+        let mut resolved_user_id: Option<Uuid> = None;
+        for eppn in &eppns {
+            if let Some((row, _via_alias)) =
+                minerva_db::queries::users::find_by_eppn_or_alias(&state.db, eppn).await?
+            {
+                resolved_user_id = Some(row.id);
+                break;
+            }
+        }
+
+        if let Some(user_id) = resolved_user_id {
+            // Real Minerva user; add as member (idempotent).
+            minerva_db::queries::courses::add_member(&state.db, outcome.course.id, user_id, role)
+                .await?;
+            summary.members_added += 1;
+
+            // Register every additional eppn as an alias of this user.
+            // No-op when an eppn is already the user's primary or
+            // already an alias somewhere; the helper's docs cover the
+            // edge cases.
+            for eppn in &eppns {
+                match minerva_db::queries::user_eppn_aliases::register(&state.db, user_id, eppn)
+                    .await
+                {
+                    Ok(true) => summary.aliases_registered += 1,
+                    Ok(false) => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            user = %user_id,
+                            eppn = %eppn,
+                            error = %e,
+                            "daisy import: alias register failed (continuing)",
+                        );
+                    }
+                }
+            }
+
+            // If they're course-responsible and the course currently sits
+            // on the fallback owner, swap ownership now. (The login
+            // drain path also does this for users who haven't logged
+            // in yet; doing it here for users who have logged in
+            // avoids a stale-owner window until they next visit.)
+            if eligible_for_owner {
+                let _ = minerva_db::queries::courses::swap_owner_from_fallback(
+                    &state.db,
+                    outcome.course.id,
+                    fallback_owner_id,
+                    user_id,
+                )
+                .await?;
+            }
+        } else {
+            // No Minerva user yet. Queue one pending row per eppn so
+            // a future login via any of them drains.
+            for eppn in &eppns {
+                minerva_db::queries::pending_course_memberships::upsert(
+                    &state.db,
+                    &minerva_db::queries::pending_course_memberships::PendingUpsert {
+                        course_id: outcome.course.id,
+                        eppn,
+                        display_name: participant.display_name.as_deref(),
+                        role,
+                        eligible_for_owner,
+                        daisy_roles: &participant.daisy_roles,
+                        daisy_momenttillf_id: Some(momenttillf_id),
+                    },
+                )
+                .await?;
+                summary.pending_memberships_added += 1;
+            }
+        }
+    }
+
+    // Bump the synced-at timestamp at the end so a partial failure
+    // leaves the row pointing at its previous successful sync.
+    minerva_db::queries::courses::touch_daisy_synced(&state.db, outcome.course.id).await?;
+    Ok(())
 }

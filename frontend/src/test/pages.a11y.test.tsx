@@ -126,6 +126,10 @@ const course: Course = {
     concept_graph: false,
     study_mode: false,
   },
+  semester_label: null,
+  daisy: null,
+  auto_managed: false,
+  course_code: null,
 }
 
 const adminUsers: AdminUser[] = [

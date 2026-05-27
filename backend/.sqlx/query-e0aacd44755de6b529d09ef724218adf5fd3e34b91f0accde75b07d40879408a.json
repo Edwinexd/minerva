@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_eppn_aliases (user_id, eppn)\n        VALUES ($1, $2)\n        ON CONFLICT (eppn) DO UPDATE SET last_seen_at = NOW()\n        RETURNING xmax = 0 AS \"inserted!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "inserted!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e0aacd44755de6b529d09ef724218adf5fd3e34b91f0accde75b07d40879408a"
+}

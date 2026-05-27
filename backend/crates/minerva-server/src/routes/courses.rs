@@ -59,6 +59,12 @@ async fn student_unread_counts(
 struct CreateCourseRequest {
     name: String,
     description: Option<String>,
+    /// Required: which semester this course is delivered in (e.g.
+    /// `VT2026`). Mandatory for every new course so the My Courses
+    /// page can group meaningfully even when the course wasn't
+    /// auto-imported from Daisy. Historical rows from before this
+    /// requirement remain NULL and admins backfill via PUT.
+    semester_label: String,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +82,72 @@ struct UpdateCourseRequest {
     embedding_provider: Option<String>,
     embedding_model: Option<String>,
     daily_token_limit: Option<i64>,
+    /// Admin / owner backfill: stamp or rewrite the per-semester
+    /// label on an existing course. Format-validated identically to
+    /// `CreateCourseRequest::semester_label`.
+    semester_label: Option<String>,
+}
+
+/// `^(VT|HT)YYYY$` with a sane year range. VT = vårtermin (spring,
+/// Jan-Jun), HT = hösttermin (autumn, Jul-Dec); year is 4 digits.
+/// Anything outside `[2000, 2100)` is rejected to catch typos like
+/// "VT26" or "VT20266" that would otherwise pass a looser pattern.
+fn validate_semester_label(raw: &str) -> Result<String, AppError> {
+    let trimmed = raw.trim().to_uppercase();
+    let invalid = || AppError::bad_request("course.semester_label_invalid");
+    if trimmed.len() != 6 {
+        return Err(invalid());
+    }
+    let (season, year_str) = trimmed.split_at(2);
+    if season != "VT" && season != "HT" {
+        return Err(invalid());
+    }
+    let year: i32 = year_str.parse().map_err(|_| invalid())?;
+    if !(2000..2100).contains(&year) {
+        return Err(invalid());
+    }
+    Ok(trimmed)
+}
+
+#[cfg(test)]
+mod semester_label_tests {
+    use super::validate_semester_label;
+
+    #[test]
+    fn accepts_canonical_labels() {
+        assert_eq!(validate_semester_label("VT2026").unwrap(), "VT2026");
+        assert_eq!(validate_semester_label("HT2099").unwrap(), "HT2099");
+    }
+
+    #[test]
+    fn normalises_case_and_trims_whitespace() {
+        // Teachers type the label by hand; we accept any case and
+        // surrounding spaces but store the canonical upper-case form.
+        assert_eq!(validate_semester_label("  vt2026 ").unwrap(), "VT2026");
+        assert_eq!(validate_semester_label("Ht2027").unwrap(), "HT2027");
+    }
+
+    #[test]
+    fn rejects_wrong_shape() {
+        // Common typos: 2-digit year, 5-digit year, wrong season,
+        // missing season, embedded space.
+        for bad in [
+            "VT26", "VT20266", "ST2026", "2026", "VT 2026", "VTVT26", "", "  ",
+        ] {
+            assert!(
+                validate_semester_label(bad).is_err(),
+                "expected {bad:?} to be rejected",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_out_of_range_years() {
+        // Guard against e.g. "VT0026" passing because the digits
+        // happen to fit. Range is [2000, 2100).
+        assert!(validate_semester_label("VT1999").is_err());
+        assert!(validate_semester_label("HT2100").is_err());
+    }
 }
 
 #[derive(Serialize)]
@@ -113,6 +185,32 @@ struct CourseResponse {
     /// default). Frontend reads this to decide whether to show
     /// KG-related tabs / badges / dialogs.
     feature_flags: CourseFeatureFlagsView,
+    /// `VT2026` / `HT2025` etc. Set by the Daisy auto-import phase;
+    /// drives the per-semester grouping on the My Courses page. NULL
+    /// for ad-hoc (manually-created) courses.
+    semester_label: Option<String>,
+    /// Daisy metadata block, present when this course was auto-imported
+    /// from Daisy. Frontend uses these to render the "Auto-managed by
+    /// Daisy sync" badge + info/syllabus links on the settings page.
+    daisy: Option<DaisyMetaView>,
+    /// TRUE when the course was created by the Daisy auto-import phase
+    /// (membership sync stays additive on these; teachers shouldn't
+    /// fight the import). Mirrors `courses.auto_managed`.
+    auto_managed: bool,
+    /// Short course code (e.g. `PROG2`). Populated by the Daisy
+    /// auto-import; NULL on historical / ad-hoc courses. Frontend
+    /// uses it as a chip on the My Courses tile so the term-stable
+    /// identifier is visible alongside the rename-friendly `name`.
+    course_code: Option<String>,
+}
+
+#[derive(Serialize)]
+struct DaisyMetaView {
+    momenttillf_id: String,
+    info_url: Option<String>,
+    syllabus_url: Option<String>,
+    unit: Option<String>,
+    last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Per-course feature-flag snapshot, resolved through the runtime
@@ -149,6 +247,19 @@ impl CourseResponse {
         my_role: Option<String>,
         feature_flags: CourseFeatureFlagsView,
     ) -> Self {
+        // Compose the Daisy view only when we have a momenttillf_id;
+        // a course with a manually-stamped `semester_label` but no
+        // Daisy linkage shouldn't carry a phantom daisy block.
+        let daisy = row
+            .daisy_momenttillf_id
+            .clone()
+            .map(|momenttillf_id| DaisyMetaView {
+                momenttillf_id,
+                info_url: row.daisy_info_url.clone(),
+                syllabus_url: row.daisy_syllabus_url.clone(),
+                unit: row.daisy_unit.clone(),
+                last_synced_at: row.daisy_last_synced_at,
+            });
         Self {
             id: row.id,
             name: row.name,
@@ -171,6 +282,10 @@ impl CourseResponse {
             updated_at: row.updated_at,
             my_role,
             feature_flags,
+            semester_label: row.semester_label,
+            daisy,
+            auto_managed: row.auto_managed,
+            course_code: row.course_code,
         }
     }
 }
@@ -224,6 +339,8 @@ async fn create_course(
         return Err(AppError::Forbidden);
     }
 
+    let semester_label = validate_semester_label(&body.semester_label)?;
+
     let id = Uuid::new_v4();
     // Snapshot every admin-tunable course default into the new row.
     // `embedding_model` is special-cased: the legacy
@@ -241,6 +358,7 @@ async fn create_course(
         name: body.name,
         description: body.description,
         owner_id: user.id,
+        semester_label,
         daily_token_limit: crate::system_defaults::course_daily_token_limit(&state.db).await,
         model: Some(crate::system_defaults::course_model(&state.db).await),
         temperature: Some(crate::system_defaults::course_temperature(&state.db).await),
@@ -457,6 +575,15 @@ async fn update_course(
         );
     }
 
+    // Validate the optional semester relabel before applying. We
+    // intentionally normalise to upper-case via `validate_semester_label`
+    // so the stored value is consistent regardless of how a teacher
+    // typed it ("vt2026" -> "VT2026").
+    let validated_semester_label = match body.semester_label.as_deref() {
+        Some(raw) => Some(validate_semester_label(raw)?),
+        None => None,
+    };
+
     // Apply the rest of the update. Provider/model are intentionally
     // omitted; if a rotation just ran they're already persisted; if
     // it didn't, COALESCE on `None` is a no-op anyway.
@@ -474,6 +601,7 @@ async fn update_course(
         embedding_provider: None,
         embedding_model: None,
         daily_token_limit: body.daily_token_limit,
+        semester_label: validated_semester_label,
     };
 
     let row = minerva_db::queries::courses::update(&state.db, id, &input)

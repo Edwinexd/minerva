@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE courses SET\n            name = COALESCE($2, name),\n            description = COALESCE($3, description),\n            context_ratio = COALESCE($4, context_ratio),\n            temperature = COALESCE($5, temperature),\n            model = COALESCE($6, model),\n            system_prompt = COALESCE($7, system_prompt),\n            max_chunks = COALESCE($8, max_chunks),\n            strategy = COALESCE($9, strategy),\n            tool_use_enabled = COALESCE($10, tool_use_enabled),\n            daily_token_limit = COALESCE($11, daily_token_limit),\n            embedding_provider = COALESCE($12, embedding_provider),\n            embedding_model = COALESCE($13, embedding_model),\n            min_score = COALESCE($14, min_score),\n            updated_at = NOW()\n        WHERE id = $1 AND active = true\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed",
+  "query": "INSERT INTO courses (id, name, description, owner_id, daily_token_limit, semester_label)\n            VALUES ($1, $2, $3, $4, $5, $6)\n            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed",
   "describe": {
     "columns": [
       {
@@ -139,17 +139,9 @@
         "Uuid",
         "Text",
         "Text",
-        "Float8",
-        "Float8",
-        "Text",
-        "Text",
-        "Int4",
-        "Text",
-        "Bool",
+        "Uuid",
         "Int8",
-        "Text",
-        "Text",
-        "Float4"
+        "Text"
       ]
     },
     "nullable": [
@@ -181,5 +173,5 @@
       false
     ]
   },
-  "hash": "78834c45d176dae82a411f7afaae66245497cc7717485c13e59170ba902c245b"
+  "hash": "620397dae3c4dc9c328e602066de9685872d8677d45aca451272726483de94eb"
 }

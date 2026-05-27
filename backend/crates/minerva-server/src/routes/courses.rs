@@ -59,6 +59,12 @@ async fn student_unread_counts(
 struct CreateCourseRequest {
     name: String,
     description: Option<String>,
+    /// Required: which semester this course is delivered in (e.g.
+    /// `VT2026`). Mandatory for every new course so the My Courses
+    /// page can group meaningfully even when the course wasn't
+    /// auto-imported from Daisy. Historical rows from before this
+    /// requirement remain NULL and admins backfill via PUT.
+    semester_label: String,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +82,72 @@ struct UpdateCourseRequest {
     embedding_provider: Option<String>,
     embedding_model: Option<String>,
     daily_token_limit: Option<i64>,
+    /// Admin / owner backfill: stamp or rewrite the per-semester
+    /// label on an existing course. Format-validated identically to
+    /// `CreateCourseRequest::semester_label`.
+    semester_label: Option<String>,
+}
+
+/// `^(VT|HT)YYYY$` with a sane year range. VT = vårtermin (spring,
+/// Jan-Jun), HT = hösttermin (autumn, Jul-Dec); year is 4 digits.
+/// Anything outside `[2000, 2100)` is rejected to catch typos like
+/// "VT26" or "VT20266" that would otherwise pass a looser pattern.
+fn validate_semester_label(raw: &str) -> Result<String, AppError> {
+    let trimmed = raw.trim().to_uppercase();
+    let invalid = || AppError::bad_request("course.semester_label_invalid");
+    if trimmed.len() != 6 {
+        return Err(invalid());
+    }
+    let (season, year_str) = trimmed.split_at(2);
+    if season != "VT" && season != "HT" {
+        return Err(invalid());
+    }
+    let year: i32 = year_str.parse().map_err(|_| invalid())?;
+    if !(2000..2100).contains(&year) {
+        return Err(invalid());
+    }
+    Ok(trimmed)
+}
+
+#[cfg(test)]
+mod semester_label_tests {
+    use super::validate_semester_label;
+
+    #[test]
+    fn accepts_canonical_labels() {
+        assert_eq!(validate_semester_label("VT2026").unwrap(), "VT2026");
+        assert_eq!(validate_semester_label("HT2099").unwrap(), "HT2099");
+    }
+
+    #[test]
+    fn normalises_case_and_trims_whitespace() {
+        // Teachers type the label by hand; we accept any case and
+        // surrounding spaces but store the canonical upper-case form.
+        assert_eq!(validate_semester_label("  vt2026 ").unwrap(), "VT2026");
+        assert_eq!(validate_semester_label("Ht2027").unwrap(), "HT2027");
+    }
+
+    #[test]
+    fn rejects_wrong_shape() {
+        // Common typos: 2-digit year, 5-digit year, wrong season,
+        // missing season, embedded space.
+        for bad in [
+            "VT26", "VT20266", "ST2026", "2026", "VT 2026", "VTVT26", "", "  ",
+        ] {
+            assert!(
+                validate_semester_label(bad).is_err(),
+                "expected {bad:?} to be rejected",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_out_of_range_years() {
+        // Guard against e.g. "VT0026" passing because the digits
+        // happen to fit. Range is [2000, 2100).
+        assert!(validate_semester_label("VT1999").is_err());
+        assert!(validate_semester_label("HT2100").is_err());
+    }
 }
 
 #[derive(Serialize)]
@@ -261,6 +333,8 @@ async fn create_course(
         return Err(AppError::Forbidden);
     }
 
+    let semester_label = validate_semester_label(&body.semester_label)?;
+
     let id = Uuid::new_v4();
     // Resolve the admin-managed default embedding model. Falls through
     // to the courses-table column DEFAULT (`all-MiniLM-L6-v2`) if no
@@ -273,6 +347,7 @@ async fn create_course(
         name: body.name,
         description: body.description,
         owner_id: user.id,
+        semester_label,
         // Apply the platform-wide default per-student-per-day cap. Teachers
         // can adjust (including to 0 = unlimited) via PUT afterwards; the
         // per-owner aggregate cap on `users` is the real spend backstop.
@@ -481,6 +556,15 @@ async fn update_course(
         );
     }
 
+    // Validate the optional semester relabel before applying. We
+    // intentionally normalise to upper-case via `validate_semester_label`
+    // so the stored value is consistent regardless of how a teacher
+    // typed it ("vt2026" -> "VT2026").
+    let validated_semester_label = match body.semester_label.as_deref() {
+        Some(raw) => Some(validate_semester_label(raw)?),
+        None => None,
+    };
+
     // Apply the rest of the update. Provider/model are intentionally
     // omitted; if a rotation just ran they're already persisted; if
     // it didn't, COALESCE on `None` is a no-op anyway.
@@ -498,6 +582,7 @@ async fn update_course(
         embedding_provider: None,
         embedding_model: None,
         daily_token_limit: body.daily_token_limit,
+        semester_label: validated_semester_label,
     };
 
     let row = minerva_db::queries::courses::update(&state.db, id, &input)

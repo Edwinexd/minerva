@@ -577,6 +577,76 @@ fn minerva_role_for(kind: &str, daisy_roles: &[String]) -> (&'static str, bool) 
     }
 }
 
+#[cfg(test)]
+mod daisy_import_tests {
+    use super::{is_kursansvarig, minerva_role_for, normalize_eppn};
+
+    fn s(v: &str) -> String {
+        v.to_string()
+    }
+
+    #[test]
+    fn normalize_lowercases_and_trims() {
+        assert_eq!(normalize_eppn(" Alice@SU.SE "), "alice@su.se");
+    }
+
+    #[test]
+    fn kursansvarig_recognises_canonical_and_legacy_labels() {
+        // The canonical Daisy heading is "Kurs-/delkursansvarig".
+        // Some older offerings use the shorter "kursansvarig". Both
+        // should promote the staff person to owner-eligible; anything
+        // else stays a plain teacher.
+        assert!(is_kursansvarig(&[s("Kurs-/delkursansvarig")]));
+        assert!(is_kursansvarig(&[s("kursansvarig")]));
+        // Case-insensitive on the shorter form (the longer one is
+        // matched via starts_with on a verbatim prefix, so casing is
+        // preserved upstream).
+        assert!(is_kursansvarig(&[s("KURSANSVARIG")]));
+        // Unrelated roles must not trigger owner promotion.
+        assert!(!is_kursansvarig(&[s("Examination")]));
+        assert!(!is_kursansvarig(&[s("Administration"), s("Handledare")]));
+        // Empty role list is fine; just means we don't promote.
+        assert!(!is_kursansvarig(&[]));
+    }
+
+    #[test]
+    fn role_mapping_staff_kursansvarig_is_owner_eligible() {
+        let (role, owner) = minerva_role_for("staff", &[s("Kurs-/delkursansvarig")]);
+        assert_eq!(role, "teacher");
+        assert!(owner);
+    }
+
+    #[test]
+    fn role_mapping_staff_non_owner_role_is_plain_teacher() {
+        let (role, owner) = minerva_role_for("staff", &[s("Examination")]);
+        assert_eq!(role, "teacher");
+        assert!(!owner);
+    }
+
+    #[test]
+    fn role_mapping_student_handledare_is_ta_never_owner() {
+        // A student-handledare should never end up as course owner
+        // even if Daisy lists them under the kursansvarig heading by
+        // accident (the kind=="student" branch wins).
+        let (role, owner) = minerva_role_for("student", &[s("Handledare")]);
+        assert_eq!(role, "ta");
+        assert!(!owner);
+        let (role, owner) = minerva_role_for("student", &[s("Kurs-/delkursansvarig")]);
+        assert_eq!(role, "ta");
+        assert!(!owner);
+    }
+
+    #[test]
+    fn unrecognised_kind_falls_through_to_teacher() {
+        // Defence against new dsv-wrapper kinds we haven't enumerated:
+        // we'd rather over-grant teacher than silently drop a course
+        // member. Owner eligibility still depends on the role labels.
+        let (role, owner) = minerva_role_for("future_kind", &[s("Examination")]);
+        assert_eq!(role, "teacher");
+        assert!(!owner);
+    }
+}
+
 /// Idempotently bulk-import Daisy course offerings + participants.
 ///
 /// Called daily by `.github/workflows/daisy-sync.yml`

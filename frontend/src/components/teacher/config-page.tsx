@@ -292,6 +292,14 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [embeddingProvider, setEmbeddingProvider] = useState(course.embedding_provider)
   const [embeddingModel, setEmbeddingModel] = useState(course.embedding_model)
   const [dailyTokenLimit, setDailyTokenLimit] = useState(course.daily_token_limit)
+  // Backfill / rename of the per-semester grouping label. Empty
+  // string means "no change" on submit (we only POST a label when
+  // the field is non-empty, since UpdateCourseRequest treats the
+  // missing key as a no-op). Daisy-imported courses can be relabelled
+  // here, but the next sync rewrites the value, so the input is
+  // gated to non-auto-managed rows + admins.
+  const [semesterLabel, setSemesterLabel] = useState(course.semester_label ?? "")
+  const semesterLabelEditable = !course.auto_managed
   // Two-step save: any provider/model change opens this dialog so the
   // teacher acknowledges the re-ingestion. Other field changes save
   // immediately. The dialog is keyed off the *baseline* values from
@@ -308,21 +316,33 @@ function CourseConfigForm({ course }: { course: Course }) {
     },
   })
 
-  const buildPayload = () => ({
-    name,
-    description: description || null,
-    context_ratio: contextRatio,
-    temperature,
-    model,
-    system_prompt: systemPrompt || null,
-    max_chunks: maxChunks,
-    min_score: minScore,
-    strategy,
-    tool_use_enabled: toolUseEnabled,
-    embedding_provider: embeddingProvider,
-    embedding_model: embeddingModel,
-    daily_token_limit: dailyTokenLimit,
-  })
+  const buildPayload = () => {
+    const trimmedSemester = semesterLabel.trim().toUpperCase()
+    const baseline = (course.semester_label ?? "").toUpperCase()
+    return {
+      name,
+      description: description || null,
+      context_ratio: contextRatio,
+      temperature,
+      model,
+      system_prompt: systemPrompt || null,
+      max_chunks: maxChunks,
+      min_score: minScore,
+      strategy,
+      tool_use_enabled: toolUseEnabled,
+      embedding_provider: embeddingProvider,
+      embedding_model: embeddingModel,
+      daily_token_limit: dailyTokenLimit,
+      // Only include the key when the editable value actually changed
+      // (and the field is editable in the first place). UpdateCourseRequest
+      // treats a missing key as "no change"; sending the existing value
+      // would be a harmless COALESCE round-trip but also defeats the
+      // server-side validation for blank "" inputs on existing labels.
+      ...(semesterLabelEditable && trimmedSemester && trimmedSemester !== baseline
+        ? { semester_label: trimmedSemester }
+        : {}),
+    }
+  }
 
   // The backend only rotates when provider or model differ from the
   // currently-persisted values, so mirror that condition here. A
@@ -378,6 +398,38 @@ function CourseConfigForm({ course }: { course: Course }) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="semester_label">
+              {t("config.semesterLabel")}
+              {!course.semester_label && (
+                <span className="ml-2 text-xs text-muted-foreground">
+                  ({t("config.semesterBackfillHint")})
+                </span>
+              )}
+            </Label>
+            <Input
+              id="semester_label"
+              value={semesterLabel}
+              onChange={(e) => setSemesterLabel(e.target.value)}
+              placeholder="VT2026"
+              // Mirrors the server-side regex; lets the browser flag
+              // a typo before the round-trip.
+              pattern="(?:VT|HT|vt|ht)\d{4}"
+              title={t("config.semesterFormatHint")}
+              // Daisy-managed courses get their semester rewritten on
+              // every nightly sync; let the field stay visible so the
+              // current value is obvious, but disable editing so a
+              // teacher doesn't waste effort on a change that won't
+              // survive the next cron tick.
+              disabled={readOnly || !semesterLabelEditable}
+            />
+            <p className="text-xs text-muted-foreground">
+              {!semesterLabelEditable
+                ? t("config.semesterManagedByDaisy")
+                : t("config.semesterFormatHint")}
+            </p>
           </div>
 
           <Separator />

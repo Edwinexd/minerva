@@ -343,16 +343,35 @@ function StudentCourseCard({
   )
 }
 
+/**
+ * Suggest a default `semester_label` based on today's calendar so a
+ * teacher who just clicked "New Course" doesn't have to think about
+ * which term they're in. Matches the same VT=Jan-Jun / HT=Jul-Dec
+ * convention used by `scripts/sync_daisy_courses.py`, so manual and
+ * Daisy-imported courses end up in the same buckets.
+ */
+function defaultSemesterLabel(today: Date = new Date()): string {
+  const year = today.getFullYear()
+  const month = today.getMonth() + 1 // 1-12
+  return month <= 6 ? `VT${year}` : `HT${year}`
+}
+
 function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
   const { t } = useTranslation("common")
   const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  // Pre-populate with the current semester. Teachers prepping the
+  // next term overwrite this; everyone else just hits submit.
+  const [semesterLabel, setSemesterLabel] = useState(defaultSemesterLabel())
 
   const mutation = useMutation({
-    mutationFn: (data: { name: string; description: string | null }) =>
-      api.post<Course>("/courses", data),
+    mutationFn: (data: {
+      name: string
+      description: string | null
+      semester_label: string
+    }) => api.post<Course>("/courses", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["courses"] })
       onCreated()
@@ -372,6 +391,7 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
             mutation.mutate({
               name,
               description: description || null,
+              semester_label: semesterLabel.trim().toUpperCase(),
             })
           }}
         >
@@ -390,6 +410,29 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
             />
           </div>
           <div className="space-y-2">
+            <Label htmlFor="semester_label">
+              {t("home.create.semesterLabel")}{" "}
+              <span className="text-destructive" aria-hidden="true">
+                {t("forms.requiredMark")}
+              </span>
+              <span className="sr-only">{t("forms.requiredLabel")}</span>
+            </Label>
+            <Input
+              id="semester_label"
+              value={semesterLabel}
+              onChange={(e) => setSemesterLabel(e.target.value)}
+              placeholder={t("home.create.semesterPlaceholder")}
+              // Client-side mirror of the backend regex. Lets the
+              // browser surface the format hint before a round-trip.
+              pattern="(?:VT|HT|vt|ht)\d{4}"
+              title={t("home.create.semesterHint")}
+              required
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("home.create.semesterHint")}
+            </p>
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="description">{t("home.create.descriptionLabel")}</Label>
             <Textarea
               id="description"
@@ -398,7 +441,10 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
               placeholder={t("home.create.descriptionPlaceholder")}
             />
           </div>
-          <Button type="submit" disabled={mutation.isPending || !name}>
+          <Button
+            type="submit"
+            disabled={mutation.isPending || !name || !semesterLabel.trim()}
+          >
             {mutation.isPending
               ? t("home.create.submitting")
               : t("home.create.submit")}

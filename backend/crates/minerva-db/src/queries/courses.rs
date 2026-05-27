@@ -68,6 +68,11 @@ pub struct CreateCourse {
     /// (column DEFAULT applies) so legacy callers and tests don't have
     /// to know about the table.
     pub embedding_model: Option<String>,
+    /// Required for new courses. The route layer validates the format
+    /// (VT|HT + 4-digit year); pre-existing rows from before this
+    /// column existed are nullable to keep historical data intact,
+    /// but every new INSERT carries a value.
+    pub semester_label: String,
 }
 
 pub struct UpdateCourse {
@@ -84,6 +89,11 @@ pub struct UpdateCourse {
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
     pub daily_token_limit: Option<i64>,
+    /// Admin / owner backfill of the per-semester grouping label.
+    /// Outer `Option` distinguishes "no change" (None) from "set
+    /// to value" (Some). We don't expose a way to clear the label
+    /// back to NULL through the API; once stamped it stays stamped.
+    pub semester_label: Option<String>,
 }
 
 pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<CourseRow, sqlx::Error> {
@@ -97,8 +107,8 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
     if let Some(model) = input.embedding_model.as_deref() {
         sqlx::query_as!(
             CourseRow,
-            r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit, embedding_model)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit, embedding_model, semester_label)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed"#,
             id,
             input.name,
@@ -106,20 +116,22 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             input.owner_id,
             input.daily_token_limit,
             model,
+            input.semester_label,
         )
         .fetch_one(db)
         .await
     } else {
         sqlx::query_as!(
             CourseRow,
-            r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit)
-            VALUES ($1, $2, $3, $4, $5)
+            r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit, semester_label)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed"#,
             id,
             input.name,
             input.description,
             input.owner_id,
             input.daily_token_limit,
+            input.semester_label,
         )
         .fetch_one(db)
         .await
@@ -230,6 +242,7 @@ pub async fn update(
             embedding_provider = COALESCE($12, embedding_provider),
             embedding_model = COALESCE($13, embedding_model),
             min_score = COALESCE($14, min_score),
+            semester_label = COALESCE($15, semester_label),
             updated_at = NOW()
         WHERE id = $1 AND active = true
         RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed"#,
@@ -247,6 +260,7 @@ pub async fn update(
         input.embedding_provider,
         input.embedding_model,
         input.min_score,
+        input.semester_label,
     )
     .fetch_optional(db)
     .await

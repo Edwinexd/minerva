@@ -60,13 +60,31 @@ def current_and_next_semesters(today: date) -> list[Semester]:
     ]
 
 
+# Realm prefixes Daisy uses on staff `usernames`. Only the SU-side
+# realms are safe to translate into Minerva eppns; KTH users can't auth
+# via SU Shibboleth so suffixing their login with `@su.se` would just
+# create a phantom user that never matches a real Shib session.
+# Unknown / unprefixed usernames are skipped on the same principle:
+# we never invent a realm we don't have evidence for.
+_SU_REALMS = {"su", "dsv"}
+
+
 def eppn_from_username(raw: str) -> str | None:
-    """Daisy realm-prefixes some logins (e.g. `dsv:edsu8469` or
-    `kth:foo`). Shibboleth eppns are realm-suffixed (`edsu8469@su.se`).
-    Strip the prefix, lowercase, suffix with @su.se. Returns None on
-    empty/whitespace-only input."""
-    bare = raw.split(":", 1)[-1].strip().lower()
-    if not bare:
+    """Translate a Daisy staff login (e.g. `dsv:edsu8469`) into the
+    Shibboleth eppn Minerva expects (`edsu8469@su.se`).
+
+    Returns None when the realm prefix is missing or names a realm we
+    can't authenticate from Minerva's SU Shibboleth (e.g. `kth:foo`).
+    The caller treats None as "skip this login"; the rest of the
+    person's usernames may still resolve.
+    """
+    raw = raw.strip()
+    if ":" not in raw:
+        return None
+    realm, _, bare = raw.partition(":")
+    realm = realm.strip().lower()
+    bare = bare.strip().lower()
+    if not bare or realm not in _SU_REALMS:
         return None
     return f"{bare}@su.se"
 

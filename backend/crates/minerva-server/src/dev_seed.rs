@@ -496,6 +496,10 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             owner_id: config.owner_id,
             daily_token_limit: 0, // unlimited per-student for seed
             embedding_model: None,
+            // Dev seed predates the per-semester grouping; pin every
+            // seeded course to a stable VT2026 label so the My Courses
+            // page renders a single header instead of an Ad-hoc bucket.
+            semester_label: "VT2026".to_string(),
         },
     )
     .await?;
@@ -521,6 +525,7 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             embedding_provider: Some("local".to_string()),
             embedding_model: Some("sentence-transformers/all-MiniLM-L6-v2".to_string()),
             daily_token_limit: None,
+            semester_label: None,
         },
     )
     .await?;

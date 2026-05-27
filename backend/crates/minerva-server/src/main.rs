@@ -14,6 +14,7 @@ mod routes;
 mod rules;
 mod state;
 mod strategy;
+mod system_defaults;
 mod worker;
 
 use axum::response::{IntoResponse, Response};
@@ -62,11 +63,13 @@ async fn main() -> anyhow::Result<()> {
             const PRUNE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
             // First sweep runs immediately so a restart after a long
             // downtime doesn't leave aged-out rows around for another
-            // six hours.
+            // six hours. The TTL is read per-iteration from
+            // `system_defaults` so an admin can dial it on
+            // /admin/defaults without restarting.
             loop {
+                let ttl_days = system_defaults::observation_ttl_days(&db).await;
                 match minerva_db::queries::role_rule_attribute_observations::prune_older_than(
-                    &db,
-                    minerva_db::queries::role_rule_attribute_observations::OBSERVATION_TTL_DAYS,
+                    &db, ttl_days,
                 )
                 .await
                 {

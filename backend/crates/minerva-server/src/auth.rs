@@ -249,7 +249,7 @@ async fn upsert_user(
         eppn,
         display_name,
         role.as_str(),
-        state.config.default_owner_daily_token_limit,
+        crate::system_defaults::owner_daily_token_limit(&state.db).await,
     )
     .await?;
 

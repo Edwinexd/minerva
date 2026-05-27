@@ -225,10 +225,15 @@ async fn create_course(
     }
 
     let id = Uuid::new_v4();
-    // Resolve the admin-managed default embedding model. Falls through
-    // to the courses-table column DEFAULT (`all-MiniLM-L6-v2`) if no
-    // row is flagged; that's a "the migration was never applied"
-    // state, not an error, so we don't fail course creation over it.
+    // Snapshot every admin-tunable course default into the new row.
+    // `embedding_model` is special-cased: the legacy
+    // `embedding_models.is_default` flag still wins because that's
+    // the table admins actually edit on the System tab. If no row is
+    // marked default (shouldn't happen post-startup-sync), we fall
+    // through to the SQL column DEFAULT via the COALESCE in
+    // `queries::courses::create`. Every other knob is read straight
+    // from `system_defaults`; teachers can override per-course via
+    // PUT /courses/{id} afterwards.
     let default_embedding_model =
         minerva_db::queries::embedding_models::current_default(&state.db).await?;
 
@@ -236,11 +241,19 @@ async fn create_course(
         name: body.name,
         description: body.description,
         owner_id: user.id,
-        // Apply the platform-wide default per-student-per-day cap. Teachers
-        // can adjust (including to 0 = unlimited) via PUT afterwards; the
-        // per-owner aggregate cap on `users` is the real spend backstop.
-        daily_token_limit: state.config.default_course_daily_token_limit,
+        daily_token_limit: crate::system_defaults::course_daily_token_limit(&state.db).await,
+        model: Some(crate::system_defaults::course_model(&state.db).await),
+        temperature: Some(crate::system_defaults::course_temperature(&state.db).await),
+        context_ratio: Some(crate::system_defaults::course_context_ratio(&state.db).await),
+        max_chunks: Some(crate::system_defaults::course_max_chunks(&state.db).await),
+        min_score: Some(crate::system_defaults::course_min_score(&state.db).await),
+        strategy: Some(crate::system_defaults::course_strategy(&state.db).await),
+        tool_use_enabled: Some(crate::system_defaults::course_tool_use_enabled(&state.db).await),
+        embedding_provider: Some(
+            crate::system_defaults::course_embedding_provider(&state.db).await,
+        ),
         embedding_model: default_embedding_model,
+        system_prompt: crate::system_defaults::course_system_prompt(&state.db).await,
     };
 
     let row = minerva_db::queries::courses::create(&state.db, id, &input).await?;
@@ -594,7 +607,7 @@ async fn add_member(
         &eppn,
         None,
         "student",
-        state.config.default_owner_daily_token_limit,
+        crate::system_defaults::owner_daily_token_limit(&state.db).await,
     )
     .await?;
     let target_id = target.id;

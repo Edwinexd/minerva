@@ -495,7 +495,19 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             description: config.description.map(|s| s.to_string()),
             owner_id: config.owner_id,
             daily_token_limit: 0, // unlimited per-student for seed
+            // Seed leaves the AI knobs at SQL DEFAULT; the immediate
+            // `update()` below overrides each seed course's policy
+            // (model, strategy, tool_use, etc.) explicitly.
+            model: None,
+            temperature: None,
+            context_ratio: None,
+            max_chunks: None,
+            min_score: None,
+            strategy: None,
+            tool_use_enabled: None,
+            embedding_provider: None,
             embedding_model: None,
+            system_prompt: None,
         },
     )
     .await?;

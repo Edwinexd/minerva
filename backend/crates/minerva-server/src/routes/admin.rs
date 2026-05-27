@@ -49,6 +49,11 @@ pub fn router() -> Router<AppState> {
             put(set_default_embedding_model),
         )
         .route("/embedding-benchmark", post(run_embedding_benchmark))
+        .route(
+            "/system-defaults",
+            get(list_system_defaults).put(update_system_default),
+        )
+        .route("/system-defaults/{key}", delete(reset_system_default))
 }
 
 fn require_admin(user: &User) -> Result<(), AppError> {
@@ -1112,4 +1117,152 @@ async fn run_embedding_benchmark(
             )))
         }
     }
+}
+
+// ============================================================
+// System defaults: admin-tunable knobs that used to live in env
+// vars or `pub const`s. Registry + typed accessors live in
+// `crate::system_defaults`; this is the HTTP layer.
+// ============================================================
+
+#[derive(Serialize)]
+struct SystemDefaultEntry {
+    key: &'static str,
+    category: crate::system_defaults::Category,
+    label_key: &'static str,
+    description_key: &'static str,
+    kind: crate::system_defaults::KnobKind,
+    /// Legacy env-var name (used to seed this row on a fresh install
+    /// and shown to the admin as documentation). `None` for knobs
+    /// that never had an env-var counterpart.
+    env_var: Option<&'static str>,
+    /// Hard-coded fallback ; what "Reset to default" sets the row to.
+    fallback: serde_json::Value,
+    /// Current effective value (DB row if present, fallback otherwise).
+    value: serde_json::Value,
+    /// `true` when a `system_defaults` row exists for this key. A
+    /// `false` value means the response is showing the fallback;
+    /// startup seeding should make this rare but the API surfaces it
+    /// so the UI can distinguish "explicitly set" from "default".
+    has_row: bool,
+    /// Timestamp of the last UI edit; `None` when no row exists.
+    updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Serialize)]
+struct SystemDefaultsResponse {
+    defaults: Vec<SystemDefaultEntry>,
+}
+
+/// Snapshot of the registry + each knob's current value. Cheap (one
+/// `SELECT *` and a registry walk); not paginated since the table has
+/// <50 rows for the foreseeable future.
+async fn list_system_defaults(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<SystemDefaultsResponse>, AppError> {
+    require_admin(&user)?;
+
+    let rows = minerva_db::queries::system_defaults::list_all(&state.db).await?;
+    let lookup: std::collections::HashMap<
+        String,
+        &minerva_db::queries::system_defaults::SystemDefaultRow,
+    > = rows.iter().map(|r| (r.key.clone(), r)).collect();
+
+    let mut defaults = Vec::new();
+    for def in crate::system_defaults::registry() {
+        let row = lookup.get(def.key);
+        let (value, has_row, updated_at) = match row {
+            Some(r) => (r.value.clone(), true, Some(r.updated_at)),
+            None => (def.fallback.clone(), false, None),
+        };
+        defaults.push(SystemDefaultEntry {
+            key: def.key,
+            category: def.category,
+            label_key: def.label_key,
+            description_key: def.description_key,
+            kind: def.kind,
+            env_var: def.env_var,
+            fallback: def.fallback,
+            value,
+            has_row,
+            updated_at,
+        });
+    }
+
+    Ok(Json(SystemDefaultsResponse { defaults }))
+}
+
+#[derive(Deserialize)]
+struct UpdateSystemDefaultRequest {
+    /// Registry key. Carried in the body, not the URL, for consistency
+    /// with `PUT /admin/embedding-models` (keys may contain dots which
+    /// path-routing can normalize unpredictably across reverse proxies).
+    key: String,
+    /// New JSON value. Validated against the registry's kind before
+    /// being written.
+    value: serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct UpdateSystemDefaultResponse {
+    key: String,
+    value: serde_json::Value,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Set or update one system default. Validates against the registry
+/// (type, range, enum membership) before writing; returns 400 with
+/// an i18n code on validation failure, 404 if the key isn't in the
+/// registry at all. The DB-side row is upserted; this is also the
+/// path the UI uses to *initialize* a default that's still riding
+/// the fallback (`has_row=false`).
+async fn update_system_default(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<UpdateSystemDefaultRequest>,
+) -> Result<Json<UpdateSystemDefaultResponse>, AppError> {
+    require_admin(&user)?;
+
+    let def = crate::system_defaults::find(&body.key).ok_or(AppError::NotFound)?;
+    crate::system_defaults::validate(&def, &body.value).map_err(AppError::bad_request)?;
+
+    let row = minerva_db::queries::system_defaults::set(&state.db, &body.key, &body.value).await?;
+
+    tracing::info!(
+        "admin {} set system_default `{}` = {}",
+        user.id,
+        row.key,
+        row.value,
+    );
+
+    Ok(Json(UpdateSystemDefaultResponse {
+        key: row.key,
+        value: row.value,
+        updated_at: row.updated_at,
+    }))
+}
+
+/// Drop the row for one key; the next read falls back to env var (if
+/// set, on the next startup) or hard-coded fallback. UI uses this as
+/// "Reset to default". Returns 404 if the key isn't in the registry;
+/// 200 with no body whether or not a row was actually deleted (idempotent).
+async fn reset_system_default(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+
+    let _ = crate::system_defaults::find(&key).ok_or(AppError::NotFound)?;
+
+    let removed = minerva_db::queries::system_defaults::delete(&state.db, &key).await?;
+    tracing::info!(
+        "admin {} reset system_default `{}` (removed={})",
+        user.id,
+        key,
+        removed,
+    );
+
+    Ok(Json(serde_json::json!({ "removed": removed })))
 }

@@ -35,19 +35,29 @@ pub struct CourseRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Every column the admin-tunable `system_defaults` registry covers
+/// is passed in here as `Some(...)` from the route layer; the SQL
+/// column DEFAULTs become a fallback ("nothing in `system_defaults`,
+/// nothing the caller wants to set") for legacy callers like tests
+/// that don't want to know about the registry. The route layer
+/// (`routes::courses::create_course`) always supplies every field so
+/// that admin edits in `/admin/defaults` flow straight into new
+/// courses; existing courses are unaffected.
 pub struct CreateCourse {
     pub name: String,
     pub description: Option<String>,
     pub owner_id: Uuid,
     pub daily_token_limit: i64,
-    /// When `Some`, the new course is created with this embedding model
-    /// instead of the SQL column DEFAULT. Used to honor the
-    /// admin-managed `embedding_models.is_default` row; which lives
-    /// in a separate table and so can't be wired through the ALTER
-    /// COLUMN DEFAULT machinery. `None` keeps the original behaviour
-    /// (column DEFAULT applies) so legacy callers and tests don't have
-    /// to know about the table.
+    pub model: Option<String>,
+    pub temperature: Option<f64>,
+    pub context_ratio: Option<f64>,
+    pub max_chunks: Option<i32>,
+    pub min_score: Option<f32>,
+    pub strategy: Option<String>,
+    pub tool_use_enabled: Option<bool>,
+    pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
+    pub system_prompt: Option<String>,
 }
 
 pub struct UpdateCourse {
@@ -67,43 +77,52 @@ pub struct UpdateCourse {
 }
 
 pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<CourseRow, sqlx::Error> {
-    // `COALESCE($6, embedding_model_default)` would be nicer but
-    // postgres doesn't expose a column DEFAULT in expressions. Instead
-    // we let `NULL::TEXT` fall through to the SQL DEFAULT via a
-    // conditional INSERT: when the caller supplies `Some`, we override;
-    // when `None`, we omit the column entirely so the DEFAULT kicks in.
-    // Branching here keeps the row construction in one statement and
-    // dodges a second UPDATE that would also bump `updated_at`.
-    if let Some(model) = input.embedding_model.as_deref() {
-        sqlx::query_as!(
-            CourseRow,
-            r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit, embedding_model)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
-            id,
-            input.name,
-            input.description,
-            input.owner_id,
-            input.daily_token_limit,
-            model,
+    // One unconditional INSERT, with `COALESCE($N, <literal>)` falling
+    // through to the migration's column DEFAULT for any field the
+    // caller passes as `None`. The route layer
+    // (`routes::courses::create_course`) always supplies every field
+    // from `system_defaults`, so the literals here only matter for
+    // `dev_seed` + tests which knowingly pass `None`. The literals
+    // mirror the values in the courses-table migrations; drifting them
+    // would only affect those legacy callers.
+    sqlx::query_as!(
+        CourseRow,
+        r#"INSERT INTO courses (
+            id, name, description, owner_id, daily_token_limit,
+            model, temperature, context_ratio, max_chunks, min_score,
+            strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt
+        ) VALUES (
+            $1, $2, $3, $4, $5,
+            COALESCE($6, 'gpt-oss-120b'),
+            COALESCE($7::DOUBLE PRECISION, 0.3),
+            COALESCE($8::DOUBLE PRECISION, 0.7),
+            COALESCE($9::INTEGER, 10),
+            COALESCE($10::REAL, 0.0),
+            COALESCE($11, 'simple'),
+            COALESCE($12::BOOLEAN, FALSE),
+            COALESCE($13, 'local'),
+            COALESCE($14, 'sentence-transformers/all-MiniLM-L6-v2'),
+            $15
         )
-        .fetch_one(db)
-        .await
-    } else {
-        sqlx::query_as!(
-            CourseRow,
-            r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
-            id,
-            input.name,
-            input.description,
-            input.owner_id,
-            input.daily_token_limit,
-        )
-        .fetch_one(db)
-        .await
-    }
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at"#,
+        id,
+        input.name,
+        input.description,
+        input.owner_id,
+        input.daily_token_limit,
+        input.model.as_deref(),
+        input.temperature,
+        input.context_ratio,
+        input.max_chunks,
+        input.min_score,
+        input.strategy.as_deref(),
+        input.tool_use_enabled,
+        input.embedding_provider.as_deref(),
+        input.embedding_model.as_deref(),
+        input.system_prompt.as_deref(),
+    )
+    .fetch_one(db)
+    .await
 }
 
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {

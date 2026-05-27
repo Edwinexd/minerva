@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO system_defaults (key, value)\n           VALUES ($1, $2)\n           ON CONFLICT (key) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b3fdcd76818569c55db8bcad34f10e8c2fac1d58d7712451c94a4f31cdc94c9f"
+}

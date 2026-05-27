@@ -936,7 +936,7 @@ async fn sync_file(
     let data =
         download_canvas_file(&state.http_client, &conn.canvas_api_token, download_url).await?;
     let size_bytes = data.len() as i64;
-    if size_bytes > super::documents::MAX_UPLOAD_BYTES {
+    if size_bytes > crate::system_defaults::max_upload_bytes(&state.db).await {
         return Err(AppError::bad_request_with(
             "canvas.file_too_large",
             [("size_bytes", size_bytes.to_string())],
@@ -1082,7 +1082,7 @@ async fn sync_page(
     );
     let data = html.into_bytes();
     let size_bytes = data.len() as i64;
-    if size_bytes > super::documents::MAX_UPLOAD_BYTES {
+    if size_bytes > crate::system_defaults::max_upload_bytes(&state.db).await {
         return Err(AppError::bad_request_with(
             "canvas.page_too_large",
             [("size_bytes", size_bytes.to_string())],

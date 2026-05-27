@@ -11,13 +11,21 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::state::AppState;
 
-/// Maximum upload size for a single document: 50 MB.
-pub const MAX_UPLOAD_BYTES: i64 = 50 * 1_000_000;
+/// Hard ceiling on `axum::DefaultBodyLimit::max(...)` for single-doc
+/// uploads. Set at router build time so changes require a restart;
+/// the *configured* per-upload cap (admin-tunable, read live in the
+/// handler via `system_defaults::max_upload_bytes`) lives at or
+/// below this. Raising the ceiling lets the admin dial higher; the
+/// admin can always dial *lower* without touching this constant.
+///
+/// Kept in sync with
+/// `crate::system_defaults::BODY_LIMIT_CEILING`.
+pub const UPLOAD_BODY_LIMIT_CEILING: i64 = crate::system_defaults::BODY_LIMIT_CEILING;
 
-/// Maximum upload size for a Moodle .mbz backup: 1 GB. Whole-course backups
-/// routinely clear 50 MB once video/slide decks are attached, so the regular
-/// per-file cap is not a useful ceiling here.
-pub const MAX_MBZ_UPLOAD_BYTES: i64 = 1_000_000_000;
+/// Same idea as `UPLOAD_BODY_LIMIT_CEILING`, but for the `.mbz`
+/// Moodle-backup route which carries whole-course bundles and so
+/// has a much higher ceiling.
+pub const MBZ_BODY_LIMIT_CEILING: i64 = crate::system_defaults::MBZ_BODY_LIMIT_CEILING;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -26,13 +34,13 @@ pub fn router() -> Router<AppState> {
             get(list_documents)
                 .post(upload_document)
                 .layer(axum::extract::DefaultBodyLimit::max(
-                    MAX_UPLOAD_BYTES as usize,
+                    UPLOAD_BODY_LIMIT_CEILING as usize,
                 )),
         )
         .route(
             "/mbz",
             post(upload_mbz).layer(axum::extract::DefaultBodyLimit::max(
-                MAX_MBZ_UPLOAD_BYTES as usize,
+                MBZ_BODY_LIMIT_CEILING as usize,
             )),
         )
         .route("/{doc_id}", delete(delete_document).patch(patch_document))
@@ -319,12 +327,13 @@ async fn upload_document(
     let data = file_bytes.ok_or_else(|| AppError::bad_request("doc.no_file"))?;
 
     let size_bytes = data.len() as i64;
-    if size_bytes > MAX_UPLOAD_BYTES {
+    let max_upload_bytes = crate::system_defaults::max_upload_bytes(&state.db).await;
+    if size_bytes > max_upload_bytes {
         return Err(AppError::bad_request_with(
             "doc.file_too_large",
             [
                 ("size_bytes", size_bytes.to_string()),
-                ("max_mb", (MAX_UPLOAD_BYTES / 1_000_000).to_string()),
+                ("max_mb", (max_upload_bytes / 1_000_000).to_string()),
             ],
         ));
     }
@@ -397,17 +406,22 @@ async fn upload_mbz(
         .map_err(|e| AppError::Internal(format!("mbz tempfile open failed: {e}")))?;
     let mut total: i64 = 0;
     let mut stream = field;
+    // Snapshot the cap once at the start of the stream. We could
+    // re-read per chunk but that would only matter if an admin lowered
+    // the cap mid-upload, and the surrounding bytes-already-on-disk
+    // would be wasted either way.
+    let max_mbz_upload_bytes = crate::system_defaults::max_mbz_upload_bytes(&state.db).await;
     while let Some(chunk) = stream.next().await {
         let bytes = chunk.map_err(|e| {
             AppError::bad_request_with("doc.read_failed", [("detail", e.to_string())])
         })?;
         total += bytes.len() as i64;
-        if total > MAX_MBZ_UPLOAD_BYTES {
+        if total > max_mbz_upload_bytes {
             return Err(AppError::bad_request_with(
                 "doc.file_too_large",
                 [
                     ("size_bytes", total.to_string()),
-                    ("max_mb", (MAX_MBZ_UPLOAD_BYTES / 1_000_000).to_string()),
+                    ("max_mb", (max_mbz_upload_bytes / 1_000_000).to_string()),
                 ],
             ));
         }

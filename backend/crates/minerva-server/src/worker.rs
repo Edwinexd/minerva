@@ -114,12 +114,22 @@ pub fn start(state: AppState, max_concurrent: usize) {
     // Canvas auto-sync: periodic re-sync for connections with auto_sync=true
     // whose last_synced_at is older than the configured interval. Runs
     // sequentially across due connections so we don't stampede Canvas.
-    let interval_hours = state.config.canvas_auto_sync_interval_hours;
-    if interval_hours > 0 {
+    //
+    // `interval_hours` is read from `system_defaults` *inside* the loop
+    // so an admin's edit on `/admin/defaults` takes effect on the next
+    // check-tick without a restart. 0 disables the sync entirely for
+    // this tick; we re-check on the next iteration in case the admin
+    // re-enables it.
+    {
         let state = state.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(CANVAS_AUTO_SYNC_CHECK_INTERVAL).await;
+                let interval_hours =
+                    crate::system_defaults::canvas_auto_sync_interval_hours(&state.db).await;
+                if interval_hours <= 0 {
+                    continue;
+                }
                 let due = match minerva_db::queries::canvas::find_due_for_auto_sync(
                     &state.db,
                     interval_hours,
@@ -170,12 +180,20 @@ pub fn start(state: AppState, max_concurrent: usize) {
     // from the LMS and add/remove course members. Runs sequentially across
     // due contexts so we don't stampede a platform's token + membership
     // endpoints. Removal is LTI-sourced-only (see lti_nrps::reconcile_context).
-    let nrps_interval_hours = state.config.lti_nrps_sync_interval_hours;
-    if nrps_interval_hours > 0 {
+    //
+    // Like the Canvas sweep above, `nrps_interval_hours` is read from
+    // `system_defaults` per-tick so admin edits propagate without a
+    // restart. 0 = skip this tick.
+    {
         let state = state.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(LTI_NRPS_CHECK_INTERVAL).await;
+                let nrps_interval_hours =
+                    crate::system_defaults::lti_nrps_sync_interval_hours(&state.db).await;
+                if nrps_interval_hours <= 0 {
+                    continue;
+                }
                 let due = match minerva_db::queries::lti_nrps::find_due_for_sync(
                     &state.db,
                     nrps_interval_hours,
@@ -642,10 +660,13 @@ async fn set_failed(db: &sqlx::PgPool, doc_id: uuid::Uuid, msg: &str) {
 /// intact so the origin URL stays a first-class record. Returns
 /// `(child_id, child_filename)`.
 ///
-/// Size is capped at `MAX_UPLOAD_BYTES` (same ceiling as teacher uploads);
-/// non-PDF responses are rejected by the `%PDF-` magic-bytes check
-/// (defense against GitHub serving an HTML error page with 200 status
-/// for unknown tags via the /releases/latest/download/ redirect).
+/// Size is capped at the admin-tunable `max_upload_bytes`
+/// (same ceiling as teacher uploads); non-PDF responses are rejected
+/// by the `%PDF-` magic-bytes check (defense against GitHub serving
+/// an HTML error page with 200 status for unknown tags via the
+/// /releases/latest/download/ redirect). The cap is read live from
+/// `system_defaults`, so an admin lowering the upload limit also
+/// shrinks the worker-side inline downloader.
 async fn download_github_pdf(
     db: &sqlx::PgPool,
     parent: &minerva_db::queries::documents::DocumentRow,
@@ -654,7 +675,7 @@ async fn download_github_pdf(
 ) -> Result<(uuid::Uuid, String), String> {
     use sha2::{Digest, Sha256};
 
-    const MAX_BYTES: usize = crate::routes::documents::MAX_UPLOAD_BYTES as usize;
+    let max_bytes: usize = crate::system_defaults::max_upload_bytes(db).await as usize;
 
     // `redirect(Limited(10))` mirrors reqwest's default but is explicit:
     // /raw/ → raw.githubusercontent.com, and /releases/latest/download/ →
@@ -681,7 +702,7 @@ async fn download_github_pdf(
     // We still cap streaming-side too because Content-Length can be absent
     // or wrong.
     if let Some(len) = resp.content_length() {
-        if len as usize > MAX_BYTES {
+        if len as usize > max_bytes {
             return Err(format!("response too large ({} bytes)", len));
         }
     }
@@ -692,8 +713,8 @@ async fn download_github_pdf(
         .await
         .map_err(|e| format!("body read: {}", e))?
     {
-        if buf.len() + chunk.len() > MAX_BYTES {
-            return Err(format!("response exceeds {} byte cap", MAX_BYTES));
+        if buf.len() + chunk.len() > max_bytes {
+            return Err(format!("response exceeds {} byte cap", max_bytes));
         }
         buf.extend_from_slice(&chunk);
     }

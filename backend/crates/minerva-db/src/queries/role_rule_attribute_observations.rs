@@ -1,15 +1,16 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Rolling retention window for captured attribute observations. The
-/// suggestion list is the only consumer of this table; we don't need it for
-/// audit, debugging, or correctness. Dropping rows that haven't been
-/// re-observed within this window keeps the GDPR footprint small: an admin
-/// who removes a user *and* every other user who shared an attribute value
-/// with them will see that value age out within the window even without
-/// vacuum. Users who keep logging in keep refreshing `last_seen`, so active
-/// data is never truncated.
-pub const OBSERVATION_TTL_DAYS: i64 = 7;
+// The rolling retention window for captured attribute observations is
+// admin-tunable via `system_defaults` (key
+// `platform.observation_ttl_days`, seeded to 7 days on fresh installs).
+// The suggestion list is the only consumer of this table; we don't need
+// it for audit, debugging, or correctness. Dropping rows that haven't
+// been re-observed within the window keeps the GDPR footprint small:
+// an admin who removes a user *and* every other user who shared an
+// attribute value with them will see that value age out without
+// vacuum. Users who keep logging in keep refreshing `last_seen`, so
+// active data is never truncated.
 
 /// One row per (attribute, value) seen across users, with the distinct user
 /// count. Returned by `list_suggestions_above_threshold` so the admin UI can

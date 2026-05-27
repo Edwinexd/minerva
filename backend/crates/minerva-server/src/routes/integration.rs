@@ -36,7 +36,7 @@ pub fn router() -> Router<AppState> {
             post(upload_document)
                 .get(list_documents)
                 .layer(axum::extract::DefaultBodyLimit::max(
-                    super::documents::MAX_UPLOAD_BYTES as usize,
+                    super::documents::UPLOAD_BODY_LIMIT_CEILING as usize,
                 )),
         )
         // Slice-2 source-identity sweep endpoints. Both are scoped to
@@ -167,7 +167,7 @@ async fn ensure_user(
         &eppn,
         body.display_name.as_deref(),
         "student",
-        state.config.default_owner_daily_token_limit,
+        crate::system_defaults::owner_daily_token_limit(&state.db).await,
     )
     .await?;
     Ok(Json(UserInfo {
@@ -204,7 +204,7 @@ async fn add_member(
         &eppn,
         body.display_name.as_deref(),
         "student",
-        state.config.default_owner_daily_token_limit,
+        crate::system_defaults::owner_daily_token_limit(&state.db).await,
     )
     .await?;
     let user_id = user.id;
@@ -381,15 +381,13 @@ async fn upload_document(
     }
 
     let size_bytes = data.len() as i64;
-    if size_bytes > super::documents::MAX_UPLOAD_BYTES {
+    let max_upload_bytes = crate::system_defaults::max_upload_bytes(&state.db).await;
+    if size_bytes > max_upload_bytes {
         return Err(AppError::bad_request_with(
             "doc.file_too_large",
             [
                 ("size_bytes", size_bytes.to_string()),
-                (
-                    "max_mb",
-                    (super::documents::MAX_UPLOAD_BYTES / 1_000_000).to_string(),
-                ),
+                ("max_mb", (max_upload_bytes / 1_000_000).to_string()),
             ],
         ));
     }
@@ -560,7 +558,7 @@ async fn create_embed_token(
         &eppn,
         body.display_name.as_deref(),
         "student",
-        state.config.default_owner_daily_token_limit,
+        crate::system_defaults::owner_daily_token_limit(&state.db).await,
     )
     .await?;
     let user_id = user.id;

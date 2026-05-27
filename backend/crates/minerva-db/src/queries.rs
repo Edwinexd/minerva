@@ -25,5 +25,6 @@ pub mod role_suggestions;
 pub mod signed_urls;
 pub mod site_integration_keys;
 pub mod study;
+pub mod system_defaults;
 pub mod usage;
 pub mod users;

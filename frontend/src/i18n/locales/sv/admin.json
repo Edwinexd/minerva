@@ -12,6 +12,7 @@
       "integrations": "Plugin-integrationer",
       "study": "Studieläge",
       "system": "System",
+      "defaults": "Standardvärden",
       "devTools": "Dev-verktyg"
     }
   },
@@ -562,6 +563,99 @@
       "confirmDisableBody_other": "Modellen \"{{model}}\" används just nu av {{count}} aktiva kurser. Att inaktivera den döljer den från lärarmenyn men låter kurserna fortsätta köra på den. För att flytta dem, gör en force-migrate per kurs från Kurshantering-sidan (admin kan välja vilken katalogmodell som helst, även inaktiverade).",
       "confirmDisableCancel": "Behåll aktiverad",
       "confirmDisableAction": "Inaktivera ändå"
+    }
+  },
+  "defaults": {
+    "title": "Systemstandarder",
+    "description": "Plattformsövergripande värden som tillämpas på nya kurser och på körtidens policyer. Kurs-AI-standarder sparas en gång på varje ny kurs vid skapande; ändringar påverkar bara framtida kurser. Plattformsvärden läses live.",
+    "categories": {
+      "course_ai": "Kurs-AI-standarder (nya kurser)",
+      "platform": "Plattformsövergripande policy"
+    },
+    "errors": {
+      "loadFailed": "Kunde inte ladda systemstandarder.",
+      "saveFailed": "Kunde inte spara: {{detail}}.",
+      "resetFailed": "Kunde inte återställa: {{detail}}."
+    },
+    "savedFlash": "Sparat.",
+    "resetButton": "Återställ till standard",
+    "resetTooltip": "Tar bort raden i databasen. Nästa läsning faller tillbaka till miljövariabeln (om satt vid nästa start) eller det inbyggda standardvärdet.",
+    "saveButton": "Spara",
+    "valueUnchanged": "(ingen ändring)",
+    "rowState": {
+      "set": "Satt av admin",
+      "fallback": "Använder standard",
+      "updatedAt": "Senast ändrad {{date}}"
+    },
+    "fallbackHint": "Standard: {{value}}",
+    "envVarHint": "Miljövariabel: {{name}}",
+    "course": {
+      "model": {
+        "label": "Standardchattmodell",
+        "description": "Väljs för nyskapade kurser. Lärare kan byta till valfri Cerebras-modell i kurskonfigurationen."
+      },
+      "temperature": {
+        "label": "Standardtemperatur",
+        "description": "Samplingstemperatur för nya kurser. 0.0 = greedy, 1.0 = hög varians."
+      },
+      "contextRatio": {
+        "label": "Standard kontextkvot",
+        "description": "Andel av modellens kontextfönster som reserveras för hämtade utdrag jämfört med konversationen."
+      },
+      "maxChunks": {
+        "label": "Standard max antal utdrag",
+        "description": "Övre gräns för antalet utdrag per hämtning."
+      },
+      "minScore": {
+        "label": "Standard min hämtningspoäng",
+        "description": "Absolut likhetströskel. Utdrag med lägre poäng tas bort."
+      },
+      "strategy": {
+        "label": "Standardstrategi",
+        "description": "`simple` = en parallell hämtning. `flare` = iterativ med low-confidence-detektor."
+      },
+      "toolUse": {
+        "label": "Verktygsanvändning på som standard",
+        "description": "När på kör nya kurser en verktygsdriven research-fas före slutsvaret. Kräver en verktygskapabel modell."
+      },
+      "embeddingProvider": {
+        "label": "Standard embedding-leverantör",
+        "description": "`local` kör FastEmbed; `openai` anropar OpenAI:s embeddings-API (kräver OPENAI_API_KEY)."
+      },
+      "systemPrompt": {
+        "label": "Standard systemprompt",
+        "description": "Läggs till före varje chatt i en ny kurs. Lämna tom för inbyggd standard."
+      },
+      "dailyTokenLimit": {
+        "label": "Standard dagligt tokentak per student",
+        "description": "Tillämpas på nya kurser. 0 = obegränsat."
+      }
+    },
+    "platform": {
+      "ownerDailyTokenLimit": {
+        "label": "Standard dagligt tokentak per ägare",
+        "description": "Tillämpas vid första inloggning. Summerar tokens över alla ägda kurser. 0 = obegränsat."
+      },
+      "maxUploadBytes": {
+        "label": "Max uppladdningsstorlek (ett dokument, bytes)",
+        "description": "Tak för en enskild uppladdning över lärar-/Canvas-/Moodle-vägar. Kan sänkas utan omstart."
+      },
+      "maxMbzUploadBytes": {
+        "label": "Max .mbz-uppladdning (hel-kurs-backup, bytes)",
+        "description": "Högre än det vanliga uppladdningstaket eftersom hel-kurs-backuper är stora."
+      },
+      "canvasAutoSyncIntervalHours": {
+        "label": "Canvas auto-sync-intervall (timmar)",
+        "description": "Hur ofta Canvas-anslutningar med auto_sync=true synkas. 0 stänger av."
+      },
+      "ltiNrpsSyncIntervalHours": {
+        "label": "LTI NRPS rostersync-intervall (timmar)",
+        "description": "Hur ofta LTI 1.3 NRPS-medlemskap stäms av mot LMS. 0 stänger av."
+      },
+      "observationTtlDays": {
+        "label": "TTL för regelattributobservationer (dagar)",
+        "description": "GDPR-retentionsgolv för (attribut, värde)-förslagen som matar rollregel-redigeraren."
+      }
     }
   }
 }

@@ -20,6 +20,7 @@
       "integrations": "Integrations",
       "study": "Study mode",
       "system": "System",
+      "defaults": "Defaults",
       "devTools": "Dev tools"
     },
     "teacherCourse": "Teacher: {{course}}",

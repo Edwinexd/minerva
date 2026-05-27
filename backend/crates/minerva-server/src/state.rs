@@ -150,6 +150,14 @@ impl AppState {
             }
         }
 
+        // Seed `system_defaults` for every knob in the registry that
+        // isn't already in the DB. Existing rows are left alone (so
+        // an admin's edit in the UI persists across restarts);
+        // newly-added registry entries land at their env-var value
+        // if set, else the hard-coded fallback. See
+        // `crate::system_defaults` for the registry and policy.
+        crate::system_defaults::seed_all(&db).await?;
+
         let rules = Arc::new(RuleCache::load(&db).await?);
 
         let http_client = reqwest::Client::new();

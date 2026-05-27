@@ -27,6 +27,7 @@ const TAB_VALUES = [
   "integrations",
   "study",
   "system",
+  "defaults",
   // Dev-only. Visibility is gated on `devConfig.dev_mode` below; the
   // server's /dev/config returns `dev_mode: false` in prod so the tab
   // simply never enters `visibleTabs` there. Listed last so the tab
@@ -51,6 +52,7 @@ const TAB_ROUTES = {
   integrations: "/admin/integrations",
   study: "/admin/study",
   system: "/admin/system",
+  defaults: "/admin/defaults",
   "dev-tools": "/admin/dev-tools",
 } as const satisfies Record<TabValue, string>
 
@@ -64,6 +66,7 @@ const TAB_LABEL_KEYS: Record<TabValue, string> = {
   integrations: "layout.tabs.integrations",
   study: "layout.tabs.study",
   system: "layout.tabs.system",
+  defaults: "layout.tabs.defaults",
   "dev-tools": "layout.tabs.devTools",
 }
 
@@ -77,6 +80,7 @@ const TAB_TITLE_KEYS: Record<TabValue, string> = {
   integrations: "pageTitles.adminTab.integrations",
   study: "pageTitles.adminTab.study",
   system: "pageTitles.adminTab.system",
+  defaults: "pageTitles.adminTab.defaults",
   "dev-tools": "pageTitles.adminTab.devTools",
 }
 

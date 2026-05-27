@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO courses (id, name, description, owner_id, daily_token_limit, embedding_model)\n            VALUES ($1, $2, $3, $4, $5, $6)\n            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at",
+  "query": "INSERT INTO courses (\n            id, name, description, owner_id, daily_token_limit,\n            model, temperature, context_ratio, max_chunks, min_score,\n            strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt\n        ) VALUES (\n            $1, $2, $3, $4, $5,\n            COALESCE($6, 'gpt-oss-120b'),\n            COALESCE($7::DOUBLE PRECISION, 0.3),\n            COALESCE($8::DOUBLE PRECISION, 0.7),\n            COALESCE($9::INTEGER, 10),\n            COALESCE($10::REAL, 0.0),\n            COALESCE($11, 'simple'),\n            COALESCE($12::BOOLEAN, FALSE),\n            COALESCE($13, 'local'),\n            COALESCE($14, 'sentence-transformers/all-MiniLM-L6-v2'),\n            $15\n        )\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -106,6 +106,15 @@
         "Text",
         "Uuid",
         "Int8",
+        "Text",
+        "Float8",
+        "Float8",
+        "Int4",
+        "Float4",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
         "Text"
       ]
     },
@@ -131,5 +140,5 @@
       false
     ]
   },
-  "hash": "688cd76ac27ae83254c09ab2f06f073ada1d30f76d431702354f4f5fd9840181"
+  "hash": "02986ed17c1a54f7a9015453c73a1602e58d07dfa168237847350b121ddc2a3d"
 }

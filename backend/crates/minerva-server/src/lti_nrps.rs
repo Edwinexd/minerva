@@ -370,7 +370,7 @@ pub async fn reconcile_context(
             &eppn,
             m.name.as_deref(),
             "student",
-            state.config.default_owner_daily_token_limit,
+            crate::system_defaults::owner_daily_token_limit(db).await,
         )
         .await?;
         active_user_ids.insert(user.id);

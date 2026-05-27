@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
+import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react"
 import { api } from "@/lib/api"
 import {
   adminStudyConfigQuery,
@@ -542,7 +543,7 @@ function SurveyEditor({
                     disabled={idx === 0}
                     aria-label={t("study.moveUp")}
                   >
-                    {"↑"}
+                    <ArrowUpIcon aria-hidden className="h-4 w-4" />
                   </Button>
                   <Button
                     variant="ghost"
@@ -551,7 +552,7 @@ function SurveyEditor({
                     disabled={idx === questions.length - 1}
                     aria-label={t("study.moveDown")}
                   >
-                    {"↓"}
+                    <ArrowDownIcon aria-hidden className="h-4 w-4" />
                   </Button>
                   <Button
                     variant="ghost"
@@ -886,7 +887,7 @@ function ParticipantDetailDrawer({
           className="rounded p-1 text-muted-foreground hover:text-foreground"
           aria-label={t("study.detail.closeLabel")}
         >
-          ✕
+          <XIcon aria-hidden className="h-4 w-4" />
         </button>
       </div>
 

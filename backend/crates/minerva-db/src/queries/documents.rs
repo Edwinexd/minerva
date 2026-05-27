@@ -586,9 +586,9 @@ pub async fn reset_for_resync(
 /// rolled back (the orphaned file gets removed) in that case.
 ///
 /// Status semantics:
-/// * GitHub PDF flow → caller passes `expected_parent_status = "processing"`
+/// * GitHub PDF flow -> caller passes `expected_parent_status = "processing"`
 ///   (worker just claimed the row).
-/// * Transcript flow → caller passes `"awaiting_transcript"` (set when
+/// * Transcript flow -> caller passes `"awaiting_transcript"` (set when
 ///   the worker triaged the URL as a play.dsv link earlier).
 pub async fn insert_tracked_child(
     db: &PgPool,

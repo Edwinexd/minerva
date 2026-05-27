@@ -127,9 +127,9 @@ pub async fn list_by_course_user(
     // cheap because `teacher_notes` is indexed by conversation_id
     // and we short-circuit on the first match. Two truth cases:
     //   1. The owner has never visited (NULL last-viewed) AND a
-    //      note exists at all → unread.
+    //      note exists at all -> unread.
     //   2. A note's `created_at` is strictly newer than the
-    //      stored last-viewed → unread.
+    //      stored last-viewed -> unread.
     // Acked / pre-existing notes that pre-date the migration
     // backfill don't fire spuriously because the backfill set
     // `student_last_viewed_at = NOW()` on every existing row.
@@ -231,8 +231,8 @@ pub async fn list_all_by_course_with_feedback(
 ) -> Result<Vec<ConversationWithFeedbackRow>, sqlx::Error> {
     // `teacher_unreviewed` joins the per-conversation review marker
     // against the latest user-message timestamp. Two truth cases:
-    //   1. No review row at all (LEFT JOIN miss) → true.
-    //   2. Latest student turn timestamp > reviewed_at → true.
+    //   1. No review row at all (LEFT JOIN miss) -> true.
+    //   2. Latest student turn timestamp > reviewed_at -> true.
     // The implicit "MAX(NULL)" path (a conversation with zero user
     // messages, which shouldn't happen but is defensive) reads as
     // FALSE because `> NULL` is unknown -> false.

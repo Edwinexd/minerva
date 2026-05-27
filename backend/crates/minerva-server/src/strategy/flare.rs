@@ -1452,7 +1452,7 @@ mod tests {
 
     #[test]
     fn sentence_boundary_inside_code_fence_false() {
-        // Unclosed fence (odd count of ```) ⇒ inside code.
+        // Unclosed fence (odd count of ```) => inside code.
         let t = "Some prose here. ```rust\nlet x = 1;\nlet y = 2;\n".to_string()
             + &"more content ".repeat(30);
         assert!(!is_sentence_boundary(&t));
@@ -2415,7 +2415,7 @@ mod loop_regression_tests {
         assert_eq!(out.total_completion_tokens, 3);
     }
 
-    // ── HitLimit with low-confidence sentence → retrieval path ──
+    // ── HitLimit with low-confidence sentence -> retrieval path ──
 
     /// End-to-end of the core FLARE mechanic: HitLimit with a low-confidence
     /// sentence triggers `retrieve_more`; new chunks cause a restart; next

@@ -589,7 +589,7 @@ pub(super) struct DaisyParticipantInput {
     /// `eligible_for_owner`; not persisted on the course row itself.
     pub daisy_roles: Vec<String>,
     /// `"staff"` or `"student"`. Determines the Minerva
-    /// `course_members.role` we add: staff → teacher, student → ta.
+    /// `course_members.role` we add: staff -> teacher, student -> ta.
     /// Only `"staff"` is eligible for owner promotion (a student
     /// handledare should never become course owner).
     pub kind: String,
@@ -1032,7 +1032,7 @@ pub(super) async fn apply_one(
     }
 
     // Add every resolved participant as a course member. Additive
-    // only: add_member is ON CONFLICT DO UPDATE SET role, so a TA→
+    // only: add_member is ON CONFLICT DO UPDATE SET role, so a TA->
     // teacher promotion lands, but the membership itself never gets
     // removed by re-sync.
     for p in &resolved {

@@ -2,7 +2,7 @@
  * Encapsulates the SSE streaming protocol used by both the regular and
  * embed chat send-message endpoints:
  *
- *   POST .../message  →  text/event-stream of `data: {"type":"token","token":"..."}`
+ *   POST .../message  ->  text/event-stream of `data: {"type":"token","token":"..."}`
  *                        terminated by either an `error` event or stream EOF.
  *
  * The caller supplies the actual `fetch` invocation (the URL and body

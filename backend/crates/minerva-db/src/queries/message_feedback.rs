@@ -40,7 +40,7 @@ pub struct MessageFeedbackWithUserRow {
 /// Insert or update the current user's feedback for a single
 /// message. Each (message, user) pair has at most one feedback
 /// row. Re-upserting a feedback row clears any prior ack (a
-/// student changing their thumbs-down → thumbs-up resets the
+/// student changing their thumbs-down -> thumbs-up resets the
 /// teacher review status, since the signal itself changed); the
 /// `ON CONFLICT` branch nulls out the ack columns explicitly so
 /// stale acknowledgments don't quietly cling to a row that now

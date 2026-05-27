@@ -2224,9 +2224,9 @@ async fn set_feedback(
 
 /// Stamp the appropriate "last seen" marker on a conversation.
 /// One endpoint, two semantics based on caller role:
-///   * Conversation owner → bumps `conversations.student_last_viewed_at`
+///   * Conversation owner -> bumps `conversations.student_last_viewed_at`
 ///     so the chat sidebar's unread dot clears.
-///   * Teacher / TA / owner / admin → upserts `conversation_reviews`
+///   * Teacher / TA / owner / admin -> upserts `conversation_reviews`
 ///     so the dashboard's "Unreviewed" tab and per-row dot clear
 ///     (course-shared; any team member's view counts).
 ///   * If the caller happens to be BOTH the owner AND a teacher
@@ -2347,7 +2347,7 @@ async fn acknowledge_feedback(
     let existing = minerva_db::queries::message_feedback::find_by_id(&state.db, fb_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    // Walk message → conversation to enforce the scope. We avoid
+    // Walk message -> conversation to enforce the scope. We avoid
     // pushing this into a JOIN in `find_by_id` so the same helper
     // is reusable for non-scope contexts (audit views, etc.).
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;

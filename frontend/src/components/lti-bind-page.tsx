@@ -24,7 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 /// First-launch LTI bind picker. Reachable without Shibboleth; the token
 /// in the URL is the auth. Renders when the backend's launch handler
-/// couldn't find an (platform, context) → course binding and redirected
+/// couldn't find an (platform, context) -> course binding and redirected
 /// the user here to pick one.
 export function LtiBindPage() {
   const { t } = useTranslation("auth")

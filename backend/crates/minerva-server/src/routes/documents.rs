@@ -143,7 +143,7 @@ pub fn compute_content_hash(bytes: &[u8]) -> String {
 
 /// Idempotent upload helper used by every route that ingests a document.
 ///
-/// Path: compute the bytes' sha256 → if `(course_id, content_hash)` matches
+/// Path: compute the bytes' sha256 -> if `(course_id, content_hash)` matches
 /// an active row, return it without touching disk; else write the file under
 /// `{docs_path}/{course_id}/{new_doc_id}.{ext}` and insert. The on-disk file
 /// for a dedup hit stays where it already was under the existing doc's id;

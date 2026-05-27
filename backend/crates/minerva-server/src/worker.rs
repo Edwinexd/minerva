@@ -716,7 +716,7 @@ async fn download_github_pdf(
     let max_bytes: usize = crate::system_defaults::max_upload_bytes(db).await as usize;
 
     // `redirect(Limited(10))` mirrors reqwest's default but is explicit:
-    // /raw/ → raw.githubusercontent.com, and /releases/latest/download/ →
+    // /raw/ -> raw.githubusercontent.com, and /releases/latest/download/ ->
     // /releases/download/{tag}/ both rely on 302 chains.
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
@@ -881,7 +881,7 @@ mod tests {
     /// with `cargo test --ignored github_pdf_download_real`.
     ///
     /// Exercises the same reqwest config the worker uses (redirect chain
-    /// from github.com/.../raw/... → raw.githubusercontent.com, User-Agent
+    /// from github.com/.../raw/... -> raw.githubusercontent.com, User-Agent
     /// header) plus the magic-bytes check the worker relies on to reject
     /// HTML error pages the GitHub raw endpoint sometimes serves with a
     /// 200 status code.

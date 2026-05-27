@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! https://github.com/{owner}/{repo}/raw/{ref...}/{path}.pdf
-//! https://github.com/{owner}/{repo}/blob/{ref...}/{path}.pdf       → rewrites blob → raw
+//! https://github.com/{owner}/{repo}/blob/{ref...}/{path}.pdf       -> rewrites blob -> raw
 //! https://raw.githubusercontent.com/{owner}/{repo}/{ref...}/{path}.pdf
 //! https://github.com/{owner}/{repo}/releases/download/{tag}/{file}.pdf
 //! https://github.com/{owner}/{repo}/releases/latest/download/{file}.pdf

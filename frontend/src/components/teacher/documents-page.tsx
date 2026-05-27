@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
+import { LockIcon } from "lucide-react"
 import { courseDocumentsQuery, courseQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
@@ -584,9 +585,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                       ? t(`documents.kindLabel.${doc.kind}`)
                       : t("documents.kindLabel.unclassified")}
                     {doc.kind_locked_by_teacher && (
-                      <span className="ml-1 opacity-70" aria-hidden>
-                        {"\u{1F512}"}
-                      </span>
+                      <LockIcon aria-hidden className="ml-1 inline h-3 w-3 opacity-70" />
                     )}
                   </Badge>
                 )}

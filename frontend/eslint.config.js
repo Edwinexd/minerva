@@ -32,6 +32,41 @@ export default defineConfig([
       // Prefer native semantic elements over ARIA roles where one exists
       // (1.3.1 Info and Relationships, 4.1.2).
       'jsx-a11y/prefer-tag-over-role': 'error',
+      // Ban emoji / decorative arrow / dingbat code points in source. Use a
+      // lucide-react icon for UI affordances and ASCII (`->`, `=>`) in
+      // comments / strings. Latin letters with diacritics stay legal
+      // (Swedish locale strings). Mirrors the repo-wide `ban-ux-glyphs`
+      // pre-commit hook for realtime IDE feedback on `.ts` / `.tsx` files.
+      //
+      // Targets string Literals (covers className, JSX attribute values,
+      // i18n keys), template-literal cooked text (after backslash-uXXXX
+      // escapes are resolved), and JSXText (including HTML entities like
+      // ampersand-rarr-semicolon which React decodes before the AST sees).
+      //
+      // The selector regex covers BMP ranges directly and the astral emoji
+      // planes via surrogate pairs (esquery attribute regexes don't accept
+      // the `u` flag, so `\u{1F300}` notation is unavailable).
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'Literal[value=/[\\u2190-\\u21FF\\u2600-\\u26FF\\u2700-\\u27BF\\u2B00-\\u2BFF]|[\\uD83C-\\uD83E][\\uDC00-\\uDFFF]/]',
+          message:
+            'No emoji / decorative-symbol glyphs in source. Use a lucide-react icon for UI affordances and ASCII (-> => etc.) in strings.',
+        },
+        {
+          selector:
+            'TemplateElement[value.cooked=/[\\u2190-\\u21FF\\u2600-\\u26FF\\u2700-\\u27BF\\u2B00-\\u2BFF]|[\\uD83C-\\uD83E][\\uDC00-\\uDFFF]/]',
+          message:
+            'No emoji / decorative-symbol glyphs in source. Use a lucide-react icon for UI affordances and ASCII (-> => etc.) in strings.',
+        },
+        {
+          selector:
+            'JSXText[value=/[\\u2190-\\u21FF\\u2600-\\u26FF\\u2700-\\u27BF\\u2B00-\\u2BFF]|[\\uD83C-\\uD83E][\\uDC00-\\uDFFF]/]',
+          message:
+            'No emoji / decorative-symbol glyphs in JSX. Use a lucide-react icon.',
+        },
+      ],
     },
   },
   {

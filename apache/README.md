@@ -67,8 +67,8 @@ vhost in a Debian runner with mod_lua + mod_shib installed.
 
 ## How the cookie path actually flows
 
-1. `GET /api/external-auth/callback?token=...` → backend verifies token
-   + `external_auth_invites` row → `302 /` with
+1. `GET /api/external-auth/callback?token=...` -> backend verifies token
+   + `external_auth_invites` row -> `302 /` with
    `Set-Cookie: minerva_ext=<token>; HttpOnly; Secure; SameSite=Lax`.
 2. Subsequent `GET /<anything>`:
    - mod_rewrite spots the cookie, internally rewrites the URI to

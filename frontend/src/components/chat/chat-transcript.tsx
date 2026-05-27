@@ -1,6 +1,6 @@
 /**
- * Shared transcript view: skeletons → message bubbles → optional
- * pending user message → streaming assistant bubble → error line.
+ * Shared transcript view: skeletons -> message bubbles -> optional
+ * pending user message -> streaming assistant bubble -> error line.
  *
  * Owns the scroll-to-bottom behaviour. The two callers (regular chat
  * page, embed iframe) feed it the same shape of data via the

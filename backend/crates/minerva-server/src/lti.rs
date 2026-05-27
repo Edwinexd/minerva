@@ -26,7 +26,7 @@ pub struct LtiKeyPair {
 
 impl LtiKeyPair {
     /// Derive an RSA-2048 key pair deterministically from a seed string.
-    /// Same seed always produces the same key → stable JWKS.
+    /// Same seed always produces the same key -> stable JWKS.
     pub fn from_seed(seed: &str) -> anyhow::Result<Self> {
         let kid = "minerva-lti-1".to_string();
 

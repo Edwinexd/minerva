@@ -600,8 +600,8 @@ function FeedbackBadges({
  *
  * Reviewable kinds (constraint_activated, rewrote) carry an
  * Acknowledge button when `acknowledged_at` is null. Acked flags
- * stay in the list (audit trail) with a dimmed "✓ acknowledged
- * by X" caption. Trace events don't expose the button; they're
+ * stay in the list (audit trail) with a dimmed "acknowledged by
+ * X" caption. Trace events don't expose the button; they're
  * not the kind of thing a teacher decides about, just a record.
  */
 function ConversationFlagDisplay({
@@ -626,7 +626,7 @@ function ConversationFlagDisplay({
         {},
       ),
     onSuccess: () => {
-      // Both the detail panel (for the ✓ caption) and the
+      // Both the detail panel (for the acknowledged caption) and the
       // course-level conversation list (for the badge + Flagged
       // tab counter) read flag state, so invalidate both.
       queryClient.invalidateQueries({

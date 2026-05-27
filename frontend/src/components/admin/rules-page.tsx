@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Trans, useTranslation } from "react-i18next"
 import { useMemo, useState } from "react"
+import { ArrowRightIcon } from "lucide-react"
 import {
   adminRoleRuleAttributeValuesQuery,
   adminRoleRulesQuery,
@@ -183,7 +184,10 @@ function RuleCard({ rule }: { rule: RoleRule }) {
             <Badge variant={rule.enabled ? "default" : "secondary"}>
               {rule.enabled ? t("rules.card.enabled") : t("rules.card.disabled")}
             </Badge>
-            <Badge variant="outline">→ {rule.target_role}</Badge>
+            <Badge variant="outline" className="gap-1">
+              <ArrowRightIcon aria-hidden className="h-3 w-3" />
+              {rule.target_role}
+            </Badge>
           </CardTitle>
           <CardDescription>
             {rule.conditions.length === 0

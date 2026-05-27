@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { useState } from "react"
+import { ArrowRightIcon } from "lucide-react"
 
 export function MembersPage({ useParams }: { useParams: () => { courseId: string } }) {
   const { courseId } = useParams()
@@ -127,7 +128,7 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
                         <Badge variant="outline" className="mr-1">
                           {s.current_role}
                         </Badge>
-                        &rarr;
+                        <ArrowRightIcon aria-hidden className="inline h-3 w-3" />
                         <Badge variant="default" className="ml-1">
                           {s.suggested_role}
                         </Badge>

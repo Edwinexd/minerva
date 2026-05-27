@@ -398,7 +398,7 @@ async fn handle_launch(
             match minerva_db::queries::lti::find_binding(&state.db, p.id, &context_id).await? {
                 Some(b) => b.course_id,
                 None => {
-                    // No binding yet → redirect launcher to the bind flow. The
+                    // No binding yet -> redirect launcher to the bind flow. The
                     // bind token ties this decision to this specific user +
                     // platform + Moodle context so we can trust the choice
                     // without re-auth on the frontend.
@@ -1097,7 +1097,7 @@ struct BindCompleteResponse {
     redirect_url: String,
 }
 
-/// POST /lti/bind; creates the (platform, context) → course binding and
+/// POST /lti/bind; creates the (platform, context) -> course binding and
 /// returns an embed URL the frontend should redirect to. Returns JSON (not
 /// HTML) because the call is XHR from the bind picker page; the frontend
 /// performs the redirect itself.

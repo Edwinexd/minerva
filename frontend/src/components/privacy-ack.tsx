@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DataHandlingContent } from "@/components/data-handling"
 import { useApiErrorMessage } from "@/lib/use-api-error"
@@ -93,7 +94,7 @@ export function PrivacyAckBanner({
                 className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-50"
                 aria-label={t("privacy.closeLabel")}
               >
-                ✕
+                <XIcon aria-hidden className="h-4 w-4" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-4">

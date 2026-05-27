@@ -41,6 +41,25 @@ repos:
         # without breaking every deployed DBs sqlx checksum check.
         exclude: (\.lock|node_modules|target|dist|\.gen\.|^backend/migrations/.*\.sql$)
 
+      - id: ban-ux-glyphs
+        name: ban UX glyphs (emoji / arrows / dingbats)
+        # Emojis and arrow / dingbat code points have no business in source.
+        # Use a lucide-react icon for UI affordances and ASCII (`->`, `=>`) in
+        # comments. Latin letters with diacritics (Swedish locale files) and
+        # box-drawing in markdown trees stay legal; em-dash has its own hook.
+        # Frontend `.ts`/`.tsx` is *also* covered by an ESLint
+        # `no-restricted-syntax` rule (in `frontend/eslint.config.js`) so the
+        # IDE underlines violations in real time; this hook is the safety net
+        # for the rest of the tree (Rust, markdown, scripts, apache vhost).
+        entry: python3 scripts/check-ban-ux-glyphs.py
+        language: system
+        types: [text]
+        # Same carve-out as ban-emdashes: applied migrations are content-hashed
+        # and can't be retro-cleaned. The fastembed model cache and Python
+        # venvs are downloaded artifacts, not source. .gen.* files are
+        # codegen output.
+        exclude: (\.lock|node_modules|target|dist|\.gen\.|^backend/migrations/.*\.sql$|^backend/\.fastembed_cache/|/\.venv-play-ingest/)
+
       - id: ban-double-dash
         name: ban space-dash-dash-space
         # Banned because LLMs reach for it as an em-dash workaround, which

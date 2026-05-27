@@ -15,6 +15,7 @@
  * user can also toggle manually.
  */
 import { useState } from "react"
+import { ArrowRightIcon } from "lucide-react"
 
 import { MarkdownContent } from "./chat-bubble"
 import type { ToolEvent } from "./use-chat-stream"
@@ -222,8 +223,9 @@ export function ThinkingBlock({
                         </code>
                       )}
                       {ev.resultSummary && (
-                        <span className="text-muted-foreground">
-                          {"→"} {ev.resultSummary}
+                        <span className="text-muted-foreground inline-flex items-center gap-1">
+                          <ArrowRightIcon aria-hidden className="h-3 w-3" />
+                          {ev.resultSummary}
                         </span>
                       )}
                     </summary>
@@ -240,8 +242,9 @@ export function ThinkingBlock({
                       </code>
                     )}
                     {ev.resultSummary && (
-                      <span className="text-muted-foreground">
-                        {"→"} {ev.resultSummary}
+                      <span className="text-muted-foreground inline-flex items-center gap-1">
+                        <ArrowRightIcon aria-hidden className="h-3 w-3" />
+                        {ev.resultSummary}
                       </span>
                     )}
                   </div>

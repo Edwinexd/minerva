@@ -206,7 +206,7 @@ accounts (e.g. external collaborators).
    name + days, max 60). Backend HMAC-signs an opaque token with
    `MINERVA_HMAC_SECRET`, inserts a row in `external_auth_invites` (id,
    jti, eppn, expires_at, revoked_at), and returns a one-shot callback URL.
-2. External user clicks the link → `GET /api/external-auth/callback?token=...`
+2. External user clicks the link -> `GET /api/external-auth/callback?token=...`
    re-verifies sig + DB row, sets `minerva_ext` HttpOnly cookie, redirects to `/`.
 3. On every subsequent request Apache mod_rewrite spots the cookie and
    rewrites to `/__ext_proxy__/...`, a `<LocationMatch>` that bypasses

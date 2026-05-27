@@ -75,7 +75,7 @@ pub struct WipeReport {
 
 /// Order of tables when walking the `seeds` registry to wipe. Children
 /// first, then parents, so FKs without `ON DELETE CASCADE` (and there
-/// are some - `external_auth_invites.created_by` → `users.id`, for
+/// are some - `external_auth_invites.created_by` -> `users.id`, for
 /// instance) don't block the parent delete. The course bytes-on-disk
 /// dir and Qdrant collection are taken care of out-of-band before the
 /// `courses` row goes; see [`wipe`].

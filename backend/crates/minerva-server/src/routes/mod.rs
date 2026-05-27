@@ -3,6 +3,7 @@ mod api_keys;
 pub(crate) mod canvas;
 mod chat;
 mod courses;
+mod daisy_admin;
 mod dev;
 pub(crate) mod documents;
 pub mod embed;
@@ -87,6 +88,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/admin", integration_admin::router())
         .nest("/admin", study::admin_router())
         .nest("/admin", system::router())
+        .nest("/admin", daisy_admin::router())
         // Dev-mode routes (e.g. /admin/dev/seed). Each handler
         // gates on `MINERVA_DEV_MODE` so the routes return 404 in
         // prod even though the surrounding router still mounts them.

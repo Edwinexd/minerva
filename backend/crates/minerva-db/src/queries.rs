@@ -6,6 +6,8 @@ pub mod conversations;
 pub mod course_suggested_questions;
 pub mod course_token_usage;
 pub mod courses;
+pub mod daisy_pending_imports;
+pub mod daisy_settings;
 pub mod document_relations;
 pub mod documents;
 pub mod embedding_models;

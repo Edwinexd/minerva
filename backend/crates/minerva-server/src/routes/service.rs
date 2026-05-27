@@ -574,50 +574,64 @@ async fn replace_play_course_catalog(
 /// flattens them into `eppns` (in newest-first order). `kind`
 /// distinguishes employed staff from student-handledare so the role
 /// mapping below stays predictable.
-#[derive(Deserialize)]
-struct DaisyParticipantInput {
+///
+/// `Serialize` is derived (not just `Deserialize`) so the staging
+/// path can store the participants list as JSONB and the admin
+/// Apply path can round-trip them back into the same struct.
+#[derive(Deserialize, Serialize)]
+pub(super) struct DaisyParticipantInput {
     /// One or more SU eppns, newest first. The first entry is treated
     /// as the canonical (primary) login; the rest are registered as
     /// `user_eppn_aliases` once we know which Minerva user they map to.
-    eppns: Vec<String>,
-    display_name: Option<String>,
+    pub eppns: Vec<String>,
+    pub display_name: Option<String>,
     /// Free-text role labels from Daisy. Stored verbatim on
     /// `pending_course_memberships.daisy_roles`; used here only to
     /// decide `eligible_for_owner`.
-    daisy_roles: Vec<String>,
+    pub daisy_roles: Vec<String>,
     /// `"staff"` or `"student"`. Determines the Minerva
     /// `course_members.role` we add: staff → teacher, student → ta.
     /// Only `"staff"` is eligible for owner promotion (a student
     /// handledare should never become course owner).
-    kind: String,
+    pub kind: String,
 }
 
-#[derive(Deserialize)]
-struct DaisyCourseInputPayload {
-    momenttillf_id: String,
-    beteckning: String,
-    name: String,
-    /// Optional metadata; everything but `momenttillf_id`, `beteckning`,
-    /// `name` is allowed to be absent so a search-page-only entry still
-    /// imports cleanly.
-    semester_label: Option<String>,
-    info_url: Option<String>,
-    syllabus_url: Option<String>,
-    unit: Option<String>,
+#[derive(Deserialize, Serialize)]
+pub(super) struct DaisyCourseInputPayload {
+    pub momenttillf_id: String,
+    pub beteckning: String,
+    pub name: String,
+    /// Required for both the staging and apply paths. Marked `Option`
+    /// for backwards-compat with any client that omits it, but the
+    /// handler rejects None with `daisy.course_missing_semester`.
+    pub semester_label: Option<String>,
+    pub info_url: Option<String>,
+    pub syllabus_url: Option<String>,
+    pub unit: Option<String>,
     #[serde(default)]
-    participants: Vec<DaisyParticipantInput>,
+    pub participants: Vec<DaisyParticipantInput>,
 }
 
 #[derive(Serialize, Default)]
-struct DaisyImportSummary {
-    courses_received: usize,
-    courses_created: usize,
-    courses_updated: usize,
-    members_added: usize,
-    pending_memberships_added: usize,
-    aliases_registered: usize,
-    designations_created: usize,
-    errors: Vec<String>,
+pub(super) struct DaisyImportSummary {
+    pub courses_received: usize,
+    /// Auto-apply path: rows written straight to `courses`.
+    pub courses_created: usize,
+    pub courses_updated: usize,
+    pub members_added: usize,
+    pub pending_memberships_added: usize,
+    pub aliases_registered: usize,
+    pub designations_created: usize,
+    /// Staging path: rows written to `daisy_pending_imports` for
+    /// admin review. Set when `daisy_settings.auto_apply` is FALSE.
+    pub courses_staged: usize,
+    /// TRUE when this request hit the staging path (everything in
+    /// `courses_staged` rather than `courses_created`/`updated`).
+    /// Lets the python caller distinguish "staged for review" from
+    /// "applied". When auto_apply is ON, all counters live in the
+    /// applied-side fields above and this stays FALSE.
+    pub staged_for_review: bool,
+    pub errors: Vec<String>,
 }
 
 /// Normalize an inbound eppn the same way `auth_middleware` does so
@@ -763,70 +777,165 @@ async fn import_daisy_courses(
 ) -> Result<Json<DaisyImportSummary>, AppError> {
     authenticate_service(&state, &headers)?;
 
+    // Read the auto-apply toggle once per request. It can in theory
+    // flip mid-batch if an admin times their click perfectly, but the
+    // sync re-runs daily so a transient mismatch self-heals. Locking
+    // it for the whole batch keeps the per-course dispatch simple.
+    let auto_apply = minerva_db::queries::daisy_settings::auto_apply_enabled(&state.db).await?;
+
     let mut summary = DaisyImportSummary {
         courses_received: body.len(),
+        staged_for_review: !auto_apply,
         ..Default::default()
     };
 
-    // Resolve the env-var fallback owner once for the whole batch.
-    // Missing config / missing user is a hard error: every auto-import
-    // INSERT needs a non-NULL owner_id.
-    let fallback_eppn = state
-        .config
-        .daisy_fallback_owner_eppn
-        .as_deref()
-        .ok_or_else(|| AppError::Internal("MINERVA_DAISY_FALLBACK_OWNER_EPPN unresolved".into()))?;
-    let fallback_owner = minerva_db::queries::users::find_by_eppn(&state.db, fallback_eppn)
-        .await?
-        .ok_or_else(|| {
-            AppError::Internal(format!(
-                "daisy fallback owner eppn {fallback_eppn} not present in users table; \
-                 ensure they have logged in at least once"
-            ))
-        })?;
+    if auto_apply {
+        // Resolve the env-var fallback owner + default embedding
+        // model up-front. Only the apply path needs them; staging
+        // writes are pure metadata snapshots with no owner attached
+        // until the admin clicks Apply.
+        let fallback_eppn = state
+            .config
+            .daisy_fallback_owner_eppn
+            .as_deref()
+            .ok_or_else(|| {
+                AppError::Internal("MINERVA_DAISY_FALLBACK_OWNER_EPPN unresolved".into())
+            })?;
+        let fallback_owner = minerva_db::queries::users::find_by_eppn(&state.db, fallback_eppn)
+            .await?
+            .ok_or_else(|| {
+                AppError::Internal(format!(
+                    "daisy fallback owner eppn {fallback_eppn} not present in users table; \
+                     ensure they have logged in at least once"
+                ))
+            })?;
+        let default_embedding_model =
+            minerva_db::queries::embedding_models::current_default(&state.db).await?;
 
-    // Same admin-default embedding model the manual course-creation
-    // endpoint honors. None falls through to the column DEFAULT.
-    let default_embedding_model =
-        minerva_db::queries::embedding_models::current_default(&state.db).await?;
-
-    for input in body {
-        match import_one(
-            &state,
-            &input,
-            fallback_owner.id,
-            default_embedding_model.as_deref(),
-            &mut summary,
-        )
-        .await
-        {
-            Ok(()) => {}
-            Err(e) => {
-                summary
-                    .errors
-                    .push(format!("{}: {}", input.momenttillf_id, e));
-                tracing::warn!(
-                    momenttillf_id = %input.momenttillf_id,
-                    error = %e,
-                    "daisy import: per-course failure",
-                );
+        for input in body {
+            match apply_one(
+                &state,
+                &input,
+                fallback_owner.id,
+                default_embedding_model.as_deref(),
+                &mut summary,
+            )
+            .await
+            {
+                Ok(()) => {}
+                Err(e) => {
+                    summary
+                        .errors
+                        .push(format!("{}: {}", input.momenttillf_id, e));
+                    tracing::warn!(
+                        momenttillf_id = %input.momenttillf_id,
+                        error = %e,
+                        "daisy apply: per-course failure",
+                    );
+                }
+            }
+        }
+    } else {
+        for input in body {
+            match stage_one(&state, &input, &mut summary).await {
+                Ok(()) => {}
+                Err(e) => {
+                    summary
+                        .errors
+                        .push(format!("{}: {}", input.momenttillf_id, e));
+                    tracing::warn!(
+                        momenttillf_id = %input.momenttillf_id,
+                        error = %e,
+                        "daisy stage: per-course failure",
+                    );
+                }
             }
         }
     }
 
     tracing::info!(
-        "daisy import: received={} created={} updated={} members_added={} pending={} aliases={}",
+        "daisy import: received={} staged={} created={} updated={} members_added={} pending={} aliases={} auto_apply={}",
         summary.courses_received,
+        summary.courses_staged,
         summary.courses_created,
         summary.courses_updated,
         summary.members_added,
         summary.pending_memberships_added,
         summary.aliases_registered,
+        auto_apply,
     );
     Ok(Json(summary))
 }
 
-async fn import_one(
+/// Write the payload to `daisy_pending_imports` for admin review.
+/// Idempotent on `momenttillf_id`: a subsequent sync overwrites the
+/// staged metadata + participants snapshot (and updates the linked
+/// `existing_course_id` if a manual apply happened between syncs).
+/// The actual `courses` table is untouched here; the admin Apply
+/// route does that via `apply_one` on the staged row.
+async fn stage_one(
+    state: &AppState,
+    input: &DaisyCourseInputPayload,
+    summary: &mut DaisyImportSummary,
+) -> Result<(), AppError> {
+    let momenttillf_id = input.momenttillf_id.trim();
+    let beteckning = input.beteckning.trim();
+    let name = input.name.trim();
+    let semester_label = input.semester_label.as_deref().unwrap_or("").trim();
+    if momenttillf_id.is_empty() || beteckning.is_empty() || name.is_empty() {
+        return Err(AppError::bad_request("daisy.course_missing_required"));
+    }
+    if semester_label.is_empty() {
+        return Err(AppError::bad_request("daisy.course_missing_semester"));
+    }
+
+    // Snapshot the resolved-participant list verbatim. The admin
+    // Apply route deserialises it back into a Vec<DaisyParticipantInput>
+    // and routes it through apply_one; the round-trip is exercised by
+    // the (de)serialise derive pair on both structs.
+    let participants_json = serde_json::to_value(&input.participants)
+        .map_err(|e| AppError::Internal(format!("serialise participants: {e}")))?;
+
+    // If a course with this momenttillf_id already exists, surface
+    // the link so the admin UI can render "Update" instead of "New".
+    let existing_course_id =
+        minerva_db::queries::courses::find_by_daisy_momenttillf_id(&state.db, momenttillf_id)
+            .await?
+            .map(|c| c.id);
+
+    minerva_db::queries::daisy_pending_imports::upsert(
+        &state.db,
+        &minerva_db::queries::daisy_pending_imports::StageInput {
+            momenttillf_id,
+            course_code: beteckning,
+            name,
+            semester_label,
+            daisy_info_url: input.info_url.as_deref(),
+            daisy_syllabus_url: input.syllabus_url.as_deref(),
+            daisy_unit: input.unit.as_deref(),
+            participants: &participants_json,
+            existing_course_id,
+        },
+    )
+    .await?;
+    summary.courses_staged += 1;
+    Ok(())
+}
+
+/// Apply a payload directly to the live `courses` table; the
+/// pre-staging behaviour. Called from two paths now:
+///   * `import_daisy_courses` when `daisy_settings.auto_apply` is ON,
+///     so the sync skips the staging step (used once the workflow is
+///     trusted in steady state).
+///   * `apply_daisy_pending` (admin route) after the admin reviews
+///     a staged row and clicks Apply.
+///
+/// Identical behaviour at both call sites: upsert the course by
+/// `daisy_momenttillf_id`, seed a play_designations row on CREATE,
+/// additively sync the participant list (registering aliases +
+/// queuing pendings for unresolved staff), and swap ownership to
+/// the first course-responsible we can see.
+pub(super) async fn apply_one(
     state: &AppState,
     input: &DaisyCourseInputPayload,
     fallback_owner_id: Uuid,

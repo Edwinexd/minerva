@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, momenttillf_id, course_code, name, semester_label,\n                  daisy_info_url, daisy_syllabus_url, daisy_unit,\n                  participants AS \"participants!: JsonValue\",\n                  existing_course_id, first_seen_at, last_seen_at\n        FROM daisy_pending_imports\n        ORDER BY first_seen_at ASC, momenttillf_id ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "momenttillf_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "course_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "semester_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "daisy_info_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "daisy_syllabus_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "daisy_unit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "participants!: JsonValue",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "existing_course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "first_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "afdf97f18084c8df6d2123a44997c6028c8bbe2d5cd2532931d70a6821a8de2d"
+}

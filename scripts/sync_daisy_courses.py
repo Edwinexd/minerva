@@ -221,6 +221,38 @@ def main() -> None:
         print("Nothing to push.")
         return
 
+    # Dry-run knob used by the workflow_dispatch path before the
+    # backend endpoint is rolled to prod. We collect the same payload
+    # we'd POST, dump a short stats summary + a single sample
+    # course's JSON to stdout, and exit. Lets you verify dsv-wrapper
+    # compatibility (semester walk, participant resolution, realm
+    # mapping) end-to-end without poking the production API.
+    if os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes"):
+        import json as _json
+
+        total_participants = sum(len(p["participants"]) for p in all_payloads)
+        kursansvarig = sum(
+            1
+            for p in all_payloads
+            for cs in p["participants"]
+            if any(
+                r.startswith("Kurs-/delkursansvarig")
+                or r.lower() == "kursansvarig"
+                for r in cs["daisy_roles"]
+            )
+        )
+        print("DRY_RUN; would POST the following:")
+        print(f"  courses:                {len(all_payloads)}")
+        print(f"  resolved participants:  {total_participants}")
+        print(f"  kursansvarig entries:   {kursansvarig}")
+        sample = next(
+            (p for p in all_payloads if p["participants"]),
+            all_payloads[0],
+        )
+        print("  sample course:")
+        print(_json.dumps(sample, indent=2, ensure_ascii=False))
+        return
+
     print(f"Posting {len(all_payloads)} courses to Minerva...")
     resp = requests.post(
         f"{api_url}/api/service/daisy-courses",

@@ -12,6 +12,11 @@ on:
   schedule:
     - cron: "0 5 * * *"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip the POST; just print what would be sent"
+        type: boolean
+        default: true
 
 # Don't double-run if a manual dispatch races the cron tick.
 concurrency:
@@ -37,4 +42,7 @@ jobs:
           MINERVA_SERVICE_API_KEY: ${{ secrets.MINERVA_SERVICE_API_KEY }}
           SU_USERNAME: ${{ secrets.SU_USERNAME }}
           SU_PASSWORD: ${{ secrets.SU_PASSWORD }}
+          # Honoured only on manual dispatch; the scheduled cron leaves
+          # this empty, so DRY_RUN evaluates falsy and the real POST runs.
+          DRY_RUN: ${{ inputs.dry_run }}
         run: python scripts/sync_daisy_courses.py

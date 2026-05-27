@@ -78,17 +78,73 @@ struct PendingTranscriptInfo {
     course_id: Uuid,
     filename: String,
     url: String,
+    /// Last component of the cursor key. The script echoes this back
+    /// as `after_created_at` on the next page request, paired with
+    /// `id` as `after_id`. RFC3339 / ISO 8601 via serde.
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Deserialize)]
+struct PendingTranscriptsQuery {
+    /// Page size cap. Defaults to 512, clamped to 1024. The python
+    /// caller picks 512 to bound in-process memory; admins running
+    /// the script by hand can crank it higher.
+    limit: Option<i64>,
+    /// First half of the cursor: `created_at` of the last item from
+    /// the previous page. RFC3339. Pair with `after_id`.
+    after_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Second half of the cursor: `id` of the last item from the
+    /// previous page. UUID. Tiebreaks ties on `created_at` when
+    /// several docs were inserted by the same statement.
+    after_id: Option<Uuid>,
+}
+
+const PENDING_TRANSCRIPTS_DEFAULT_LIMIT: i64 = 512;
+const PENDING_TRANSCRIPTS_MAX_LIMIT: i64 = 1024;
+
 /// List URL documents that are waiting for external transcript processing.
-/// Returns the URL content from each `.url` file so the caller knows what to fetch.
+/// Returns the URL content from each `.url` file so the caller knows
+/// what to fetch. Cursor-paginated; ordered by `(created_at, id)` ASC.
+/// To drain everything, the caller loops:
+///   1. GET `/pending-transcripts?limit=512` (no cursor)
+///   2. process all returned items; remember the last item's
+///      `(created_at, id)`.
+///   3. GET `/pending-transcripts?limit=512&after_created_at=...&after_id=...`
+///   4. repeat until the response is empty.
+///
+/// Items that fail to process during a run (e.g. Play hasn't finished
+/// processing the recording yet) stay in `awaiting_transcript` status
+/// and so re-appear on the *next* hourly cron, but never re-appear
+/// within the same run; the cursor moves strictly forward.
 async fn pending_transcripts(
     State(state): State<AppState>,
     headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<PendingTranscriptsQuery>,
 ) -> Result<Json<Vec<PendingTranscriptInfo>>, AppError> {
     authenticate_service(&state, &headers)?;
 
-    let docs = minerva_db::queries::documents::list_awaiting_transcripts(&state.db).await?;
+    // Clamp the limit. A caller asking for `limit=0` would otherwise
+    // get an empty response and infinite-loop in the script; a
+    // negative limit is a postgres error. We coerce to the default
+    // for both pathological cases.
+    let limit = q
+        .limit
+        .filter(|n| *n > 0)
+        .unwrap_or(PENDING_TRANSCRIPTS_DEFAULT_LIMIT)
+        .min(PENDING_TRANSCRIPTS_MAX_LIMIT);
+
+    // Cursor: both halves required together, or neither. A half-
+    // specified cursor is a client bug and we reject it loudly rather
+    // than silently treating it as "first page".
+    let after = match (q.after_created_at, q.after_id) {
+        (Some(t), Some(i)) => Some((t, i)),
+        (None, None) => None,
+        _ => return Err(AppError::bad_request("service.cursor_half_specified")),
+    };
+
+    let docs =
+        minerva_db::queries::documents::list_awaiting_transcripts_page(&state.db, after, limit)
+            .await?;
     let mut result = Vec::new();
 
     for doc in docs {
@@ -106,6 +162,7 @@ async fn pending_transcripts(
             course_id: doc.course_id,
             filename: doc.filename,
             url,
+            created_at: doc.created_at,
         });
     }
 

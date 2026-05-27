@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, description, owner_id, context_ratio, temperature,\n           model, system_prompt, max_chunks, min_score, strategy,\n           tool_use_enabled, embedding_provider, embedding_model,\n           embedding_version, daily_token_limit, active, created_at,\n           updated_at, semester_label, daisy_momenttillf_id,\n           daisy_info_url, daisy_syllabus_url, daisy_unit,\n           daisy_last_synced_at, auto_managed\n        FROM courses\n        WHERE daisy_momenttillf_id = $1 AND active = true",
+  "query": "UPDATE courses SET\n            name = COALESCE($2, name),\n            description = COALESCE($3, description),\n            context_ratio = COALESCE($4, context_ratio),\n            temperature = COALESCE($5, temperature),\n            model = COALESCE($6, model),\n            system_prompt = COALESCE($7, system_prompt),\n            max_chunks = COALESCE($8, max_chunks),\n            strategy = COALESCE($9, strategy),\n            tool_use_enabled = COALESCE($10, tool_use_enabled),\n            daily_token_limit = COALESCE($11, daily_token_limit),\n            embedding_provider = COALESCE($12, embedding_provider),\n            embedding_model = COALESCE($13, embedding_model),\n            min_score = COALESCE($14, min_score),\n            semester_label = COALESCE($15, semester_label),\n            updated_at = NOW()\n        WHERE id = $1 AND active = true\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code",
   "describe": {
     "columns": [
       {
@@ -132,10 +132,29 @@
         "ordinal": 25,
         "name": "auto_managed",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 26,
+        "name": "course_code",
+        "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Float8",
+        "Float8",
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Bool",
+        "Int8",
+        "Text",
+        "Text",
+        "Float4",
         "Text"
       ]
     },
@@ -165,8 +184,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "83dce316d74f5a830f0164073085b3fe313737da60d367c3286c414586869070"
+  "hash": "70558064f5e828df617d2ca056d122bca4d8054ed74553fe45bfe24799f666fb"
 }

@@ -267,7 +267,17 @@ function TeacherCourseCard({ course }: { course: Course }) {
       <Card className="hover:border-foreground/20 transition-colors cursor-pointer h-full">
         <CardHeader>
           <div className="flex items-start justify-between gap-2">
-            <CardTitle className="text-lg">{course.name}</CardTitle>
+            <CardTitle className="text-lg">
+              {course.course_code && (
+                // Stable code chip in front of the rename-friendly
+                // human name. Only rendered when the course is
+                // Daisy-linked; ad-hoc courses keep the bare name.
+                <span className="mr-2 inline-block rounded bg-muted px-1.5 py-0.5 text-xs font-mono align-middle">
+                  {course.course_code}
+                </span>
+              )}
+              {course.name}
+            </CardTitle>
             <Badge variant="outline" className="shrink-0 capitalize">
               {course.my_role}
             </Badge>
@@ -315,7 +325,17 @@ function StudentCourseCard({
       <Card className="hover:border-foreground/20 transition-colors cursor-pointer h-full">
         <CardHeader>
           <div className="flex items-start justify-between gap-2">
-            <CardTitle className="text-lg">{course.name}</CardTitle>
+            <CardTitle className="text-lg">
+              {course.course_code && (
+                // Stable code chip in front of the rename-friendly
+                // human name. Only rendered when the course is
+                // Daisy-linked; ad-hoc courses keep the bare name.
+                <span className="mr-2 inline-block rounded bg-muted px-1.5 py-0.5 text-xs font-mono align-middle">
+                  {course.course_code}
+                </span>
+              )}
+              {course.name}
+            </CardTitle>
             {unreadCount > 0 && (
               // Small primary-filled badge with the unread count.
               // Significantly more discoverable than a dot inside

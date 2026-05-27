@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed\n        FROM courses c\n        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1 OR cm.role = 'teacher')\n        ORDER BY c.updated_at DESC",
+  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code FROM courses WHERE id = $1 AND active = true",
   "describe": {
     "columns": [
       {
@@ -132,6 +132,11 @@
         "ordinal": 25,
         "name": "auto_managed",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 26,
+        "name": "course_code",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -165,8 +170,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "6bef8b3658f89a66c34ba141f53f1fc4e59a6a58991b27756c688a180fc5fcb2"
+  "hash": "b6401f0adb134835851279f0346a74e543a65a78449b04e7aff7b70355413281"
 }

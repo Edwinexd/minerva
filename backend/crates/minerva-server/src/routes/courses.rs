@@ -197,6 +197,11 @@ struct CourseResponse {
     /// (membership sync stays additive on these; teachers shouldn't
     /// fight the import). Mirrors `courses.auto_managed`.
     auto_managed: bool,
+    /// Short course code (e.g. `PROG2`). Populated by the Daisy
+    /// auto-import; NULL on historical / ad-hoc courses. Frontend
+    /// uses it as a chip on the My Courses tile so the term-stable
+    /// identifier is visible alongside the rename-friendly `name`.
+    course_code: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -280,6 +285,7 @@ impl CourseResponse {
             semester_label: row.semester_label,
             daisy,
             auto_managed: row.auto_managed,
+            course_code: row.course_code,
         }
     }
 }

@@ -69,6 +69,12 @@ export interface Course {
    * gate UI affordances that shouldn't fight the sync.
    */
   auto_managed: boolean
+  /**
+   * Short course code (e.g. `PROG2`). Stable identifier across
+   * `name` renames; populated by the Daisy auto-import. Rendered as
+   * a chip on the My Courses tile when present.
+   */
+  course_code: string | null
 }
 
 export interface DaisyMeta {

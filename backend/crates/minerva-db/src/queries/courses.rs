@@ -53,6 +53,11 @@ pub struct CourseRow {
     /// membership stays additive and owner is the env-var fallback
     /// until a real kursansvarig is identified and present in Minerva.
     pub auto_managed: bool,
+    /// Course code (e.g. `PROG2`). Stable identifier across name
+    /// renames; populated by the Daisy auto-import from the
+    /// `beteckning` field on the Daisy side. NULL on historical /
+    /// ad-hoc courses without a Daisy linkage.
+    pub course_code: Option<String>,
 }
 
 pub struct CreateCourse {
@@ -109,7 +114,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             CourseRow,
             r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit, embedding_model, semester_label)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed"#,
+            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code"#,
             id,
             input.name,
             input.description,
@@ -125,7 +130,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             CourseRow,
             r#"INSERT INTO courses (id, name, description, owner_id, daily_token_limit, semester_label)
             VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed"#,
+            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code"#,
             id,
             input.name,
             input.description,
@@ -141,7 +146,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed FROM courses WHERE id = $1 AND active = true",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code FROM courses WHERE id = $1 AND active = true",
         id,
     )
     .fetch_optional(db)
@@ -151,7 +156,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx
 pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
         owner_id,
     )
     .fetch_all(db)
@@ -161,7 +166,7 @@ pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed
+        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed, c.course_code
         FROM courses c
         JOIN course_members cm ON cm.course_id = c.id
         WHERE cm.user_id = $1 AND c.active = true
@@ -178,7 +183,7 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_for_teacher(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed, c.course_code
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -200,7 +205,7 @@ pub async fn list_for_teacher_strict(
 ) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed, c.course_code
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -215,7 +220,7 @@ pub async fn list_for_teacher_strict(
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed FROM courses WHERE active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code FROM courses WHERE active = true ORDER BY updated_at DESC",
     )
     .fetch_all(db)
     .await
@@ -245,7 +250,7 @@ pub async fn update(
             semester_label = COALESCE($15, semester_label),
             updated_at = NOW()
         WHERE id = $1 AND active = true
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code"#,
         id,
         input.name,
         input.description,
@@ -549,15 +554,16 @@ pub async fn upsert_from_daisy(
                 id, name, owner_id, daily_token_limit, embedding_model,
                 semester_label, daisy_momenttillf_id, daisy_info_url,
                 daisy_syllabus_url, daisy_unit, daisy_last_synced_at,
-                auto_managed
+                auto_managed, course_code
             ) VALUES (
                 gen_random_uuid(), $1, $2, $3, $4,
-                $5, $6, $7, $8, $9, NOW(), TRUE
+                $5, $6, $7, $8, $9, NOW(), TRUE, $10
             )
             ON CONFLICT (daisy_momenttillf_id)
                 WHERE daisy_momenttillf_id IS NOT NULL
             DO UPDATE SET
                 name = EXCLUDED.name,
+                course_code = COALESCE(EXCLUDED.course_code, courses.course_code),
                 semester_label = COALESCE(EXCLUDED.semester_label, courses.semester_label),
                 daisy_info_url = COALESCE(EXCLUDED.daisy_info_url, courses.daisy_info_url),
                 daisy_syllabus_url = COALESCE(EXCLUDED.daisy_syllabus_url, courses.daisy_syllabus_url),
@@ -574,6 +580,7 @@ pub async fn upsert_from_daisy(
             input.info_url,
             input.syllabus_url,
             input.unit,
+            input.beteckning,
         )
         .fetch_one(db)
         .await?;
@@ -584,15 +591,16 @@ pub async fn upsert_from_daisy(
                 id, name, owner_id, daily_token_limit,
                 semester_label, daisy_momenttillf_id, daisy_info_url,
                 daisy_syllabus_url, daisy_unit, daisy_last_synced_at,
-                auto_managed
+                auto_managed, course_code
             ) VALUES (
                 gen_random_uuid(), $1, $2, $3,
-                $4, $5, $6, $7, $8, NOW(), TRUE
+                $4, $5, $6, $7, $8, NOW(), TRUE, $9
             )
             ON CONFLICT (daisy_momenttillf_id)
                 WHERE daisy_momenttillf_id IS NOT NULL
             DO UPDATE SET
                 name = EXCLUDED.name,
+                course_code = COALESCE(EXCLUDED.course_code, courses.course_code),
                 semester_label = COALESCE(EXCLUDED.semester_label, courses.semester_label),
                 daisy_info_url = COALESCE(EXCLUDED.daisy_info_url, courses.daisy_info_url),
                 daisy_syllabus_url = COALESCE(EXCLUDED.daisy_syllabus_url, courses.daisy_syllabus_url),
@@ -608,6 +616,7 @@ pub async fn upsert_from_daisy(
             input.info_url,
             input.syllabus_url,
             input.unit,
+            input.beteckning,
         )
         .fetch_one(db)
         .await?;
@@ -635,7 +644,7 @@ pub async fn find_by_daisy_momenttillf_id(
            embedding_version, daily_token_limit, active, created_at,
            updated_at, semester_label, daisy_momenttillf_id,
            daisy_info_url, daisy_syllabus_url, daisy_unit,
-           daisy_last_synced_at, auto_managed
+           daisy_last_synced_at, auto_managed, course_code
         FROM courses
         WHERE daisy_momenttillf_id = $1 AND active = true"#,
         momenttillf_id,

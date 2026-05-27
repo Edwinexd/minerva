@@ -196,6 +196,72 @@ def build_course_payload(
     }
 
 
+# Per-POST batch size. Picked to bound three things at once:
+#   * runner memory: at any moment we hold at most CHUNK_SIZE
+#     fully-resolved course payloads, not the union across both
+#     semesters.
+#   * backend memory + handler latency: one chunk is ~40 KB JSON
+#     and ~250 SQL statements, finishing in a few seconds with a
+#     single DB connection held the whole time.
+#   * partial-failure granularity: a hard HTTP failure on one batch
+#     stops the run loudly; earlier batches stay applied (the
+#     backend upsert is idempotent so a next-day retry catches up).
+# Today's DSV scale fits in ~7 batches; if the scope expands the
+# constant scales linearly without code changes.
+CHUNK_SIZE = 25
+
+
+def iter_payloads(
+    daisy: DaisyClient,
+    semesters: list[Semester],
+    participant_cache: dict[str, dict],
+):
+    """Yield per-course payloads as we walk Daisy. Lets the caller
+    decide between batch-and-drain (normal path) or fully buffered
+    (dry-run inspection) without us holding the whole product in
+    memory ourselves."""
+    for sem in semesters:
+        courses = daisy.get_courses(sem)
+        print(f"[{sem.label}] {len(courses)} course offerings")
+        for course in courses:
+            yield build_course_payload(daisy, course, participant_cache)
+
+
+def post_batch(
+    api_url: str,
+    headers: dict,
+    batch: list[dict],
+) -> dict:
+    """POST one chunk and raise on transport failure. Per-course
+    errors inside the batch come back inside the summary's `errors`
+    array; only HTTP-level failures (4xx/5xx/timeout) bubble up."""
+    resp = requests.post(
+        f"{api_url}/api/service/daisy-courses",
+        headers=headers,
+        json=batch,
+        timeout=300,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def merge_summary(into: dict, batch_summary: dict) -> None:
+    """Sum counters across batches; concat per-course error strings.
+    Mirrors `DaisyImportSummary` on the backend so the printed total
+    matches what a single-shot POST would have returned."""
+    for k in (
+        "courses_received",
+        "courses_created",
+        "courses_updated",
+        "members_added",
+        "pending_memberships_added",
+        "aliases_registered",
+        "designations_created",
+    ):
+        into[k] = into.get(k, 0) + batch_summary.get(k, 0)
+    into.setdefault("errors", []).extend(batch_summary.get("errors", []))
+
+
 def main() -> None:
     api_url = get_env("MINERVA_API_URL").rstrip("/")
     api_key = get_env("MINERVA_SERVICE_API_KEY")
@@ -210,64 +276,89 @@ def main() -> None:
         f"{[s.label for s in semesters]}"
     )
 
-    all_payloads: list[dict] = []
-    # Per-run identity cache keyed by Daisy `person_id`.
+    # Per-run identity cache keyed by Daisy `person_id`. Shared
+    # across batches so a kursansvarig who teaches courses in both
+    # VT and HT only triggers one profile-page fetch per run.
     participant_cache: dict[str, dict] = {}
+    dry_run = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
 
     with DaisyClient(username=su_username, password=su_password) as daisy:
-        for sem in semesters:
-            courses = daisy.get_courses(sem)
-            print(f"[{sem.label}] {len(courses)} course offerings")
-            for course in courses:
-                payload = build_course_payload(daisy, course, participant_cache)
-                all_payloads.append(payload)
+        if dry_run:
+            # Dry-run is for human inspection; buffer everything so the
+            # final stats + sample are computed against the full set.
+            # At today's scale this is a few MB and the GH runner has
+            # 7 GB; if scope explodes the streaming path below applies.
+            all_payloads = list(iter_payloads(daisy, semesters, participant_cache))
+            _emit_dry_run_summary(all_payloads)
+            return
 
-    if not all_payloads:
+        # Streaming path. We POST each batch as it fills and drop it
+        # so peak memory stays at ~CHUNK_SIZE payloads. The participant
+        # cache and the accumulated summary are the only objects that
+        # grow over the run; both stay tiny.
+        total = {"errors": []}
+        batch: list[dict] = []
+        batches_sent = 0
+        for payload in iter_payloads(daisy, semesters, participant_cache):
+            batch.append(payload)
+            if len(batch) >= CHUNK_SIZE:
+                batch_summary = post_batch(api_url, headers, batch)
+                merge_summary(total, batch_summary)
+                batches_sent += 1
+                print(
+                    f"  batch {batches_sent}: {len(batch)} courses -> "
+                    f"created={batch_summary.get('courses_created', 0)}, "
+                    f"updated={batch_summary.get('courses_updated', 0)}, "
+                    f"members+={batch_summary.get('members_added', 0)}"
+                )
+                batch = []
+
+        if batch:
+            batch_summary = post_batch(api_url, headers, batch)
+            merge_summary(total, batch_summary)
+            batches_sent += 1
+            print(
+                f"  batch {batches_sent}: {len(batch)} courses -> "
+                f"created={batch_summary.get('courses_created', 0)}, "
+                f"updated={batch_summary.get('courses_updated', 0)}, "
+                f"members+={batch_summary.get('members_added', 0)}"
+            )
+
+    if batches_sent == 0:
         print("Nothing to push.")
         return
+    print(f"Done across {batches_sent} batch(es): {total}")
 
-    # Dry-run knob used by the workflow_dispatch path before the
-    # backend endpoint is rolled to prod. We collect the same payload
-    # we'd POST, dump a short stats summary + a single sample
-    # course's JSON to stdout, and exit. Lets you verify dsv-wrapper
-    # compatibility (semester walk, participant resolution, realm
-    # mapping) end-to-end without poking the production API.
-    if os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes"):
-        import json as _json
 
-        total_participants = sum(len(p["participants"]) for p in all_payloads)
-        kursansvarig = sum(
-            1
-            for p in all_payloads
-            for cs in p["participants"]
-            if any(
-                r.startswith("Kurs-/delkursansvarig")
-                or r.lower() == "kursansvarig"
-                for r in cs["daisy_roles"]
-            )
-        )
-        print("DRY_RUN; would POST the following:")
-        print(f"  courses:                {len(all_payloads)}")
-        print(f"  resolved participants:  {total_participants}")
-        print(f"  kursansvarig entries:   {kursansvarig}")
-        sample = next(
-            (p for p in all_payloads if p["participants"]),
-            all_payloads[0],
-        )
-        print("  sample course:")
-        print(_json.dumps(sample, indent=2, ensure_ascii=False))
+def _emit_dry_run_summary(all_payloads: list[dict]) -> None:
+    """Dump aggregate counters + one sample course as pretty JSON.
+    Lets the workflow_dispatch dry-run verify dsv-wrapper compatibility
+    end-to-end without poking the production API."""
+    import json as _json
+
+    if not all_payloads:
+        print("DRY_RUN; nothing to push.")
         return
-
-    print(f"Posting {len(all_payloads)} courses to Minerva...")
-    resp = requests.post(
-        f"{api_url}/api/service/daisy-courses",
-        headers=headers,
-        json=all_payloads,
-        timeout=300,
+    total_participants = sum(len(p["participants"]) for p in all_payloads)
+    kursansvarig = sum(
+        1
+        for p in all_payloads
+        for cs in p["participants"]
+        if any(
+            r.startswith("Kurs-/delkursansvarig") or r.lower() == "kursansvarig"
+            for r in cs["daisy_roles"]
+        )
     )
-    resp.raise_for_status()
-    summary = resp.json()
-    print(f"Done: {summary}")
+    print("DRY_RUN; would POST the following:")
+    print(f"  courses:                {len(all_payloads)}")
+    print(f"  resolved participants:  {total_participants}")
+    print(f"  kursansvarig entries:   {kursansvarig}")
+    sample = next(
+        (p for p in all_payloads if p["participants"]),
+        all_payloads[0],
+    )
+    print("  sample course:")
+    print(_json.dumps(sample, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

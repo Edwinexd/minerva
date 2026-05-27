@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed\n        FROM courses c\n        JOIN course_members cm ON cm.course_id = c.id\n        WHERE cm.user_id = $1 AND c.active = true\n        ORDER BY c.updated_at DESC",
+  "query": "INSERT INTO courses (id, name, description, owner_id, daily_token_limit, semester_label)\n            VALUES ($1, $2, $3, $4, $5, $6)\n            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code",
   "describe": {
     "columns": [
       {
@@ -132,11 +132,21 @@
         "ordinal": 25,
         "name": "auto_managed",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 26,
+        "name": "course_code",
+        "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -165,8 +175,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "fb75d76282fd3e4df4eb8b69abe2f69eecb7d08f2795ffad31b8878cbb69879c"
+  "hash": "81ef8c64cbce48e5d25fe28bc404b95477873dcd89f5b6651f7dcf5488def67d"
 }

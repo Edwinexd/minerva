@@ -14,6 +14,17 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::state::AppState;
 
+/// Body cap on `/api/service/daisy-courses`. Each course carries
+/// nested participants (name + 1-2 eppns + free-text role list), so
+/// row size is ~1.5 KB rather than the catalog endpoint's ~50 B per
+/// entry. At today's DSV scale a single semester batch is ~250 KB;
+/// the 20 MB ceiling leaves room for an order-of-magnitude growth
+/// (cross-department sync, larger course rosters) before the
+/// chunker in `scripts/sync_daisy_courses.py` would need to drop
+/// its batch size. The script still chunks at 25 courses per POST
+/// to bound backend memory + per-request handler latency regardless.
+const DAISY_IMPORT_MAX_BYTES: usize = 20 * 1_000_000;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/pending-transcripts", get(pending_transcripts))
@@ -31,7 +42,11 @@ pub fn router() -> Router<AppState> {
             post(create_url_document),
         )
         .route("/play-courses", put(replace_play_course_catalog))
-        .route("/daisy-courses", post(import_daisy_courses))
+        .route(
+            "/daisy-courses",
+            post(import_daisy_courses)
+                .layer(axum::extract::DefaultBodyLimit::max(DAISY_IMPORT_MAX_BYTES)),
+        )
 }
 
 /// Authenticate using the global service API key (MINERVA_SERVICE_API_KEY).

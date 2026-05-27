@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed FROM courses WHERE active = true ORDER BY updated_at DESC",
+  "query": "INSERT INTO courses (id, name, description, owner_id, daily_token_limit, embedding_model, semester_label)\n            VALUES ($1, $2, $3, $4, $5, $6, $7)\n            RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, daisy_momenttillf_id, daisy_info_url, daisy_syllabus_url, daisy_unit, daisy_last_synced_at, auto_managed, course_code",
   "describe": {
     "columns": [
       {
@@ -132,10 +132,23 @@
         "ordinal": 25,
         "name": "auto_managed",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 26,
+        "name": "course_code",
+        "type_info": "Text"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8",
+        "Text",
+        "Text"
+      ]
     },
     "nullable": [
       false,
@@ -163,8 +176,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "8dfda9bedbbf0a7bd956f8565be1e748570a446dc815092f7321ef7e28a4c1a1"
+  "hash": "c8844874f522bfde8d057202997c5f9e1ca3a530dae48c95ff2793ee72ad01a3"
 }

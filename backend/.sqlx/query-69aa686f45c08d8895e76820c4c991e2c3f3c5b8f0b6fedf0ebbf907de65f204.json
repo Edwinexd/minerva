@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM canvas_connections WHERE course_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "69aa686f45c08d8895e76820c4c991e2c3f3c5b8f0b6fedf0ebbf907de65f204"
+}

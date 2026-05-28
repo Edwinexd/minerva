@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM feature_flags WHERE course_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9fbd73a74a718190f55b0c9d512fcce125fbc0e8b7a32f82600293eb577de2a"
+}

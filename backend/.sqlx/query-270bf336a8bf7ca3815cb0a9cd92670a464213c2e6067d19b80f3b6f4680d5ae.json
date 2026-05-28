@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM relink_queue WHERE course_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "270bf336a8bf7ca3815cb0a9cd92670a464213c2e6067d19b80f3b6f4680d5ae"
+}

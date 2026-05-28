@@ -12,6 +12,17 @@ export const coursesQuery = queryOptions({
   queryFn: () => api.get<Course[]>("/courses"),
 })
 
+/**
+ * Admin-only course listing. Same shape as `coursesQuery` but includes
+ * archived courses (the teacher-facing `/courses` route hides them), so
+ * the admin panel can restore or merge them. Keyed separately so it
+ * doesn't collide with the teacher/student `["courses"]` cache.
+ */
+export const adminCoursesQuery = queryOptions({
+  queryKey: ["admin", "courses"],
+  queryFn: () => api.get<Course[]>("/admin/courses"),
+})
+
 export const courseQuery = (id: string) =>
   queryOptions({
     queryKey: ["courses", id],

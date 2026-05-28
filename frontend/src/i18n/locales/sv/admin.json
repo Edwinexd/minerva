@@ -289,7 +289,8 @@
       "created": "Skapad",
       "embedding": "Embedding",
       "features": "Funktioner",
-      "settings": "Inställningar"
+      "settings": "Inställningar",
+      "actions": "Åtgärder"
     },
     "migrateButton": "Migrera",
     "migrateButtonTitle": "Tvångsmigrera kursen till en annan embedding-leverantör/modell. Köar om alla dokument för ny embedding.",
@@ -331,7 +332,26 @@
       "aegis": "Sidopanel med promptcoachning. Varje studentprompt poängsätts på fem dimensioner (tydlighet, kontext, ramar, resonemangskrav, kritiskt tänkande) plus tre korta kommentarer (strukturell tydlighet, terminologi, saknad ram). Icke-blockerande: analysen körs parallellt med assistentens svar och studenten kan ignorera återkopplingen fritt.",
       "concept_graph": "Eureka-2 begreppsgraf: LLM-extrahering per dokument av domänbegrepp och riktade relationer, sparat med dokumentnivå-spårning och cosin/strukturell/community-dedup. Skiljer sig från kursens kunskapsgraf (som är på dokumentnivå). När den är på kan admins köra extraktion och visa grafen; avstängning döljer admin-endpointsen men bevarar den sparade grafen.",
       "study_mode": "Förvandlar kursen till en forskningsutvärderingspipeline (samtyckesskärm, förenkät, N förkonfigurerade uppgifter, eftersändningsenkät, tackskärm + utestängning). Tvingar Aegis på under hela studien oavsett kursens egen aegis-flagga. Konfigurera samtyckestext, uppgifter och enkäter via admin-sidan för Studiekonfiguration; deltagarna ser pipelinen istället för den vanliga konversationslistan."
-    }
+    },
+    "statusFilterLabel": "Filtrera efter status",
+    "statusFilter": {
+      "all": "Alla",
+      "active": "Aktiva",
+      "archived": "Arkiverade"
+    },
+    "mergeButton": "Slå samman",
+    "mergeButtonTitle": "Slå samman den här kursen med en annan och arkivera den",
+    "archiveButton": "Arkivera",
+    "restoreButton": "Återställ",
+    "mergeDialogTitle": "Slå samman {{course}}",
+    "mergeDialogDescription": "Flytta kursens alla dokument, konversationer, medlemmar, Daisy-tillfällen och övrig data till den kvarvarande kursen och arkivera sedan den här. Flyttade dokument bäddas in på nytt i den kvarvarande kursen.",
+    "mergeSurvivorLabel": "Slå samman till (kvarvarande kurs)",
+    "mergeSurvivorPlaceholder": "Välj en kurs",
+    "mergeWarning": "{{source}} arkiveras och allt innehåll flyttas till {{survivor}}. Detta kan inte ångras från gränssnittet.",
+    "mergeNoCandidates": "Det finns inga andra aktiva kurser att slå samman till.",
+    "mergeCancel": "Avbryt",
+    "mergeConfirm": "Slå samman och arkivera",
+    "mergeSubmitting": "Slår samman..."
   },
   "study": {
     "title": "Konfiguration av studieläge",

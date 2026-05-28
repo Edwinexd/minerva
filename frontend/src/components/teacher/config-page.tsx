@@ -54,7 +54,7 @@ export function ConfigPage({ useParams }: { useParams: () => { courseId: string 
   if (!course) return null
   return (
     <div className="space-y-6">
-      {course.daisy && <DaisyMetaCard course={course} />}
+      {course.daisy_offerings.length > 0 && <DaisyMetaCard course={course} />}
       <CourseConfigForm course={course} />
       <KgTokenUsageCard courseId={courseId} />
     </div>
@@ -62,23 +62,21 @@ export function ConfigPage({ useParams }: { useParams: () => { courseId: string 
 }
 
 /**
- * Read-only "Auto-managed by Daisy sync" card. Renders when the
- * course was created by the daily Daisy import (`course.daisy` is
- * non-null). The fields here mirror what `sync_daisy_courses.py`
- * pushes nightly; the teacher can't edit any of them inline (every
- * field is canonically managed by Daisy and would just be overwritten
- * on the next sync). Outbound links land on the public Daisy pages
- * so a teacher can spot-check the offering without leaving Minerva.
+ * Read-only "Auto-managed by Daisy sync" card. Renders when the course
+ * has at least one linked Daisy offering. A course can carry several
+ * (e.g. the same content delivered as both a 7.5 and a 15 ECTS
+ * offering, or a pre-Daisy course merged into its Daisy equivalent); we
+ * render one block per offering. The fields mirror what
+ * `sync_daisy_courses.py` pushes nightly; the teacher can't edit any of
+ * them inline (Daisy is canonical and would overwrite edits on the next
+ * sync). Outbound links land on the public Daisy pages so a teacher can
+ * spot-check the offering without leaving Minerva.
  */
 function DaisyMetaCard({ course }: { course: Course }) {
   const { t } = useTranslation("teacher")
-  const meta = course.daisy
-  if (!meta) return null
-  const lastSynced = meta.last_synced_at ? (
-    <RelativeTime date={meta.last_synced_at} />
-  ) : (
-    t("daisyMeta.neverSynced")
-  )
+  const offerings = course.daisy_offerings
+  if (offerings.length === 0) return null
+  const multiple = offerings.length > 1
   return (
     <Card>
       <CardHeader>
@@ -93,51 +91,78 @@ function DaisyMetaCard({ course }: { course: Course }) {
         </div>
         <CardDescription>{t("daisyMeta.description")}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-2 text-sm">
-        <DaisyMetaRow
-          label={t("daisyMeta.momenttillfId")}
-          value={meta.momenttillf_id}
-        />
-        {course.semester_label && (
-          <DaisyMetaRow
-            label={t("daisyMeta.semester")}
-            value={course.semester_label}
-          />
-        )}
-        {meta.unit && (
-          <DaisyMetaRow label={t("daisyMeta.unit")} value={meta.unit} />
-        )}
-        {meta.info_url && (
-          <DaisyMetaRow
-            label={t("daisyMeta.infoUrl")}
-            value={
-              <a
-                href={meta.info_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline-offset-2 hover:underline"
-              >
-                {t("daisyMeta.openExternal")}
-              </a>
-            }
-          />
-        )}
-        {meta.syllabus_url && (
-          <DaisyMetaRow
-            label={t("daisyMeta.syllabusUrl")}
-            value={
-              <a
-                href={meta.syllabus_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline-offset-2 hover:underline"
-              >
-                {t("daisyMeta.openExternal")}
-              </a>
-            }
-          />
-        )}
-        <DaisyMetaRow label={t("daisyMeta.lastSynced")} value={lastSynced} />
+      <CardContent className="space-y-4 text-sm">
+        {offerings.map((offering, idx) => {
+          const lastSynced = offering.last_synced_at ? (
+            <RelativeTime date={offering.last_synced_at} />
+          ) : (
+            t("daisyMeta.neverSynced")
+          )
+          const semester = offering.semester_label ?? course.semester_label
+          return (
+            <div
+              key={offering.momenttillf_id}
+              className={idx > 0 ? "space-y-2 border-t pt-4" : "space-y-2"}
+            >
+              {multiple && (
+                <div className="font-medium">
+                  {offering.course_code ??
+                    offering.name ??
+                    offering.momenttillf_id}
+                  {offering.course_code && offering.name && (
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      {offering.name}
+                    </span>
+                  )}
+                </div>
+              )}
+              <DaisyMetaRow
+                label={t("daisyMeta.momenttillfId")}
+                value={offering.momenttillf_id}
+              />
+              {semester && (
+                <DaisyMetaRow label={t("daisyMeta.semester")} value={semester} />
+              )}
+              {offering.unit && (
+                <DaisyMetaRow label={t("daisyMeta.unit")} value={offering.unit} />
+              )}
+              {offering.info_url && (
+                <DaisyMetaRow
+                  label={t("daisyMeta.infoUrl")}
+                  value={
+                    <a
+                      href={offering.info_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline-offset-2 hover:underline"
+                    >
+                      {t("daisyMeta.openExternal")}
+                    </a>
+                  }
+                />
+              )}
+              {offering.syllabus_url && (
+                <DaisyMetaRow
+                  label={t("daisyMeta.syllabusUrl")}
+                  value={
+                    <a
+                      href={offering.syllabus_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline-offset-2 hover:underline"
+                    >
+                      {t("daisyMeta.openExternal")}
+                    </a>
+                  }
+                />
+              )}
+              <DaisyMetaRow
+                label={t("daisyMeta.lastSynced")}
+                value={lastSynced}
+              />
+            </div>
+          )
+        })}
       </CardContent>
     </Card>
   )

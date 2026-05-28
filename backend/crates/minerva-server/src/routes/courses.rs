@@ -110,7 +110,7 @@ fn validate_semester_label(raw: &str) -> Result<String, AppError> {
 }
 
 #[derive(Serialize)]
-struct CourseResponse {
+pub(crate) struct CourseResponse {
     id: Uuid,
     name: String,
     description: Option<String>,
@@ -148,10 +148,11 @@ struct CourseResponse {
     /// drives the per-semester grouping on the My Courses page. NULL
     /// for ad-hoc (manually-created) courses.
     semester_label: Option<String>,
-    /// Daisy metadata block, present when this course was auto-imported
-    /// from Daisy. Frontend uses these to render the "Auto-managed by
-    /// Daisy sync" badge + info/syllabus links on the settings page.
-    daisy: Option<DaisyMetaView>,
+    /// Daisy offerings linked to this course (possibly several after a
+    /// merge). Frontend renders the "Auto-managed by Daisy sync" badge
+    /// plus per-offering info / syllabus links on the settings page.
+    /// Empty for manually-created courses.
+    daisy_offerings: Vec<DaisyOfferingView>,
     /// TRUE when the course was created by the Daisy auto-import phase
     /// (membership sync stays additive on these; teachers shouldn't
     /// fight the import). Mirrors `courses.auto_managed`.
@@ -164,12 +165,30 @@ struct CourseResponse {
 }
 
 #[derive(Serialize)]
-struct DaisyMetaView {
+struct DaisyOfferingView {
     momenttillf_id: String,
+    course_code: Option<String>,
+    name: Option<String>,
+    semester_label: Option<String>,
     info_url: Option<String>,
     syllabus_url: Option<String>,
     unit: Option<String>,
     last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl DaisyOfferingView {
+    fn from_row(o: minerva_db::queries::course_daisy_offerings::DaisyOfferingRow) -> Self {
+        Self {
+            momenttillf_id: o.momenttillf_id,
+            course_code: o.course_code,
+            name: o.name,
+            semester_label: o.semester_label,
+            info_url: o.info_url,
+            syllabus_url: o.syllabus_url,
+            unit: o.unit,
+            last_synced_at: o.last_synced_at,
+        }
+    }
 }
 
 /// Per-course feature-flag snapshot, resolved through the runtime
@@ -205,20 +224,8 @@ impl CourseResponse {
         row: minerva_db::queries::courses::CourseRow,
         my_role: Option<String>,
         feature_flags: CourseFeatureFlagsView,
+        daisy_offerings: Vec<DaisyOfferingView>,
     ) -> Self {
-        // Compose the Daisy view only when we have a momenttillf_id;
-        // a course with a manually-stamped `semester_label` but no
-        // Daisy linkage shouldn't carry a phantom daisy block.
-        let daisy = row
-            .daisy_momenttillf_id
-            .clone()
-            .map(|momenttillf_id| DaisyMetaView {
-                momenttillf_id,
-                info_url: row.daisy_info_url.clone(),
-                syllabus_url: row.daisy_syllabus_url.clone(),
-                unit: row.daisy_unit.clone(),
-                last_synced_at: row.daisy_last_synced_at,
-            });
         Self {
             id: row.id,
             name: row.name,
@@ -242,7 +249,7 @@ impl CourseResponse {
             my_role,
             feature_flags,
             semester_label: row.semester_label,
-            daisy,
+            daisy_offerings,
             auto_managed: row.auto_managed,
             course_code: row.course_code,
         }
@@ -265,6 +272,31 @@ pub(crate) async fn resolve_course_flags(
     }
 }
 
+/// Resolve every Daisy offering linked to a course for the response.
+/// Empty for manually-created courses. A read failure degrades to an
+/// empty list rather than failing the whole course fetch.
+async fn resolve_course_offerings(db: &sqlx::PgPool, course_id: Uuid) -> Vec<DaisyOfferingView> {
+    minerva_db::queries::course_daisy_offerings::list_by_course(db, course_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(DaisyOfferingView::from_row)
+        .collect()
+}
+
+/// Build the wire `CourseResponse` for an admin listing (the admin
+/// `/admin/courses` surface, which includes archived courses). `my_role`
+/// is left None: the admin courses table doesn't gate on per-course
+/// membership the way the teacher/student views do.
+pub(crate) async fn admin_course_response(
+    db: &sqlx::PgPool,
+    row: minerva_db::queries::courses::CourseRow,
+) -> CourseResponse {
+    let flags = resolve_course_flags(db, row.id).await;
+    let offerings = resolve_course_offerings(db, row.id).await;
+    CourseResponse::from_row(row, None, flags, offerings)
+}
+
 async fn list_courses(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -284,7 +316,8 @@ async fn list_courses(
         let my_role =
             minerva_db::queries::courses::get_member_role(&state.db, row.id, user.id).await?;
         let flags = resolve_course_flags(&state.db, row.id).await;
-        out.push(CourseResponse::from_row(row, my_role, flags));
+        let offerings = resolve_course_offerings(&state.db, row.id).await;
+        out.push(CourseResponse::from_row(row, my_role, flags, offerings));
     }
     Ok(Json(out))
 }
@@ -343,6 +376,7 @@ async fn create_course(
         row,
         Some("teacher".into()),
         flags,
+        Vec::new(),
     )))
 }
 
@@ -362,7 +396,10 @@ async fn get_course(
     }
 
     let flags = resolve_course_flags(&state.db, row.id).await;
-    Ok(Json(CourseResponse::from_row(row, my_role, flags)))
+    let offerings = resolve_course_offerings(&state.db, row.id).await;
+    Ok(Json(CourseResponse::from_row(
+        row, my_role, flags, offerings,
+    )))
 }
 
 async fn update_course(
@@ -569,7 +606,10 @@ async fn update_course(
 
     let my_role = minerva_db::queries::courses::get_member_role(&state.db, id, user.id).await?;
     let flags = resolve_course_flags(&state.db, row.id).await;
-    Ok(Json(CourseResponse::from_row(row, my_role, flags)))
+    let offerings = resolve_course_offerings(&state.db, row.id).await;
+    Ok(Json(CourseResponse::from_row(
+        row, my_role, flags, offerings,
+    )))
 }
 
 async fn archive_course(

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE feature_flags f SET course_id = $1\n           WHERE f.course_id = $2\n             AND NOT EXISTS (SELECT 1 FROM feature_flags q\n                             WHERE q.course_id = $1 AND q.flag = f.flag)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48b767246ce93903b81230369c8ea402497aeea0acd2e04bb1cec4baabff5678"
+}

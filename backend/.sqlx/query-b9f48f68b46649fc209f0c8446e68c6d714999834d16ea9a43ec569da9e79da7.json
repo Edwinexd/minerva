@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE lti_nrps_contexts SET course_id = $1 WHERE course_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b9f48f68b46649fc209f0c8446e68c6d714999834d16ea9a43ec569da9e79da7"
+}

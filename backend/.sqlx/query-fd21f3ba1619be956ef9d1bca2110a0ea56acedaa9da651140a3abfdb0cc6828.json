@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE play_designations p SET course_id = $1\n           WHERE p.course_id = $2\n             AND NOT EXISTS (SELECT 1 FROM play_designations q\n                             WHERE q.course_id = $1 AND q.designation = p.designation)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fd21f3ba1619be956ef9d1bca2110a0ea56acedaa9da651140a3abfdb0cc6828"
+}

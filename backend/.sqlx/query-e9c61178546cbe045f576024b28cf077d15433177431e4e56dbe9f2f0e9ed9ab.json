@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.daisy_momenttillf_id, c.daisy_info_url, c.daisy_syllabus_url, c.daisy_unit, c.daisy_last_synced_at, c.auto_managed, c.course_code\n        FROM courses c\n        JOIN course_members cm ON cm.course_id = c.id\n        WHERE cm.user_id = $1 AND c.active = true\n        ORDER BY c.updated_at DESC",
+  "query": "INSERT INTO courses (\n            id, name, description, owner_id, daily_token_limit,\n            model, temperature, context_ratio, max_chunks, min_score,\n            strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt,\n            semester_label\n        ) VALUES (\n            $1, $2, $3, $4, $5,\n            COALESCE($6, 'gpt-oss-120b'),\n            COALESCE($7::DOUBLE PRECISION, 0.3),\n            COALESCE($8::DOUBLE PRECISION, 0.7),\n            COALESCE($9::INTEGER, 10),\n            COALESCE($10::REAL, 0.0),\n            COALESCE($11, 'simple'),\n            COALESCE($12::BOOLEAN, FALSE),\n            COALESCE($13, 'local'),\n            COALESCE($14, 'sentence-transformers/all-MiniLM-L6-v2'),\n            $15,\n            $16\n        )\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code",
   "describe": {
     "columns": [
       {
@@ -105,43 +105,33 @@
       },
       {
         "ordinal": 20,
-        "name": "daisy_momenttillf_id",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 21,
-        "name": "daisy_info_url",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 22,
-        "name": "daisy_syllabus_url",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 23,
-        "name": "daisy_unit",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 24,
-        "name": "daisy_last_synced_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 25,
         "name": "auto_managed",
         "type_info": "Bool"
       },
       {
-        "ordinal": 26,
+        "ordinal": 21,
         "name": "course_code",
         "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8",
+        "Text",
+        "Float8",
+        "Float8",
+        "Int4",
+        "Float4",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -165,14 +155,9 @@
       false,
       false,
       true,
-      true,
-      true,
-      true,
-      true,
-      true,
       false,
       true
     ]
   },
-  "hash": "01068315c8caea33969f8cbb06575a13a138f6d485811ac01a1e69777b64d5fd"
+  "hash": "e9c61178546cbe045f576024b28cf077d15433177431e4e56dbe9f2f0e9ed9ab"
 }

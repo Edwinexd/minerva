@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH m AS (\n               UPDATE course_daisy_offerings SET course_id = $1 WHERE course_id = $2 RETURNING 1\n           )\n           SELECT COUNT(*) FROM m",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "901ea6030536026e304f74e8d656ba227752155549a6d1e15743b3d9fea8280f"
+}

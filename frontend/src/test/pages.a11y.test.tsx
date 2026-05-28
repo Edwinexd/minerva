@@ -128,7 +128,7 @@ const course: Course = {
     study_mode: false,
   },
   semester_label: null,
-  daisy: null,
+  daisy_offerings: [],
   auto_managed: false,
   course_code: null,
 }

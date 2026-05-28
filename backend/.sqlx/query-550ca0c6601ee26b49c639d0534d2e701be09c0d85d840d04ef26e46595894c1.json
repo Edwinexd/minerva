@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE lti_course_bindings SET course_id = $1 WHERE course_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "550ca0c6601ee26b49c639d0534d2e701be09c0d85d840d04ef26e46595894c1"
+}

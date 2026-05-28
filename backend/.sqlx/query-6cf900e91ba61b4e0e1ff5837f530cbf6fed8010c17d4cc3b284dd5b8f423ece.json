@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE courses SET daisy_last_synced_at = NOW() WHERE id = $1",
+  "query": "DELETE FROM study_participant_state WHERE course_id = $1",
   "describe": {
     "columns": [],
     "parameters": {
@@ -10,5 +10,5 @@
     },
     "nullable": []
   },
-  "hash": "fb16c8e6b747cf28a769b5c648f0f4905d49ce33696a8993cba768d3ea1e27c6"
+  "hash": "6cf900e91ba61b4e0e1ff5837f530cbf6fed8010c17d4cc3b284dd5b8f423ece"
 }

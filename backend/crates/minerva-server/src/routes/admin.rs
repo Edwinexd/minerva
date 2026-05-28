@@ -36,6 +36,14 @@ pub fn router() -> Router<AppState> {
         )
         .route("/classification-stats", get(get_classification_stats))
         .route("/backfill-classifications", post(backfill_classifications))
+        // Admin course management: list (incl. archived), merge,
+        // archive / restore. Distinct from the teacher-facing
+        // `/courses` router so it can surface archived rows and the
+        // admin-only merge.
+        .route("/courses", get(list_all_courses))
+        .route("/courses/merge", post(merge_courses))
+        .route("/courses/{id}/archive", post(archive_course))
+        .route("/courses/{id}/unarchive", post(unarchive_course))
         .route(
             "/courses/{course_id}/feature-flags",
             get(get_course_feature_flags).put(set_course_feature_flags),
@@ -61,6 +69,179 @@ fn require_admin(user: &User) -> Result<(), AppError> {
         return Err(AppError::Forbidden);
     }
     Ok(())
+}
+
+/// All courses including archived ones, in the same wire shape as
+/// `GET /courses` so the admin frontend can reuse the `Course` type.
+/// The teacher-facing `/courses` route hides archived courses; admins
+/// need to see them here to restore or merge them.
+async fn list_all_courses(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<Vec<crate::routes::courses::CourseResponse>>, AppError> {
+    require_admin(&user)?;
+    let rows = minerva_db::queries::courses::list_all_including_archived(&state.db).await?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        out.push(crate::routes::courses::admin_course_response(&state.db, row).await);
+    }
+    Ok(Json(out))
+}
+
+#[derive(Deserialize)]
+struct MergeCoursesRequest {
+    /// The course that survives and absorbs the source's data.
+    survivor_id: Uuid,
+    /// The course whose data is moved into the survivor; archived after.
+    source_id: Uuid,
+}
+
+/// Relocate a source course's document bytes on disk into the
+/// survivor's directory. Documents live at
+/// `{docs_path}/{course_id}/{doc_id}.{ext}`, so a merge that re-points
+/// `course_id` in the DB must also move the files or the worker (which
+/// rebuilds the path from `course_id`) can't find them.
+///
+/// We COPY (not move) so the bytes exist under both course-ids for the
+/// duration of the merge transaction: before commit the docs still read
+/// from the source dir, after commit from the survivor dir, and the
+/// worker never sees a gap. The caller deletes the source dir after the
+/// transaction commits. Doc ids are globally unique, so filenames never
+/// clash in the destination.
+async fn relocate_course_docs(
+    docs_path: &str,
+    source_id: Uuid,
+    survivor_id: Uuid,
+) -> Result<(), AppError> {
+    let src_dir = format!("{}/{}", docs_path, source_id);
+    let dst_dir = format!("{}/{}", docs_path, survivor_id);
+    let mut entries = match tokio::fs::read_dir(&src_dir).await {
+        Ok(rd) => rd,
+        // Source course never had any uploads; nothing to relocate.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(AppError::Internal(format!(
+                "merge: read source docs dir: {e}"
+            )))
+        }
+    };
+    tokio::fs::create_dir_all(&dst_dir)
+        .await
+        .map_err(|e| AppError::Internal(format!("merge: create survivor docs dir: {e}")))?;
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| AppError::Internal(format!("merge: iterate source docs: {e}")))?
+    {
+        let file_type = entry
+            .file_type()
+            .await
+            .map_err(|e| AppError::Internal(format!("merge: stat source doc: {e}")))?;
+        if !file_type.is_file() {
+            continue;
+        }
+        let dst = std::path::Path::new(&dst_dir).join(entry.file_name());
+        tokio::fs::copy(entry.path(), &dst)
+            .await
+            .map_err(|e| AppError::Internal(format!("merge: copy doc file: {e}")))?;
+    }
+    Ok(())
+}
+
+/// Merge `source_id` into `survivor_id`: move all the source's data
+/// (documents, conversations, members, Daisy offerings, integrations,
+/// usage, ...) into the survivor, re-embed moved documents into the
+/// survivor's vector space, then archive the source. Irreversible from
+/// the UI's perspective (the source is archived, not deleted, but its
+/// content now lives under the survivor).
+async fn merge_courses(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<MergeCoursesRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+
+    if body.survivor_id == body.source_id {
+        return Err(AppError::bad_request("admin.merge_same_course"));
+    }
+
+    // Both must exist and be active (find_by_id filters archived).
+    let survivor = minerva_db::queries::courses::find_by_id(&state.db, body.survivor_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let source = minerva_db::queries::courses::find_by_id(&state.db, body.source_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    // Copy the source's document bytes into the survivor's dir BEFORE
+    // the DB transaction commits (see relocate_course_docs).
+    relocate_course_docs(&state.config.docs_path, source.id, survivor.id).await?;
+
+    let outcome =
+        minerva_db::queries::courses::merge_courses(&state.db, survivor.id, source.id).await?;
+
+    // The DB now points every moved doc at the survivor, so the source
+    // dir is dead weight. Best-effort removal; a leftover dir is
+    // harmless (nothing references it).
+    let src_dir = format!("{}/{}", state.config.docs_path, source.id);
+    if let Err(e) = tokio::fs::remove_dir_all(&src_dir).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(
+                source = %source.id,
+                error = %e,
+                "merge: failed to remove source docs dir (non-fatal)",
+            );
+        }
+    }
+
+    tracing::info!(
+        survivor = %survivor.id,
+        source = %source.id,
+        documents_moved = outcome.documents_moved,
+        documents_orphaned = outcome.documents_orphaned,
+        documents_requeued = outcome.documents_requeued,
+        conversations_moved = outcome.conversations_moved,
+        members_merged = outcome.members_merged,
+        offerings_moved = outcome.offerings_moved,
+        "admin merged course",
+    );
+
+    Ok(Json(serde_json::json!({
+        "merged": true,
+        "documents_moved": outcome.documents_moved,
+        "documents_orphaned": outcome.documents_orphaned,
+        "documents_requeued": outcome.documents_requeued,
+        "conversations_moved": outcome.conversations_moved,
+        "members_merged": outcome.members_merged,
+        "offerings_moved": outcome.offerings_moved,
+    })))
+}
+
+async fn archive_course(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+    let archived = minerva_db::queries::courses::archive(&state.db, id).await?;
+    if !archived {
+        // Either the course doesn't exist or it's already archived.
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(serde_json::json!({ "archived": true })))
+}
+
+async fn unarchive_course(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+    let restored = minerva_db::queries::courses::unarchive(&state.db, id).await?;
+    if !restored {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(serde_json::json!({ "restored": true })))
 }
 
 #[derive(Serialize)]

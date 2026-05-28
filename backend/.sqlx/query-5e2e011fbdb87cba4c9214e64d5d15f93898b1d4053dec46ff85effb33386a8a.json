@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH m AS (\n               UPDATE conversations SET course_id = $1 WHERE course_id = $2 RETURNING 1\n           )\n           SELECT COUNT(*) FROM m",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5e2e011fbdb87cba4c9214e64d5d15f93898b1d4053dec46ff85effb33386a8a"
+}

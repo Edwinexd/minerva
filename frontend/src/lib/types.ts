@@ -58,11 +58,14 @@ export interface Course {
    */
   semester_label: string | null
   /**
-   * Daisy linkage block when this course was auto-imported. Drives
-   * the "Auto-managed by Daisy sync" badge + info / syllabus links
-   * on the course settings page.
+   * Daisy offerings linked to this course. A course can map to several
+   * (e.g. the same content delivered as both a 7.5 and a 15 ECTS
+   * offering, or a pre-Daisy course merged into its Daisy equivalent).
+   * Drives the "Auto-managed by Daisy sync" badge + per-offering info /
+   * syllabus links on the course settings page. Empty for
+   * manually-created courses.
    */
-  daisy: DaisyMeta | null
+  daisy_offerings: DaisyOffering[]
   /**
    * TRUE when this course was created by the Daisy auto-import
    * phase. Used by the frontend to show a status badge and (later)
@@ -77,8 +80,11 @@ export interface Course {
   course_code: string | null
 }
 
-export interface DaisyMeta {
+export interface DaisyOffering {
   momenttillf_id: string
+  course_code: string | null
+  name: string | null
+  semester_label: string | null
   info_url: string | null
   syllabus_url: string | null
   unit: string | null

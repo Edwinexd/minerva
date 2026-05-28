@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE relink_queue r SET course_id = $1\n           WHERE r.course_id = $2\n             AND NOT EXISTS (SELECT 1 FROM relink_queue q WHERE q.course_id = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "99412734008cd573a4ba9e0262b7896bb8739023a1c56228d127eec17f66a3d1"
+}

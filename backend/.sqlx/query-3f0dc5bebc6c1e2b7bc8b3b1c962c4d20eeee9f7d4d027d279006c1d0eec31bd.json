@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE course_member_role_suggestions s SET course_id = $1\n           WHERE s.course_id = $2\n             AND NOT EXISTS (SELECT 1 FROM course_member_role_suggestions q\n                             WHERE q.course_id = $1 AND q.user_id = s.user_id\n                               AND q.suggested_role = s.suggested_role)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3f0dc5bebc6c1e2b7bc8b3b1c962c4d20eeee9f7d4d027d279006c1d0eec31bd"
+}

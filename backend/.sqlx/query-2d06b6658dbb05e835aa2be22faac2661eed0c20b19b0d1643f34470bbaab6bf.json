@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE signed_urls SET course_id = $1 WHERE course_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d06b6658dbb05e835aa2be22faac2661eed0c20b19b0d1643f34470bbaab6bf"
+}

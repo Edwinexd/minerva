@@ -3,9 +3,9 @@ import { RelativeTime } from "@/components/relative-time"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import {
+  adminCoursesQuery,
   adminEmbeddingModelsQuery,
   adminUsersQuery,
-  coursesQuery,
 } from "@/lib/queries"
 import type { Course } from "@/lib/types"
 import { modelDisplayName } from "@/lib/embedding-models"
@@ -56,9 +56,12 @@ type FeatureFlagName = (typeof KNOWN_FEATURE_FLAGS)[number]
 
 export function CourseManagementPanel() {
   const { t } = useTranslation("admin")
-  const { data: courses, isLoading: coursesLoading } = useQuery(coursesQuery)
+  const { data: courses, isLoading: coursesLoading } = useQuery(adminCoursesQuery)
   const { data: users } = useQuery(adminUsersQuery)
   const [filter, setFilter] = useState("")
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "archived">(
+    "all",
+  )
 
   if (coursesLoading) {
     return (
@@ -74,29 +77,54 @@ export function CourseManagementPanel() {
 
   const userMap = new Map((users ?? []).map((u) => [u.id, u]))
 
-  const filtered = filter
-    ? courses.filter((c) => {
-        const owner = userMap.get(c.owner_id)
-        const ownerLabel = owner?.display_name ?? owner?.eppn ?? c.owner_id
-        return (
-          c.name.toLowerCase().includes(filter.toLowerCase()) ||
-          ownerLabel.toLowerCase().includes(filter.toLowerCase())
-        )
-      })
-    : courses
+  const filtered = courses.filter((c) => {
+    if (statusFilter === "active" && !c.active) return false
+    if (statusFilter === "archived" && c.active) return false
+    if (!filter) return true
+    const owner = userMap.get(c.owner_id)
+    const ownerLabel = owner?.display_name ?? owner?.eppn ?? c.owner_id
+    return (
+      c.name.toLowerCase().includes(filter.toLowerCase()) ||
+      ownerLabel.toLowerCase().includes(filter.toLowerCase())
+    )
+  })
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>{t("courses.title", { total: courses.length })}</CardTitle>
         <CardDescription>{t("courses.description")}</CardDescription>
-        <input
-          className="mt-2 w-full max-w-sm rounded border bg-background px-3 py-1.5 text-sm"
-          placeholder={t("courses.filterPlaceholder")}
-          aria-label={t("courses.filterPlaceholder")}
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            className="w-full max-w-sm rounded border bg-background px-3 py-1.5 text-sm"
+            placeholder={t("courses.filterPlaceholder")}
+            aria-label={t("courses.filterPlaceholder")}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <Select
+            value={statusFilter}
+            onValueChange={(v) =>
+              v && setStatusFilter(v as "all" | "active" | "archived")
+            }
+          >
+            <SelectTrigger
+              className="w-40"
+              aria-label={t("courses.statusFilterLabel")}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("courses.statusFilter.all")}</SelectItem>
+              <SelectItem value="active">
+                {t("courses.statusFilter.active")}
+              </SelectItem>
+              <SelectItem value="archived">
+                {t("courses.statusFilter.archived")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">
@@ -110,7 +138,8 @@ export function CourseManagementPanel() {
                 <th className="py-2 pr-4 font-medium">{t("courses.columns.created")}</th>
                 <th className="py-2 pr-4 font-medium">{t("courses.columns.embedding")}</th>
                 <th className="py-2 pr-4 font-medium">{t("courses.columns.features")}</th>
-                <th className="py-2 font-medium">{t("courses.columns.settings")}</th>
+                <th className="py-2 pr-4 font-medium">{t("courses.columns.settings")}</th>
+                <th className="py-2 font-medium">{t("courses.columns.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -148,7 +177,7 @@ export function CourseManagementPanel() {
                         courseName={course.name}
                       />
                     </td>
-                    <td className="py-2">
+                    <td className="py-2 pr-4">
                       <Link
                         to="/teacher/courses/$courseId/config"
                         params={{ courseId: course.id }}
@@ -156,6 +185,9 @@ export function CourseManagementPanel() {
                       >
                         {t("courses.settingsLink")}
                       </Link>
+                    </td>
+                    <td className="py-2">
+                      <CourseActionsCell course={course} allCourses={courses} />
                     </td>
                   </tr>
                 )
@@ -441,6 +473,7 @@ function CourseMigrateDialog({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["courses"] })
+      queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
       onOpenChange(false)
     },
   })
@@ -536,6 +569,195 @@ function CourseMigrateDialog({
             {mutation.isPending
               ? t("courses.migrateSubmitting")
               : t("courses.migrateConfirm")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+// ── Per-course admin actions: archive / restore + merge ────────────
+//
+// `CourseActionsCell` renders the inline buttons in the last table
+// column. Archive / restore toggle the soft-delete flag; "Merge" opens
+// a dialog where the admin picks a SURVIVOR course to fold this row
+// (the source) into. Only active courses can be a merge source or a
+// survivor candidate.
+
+function CourseActionsCell({
+  course,
+  allCourses,
+}: {
+  course: Course
+  allCourses: Course[]
+}) {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
+  const queryClient = useQueryClient()
+  const [mergeOpen, setMergeOpen] = useState(false)
+
+  const toggleArchiveMutation = useMutation({
+    mutationFn: () =>
+      course.active
+        ? api.post(`/admin/courses/${course.id}/archive`, {})
+        : api.post(`/admin/courses/${course.id}/unarchive`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
+      queryClient.invalidateQueries({ queryKey: ["courses"] })
+    },
+  })
+
+  return (
+    <div className="flex items-center gap-2">
+      {course.active && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setMergeOpen(true)}
+          title={t("courses.mergeButtonTitle")}
+        >
+          {t("courses.mergeButton")}
+        </Button>
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => toggleArchiveMutation.mutate()}
+        disabled={toggleArchiveMutation.isPending}
+      >
+        {course.active
+          ? t("courses.archiveButton")
+          : t("courses.restoreButton")}
+      </Button>
+      {toggleArchiveMutation.isError && (
+        <span className="text-xs text-destructive">
+          {formatError(toggleArchiveMutation.error)}
+        </span>
+      )}
+      {mergeOpen && (
+        <MergeCourseDialog
+          source={course}
+          candidates={allCourses.filter((c) => c.active && c.id !== course.id)}
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+        />
+      )}
+    </div>
+  )
+}
+
+interface MergeResult {
+  merged: boolean
+  documents_moved: number
+  documents_orphaned: number
+  documents_requeued: number
+  conversations_moved: number
+  members_merged: number
+  offerings_moved: number
+}
+
+function MergeCourseDialog({
+  source,
+  candidates,
+  open,
+  onOpenChange,
+}: {
+  source: Course
+  candidates: Course[]
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
+  const queryClient = useQueryClient()
+  const [survivorId, setSurvivorId] = useState("")
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.post<MergeResult>("/admin/courses/merge", {
+        survivor_id: survivorId,
+        source_id: source.id,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
+      queryClient.invalidateQueries({ queryKey: ["courses"] })
+      onOpenChange(false)
+    },
+  })
+
+  const survivor = candidates.find((c) => c.id === survivorId)
+
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {t("courses.mergeDialogTitle", { course: source.name })}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("courses.mergeDialogDescription")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="space-y-4 py-2">
+          {candidates.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {t("courses.mergeNoCandidates")}
+            </p>
+          ) : (
+            <div className="space-y-1">
+              <label className="text-sm font-medium">
+                {t("courses.mergeSurvivorLabel")}
+              </label>
+              <Select
+                value={survivorId}
+                onValueChange={(v) => v && setSurvivorId(v)}
+              >
+                <SelectTrigger
+                  className="w-full"
+                  aria-label={t("courses.mergeSurvivorLabel")}
+                >
+                  <SelectValue
+                    placeholder={t("courses.mergeSurvivorPlaceholder")}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {candidates.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.semester_label
+                        ? `${c.name} (${c.semester_label})`
+                        : c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {survivor && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              {t("courses.mergeWarning", {
+                source: source.name,
+                survivor: survivor.name,
+              })}
+            </div>
+          )}
+          {mutation.isError && (
+            <p className="text-sm text-destructive">
+              {formatError(mutation.error)}
+            </p>
+          )}
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("courses.mergeCancel")}</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={!survivorId || mutation.isPending}
+            onClick={(e) => {
+              e.preventDefault()
+              mutation.mutate()
+            }}
+          >
+            {mutation.isPending
+              ? t("courses.mergeSubmitting")
+              : t("courses.mergeConfirm")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

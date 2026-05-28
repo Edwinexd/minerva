@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE daisy_pending_imports SET existing_course_id = $1 WHERE existing_course_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7472bb39ffbbaeccb3789a5bf9240804ae8c3609b244fc5b30e02cebd4d10e80"
+}

@@ -1041,7 +1041,7 @@ pub(super) async fn apply_one(
         summary.members_added += 1;
     }
 
-    minerva_db::queries::courses::touch_daisy_synced(&state.db, outcome.course.id).await?;
+    minerva_db::queries::course_daisy_offerings::touch_synced(&state.db, momenttillf_id).await?;
     Ok(())
 }
 

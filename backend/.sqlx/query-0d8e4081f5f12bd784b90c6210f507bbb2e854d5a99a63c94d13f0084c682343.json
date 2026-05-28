@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH requeued AS (\n                   UPDATE documents\n                   SET status = 'pending',\n                       chunk_count = NULL,\n                       processed_at = NULL,\n                       processing_started_at = NULL,\n                       error_msg = NULL,\n                       pooled_embedding = NULL\n                   WHERE id = ANY($1)\n                     AND orphaned_at IS NULL\n                     AND mime_type <> 'text/x-url'\n                   RETURNING 1\n               )\n               SELECT COUNT(*) FROM requeued",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0d8e4081f5f12bd784b90c6210f507bbb2e854d5a99a63c94d13f0084c682343"
+}

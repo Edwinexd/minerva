@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO usage_daily\n               (user_id, course_id, date, prompt_tokens, completion_tokens,\n                embedding_tokens, research_prompt_tokens, research_completion_tokens, request_count)\n           SELECT user_id, $1, date, prompt_tokens, completion_tokens,\n                  embedding_tokens, research_prompt_tokens, research_completion_tokens, request_count\n           FROM usage_daily WHERE course_id = $2\n           ON CONFLICT (user_id, course_id, date) DO UPDATE SET\n               prompt_tokens = usage_daily.prompt_tokens + EXCLUDED.prompt_tokens,\n               completion_tokens = usage_daily.completion_tokens + EXCLUDED.completion_tokens,\n               embedding_tokens = usage_daily.embedding_tokens + EXCLUDED.embedding_tokens,\n               research_prompt_tokens = usage_daily.research_prompt_tokens + EXCLUDED.research_prompt_tokens,\n               research_completion_tokens = usage_daily.research_completion_tokens + EXCLUDED.research_completion_tokens,\n               request_count = usage_daily.request_count + EXCLUDED.request_count",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "554857945996c1f3b2bf3e3f5071e1fe993934f437c464766e665ddb5bfe0df5"
+}

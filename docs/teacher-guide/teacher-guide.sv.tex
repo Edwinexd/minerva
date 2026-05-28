@@ -1,0 +1,142 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{parskip}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+
+% Same screenshots as the English guide and the in-app help page.
+\graphicspath{{../../frontend/public/help/}}
+
+\definecolor{accent}{HTML}{1D4ED8}
+\definecolor{accentbg}{HTML}{EFF4FF}
+\definecolor{soft}{HTML}{555555}
+
+\titleformat{\section}{\Large\bfseries\color{accent}}{}{0pt}{}
+\titlespacing*{\section}{0pt}{1.4em}{0.5em}
+
+\captionsetup{font={small,it},labelformat=empty,skip=4pt}
+\setlength{\fboxsep}{10pt}
+
+\newcommand{\shot}[2]{%
+  \begin{figure}[H]\centering
+  \includegraphics[width=\linewidth,height=0.6\textheight,keepaspectratio]{#1}%
+  \caption*{#2}%
+  \end{figure}}
+
+\newcommand{\callout}[1]{%
+  \begin{center}
+  \fcolorbox{accent}{accentbg}{\parbox{0.96\linewidth}{\small #1}}
+  \end{center}}
+
+\hypersetup{
+  pdftitle={Minerva: Lärarguide},
+  pdfauthor={DSV, Stockholms universitet},
+}
+
+\begin{document}
+
+\begin{center}
+  {\LARGE\bfseries Minerva}\\[2pt]
+  {\Large\color{accent} Lärarguide}\\[6pt]
+  {\color{soft}\small Koppla AI-studieassistenten Minerva till din Moodle-kurs \textbullet{} ungefär 10 minuter \textbullet{} 4 steg}
+\end{center}
+
+\vspace{0.4em}
+\hrule height 1pt
+\vspace{1.0em}
+
+\noindent
+Minerva är en AI-studieassistent som svarar utifrån ditt eget kursmaterial.
+Dina studenter når den via en länk inne i din Moodle-kurs. Den här guiden går
+igenom inställningarna per kurs från början till slut.
+
+\callout{\textbf{Innan du börjar:} din administratör har redan installerat
+Minerva-verktyget och pluginet i hela Moodle, så du behöver bara göra stegen per
+kurs nedan. Om du inte ser alternativen som visas här, kontakta
+\href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.}
+
+\section{Steg 1. Logga in i Minerva}
+
+Gå till \href{https://minerva.dsv.su.se}{minerva.dsv.su.se} och logga in med ditt
+SU-konto. Kurser som importeras nattligen från Daisy visas på din översikt. Om en
+kurs saknas kan du skapa den med \textbf{New Course}.
+
+\shot{minerva-dashboard.png}{Din Minerva-översikt med de kurser du undervisar i.}
+
+\section{Steg 2. Lägg till Minerva i din Moodle-kurs}
+
+I din Moodle-kurs, slå på \textbf{Edit mode}, välj \textbf{Add an activity or
+resource} i det avsnitt där du vill ha assistenten och välj \textbf{Minerva}.
+
+\shot{activity-chooser.png}{Välj Minerva i aktivitetsväljaren.}
+
+Ge den ett namn som studenterna känner igen (till exempel ``Minerva AI
+assistant'') och välj sedan \textbf{Save and return to course}. Aktiviteten visas
+nu i din kurs.
+
+\shot{lti-config.png}{Namnge aktiviteten och spara.}
+\shot{course-activity.png}{Minerva-aktiviteten finns nu i din kurs.}
+
+\section{Steg 3. Koppla ditt kursmaterial}
+
+Öppna \textbf{Minerva settings} från kursens \textbf{More}-meny, välj din
+motsvarande Minerva-kurs i listan och välj \textbf{Link Minerva course}.
+
+\shot{link-form.png}{Minerva settings: välj din Minerva-kurs och länka den.}
+
+Välj sedan \textbf{Sync materials} för att ladda upp dina filer, sidor och
+avsnittssammanfattningar så att assistenten kan svara utifrån dem. Kör om det när
+du ändrar material; det körs även automatiskt två gånger i timmen.
+
+\shot{linked.png}{När kursen är länkad kan du synka material eller avlänka när som helst.}
+\shot{sync-complete.png}{Minerva bekräftar hur många resurser som laddades upp.}
+
+\section{Steg 4. Öppna den en gång för att koppla aktiviteten}
+
+Klicka på Minerva-aktiviteten du lade till. Första gången väljer du vilken
+Minerva-kurs den ska öppna och väljer \textbf{Link and open Minerva}. Minerva
+kommer ihåg detta, så varje senare öppning av dig eller dina studenter går till
+rätt kurs.
+
+\shot{first-launch-bind.png}{Vid första öppningen kopplar du aktiviteten till din Minerva-kurs.}
+
+\section{Klart: så här ser studenterna det}
+
+Studenterna klickar på samma aktivitet och får en chattassistent som svarar
+utifrån ditt kursmaterial, direkt i Moodle. De föreslagna frågorna hämtas från
+det du har synkat.
+
+\shot{student-chat.png}{Studentvyn: en kursförankrad chattassistent.}
+\shot{launch-in-moodle.png}{Samma assistent, inbäddad i Moodle-aktiviteten.}
+
+\section{Bra att veta}
+
+\begin{itemize}[leftmargin=1.4em,itemsep=4pt]
+  \item Assistenten använder bara material du synkar. Studenternas
+  konversationer är synliga för kurspersonal; se \textbf{Data handling} i Minerva
+  för detaljer.
+  \item Synka om efter att du ändrat material. Du kan även inkludera
+  lärarbesvarade forumtrådar från \textbf{Minerva settings} (valfritt;
+  studenternas namn tas bort före uppladdning).
+  \item Frågor eller behöver du högre användningsgränser? Mejla
+  \href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.
+\end{itemize}
+
+\vspace{1.2em}
+\hrule height 0.4pt
+\vspace{0.4em}
+\noindent{\color{soft}\small Minerva \textbullet{} Institutionen för data- och
+systemvetenskap (DSV), Stockholms universitet \textbullet{}
+\href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}}
+
+\end{document}

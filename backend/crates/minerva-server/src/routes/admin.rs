@@ -257,20 +257,74 @@ struct MergeSuggestionCourse {
 
 #[derive(Serialize)]
 struct MergeSuggestionGroup {
-    /// What linked the group: "name" (identical course names), "code"
-    /// (shared base course code, e.g. SUPCOM / SUPCOM-HI / SUPCOM-DIST
-    /// all reduce to SUPCOM), or "related" (linked through a mix of the
-    /// two signals).
-    match_kind: &'static str,
+    /// Normalized core course code shared by every course in the group
+    /// (section / campus / mode markers stripped), e.g. `PROLED` for
+    /// PROLED (AB) / PROLED (CD) / PROLED-S, or `FODS` for MAR-FODS /
+    /// FODS.
+    code: String,
+    /// The semester every course in the group belongs to; groups never
+    /// span semesters. None only when all members predate semester
+    /// tracking (and therefore only group with other unlabelled rows).
+    semester_label: Option<String>,
     courses: Vec<MergeSuggestionCourse>,
 }
 
-/// Suggest groups of active courses that look like merge candidates:
-/// courses that share an identical (case-insensitive, trimmed) name, or
-/// a common base course code (the part before the first '-'). Linked
-/// transitively via union-find so e.g. SUPCOM, SUPCOM-HI and SUPCOM-DIST
-/// land in one group. Pure heuristic; the admin still picks the survivor
-/// and confirms before anything is merged.
+/// Reduce a raw course code to its core for grouping. Strips
+/// parenthetical / bracketed section markers (`PROLED (AB)` -> `PROLED`)
+/// and known section / campus / delivery-mode tokens that mark a variant
+/// rather than the course itself, from either end:
+///   * `MAR-FODS` -> `FODS`  (campus prefix)
+///   * `SUPCOM-DIST` / `SUPCOM-HI` -> `SUPCOM`  (delivery-mode suffix)
+///   * `PROLED-S` -> `PROLED`
+///
+/// Returns None when there is no usable code. `SECTION_MARKERS` is the
+/// one knob to extend as new DSV variant codes appear; deliberately
+/// conservative so genuinely-distinct courses (e.g. `MAR-IP` vs
+/// `INTROPROG`) are NOT collapsed together.
+fn normalize_course_code(raw: &str) -> Option<String> {
+    const SECTION_MARKERS: &[&str] = &["MAR", "DIST", "HI", "S", "AB", "CD"];
+
+    // Drop anything inside (), [] or {} (group / section markers).
+    let mut stripped = String::with_capacity(raw.len());
+    let mut depth: i32 = 0;
+    for ch in raw.chars() {
+        match ch {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = (depth - 1).max(0),
+            _ if depth == 0 => stripped.push(ch),
+            _ => {}
+        }
+    }
+
+    let upper = stripped.trim().to_uppercase();
+    if upper.is_empty() {
+        return None;
+    }
+    let tokens: Vec<&str> = upper
+        .split(|c: char| c == '-' || c.is_whitespace())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+    let core: Vec<&str> = tokens
+        .iter()
+        .copied()
+        .filter(|t| !SECTION_MARKERS.contains(t))
+        .collect();
+    // If every token was a marker (unusual), keep the full token list so
+    // the code still groups with identical full codes rather than
+    // collapsing to nothing.
+    let core = if core.is_empty() { tokens } else { core };
+    let joined = core.join("-");
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// Suggest groups of active courses that look like the same course
+/// delivered under several codes: courses in the SAME semester whose
+/// normalized core course codes match (see `normalize_course_code`).
+/// Code-only and same-semester by design, so e.g. an HT and a VT
+/// offering of PROLED are never lumped together, and a shared `MAR-`
+/// campus prefix can't chain unrelated courses into one blob. Pure
+/// heuristic; the admin still picks the survivor and confirms.
 async fn merge_suggestions(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -283,90 +337,26 @@ async fn merge_suggestions(
             .into_iter()
             .filter(|c| c.active)
             .collect();
-    let n = courses.len();
 
-    // Union-find over course indices (path-halving find).
-    fn find(parent: &mut [usize], mut i: usize) -> usize {
-        while parent[i] != i {
-            parent[i] = parent[parent[i]];
-            i = parent[i];
-        }
-        i
-    }
-    fn union(parent: &mut [usize], a: usize, b: usize) {
-        let (ra, rb) = (find(parent, a), find(parent, b));
-        if ra != rb {
-            parent[ra] = rb;
-        }
-    }
-
-    let name_key = |c: &minerva_db::queries::courses::CourseRow| -> Option<String> {
-        let k = c.name.trim().to_lowercase();
-        (!k.is_empty()).then_some(k)
-    };
-    let code_key = |c: &minerva_db::queries::courses::CourseRow| -> Option<String> {
-        c.course_code.as_deref().and_then(|code| {
-            let base = code.split('-').next().unwrap_or(code).trim().to_lowercase();
-            (!base.is_empty()).then_some(base)
-        })
-    };
-
-    let mut parent: Vec<usize> = (0..n).collect();
-    let mut first_by_name: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    let mut first_by_code: std::collections::HashMap<String, usize> =
+    // Bucket by (semester, normalized core code). Courses without a
+    // course code are never suggested.
+    let mut buckets: std::collections::HashMap<(Option<String>, String), Vec<usize>> =
         std::collections::HashMap::new();
     for (i, c) in courses.iter().enumerate() {
-        if let Some(k) = name_key(c) {
-            match first_by_name.get(&k) {
-                Some(&j) => union(&mut parent, i, j),
-                None => {
-                    first_by_name.insert(k, i);
-                }
-            }
-        }
-        if let Some(k) = code_key(c) {
-            match first_by_code.get(&k) {
-                Some(&j) => union(&mut parent, i, j),
-                None => {
-                    first_by_code.insert(k, i);
-                }
-            }
-        }
-    }
-
-    let mut components: std::collections::HashMap<usize, Vec<usize>> =
-        std::collections::HashMap::new();
-    for i in 0..n {
-        let root = find(&mut parent, i);
-        components.entry(root).or_default().push(i);
+        let Some(code) = c.course_code.as_deref().and_then(normalize_course_code) else {
+            continue;
+        };
+        buckets
+            .entry((c.semester_label.clone(), code))
+            .or_default()
+            .push(i);
     }
 
     let mut out: Vec<MergeSuggestionGroup> = Vec::new();
-    for members in components.into_values() {
+    for ((semester_label, code), members) in buckets {
         if members.len() < 2 {
             continue;
         }
-        let names: std::collections::HashSet<String> = members
-            .iter()
-            .filter_map(|&i| name_key(&courses[i]))
-            .collect();
-        let codes: std::collections::HashSet<String> = members
-            .iter()
-            .filter_map(|&i| code_key(&courses[i]))
-            .collect();
-        let all_same_name =
-            names.len() == 1 && members.iter().all(|&i| name_key(&courses[i]).is_some());
-        let all_same_code =
-            codes.len() == 1 && members.iter().all(|&i| code_key(&courses[i]).is_some());
-        let match_kind = if all_same_name {
-            "name"
-        } else if all_same_code {
-            "code"
-        } else {
-            "related"
-        };
-
         let mut group: Vec<MergeSuggestionCourse> = members
             .iter()
             .map(|&i| {
@@ -382,27 +372,76 @@ async fn merge_suggestions(
             })
             .collect();
         group.sort_by(|a, b| {
-            a.semester_label
-                .cmp(&b.semester_label)
+            a.course_code
+                .cmp(&b.course_code)
                 .then_with(|| a.name.cmp(&b.name))
-                .then_with(|| a.course_code.cmp(&b.course_code))
         });
         out.push(MergeSuggestionGroup {
-            match_kind,
+            code,
+            semester_label,
             courses: group,
         });
     }
 
-    // Largest groups first, then alphabetical by the first course name,
-    // so the listing is stable across requests.
+    // Largest groups first, then by code, so the listing is stable.
     out.sort_by(|a, b| {
         b.courses
             .len()
             .cmp(&a.courses.len())
-            .then_with(|| a.courses[0].name.cmp(&b.courses[0].name))
+            .then_with(|| a.code.cmp(&b.code))
     });
 
     Ok(Json(out))
+}
+
+#[cfg(test)]
+mod merge_suggestion_tests {
+    use super::normalize_course_code;
+
+    #[test]
+    fn strips_section_and_campus_markers() {
+        assert_eq!(
+            normalize_course_code("PROLED (AB)").as_deref(),
+            Some("PROLED")
+        );
+        assert_eq!(
+            normalize_course_code("PROLED (CD)").as_deref(),
+            Some("PROLED")
+        );
+        assert_eq!(normalize_course_code("PROLED-S").as_deref(), Some("PROLED"));
+        assert_eq!(
+            normalize_course_code("SUPCOM-HI").as_deref(),
+            Some("SUPCOM")
+        );
+        assert_eq!(
+            normalize_course_code("SUPCOM-DIST").as_deref(),
+            Some("SUPCOM")
+        );
+        assert_eq!(normalize_course_code("MAR-FODS").as_deref(), Some("FODS"));
+        assert_eq!(normalize_course_code("MAR-NLP").as_deref(), Some("NLP"));
+    }
+
+    #[test]
+    fn keeps_distinct_codes_distinct() {
+        // Same name, different real codes: must NOT collapse together.
+        assert_eq!(normalize_course_code("MAR-IP").as_deref(), Some("IP"));
+        assert_eq!(
+            normalize_course_code("INTROPROG").as_deref(),
+            Some("INTROPROG")
+        );
+        assert_ne!(
+            normalize_course_code("MAR-IP"),
+            normalize_course_code("INTROPROG")
+        );
+    }
+
+    #[test]
+    fn empty_or_markers_only() {
+        assert_eq!(normalize_course_code("").as_deref(), None);
+        assert_eq!(normalize_course_code("  ()  ").as_deref(), None);
+        // All-marker code falls back to the full token list.
+        assert_eq!(normalize_course_code("MAR").as_deref(), Some("MAR"));
+    }
 }
 
 #[derive(Serialize)]

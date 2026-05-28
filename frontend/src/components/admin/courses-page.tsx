@@ -836,9 +836,10 @@ function SuggestedMergeGroup({ group }: { group: MergeSuggestionGroup }) {
   return (
     <div className="space-y-3 rounded border p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary">
-          {t(`courses.suggestions.match.${group.match_kind}`)}
-        </Badge>
+        <Badge variant="secondary">{group.code}</Badge>
+        {group.semester_label && (
+          <Badge variant="outline">{group.semester_label}</Badge>
+        )}
         <span className="text-sm text-muted-foreground">
           {t("courses.suggestions.groupCount", { count: group.courses.length })}
         </span>

@@ -354,12 +354,7 @@
     "mergeSubmitting": "Merging...",
     "suggestions": {
       "title": "Suggested merges ({{count}})",
-      "description": "Active courses that share a name or a base course code, and may be the same course under several codes. Pick the course to keep; the others are merged into it and archived.",
-      "match": {
-        "name": "Same name",
-        "code": "Same code",
-        "related": "Related"
-      },
+      "description": "Active courses in the same semester whose course codes share a core (ignoring section / campus markers like MAR-, -S or (AB)). Pick the course to keep; the others are merged into it and archived.",
       "groupCount": "{{count}} courses",
       "survivorBadge": "keep",
       "survivorLabel": "Keep:",

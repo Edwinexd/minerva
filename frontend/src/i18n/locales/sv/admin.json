@@ -354,12 +354,7 @@
     "mergeSubmitting": "Slår samman...",
     "suggestions": {
       "title": "Föreslagna sammanslagningar ({{count}})",
-      "description": "Aktiva kurser som delar namn eller bas-kurskod och kan vara samma kurs under flera koder. Välj kursen som ska behållas; övriga slås samman till den och arkiveras.",
-      "match": {
-        "name": "Samma namn",
-        "code": "Samma kod",
-        "related": "Relaterade"
-      },
+      "description": "Aktiva kurser inom samma termin vars kurskoder delar en kärna (bortser från sektions-/campusmarkörer som MAR-, -S eller (AB)). Välj kursen som ska behållas; övriga slås samman till den och arkiveras.",
       "groupCount": "{{count}} kurser",
       "survivorBadge": "behåll",
       "survivorLabel": "Behåll:",

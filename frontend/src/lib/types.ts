@@ -90,8 +90,10 @@ export interface MergeSuggestionCourse {
 }
 
 export interface MergeSuggestionGroup {
-  /** "name" = identical course names, "code" = shared base course code, "related" = a mix. */
-  match_kind: "name" | "code" | "related"
+  /** Normalized core course code shared by the group (e.g. "PROLED"). */
+  code: string
+  /** Semester all members share; groups never span semesters. */
+  semester_label: string | null
   courses: MergeSuggestionCourse[]
 }
 

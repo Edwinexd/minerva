@@ -129,7 +129,7 @@ export function RootLayout() {
             {" "}{t("footer.licenseLead")}{" "}
             <a href="https://github.com/Edwinexd/minerva?tab=AGPL-3.0-1-ov-file" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">AGPL-3.0</a>
           </span>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             {isEmbed ? (
               <a href="/data-handling" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">{t("nav.dataHandling")}</a>
             ) : (

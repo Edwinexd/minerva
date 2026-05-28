@@ -123,24 +123,30 @@
   "teacherGuide": {
     "title": "Kom igång med Minerva i din kurs",
     "intro": "Minerva är en AI-studieassistent som svarar utifrån ditt eget kursmaterial. Dina studenter når den via en länk inne i din Moodle-kurs, och det tar ungefär tio minuter att komma igång.",
-    "adminNote": "Din administratör har redan installerat Minerva i hela Moodle, så du behöver bara göra stegen per kurs nedan.",
-    "timeBadge": "Ungefär 10 minuter, 4 steg",
+    "adminNote": "Din administratör har registrerat Minerva som ett externt verktyg i hela Moodle. Du behöver fortfarande aktivera det för var och en av dina kurser (steg 2) innan det visas i aktivitetsväljaren.",
+    "timeBadge": "Ungefär 10 minuter, 5 steg",
     "steps": {
       "login": {
         "title": "1. Logga in i Minerva",
         "body": "Gå till minerva.dsv.su.se och logga in med ditt SU-konto. Kurser som importeras nattligen från Daisy visas på din översikt. Om en kurs saknas kan du skapa den med Ny kurs.",
         "alt": "Minervas översikt med lärarens kurser"
       },
+      "enableTool": {
+        "title": "2. Aktivera Minerva i din kurs",
+        "body": "I din Moodle-kurs öppnar du Mer-menyn och väljer LTI Externa verktyg. Hitta Minerva, aktivera det och slå på Visa i aktivitetsväljaren.",
+        "alt": "Kursens sida för LTI Externa verktyg med Minerva aktiverat och visat i aktivitetsväljaren",
+        "body2": "När det är korrekt aktiverat visas Minerva i aktivitetsväljaren med sin logotyp. Om du istället ser en tom eller generisk ikon har verktyget registrerats utan sin ikon; kontakta lambda@dsv.su.se."
+      },
       "addActivity": {
-        "title": "2. Lägg till Minerva i din Moodle-kurs",
+        "title": "3. Lägg till Minerva-aktiviteten i ett avsnitt",
         "body": "I din Moodle-kurs, slå på Redigeringsläge, välj Lägg till aktivitet eller resurs i det avsnitt där du vill ha assistenten och välj Minerva.",
-        "alt": "Moodles aktivitetsväljare med verktyget Minerva",
+        "alt": "Moodles aktivitetsväljare med verktyget Minerva och dess logotyp",
         "body2": "Ge den ett namn som studenterna känner igen och välj sedan Spara och återgå till kursen. Aktiviteten visas nu i din kurs.",
         "altConfig": "Inställningar för externt verktyg med ifyllt aktivitetsnamn",
         "altCourse": "Moodle-kurssidan med Minerva-aktiviteten tillagd"
       },
       "linkMaterials": {
-        "title": "3. Koppla ditt kursmaterial",
+        "title": "4. Koppla ditt kursmaterial",
         "body": "Öppna Minerva-inställningar från kursens Mer-meny, välj din motsvarande Minerva-kurs i listan och välj Länka Minerva-kurs.",
         "alt": "Minerva-inställningarnas länkformulär med kurslistan",
         "body2": "Välj sedan Synka material för att ladda upp dina filer, sidor och avsnittssammanfattningar så att assistenten kan svara utifrån dem. Kör om det när du ändrar material; det körs även automatiskt två gånger i timmen.",
@@ -148,7 +154,7 @@
         "altSync": "Bekräftelse på slutförd materialsynkronisering"
       },
       "firstLaunch": {
-        "title": "4. Öppna den en gång för att koppla aktiviteten",
+        "title": "5. Öppna den en gång för att koppla aktiviteten",
         "body": "Klicka på Minerva-aktiviteten du lade till. Första gången väljer du vilken Minerva-kurs den ska öppna och väljer Länka och öppna Minerva. Minerva kommer ihåg detta, så varje senare öppning av dig eller dina studenter går till rätt kurs.",
         "alt": "Förstagångsvyn som länkar Moodle-aktiviteten till en Minerva-kurs"
       }

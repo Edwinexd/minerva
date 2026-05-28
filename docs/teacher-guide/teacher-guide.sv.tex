@@ -48,7 +48,7 @@
 \begin{center}
   {\LARGE\bfseries Minerva}\\[2pt]
   {\Large\color{accent} Lärarguide}\\[6pt]
-  {\color{soft}\small Koppla AI-studieassistenten Minerva till din Moodle-kurs \textbullet{} ungefär 10 minuter \textbullet{} 4 steg}
+  {\color{soft}\small Koppla AI-studieassistenten Minerva till din Moodle-kurs \textbullet{} ungefär 10 minuter \textbullet{} 5 steg}
 \end{center}
 
 \vspace{0.4em}
@@ -60,9 +60,10 @@ Minerva är en AI-studieassistent som svarar utifrån ditt eget kursmaterial.
 Dina studenter når den via en länk inne i din Moodle-kurs. Den här guiden går
 igenom inställningarna per kurs från början till slut.
 
-\callout{\textbf{Innan du börjar:} din administratör har redan installerat
-Minerva-verktyget och pluginet i hela Moodle, så du behöver bara göra stegen per
-kurs nedan. Om du inte ser alternativen som visas här, kontakta
+\callout{\textbf{Innan du börjar:} din administratör har registrerat Minerva som
+ett externt verktyg i hela Moodle. Du behöver fortfarande aktivera det för var
+och en av dina kurser (Steg 2) innan det visas i aktivitetsväljaren. Om du inte
+ser alternativen som visas här, kontakta
 \href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.}
 
 \section{Steg 1. Logga in i Minerva}
@@ -73,12 +74,25 @@ kurs saknas kan du skapa den med \textbf{New Course}.
 
 \shot{minerva-dashboard.png}{Din Minerva-översikt med de kurser du undervisar i.}
 
-\section{Steg 2. Lägg till Minerva i din Moodle-kurs}
+\section{Steg 2. Aktivera Minerva i din kurs}
+
+Minerva är registrerat i hela Moodle, men det visas inte i en kurs förrän du
+aktiverar det. I din Moodle-kurs, öppna menyn \textbf{More} och välj \textbf{LTI
+External tools}. Hitta \textbf{Minerva}, aktivera det och slå på \textbf{Show in
+activity chooser}.
+
+\shot{enable-tool.png}{Kursens LTI External tools: aktivera Minerva och visa det i aktivitetsväljaren.}
+
+När det är korrekt aktiverat visas Minerva i aktivitetsväljaren med sin logotyp.
+Om du istället ser en tom eller generisk ikon har verktyget registrerats utan sin
+ikon; kontakta \href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.
+
+\section{Steg 3. Lägg till Minerva-aktiviteten i ett avsnitt}
 
 I din Moodle-kurs, slå på \textbf{Edit mode}, välj \textbf{Add an activity or
 resource} i det avsnitt där du vill ha assistenten och välj \textbf{Minerva}.
 
-\shot{activity-chooser.png}{Välj Minerva i aktivitetsväljaren.}
+\shot{activity-chooser.png}{Välj Minerva i aktivitetsväljaren; den har Minervas logotyp.}
 
 Ge den ett namn som studenterna känner igen (till exempel ``Minerva AI
 assistant'') och välj sedan \textbf{Save and return to course}. Aktiviteten visas
@@ -87,7 +101,7 @@ nu i din kurs.
 \shot{lti-config.png}{Namnge aktiviteten och spara.}
 \shot{course-activity.png}{Minerva-aktiviteten finns nu i din kurs.}
 
-\section{Steg 3. Koppla ditt kursmaterial}
+\section{Steg 4. Koppla ditt kursmaterial}
 
 Öppna \textbf{Minerva settings} från kursens \textbf{More}-meny, välj din
 motsvarande Minerva-kurs i listan och välj \textbf{Link Minerva course}.
@@ -101,7 +115,7 @@ du ändrar material; det körs även automatiskt två gånger i timmen.
 \shot{linked.png}{När kursen är länkad kan du synka material eller avlänka när som helst.}
 \shot{sync-complete.png}{Minerva bekräftar hur många resurser som laddades upp.}
 
-\section{Steg 4. Öppna den en gång för att koppla aktiviteten}
+\section{Steg 5. Öppna den en gång för att koppla aktiviteten}
 
 Klicka på Minerva-aktiviteten du lade till. Första gången väljer du vilken
 Minerva-kurs den ska öppna och väljer \textbf{Link and open Minerva}. Minerva

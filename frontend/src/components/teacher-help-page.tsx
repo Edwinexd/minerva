@@ -55,6 +55,22 @@ export function TeacherHelpPage() {
 
         <li>
           <h2 className="text-lg font-semibold">
+            {t("teacherGuide.steps.enableTool.title")}
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            {t("teacherGuide.steps.enableTool.body")}
+          </p>
+          <Shot
+            src="/help/enable-tool.png"
+            alt={t("teacherGuide.steps.enableTool.alt")}
+          />
+          <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+            {t("teacherGuide.steps.enableTool.body2")}
+          </p>
+        </li>
+
+        <li>
+          <h2 className="text-lg font-semibold">
             {t("teacherGuide.steps.addActivity.title")}
           </h2>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">

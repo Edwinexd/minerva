@@ -85,6 +85,7 @@ import { ConfigPage } from "@/components/teacher/config-page"
 import { DocumentsPage } from "@/components/teacher/documents-page"
 import { MembersPage } from "@/components/teacher/members-page"
 import { NewChatRouteComponent } from "@/components/chat/chat-page"
+import { TeacherHelpPage } from "@/components/teacher-help-page"
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -277,6 +278,12 @@ describe("Authenticated pages a11y", () => {
       ],
     )
     expect(getByText("What is recursion?")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("teacher help page has no axe violations", async () => {
+    const { container, getByText } = renderPage(<TeacherHelpPage />, [])
+    expect(getByText("Set up Minerva for your course")).toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
   })
 })

@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root"
+import { Route as TeacherHelpRouteImport } from "./routes/teacher-help"
 import { Route as DataHandlingRouteImport } from "./routes/data-handling"
 import { Route as AdminRouteImport } from "./routes/admin"
 import { Route as AcknowledgementsRouteImport } from "./routes/acknowledgements"
@@ -53,6 +54,11 @@ import { Route as TeacherCoursesCourseIdConfigRouteImport } from "./routes/teach
 import { Route as TeacherCoursesCourseIdCanvasRouteImport } from "./routes/teacher/courses.$courseId/canvas"
 import { Route as TeacherCoursesCourseIdApiKeysRouteImport } from "./routes/teacher/courses.$courseId/api-keys"
 
+const TeacherHelpRoute = TeacherHelpRouteImport.update({
+  id: "/teacher-help",
+  path: "/teacher-help",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DataHandlingRoute = DataHandlingRouteImport.update({
   id: "/data-handling",
   path: "/data-handling",
@@ -291,6 +297,7 @@ export interface FileRoutesByFullPath {
   "/acknowledgements": typeof AcknowledgementsRoute
   "/admin": typeof AdminRouteWithChildren
   "/data-handling": typeof DataHandlingRoute
+  "/teacher-help": typeof TeacherHelpRoute
   "/admin/courses": typeof AdminCoursesRoute
   "/admin/daisy": typeof AdminDaisyRoute
   "/admin/defaults": typeof AdminDefaultsRoute
@@ -335,6 +342,7 @@ export interface FileRoutesByTo {
   "/accessibility": typeof AccessibilityRoute
   "/acknowledgements": typeof AcknowledgementsRoute
   "/data-handling": typeof DataHandlingRoute
+  "/teacher-help": typeof TeacherHelpRoute
   "/admin/courses": typeof AdminCoursesRoute
   "/admin/daisy": typeof AdminDaisyRoute
   "/admin/defaults": typeof AdminDefaultsRoute
@@ -380,6 +388,7 @@ export interface FileRoutesById {
   "/acknowledgements": typeof AcknowledgementsRoute
   "/admin": typeof AdminRouteWithChildren
   "/data-handling": typeof DataHandlingRoute
+  "/teacher-help": typeof TeacherHelpRoute
   "/admin/courses": typeof AdminCoursesRoute
   "/admin/daisy": typeof AdminDaisyRoute
   "/admin/defaults": typeof AdminDefaultsRoute
@@ -427,6 +436,7 @@ export interface FileRouteTypes {
     | "/acknowledgements"
     | "/admin"
     | "/data-handling"
+    | "/teacher-help"
     | "/admin/courses"
     | "/admin/daisy"
     | "/admin/defaults"
@@ -471,6 +481,7 @@ export interface FileRouteTypes {
     | "/accessibility"
     | "/acknowledgements"
     | "/data-handling"
+    | "/teacher-help"
     | "/admin/courses"
     | "/admin/daisy"
     | "/admin/defaults"
@@ -515,6 +526,7 @@ export interface FileRouteTypes {
     | "/acknowledgements"
     | "/admin"
     | "/data-handling"
+    | "/teacher-help"
     | "/admin/courses"
     | "/admin/daisy"
     | "/admin/defaults"
@@ -561,6 +573,7 @@ export interface RootRouteChildren {
   AcknowledgementsRoute: typeof AcknowledgementsRoute
   AdminRoute: typeof AdminRouteWithChildren
   DataHandlingRoute: typeof DataHandlingRoute
+  TeacherHelpRoute: typeof TeacherHelpRoute
   EmbedCourseIdRoute: typeof EmbedCourseIdRoute
   JoinTokenRoute: typeof JoinTokenRoute
   LtiBindRoute: typeof LtiBindRoute
@@ -575,6 +588,13 @@ export interface RootRouteChildren {
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
+    "/teacher-help": {
+      id: "/teacher-help"
+      path: "/teacher-help"
+      fullPath: "/teacher-help"
+      preLoaderRoute: typeof TeacherHelpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/data-handling": {
       id: "/data-handling"
       path: "/data-handling"
@@ -964,6 +984,7 @@ const rootRouteChildren: RootRouteChildren = {
   AcknowledgementsRoute: AcknowledgementsRoute,
   AdminRoute: AdminRouteWithChildren,
   DataHandlingRoute: DataHandlingRoute,
+  TeacherHelpRoute: TeacherHelpRoute,
   EmbedCourseIdRoute: EmbedCourseIdRoute,
   JoinTokenRoute: JoinTokenRoute,
   LtiBindRoute: LtiBindRoute,

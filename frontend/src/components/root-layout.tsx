@@ -2,7 +2,7 @@ import { Link, Outlet } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { userQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
-import { canManageSiteIntegrations } from "@/lib/roles"
+import { canManageSiteIntegrations, isTeacherOrAbove } from "@/lib/roles"
 import { ExternalLink } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
@@ -86,6 +86,14 @@ export function RootLayout() {
             </Link>
           )}
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm min-w-0">
+            {!isEmbed && user && isTeacherOrAbove(user.role) && (
+              <Link
+                to="/teacher-help"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                {t("nav.teacherHelp")}
+              </Link>
+            )}
             {!isEmbed && user && canManageSiteIntegrations(user.role) && (
               <Link
                 to="/admin"

@@ -1,0 +1,141 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{parskip}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+
+% Screenshots are the same files the in-app help page uses.
+\graphicspath{{../../frontend/public/help/}}
+
+\definecolor{accent}{HTML}{1D4ED8}
+\definecolor{accentbg}{HTML}{EFF4FF}
+\definecolor{soft}{HTML}{555555}
+
+\titleformat{\section}{\Large\bfseries\color{accent}}{}{0pt}{}
+\titlespacing*{\section}{0pt}{1.4em}{0.5em}
+
+\captionsetup{font={small,it},labelformat=empty,skip=4pt}
+\setlength{\fboxsep}{10pt}
+
+\newcommand{\shot}[2]{%
+  \begin{figure}[H]\centering
+  \includegraphics[width=\linewidth,height=0.6\textheight,keepaspectratio]{#1}%
+  \caption*{#2}%
+  \end{figure}}
+
+\newcommand{\callout}[1]{%
+  \begin{center}
+  \fcolorbox{accent}{accentbg}{\parbox{0.96\linewidth}{\small #1}}
+  \end{center}}
+
+\hypersetup{
+  pdftitle={Minerva: Teacher Setup Guide},
+  pdfauthor={DSV, Stockholm University},
+}
+
+\begin{document}
+
+\begin{center}
+  {\LARGE\bfseries Minerva}\\[2pt]
+  {\Large\color{accent} Teacher Setup Guide}\\[6pt]
+  {\color{soft}\small Connect the Minerva AI study assistant to your Moodle course \textbullet{} about 10 minutes \textbullet{} 4 steps}
+\end{center}
+
+\vspace{0.4em}
+\hrule height 1pt
+\vspace{1.0em}
+
+\noindent
+Minerva is an AI study assistant that answers from your own course materials.
+Your students reach it from a link inside your Moodle course. This guide walks
+you through the per-course setup from start to finish.
+
+\callout{\textbf{Before you start:} your administrator has already installed the
+Minerva tool and plugin across Moodle, so you only need the per-course steps
+below. If you do not see the options shown here, contact
+\href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.}
+
+\section{Step 1. Log in to Minerva}
+
+Go to \href{https://minerva.dsv.su.se}{minerva.dsv.su.se} and sign in with your
+SU account. Courses imported nightly from Daisy appear on your dashboard. If a
+course is missing, create it with \textbf{New Course}.
+
+\shot{minerva-dashboard.png}{Your Minerva dashboard, with the courses you teach.}
+
+\section{Step 2. Add Minerva to your Moodle course}
+
+In your Moodle course, turn on \textbf{Edit mode}, select \textbf{Add an
+activity or resource} in the section where you want the assistant, and choose
+\textbf{Minerva}.
+
+\shot{activity-chooser.png}{Pick Minerva from the activity chooser.}
+
+Give it a name students will recognise (for example, ``Minerva AI assistant''),
+then choose \textbf{Save and return to course}. The activity now appears in your
+course.
+
+\shot{lti-config.png}{Name the activity and save.}
+\shot{course-activity.png}{The Minerva activity is now in your course.}
+
+\section{Step 3. Connect your course materials}
+
+Open \textbf{Minerva settings} from the course's \textbf{More} menu, pick your
+matching Minerva course from the list, and choose \textbf{Link Minerva course}.
+
+\shot{link-form.png}{Minerva settings: choose your Minerva course and link it.}
+
+Then choose \textbf{Sync materials} to upload your files, pages, and section
+summaries so the assistant can answer from them. Re-run it whenever you change
+materials; it also runs automatically twice an hour.
+
+\shot{linked.png}{Once linked, you can sync materials or unlink at any time.}
+\shot{sync-complete.png}{Minerva confirms how many resources were uploaded.}
+
+\section{Step 4. Open it once to connect the activity}
+
+Click the Minerva activity you added. The first time, pick which Minerva course
+it should open and choose \textbf{Link and open Minerva}. Minerva remembers
+this, so every later launch by you or your students opens the right course.
+
+\shot{first-launch-bind.png}{On first launch, connect the activity to your Minerva course.}
+
+\section{That is it: here is what students see}
+
+Students click the same activity and get a chat assistant that answers from your
+course materials, right inside Moodle. The suggested questions are drawn from
+what you synced.
+
+\shot{student-chat.png}{The student view: a course-grounded chat assistant.}
+\shot{launch-in-moodle.png}{The same assistant, embedded inside the Moodle activity.}
+
+\section{Good to know}
+
+\begin{itemize}[leftmargin=1.4em,itemsep=4pt]
+  \item The assistant only uses materials you sync. Student conversations are
+  visible to course staff; see \textbf{Data handling} in Minerva for details.
+  \item Re-sync after you change materials. You can also include
+  teacher-answered forum threads from \textbf{Minerva settings} (optional;
+  student names are removed before upload).
+  \item Questions or need higher usage limits? Email
+  \href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.
+\end{itemize}
+
+\vspace{1.2em}
+\hrule height 0.4pt
+\vspace{0.4em}
+\noindent{\color{soft}\small Minerva \textbullet{} Department of Computer and
+Systems Sciences (DSV), Stockholm University \textbullet{}
+\href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}}
+
+\end{document}

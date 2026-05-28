@@ -41,6 +41,7 @@ pub fn router() -> Router<AppState> {
         // `/courses` router so it can surface archived rows and the
         // admin-only merge.
         .route("/courses", get(list_all_courses))
+        .route("/courses/merge-suggestions", get(merge_suggestions))
         .route("/courses/merge", post(merge_courses))
         .route("/courses/{id}/archive", post(archive_course))
         .route("/courses/{id}/unarchive", post(unarchive_course))
@@ -242,6 +243,166 @@ async fn unarchive_course(
         return Err(AppError::NotFound);
     }
     Ok(Json(serde_json::json!({ "restored": true })))
+}
+
+#[derive(Serialize)]
+struct MergeSuggestionCourse {
+    id: Uuid,
+    name: String,
+    course_code: Option<String>,
+    semester_label: Option<String>,
+    owner_id: Uuid,
+    auto_managed: bool,
+}
+
+#[derive(Serialize)]
+struct MergeSuggestionGroup {
+    /// What linked the group: "name" (identical course names), "code"
+    /// (shared base course code, e.g. SUPCOM / SUPCOM-HI / SUPCOM-DIST
+    /// all reduce to SUPCOM), or "related" (linked through a mix of the
+    /// two signals).
+    match_kind: &'static str,
+    courses: Vec<MergeSuggestionCourse>,
+}
+
+/// Suggest groups of active courses that look like merge candidates:
+/// courses that share an identical (case-insensitive, trimmed) name, or
+/// a common base course code (the part before the first '-'). Linked
+/// transitively via union-find so e.g. SUPCOM, SUPCOM-HI and SUPCOM-DIST
+/// land in one group. Pure heuristic; the admin still picks the survivor
+/// and confirms before anything is merged.
+async fn merge_suggestions(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<Vec<MergeSuggestionGroup>>, AppError> {
+    require_admin(&user)?;
+
+    let courses: Vec<minerva_db::queries::courses::CourseRow> =
+        minerva_db::queries::courses::list_all_including_archived(&state.db)
+            .await?
+            .into_iter()
+            .filter(|c| c.active)
+            .collect();
+    let n = courses.len();
+
+    // Union-find over course indices (path-halving find).
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let (ra, rb) = (find(parent, a), find(parent, b));
+        if ra != rb {
+            parent[ra] = rb;
+        }
+    }
+
+    let name_key = |c: &minerva_db::queries::courses::CourseRow| -> Option<String> {
+        let k = c.name.trim().to_lowercase();
+        (!k.is_empty()).then_some(k)
+    };
+    let code_key = |c: &minerva_db::queries::courses::CourseRow| -> Option<String> {
+        c.course_code.as_deref().and_then(|code| {
+            let base = code.split('-').next().unwrap_or(code).trim().to_lowercase();
+            (!base.is_empty()).then_some(base)
+        })
+    };
+
+    let mut parent: Vec<usize> = (0..n).collect();
+    let mut first_by_name: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut first_by_code: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for (i, c) in courses.iter().enumerate() {
+        if let Some(k) = name_key(c) {
+            match first_by_name.get(&k) {
+                Some(&j) => union(&mut parent, i, j),
+                None => {
+                    first_by_name.insert(k, i);
+                }
+            }
+        }
+        if let Some(k) = code_key(c) {
+            match first_by_code.get(&k) {
+                Some(&j) => union(&mut parent, i, j),
+                None => {
+                    first_by_code.insert(k, i);
+                }
+            }
+        }
+    }
+
+    let mut components: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        components.entry(root).or_default().push(i);
+    }
+
+    let mut out: Vec<MergeSuggestionGroup> = Vec::new();
+    for members in components.into_values() {
+        if members.len() < 2 {
+            continue;
+        }
+        let names: std::collections::HashSet<String> = members
+            .iter()
+            .filter_map(|&i| name_key(&courses[i]))
+            .collect();
+        let codes: std::collections::HashSet<String> = members
+            .iter()
+            .filter_map(|&i| code_key(&courses[i]))
+            .collect();
+        let all_same_name =
+            names.len() == 1 && members.iter().all(|&i| name_key(&courses[i]).is_some());
+        let all_same_code =
+            codes.len() == 1 && members.iter().all(|&i| code_key(&courses[i]).is_some());
+        let match_kind = if all_same_name {
+            "name"
+        } else if all_same_code {
+            "code"
+        } else {
+            "related"
+        };
+
+        let mut group: Vec<MergeSuggestionCourse> = members
+            .iter()
+            .map(|&i| {
+                let c = &courses[i];
+                MergeSuggestionCourse {
+                    id: c.id,
+                    name: c.name.clone(),
+                    course_code: c.course_code.clone(),
+                    semester_label: c.semester_label.clone(),
+                    owner_id: c.owner_id,
+                    auto_managed: c.auto_managed,
+                }
+            })
+            .collect();
+        group.sort_by(|a, b| {
+            a.semester_label
+                .cmp(&b.semester_label)
+                .then_with(|| a.name.cmp(&b.name))
+                .then_with(|| a.course_code.cmp(&b.course_code))
+        });
+        out.push(MergeSuggestionGroup {
+            match_kind,
+            courses: group,
+        });
+    }
+
+    // Largest groups first, then alphabetical by the first course name,
+    // so the listing is stable across requests.
+    out.sort_by(|a, b| {
+        b.courses
+            .len()
+            .cmp(&a.courses.len())
+            .then_with(|| a.courses[0].name.cmp(&b.courses[0].name))
+    });
+
+    Ok(Json(out))
 }
 
 #[derive(Serialize)]

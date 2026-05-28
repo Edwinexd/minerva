@@ -80,6 +80,21 @@ export interface Course {
   course_code: string | null
 }
 
+export interface MergeSuggestionCourse {
+  id: string
+  name: string
+  course_code: string | null
+  semester_label: string | null
+  owner_id: string
+  auto_managed: boolean
+}
+
+export interface MergeSuggestionGroup {
+  /** "name" = identical course names, "code" = shared base course code, "related" = a mix. */
+  match_kind: "name" | "code" | "related"
+  courses: MergeSuggestionCourse[]
+}
+
 export interface DaisyOffering {
   momenttillf_id: string
   course_code: string | null

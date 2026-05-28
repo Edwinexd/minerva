@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiDiagnostics, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiDiagnostics, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, StudyState, StudySurvey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -21,6 +21,19 @@ export const coursesQuery = queryOptions({
 export const adminCoursesQuery = queryOptions({
   queryKey: ["admin", "courses"],
   queryFn: () => api.get<Course[]>("/admin/courses"),
+})
+
+/**
+ * Heuristic merge candidates: groups of active courses that share a
+ * name or a base course code (e.g. SUPCOM / SUPCOM-HI / SUPCOM-DIST).
+ * Drives the "Suggested merges" panel on the admin courses tab. Keyed
+ * under ["admin", "courses", ...] so an admin-courses invalidation
+ * (after a merge / archive) refreshes the suggestions too.
+ */
+export const adminMergeSuggestionsQuery = queryOptions({
+  queryKey: ["admin", "courses", "merge-suggestions"],
+  queryFn: () =>
+    api.get<MergeSuggestionGroup[]>("/admin/courses/merge-suggestions"),
 })
 
 export const courseQuery = (id: string) =>

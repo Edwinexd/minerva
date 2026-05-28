@@ -351,7 +351,23 @@
     "mergeNoCandidates": "There are no other active courses to merge into.",
     "mergeCancel": "Cancel",
     "mergeConfirm": "Merge and archive",
-    "mergeSubmitting": "Merging..."
+    "mergeSubmitting": "Merging...",
+    "suggestions": {
+      "title": "Suggested merges ({{count}})",
+      "description": "Active courses that share a name or a base course code, and may be the same course under several codes. Pick the course to keep; the others are merged into it and archived.",
+      "match": {
+        "name": "Same name",
+        "code": "Same code",
+        "related": "Related"
+      },
+      "groupCount": "{{count}} courses",
+      "survivorBadge": "keep",
+      "survivorLabel": "Keep:",
+      "mergeButton": "Merge group",
+      "confirmTitle": "Merge this group?",
+      "confirmDescription": "{{count}} course(s) will be archived and all of their content moved into {{survivor}}. This cannot be undone from the UI.",
+      "confirmButton": "Merge and archive"
+    }
   },
   "study": {
     "title": "Study mode configuration",

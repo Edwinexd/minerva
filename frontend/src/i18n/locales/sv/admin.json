@@ -351,7 +351,23 @@
     "mergeNoCandidates": "Det finns inga andra aktiva kurser att slå samman till.",
     "mergeCancel": "Avbryt",
     "mergeConfirm": "Slå samman och arkivera",
-    "mergeSubmitting": "Slår samman..."
+    "mergeSubmitting": "Slår samman...",
+    "suggestions": {
+      "title": "Föreslagna sammanslagningar ({{count}})",
+      "description": "Aktiva kurser som delar namn eller bas-kurskod och kan vara samma kurs under flera koder. Välj kursen som ska behållas; övriga slås samman till den och arkiveras.",
+      "match": {
+        "name": "Samma namn",
+        "code": "Samma kod",
+        "related": "Relaterade"
+      },
+      "groupCount": "{{count}} kurser",
+      "survivorBadge": "behåll",
+      "survivorLabel": "Behåll:",
+      "mergeButton": "Slå samman grupp",
+      "confirmTitle": "Slå samman gruppen?",
+      "confirmDescription": "{{count}} kurs(er) arkiveras och allt deras innehåll flyttas till {{survivor}}. Detta kan inte ångras från gränssnittet.",
+      "confirmButton": "Slå samman och arkivera"
+    }
   },
   "study": {
     "title": "Konfiguration av studieläge",

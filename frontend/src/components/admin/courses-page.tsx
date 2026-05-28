@@ -5,9 +5,10 @@ import { useTranslation } from "react-i18next"
 import {
   adminCoursesQuery,
   adminEmbeddingModelsQuery,
+  adminMergeSuggestionsQuery,
   adminUsersQuery,
 } from "@/lib/queries"
-import type { Course } from "@/lib/types"
+import type { Course, MergeSuggestionGroup } from "@/lib/types"
 import { modelDisplayName } from "@/lib/embedding-models"
 import { api } from "@/lib/api"
 import {
@@ -90,7 +91,9 @@ export function CourseManagementPanel() {
   })
 
   return (
-    <Card>
+    <div className="space-y-4">
+      <SuggestedMergesCard />
+      <Card>
       <CardHeader>
         <CardTitle>{t("courses.title", { total: courses.length })}</CardTitle>
         <CardDescription>{t("courses.description")}</CardDescription>
@@ -201,7 +204,8 @@ export function CourseManagementPanel() {
           )}
         </div>
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   )
 }
 
@@ -762,5 +766,168 @@ function MergeCourseDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+// ── Suggested merges ───────────────────────────────────────────────
+//
+// A heuristic panel that surfaces groups of active courses that look
+// like the same course delivered under several codes (e.g. SUPCOM /
+// SUPCOM-HI / SUPCOM-DIST share a name and a base code). The admin
+// picks which course in the group survives; the rest are merged into it
+// (one merge call each) and archived. Only renders when the backend
+// returns at least one group.
+
+function SuggestedMergesCard() {
+  const { t } = useTranslation("admin")
+  const { data: groups } = useQuery(adminMergeSuggestionsQuery)
+  if (!groups || groups.length === 0) return null
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          {t("courses.suggestions.title", { count: groups.length })}
+        </CardTitle>
+        <CardDescription>{t("courses.suggestions.description")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {groups.map((group, i) => (
+          <SuggestedMergeGroup key={i} group={group} />
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
+function SuggestedMergeGroup({ group }: { group: MergeSuggestionGroup }) {
+  const { t } = useTranslation("admin")
+  const formatError = useApiErrorMessage()
+  const queryClient = useQueryClient()
+  // Default the survivor to the Daisy-managed course if one is present
+  // (that's the canonical record for the pre-Daisy -> Daisy case);
+  // otherwise the first listed course.
+  const defaultSurvivor =
+    group.courses.find((c) => c.auto_managed)?.id ?? group.courses[0].id
+  const [survivorId, setSurvivorId] = useState(defaultSurvivor)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const mergeMutation = useMutation({
+    mutationFn: async () => {
+      // Merge every other group member into the chosen survivor, one
+      // call each (each merge is its own transaction server-side).
+      for (const c of group.courses) {
+        if (c.id === survivorId) continue
+        await api.post("/admin/courses/merge", {
+          survivor_id: survivorId,
+          source_id: c.id,
+        })
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
+      queryClient.invalidateQueries({ queryKey: ["courses"] })
+      setConfirmOpen(false)
+    },
+  })
+
+  const survivor = group.courses.find((c) => c.id === survivorId)
+  const otherCount = group.courses.length - 1
+
+  return (
+    <div className="space-y-3 rounded border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary">
+          {t(`courses.suggestions.match.${group.match_kind}`)}
+        </Badge>
+        <span className="text-sm text-muted-foreground">
+          {t("courses.suggestions.groupCount", { count: group.courses.length })}
+        </span>
+      </div>
+      <ul className="space-y-1 text-sm">
+        {group.courses.map((c) => (
+          <li key={c.id} className="flex flex-wrap items-center gap-2">
+            {c.course_code && (
+              <Badge variant="outline" className="text-xs">
+                {c.course_code}
+              </Badge>
+            )}
+            <span className="font-medium">{c.name}</span>
+            {c.semester_label && (
+              <span className="text-xs text-muted-foreground">
+                {c.semester_label}
+              </span>
+            )}
+            {c.id === survivorId && (
+              <Badge className="text-xs">
+                {t("courses.suggestions.survivorBadge")}
+              </Badge>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-sm font-medium">
+          {t("courses.suggestions.survivorLabel")}
+        </label>
+        <Select value={survivorId} onValueChange={(v) => v && setSurvivorId(v)}>
+          <SelectTrigger
+            className="w-72 max-w-full"
+            aria-label={t("courses.suggestions.survivorLabel")}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {group.courses.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.course_code ? `${c.course_code} ` : ""}
+                {c.name}
+                {c.semester_label ? ` (${c.semester_label})` : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          size="sm"
+          onClick={() => setConfirmOpen(true)}
+          disabled={mergeMutation.isPending}
+        >
+          {t("courses.suggestions.mergeButton")}
+        </Button>
+      </div>
+      {mergeMutation.isError && (
+        <p className="text-sm text-destructive">
+          {formatError(mergeMutation.error)}
+        </p>
+      )}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("courses.suggestions.confirmTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("courses.suggestions.confirmDescription", {
+                count: otherCount,
+                survivor: survivor?.name ?? "",
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("courses.mergeCancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={mergeMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault()
+                mergeMutation.mutate()
+              }}
+            >
+              {mergeMutation.isPending
+                ? t("courses.mergeSubmitting")
+                : t("courses.suggestions.confirmButton")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   )
 }

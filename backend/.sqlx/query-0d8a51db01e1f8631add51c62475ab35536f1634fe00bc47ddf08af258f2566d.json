@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE site_integration_keys SET allowed_eppn_domains = $2 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0d8a51db01e1f8631add51c62475ab35536f1634fe00bc47ddf08af258f2566d"
+}

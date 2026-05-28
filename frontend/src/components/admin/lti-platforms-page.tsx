@@ -86,6 +86,16 @@ export function LtiPlatformsPanel() {
     },
   })
 
+  const editScopeMutation = useMutation({
+    mutationFn: ({ id, domains }: { id: string; domains: string[] }) =>
+      api.put(`/admin/lti/platforms/${id}/eppn-domains`, {
+        allowed_eppn_domains: domains,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "lti", "platforms"] })
+    },
+  })
+
   const config = setup?.moodle_tool_config
 
   async function copyToClipboard(text: string, field: string) {
@@ -352,6 +362,10 @@ export function LtiPlatformsPanel() {
                   approveMutation.mutate({ id: p.id, domains })
                 }
                 approving={approveMutation.isPending}
+                onEditScope={(domains) =>
+                  editScopeMutation.mutate({ id: p.id, domains })
+                }
+                editingScope={editScopeMutation.isPending}
               />
             ))}
           </div>
@@ -367,18 +381,24 @@ function PlatformRow({
   deleting,
   onApprove,
   approving,
+  onEditScope,
+  editingScope,
 }: {
   platform: LtiPlatform
   onDelete: () => void
   deleting: boolean
   onApprove: (domains: string[]) => void
   approving: boolean
+  onEditScope: (domains: string[]) => void
+  editingScope: boolean
 }) {
   const { t } = useTranslation("admin")
   const [open, setOpen] = useState(false)
   const [showApproveForm, setShowApproveForm] = useState(false)
+  const [showScopeForm, setShowScopeForm] = useState(false)
   // Pre-fill from whatever the dynreg iframe captured (or empty if the
-  // LMS admin skipped the form).
+  // LMS admin skipped the form). Reused by both the approve form (pending)
+  // and the edit-scope form (active).
   const [scopeInput, setScopeInput] = useState(
     platform.allowed_eppn_domains.join(", "),
   )
@@ -410,6 +430,20 @@ function PlatformRow({
       }
     }
     onApprove(domains)
+  }
+
+  const submitScopeEdit = () => {
+    const domains = scopeInput
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    if (domains.length === 0) {
+      if (!window.confirm(t("ltiPlatforms.editScopeEmptyConfirm"))) {
+        return
+      }
+    }
+    onEditScope(domains)
+    setShowScopeForm(false)
   }
 
   return (
@@ -479,6 +513,25 @@ function PlatformRow({
                 : t("ltiPlatforms.approve")}
             </Button>
           )}
+          {!pending && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                // Re-seed from the current value each time the form opens so
+                // a cancelled edit doesn't leave a stale draft behind.
+                if (!showScopeForm) {
+                  setScopeInput(platform.allowed_eppn_domains.join(", "))
+                }
+                setShowScopeForm((v) => !v)
+              }}
+              disabled={editingScope}
+            >
+              {showScopeForm
+                ? t("ltiPlatforms.editScopeCancel")
+                : t("ltiPlatforms.editScope")}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => setOpen((o) => !o)}>
             {open ? t("ltiPlatforms.hideBindings") : t("ltiPlatforms.showBindings")}
           </Button>
@@ -507,6 +560,33 @@ function PlatformRow({
             <div className="flex gap-2 pt-1">
               <Button variant="default" size="sm" onClick={submitApproval} disabled={approving}>
                 {t("ltiPlatforms.approveAndActivate")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!pending && showScopeForm && (
+        <div className="border-t p-3">
+          <div className="space-y-2">
+            <Label htmlFor={`scope-edit-${platform.id}`} className="text-xs font-medium">
+              {t("ltiPlatforms.editScopeLabel")}
+            </Label>
+            <Input
+              id={`scope-edit-${platform.id}`}
+              value={scopeInput}
+              onChange={(e) => setScopeInput(e.target.value)}
+              placeholder="dsv.su.se, su.se"
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("ltiPlatforms.editScopeHint")}
+            </p>
+            <div className="flex gap-2 pt-1">
+              <Button variant="default" size="sm" onClick={submitScopeEdit} disabled={editingScope}>
+                {editingScope
+                  ? t("ltiPlatforms.editScopeSaving")
+                  : t("ltiPlatforms.editScopeSave")}
               </Button>
             </div>
           </div>

@@ -73,10 +73,18 @@
       "copied": "Kopierat"
     },
     "listTitle": "Befintliga nycklar ({{total}})",
-    "listDescription": "Att återkalla en nyckel spärrar den omedelbart. Kursnycklar som pluginet redan skapat via den här nyckeln fortsätter fungera (de är vanliga kursnycklar). Eppn-scopet är fast; rotera nyckeln för att ändra det.",
+    "listDescription": "Att återkalla en nyckel spärrar den omedelbart. Kursnycklar som pluginet redan skapat via den här nyckeln fortsätter fungera (de är vanliga kursnycklar). Redigera en nyckels eppn-scope direkt i listan för att strama åt en för bred lista; ändringen gäller vid nästa provisionering utan att nyckeln behöver roteras.",
     "empty": "Inga integrationsnycklar på webbplatsnivå än.",
     "neverUsed": "aldrig",
     "revoke": "Återkalla",
+    "editScope": {
+      "edit": "Redigera scope",
+      "save": "Spara",
+      "saving": "Sparar…",
+      "cancel": "Avbryt",
+      "label": "Tillåtna eppn-domäner",
+      "emptyConfirm": "Att tömma listan över eppn-domäner innebär att nyckeln kan agera för VILKEN eppn som helst (inklusive admin-konton). Är du säker?"
+    },
     "scope": {
       "any": "valfri eppn"
     },
@@ -135,6 +143,13 @@
     "approveScopeHint": "Kommaseparerad lista över domänsuffix som plattformen får lansera användare för (t.ex. 'dsv.su.se, su.se'). Förifyllt med vad LMS-administratören föreslog i dynreg-popupen, om något. Lämna tomt ENDAST om du medvetet vill lita på vilken eppn som helst (osäkert).",
     "approveAndActivate": "Godkänn och aktivera",
     "approveEmptyConfirm": "Att godkänna med en tom lista över eppn-domäner innebär att plattformen kan utfärda lanseringar som påstår sig vara VILKEN eppn som helst (inklusive admin-konton). Är du säker?",
+    "editScope": "Redigera scope",
+    "editScopeCancel": "Avbryt",
+    "editScopeSave": "Spara scope",
+    "editScopeSaving": "Sparar…",
+    "editScopeLabel": "Tillåtna eppn-domäner",
+    "editScopeHint": "Kommaseparerad lista över domänsuffix som plattformen får lansera användare för (t.ex. 'dsv.su.se, su.se'). Gäller vid nästa lansering. Lämna tomt ENDAST om du medvetet vill lita på vilken eppn som helst (osäkert).",
+    "editScopeEmptyConfirm": "Att tömma listan över eppn-domäner innebär att plattformen kan utfärda lanseringar som påstår sig vara VILKEN eppn som helst (inklusive admin-konton). Är du säker?",
     "statusPending": "Väntar på godkännande",
     "statusOrphaned": "Övergiven av LMS",
     "pendingExplain": "Installerad via LTI Dynamic Registration. Tills du godkänner den kan plattformen INTE autentisera lanseringar mot Minerva. Ej godkända plattformar tas bort automatiskt efter 7 dagar. Verifiera att issuer och client id nedan matchar det LMS du förväntar dig, godkänn sedan.",

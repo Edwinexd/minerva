@@ -243,12 +243,32 @@ function CreatedKeyCallout({
 function KeyRow({ k }: { k: SiteIntegrationKey }) {
   const { t } = useTranslation("admin")
   const queryClient = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [domainsRaw, setDomainsRaw] = useState(k.allowed_eppn_domains.join(", "))
   const deleteMutation = useMutation({
     mutationFn: () => api.delete(`/admin/integration-keys/${k.id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "integration-keys"] })
     },
   })
+  const editScopeMutation = useMutation({
+    mutationFn: (domains: string[]) =>
+      api.put(`/admin/integration-keys/${k.id}/eppn-domains`, {
+        allowed_eppn_domains: domains,
+      }),
+    onSuccess: () => {
+      setEditing(false)
+      queryClient.invalidateQueries({ queryKey: ["admin", "integration-keys"] })
+    },
+  })
+
+  const saveScope = () => {
+    const domains = parseDomains(domainsRaw)
+    if (domains.length === 0 && !window.confirm(t("integrationKeys.editScope.emptyConfirm"))) {
+      return
+    }
+    editScopeMutation.mutate(domains)
+  }
 
   return (
     <tr className="border-b">
@@ -257,7 +277,15 @@ function KeyRow({ k }: { k: SiteIntegrationKey }) {
         <Badge variant="secondary">{k.key_prefix}</Badge>
       </td>
       <td className="py-2 pr-4 text-xs">
-        {k.allowed_eppn_domains.length === 0 ? (
+        {editing ? (
+          <Input
+            value={domainsRaw}
+            onChange={(e) => setDomainsRaw(e.target.value)}
+            placeholder={t("integrationKeys.form.domainsPlaceholder")}
+            className="h-7 w-48 font-mono text-xs"
+            aria-label={t("integrationKeys.editScope.label")}
+          />
+        ) : k.allowed_eppn_domains.length === 0 ? (
           <span className="text-amber-600 dark:text-amber-400">
             {t("integrationKeys.scope.any")}
           </span>
@@ -284,15 +312,55 @@ function KeyRow({ k }: { k: SiteIntegrationKey }) {
         )}
       </td>
       <td className="py-2">
-        <Button
-          variant="destructive"
-          size="sm"
-          className="h-7 text-xs"
-          onClick={() => deleteMutation.mutate()}
-          disabled={deleteMutation.isPending}
-        >
-          {t("integrationKeys.revoke")}
-        </Button>
+        <div className="flex gap-1">
+          {editing ? (
+            <>
+              <Button
+                variant="default"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={saveScope}
+                disabled={editScopeMutation.isPending}
+              >
+                {editScopeMutation.isPending
+                  ? t("integrationKeys.editScope.saving")
+                  : t("integrationKeys.editScope.save")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => {
+                  setDomainsRaw(k.allowed_eppn_domains.join(", "))
+                  setEditing(false)
+                }}
+                disabled={editScopeMutation.isPending}
+              >
+                {t("integrationKeys.editScope.cancel")}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setEditing(true)}
+              >
+                {t("integrationKeys.editScope.edit")}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending}
+              >
+                {t("integrationKeys.revoke")}
+              </Button>
+            </>
+          )}
+        </div>
       </td>
     </tr>
   )

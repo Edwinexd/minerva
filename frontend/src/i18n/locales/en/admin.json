@@ -73,10 +73,18 @@
       "copied": "Copied"
     },
     "listTitle": "Existing keys ({{total}})",
-    "listDescription": "Revoking a key invalidates it immediately. Any api_keys the plugin already provisioned via this site key continue to work (they're ordinary course keys). The eppn scope is immutable; rotate the key to change it.",
+    "listDescription": "Revoking a key invalidates it immediately. Any api_keys the plugin already provisioned via this site key continue to work (they're ordinary course keys). Edit a key's eppn scope inline to tighten an over-broad allowlist; the change takes effect on the next provisioning call without rotating the key.",
     "empty": "No site integration keys minted yet.",
     "neverUsed": "never",
     "revoke": "Revoke",
+    "editScope": {
+      "edit": "Edit scope",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "label": "Allowed eppn domains",
+      "emptyConfirm": "Clearing the eppn-domain list means this key can act on behalf of ANY eppn (including admin accounts). Are you sure?"
+    },
     "scope": {
       "any": "any eppn"
     },
@@ -135,6 +143,13 @@
     "approveScopeHint": "Comma-separated list of domain suffixes the platform may launch users for (e.g. 'dsv.su.se, su.se'). Pre-filled with what the LMS admin suggested in the dynreg popup, if anything. Leave blank ONLY if you intentionally want to trust every claimed eppn (unsafe).",
     "approveAndActivate": "Approve and activate",
     "approveEmptyConfirm": "Approving with an empty eppn-domain list means this platform can mint launches claiming ANY eppn (including admin accounts). Are you sure?",
+    "editScope": "Edit scope",
+    "editScopeCancel": "Cancel",
+    "editScopeSave": "Save scope",
+    "editScopeSaving": "Saving…",
+    "editScopeLabel": "Allowed eppn domains",
+    "editScopeHint": "Comma-separated list of domain suffixes this platform may launch users for (e.g. 'dsv.su.se, su.se'). Takes effect on the next launch. Leave blank ONLY if you intentionally want to trust every claimed eppn (unsafe).",
+    "editScopeEmptyConfirm": "Clearing the eppn-domain list means this platform can mint launches claiming ANY eppn (including admin accounts). Are you sure?",
     "statusPending": "Pending approval",
     "statusOrphaned": "Orphaned by LMS",
     "pendingExplain": "Installed via LTI Dynamic Registration. Until you approve it, this platform CANNOT authenticate launches against Minerva. Unapproved platforms are automatically deleted after 7 days. Verify the issuer and client id below match the LMS you expect, then approve.",

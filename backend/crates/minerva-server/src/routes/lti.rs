@@ -22,7 +22,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Extension, Form, Json, Router};
 use hmac::{Hmac, KeyInit, Mac};
 use rand::RngExt;
@@ -100,6 +100,10 @@ pub fn admin_router() -> Router<AppState> {
         .route(
             "/lti/platforms/{platform_id}/approve",
             post(approve_platform),
+        )
+        .route(
+            "/lti/platforms/{platform_id}/eppn-domains",
+            put(update_platform_scope),
         )
         .route(
             "/lti/platforms/{platform_id}/bindings",
@@ -1828,6 +1832,40 @@ async fn approve_platform(
     Ok(Json(
         serde_json::json!({ "approved": true, "newly_activated": changed }),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdatePlatformScopeRequest {
+    /// Replacement eppn-domain allowlist. Empty array = trust ANY eppn
+    /// (admin opt-in; UI confirms first). Same normalisation as create.
+    #[serde(default)]
+    allowed_eppn_domains: Vec<String>,
+}
+
+/// PUT /admin/lti/platforms/{id}/eppn-domains: replace the eppn-domain
+/// scope on an already-active platform. The create/approve forms set this
+/// once; this is the only post-activation edit path (admins who realise
+/// they over-allowed). Same admin gate + normalisation as the create path.
+async fn update_platform_scope(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(platform_id): Path<Uuid>,
+    Json(body): Json<UpdatePlatformScopeRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_site_integrator(&user)?;
+    let domains = normalize_eppn_domains(&body.allowed_eppn_domains)?;
+    let updated =
+        minerva_db::queries::lti::update_platform_scope(&state.db, platform_id, &domains).await?;
+    if !updated {
+        return Err(AppError::NotFound);
+    }
+    tracing::info!(
+        "lti: platform {} eppn scope set to {:?} by user {}",
+        platform_id,
+        domains,
+        user.id
+    );
+    Ok(Json(serde_json::json!({ "updated": true })))
 }
 
 /// POST /lti/dynamic-register/{id}/scope: PUBLIC endpoint called by the

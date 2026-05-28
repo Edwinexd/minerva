@@ -284,6 +284,30 @@ pub async fn set_pending_platform_scope(
     Ok(result.rows_affected() > 0)
 }
 
+/// Replace the eppn-domain scope on an already-active platform. Unlike
+/// `set_pending_platform_scope` there's no `activated_at IS NULL` guard:
+/// this is the post-approval edit path for admins who over- or
+/// under-scoped at approval time. Empty slice clears the allowlist (=
+/// trust any eppn, stored as NULL). Returns whether a row matched.
+pub async fn update_platform_scope(
+    db: &PgPool,
+    id: Uuid,
+    eppn_domains: &[String],
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE lti_platforms SET allowed_eppn_domains = $2, updated_at = NOW() WHERE id = $1",
+        id,
+        if eppn_domains.is_empty() {
+            None
+        } else {
+            Some(eppn_domains)
+        },
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Delete pending platform rows whose `created_at` is older than the
 /// supplied interval. Called periodically from the worker to clean up
 /// unapproved dynreg installs (which could otherwise pile up if anyone

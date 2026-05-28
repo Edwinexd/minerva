@@ -10,7 +10,7 @@
 //! `UserRole::can_manage_site_integrations`).
 
 use axum::extract::{Extension, Path, State};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, put};
 use axum::{Json, Router};
 use minerva_core::models::User;
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/integration-keys/{id}",
             delete(delete_site_integration_key),
+        )
+        .route(
+            "/integration-keys/{id}/eppn-domains",
+            put(update_site_integration_key_scope),
         )
 }
 
@@ -175,6 +179,35 @@ async fn create_site_integration_key(
         created_at: row.created_at,
         allowed_eppn_domains: row.allowed_eppn_domains.unwrap_or_default(),
     }))
+}
+
+#[derive(Deserialize)]
+struct UpdateScopeRequest {
+    /// Replacement eppn-domain allowlist. Empty = any eppn (admin opt-in;
+    /// the UI confirms first). Same normalisation as the create path.
+    #[serde(default)]
+    allowed_eppn_domains: Vec<String>,
+}
+
+/// PUT /admin/integration-keys/{id}/eppn-domains: tighten (or widen) the
+/// eppn-domain allowlist on an existing key without rotating it. Added
+/// because the Moodle/Canvas plugin's key was the easy thing for admins to
+/// over-scope at mint time, and revoke+re-mint forces every linked plugin
+/// to be reconfigured. Admin/integrator only.
+async fn update_site_integration_key_scope(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateScopeRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_site_integrator(&user)?;
+    let domains = normalize_domains(&body.allowed_eppn_domains)?;
+    let updated =
+        minerva_db::queries::site_integration_keys::update_scope(&state.db, id, &domains).await?;
+    if !updated {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(serde_json::json!({ "updated": true })))
 }
 
 async fn delete_site_integration_key(

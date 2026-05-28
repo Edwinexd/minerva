@@ -65,6 +65,29 @@ pub async fn find_by_hash(
     .await
 }
 
+/// Replace the eppn-domain allowlist on an existing key. Empty slice
+/// clears it (= any eppn, stored as NULL). Post-mint edit path so admins
+/// who over-allowed at creation can tighten the scope without rotating
+/// the key. Returns whether a row matched.
+pub async fn update_scope(
+    db: &PgPool,
+    id: Uuid,
+    allowed_eppn_domains: &[String],
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE site_integration_keys SET allowed_eppn_domains = $2 WHERE id = $1",
+        id,
+        if allowed_eppn_domains.is_empty() {
+            None
+        } else {
+            Some(allowed_eppn_domains)
+        },
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn delete(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!("DELETE FROM site_integration_keys WHERE id = $1", id)
         .execute(db)

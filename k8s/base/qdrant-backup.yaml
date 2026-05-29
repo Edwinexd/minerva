@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: qdrant-backup
+  namespace: minerva
+spec:
+  # Offset 30 min after the postgres dump (0 3 * * *) to avoid a disk-IO spike.
+  schedule: "30 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          # hostPath /data0/minerva/backups/qdrant is root-owned; curlimages/curl
+          # otherwise runs as uid 100 and could not write the snapshot.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          containers:
+            - name: backup
+              image: curlimages/curl:latest
+              env:
+                - name: QDRANT_URL
+                  value: http://qdrant:6333
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  TS="$(date +%Y-%m-%d_%H%M%S)"
+                  DEST="/backups/qdrant-${TS}.snapshot"
+                  echo "Requesting full storage snapshot from ${QDRANT_URL}..."
+                  RESP="$(curl -fsS -X POST "${QDRANT_URL}/snapshots?wait=true")"
+                  echo "Create response: ${RESP}"
+                  # Full-snapshot name lives at result.name (e.g. full-snapshot-<ts>.snapshot)
+                  NAME="$(printf '%s' "${RESP}" | grep -o '"name":"[^"]*"' | head -n1 | cut -d'"' -f4)"
+                  if [ -z "${NAME}" ]; then
+                    echo "ERROR: could not parse snapshot name from response" >&2
+                    exit 1
+                  fi
+                  echo "Snapshot created in qdrant: ${NAME}; downloading to ${DEST}..."
+                  curl -fsS "${QDRANT_URL}/snapshots/${NAME}" -o "${DEST}"
+                  echo "Downloaded: $(ls -lh "${DEST}")"
+                  # Drop the in-qdrant copy so it does not fill the pod's ephemeral layer
+                  echo "Deleting in-qdrant snapshot ${NAME}..."
+                  curl -fsS -X DELETE "${QDRANT_URL}/snapshots/${NAME}" >/dev/null || true
+                  # Keep only the last 14 daily snapshots
+                  ls -t /backups/qdrant-*.snapshot 2>/dev/null | tail -n +15 | xargs -r rm -f
+                  echo "Cleanup completed. Current qdrant backups:"
+                  ls -lh /backups/
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backups
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "256Mi"
+                  cpu: "500m"
+          restartPolicy: OnFailure
+          volumes:
+            - name: backup-storage
+              hostPath:
+                path: /data0/minerva/backups/qdrant
+                type: DirectoryOrCreate

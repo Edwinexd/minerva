@@ -121,19 +121,66 @@ kubectl get pods -n minerva    # Check status
 
 ```
 /data0/minerva/
-├── postgres/     # PostgreSQL data directory
-├── qdrant/       # Qdrant vector storage
-├── data/         # Application data (documents)
-└── backups/      # Daily PostgreSQL dumps (14 days retention)
+├── postgres/         # PostgreSQL data directory
+├── qdrant/           # Qdrant vector storage
+├── data/             # Application data (documents)
+└── backups/          # Daily backups (14 days retention each)
+    ├── minerva-DATE.sql.gz       # postgres pg_dump
+    └── qdrant/
+        └── qdrant-DATE.snapshot  # qdrant full-storage snapshot
 ```
 
-**Backup CronJob** (`k8s/base/backup.yaml`):
-- Daily at 03:00 UTC, gzipped pg_dump, retains last 14
+**Backup CronJobs** (both daily, 14-day retention, hostPath under `/data0/minerva/backups`):
+- `k8s/base/backup.yaml` (`postgres-backup`): 03:00 UTC, gzipped `pg_dump` of
+  the `minerva` DB.
+- `k8s/base/qdrant-backup.yaml` (`qdrant-backup`): 03:30 UTC (offset to avoid a
+  disk-IO spike). Calls qdrant's HTTP snapshot API (`POST /snapshots?wait=true`)
+  for a consistent full-storage snapshot, downloads it via
+  `GET /snapshots/{name}` to `backups/qdrant/`, then `DELETE`s the in-qdrant
+  copy so it does not fill the pod's ephemeral layer. Full-storage snapshots are
+  single-node only (our deployment is single-node).
 
-**Restore:**
+### Restore
+
+Run from the prod node (`ssh minerva.dsv.su.se` then `sudo su`). Pick the
+dated file you want from `/data0/minerva/backups/`.
+
+**Postgres** streams the dump straight into the running pod. The `--`
+separator (NOT `;`) is what makes `psql` run *inside* the container; a `;`
+runs `psql` on your laptop against nothing:
 ```bash
-gunzip -c /data0/minerva/backups/minerva-DATE.sql.gz | kubectl exec -i -n minerva deploy/postgres; psql -U minerva -d minerva
+gunzip -c /data0/minerva/backups/minerva-DATE.sql.gz \
+  | kubectl exec -i -n minerva deploy/postgres \
+      -- psql -U minerva -d minerva
 ```
+
+**Qdrant** (a full-storage snapshot is recovered at startup via the
+`--storage-snapshot` CLI flag, so qdrant must be stopped first; the hostPath
+`/data0/minerva/qdrant` is the live storage dir):
+```bash
+SNAP=/data0/minerva/backups/qdrant/qdrant-DATE.snapshot
+
+# 1. Stop qdrant so its storage is quiescent
+kubectl scale -n minerva deploy/qdrant --replicas=0
+kubectl wait -n minerva --for=delete pod -l app=qdrant --timeout=120s
+
+# 2. Move the live storage aside (rollback safety) and recover into a fresh dir
+mv /data0/minerva/qdrant "/data0/minerva/qdrant.pre-restore.$(date +%s)"
+mkdir -p /data0/minerva/qdrant
+docker run --rm \
+  --entrypoint ./qdrant \
+  -v /data0/minerva/qdrant:/qdrant/storage \
+  -v /data0/minerva/backups/qdrant:/snapshots:ro \
+  qdrant/qdrant:latest \
+  --storage-snapshot "/snapshots/$(basename "$SNAP")"
+# Watch the log; once collections are loaded ("Qdrant ... listening"), Ctrl-C.
+# (To restore in place without moving the dir aside, add --force-snapshot.)
+
+# 3. Bring qdrant back up
+kubectl scale -n minerva deploy/qdrant --replicas=1
+kubectl rollout status -n minerva deploy/qdrant
+```
+Once verified healthy, delete the `qdrant.pre-restore.*` dir to reclaim space.
 
 ## URL Document Routing
 

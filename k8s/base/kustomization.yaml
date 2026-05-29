@@ -12,4 +12,5 @@ resources:
   - app.yaml
   - app-svc.yaml
   - backup.yaml
+  - qdrant-backup.yaml
   - image-prune.yaml

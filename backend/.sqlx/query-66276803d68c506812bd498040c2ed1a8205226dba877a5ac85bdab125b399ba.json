@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            COUNT(*)::bigint AS \"count!\",\n            COALESCE(SUM(size_bytes), 0)::bigint AS total_bytes,\n            COUNT(*) FILTER (WHERE status IN ('pending', 'processing'))::bigint AS \"pending!\",\n            COUNT(*) FILTER (WHERE status = 'awaiting_transcript')::bigint AS \"awaiting_external!\",\n            COUNT(*) FILTER (WHERE status = 'unsupported')::bigint AS \"unsupported!\",\n            COUNT(*) FILTER (WHERE status = 'failed')::bigint AS \"failed!\"\n        FROM documents",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "pending!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "awaiting_external!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "unsupported!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "failed!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "66276803d68c506812bd498040c2ed1a8205226dba877a5ac85bdab125b399ba"
+}

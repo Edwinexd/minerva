@@ -1005,7 +1005,15 @@ export interface SystemMetrics {
   documents: {
     count: number
     total_bytes: number
+    // Queued for or mid-way through our own embedding pipeline; the only
+    // bucket that reflects backend load.
     pending: number
+    // Blocked on an external source (play.dsv.su.se transcripts not yet
+    // published). Kept separate from `pending` so the dashboard does not
+    // read an external dependency as an embedder backlog.
+    awaiting_external: number
+    // URL documents whose target we do not know how to ingest.
+    unsupported: number
     failed: number
   }
   qdrant: {

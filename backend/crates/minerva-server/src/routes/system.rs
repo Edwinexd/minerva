@@ -47,8 +47,18 @@ struct DocumentsInfo {
     count: i64,
     /// Sum of size_bytes across all documents.
     total_bytes: i64,
-    /// Documents currently processing or pending.
+    /// Documents queued for or mid-way through our own ingest pipeline
+    /// (embedding). This is the only bucket that reflects backend load.
     pending: i64,
+    /// Documents we cannot finish until an external source delivers their
+    /// content; currently play.dsv.su.se URL stubs in `awaiting_transcript`,
+    /// waiting on Play to publish a transcript (which may never arrive if the
+    /// presentation has no captions). Split out from `pending` so the
+    /// dashboard does not read an external dependency as an embedder backlog.
+    awaiting_external: i64,
+    /// URL documents whose target we do not know how to ingest (neither a
+    /// recognised PDF host nor a play.dsv.su.se presentation).
+    unsupported: i64,
     /// Documents in the failed state.
     failed: i64,
 }
@@ -167,7 +177,9 @@ async fn documents_info(db: &sqlx::PgPool) -> DocumentsInfo {
         r#"SELECT
             COUNT(*)::bigint AS "count!",
             COALESCE(SUM(size_bytes), 0)::bigint AS total_bytes,
-            COUNT(*) FILTER (WHERE status IN ('pending', 'processing', 'awaiting_transcript'))::bigint AS "pending!",
+            COUNT(*) FILTER (WHERE status IN ('pending', 'processing'))::bigint AS "pending!",
+            COUNT(*) FILTER (WHERE status = 'awaiting_transcript')::bigint AS "awaiting_external!",
+            COUNT(*) FILTER (WHERE status = 'unsupported')::bigint AS "unsupported!",
             COUNT(*) FILTER (WHERE status = 'failed')::bigint AS "failed!"
         FROM documents"#,
     )
@@ -181,12 +193,16 @@ async fn documents_info(db: &sqlx::PgPool) -> DocumentsInfo {
             count: r.count,
             total_bytes: r.total_bytes.unwrap_or(0),
             pending: r.pending,
+            awaiting_external: r.awaiting_external,
+            unsupported: r.unsupported,
             failed: r.failed,
         },
         None => DocumentsInfo {
             count: 0,
             total_bytes: 0,
             pending: 0,
+            awaiting_external: 0,
+            unsupported: 0,
             failed: 0,
         },
     }

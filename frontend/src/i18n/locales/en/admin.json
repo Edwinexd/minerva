@@ -600,8 +600,11 @@
     "databaseSize": "PostgreSQL database size",
     "documentsOnDisk": "Documents on disk",
     "documentsTotal": "{{value}} total",
-    "documentsPending": "{{value}} pending",
+    "documentsPending": "{{value}} pending (in our embedding queue)",
     "documentsFailed": "{{value}} failed",
+    "documentsExternalHeader": "Awaiting external sources (not a backend backlog)",
+    "documentsAwaitingExternal": "{{value}} awaiting a play.dsv.su.se transcript",
+    "documentsUnsupported": "{{value}} unsupported URL",
     "qdrant": {
       "title": "Qdrant",
       "description": "Vector collections",

@@ -128,18 +128,41 @@ export function SystemPanel() {
               {formatBytes(data.documents.total_bytes)}
             </CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            {t("system.documentsTotal", { value: data.documents.count.toLocaleString() })}
-            {data.documents.pending > 0 && (
-              <> · {t("system.documentsPending", { value: data.documents.pending.toLocaleString() })}</>
-            )}
-            {data.documents.failed > 0 && (
-              <>
-                {" · "}
-                <span className="text-red-600 dark:text-red-400">
-                  {t("system.documentsFailed", { value: data.documents.failed.toLocaleString() })}
-                </span>
-              </>
+          <CardContent className="space-y-1 text-sm text-muted-foreground">
+            <div>
+              {t("system.documentsTotal", { value: data.documents.count.toLocaleString() })}
+              {data.documents.pending > 0 && (
+                <> · {t("system.documentsPending", { value: data.documents.pending.toLocaleString() })}</>
+              )}
+              {data.documents.failed > 0 && (
+                <>
+                  {" · "}
+                  <span className="text-red-600 dark:text-red-400">
+                    {t("system.documentsFailed", { value: data.documents.failed.toLocaleString() })}
+                  </span>
+                </>
+              )}
+            </div>
+            {(data.documents.awaiting_external > 0 || data.documents.unsupported > 0) && (
+              <div className="space-y-1 border-t pt-1">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground/80">
+                  {t("system.documentsExternalHeader")}
+                </p>
+                {data.documents.awaiting_external > 0 && (
+                  <p>
+                    {t("system.documentsAwaitingExternal", {
+                      value: data.documents.awaiting_external.toLocaleString(),
+                    })}
+                  </p>
+                )}
+                {data.documents.unsupported > 0 && (
+                  <p>
+                    {t("system.documentsUnsupported", {
+                      value: data.documents.unsupported.toLocaleString(),
+                    })}
+                  </p>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>

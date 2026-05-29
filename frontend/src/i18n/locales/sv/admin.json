@@ -600,8 +600,11 @@
     "databaseSize": "PostgreSQL-databasens storlek",
     "documentsOnDisk": "Dokument på disk",
     "documentsTotal": "{{value}} totalt",
-    "documentsPending": "{{value}} väntande",
+    "documentsPending": "{{value}} väntande (i vår embedding-kö)",
     "documentsFailed": "{{value}} misslyckade",
+    "documentsExternalHeader": "Väntar på externa källor (inte en eftersläpning i backend)",
+    "documentsAwaitingExternal": "{{value}} väntar på en transkription från play.dsv.su.se",
+    "documentsUnsupported": "{{value}} ej stödd URL",
     "qdrant": {
       "title": "Qdrant",
       "description": "Vektor-samlingar",

@@ -5,7 +5,7 @@ use minerva_core::models::{RuleOperator, User};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::error::AppError;
+use crate::error::{AppError, LocalizedMessage};
 use crate::rules::{validate_regex, SUPPORTED_ATTRIBUTES};
 use crate::state::AppState;
 
@@ -45,6 +45,13 @@ pub fn router() -> Router<AppState> {
         .route("/courses/merge", post(merge_courses))
         .route("/courses/{id}/archive", post(archive_course))
         .route("/courses/{id}/unarchive", post(unarchive_course))
+        // Bulk actions over a multi-selected set of courses: a settings
+        // + feature-flag patch (`/bulk`), or a lifecycle action
+        // (`/bulk-archive`, `/bulk-unarchive`). Each reports per-course
+        // results so a partial batch is transparent.
+        .route("/courses/bulk", post(bulk_update_courses))
+        .route("/courses/bulk-archive", post(bulk_archive_courses))
+        .route("/courses/bulk-unarchive", post(bulk_unarchive_courses))
         .route(
             "/courses/{course_id}/feature-flags",
             get(get_course_feature_flags).put(set_course_feature_flags),
@@ -1203,6 +1210,313 @@ async fn set_course_feature_flags(
     // Reuse the GET handler's shape so the client can apply the
     // response directly without an extra round-trip.
     get_course_feature_flags(State(state), Extension(user), Path(course_id)).await
+}
+
+// ── Bulk course actions (admin) ────────────────────────────────────
+//
+// The admin courses table lets an admin multi-select courses and apply
+// one change to all of them: a settings patch (any subset of the
+// editable course knobs), a feature-flag patch, or a lifecycle action
+// (archive / restore). Each course is processed independently and the
+// response reports per-course success / failure, so a partial batch
+// (e.g. one course sitting on a now-disabled model) is fully
+// transparent rather than failing the whole request. Settings changes
+// route through the SAME `apply_course_update` path as
+// `PUT /courses/{id}`, so every model-capability / embedding / reranker
+// validation applies per course; admins bypass the picker-disabled
+// gates exactly as they do via the per-course force-migrate dialog.
+
+/// Sanity cap on how many courses one bulk call may touch. Guards
+/// against a runaway request (and, for embedding changes, against
+/// queuing a re-embed storm). Comfortably above any realistic course
+/// count an admin would multi-select.
+const BULK_MAX_COURSES: usize = 500;
+
+#[derive(Deserialize, Default)]
+struct BulkCoursePatch {
+    // `name` / `description` are intentionally absent: they're per-course
+    // identity, and setting them identically across a selection is never
+    // what an admin wants. Everything else `apply_course_update` accepts
+    // is bulk-settable.
+    context_ratio: Option<f64>,
+    temperature: Option<f64>,
+    model: Option<String>,
+    system_prompt: Option<String>,
+    max_chunks: Option<i32>,
+    min_score: Option<f32>,
+    strategy: Option<String>,
+    tool_use_enabled: Option<bool>,
+    embedding_provider: Option<String>,
+    embedding_model: Option<String>,
+    reranker_model: Option<String>,
+    daily_token_limit: Option<i64>,
+    semester_label: Option<String>,
+}
+
+impl BulkCoursePatch {
+    /// True when no settings field is present. A bulk call may carry only
+    /// feature-flag changes, in which case we skip the
+    /// `apply_course_update` round-trip (and its potential re-embed)
+    /// entirely.
+    fn is_empty(&self) -> bool {
+        self.context_ratio.is_none()
+            && self.temperature.is_none()
+            && self.model.is_none()
+            && self.system_prompt.is_none()
+            && self.max_chunks.is_none()
+            && self.min_score.is_none()
+            && self.strategy.is_none()
+            && self.tool_use_enabled.is_none()
+            && self.embedding_provider.is_none()
+            && self.embedding_model.is_none()
+            && self.reranker_model.is_none()
+            && self.daily_token_limit.is_none()
+            && self.semester_label.is_none()
+    }
+}
+
+#[derive(Deserialize)]
+struct BulkUpdateCoursesRequest {
+    course_ids: Vec<Uuid>,
+    #[serde(default)]
+    patch: BulkCoursePatch,
+    /// flag-name -> Some(enabled) to set a course override, None (null)
+    /// to revert to the global default. Flags absent from the map are
+    /// left untouched. Same semantics as the per-course feature-flags PUT.
+    #[serde(default)]
+    feature_flags: std::collections::HashMap<String, Option<bool>>,
+}
+
+#[derive(Serialize)]
+struct BulkResultItem {
+    course_id: Uuid,
+    ok: bool,
+    /// Present only when `ok == false`; carries the same translatable
+    /// `{code, params}` the single-course route would have returned, so
+    /// the admin UI can render a precise per-course reason.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<LocalizedMessage>,
+}
+
+#[derive(Serialize)]
+struct BulkResponse {
+    succeeded: usize,
+    failed: usize,
+    results: Vec<BulkResultItem>,
+}
+
+fn validate_bulk_ids(ids: &[Uuid]) -> Result<(), AppError> {
+    if ids.is_empty() {
+        return Err(AppError::bad_request("admin.bulk_no_courses"));
+    }
+    if ids.len() > BULK_MAX_COURSES {
+        return Err(AppError::bad_request_with(
+            "admin.bulk_too_many",
+            [("max", BULK_MAX_COURSES.to_string())],
+        ));
+    }
+    Ok(())
+}
+
+/// Apply the settings patch + feature-flag patch to one course. Returns
+/// a per-course `AppError` (not bubbled) so the caller can record it
+/// against this `course_id` and keep going.
+async fn apply_bulk_one(
+    state: &AppState,
+    course_id: Uuid,
+    patch: &BulkCoursePatch,
+    feature_flags: &std::collections::HashMap<String, Option<bool>>,
+) -> Result<(), AppError> {
+    // Only active courses are editable (the underlying UPDATE is scoped
+    // to active = true). Report archived / missing ids as a clear
+    // per-course failure rather than silently skipping them.
+    let existing = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or_else(|| AppError::bad_request("admin.bulk_course_not_active"))?;
+
+    if !patch.is_empty() {
+        // `name` / `description` stay None (not bulk-settable). All
+        // validation and any embedding rotation happen inside
+        // `apply_course_update`, identical to PUT /courses/{id}; we pass
+        // is_admin = true (the route gated on `require_admin`) so a
+        // disabled-picker model can still be targeted.
+        let fields = crate::routes::courses::CourseUpdateFields {
+            name: None,
+            description: None,
+            context_ratio: patch.context_ratio,
+            temperature: patch.temperature,
+            model: patch.model.clone(),
+            system_prompt: patch.system_prompt.clone(),
+            max_chunks: patch.max_chunks,
+            min_score: patch.min_score,
+            strategy: patch.strategy.clone(),
+            tool_use_enabled: patch.tool_use_enabled,
+            embedding_provider: patch.embedding_provider.clone(),
+            embedding_model: patch.embedding_model.clone(),
+            reranker_model: patch.reranker_model.clone(),
+            daily_token_limit: patch.daily_token_limit,
+            semester_label: patch.semester_label.clone(),
+        };
+        crate::routes::courses::apply_course_update(state, &existing, fields, true).await?;
+    }
+
+    for (flag, desired) in feature_flags {
+        match desired {
+            Some(enabled) => {
+                minerva_db::queries::feature_flags::set(
+                    &state.db,
+                    flag,
+                    minerva_db::queries::feature_flags::Scope::Course(course_id),
+                    *enabled,
+                )
+                .await?;
+            }
+            None => {
+                minerva_db::queries::feature_flags::delete(
+                    &state.db,
+                    flag,
+                    minerva_db::queries::feature_flags::Scope::Course(course_id),
+                )
+                .await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn bulk_update_courses(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<BulkUpdateCoursesRequest>,
+) -> Result<Json<BulkResponse>, AppError> {
+    require_admin(&user)?;
+    validate_bulk_ids(&body.course_ids)?;
+
+    // Reject unknown flag names for the WHOLE request up front (a typo
+    // shouldn't apply to some courses and then report per-course); same
+    // guard as `set_course_feature_flags`.
+    for flag in body.feature_flags.keys() {
+        if !crate::feature_flags::ALL_FLAGS.contains(&flag.as_str()) {
+            return Err(AppError::bad_request_with(
+                "admin.feature_flag_unknown",
+                [("flag", flag.clone())],
+            ));
+        }
+    }
+
+    let mut results = Vec::with_capacity(body.course_ids.len());
+    for &course_id in &body.course_ids {
+        match apply_bulk_one(&state, course_id, &body.patch, &body.feature_flags).await {
+            Ok(()) => results.push(BulkResultItem {
+                course_id,
+                ok: true,
+                error: None,
+            }),
+            Err(e) => results.push(BulkResultItem {
+                course_id,
+                ok: false,
+                error: Some(LocalizedMessage::from_app_error(&e)),
+            }),
+        }
+    }
+
+    let succeeded = results.iter().filter(|r| r.ok).count();
+    let failed = results.len() - succeeded;
+    tracing::info!(
+        "admin {} bulk-updated {} course(s): {} ok, {} failed",
+        user.id,
+        results.len(),
+        succeeded,
+        failed,
+    );
+    Ok(Json(BulkResponse {
+        succeeded,
+        failed,
+        results,
+    }))
+}
+
+#[derive(Deserialize)]
+struct BulkIdsRequest {
+    course_ids: Vec<Uuid>,
+}
+
+async fn bulk_archive_courses(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<BulkIdsRequest>,
+) -> Result<Json<BulkResponse>, AppError> {
+    require_admin(&user)?;
+    validate_bulk_ids(&body.course_ids)?;
+
+    let mut results = Vec::with_capacity(body.course_ids.len());
+    for &course_id in &body.course_ids {
+        // A real DB failure bubbles as a 500 (it'd fail every course
+        // anyway); `Ok(false)` is the benign "already archived / gone"
+        // no-op, surfaced per-course.
+        let changed = minerva_db::queries::courses::archive(&state.db, course_id).await?;
+        results.push(BulkResultItem {
+            course_id,
+            ok: changed,
+            error: if changed {
+                None
+            } else {
+                Some(LocalizedMessage::new("admin.bulk_archive_noop"))
+            },
+        });
+    }
+
+    let succeeded = results.iter().filter(|r| r.ok).count();
+    let failed = results.len() - succeeded;
+    tracing::info!(
+        "admin {} bulk-archived: {} ok, {} no-op",
+        user.id,
+        succeeded,
+        failed,
+    );
+    Ok(Json(BulkResponse {
+        succeeded,
+        failed,
+        results,
+    }))
+}
+
+async fn bulk_unarchive_courses(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<BulkIdsRequest>,
+) -> Result<Json<BulkResponse>, AppError> {
+    require_admin(&user)?;
+    validate_bulk_ids(&body.course_ids)?;
+
+    let mut results = Vec::with_capacity(body.course_ids.len());
+    for &course_id in &body.course_ids {
+        let changed = minerva_db::queries::courses::unarchive(&state.db, course_id).await?;
+        results.push(BulkResultItem {
+            course_id,
+            ok: changed,
+            error: if changed {
+                None
+            } else {
+                Some(LocalizedMessage::new("admin.bulk_unarchive_noop"))
+            },
+        });
+    }
+
+    let succeeded = results.iter().filter(|r| r.ok).count();
+    let failed = results.len() - succeeded;
+    tracing::info!(
+        "admin {} bulk-unarchived: {} ok, {} no-op",
+        user.id,
+        succeeded,
+        failed,
+    );
+    Ok(Json(BulkResponse {
+        succeeded,
+        failed,
+        results,
+    }))
 }
 
 // ── Embedding model benchmarks (admin-scoped) ──────────────────────

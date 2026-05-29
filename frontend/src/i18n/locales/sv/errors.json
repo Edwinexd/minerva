@@ -69,7 +69,13 @@
     "embedding_model_unknown": "Okänd embedding-modell '{{model}}'. Välj en från listan.",
     "benchmark_busy": "Ett benchmark körs redan. Vänta tills det är klart (sidan uppdateras automatiskt).",
     "embedding_default_disabled": "Kan inte göra '{{model}}' till standard medan den är inaktiverad. Aktivera den först och sätt den sedan som standard.",
-    "reranker_default_disabled": "Kan inte göra '{{model}}' till standardomrankare medan den är inaktiverad. Aktivera den först och sätt den sedan som standard."
+    "reranker_default_disabled": "Kan inte göra '{{model}}' till standardomrankare medan den är inaktiverad. Aktivera den först och sätt den sedan som standard.",
+    "feature_flag_unknown": "Okänd funktionsflagga '{{flag}}'.",
+    "bulk_no_courses": "Välj minst en kurs först.",
+    "bulk_too_many": "För många kurser valda samtidigt (max {{max}}).",
+    "bulk_course_not_active": "Kursen är arkiverad eller finns inte längre; återställ den innan du redigerar.",
+    "bulk_archive_noop": "Redan arkiverad eller finns inte längre.",
+    "bulk_unarchive_noop": "Redan aktiv eller finns inte längre."
   },
   "chat": {
     "rating_invalid": "Betyget måste vara 'up' eller 'down'.",

@@ -416,19 +416,46 @@ async fn get_course(
     )))
 }
 
-async fn update_course(
-    State(state): State<AppState>,
-    Extension(user): Extension<User>,
-    Path(id): Path<Uuid>,
-    Json(body): Json<UpdateCourseRequest>,
-) -> Result<Json<CourseResponse>, AppError> {
-    let existing = minerva_db::queries::courses::find_by_id(&state.db, id)
-        .await?
-        .ok_or(AppError::NotFound)?;
+/// The mutable subset of a course, with every field optional so a
+/// partial update only touches what's present. Shared between the
+/// owner/admin `PUT /courses/{id}` route and the admin bulk-edit
+/// endpoint so both run the *identical* validation + rotation path
+/// (see [`apply_course_update`]); there is no second, drifting copy of
+/// the model-capability / embedding / reranker checks.
+pub(crate) struct CourseUpdateFields {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub context_ratio: Option<f64>,
+    pub temperature: Option<f64>,
+    pub model: Option<String>,
+    pub system_prompt: Option<String>,
+    pub max_chunks: Option<i32>,
+    pub min_score: Option<f32>,
+    pub strategy: Option<String>,
+    pub tool_use_enabled: Option<bool>,
+    pub embedding_provider: Option<String>,
+    pub embedding_model: Option<String>,
+    pub reranker_model: Option<String>,
+    pub daily_token_limit: Option<i64>,
+    pub semester_label: Option<String>,
+}
 
-    if existing.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
+/// Validate a partial course update against `existing`, perform an
+/// embedding rotation if the provider/model changed, and persist the
+/// rest. Returns the freshly-updated row.
+///
+/// `is_admin` controls two bypasses: admins may force a course onto a
+/// catalog model that's currently disabled in the picker (embedding or
+/// reranker), the same affordance the per-course force-migrate dialog
+/// relies on. Authorization (owner-or-admin) is the caller's job; this
+/// helper assumes the caller already proved they may edit the course.
+pub(crate) async fn apply_course_update(
+    state: &AppState,
+    existing: &minerva_db::queries::courses::CourseRow,
+    body: CourseUpdateFields,
+    is_admin: bool,
+) -> Result<minerva_db::queries::courses::CourseRow, AppError> {
+    let id = existing.id;
 
     // Threshold is a magnitude (we filter on abs(score)), so a negative
     // value would never match. Reject it before it hits the CHECK constraint.
@@ -511,7 +538,7 @@ async fn update_course(
                 ));
             }
             let unchanged = model.as_str() == existing.embedding_model.as_str();
-            if !unchanged && !user.role.is_admin() {
+            if !unchanged && !is_admin {
                 let enabled =
                     minerva_db::queries::embedding_models::is_enabled(&state.db, model).await?;
                 if !enabled {
@@ -540,7 +567,7 @@ async fn update_course(
             ));
         }
         let unchanged = model.as_str() == existing.reranker_model.as_str();
-        if !unchanged && !user.role.is_admin() {
+        if !unchanged && !is_admin {
             let enabled =
                 minerva_db::queries::reranker_models::is_enabled(&state.db, model).await?;
             if !enabled {
@@ -643,9 +670,44 @@ async fn update_course(
         semester_label: validated_semester_label,
     };
 
-    let row = minerva_db::queries::courses::update(&state.db, id, &input)
+    minerva_db::queries::courses::update(&state.db, id, &input)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
+async fn update_course(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateCourseRequest>,
+) -> Result<Json<CourseResponse>, AppError> {
+    let existing = minerva_db::queries::courses::find_by_id(&state.db, id)
         .await?
         .ok_or(AppError::NotFound)?;
+
+    if existing.owner_id != user.id && !user.role.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    let fields = CourseUpdateFields {
+        name: body.name,
+        description: body.description,
+        context_ratio: body.context_ratio,
+        temperature: body.temperature,
+        model: body.model,
+        system_prompt: body.system_prompt,
+        max_chunks: body.max_chunks,
+        min_score: body.min_score,
+        strategy: body.strategy,
+        tool_use_enabled: body.tool_use_enabled,
+        embedding_provider: body.embedding_provider,
+        embedding_model: body.embedding_model,
+        reranker_model: body.reranker_model,
+        daily_token_limit: body.daily_token_limit,
+        semester_label: body.semester_label,
+    };
+
+    let row = apply_course_update(&state, &existing, fields, user.role.is_admin()).await?;
 
     let my_role = minerva_db::queries::courses::get_member_role(&state.db, id, user.id).await?;
     let flags = resolve_course_flags(&state.db, row.id).await;

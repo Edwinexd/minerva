@@ -69,7 +69,13 @@
     "embedding_model_unknown": "Unknown embedding model '{{model}}'. Pick one from the whitelist.",
     "benchmark_busy": "Another benchmark is already running. Wait for it to finish (the page will update on its own).",
     "embedding_default_disabled": "Cannot make '{{model}}' the default while it's disabled. Enable it first, then set it as default.",
-    "reranker_default_disabled": "Cannot make '{{model}}' the default re-ranker while it's disabled. Enable it first, then set it as default."
+    "reranker_default_disabled": "Cannot make '{{model}}' the default re-ranker while it's disabled. Enable it first, then set it as default.",
+    "feature_flag_unknown": "Unknown feature flag '{{flag}}'.",
+    "bulk_no_courses": "Select at least one course first.",
+    "bulk_too_many": "Too many courses selected at once (max {{max}}).",
+    "bulk_course_not_active": "Course is archived or no longer exists; restore it before editing.",
+    "bulk_archive_noop": "Already archived or no longer exists.",
+    "bulk_unarchive_noop": "Already active or no longer exists."
   },
   "chat": {
     "rating_invalid": "Rating must be 'up' or 'down'.",

@@ -47,6 +47,11 @@ pub struct ToolDispatchCtx<'a> {
     pub http_client: &'a reqwest::Client,
     pub openai_api_key: &'a str,
     pub fastembed: &'a Arc<FastEmbedder>,
+    pub reranker: &'a Arc<minerva_ingest::reranker::FastReranker>,
+    /// Per-course re-ranker model id, forwarded to `rag_lookup` for the
+    /// model's tool-driven semantic searches so they re-rank with the
+    /// same model as the seed retrieval.
+    pub reranker_model: &'a str,
     pub qdrant: &'a Arc<qdrant_client::Qdrant>,
     pub db: &'a sqlx::PgPool,
     pub collection_name: &'a str,
@@ -297,6 +302,8 @@ async fn run_semantic_search(
         ctx.http_client,
         ctx.openai_api_key,
         ctx.fastembed,
+        ctx.reranker,
+        ctx.reranker_model,
         ctx.qdrant,
         ctx.collection_name,
         &args.query,

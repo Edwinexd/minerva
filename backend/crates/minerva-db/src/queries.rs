@@ -22,6 +22,7 @@ pub mod play_course_catalog;
 pub mod play_designations;
 pub mod prompt_analyses;
 pub mod relink_queue;
+pub mod reranker_models;
 pub mod role_rule_attribute_observations;
 pub mod role_rules;
 pub mod role_suggestions;

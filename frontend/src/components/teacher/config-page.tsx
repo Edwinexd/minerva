@@ -4,6 +4,7 @@ import {
   courseQuery,
   modelsQuery,
   embeddingModelsQuery,
+  rerankerModelsQuery,
   courseKgTokenUsageQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
@@ -42,6 +43,7 @@ import {
 import { useState } from "react"
 import type { Course } from "@/lib/types"
 import { MODEL_DISPLAY } from "@/lib/embedding-models"
+import { RERANKER_MODEL_DISPLAY } from "@/lib/reranker-models"
 import { RelativeTime } from "@/components/relative-time"
 
 // MODEL_DISPLAY now lives in @/lib/embedding-models so the admin
@@ -304,6 +306,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   // re-picking; only an actual model *change* hits the
   // `local_embedding_model_disabled` server-side check.
   const { data: embeddingModelsData } = useQuery(embeddingModelsQuery)
+  const { data: rerankerModelsData } = useQuery(rerankerModelsQuery)
   const readOnly = course.my_role === "ta"
   const [name, setName] = useState(course.name)
   const [description, setDescription] = useState(course.description || "")
@@ -319,6 +322,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [toolUseEnabled, setToolUseEnabled] = useState(course.tool_use_enabled)
   const [embeddingProvider, setEmbeddingProvider] = useState(course.embedding_provider)
   const [embeddingModel, setEmbeddingModel] = useState(course.embedding_model)
+  const [rerankerModel, setRerankerModel] = useState(course.reranker_model)
   const [dailyTokenLimit, setDailyTokenLimit] = useState(course.daily_token_limit)
   // Backfill / rename of the per-semester grouping label. Empty
   // string means "no change" on submit (we only POST a label when
@@ -360,6 +364,7 @@ function CourseConfigForm({ course }: { course: Course }) {
       tool_use_enabled: toolUseEnabled,
       embedding_provider: embeddingProvider,
       embedding_model: embeddingModel,
+      reranker_model: rerankerModel,
       daily_token_limit: dailyTokenLimit,
       // Only include the key when the editable value actually changed
       // (and the field is editable in the first place). UpdateCourseRequest
@@ -632,6 +637,51 @@ function CourseConfigForm({ course }: { course: Course }) {
               </p>
             </div>
           )}
+
+          <div className="space-y-2">
+            <Label>{t("config.rerankerModelLabel")}</Label>
+            <Select value={rerankerModel} onValueChange={(v) => v && setRerankerModel(v)}>
+              <SelectTrigger className="w-full truncate" aria-label={t("config.rerankerModelLabel")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(() => {
+                  // Same merge trick as the embedding picker: the public
+                  // feed carries admin-enabled re-rankers only, so patch
+                  // in the course's saved model if an admin has since
+                  // disabled it (otherwise the trigger renders blank).
+                  const apiModels = rerankerModelsData?.models ?? []
+                  const ids = new Set(apiModels.map((m) => m.model))
+                  const merged = [...apiModels]
+                  if (rerankerModel && !ids.has(rerankerModel)) {
+                    merged.push({ model: rerankerModel })
+                  }
+                  return merged.map((m) => {
+                    const meta = RERANKER_MODEL_DISPLAY[m.model]
+                    const name = meta?.name ?? m.model
+                    const desc = meta?.descKey ? t(meta.descKey) : ""
+                    const label = desc ? `${name} (${desc})` : name
+                    const multilingual = meta?.multilingual
+                      ? ` ${t("config.rerankerModelMultilingualSuffix")}`
+                      : ""
+                    const disabledNote = !ids.has(m.model)
+                      ? ` ${t("config.rerankerModelDisabledSuffix")}`
+                      : ""
+                    return (
+                      <SelectItem key={m.model} value={m.model}>
+                        {label}
+                        {multilingual}
+                        {disabledNote}
+                      </SelectItem>
+                    )
+                  })
+                })()}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {t("config.rerankerModelHelp")}
+            </p>
+          </div>
 
           <div className="space-y-2">
             <Label htmlFor="maxChunks">{t("config.maxChunksLabel")}</Label>

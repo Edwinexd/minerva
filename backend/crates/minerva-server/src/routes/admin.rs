@@ -59,6 +59,12 @@ pub fn router() -> Router<AppState> {
         )
         .route("/embedding-benchmark", post(run_embedding_benchmark))
         .route(
+            "/reranker-models",
+            get(list_reranker_models).put(update_reranker_model_enabled),
+        )
+        .route("/reranker-models/default", put(set_default_reranker_model))
+        .route("/reranker-benchmark", post(run_reranker_benchmark))
+        .route(
             "/system-defaults",
             get(list_system_defaults).put(update_system_default),
         )
@@ -1449,6 +1455,238 @@ async fn set_default_embedding_model(
         model: row.model,
         is_default: row.is_default,
     }))
+}
+
+// ── Re-ranker model catalog (admin) ────────────────────────────────
+
+#[derive(Serialize)]
+struct RerankerModelEntry {
+    model: String,
+    /// Admin-managed picker policy. When false, teachers can't pick this
+    /// model in the per-course config dropdown; courses already on it
+    /// keep working. Backed by the `reranker_models` table.
+    enabled: bool,
+    /// True for the single model new courses are created with. Exactly
+    /// one row in the response carries this (partial unique index).
+    is_default: bool,
+    /// How many active courses currently select this re-ranker. Surfaced
+    /// so the admin can see the impact of disabling before they do it.
+    /// No provider filter (re-ranking applies regardless of how a course
+    /// embeds).
+    courses_using: i64,
+    /// Latest benchmark result for this model, or null if it hasn't been
+    /// run since the server started. Populated on demand by the admin
+    /// "Run benchmark" button.
+    benchmark: Option<minerva_ingest::reranker::RerankBenchmarkResult>,
+}
+
+#[derive(Serialize)]
+struct RerankerModelsResponse {
+    models: Vec<RerankerModelEntry>,
+    /// True while a benchmark is running. The frontend disables every
+    /// "Run benchmark" button on the page when this is true.
+    running: bool,
+}
+
+/// List the re-ranker catalog with admin policy + usage counts +
+/// latest benchmark. Mirrors `list_embedding_models`; the re-ranker has
+/// no dimensions column, and its benchmark metric is pairs/sec.
+async fn list_reranker_models(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<RerankerModelsResponse>, AppError> {
+    require_admin(&user)?;
+
+    let benchmarks = state.reranker.get_benchmarks().await;
+    let bench_lookup: std::collections::HashMap<
+        &str,
+        &minerva_ingest::reranker::RerankBenchmarkResult,
+    > = benchmarks.iter().map(|b| (b.model.as_str(), b)).collect();
+
+    let policy: std::collections::HashMap<String, (bool, bool)> =
+        minerva_db::queries::reranker_models::list_all(&state.db)
+            .await?
+            .into_iter()
+            .map(|r| (r.model, (r.enabled, r.is_default)))
+            .collect();
+
+    let usage_rows = sqlx::query!(
+        r#"SELECT reranker_model, COUNT(*)::BIGINT AS "count!"
+           FROM courses
+           WHERE active = true
+           GROUP BY reranker_model"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let usage: std::collections::HashMap<String, i64> = usage_rows
+        .into_iter()
+        .map(|r| (r.reranker_model, r.count))
+        .collect();
+
+    let models = minerva_ingest::reranker::VALID_RERANKER_MODELS
+        .iter()
+        .map(|name| {
+            let (enabled, is_default) = policy.get(*name).copied().unwrap_or((false, false));
+            RerankerModelEntry {
+                model: (*name).to_string(),
+                enabled,
+                is_default,
+                courses_using: usage.get(*name).copied().unwrap_or(0),
+                benchmark: bench_lookup.get(name).map(|b| (*b).clone()),
+            }
+        })
+        .collect();
+
+    Ok(Json(RerankerModelsResponse {
+        models,
+        running: state.reranker.is_benchmark_running().await,
+    }))
+}
+
+#[derive(Deserialize)]
+struct UpdateRerankerModelRequest {
+    /// Catalog model id. In the body, not the URL, because the ids
+    /// contain forward slashes (`jinaai/...`) that axum path-routing
+    /// collapses.
+    model: String,
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+struct UpdateRerankerModelResponse {
+    model: String,
+    enabled: bool,
+}
+
+/// Toggle the admin-managed `enabled` flag for one re-ranker catalog
+/// model. Disabling only affects future picker decisions; courses
+/// already on it keep working (and switching re-ranker has no re-embed
+/// cost anyway).
+async fn update_reranker_model_enabled(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<UpdateRerankerModelRequest>,
+) -> Result<Json<UpdateRerankerModelResponse>, AppError> {
+    require_admin(&user)?;
+
+    let in_catalog = minerva_ingest::reranker::VALID_RERANKER_MODELS.contains(&body.model.as_str());
+    if !in_catalog {
+        return Err(AppError::NotFound);
+    }
+
+    let row =
+        minerva_db::queries::reranker_models::set_enabled(&state.db, &body.model, body.enabled)
+            .await?
+            .ok_or_else(|| {
+                AppError::Internal(format!(
+            "reranker_models row missing for catalog entry {} (startup sync should have seeded it)",
+            body.model,
+        ))
+            })?;
+
+    tracing::info!(
+        "admin {} set reranker model {} enabled={}",
+        user.id,
+        row.model,
+        row.enabled,
+    );
+
+    Ok(Json(UpdateRerankerModelResponse {
+        model: row.model,
+        enabled: row.enabled,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SetDefaultRerankerModelRequest {
+    model: String,
+}
+
+#[derive(Serialize)]
+struct SetDefaultRerankerModelResponse {
+    model: String,
+    is_default: bool,
+}
+
+/// Promote one catalog re-ranker to the default for new courses. Atomic
+/// flip (see `set_default`); existing courses keep their current choice.
+async fn set_default_reranker_model(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<SetDefaultRerankerModelRequest>,
+) -> Result<Json<SetDefaultRerankerModelResponse>, AppError> {
+    require_admin(&user)?;
+
+    let in_catalog = minerva_ingest::reranker::VALID_RERANKER_MODELS.contains(&body.model.as_str());
+    if !in_catalog {
+        return Err(AppError::NotFound);
+    }
+
+    let row = match minerva_db::queries::reranker_models::set_default(&state.db, &body.model).await
+    {
+        Ok(row) => row,
+        Err(minerva_db::queries::reranker_models::SetDefaultError::NotFound) => {
+            return Err(AppError::NotFound);
+        }
+        Err(minerva_db::queries::reranker_models::SetDefaultError::Disabled) => {
+            return Err(AppError::bad_request_with(
+                "admin.reranker_default_disabled",
+                [("model", body.model.clone())],
+            ));
+        }
+        Err(minerva_db::queries::reranker_models::SetDefaultError::Db(e)) => {
+            return Err(AppError::from(e));
+        }
+    };
+
+    tracing::info!(
+        "admin {} set reranker model {} as default for new courses",
+        user.id,
+        row.model,
+    );
+
+    Ok(Json(SetDefaultRerankerModelResponse {
+        model: row.model,
+        is_default: row.is_default,
+    }))
+}
+
+#[derive(Deserialize)]
+struct RunRerankerBenchmarkRequest {
+    /// Catalog re-ranker id. In the body, not the URL (the ids contain
+    /// forward slashes that axum path-routing collapses).
+    model: String,
+}
+
+#[derive(Serialize)]
+struct RunRerankerBenchmarkResponse {
+    result: minerva_ingest::reranker::RerankBenchmarkResult,
+}
+
+/// Benchmark one re-ranker model (pairs/sec). Reuses the same
+/// `admin.benchmark_busy` soft error the embedding benchmark uses; a
+/// failed model load surfaces as Internal so the operator checks logs.
+async fn run_reranker_benchmark(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<RunRerankerBenchmarkRequest>,
+) -> Result<Json<RunRerankerBenchmarkResponse>, AppError> {
+    require_admin(&user)?;
+
+    let in_catalog = minerva_ingest::reranker::VALID_RERANKER_MODELS.contains(&body.model.as_str());
+    if !in_catalog {
+        return Err(AppError::NotFound);
+    }
+
+    match state.reranker.benchmark_one(&body.model).await {
+        Ok(result) => Ok(Json(RunRerankerBenchmarkResponse { result })),
+        Err(minerva_ingest::reranker::BenchmarkError::Busy) => {
+            Err(AppError::bad_request("admin.benchmark_busy"))
+        }
+        Err(minerva_ingest::reranker::BenchmarkError::Failed(e)) => Err(AppError::Internal(
+            format!("reranker benchmark failed for {}: {}", body.model, e),
+        )),
+    }
 }
 
 #[derive(Deserialize)]

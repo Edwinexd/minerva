@@ -81,6 +81,10 @@ struct UpdateCourseRequest {
     tool_use_enabled: Option<bool>,
     embedding_provider: Option<String>,
     embedding_model: Option<String>,
+    /// Per-course re-ranker model change. Validated against the
+    /// `reranker_models` catalog (enabled unless admin / unchanged).
+    /// No re-embed: applies on the next chat turn.
+    reranker_model: Option<String>,
     daily_token_limit: Option<i64>,
     /// Admin / owner backfill: stamp or rewrite the per-semester
     /// label on an existing course. Format-validated identically to
@@ -132,6 +136,10 @@ pub(crate) struct CourseResponse {
     /// rotates. Surfaced so the UI can correlate post-rotation
     /// re-ingestion progress with the current embedding generation.
     embedding_version: i32,
+    /// Per-course cross-encoder re-ranker model id. Picked from the
+    /// admin-managed `reranker_models` catalog; changing it has no
+    /// re-embed cost. Frontend renders a dropdown on the config page.
+    reranker_model: String,
     daily_token_limit: i64,
     active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -242,6 +250,7 @@ impl CourseResponse {
             embedding_provider: row.embedding_provider,
             embedding_model: row.embedding_model,
             embedding_version: row.embedding_version,
+            reranker_model: row.reranker_model,
             daily_token_limit: row.daily_token_limit,
             active: row.active,
             created_at: row.created_at,
@@ -345,6 +354,10 @@ async fn create_course(
     // PUT /courses/{id} afterwards.
     let default_embedding_model =
         minerva_db::queries::embedding_models::current_default(&state.db).await?;
+    // Same pattern for the re-ranker: snapshot the admin-chosen catalog
+    // default. Falls through to the column DEFAULT if no row is marked.
+    let default_reranker_model =
+        minerva_db::queries::reranker_models::current_default(&state.db).await?;
 
     let input = minerva_db::queries::courses::CreateCourse {
         name: body.name,
@@ -363,6 +376,7 @@ async fn create_course(
             crate::system_defaults::course_embedding_provider(&state.db).await,
         ),
         embedding_model: default_embedding_model,
+        reranker_model: default_reranker_model,
         system_prompt: crate::system_defaults::course_system_prompt(&state.db).await,
     };
 
@@ -510,6 +524,34 @@ async fn update_course(
         }
     }
 
+    // Validate the re-ranker model (independent of embedding provider;
+    // the cross-encoder reads chunk text either way). Same two-layer
+    // check as embeddings: catalog membership + admin-managed enabled
+    // flag, bypassed when the value is unchanged or the caller is an
+    // admin. Unlike embeddings there is NO rotation: switching the
+    // re-ranker has no re-embed cost, so the new value just lands via
+    // the COALESCE update below and applies on the next chat turn.
+    if let Some(ref model) = body.reranker_model {
+        let in_catalog = minerva_ingest::reranker::VALID_RERANKER_MODELS.contains(&model.as_str());
+        if !in_catalog {
+            return Err(AppError::bad_request_with(
+                "course.reranker_model_invalid",
+                [("model", model.clone())],
+            ));
+        }
+        let unchanged = model.as_str() == existing.reranker_model.as_str();
+        if !unchanged && !user.role.is_admin() {
+            let enabled =
+                minerva_db::queries::reranker_models::is_enabled(&state.db, model).await?;
+            if !enabled {
+                return Err(AppError::bad_request_with(
+                    "course.reranker_model_disabled",
+                    [("model", model.clone())],
+                ));
+            }
+        }
+    }
+
     // For openai provider, force the embedding_model to the canonical value
     let embedding_model = if effective_provider == "openai" {
         body.embedding_model
@@ -596,6 +638,7 @@ async fn update_course(
         tool_use_enabled: body.tool_use_enabled,
         embedding_provider: None,
         embedding_model: None,
+        reranker_model: body.reranker_model,
         daily_token_limit: body.daily_token_limit,
         semester_label: validated_semester_label,
     };

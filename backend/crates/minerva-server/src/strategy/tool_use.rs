@@ -131,6 +131,8 @@ pub async fn run(
         &http_client,
         &ctx.openai_api_key,
         &ctx.fastembed,
+        &ctx.reranker,
+        &ctx.reranker_model,
         &ctx.qdrant,
         &collection_name,
         &ctx.user_content,

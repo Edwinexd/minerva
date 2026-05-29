@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO reranker_models (model, enabled)\n           VALUES ($1, $2)\n           ON CONFLICT (model) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4e46e89bb1e0c24560b9bf814f925089747dfb56bcdd56b25a5911b7cbef80d4"
+}

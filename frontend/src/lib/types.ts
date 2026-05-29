@@ -38,6 +38,15 @@ export interface Course {
    * post-rotation re-ingestion progress with the live generation.
    */
   embedding_version: number
+  /**
+   * Per-course cross-encoder re-ranker model id. RAG retrieval always
+   * re-ranks the embedding candidate pool; this selects which model.
+   * Picked from the admin-managed `reranker_models` catalog; changing it
+   * has no re-embed cost (the cross-encoder reads chunk text, not
+   * vectors), so unlike `embedding_model` it applies on the next turn
+   * without a rotation dialog.
+   */
+  reranker_model: string
   daily_token_limit: number
   active: boolean
   created_at: string

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE courses SET\n            name = COALESCE($2, name),\n            description = COALESCE($3, description),\n            context_ratio = COALESCE($4, context_ratio),\n            temperature = COALESCE($5, temperature),\n            model = COALESCE($6, model),\n            system_prompt = COALESCE($7, system_prompt),\n            max_chunks = COALESCE($8, max_chunks),\n            strategy = COALESCE($9, strategy),\n            tool_use_enabled = COALESCE($10, tool_use_enabled),\n            daily_token_limit = COALESCE($11, daily_token_limit),\n            embedding_provider = COALESCE($12, embedding_provider),\n            embedding_model = COALESCE($13, embedding_model),\n            min_score = COALESCE($14, min_score),\n            semester_label = COALESCE($15, semester_label),\n            updated_at = NOW()\n        WHERE id = $1 AND active = true\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code",
+  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code\n        FROM courses c\n        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1 OR cm.role IN ('teacher', 'ta'))\n        ORDER BY c.updated_at DESC",
   "describe": {
     "columns": [
       {
@@ -80,57 +80,48 @@
       },
       {
         "ordinal": 15,
+        "name": "reranker_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
         "name": "daily_token_limit",
         "type_info": "Int8"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "semester_label",
         "type_info": "Text"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "auto_managed",
         "type_info": "Bool"
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "course_code",
         "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Text",
-        "Float8",
-        "Float8",
-        "Text",
-        "Text",
-        "Int4",
-        "Text",
-        "Bool",
-        "Int8",
-        "Text",
-        "Text",
-        "Float4",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -153,10 +144,11 @@
       false,
       false,
       false,
+      false,
       true,
       false,
       true
     ]
   },
-  "hash": "74191b486d5c2a12e20b7105ddb764a2b55a4b2e7eaab21029c9292ba72ea841"
+  "hash": "17f24a3ad4fb77cdf9450d0775e04851ff3dcaa4911c1e0362a20a074277ad40"
 }

@@ -721,12 +721,15 @@ async fn import_daisy_courses(
         // settings stamped until an admin promotes them.
         let default_embedding_model =
             minerva_db::queries::embedding_models::current_default(&state.db).await?;
+        let default_reranker_model =
+            minerva_db::queries::reranker_models::current_default(&state.db).await?;
 
         for input in body {
             match apply_one(
                 &state,
                 &input,
                 default_embedding_model.as_deref(),
+                default_reranker_model.as_deref(),
                 &mut summary,
             )
             .await
@@ -865,6 +868,7 @@ pub(super) async fn apply_one(
     state: &AppState,
     input: &DaisyCourseInputPayload,
     default_embedding_model: Option<&str>,
+    default_reranker_model: Option<&str>,
     summary: &mut DaisyImportSummary,
 ) -> Result<(), AppError> {
     let momenttillf_id = input.momenttillf_id.trim();
@@ -1001,6 +1005,7 @@ pub(super) async fn apply_one(
             ),
             embedding_provider: Some(embedding_provider.as_str()),
             embedding_model: default_embedding_model,
+            reranker_model: default_reranker_model,
             system_prompt: system_prompt.as_deref(),
         },
     )

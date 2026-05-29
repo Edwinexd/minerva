@@ -125,6 +125,30 @@ pub async fn embedding_models(
     Ok(Json(json!({ "models": models })))
 }
 
+/// Auth-gated catalog feed for the teacher re-ranker dropdown. Returns
+/// `{ models: [{model}, …] }` filtered to `enabled = true` rows. Mirrors
+/// `embedding_models` above; the re-ranker has no per-model dimensions
+/// or benchmark, so the entries carry only the id (the frontend's
+/// display map supplies friendly names + multilingual hints).
+pub async fn reranker_models(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, crate::error::AppError> {
+    let policy: std::collections::HashMap<String, bool> =
+        minerva_db::queries::reranker_models::list_all(&state.db)
+            .await?
+            .into_iter()
+            .map(|r| (r.model, r.enabled))
+            .collect();
+
+    let models: Vec<Value> = minerva_ingest::reranker::VALID_RERANKER_MODELS
+        .iter()
+        .filter(|name| policy.get(**name).copied().unwrap_or(false))
+        .map(|name| json!({ "model": name }))
+        .collect();
+
+    Ok(Json(json!({ "models": models })))
+}
+
 fn fallback_models() -> Vec<Value> {
     // Used only when the Cerebras `/v1/models` endpoint is unreachable
     // or returns garbage. Lists the model(s) we actually expect every

@@ -68,7 +68,8 @@
     "condition_regex_invalid": "Invalid regex: {{detail}}",
     "embedding_model_unknown": "Unknown embedding model '{{model}}'. Pick one from the whitelist.",
     "benchmark_busy": "Another benchmark is already running. Wait for it to finish (the page will update on its own).",
-    "embedding_default_disabled": "Cannot make '{{model}}' the default while it's disabled. Enable it first, then set it as default."
+    "embedding_default_disabled": "Cannot make '{{model}}' the default while it's disabled. Enable it first, then set it as default.",
+    "reranker_default_disabled": "Cannot make '{{model}}' the default re-ranker while it's disabled. Enable it first, then set it as default."
   },
   "chat": {
     "rating_invalid": "Rating must be 'up' or 'down'.",
@@ -121,6 +122,8 @@
     "embedding_provider_invalid": "Invalid embedding provider: {{provider}}",
     "local_embedding_model_invalid": "Invalid local embedding model: {{model}}",
     "local_embedding_model_disabled": "The embedding model \"{{model}}\" has been disabled by an administrator. Pick a different model or ask the admin to re-enable it.",
+    "reranker_model_invalid": "Invalid re-ranker model: {{model}}",
+    "reranker_model_disabled": "The re-ranker model \"{{model}}\" has been disabled by an administrator. Pick a different model or ask the admin to re-enable it.",
     "model_does_not_support_tools": "The model \"{{model}}\" does not support tool calling. Either pick a tool-capable model or disable tool use.",
     "model_does_not_support_logprobs": "The model \"{{model}}\" does not return per-token logprobs, which the FLARE strategy needs. Either pick a model that supports logprobs or switch the strategy to Simple."
   },

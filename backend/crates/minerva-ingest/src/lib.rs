@@ -5,3 +5,4 @@ pub mod fastembed_embedder;
 pub mod moodle;
 pub mod pdf;
 pub mod pipeline;
+pub mod reranker;

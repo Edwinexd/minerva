@@ -68,7 +68,8 @@
     "condition_regex_invalid": "Ogiltigt regex: {{detail}}",
     "embedding_model_unknown": "Okänd embedding-modell '{{model}}'. Välj en från listan.",
     "benchmark_busy": "Ett benchmark körs redan. Vänta tills det är klart (sidan uppdateras automatiskt).",
-    "embedding_default_disabled": "Kan inte göra '{{model}}' till standard medan den är inaktiverad. Aktivera den först och sätt den sedan som standard."
+    "embedding_default_disabled": "Kan inte göra '{{model}}' till standard medan den är inaktiverad. Aktivera den först och sätt den sedan som standard.",
+    "reranker_default_disabled": "Kan inte göra '{{model}}' till standardomrankare medan den är inaktiverad. Aktivera den först och sätt den sedan som standard."
   },
   "chat": {
     "rating_invalid": "Betyget måste vara 'up' eller 'down'.",
@@ -121,6 +122,8 @@
     "embedding_provider_invalid": "Ogiltig embedding-leverantör: {{provider}}",
     "local_embedding_model_invalid": "Ogiltig lokal embedding-modell: {{model}}",
     "local_embedding_model_disabled": "Embedding-modellen \"{{model}}\" har inaktiverats av en administratör. Välj en annan modell eller be admin slå på den igen.",
+    "reranker_model_invalid": "Ogiltig omrankningsmodell: {{model}}",
+    "reranker_model_disabled": "Omrankningsmodellen \"{{model}}\" har inaktiverats av en administratör. Välj en annan modell eller be admin slå på den igen.",
     "model_does_not_support_tools": "Modellen \"{{model}}\" stödjer inte verktygsanrop. Välj en modell som klarar verktyg eller stäng av verktygsanvändning.",
     "model_does_not_support_logprobs": "Modellen \"{{model}}\" returnerar inte logprobs per token, vilket FLARE-strategin behöver. Välj en modell som stödjer logprobs eller byt strategi till Simple."
   },

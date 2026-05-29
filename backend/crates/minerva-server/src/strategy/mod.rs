@@ -48,6 +48,16 @@ pub struct GenerationContext {
     pub db: sqlx::PgPool,
     pub qdrant: std::sync::Arc<qdrant_client::Qdrant>,
     pub fastembed: std::sync::Arc<minerva_ingest::fastembed_embedder::FastEmbedder>,
+    /// Cross-encoder re-ranker shared from `AppState`. Every RAG
+    /// retrieval over-fetches a candidate pool from Qdrant and runs it
+    /// through this before truncating to `max_chunks`; see
+    /// `common::rag_lookup` / `common::rerank_chunks`.
+    pub reranker: std::sync::Arc<minerva_ingest::reranker::FastReranker>,
+    /// Per-course re-ranker model id (`courses.reranker_model`), chosen
+    /// from the admin-managed `reranker_models` catalog. Passed to the
+    /// `reranker` on every RAG lookup; independent of the embedding
+    /// model (no re-embed on change).
+    pub reranker_model: String,
     /// Resolved per-request from the `course_kg` feature flag. When
     /// FALSE, RAG behaviour reverts to the pre-KG baseline:
     ///

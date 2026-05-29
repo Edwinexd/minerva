@@ -79,6 +79,16 @@
       "arcticMV2Desc": "flerspråkig (inkl. svenska), 768 dim, int8",
       "qwen3Desc": "Qwen3, flerspråkig, tung"
     },
+    "rerankerModelLabel": "Omrankningsmodell",
+    "rerankerModelHelp": "Varje hämtning omrankas av en cross-encoder innan de bästa styckena når modellen. Här väljer du vilken omrankare som används. Flerspråkiga modeller täcker svenskt kursmaterial. Att byta har ingen kostnad för omberäkning av embeddings; det börjar gälla vid nästa fråga.",
+    "rerankerModelMultilingualSuffix": "[flerspråkig]",
+    "rerankerModelDisabledSuffix": "(erbjuds inte längre)",
+    "rerankerModels": {
+      "jinaV2MultilingualDesc": "flerspråkig inkl. svenska, lätt",
+      "bgeV2M3Desc": "flerspråkig, högre kvalitet, tung",
+      "bgeBaseDesc": "engelska / kinesiska",
+      "jinaV1TurboDesc": "engelska, mycket snabb"
+    },
     "maxChunksLabel": "Maximalt antal hämtade stycken",
     "minScoreLabel": "Lägsta likhetspoäng: {{value}}",
     "minScoreHelp": "Stycken som får lägre poäng än tröskeln kastas innan de skickas till modellen. 0 inaktiverar filtret (endast topp-K). Använd RAG-fliken för att förhandsgranska vilka stycken som passerar för en exempelfråga.",

@@ -29,6 +29,11 @@ pub struct CourseRow {
     /// version>=2 maps to `course_{id}_v{n}`. See
     /// `minerva-ingest::pipeline::collection_name`.
     pub embedding_version: i32,
+    /// Per-course cross-encoder re-ranker model id. Selected from the
+    /// admin-managed `reranker_models` catalog; independent of the
+    /// embedding model (changing it needs no re-embed). See
+    /// `minerva_ingest::reranker`.
+    pub reranker_model: String,
     pub daily_token_limit: i64,
     pub active: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -71,6 +76,9 @@ pub struct CreateCourse {
     pub tool_use_enabled: Option<bool>,
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
+    /// Re-ranker model id snapshotted from the `reranker_models` catalog
+    /// default at create time. `None` falls through to the column DEFAULT.
+    pub reranker_model: Option<String>,
     pub system_prompt: Option<String>,
     /// Required for new courses. The route layer validates the format
     /// (VT|HT + 4-digit year); pre-existing rows from before this
@@ -92,6 +100,10 @@ pub struct UpdateCourse {
     pub tool_use_enabled: Option<bool>,
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
+    /// Per-course re-ranker model change. `None` = no change (COALESCE
+    /// no-op). No re-embed side effect, so unlike embedding rotation this
+    /// just lands in the row.
+    pub reranker_model: Option<String>,
     pub daily_token_limit: Option<i64>,
     /// Admin / owner backfill of the per-semester grouping label.
     /// Outer `Option` distinguishes "no change" (None) from "set
@@ -118,7 +130,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             id, name, description, owner_id, daily_token_limit,
             model, temperature, context_ratio, max_chunks, min_score,
             strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt,
-            semester_label
+            semester_label, reranker_model
         ) VALUES (
             $1, $2, $3, $4, $5,
             COALESCE($6, 'gpt-oss-120b'),
@@ -131,9 +143,10 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             COALESCE($13, 'local'),
             COALESCE($14, 'sentence-transformers/all-MiniLM-L6-v2'),
             $15,
-            $16
+            $16,
+            COALESCE($17, 'jinaai/jina-reranker-v2-base-multilingual')
         )
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
         id,
         input.name,
         input.description,
@@ -150,6 +163,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
         input.embedding_model.as_deref(),
         input.system_prompt.as_deref(),
         input.semester_label,
+        input.reranker_model.as_deref(),
     )
     .fetch_one(db)
     .await
@@ -158,7 +172,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE id = $1 AND active = true",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE id = $1 AND active = true",
         id,
     )
     .fetch_optional(db)
@@ -168,7 +182,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx
 pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
         owner_id,
     )
     .fetch_all(db)
@@ -178,7 +192,7 @@ pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
+        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
         FROM courses c
         JOIN course_members cm ON cm.course_id = c.id
         WHERE cm.user_id = $1 AND c.active = true
@@ -195,7 +209,7 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_for_teacher(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -217,7 +231,7 @@ pub async fn list_for_teacher_strict(
 ) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -232,7 +246,7 @@ pub async fn list_for_teacher_strict(
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE active = true ORDER BY updated_at DESC",
     )
     .fetch_all(db)
     .await
@@ -260,9 +274,10 @@ pub async fn update(
             embedding_model = COALESCE($13, embedding_model),
             min_score = COALESCE($14, min_score),
             semester_label = COALESCE($15, semester_label),
+            reranker_model = COALESCE($16, reranker_model),
             updated_at = NOW()
         WHERE id = $1 AND active = true
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
         id,
         input.name,
         input.description,
@@ -278,6 +293,7 @@ pub async fn update(
         input.embedding_model,
         input.min_score,
         input.semester_label,
+        input.reranker_model,
     )
     .fetch_optional(db)
     .await
@@ -545,6 +561,8 @@ pub struct DaisyCourseInput<'a> {
     pub tool_use_enabled: Option<bool>,
     pub embedding_provider: Option<&'a str>,
     pub embedding_model: Option<&'a str>,
+    /// Re-ranker model id snapshotted from the catalog default on INSERT.
+    pub reranker_model: Option<&'a str>,
     pub system_prompt: Option<&'a str>,
 }
 
@@ -614,7 +632,7 @@ pub async fn upsert_from_daisy(
                     id, name, owner_id, daily_token_limit,
                     model, temperature, context_ratio, max_chunks, min_score,
                     strategy, tool_use_enabled, embedding_provider, embedding_model,
-                    system_prompt, semester_label, auto_managed, course_code
+                    system_prompt, semester_label, auto_managed, course_code, reranker_model
                 ) VALUES (
                     $1, $2, $3, $4,
                     COALESCE($5, 'gpt-oss-120b'),
@@ -626,7 +644,8 @@ pub async fn upsert_from_daisy(
                     COALESCE($11::BOOLEAN, FALSE),
                     COALESCE($12, 'local'),
                     COALESCE($13, 'sentence-transformers/all-MiniLM-L6-v2'),
-                    $14, $15, TRUE, $16
+                    $14, $15, TRUE, $16,
+                    COALESCE($17, 'jinaai/jina-reranker-v2-base-multilingual')
                 )"#,
                 new_id,
                 input.name,
@@ -644,6 +663,7 @@ pub async fn upsert_from_daisy(
                 input.system_prompt,
                 input.semester_label,
                 input.beteckning,
+                input.reranker_model,
             )
             .execute(&mut *tx)
             .await?;
@@ -687,7 +707,7 @@ pub async fn find_by_daisy_momenttillf_id(
         r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature,
                c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy,
                c.tool_use_enabled, c.embedding_provider, c.embedding_model,
-               c.embedding_version, c.daily_token_limit, c.active, c.created_at,
+               c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at,
                c.updated_at, c.semester_label, c.auto_managed, c.course_code
             FROM courses c
             JOIN course_daisy_offerings o ON o.course_id = c.id
@@ -704,7 +724,7 @@ pub async fn find_by_daisy_momenttillf_id(
 pub async fn list_all_including_archived(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses ORDER BY active DESC, updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses ORDER BY active DESC, updated_at DESC",
     )
     .fetch_all(db)
     .await

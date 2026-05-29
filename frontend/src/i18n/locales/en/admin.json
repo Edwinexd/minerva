@@ -619,6 +619,35 @@
       "confirmDisableBody_other": "The model \"{{model}}\" is currently selected by {{count}} active courses. Disabling it removes it from the teacher picker but leaves those courses on it; they keep working under the model. To move them off, force-migrate each course from the Course Management page (admins can target any catalog model, including disabled ones).",
       "confirmDisableCancel": "Keep enabled",
       "confirmDisableAction": "Disable anyway"
+    },
+    "rerankerModels": {
+      "title": "Re-ranker models",
+      "description": "Catalog of cross-encoder re-rankers the runtime can load. Every RAG retrieval re-ranks its embedding candidate pool before the top chunks reach the model; this controls which re-rankers teachers may pick per course and which one new courses default to. Multilingual models cover Swedish course content. Unlike embeddings, switching a course's re-ranker has no re-embedding cost (the cross-encoder reads chunk text, not vectors), so disabling a model here is cheap to recover from. Only enabled models can be the default, and the default itself can't be disabled (clear it from another row first).",
+      "columns": {
+        "enabled": "Enabled",
+        "default": "Default",
+        "model": "Model",
+        "coursesUsing": "Courses",
+        "speed": "Speed",
+        "action": " "
+      },
+      "multilingualBadge": "multilingual",
+      "defaultBadge": "default",
+      "enabledAriaLabel": "Toggle picker visibility for {{model}}",
+      "defaultAriaLabel": "Make {{model}} the default for new courses",
+      "speedValue": "{{value}} pairs/s",
+      "run": "Run benchmark",
+      "rerun": "Re-run",
+      "running": "Running...",
+      "runBenchmarkTitle": "Load this re-ranker and score a fixed query/passage set through it to measure pairs/sec. Disabled while another benchmark is running.",
+      "runningHint": "Currently benchmarking {{model}}. The page polls every 1.5s while a run is in flight and updates the row when it finishes.",
+      "note": "First use of a model includes a one-time download from HuggingFace. The default multilingual model is the lightest; the heavier multilingual re-ranker uses noticeably more memory once a course selects it.",
+      "confirmDisableTitle_one": "Disable a re-ranker that {{count}} course is using?",
+      "confirmDisableTitle_other": "Disable a re-ranker that {{count}} courses are using?",
+      "confirmDisableBody_one": "The re-ranker \"{{model}}\" is currently selected by {{count}} active course. Disabling it removes it from the teacher picker but leaves the course on it; it keeps working. The teacher can switch to another model with no re-embedding cost.",
+      "confirmDisableBody_other": "The re-ranker \"{{model}}\" is currently selected by {{count}} active courses. Disabling it removes it from the teacher picker but leaves those courses on it; they keep working. Teachers can switch to another model with no re-embedding cost.",
+      "confirmDisableCancel": "Keep enabled",
+      "confirmDisableAction": "Disable anyway"
     }
   },
   "defaults": {

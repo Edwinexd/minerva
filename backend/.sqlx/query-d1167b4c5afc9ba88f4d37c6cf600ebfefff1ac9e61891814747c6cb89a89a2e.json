@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT model, enabled, is_default, created_at, updated_at\n           FROM reranker_models\n           ORDER BY model ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_default",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d1167b4c5afc9ba88f4d37c6cf600ebfefff1ac9e61891814747c6cb89a89a2e"
+}

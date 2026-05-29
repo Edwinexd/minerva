@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT enabled FROM reranker_models WHERE model = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "enabled",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9a381a180c5265928840416a70ef9e673b229328ecb69a21181e34fd70eeb3ae"
+}

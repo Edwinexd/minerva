@@ -118,10 +118,9 @@ export interface AdminEmbeddingModelsResponse {
 export const adminEmbeddingModelsQuery = queryOptions({
   queryKey: ["admin", "embedding-models"],
   queryFn: () => api.get<AdminEmbeddingModelsResponse>("/admin/embedding-models"),
-  // Poll while a benchmark is running so the row's speed populates
-  // automatically once it finishes. The hook in the page swaps to
-  // a faster interval when `running` is true.
-  refetchInterval: 5000,
+  // Poll only while a benchmark is running so the row's speed populates
+  // automatically once it finishes; idle otherwise.
+  refetchInterval: (q) => (q.state.data?.running ? 1500 : false),
 })
 
 /// Public picker feed for the per-course teacher dropdown. Auth-gated
@@ -141,6 +140,64 @@ export const embeddingModelsQuery = queryOptions({
     api.get<{ models: PublicEmbeddingModel[] }>("/embedding-catalog"),
   // Fresh-ish: a teacher reopening config after an admin re-enables
   // a model shouldn't have to hard-refresh.
+  staleTime: 60_000,
+})
+
+// ── Re-ranker model catalog ────────────────────────────────────────
+
+// Cross-encoder throughput: (query, passage) pairs scored per second.
+// Distinct from the embedder's embeddings_per_second metric.
+export interface RerankBenchmark {
+  model: string
+  pairs_per_second: number
+  total_ms: number
+  pairs: number
+}
+
+export interface AdminRerankerModel {
+  model: string
+  // Admin-managed picker policy. When false, teachers can't pick this
+  // re-ranker in the per-course config dropdown; courses already on it
+  // keep working. Toggled via `PUT /admin/reranker-models` with
+  // `{model, enabled}`.
+  enabled: boolean
+  // True for the single re-ranker new courses default to. Set via
+  // `PUT /admin/reranker-models/default` with `{model}`.
+  is_default: boolean
+  // Number of active courses currently using this re-ranker (no
+  // provider filter; re-ranking applies regardless of embedding).
+  courses_using: number
+  // Latest benchmark, or null if not run since boot. Populated on
+  // demand by the admin "Run benchmark" button.
+  benchmark: RerankBenchmark | null
+}
+
+export interface AdminRerankerModelsResponse {
+  models: AdminRerankerModel[]
+  // True while a benchmark is in flight on the server (one model loaded
+  // + scored at a time). Disables every "Run benchmark" button.
+  running: boolean
+}
+
+export const adminRerankerModelsQuery = queryOptions({
+  queryKey: ["admin", "reranker-models"],
+  queryFn: () => api.get<AdminRerankerModelsResponse>("/admin/reranker-models"),
+  // Poll only while a benchmark is running (matches the embedding query)
+  // so the speed fills in when the run finishes; idle otherwise.
+  refetchInterval: (q) => (q.state.data?.running ? 1500 : false),
+})
+
+/// Public picker feed for the per-course teacher re-ranker dropdown.
+/// Returns only `enabled` catalog entries; carries just the id (the
+/// frontend display map supplies friendly names + multilingual hints).
+export interface PublicRerankerModel {
+  model: string
+}
+
+export const rerankerModelsQuery = queryOptions({
+  queryKey: ["reranker-models"],
+  queryFn: () =>
+    api.get<{ models: PublicRerankerModel[] }>("/reranker-catalog"),
   staleTime: 60_000,
 })
 

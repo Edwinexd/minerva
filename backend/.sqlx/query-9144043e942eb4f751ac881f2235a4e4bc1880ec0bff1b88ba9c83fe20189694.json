@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code\n        FROM courses c\n        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1 OR cm.role = 'teacher')\n        ORDER BY c.updated_at DESC",
+  "query": "SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature,\n               c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy,\n               c.tool_use_enabled, c.embedding_provider, c.embedding_model,\n               c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at,\n               c.updated_at, c.semester_label, c.auto_managed, c.course_code\n            FROM courses c\n            JOIN course_daisy_offerings o ON o.course_id = c.id\n            WHERE o.momenttillf_id = $1 AND c.active = true",
   "describe": {
     "columns": [
       {
@@ -80,43 +80,48 @@
       },
       {
         "ordinal": 15,
+        "name": "reranker_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
         "name": "daily_token_limit",
         "type_info": "Int8"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "semester_label",
         "type_info": "Text"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "auto_managed",
         "type_info": "Bool"
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "course_code",
         "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
@@ -139,10 +144,11 @@
       false,
       false,
       false,
+      false,
       true,
       false,
       true
     ]
   },
-  "hash": "5e55c81d8620eef61f97d84a04c2d61e2e2382ecf987f3f3c8b596c4266e9a3b"
+  "hash": "9144043e942eb4f751ac881f2235a4e4bc1880ec0bff1b88ba9c83fe20189694"
 }

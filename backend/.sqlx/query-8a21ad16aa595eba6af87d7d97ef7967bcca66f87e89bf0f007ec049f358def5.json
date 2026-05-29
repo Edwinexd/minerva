@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE reranker_models\n           SET enabled = $2, updated_at = NOW()\n           WHERE model = $1\n           RETURNING model, enabled, is_default, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_default",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8a21ad16aa595eba6af87d7d97ef7967bcca66f87e89bf0f007ec049f358def5"
+}

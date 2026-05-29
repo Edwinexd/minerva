@@ -507,6 +507,7 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             tool_use_enabled: None,
             embedding_provider: None,
             embedding_model: None,
+            reranker_model: None,
             system_prompt: None,
             // Dev seed predates the per-semester grouping; pin every
             // seeded course to a stable VT2026 label so the My Courses
@@ -536,6 +537,9 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             // the smallest of the local options (384-dim, ~25 MB).
             embedding_provider: Some("local".to_string()),
             embedding_model: Some("sentence-transformers/all-MiniLM-L6-v2".to_string()),
+            // Leave the re-ranker at the catalog default (multilingual);
+            // None = no change from the row's SQL DEFAULT.
+            reranker_model: None,
             daily_token_limit: None,
             semester_label: None,
         },

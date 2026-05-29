@@ -70,6 +70,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         // renaming the route is the immediate fix that doesn't depend
         // on the manual prod-server apache update.
         .route("/embedding-catalog", get(health::embedding_models))
+        .route("/reranker-catalog", get(health::reranker_models))
         .nest("/courses", courses::router())
         .nest("/courses/{course_id}/documents", documents::router())
         .nest("/courses/{course_id}", chat::router())

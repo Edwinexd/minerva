@@ -4,7 +4,15 @@ import React from "react"
 
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
-import { modelsQuery } from "@/lib/queries"
+import {
+  modelsQuery,
+  adminEmbeddingModelsQuery,
+  adminRerankerModelsQuery,
+  type AdminEmbeddingModel,
+  type AdminRerankerModel,
+} from "@/lib/queries"
+import { RERANKER_MODEL_DISPLAY } from "@/lib/reranker-models"
+import { ModelCatalogCard } from "./model-catalog-card"
 import { RelativeTime } from "@/components/relative-time"
 import {
   Card,
@@ -125,6 +133,12 @@ export function AdminDefaultsPanel() {
         entries={platform}
         tCommon={tCommon}
       />
+
+      {/* Model catalogs: which embedding / re-ranker models teachers can
+          pick, and which one new courses default to. Live here (not the
+          System tab) because they govern new-course defaults. */}
+      <EmbeddingModelsCard />
+      <RerankerModelsCard />
     </div>
   )
 }
@@ -465,4 +479,75 @@ function shallowJsonEqual(a: unknown, b: unknown): boolean {
   if (typeof a !== typeof b) return false
   if (typeof a === "object") return JSON.stringify(a) === JSON.stringify(b)
   return false
+}
+
+// ── Admin model catalogs ───────────────────────────────────────────
+// Both render through the shared `ModelCatalogCard` (one component =
+// guaranteed-identical column order + spacing); only the per-catalog
+// props differ. They live on the Defaults tab (not System) because they
+// govern new-course defaults.
+
+function EmbeddingModelsCard() {
+  const { t } = useTranslation("admin")
+  const { data, isLoading, error } = useQuery(adminEmbeddingModelsQuery)
+  return (
+    <ModelCatalogCard<AdminEmbeddingModel>
+      i18nPrefix="system.embeddingModels"
+      data={data}
+      isLoading={isLoading}
+      error={error}
+      adminQueryKey={["admin", "embedding-models"]}
+      pickerQueryKey={["embedding-models"]}
+      benchmarkQueryKey={["embedding-benchmarks"]}
+      enabledPath="/admin/embedding-models"
+      defaultPath="/admin/embedding-models/default"
+      benchmarkPath="/admin/embedding-benchmark"
+      defaultRadioName="default-embedding-model"
+      extraColumns={[{ headerKey: "dimensions", render: (m) => m.dimensions }]}
+      speedOf={(m) => (m.benchmark ? m.benchmark.embeddings_per_second : null)}
+      renderModelName={(m) => (
+        <>
+          {m.model}
+          {m.warmed_at_startup && (
+            <Badge variant="secondary" className="ml-2">
+              {t("system.embeddingModels.warmBadge")}
+            </Badge>
+          )}
+        </>
+      )}
+    />
+  )
+}
+
+function RerankerModelsCard() {
+  const { t } = useTranslation("admin")
+  const { data, isLoading, error } = useQuery(adminRerankerModelsQuery)
+  return (
+    <ModelCatalogCard<AdminRerankerModel>
+      i18nPrefix="system.rerankerModels"
+      data={data}
+      isLoading={isLoading}
+      error={error}
+      adminQueryKey={["admin", "reranker-models"]}
+      pickerQueryKey={["reranker-models"]}
+      enabledPath="/admin/reranker-models"
+      defaultPath="/admin/reranker-models/default"
+      benchmarkPath="/admin/reranker-benchmark"
+      defaultRadioName="default-reranker-model"
+      speedOf={(m) => (m.benchmark ? m.benchmark.pairs_per_second : null)}
+      renderModelName={(m) => {
+        const meta = RERANKER_MODEL_DISPLAY[m.model]
+        return (
+          <>
+            {meta?.name ?? m.model}
+            {meta?.multilingual && (
+              <Badge variant="secondary" className="ml-2">
+                {t("system.rerankerModels.multilingualBadge")}
+              </Badge>
+            )}
+          </>
+        )
+      }}
+    />
+  )
 }

@@ -116,6 +116,7 @@ const course: Course = {
   embedding_provider: "local",
   embedding_model: "bge-small",
   embedding_version: 1,
+  reranker_model: "jinaai/jina-reranker-v2-base-multilingual",
   daily_token_limit: 100000,
   active: true,
   created_at: "2026-01-01T00:00:00Z",

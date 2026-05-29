@@ -4,6 +4,7 @@ use crate::model_capabilities::CapabilityCache;
 use crate::relink_scheduler::RelinkScheduler;
 use crate::rules::RuleCache;
 use minerva_ingest::fastembed_embedder::FastEmbedder;
+use minerva_ingest::reranker::FastReranker;
 use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use std::sync::{Arc, Mutex};
@@ -96,6 +97,11 @@ pub struct AppState {
     pub lti: Arc<LtiKeyPair>,
     pub http_client: reqwest::Client,
     pub fastembed: Arc<FastEmbedder>,
+    /// Cross-encoder re-ranker applied to RAG candidate pools before the
+    /// top-k chunks reach the LLM. Loaded lazily on first use. See
+    /// `minerva_ingest::reranker::FastReranker` and
+    /// `crate::strategy::common::rerank_chunks`.
+    pub reranker: Arc<FastReranker>,
     /// In-memory cache of compiled role rules. Reads (every authenticated
     /// request) take an Arc snapshot; writes (admin CRUD on rules) call
     /// `reload`. See `crate::rules`.
@@ -131,6 +137,7 @@ impl AppState {
         tracing::info!("LTI 1.3 provider ready (kid={})", lti.kid);
 
         let fastembed = Arc::new(FastEmbedder::new());
+        let reranker = Arc::new(FastReranker::new());
 
         // Sync `VALID_LOCAL_MODELS` into the admin-managed
         // `embedding_models` table. Existing rows are left alone (so an
@@ -145,6 +152,21 @@ impl AppState {
             if inserted {
                 tracing::info!(
                     "embedding_models: seeded new catalog entry {} (enabled=false)",
+                    model
+                );
+            }
+        }
+
+        // Same sync for the re-ranker catalog. The migration seeds the
+        // default multilingual model enabled+default; everything else in
+        // `VALID_RERANKER_MODELS` lands here disabled on first sight, so
+        // enabling a heavier reranker is a deliberate admin opt-in.
+        for model in minerva_ingest::reranker::VALID_RERANKER_MODELS {
+            let inserted =
+                minerva_db::queries::reranker_models::seed_if_missing(&db, model, false).await?;
+            if inserted {
+                tracing::info!(
+                    "reranker_models: seeded new catalog entry {} (enabled=false)",
                     model
                 );
             }
@@ -176,6 +198,7 @@ impl AppState {
             lti: Arc::new(lti),
             http_client,
             fastembed,
+            reranker,
             rules,
             model_capabilities,
             relink_scheduler: Arc::new(RelinkScheduler::new(db)),

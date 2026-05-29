@@ -1,6 +1,7 @@
 use axum::response::sse::Event;
 use futures::StreamExt;
 use minerva_ingest::fastembed_embedder::FastEmbedder;
+use minerva_ingest::reranker::FastReranker;
 use qdrant_client::qdrant::{value::Kind, ScoredPoint, SearchPointsBuilder};
 use reqwest::Response;
 use std::collections::{HashMap, HashSet};
@@ -371,6 +372,124 @@ pub async fn embedding_search(
         .await
         .map(|r| r.result)
         .map_err(|e| format!("qdrant search failed: {}", e))
+}
+
+// ── Cross-encoder re-ranking ───────────────────────────────────────
+
+/// How many extra candidates to pull from Qdrant per requested chunk
+/// before re-ranking. The bi-encoder (embedding) recall set is wider
+/// than the final context, so over-fetching gives the cross-encoder
+/// room to promote a chunk the cosine ranking buried.
+const RERANK_CANDIDATE_FACTOR: i64 = 4;
+
+/// Lower bound on the candidate pool: even a 1-chunk request fetches at
+/// least this many so the re-ranker has something to choose from. (A
+/// `max_chunks` of 1 with no over-fetch would make re-ranking a no-op.)
+const RERANK_CANDIDATE_FLOOR: i64 = 30;
+
+/// Upper bound on the candidate pool. Caps the number of cross-encoder
+/// forward passes per turn (each candidate is one pass) so the
+/// pre-stream re-rank latency stays bounded even for a course with a
+/// large `max_chunks`. A request for more than this many *final* chunks
+/// still fetches `max_chunks` (no point returning fewer than asked), it
+/// just doesn't over-fetch beyond the cap.
+const RERANK_CANDIDATE_CEIL: i64 = 80;
+
+/// Size of the Qdrant candidate pool to retrieve for a `top_k`-chunk
+/// request when re-ranking. Over-fetches `top_k * FACTOR`, clamped into
+/// `[FLOOR, CEIL]`, but never fewer than `top_k` itself.
+pub fn rerank_candidate_count(top_k: i32) -> u64 {
+    let k = top_k.max(1) as i64;
+    let want = (k.saturating_mul(RERANK_CANDIDATE_FACTOR))
+        .clamp(RERANK_CANDIDATE_FLOOR, RERANK_CANDIDATE_CEIL)
+        .max(k);
+    want as u64
+}
+
+/// Reorder `chunks` to follow `order` (a `(original_index, score)` list,
+/// already sorted best-first by the re-ranker) and truncate to `top_k`.
+///
+/// Pure (no model call) so it is unit-testable. Indices in `order` that
+/// fall outside `chunks` are skipped defensively; each chunk is emitted
+/// at most once. The chunks' `score` field (cosine similarity) is left
+/// untouched: downstream consumers (`ASSIGNMENT_SIGNAL_MIN_SCORE`, the
+/// RAG debug UI) are calibrated against cosine, not the cross-encoder
+/// logit, so re-ranking changes *order*, not the recorded score.
+fn apply_rerank_order(
+    chunks: Vec<RagChunk>,
+    order: Vec<(usize, f32)>,
+    top_k: usize,
+) -> Vec<RagChunk> {
+    let mut slots: Vec<Option<RagChunk>> = chunks.into_iter().map(Some).collect();
+    let mut out = Vec::with_capacity(order.len().min(top_k));
+    for (idx, _score) in order {
+        if out.len() >= top_k {
+            break;
+        }
+        if let Some(chunk) = slots.get_mut(idx).and_then(Option::take) {
+            out.push(chunk);
+        }
+    }
+    out
+}
+
+/// Cross-encoder re-rank: score every `(query, chunk)` pair with the
+/// course's `reranker_model`, reorder best-first, and keep the top
+/// `top_k`.
+///
+/// Fails open: if the re-ranker errors (model load / inference failure)
+/// the original embedding-order chunks are returned, truncated to
+/// `top_k`, so a re-ranker hiccup degrades quality but never breaks the
+/// chat turn. Trivial inputs (0 or 1 chunk) skip the model entirely.
+pub async fn rerank_chunks(
+    reranker: &Arc<FastReranker>,
+    reranker_model: &str,
+    query: &str,
+    chunks: Vec<RagChunk>,
+    top_k: usize,
+) -> Vec<RagChunk> {
+    if chunks.len() <= 1 || top_k == 0 {
+        let mut chunks = chunks;
+        chunks.truncate(top_k);
+        return chunks;
+    }
+    let documents: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
+    let candidate_count = documents.len();
+    match reranker
+        .rerank(reranker_model, query.to_string(), documents)
+        .await
+    {
+        Ok(order) => {
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                let preview: Vec<String> = order
+                    .iter()
+                    .take(top_k)
+                    .filter_map(|(idx, score)| {
+                        chunks
+                            .get(*idx)
+                            .map(|c| format!("{}={:.3}", c.filename, score))
+                    })
+                    .collect();
+                tracing::debug!(
+                    "rerank: {} candidates -> top {} [{}]",
+                    candidate_count,
+                    top_k.min(candidate_count),
+                    preview.join(", "),
+                );
+            }
+            apply_rerank_order(chunks, order, top_k)
+        }
+        Err(e) => {
+            tracing::warn!(
+                "rerank failed ({}); falling back to embedding order ({} candidates)",
+                e,
+                candidate_count,
+            );
+            let mut chunks = chunks;
+            chunks.truncate(top_k);
+            chunks
+        }
+    }
 }
 
 // ── Cerebras helpers ───────────────────────────────────────────────
@@ -847,22 +966,31 @@ pub fn build_chat_messages(
     messages
 }
 
-/// Perform RAG lookup: search Qdrant, return structured chunks.
+/// Perform RAG lookup: search Qdrant, re-rank, return structured chunks.
 /// Dispatches to OpenAI or FastEmbed embeddings based on provider.
 ///
 /// `min_score` is forwarded to Qdrant's `score_threshold` so filtering
 /// happens server-side (no point dragging filtered-out vectors over the
 /// wire). 0.0 disables the filter.
 ///
-/// Note: this returns the *raw* chunks (everything Qdrant matched).
-/// Strategies must call [`partition_chunks`] with the course's
-/// `unclassified_doc_ids` to split context from signals before building
-/// the system prompt.
+/// Two-stage retrieval: the embedding search over-fetches a candidate
+/// pool (see [`rerank_candidate_count`]) which is then run through the
+/// cross-encoder [`rerank_chunks`] and truncated to `max_chunks`. The
+/// embedding cosine `score` filter (`min_score`) still applies as a
+/// coarse pre-filter on the candidate pool; the cross-encoder decides
+/// the final ordering and which `max_chunks` survive.
+///
+/// Note: this returns the re-ranked top-`max_chunks` chunks (the raw
+/// kinds, unpartitioned). Strategies must call [`partition_chunks`] with
+/// the course's `unclassified_doc_ids` to split context from signals
+/// before building the system prompt.
 #[allow(clippy::too_many_arguments)]
 pub async fn rag_lookup(
     client: &reqwest::Client,
     openai_key: &str,
     fastembed: &Arc<FastEmbedder>,
+    reranker: &Arc<FastReranker>,
+    reranker_model: &str,
     qdrant: &qdrant_client::Qdrant,
     collection_name: &str,
     query: &str,
@@ -877,6 +1005,10 @@ pub async fn rag_lookup(
     } else {
         None
     };
+    // Over-fetch a candidate pool wider than the final context so the
+    // cross-encoder has room to reorder; we truncate back to
+    // `max_chunks` after re-ranking.
+    let candidate_limit = rerank_candidate_count(max_chunks);
     // Orphan exclusion is enforced *inside* Qdrant via `excluded_doc_ids`
     // on the search call below: this keeps the "top-N" contract intact
     // (the next-best active chunks are returned in place of orphaned
@@ -891,7 +1023,7 @@ pub async fn rag_lookup(
         qdrant,
         collection_name,
         query,
-        max_chunks as u64,
+        candidate_limit,
         threshold,
         embedding_provider,
         embedding_model,
@@ -904,7 +1036,15 @@ pub async fn rag_lookup(
                 .iter()
                 .filter_map(scored_point_to_rag_chunk)
                 .collect();
-            filter_orphaned(chunks, orphaned_doc_ids)
+            let chunks = filter_orphaned(chunks, orphaned_doc_ids);
+            rerank_chunks(
+                reranker,
+                reranker_model,
+                query,
+                chunks,
+                max_chunks.max(0) as usize,
+            )
+            .await
         }
         Err(e) => {
             tracing::warn!("{}, skipping RAG", e);
@@ -1368,5 +1508,86 @@ mod tests {
         assert_eq!(r.context.len(), 1);
         assert_eq!(r.context[0].filename, "lecture.pdf");
         assert!(r.signals.is_empty());
+    }
+
+    #[test]
+    fn rerank_candidate_count_over_fetches_within_bounds() {
+        // Default course (k=10) over-fetches 4x = 40, inside [30, 80].
+        assert_eq!(rerank_candidate_count(10), 40);
+        // Small k still hits the floor so the reranker has candidates
+        // to choose from (a no-over-fetch k=1 would make rerank a no-op).
+        assert_eq!(rerank_candidate_count(1), 30);
+        assert_eq!(rerank_candidate_count(5), 30);
+        // 4x crosses the ceiling at k=20 (80) and stays capped...
+        assert_eq!(rerank_candidate_count(20), 80);
+        // ...but the pool is never smaller than k itself.
+        assert_eq!(rerank_candidate_count(100), 100);
+        // Defensive: non-positive k behaves like k=1.
+        assert_eq!(rerank_candidate_count(0), 30);
+        assert_eq!(rerank_candidate_count(-5), 30);
+    }
+
+    #[test]
+    fn apply_rerank_order_reorders_and_truncates() {
+        let chunks = vec![
+            chunk("d0", "a.pdf", "alpha", None),
+            chunk("d1", "b.pdf", "bravo", None),
+            chunk("d2", "c.pdf", "charlie", None),
+        ];
+        // Reranker verdict: index 2 best, then 0, then 1.
+        let order = vec![(2usize, 9.0f32), (0, 5.0), (1, 1.0)];
+        let out = apply_rerank_order(chunks, order, 2);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].filename, "c.pdf");
+        assert_eq!(out[1].filename, "a.pdf");
+    }
+
+    #[test]
+    fn apply_rerank_order_skips_out_of_range_indices() {
+        let chunks = vec![
+            chunk("d0", "a.pdf", "alpha", None),
+            chunk("d1", "b.pdf", "bravo", None),
+        ];
+        // Index 9 is out of range and must be skipped, not panic.
+        let order = vec![(9usize, 9.0f32), (0, 5.0), (1, 1.0)];
+        let out = apply_rerank_order(chunks, order, 10);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].filename, "a.pdf");
+        assert_eq!(out[1].filename, "b.pdf");
+    }
+
+    #[test]
+    fn apply_rerank_order_preserves_cosine_score_field() {
+        // `score` must stay the cosine value (0.85 from `chunk`), not the
+        // cross-encoder logit; ASSIGNMENT_SIGNAL_MIN_SCORE and the RAG
+        // debug UI are calibrated against cosine.
+        let chunks = vec![chunk("d0", "a.pdf", "alpha", None)];
+        let out = apply_rerank_order(chunks, vec![(0usize, 12.5f32)], 5);
+        assert_eq!(out.len(), 1);
+        assert!((out[0].score - 0.85).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn rerank_chunks_short_circuits_trivial_input() {
+        // The wrapper's guard paths (<=1 chunk, top_k == 0) must not touch
+        // the model, so this runs without any weights on disk.
+        let reranker = std::sync::Arc::new(minerva_ingest::reranker::FastReranker::new());
+        let model = minerva_ingest::reranker::DEFAULT_RERANK_MODEL;
+        assert!(rerank_chunks(&reranker, model, "q", Vec::new(), 5)
+            .await
+            .is_empty());
+
+        let one = vec![chunk("d0", "a.pdf", "alpha", None)];
+        let out = rerank_chunks(&reranker, model, "q", one, 5).await;
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].filename, "a.pdf");
+
+        let many = vec![
+            chunk("d0", "a.pdf", "alpha", None),
+            chunk("d1", "b.pdf", "bravo", None),
+        ];
+        assert!(rerank_chunks(&reranker, model, "q", many, 0)
+            .await
+            .is_empty());
     }
 }

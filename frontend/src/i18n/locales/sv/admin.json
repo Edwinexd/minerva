@@ -619,6 +619,35 @@
       "confirmDisableBody_other": "Modellen \"{{model}}\" används just nu av {{count}} aktiva kurser. Att inaktivera den döljer den från lärarmenyn men låter kurserna fortsätta köra på den. För att flytta dem, gör en force-migrate per kurs från Kurshantering-sidan (admin kan välja vilken katalogmodell som helst, även inaktiverade).",
       "confirmDisableCancel": "Behåll aktiverad",
       "confirmDisableAction": "Inaktivera ändå"
+    },
+    "rerankerModels": {
+      "title": "Omrankningsmodeller",
+      "description": "Katalog över cross-encoder-omrankare som körtiden kan ladda. Varje RAG-hämtning omrankar sin kandidatmängd innan de bästa styckena når modellen; här styr du vilka omrankare lärare får välja per kurs och vilken nya kurser får som standard. Flerspråkiga modeller täcker svenskt kursmaterial. Till skillnad från embeddings har ett byte av en kurs omrankare ingen kostnad för omberäkning (cross-encodern läser styckenas text, inte vektorer), så att inaktivera en modell här är lätt att återhämta sig från. Endast aktiverade modeller kan vara standard, och standarden själv kan inte inaktiveras (rensa den från en annan rad först).",
+      "columns": {
+        "enabled": "Aktiverad",
+        "default": "Standard",
+        "model": "Modell",
+        "coursesUsing": "Kurser",
+        "speed": "Hastighet",
+        "action": " "
+      },
+      "multilingualBadge": "flerspråkig",
+      "defaultBadge": "standard",
+      "enabledAriaLabel": "Växla synlighet i menyn för {{model}}",
+      "defaultAriaLabel": "Gör {{model}} till standard för nya kurser",
+      "speedValue": "{{value}} par/s",
+      "run": "Kör benchmark",
+      "rerun": "Kör igen",
+      "running": "Kör...",
+      "runBenchmarkTitle": "Ladda omrankaren och poängsätt en fast uppsättning fråga/passage för att mäta par/s. Inaktiverad medan ett annat benchmark körs.",
+      "runningHint": "Kör benchmark för {{model}}. Sidan uppdateras var 1,5 s medan en körning pågår och uppdaterar raden när den är klar.",
+      "note": "Första användningen av en modell innebär en engångsnedladdning från HuggingFace. Standardmodellen (flerspråkig) är den lättaste; den tyngre flerspråkiga omrankaren använder märkbart mer minne när en kurs väljer den.",
+      "confirmDisableTitle_one": "Inaktivera en omrankare som {{count}} kurs använder?",
+      "confirmDisableTitle_other": "Inaktivera en omrankare som {{count}} kurser använder?",
+      "confirmDisableBody_one": "Omrankaren \"{{model}}\" används just nu av {{count}} aktiv kurs. Att inaktivera den döljer den från lärarmenyn men låter kursen fortsätta köra på den. Läraren kan byta till en annan modell utan kostnad för omberäkning.",
+      "confirmDisableBody_other": "Omrankaren \"{{model}}\" används just nu av {{count}} aktiva kurser. Att inaktivera den döljer den från lärarmenyn men låter kurserna fortsätta köra på den. Lärare kan byta till en annan modell utan kostnad för omberäkning.",
+      "confirmDisableCancel": "Behåll aktiverad",
+      "confirmDisableAction": "Inaktivera ändå"
     }
   },
   "defaults": {

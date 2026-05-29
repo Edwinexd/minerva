@@ -115,6 +115,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &http_client,
         &ctx.openai_api_key,
         &ctx.fastembed,
+        &ctx.reranker,
+        &ctx.reranker_model,
         &ctx.qdrant,
         &collection_name,
         &ctx.user_content,
@@ -243,6 +245,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         let openai_key = ctx.openai_api_key.clone();
         let cerebras_key = ctx.cerebras_api_key.clone();
         let fastembed = ctx.fastembed.clone();
+        let reranker = ctx.reranker.clone();
+        let reranker_model = ctx.reranker_model.clone();
         let qdrant = ctx.qdrant.clone();
         let db = ctx.db.clone();
         let collection_name = collection_name.clone();
@@ -256,6 +260,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 &http_client,
                 &openai_key,
                 &fastembed,
+                &reranker,
+                &reranker_model,
                 &qdrant,
                 &collection_name,
                 &sentence,
@@ -1026,14 +1032,18 @@ fn is_sentence_boundary(text: &str) -> bool {
     false
 }
 
-/// Search Qdrant with a similarity threshold for FLARE retrieval.
-/// Orphaned-doc chunks are filtered after parsing so mid-stream FLARE
-/// retrievals stay consistent with the seed `rag_lookup` path.
+/// Search Qdrant with a similarity threshold for FLARE retrieval, then
+/// cross-encoder re-rank. Mirrors the seed `rag_lookup` path: over-fetch
+/// a candidate pool, re-rank, truncate to `max_chunks`. Orphaned-doc
+/// chunks are filtered after parsing so mid-stream FLARE retrievals stay
+/// consistent with the seed path.
 #[allow(clippy::too_many_arguments)]
 async fn flare_retrieve(
     client: &reqwest::Client,
     openai_key: &str,
     fastembed: &Arc<minerva_ingest::fastembed_embedder::FastEmbedder>,
+    reranker: &Arc<minerva_ingest::reranker::FastReranker>,
+    reranker_model: &str,
     qdrant: &Arc<qdrant_client::Qdrant>,
     collection_name: &str,
     query: &str,
@@ -1043,6 +1053,7 @@ async fn flare_retrieve(
     embedding_model: &str,
     orphaned_doc_ids: &std::collections::HashSet<String>,
 ) -> Vec<RagChunk> {
+    let candidate_limit = common::rerank_candidate_count(max_chunks);
     let chunks = match common::embedding_search(
         client,
         openai_key,
@@ -1050,7 +1061,7 @@ async fn flare_retrieve(
         qdrant,
         collection_name,
         query,
-        max_chunks as u64,
+        candidate_limit,
         Some(score_threshold),
         embedding_provider,
         embedding_model,
@@ -1075,7 +1086,15 @@ async fn flare_retrieve(
             Vec::new()
         }
     };
-    common::filter_orphaned(chunks, orphaned_doc_ids)
+    let chunks = common::filter_orphaned(chunks, orphaned_doc_ids);
+    common::rerank_chunks(
+        reranker,
+        reranker_model,
+        query,
+        chunks,
+        max_chunks.max(0) as usize,
+    )
+    .await
 }
 
 fn truncate_for_log(s: &str, max_len: usize) -> String {

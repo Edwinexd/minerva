@@ -42,6 +42,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &http_client,
         &ctx.openai_api_key,
         &ctx.fastembed,
+        &ctx.reranker,
+        &ctx.reranker_model,
         &ctx.qdrant,
         &collection_name,
         &ctx.user_content,

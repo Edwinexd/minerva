@@ -79,6 +79,16 @@
       "arcticMV2Desc": "multilingual (incl. Swedish), 768 dims, int8",
       "qwen3Desc": "Qwen3, multilingual, heavy"
     },
+    "rerankerModelLabel": "Re-ranker Model",
+    "rerankerModelHelp": "Every retrieval is re-ranked by a cross-encoder before the top chunks reach the model. This picks which re-ranker to use. Multilingual models cover Swedish course content. Changing it has no re-embedding cost; it applies on the next question.",
+    "rerankerModelMultilingualSuffix": "[multilingual]",
+    "rerankerModelDisabledSuffix": "(no longer offered)",
+    "rerankerModels": {
+      "jinaV2MultilingualDesc": "multilingual incl. Swedish, light",
+      "bgeV2M3Desc": "multilingual, higher quality, heavy",
+      "bgeBaseDesc": "English / Chinese",
+      "jinaV1TurboDesc": "English, very fast"
+    },
     "maxChunksLabel": "Max Retrieved Chunks",
     "minScoreLabel": "Minimum Similarity Score: {{value}}",
     "minScoreHelp": "Chunks scoring below this threshold are dropped before being sent to the model. 0 disables the filter (top-K only). Use the RAG tab to preview which chunks pass for a sample question.",

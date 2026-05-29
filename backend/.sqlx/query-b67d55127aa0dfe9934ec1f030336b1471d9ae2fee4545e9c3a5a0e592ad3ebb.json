@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE reranker_models SET is_default = FALSE, updated_at = NOW() WHERE is_default = TRUE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b67d55127aa0dfe9934ec1f030336b1471d9ae2fee4545e9c3a5a0e592ad3ebb"
+}

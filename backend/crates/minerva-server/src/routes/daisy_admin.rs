@@ -182,6 +182,8 @@ async fn apply_pending(
     // surfaced; we only need the admin-default embedding model here.
     let default_embedding_model =
         minerva_db::queries::embedding_models::current_default(&state.db).await?;
+    let default_reranker_model =
+        minerva_db::queries::reranker_models::current_default(&state.db).await?;
 
     for id in body.ids {
         // Re-fetch each row inside the loop so a concurrent
@@ -224,6 +226,7 @@ async fn apply_pending(
             &state,
             &payload,
             default_embedding_model.as_deref(),
+            default_reranker_model.as_deref(),
             &mut summary,
         )
         .await

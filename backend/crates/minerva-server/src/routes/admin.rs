@@ -1580,7 +1580,7 @@ async fn list_embedding_models(
     let lookup: std::collections::HashMap<&str, &minerva_core::rpc::EmbedBenchmarkResult> =
         benchmarks.iter().map(|b| (b.model.as_str(), b)).collect();
 
-    let warm: std::collections::HashSet<&str> = minerva_ingest::pipeline::STARTUP_BENCHMARK_MODELS
+    let warm: std::collections::HashSet<&str> = minerva_catalog::STARTUP_BENCHMARK_MODELS
         .iter()
         .map(|(name, _)| *name)
         .collect();
@@ -1614,7 +1614,7 @@ async fn list_embedding_models(
         .map(|r| (r.embedding_model, r.count))
         .collect();
 
-    let models = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+    let models = minerva_catalog::VALID_LOCAL_MODELS
         .iter()
         .map(|(name, dims)| {
             let (enabled, is_default) = policy.get(*name).copied().unwrap_or((false, false));
@@ -1669,7 +1669,7 @@ async fn update_embedding_model_enabled(
 ) -> Result<Json<UpdateEmbeddingModelResponse>, AppError> {
     require_admin(&user)?;
 
-    let in_catalog = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+    let in_catalog = minerva_catalog::VALID_LOCAL_MODELS
         .iter()
         .any(|(name, _)| *name == body.model.as_str());
     if !in_catalog {
@@ -1733,7 +1733,7 @@ async fn set_default_embedding_model(
 
     // Catalog membership check up front, same pattern as the enabled
     // toggle. Shaves a transaction-open + rollback off the 404 path.
-    let in_catalog = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+    let in_catalog = minerva_catalog::VALID_LOCAL_MODELS
         .iter()
         .any(|(name, _)| *name == body.model.as_str());
     if !in_catalog {
@@ -1833,7 +1833,7 @@ async fn list_reranker_models(
         .map(|r| (r.reranker_model, r.count))
         .collect();
 
-    let models = minerva_ingest::reranker::VALID_RERANKER_MODELS
+    let models = minerva_catalog::VALID_RERANKER_MODELS
         .iter()
         .map(|name| {
             let (enabled, is_default) = policy.get(*name).copied().unwrap_or((false, false));
@@ -1879,7 +1879,7 @@ async fn update_reranker_model_enabled(
 ) -> Result<Json<UpdateRerankerModelResponse>, AppError> {
     require_admin(&user)?;
 
-    let in_catalog = minerva_ingest::reranker::VALID_RERANKER_MODELS.contains(&body.model.as_str());
+    let in_catalog = minerva_catalog::VALID_RERANKER_MODELS.contains(&body.model.as_str());
     if !in_catalog {
         return Err(AppError::NotFound);
     }
@@ -1927,7 +1927,7 @@ async fn set_default_reranker_model(
 ) -> Result<Json<SetDefaultRerankerModelResponse>, AppError> {
     require_admin(&user)?;
 
-    let in_catalog = minerva_ingest::reranker::VALID_RERANKER_MODELS.contains(&body.model.as_str());
+    let in_catalog = minerva_catalog::VALID_RERANKER_MODELS.contains(&body.model.as_str());
     if !in_catalog {
         return Err(AppError::NotFound);
     }
@@ -1983,7 +1983,7 @@ async fn run_reranker_benchmark(
 ) -> Result<Json<RunRerankerBenchmarkResponse>, AppError> {
     require_admin(&user)?;
 
-    let in_catalog = minerva_ingest::reranker::VALID_RERANKER_MODELS.contains(&body.model.as_str());
+    let in_catalog = minerva_catalog::VALID_RERANKER_MODELS.contains(&body.model.as_str());
     if !in_catalog {
         return Err(AppError::NotFound);
     }
@@ -2022,7 +2022,7 @@ async fn run_embedding_benchmark(
 
     // Look up dimensions from the whitelist; reject unknown ids
     // before paying the cost of a model load.
-    let dimensions = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+    let dimensions = minerva_catalog::VALID_LOCAL_MODELS
         .iter()
         .find_map(|(n, d)| (*n == body.model).then_some(*d))
         .ok_or_else(|| {

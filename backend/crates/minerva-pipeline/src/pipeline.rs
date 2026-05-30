@@ -65,6 +65,18 @@ pub fn extract_document_text(file_path: &Path) -> Result<String, String> {
     }
 }
 
+/// Filename to extension, defaulting to `bin` when the name has none.
+/// Used to build the on-disk storage path
+/// `{docs_path}/{course_id}/{doc_id}.{ext}` for every ingested doc, so
+/// it lives here next to the other doc-storage helpers, shared by the
+/// api upload routes and the worker.
+pub fn extension_from_filename(filename: &str) -> &str {
+    std::path::Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin")
+}
+
 /// Compose the Qdrant collection name for a course at a given
 /// embedding-rotation version.
 ///
@@ -104,7 +116,7 @@ pub async fn collection_name_for_course(
     Ok(collection_name(course_id, version.unwrap_or(1)))
 }
 
-pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "local"];
+pub use minerva_catalog::VALID_EMBEDDING_PROVIDERS;
 
 /// Whitelist of local embedding models a course owner can pick. Each
 /// entry is `(huggingface-style id, output dimension)`. The dimension is
@@ -127,31 +139,7 @@ pub const VALID_EMBEDDING_PROVIDERS: &[&str] = &["openai", "local"];
 /// warm up at boot (`STARTUP_BENCHMARK_MODELS` below). If unsure, leave
 /// it out of startup; admins can run `POST /api/admin/embedding-benchmark`
 /// to benchmark on demand without OOMing the box.
-pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
-    // English-only, original set kept for backwards compatibility with
-    // courses that picked these before multilingual options existed.
-    ("sentence-transformers/all-MiniLM-L6-v2", 384),
-    ("BAAI/bge-small-en-v1.5", 384),
-    ("BAAI/bge-base-en-v1.5", 768),
-    ("nomic-ai/nomic-embed-text-v1.5", 768),
-    // Multilingual (Swedish + English, matters for SU/DSV course mix).
-    ("intfloat/multilingual-e5-small", 384),
-    ("intfloat/multilingual-e5-base", 768),
-    ("intfloat/multilingual-e5-large", 1024),
-    ("BAAI/bge-m3", 1024),
-    ("google/embeddinggemma-300m", 768),
-    // Snowflake Arctic Embed M v2.0: multilingual (Swedish + English),
-    // 768 dims, ~311 MB int8 ONNX. Not part of fastembed-rs's
-    // `EmbeddingModel` enum; loaded via `UserDefinedEmbeddingModel` --
-    // see the `Backend::Custom` branch in `fastembed_embedder.rs`.
-    ("Snowflake/snowflake-arctic-embed-m-v2.0", 768),
-    // English, top-of-MTEB-class upgrades.
-    ("mixedbread-ai/mxbai-embed-large-v1", 1024),
-    ("Alibaba-NLP/gte-large-en-v1.5", 1024),
-    ("snowflake/snowflake-arctic-embed-l", 1024),
-    // Qwen3 (candle backend). Dim 1024, multilingual.
-    ("Qwen/Qwen3-Embedding-0.6B", 1024),
-];
+pub use minerva_catalog::VALID_LOCAL_MODELS;
 
 /// Models the server warms up + benchmarks at boot. Subset of
 /// `VALID_LOCAL_MODELS`: small/fast ONNX models the pod can hold in RAM
@@ -170,14 +158,9 @@ pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
 /// only and overlapping with bge-small-en (also warmed). Existing
 /// courses on bge-base still work; teachers who want a benchmark can
 /// trigger one from the admin page.
-pub const STARTUP_BENCHMARK_MODELS: &[(&str, u64)] = &[
-    ("sentence-transformers/all-MiniLM-L6-v2", 384),
-    ("BAAI/bge-small-en-v1.5", 384),
-    ("nomic-ai/nomic-embed-text-v1.5", 768),
-    ("Snowflake/snowflake-arctic-embed-m-v2.0", 768),
-];
+pub use minerva_catalog::STARTUP_BENCHMARK_MODELS;
 
-pub const OPENAI_EMBEDDING_MODEL: &str = "text-embedding-3-small";
+pub use minerva_catalog::OPENAI_EMBEDDING_MODEL;
 const OPENAI_EMBEDDING_DIMENSIONS: u64 = 1536;
 
 fn local_model_dimensions(model: &str) -> Option<u64> {

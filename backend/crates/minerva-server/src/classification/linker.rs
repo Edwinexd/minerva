@@ -46,9 +46,7 @@ use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::strategy::common::{
-    cerebras_request_with_retry, payload_int, payload_string, record_cerebras_usage,
-};
+use crate::llm::{cerebras_request_with_retry, payload_int, payload_string, record_cerebras_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_LINKER;
 
 /// Cerebras model for the per-pair link decision. Briefly ran on
@@ -787,9 +785,9 @@ async fn gather_embeddings(
     docs: &[&DocumentRow],
 ) -> Result<HashMap<Uuid, Vec<f32>>, String> {
     let mut out: HashMap<Uuid, Vec<f32>> = HashMap::new();
-    let collection = minerva_ingest::pipeline::collection_name_for_course(ctx.db, course_id)
+    let collection = minerva_pipeline::pipeline::collection_name_for_course(ctx.db, course_id)
         .await
-        .unwrap_or_else(|_| minerva_ingest::pipeline::collection_name(course_id, 1));
+        .unwrap_or_else(|_| minerva_pipeline::pipeline::collection_name(course_id, 1));
     let collection_exists = ctx
         .qdrant
         .collection_exists(&collection)
@@ -998,9 +996,9 @@ async fn load_excerpts(
     docs: &[&DocumentRow],
     only_for: &HashSet<Uuid>,
 ) -> HashMap<Uuid, String> {
-    let collection = minerva_ingest::pipeline::collection_name_for_course(db, course_id)
+    let collection = minerva_pipeline::pipeline::collection_name_for_course(db, course_id)
         .await
-        .unwrap_or_else(|_| minerva_ingest::pipeline::collection_name(course_id, 1));
+        .unwrap_or_else(|_| minerva_pipeline::pipeline::collection_name(course_id, 1));
     if !qdrant.collection_exists(&collection).await.unwrap_or(false) {
         // Collection hasn't been created yet (e.g. brand-new course
         // with all-sample_solution uploads): nothing to scroll.

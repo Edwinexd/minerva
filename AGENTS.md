@@ -377,7 +377,7 @@ The structural fix is to split these into separate services (see
 "Architecture debt" below); until then we have several pieces of
 defense to keep this from OOM-killing the pod.
 
-### FastEmbed cache LRU (`backend/crates/minerva-ingest/src/fastembed_embedder.rs`)
+### FastEmbed cache LRU (`backend/crates/minerva-embed-engine/src/fastembed_embedder.rs`)
 
 Bounded model cache keyed by HuggingFace model id. Three things make
 the LRU actually bound RSS, learned the hard way:
@@ -434,7 +434,7 @@ warmed arena); the four-model startup set with sync eviction lands
 at ~3.5 GiB steady-state holding only the last (arctic-m, the
 default). If you add a model here, factor that into the budget.
 
-### MemBudget (`backend/crates/minerva-ingest/src/mem_budget.rs`)
+### MemBudget (`backend/crates/minerva-embed-engine/src/mem_budget.rs`)
 
 Pod-wide MiB-permit pool for fat background ops that allocate
 *outside* the fastembed cache: cross-encoder reranker loads, per-doc
@@ -473,6 +473,22 @@ next memory incident lands.
   workload.
 
 ### Architecture debt
+
+**Status (proper-ms branch):** the dependency split is largely done. The
+heavy model engine (FastEmbedder + FastReranker + MemBudget, i.e. the
+fastembed / candle / hf-hub deps) now lives in its own
+`minerva-embed-engine` crate, compiled ONLY by the `minerva-embedder` /
+`minerva-reranker` model-server binaries. `AppState` no longer links the
+engine (the in-process variant is behind a default-off `local-engine`
+cargo feature used only for single-process local dev); the api / worker /
+scheduler reach the model servers over gRPC and are engine-free. The
+MBZ parser is its own `minerva-mbz` crate; the old `minerva-ingest` is
+now the engine-free `minerva-pipeline`; `minerva-rpc` (remote gRPC
+clients) is split from `minerva-rpc-local` (in-process wrappers). Still
+TODO: carving the `minerva` / `minerva-worker` / `minerva-scheduler`
+bins into separate crates so the worker/scheduler binaries also stop
+compiling axum (lower value now the engine is isolated; see the
+deferred work in `docs/microservices-split.md`).
 
 The OOM class of incidents only exists because one process holds
 HTTP/auth, the worker, the embedder cache, the reranker, and chat

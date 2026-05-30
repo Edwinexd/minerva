@@ -4,23 +4,9 @@ use crate::model_capabilities::CapabilityCache;
 use crate::relink_scheduler::RelinkScheduler;
 use crate::rules::RuleCache;
 use minerva_core::rpc::{EmbedderClient, RerankerClient};
-use minerva_ingest::fastembed_embedder::{self, FastEmbedder};
-use minerva_ingest::mem_budget::MemBudget;
-use minerva_ingest::reranker::FastReranker;
-use minerva_rpc::{LocalEmbedderClient, LocalRerankerClient};
 use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use std::sync::{Arc, Mutex};
-
-/// Conservative steady-state floor for "the rest of the pod" outside
-/// the fastembed cache and the `MemBudget` permit pool.
-///
-/// Covers Rust + tokio + sqlx pool + qdrant client + axum + ORT
-/// runtime baseline + glibc fragmentation overhead. Subtracted from
-/// the cgroup limit when sizing the shared budget so concurrent
-/// fat-job activity can't crowd the irreducible-baseline floor out
-/// of memory.
-const BASELINE_RESERVE_MIB: u32 = 1024;
 
 /// Snapshot of the current admin classification backfill, returned by
 /// `GET /admin/classification-stats` so the UI can show progress.
@@ -139,17 +125,6 @@ pub struct AppState {
     /// `Some(_)` while one is running and for the cycle after it
     /// finishes. See `crate::routes::admin::backfill_classifications`.
     pub backfill_tracker: Arc<BackfillTracker>,
-    /// Pod-wide MiB-permit pool that all "fat" background operations
-    /// outside the fastembed cache acquire from: the cross-encoder
-    /// reranker model loads, per-doc ingest jobs, MBZ parse, bulk
-    /// classify-all batches, etc. Sized at startup from
-    /// `cgroup_limit - fastembed_cache_budget - BASELINE_RESERVE_MIB`.
-    /// Anything that allocates non-trivial memory in the background
-    /// is expected to acquire from this before starting and hold the
-    /// guard until the allocation is freed, so concurrent activity
-    /// can't collectively overrun the cgroup. See
-    /// `minerva_ingest::mem_budget`.
-    pub mem_budget: Arc<MemBudget>,
 }
 
 impl AppState {
@@ -163,53 +138,14 @@ impl AppState {
         let lti = LtiKeyPair::from_seed(&config.lti_key_seed)?;
         tracing::info!("LTI 1.3 provider ready (kid={})", lti.kid);
 
-        // Embedder client: remote when MINERVA_EMBEDDER_URL is set
-        // (Phase 1 cutover path; talks gRPC to the minerva-embedder
-        // pod), local otherwise (Phase 0 default; in-process
-        // FastEmbedder lives behind the same trait). When remote, we
-        // skip the local FastEmbedder construction so the cache RSS
-        // stays out of the api/worker pod.
-        let fastembed: Arc<dyn EmbedderClient> = if let Some(url) = &config.embedder_url {
-            tracing::info!("embedder: remote ({url})");
-            Arc::new(
-                minerva_rpc::RemoteEmbedderClient::connect(url.clone())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("remote embedder connect: {e}"))?,
-            )
-        } else {
-            tracing::info!("embedder: in-process FastEmbedder");
-            Arc::new(LocalEmbedderClient::new(Arc::new(FastEmbedder::new())))
-        };
-
-        // Shared memory budget for everything that allocates outside
-        // the fastembed cache. Sized in lockstep with the fastembed
-        // cache so the two pools together fit under the cgroup with
-        // `BASELINE_RESERVE_MIB` of slack left for the irreducible
-        // baseline. On a 6 GiB pod with the 55% fastembed fraction
-        // that's roughly 6144 - 3379 - 1024 = ~1740 MiB; tunable via
-        // `MINERVA_MEM_BUDGET_MIB` for ops.
-        let cache_budget_bytes = fastembed_embedder::compute_budget_bytes();
-        let (mem_budget, mem_budget_source) =
-            MemBudget::from_cgroup_with_reserve(cache_budget_bytes, BASELINE_RESERVE_MIB);
-        tracing::info!(
-            "mem_budget: {} MiB ({})",
-            mem_budget.total_mib(),
-            mem_budget_source
-        );
-        let mem_budget = Arc::new(mem_budget);
-
-        // Reranker client: same dual-mode pattern as the embedder.
-        let reranker: Arc<dyn RerankerClient> = if let Some(url) = &config.reranker_url {
-            tracing::info!("reranker: remote ({url})");
-            Arc::new(
-                minerva_rpc::RemoteRerankerClient::connect(url.clone())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("remote reranker connect: {e}"))?,
-            )
-        } else {
-            tracing::info!("reranker: in-process FastReranker");
-            Arc::new(LocalRerankerClient::new(Arc::new(FastReranker::new())))
-        };
+        // Embedder / reranker clients. Remote (gRPC) whenever the
+        // service URL is set, which is the production topology
+        // (api / worker / scheduler reach the model-server pods over
+        // gRPC). The in-process engine fallback is only compiled into
+        // `local-engine` builds for single-process local dev; see
+        // `build_embedder` / `build_reranker` below.
+        let fastembed = build_embedder(config).await?;
+        let reranker = build_reranker(config).await?;
 
         // Sync `VALID_LOCAL_MODELS` into the admin-managed
         // `embedding_models` table. Existing rows are left alone (so an
@@ -218,7 +154,7 @@ impl AppState {
         // teacher picker; the admin opts in deliberately. See
         // migration `20260427000001_embedding_models.sql` for the
         // initial-policy reasoning.
-        for (model, _dims) in minerva_ingest::pipeline::VALID_LOCAL_MODELS {
+        for (model, _dims) in minerva_catalog::VALID_LOCAL_MODELS {
             let inserted =
                 minerva_db::queries::embedding_models::seed_if_missing(&db, model, false).await?;
             if inserted {
@@ -233,7 +169,7 @@ impl AppState {
         // default multilingual model enabled+default; everything else in
         // `VALID_RERANKER_MODELS` lands here disabled on first sight, so
         // enabling a heavier reranker is a deliberate admin opt-in.
-        for model in minerva_ingest::reranker::VALID_RERANKER_MODELS {
+        for model in minerva_catalog::VALID_RERANKER_MODELS {
             let inserted =
                 minerva_db::queries::reranker_models::seed_if_missing(&db, model, false).await?;
             if inserted {
@@ -259,7 +195,7 @@ impl AppState {
         // benefit from connection pooling against Cerebras the
         // same way live chat traffic does.
         let model_capabilities = CapabilityCache::new(
-            crate::strategy::common::CEREBRAS_CHAT_COMPLETIONS_URL.to_string(),
+            crate::llm::CEREBRAS_CHAT_COMPLETIONS_URL.to_string(),
             config.cerebras_api_key.clone(),
             http_client.clone(),
         );
@@ -275,7 +211,71 @@ impl AppState {
             model_capabilities,
             relink_scheduler: Arc::new(RelinkScheduler::new(db)),
             backfill_tracker: Arc::new(BackfillTracker::default()),
-            mem_budget,
         })
     }
+}
+
+/// Build the embedder client.
+///
+/// Remote gRPC when `MINERVA_EMBEDDER_URL` is set: the production
+/// topology, where the api / worker / scheduler reach the
+/// `minerva-embedder` pod over gRPC and never link the model engine.
+/// The in-process `FastEmbedder` fallback is only available in
+/// `local-engine` builds (single-process local dev); a non-local-engine
+/// build with no URL is a misconfiguration and errors out rather than
+/// silently running without an embedder.
+async fn build_embedder(config: &Config) -> anyhow::Result<Arc<dyn EmbedderClient>> {
+    if let Some(url) = &config.embedder_url {
+        tracing::info!("embedder: remote ({url})");
+        return Ok(Arc::new(
+            minerva_rpc::RemoteEmbedderClient::connect(url.clone())
+                .await
+                .map_err(|e| anyhow::anyhow!("remote embedder connect: {e}"))?,
+        ));
+    }
+    build_local_embedder()
+}
+
+/// Build the reranker client. Same remote-vs-local policy as
+/// [`build_embedder`].
+async fn build_reranker(config: &Config) -> anyhow::Result<Arc<dyn RerankerClient>> {
+    if let Some(url) = &config.reranker_url {
+        tracing::info!("reranker: remote ({url})");
+        return Ok(Arc::new(
+            minerva_rpc::RemoteRerankerClient::connect(url.clone())
+                .await
+                .map_err(|e| anyhow::anyhow!("remote reranker connect: {e}"))?,
+        ));
+    }
+    build_local_reranker()
+}
+
+#[cfg(feature = "local-engine")]
+fn build_local_embedder() -> anyhow::Result<Arc<dyn EmbedderClient>> {
+    tracing::info!("embedder: in-process FastEmbedder (local-engine build)");
+    Ok(Arc::new(minerva_rpc_local::LocalEmbedderClient::new(
+        Arc::new(minerva_embed_engine::fastembed_embedder::FastEmbedder::new()),
+    )))
+}
+
+#[cfg(not(feature = "local-engine"))]
+fn build_local_embedder() -> anyhow::Result<Arc<dyn EmbedderClient>> {
+    anyhow::bail!(
+        "MINERVA_EMBEDDER_URL is unset and this build has no in-process embedder (the `local-engine` feature is off). Set MINERVA_EMBEDDER_URL to the minerva-embedder service, or build with --features local-engine for single-process local dev."
+    )
+}
+
+#[cfg(feature = "local-engine")]
+fn build_local_reranker() -> anyhow::Result<Arc<dyn RerankerClient>> {
+    tracing::info!("reranker: in-process FastReranker (local-engine build)");
+    Ok(Arc::new(minerva_rpc_local::LocalRerankerClient::new(
+        Arc::new(minerva_embed_engine::reranker::FastReranker::new()),
+    )))
+}
+
+#[cfg(not(feature = "local-engine"))]
+fn build_local_reranker() -> anyhow::Result<Arc<dyn RerankerClient>> {
+    anyhow::bail!(
+        "MINERVA_RERANKER_URL is unset and this build has no in-process reranker (the `local-engine` feature is off). Set MINERVA_RERANKER_URL to the minerva-reranker service, or build with --features local-engine for single-process local dev."
+    )
 }

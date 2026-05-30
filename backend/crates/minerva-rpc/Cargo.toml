@@ -19,12 +19,11 @@ tonic.workspace = true
 prost.workspace = true
 tracing.workspace = true
 
-# Trait + protocol-neutral result types live in minerva-core.
+# Trait + protocol-neutral result types live in minerva-core. This
+# crate holds only the protos + remote gRPC clients, so it has NO
+# dependency on the model engine; the in-process wrappers live in
+# minerva-rpc-local.
 minerva-core = { path = "../minerva-core" }
-# Local wrapper variants delegate to the in-process FastEmbedder /
-# FastReranker. Phase 4 deletes this dep when the local variant goes
-# away.
-minerva-ingest = { path = "../minerva-ingest" }
 
 [build-dependencies]
 tonic-build.workspace = true

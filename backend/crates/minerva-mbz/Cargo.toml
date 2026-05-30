@@ -1,0 +1,18 @@
+[package]
+name = "minerva-mbz"
+version = "0.1.0"
+edition = "2021"
+
+# Moodle course-backup (.mbz) importer: extracts a gzipped-tar archive
+# and yields the visible course materials. Self-contained (tar / gzip /
+# xml), so only the api crate (the import-mbz route) links it; the
+# worker and scheduler never compile the MBZ parser.
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tar.workspace = true
+flate2.workspace = true
+quick-xml.workspace = true
+tempfile.workspace = true

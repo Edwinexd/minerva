@@ -32,7 +32,7 @@ pub struct CourseRow {
     /// Per-course cross-encoder re-ranker model id. Selected from the
     /// admin-managed `reranker_models` catalog; independent of the
     /// embedding model (changing it needs no re-embed). See
-    /// `minerva_ingest::reranker`.
+    /// `minerva_embed_engine::reranker`.
     pub reranker_model: String,
     pub daily_token_limit: i64,
     pub active: bool,

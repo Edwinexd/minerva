@@ -496,7 +496,7 @@ pub(crate) async fn apply_course_update(
 
     // Validate embedding_provider
     if let Some(ref provider) = body.embedding_provider {
-        if !minerva_ingest::pipeline::VALID_EMBEDDING_PROVIDERS.contains(&provider.as_str()) {
+        if !minerva_catalog::VALID_EMBEDDING_PROVIDERS.contains(&provider.as_str()) {
             return Err(AppError::bad_request_with(
                 "course.embedding_provider_invalid",
                 [("provider", provider.clone())],
@@ -528,7 +528,7 @@ pub(crate) async fn apply_course_update(
             //     workflow is "disable model X site-wide, then walk
             //     each course off it"). The catalog membership check
             //     still applies.
-            let in_catalog = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+            let in_catalog = minerva_catalog::VALID_LOCAL_MODELS
                 .iter()
                 .any(|(name, _)| *name == model.as_str());
             if !in_catalog {
@@ -559,7 +559,7 @@ pub(crate) async fn apply_course_update(
     // re-ranker has no re-embed cost, so the new value just lands via
     // the COALESCE update below and applies on the next chat turn.
     if let Some(ref model) = body.reranker_model {
-        let in_catalog = minerva_ingest::reranker::VALID_RERANKER_MODELS.contains(&model.as_str());
+        let in_catalog = minerva_catalog::VALID_RERANKER_MODELS.contains(&model.as_str());
         if !in_catalog {
             return Err(AppError::bad_request_with(
                 "course.reranker_model_invalid",
@@ -583,11 +583,11 @@ pub(crate) async fn apply_course_update(
     let embedding_model = if effective_provider == "openai" {
         body.embedding_model
             .as_ref()
-            .map(|_| minerva_ingest::pipeline::OPENAI_EMBEDDING_MODEL.to_string())
+            .map(|_| minerva_catalog::OPENAI_EMBEDDING_MODEL.to_string())
             .or_else(|| {
                 // If switching to openai, ensure the model column is updated
                 if body.embedding_provider.is_some() {
-                    Some(minerva_ingest::pipeline::OPENAI_EMBEDDING_MODEL.to_string())
+                    Some(minerva_catalog::OPENAI_EMBEDDING_MODEL.to_string())
                 } else {
                     None
                 }

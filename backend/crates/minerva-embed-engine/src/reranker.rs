@@ -60,7 +60,7 @@ use serde::Serialize;
 /// multilingual model in fastembed's reranker catalog. Mirrored by the
 /// `courses.reranker_model` column DEFAULT and the `reranker_models`
 /// seed; kept here so validation / fallbacks have a single source.
-pub const DEFAULT_RERANK_MODEL: &str = "jinaai/jina-reranker-v2-base-multilingual";
+pub use minerva_catalog::DEFAULT_RERANK_MODEL;
 
 /// Compile-time catalog of re-ranker model ids the runtime can load.
 ///
@@ -70,17 +70,7 @@ pub const DEFAULT_RERANK_MODEL: &str = "jinaai/jina-reranker-v2-base-multilingua
 /// `pipeline::VALID_LOCAL_MODELS` for embeddings. Each id must be a
 /// `model_code` fastembed's [`RerankerModel`] understands (asserted in
 /// tests).
-pub const VALID_RERANKER_MODELS: &[&str] = &[
-    // Multilingual (Swedish + English). Default; lightest multilingual.
-    "jinaai/jina-reranker-v2-base-multilingual",
-    // Multilingual, higher quality but heavier (fp32, ~568M + external
-    // data file). Off by default; admin can enable when RAM allows.
-    "rozgo/bge-reranker-v2-m3",
-    // English / Chinese. Useful for English-only courses.
-    "BAAI/bge-reranker-base",
-    // English, very small / fast.
-    "jinaai/jina-reranker-v1-turbo-en",
-];
+pub use minerva_catalog::VALID_RERANKER_MODELS;
 
 /// Token cap per `(query, chunk)` pair. Course chunks are ~500 tokens
 /// (2000 chars) and queries are short, so 512 comfortably covers a pair

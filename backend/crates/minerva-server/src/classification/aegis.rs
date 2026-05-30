@@ -51,7 +51,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage};
+use crate::llm::{cerebras_request_with_retry, record_cerebras_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_AEGIS;
 
 /// First-fire analyzer model. Runs on the very first debounced fire

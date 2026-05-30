@@ -129,7 +129,7 @@ async fn regenerate(
         return Ok(Vec::new());
     }
 
-    let collection = minerva_ingest::pipeline::collection_name_for_course(&state.db, course_id)
+    let collection = minerva_pipeline::pipeline::collection_name_for_course(&state.db, course_id)
         .await
         .map_err(AppError::Database)?;
 

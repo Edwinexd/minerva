@@ -276,7 +276,7 @@ pub async fn run(
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name =
-        minerva_ingest::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
+        minerva_pipeline::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
 
     // Tell the frontend up front that the disclosure should render
     // as a placeholder for this turn. Done before any other SSE
@@ -1202,13 +1202,9 @@ mod stream_integration_tests {
                     .build()
                     .unwrap(),
             ),
-            fastembed: std::sync::Arc::new(minerva_rpc::LocalEmbedderClient::new(
-                std::sync::Arc::new(minerva_ingest::fastembed_embedder::FastEmbedder::new()),
-            )),
-            reranker: std::sync::Arc::new(minerva_rpc::LocalRerankerClient::new(
-                std::sync::Arc::new(minerva_ingest::reranker::FastReranker::new()),
-            )),
-            reranker_model: minerva_ingest::reranker::DEFAULT_RERANK_MODEL.to_string(),
+            fastembed: std::sync::Arc::new(crate::strategy::test_support::NoopEmbedderClient),
+            reranker: std::sync::Arc::new(crate::strategy::test_support::NoopRerankerClient),
+            reranker_model: minerva_catalog::DEFAULT_RERANK_MODEL.to_string(),
             kg_enabled: false,
             tool_use_enabled: true,
         }

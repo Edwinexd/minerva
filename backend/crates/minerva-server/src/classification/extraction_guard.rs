@@ -35,7 +35,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage};
+use crate::llm::{cerebras_request_with_retry, record_cerebras_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
 
 // ── Cerebras model selection ───────────────────────────────────────

@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use minerva_ingest::fastembed_embedder::FastEmbedder;
+use minerva_embed_engine::fastembed_embedder::FastEmbedder;
 use minerva_rpc::proto::embedder::embedder_server::EmbedderServer;
 use tonic::transport::Server;
 
@@ -56,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         tracing::info!("running fastembed boot benchmark set...");
         match warmup
-            .run_benchmarks(minerva_ingest::pipeline::STARTUP_BENCHMARK_MODELS)
+            .run_benchmarks(minerva_catalog::STARTUP_BENCHMARK_MODELS)
             .await
         {
             Ok(results) => tracing::info!(

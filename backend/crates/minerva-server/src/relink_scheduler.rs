@@ -144,7 +144,7 @@ pub fn spawn_sweep(state: crate::state::AppState) {
             tracing::info!("relink sweeper: firing linker for {} course(s)", due.len());
             for course_id in due {
                 let started = std::time::Instant::now();
-                match crate::routes::documents::relink_course(&state, course_id).await {
+                match relink_course(&state, course_id).await {
                     Ok(edges_written) => {
                         tracing::info!(
                             "relink sweeper: course {} done in {}ms ({} edges)",
@@ -164,4 +164,44 @@ pub fn spawn_sweep(state: crate::state::AppState) {
             }
         }
     });
+}
+
+/// Re-run the cross-document KG linker for a single course and return
+/// the number of live edges. Shared by the relink sweeper above and the
+/// teacher-triggered `rebuild_knowledge_graph` route. Errors come back
+/// as a string; the route maps them to a 500. Lives here (not in the
+/// axum route module) so the worker can drive it without linking the
+/// route tree.
+pub async fn relink_course(
+    state: &crate::state::AppState,
+    course_id: Uuid,
+) -> Result<usize, String> {
+    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let http = reqwest::Client::new();
+    let ctx = crate::classification::linker::LinkContext {
+        http: &http,
+        api_key: &state.config.cerebras_api_key,
+        db: &state.db,
+        qdrant: &state.qdrant,
+    };
+    // The linker writes edges + decision cache itself per fresh pair,
+    // so we don't wipe-and-rewrite here. A pair whose endpoints haven't
+    // been re-classified since its prior decision keeps both its cache
+    // row AND its existing document_relations edge (if any); no LLM
+    // call, no DB churn.
+    let result = crate::classification::linker::link_course(&ctx, course_id, &docs).await?;
+
+    tracing::info!(
+        "relink: course {} considered {} doc(s); {} cached, {} re-evaluated, {} live edge(s)",
+        course_id,
+        result.considered,
+        result.cached_hits,
+        result.re_evaluated,
+        result.edges_written,
+    );
+
+    Ok(result.edges_written)
 }

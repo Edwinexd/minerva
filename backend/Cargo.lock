@@ -2830,6 +2830,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "minerva-catalog"
+version = "0.1.0"
+
+[[package]]
 name = "minerva-core"
 version = "0.1.0"
 dependencies = [
@@ -2856,14 +2860,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "minerva-embed-engine"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "fastembed",
+ "hf-hub",
+ "libc",
+ "minerva-catalog",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "minerva-embedder"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "dotenvy",
+ "minerva-catalog",
  "minerva-core",
- "minerva-ingest",
+ "minerva-embed-engine",
  "minerva-rpc",
  "prost",
  "tokio",
@@ -2873,29 +2892,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "minerva-ingest"
+name = "minerva-mbz"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "quick-xml",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "minerva-pipeline"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "candle-core",
  "chrono",
- "fastembed",
- "flate2",
  "futures",
- "hf-hub",
- "libc",
+ "minerva-catalog",
  "minerva-core",
  "minerva-db",
  "pdf-extract",
  "qdrant-client",
- "quick-xml",
  "reqwest 0.13.3",
  "scraper",
  "serde",
  "serde_json",
  "sqlx",
- "tar",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2909,8 +2934,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "dotenvy",
+ "minerva-catalog",
  "minerva-core",
- "minerva-ingest",
+ "minerva-embed-engine",
  "minerva-rpc",
  "prost",
  "tokio",
@@ -2925,7 +2951,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "minerva-core",
- "minerva-ingest",
  "prost",
  "serde",
  "thiserror 2.0.18",
@@ -2934,6 +2959,15 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tracing",
+]
+
+[[package]]
+name = "minerva-rpc-local"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "minerva-core",
+ "minerva-embed-engine",
 ]
 
 [[package]]
@@ -2952,10 +2986,14 @@ dependencies = [
  "hmac 0.13.0",
  "jsonwebtoken",
  "libc",
+ "minerva-catalog",
  "minerva-core",
  "minerva-db",
- "minerva-ingest",
+ "minerva-embed-engine",
+ "minerva-mbz",
+ "minerva-pipeline",
  "minerva-rpc",
+ "minerva-rpc-local",
  "qdrant-client",
  "rand 0.10.1",
  "rand_chacha 0.3.1",

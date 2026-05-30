@@ -13,7 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 minerva-core = { path = "../minerva-core" }
-minerva-ingest = { path = "../minerva-ingest" }
+minerva-catalog = { path = "../minerva-catalog" }
+minerva-embed-engine = { path = "../minerva-embed-engine" }
 minerva-rpc = { path = "../minerva-rpc" }
 
 async-trait = "0.1"

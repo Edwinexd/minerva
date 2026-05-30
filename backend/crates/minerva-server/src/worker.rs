@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use async_trait::async_trait;
-use minerva_ingest::classifier::{ClassifiedKind, Classifier};
+use minerva_pipeline::classifier::{ClassifiedKind, Classifier};
 
 use crate::classification::CerebrasClassifier;
 use crate::feature_flags;
@@ -547,7 +547,7 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
                             }
                         };
 
-                    let ext = crate::routes::documents::extension_from_filename(&doc.filename);
+                    let ext = minerva_pipeline::pipeline::extension_from_filename(&doc.filename);
 
                     // URL documents: route by URL shape.
                     //
@@ -646,7 +646,7 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
                     let path = std::path::Path::new(&file_path);
                     let client = reqwest::Client::new();
 
-                    match minerva_ingest::pipeline::process_document(
+                    match minerva_pipeline::pipeline::process_document(
                         &db,
                         &qdrant,
                         &client,

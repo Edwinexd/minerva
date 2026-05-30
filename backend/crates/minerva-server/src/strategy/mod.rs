@@ -7,6 +7,9 @@ pub mod tool_use;
 pub mod tools;
 pub mod writeup;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 use axum::response::sse::Event;
 use tokio::sync::mpsc;
 use uuid::Uuid;

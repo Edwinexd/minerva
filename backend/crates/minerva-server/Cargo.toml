@@ -26,14 +26,33 @@ path = "src/bin/minerva-worker.rs"
 name = "minerva-scheduler"
 path = "src/bin/minerva-scheduler.rs"
 
+[features]
+default = []
+# Single-process local-dev build: links the in-process model engine so
+# the one `minerva` binary can embed/rerank without separate
+# embedder/reranker pods. Off in prod images (they reach the model
+# servers over gRPC). The dev Dockerfile builds with
+# `--features local-engine`.
+local-engine = ["dep:minerva-embed-engine", "dep:minerva-rpc-local"]
+
 [dependencies]
 minerva-core = { path = "../minerva-core" }
+minerva-catalog = { path = "../minerva-catalog" }
 minerva-db = { path = "../minerva-db" }
-minerva-ingest = { path = "../minerva-ingest" }
-# Client wrappers for the embedder + reranker services. Phase 0 uses
-# the in-process `LocalEmbedderClient` / `LocalRerankerClient`;
-# Phase 1/2 wire the remote gRPC variants behind the same trait.
+minerva-pipeline = { path = "../minerva-pipeline" }
+# Model engine + in-process client wrappers. Optional: only the
+# `local-engine` feature (single-process local dev) pulls them in, so
+# the prod api binary, which reaches the embedder/reranker pods over
+# gRPC, never compiles fastembed/candle/hf-hub.
+minerva-embed-engine = { path = "../minerva-embed-engine", optional = true }
+# Moodle .mbz importer (api-only; the import-mbz route).
+minerva-mbz = { path = "../minerva-mbz" }
+# Remote gRPC client wrappers for the embedder + reranker services
+# (engine-free). The in-process Local* wrappers come from
+# minerva-rpc-local, gated behind the `local-engine` feature so prod
+# api/worker/scheduler images don't link the model engine.
 minerva-rpc = { path = "../minerva-rpc" }
+minerva-rpc-local = { path = "../minerva-rpc-local", optional = true }
 # Concept-graph integration via the eureka HTTP service has been
 # removed pending a clean HTTP-wrapper rewrite. Previously a path-dep
 # on a vendored `eureka-2` Rust release artifact, which forced

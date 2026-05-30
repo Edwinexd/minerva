@@ -3,7 +3,7 @@
 //! Pipeline:
 //! 1. After text extraction, the worker calls
 //!    [`document::CerebrasClassifier`] (which implements
-//!    `minerva_ingest::classifier::Classifier`).
+//!    `minerva_pipeline::classifier::Classifier`).
 //! 2. The classifier asks gpt-oss-120b on Cerebras to label the doc as one
 //!    of [`types::DocumentKind`], returning JSON via Cerebras structured
 //!    outputs.

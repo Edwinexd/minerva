@@ -2,9 +2,13 @@
 members = [
     "crates/minerva-server",
     "crates/minerva-core",
-    "crates/minerva-ingest",
+    "crates/minerva-catalog",
+    "crates/minerva-embed-engine",
+    "crates/minerva-mbz",
+    "crates/minerva-pipeline",
     "crates/minerva-db",
     "crates/minerva-rpc",
+    "crates/minerva-rpc-local",
     "crates/minerva-embedder",
     "crates/minerva-reranker",
 ]

@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use minerva_ingest::reranker::FastReranker;
+use minerva_embed_engine::reranker::FastReranker;
 use minerva_rpc::proto::reranker::reranker_server::RerankerServer;
 use tonic::transport::Server;
 

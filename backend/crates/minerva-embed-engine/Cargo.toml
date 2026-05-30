@@ -1,0 +1,30 @@
+[package]
+name = "minerva-embed-engine"
+version = "0.1.0"
+edition = "2021"
+
+# The heavyweight local model engine: the FastEmbedder LRU + FastReranker
+# caches (ONNX via fastembed, candle for the Qwen3 entry, hf-hub for
+# model downloads) and the pod-wide MemBudget permit pool. This is the
+# ONLY crate that pulls fastembed / candle / hf-hub, so the
+# api / worker / scheduler stay engine-free by talking to the
+# embedder / reranker gRPC services instead of linking this.
+
+[dependencies]
+minerva-catalog = { path = "../minerva-catalog" }
+
+candle-core.workspace = true
+fastembed.workspace = true
+hf-hub.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# `malloc_trim(0)` after FastEmbedder LRU eviction. glibc holds freed
+# pages well past Drop, so `wait_for_rss_drop` was observing 0 bytes
+# released even after the dispatcher Arc dropped, then the next model
+# load allocated on top of the lingering arenas and OOM-killed the
+# embedder pod. AGENTS.md's "Sync eviction" section flagged this as
+# the follow-up.
+[target.'cfg(target_env = "gnu")'.dependencies]
+libc = "0.2"

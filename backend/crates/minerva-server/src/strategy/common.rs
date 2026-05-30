@@ -1,15 +1,22 @@
 use axum::response::sse::Event;
 use futures::StreamExt;
 use minerva_core::rpc::{EmbedderClient, RerankerClient};
-use qdrant_client::qdrant::{value::Kind, ScoredPoint, SearchPointsBuilder};
-use reqwest::Response;
-use std::collections::{HashMap, HashSet};
+use qdrant_client::qdrant::{ScoredPoint, SearchPointsBuilder};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::classification::prompts::{ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE, PASTED_PROBLEM_RULE};
 use crate::classification::types::is_signal_only_kind;
 use crate::error::AppError;
+
+// Primitives shared with the ingest-time classifier live in `crate::llm`
+// (axum-free). Re-exported here so the chat strategies keep referring to
+// them via `strategy::common`.
+pub use crate::llm::{
+    cerebras_request_with_retry, cerebras_request_with_retry_to, extract_cerebras_usage,
+    payload_int, payload_string, record_cerebras_usage, RagChunk, CEREBRAS_CHAT_COMPLETIONS_URL,
+};
 
 /// Minimum retrieval score (cosine similarity in [0, 1]) below which an
 /// assignment-kind signal is considered tangential and the refusal
@@ -23,41 +30,10 @@ use crate::error::AppError;
 /// stop trusting the signal as evidence of an actual assignment paste.
 pub const ASSIGNMENT_SIGNAL_MIN_SCORE: f32 = 0.65;
 
-/// Maximum number of retries for transient Cerebras API errors (5XX, timeouts).
-const MAX_RETRIES: u32 = 3;
-
-/// Initial backoff delay between retries.
-const INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_millis(500);
-
 /// Idle timeout between consecutive SSE frames from Cerebras. Protects every
 /// streaming strategy against a silently-stalled TCP connection that never
 /// delivers [DONE]. Applied per `stream.next().await`, not a total deadline.
 const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// A chunk returned by RAG lookup, carrying metadata for display filtering.
-///
-/// `kind` mirrors the document's classification (lecture, assignment_brief,
-/// sample_solution, …). It is sourced from the Qdrant payload (stamped at
-/// embed time by `minerva-ingest::pipeline`) so we don't need a per-chunk
-/// DB roundtrip on hot retrieval paths. Older points without `kind` (i.e.
-/// stale data, or vectors uploaded by an out-of-date worker) come through
-/// as `None`; the partition logic treats those as "context" with a DB
-/// safety check downstream via `unclassified_doc_ids`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RagChunk {
-    pub document_id: String,
-    pub filename: String,
-    pub text: String,
-    pub kind: Option<String>,
-    pub score: f32,
-}
-
-impl RagChunk {
-    /// Format for inclusion in the LLM system prompt (always full text).
-    pub fn formatted(&self) -> String {
-        format!("[Source: {}]\n{}", self.filename, self.text)
-    }
-}
 
 /// Stable identity hash over `(document_id, text)`. Used by the agentic
 /// research loop (and historically FLARE) to dedupe chunks pulled from
@@ -194,28 +170,6 @@ pub async fn scroll_doc_chunks(
     Ok(by_index)
 }
 
-/// Extract a string field from a Qdrant point payload, returning None if missing.
-pub fn payload_string(
-    payload: &HashMap<String, qdrant_client::qdrant::Value>,
-    key: &str,
-) -> Option<String> {
-    match payload.get(key).and_then(|v| v.kind.as_ref()) {
-        Some(Kind::StringValue(s)) => Some(s.clone()),
-        _ => None,
-    }
-}
-
-/// Extract an integer field from a Qdrant point payload.
-pub fn payload_int(
-    payload: &HashMap<String, qdrant_client::qdrant::Value>,
-    key: &str,
-) -> Option<i64> {
-    match payload.get(key).and_then(|v| v.kind.as_ref()) {
-        Some(Kind::IntegerValue(i)) => Some(*i),
-        _ => None,
-    }
-}
-
 /// Parse a scored point into a RagChunk. Returns None if the required `text`
 /// field is missing. `kind` may be absent on old points written before the
 /// classifier was wired in; those fall through to the unclassified
@@ -327,8 +281,7 @@ pub async fn embedding_search(
         // arctic-m-v2.0). No-op for models without one. Documents in
         // the collection are *not* prefixed; see
         // `fastembed_embedder::query_prefix_for_model`.
-        let formatted_query =
-            minerva_ingest::fastembed_embedder::format_query_for_model(embedding_model, query);
+        let formatted_query = minerva_catalog::format_query_for_model(embedding_model, query);
         // `embed_query` (not `embed`): user-facing retrieval must beat
         // any concurrent ingest run for the model mutex. See the
         // priority-lane explanation on `FastEmbedder::embed_query`.
@@ -340,7 +293,7 @@ pub async fn embedding_search(
             .next()
             .ok_or_else(|| "no embedding returned from fastembed".to_string())?
     } else {
-        let embed_result = minerva_ingest::embedder::embed_texts(
+        let embed_result = minerva_pipeline::embedder::embed_texts(
             client,
             openai_key,
             std::slice::from_ref(&query.to_string()),
@@ -488,134 +441,6 @@ pub async fn rerank_chunks(
             chunks.truncate(top_k);
             chunks
         }
-    }
-}
-
-// ── Cerebras helpers ───────────────────────────────────────────────
-
-/// Production Cerebras chat-completions endpoint. Tests override this via
-/// `cerebras_request_with_retry_to` to hit an in-process wiremock server.
-pub const CEREBRAS_CHAT_COMPLETIONS_URL: &str = "https://api.cerebras.ai/v1/chat/completions";
-
-/// Send a request to the Cerebras API with retry on 5XX / network errors.
-/// Returns the successful response or the last error as a formatted string.
-pub async fn cerebras_request_with_retry(
-    client: &reqwest::Client,
-    api_key: &str,
-    body: &serde_json::Value,
-) -> Result<Response, String> {
-    cerebras_request_with_retry_to(client, CEREBRAS_CHAT_COMPLETIONS_URL, api_key, body).await
-}
-
-/// Same as `cerebras_request_with_retry` but posts to `url` instead of the
-/// production endpoint. Exists so integration tests can point FLARE at a
-/// mock server without exposing URL-override plumbing throughout the rest
-/// of the codebase.
-pub async fn cerebras_request_with_retry_to(
-    client: &reqwest::Client,
-    url: &str,
-    api_key: &str,
-    body: &serde_json::Value,
-) -> Result<Response, String> {
-    let mut last_err = String::new();
-
-    for attempt in 0..=MAX_RETRIES {
-        if attempt > 0 {
-            let backoff = INITIAL_BACKOFF * 2u32.pow(attempt - 1);
-            tracing::warn!(
-                "cerebras: retry {}/{} after {:?}",
-                attempt,
-                MAX_RETRIES,
-                backoff
-            );
-            tokio::time::sleep(backoff).await;
-        }
-
-        let result = client
-            .post(url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .json(body)
-            .send()
-            .await;
-
-        match result {
-            Ok(response) => {
-                let status = response.status();
-                if status.is_success() {
-                    return Ok(response);
-                }
-                if status.is_server_error() {
-                    let body_text = response.text().await.unwrap_or_default();
-                    last_err = format!("Cerebras API error {}: {}", status, body_text);
-                    tracing::warn!("cerebras: {}", last_err);
-                    continue;
-                }
-                // Client errors (4XX) are not retryable
-                let body_text = response.text().await.unwrap_or_default();
-                return Err(format!("Cerebras API error {}: {}", status, body_text));
-            }
-            Err(e) if e.is_timeout() || e.is_connect() => {
-                last_err = format!("Request failed: {}", e);
-                tracing::warn!("cerebras: {}", last_err);
-                continue;
-            }
-            Err(e) => {
-                return Err(format!("Request failed: {}", e));
-            }
-        }
-    }
-
-    Err(last_err)
-}
-
-/// Pull `(prompt_tokens, completion_tokens)` out of a parsed
-/// Cerebras chat-completions response payload. Returns `None`
-/// when the usage block is missing or malformed; callers should
-/// just skip token recording in that case (we never block a chat
-/// path because tracking failed).
-pub fn extract_cerebras_usage(payload: &serde_json::Value) -> Option<(i32, i32)> {
-    let usage = payload.get("usage")?;
-    let p = usage.get("prompt_tokens")?.as_i64()?;
-    let c = usage.get("completion_tokens")?.as_i64()?;
-    Some((p as i32, c as i32))
-}
-
-/// Convenience wrapper: pull usage out of `payload` and record a
-/// `course_token_usage` row. Best-effort; logs a warning on
-/// either missing-usage or DB error and returns silently. Used
-/// from every classification call site so they don't all repeat
-/// the same boilerplate.
-pub async fn record_cerebras_usage(
-    db: &sqlx::PgPool,
-    course_id: uuid::Uuid,
-    category: &'static str,
-    model: &str,
-    payload: &serde_json::Value,
-) {
-    let Some((prompt_tokens, completion_tokens)) = extract_cerebras_usage(payload) else {
-        tracing::warn!(
-            "course_token_usage: skipping record for course={} category={}: usage block missing/malformed",
-            course_id,
-            category
-        );
-        return;
-    };
-    if let Err(e) = minerva_db::queries::course_token_usage::record(
-        db,
-        course_id,
-        category,
-        model,
-        prompt_tokens,
-        completion_tokens,
-    )
-    .await
-    {
-        tracing::warn!(
-            "course_token_usage: insert failed for course={} category={}: {}",
-            course_id,
-            category,
-            e
-        );
     }
 }
 
@@ -867,8 +692,7 @@ pub async fn expand_context_via_graph(
 
     // Embed the query once, reuse for every per-doc filtered search.
     let query_vector: Vec<f32> = if embedding_provider == "local" {
-        let formatted_query =
-            minerva_ingest::fastembed_embedder::format_query_for_model(embedding_model, query);
+        let formatted_query = minerva_catalog::format_query_for_model(embedding_model, query);
         // Interactive path: use the priority lane so this doesn't
         // queue behind in-flight ingest batches. See
         // `FastEmbedder::embed_query`.
@@ -884,7 +708,7 @@ pub async fn expand_context_via_graph(
             }
         }
     } else {
-        match minerva_ingest::embedder::embed_texts(
+        match minerva_pipeline::embedder::embed_texts(
             http_client,
             openai_api_key,
             std::slice::from_ref(&query.to_string()),
@@ -1067,7 +891,7 @@ pub async fn rag_lookup(
 /// the existing `chunk_identity_hash` dedup.
 ///
 /// The text indexes are created on demand by
-/// `minerva_ingest::pipeline::ensure_text_index` /
+/// `minerva_pipeline::pipeline::ensure_text_index` /
 /// `ensure_filename_text_index` when a collection is first written
 /// to; legacy collections without the index will return an error
 /// here, which the caller surfaces as a `ToolError::Backend`.
@@ -1571,10 +1395,8 @@ mod tests {
         // The wrapper's guard paths (<=1 chunk, top_k == 0) must not touch
         // the model, so this runs without any weights on disk.
         let reranker: std::sync::Arc<dyn minerva_core::rpc::RerankerClient> =
-            std::sync::Arc::new(minerva_rpc::LocalRerankerClient::new(std::sync::Arc::new(
-                minerva_ingest::reranker::FastReranker::new(),
-            )));
-        let model = minerva_ingest::reranker::DEFAULT_RERANK_MODEL;
+            std::sync::Arc::new(crate::strategy::test_support::NoopRerankerClient);
+        let model = minerva_catalog::DEFAULT_RERANK_MODEL;
         assert!(rerank_chunks(&reranker, model, "q", Vec::new(), 5)
             .await
             .is_empty());

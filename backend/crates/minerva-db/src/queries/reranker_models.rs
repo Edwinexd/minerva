@@ -3,7 +3,7 @@
 //! `20260529000001_reranker_models.sql` for the schema and seed.
 //!
 //! The compile-time `VALID_RERANKER_MODELS` slice
-//! (`minerva_ingest::reranker`) is the catalog of models the runtime
+//! (`minerva_embed_engine::reranker`) is the catalog of models the runtime
 //! *can* load. This table is the *policy* layer on top: only
 //! `enabled = TRUE` rows show up in the per-course picker. Disabling a
 //! model never touches existing courses already on it; the admin can

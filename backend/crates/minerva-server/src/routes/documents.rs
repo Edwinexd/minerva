@@ -463,13 +463,12 @@ async fn upload_mbz(
     // Parse off the blocking thread pool: archive extraction is CPU+fs bound
     // and would otherwise stall the async reactor.
     let parse_path = upload_path.clone();
-    let import =
-        tokio::task::spawn_blocking(move || minerva_ingest::moodle::import_mbz(&parse_path))
-            .await
-            .map_err(|e| AppError::Internal(format!("mbz parse task panicked: {e}")))?
-            .map_err(|e| {
-                AppError::bad_request_with("doc.mbz_parse_failed", [("detail", e.to_string())])
-            })?;
+    let import = tokio::task::spawn_blocking(move || minerva_mbz::import_mbz(&parse_path))
+        .await
+        .map_err(|e| AppError::Internal(format!("mbz parse task panicked: {e}")))?
+        .map_err(|e| {
+            AppError::bad_request_with("doc.mbz_parse_failed", [("detail", e.to_string())])
+        })?;
 
     let mut imported: usize = 0;
     for item in &import.items {
@@ -478,12 +477,10 @@ async fn upload_mbz(
         // cap, in practice ≪ MAX_UPLOAD_BYTES); buffering them here is
         // fine even on the biggest backups we've seen in production.
         let bytes: Vec<u8> = match &item.body {
-            minerva_ingest::moodle::ItemBody::Inline(bytes) => bytes.clone(),
-            minerva_ingest::moodle::ItemBody::File(src) => {
-                tokio::fs::read(src).await.map_err(|e| {
-                    AppError::Internal(format!("failed to read {}: {}", item.filename, e))
-                })?
-            }
+            minerva_mbz::ItemBody::Inline(bytes) => bytes.clone(),
+            minerva_mbz::ItemBody::File(src) => tokio::fs::read(src).await.map_err(|e| {
+                AppError::Internal(format!("failed to read {}: {}", item.filename, e))
+            })?,
         };
 
         upload_or_dedup(
@@ -619,7 +616,7 @@ async fn delete_document(
     // doesn't leave orphaned PDF/transcript bytes + vectors behind.
     let children = minerva_db::queries::documents::list_children(&state.db, doc_id).await?;
     let collection_name =
-        minerva_ingest::pipeline::collection_name(course_id, course.embedding_version);
+        minerva_pipeline::pipeline::collection_name(course_id, course.embedding_version);
     let collection_exists = state
         .qdrant
         .collection_exists(&collection_name)
@@ -691,7 +688,7 @@ async fn list_chunks(
     }
 
     let collection_name =
-        minerva_ingest::pipeline::collection_name(course_id, course.embedding_version);
+        minerva_pipeline::pipeline::collection_name(course_id, course.embedding_version);
 
     // Check if collection exists
     let exists = state
@@ -773,7 +770,7 @@ async fn search_chunks(
     }
 
     let collection_name =
-        minerva_ingest::pipeline::collection_name(course_id, course.embedding_version);
+        minerva_pipeline::pipeline::collection_name(course_id, course.embedding_version);
     let exists = state
         .qdrant
         .collection_exists(&collection_name)
@@ -826,13 +823,10 @@ async fn search_chunks(
     Ok(Json(results))
 }
 
-/// Extract file extension from a filename, defaulting to "bin".
-pub fn extension_from_filename(filename: &str) -> &str {
-    std::path::Path::new(filename)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("bin")
-}
+// `extension_from_filename` moved to `minerva_pipeline` (shared by the
+// worker, which must not depend on the axum route tree). Re-exported
+// here so the in-crate upload routes keep calling it via the old path.
+pub use minerva_pipeline::pipeline::extension_from_filename;
 
 // ── Course-knowledge-graph V1 endpoints ────────────────────────────
 //
@@ -907,7 +901,7 @@ pub(crate) async fn run_classify_one(
         state.config.docs_path, doc.course_id, doc.id, ext
     );
     let path = std::path::Path::new(&file_path);
-    let text = minerva_ingest::pipeline::extract_document_text(path)
+    let text = minerva_pipeline::pipeline::extract_document_text(path)
         .map_err(|e| AppError::Internal(format!("text extraction failed: {}", e)))?;
 
     let classifier = crate::classification::CerebrasClassifier::new(
@@ -915,7 +909,7 @@ pub(crate) async fn run_classify_one(
         state.config.cerebras_api_key.clone(),
         state.db.clone(),
     );
-    use minerva_ingest::classifier::Classifier;
+    use minerva_pipeline::classifier::Classifier;
     let result = classifier
         .classify(doc.course_id, &doc.filename, &doc.mime_type, &text)
         .await
@@ -1019,7 +1013,7 @@ async fn set_document_kind(
         // orphan. One quick round-trip; this path is only taken on a
         // teacher's manual lock action so it's not hot.
         let collection_name =
-            minerva_ingest::pipeline::collection_name_for_course(&state.db, course_id)
+            minerva_pipeline::pipeline::collection_name_for_course(&state.db, course_id)
                 .await
                 .map_err(|e| AppError::Internal(format!("course lookup failed: {}", e)))?;
         if state
@@ -1146,36 +1140,9 @@ async fn reclassify_all_in_course(
 ///
 /// Crate-public so the admin backfill task can relink each course it
 /// touched after the per-doc classification finishes.
-pub(crate) async fn relink_course(state: &AppState, course_id: Uuid) -> Result<usize, AppError> {
-    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
-
-    let http = reqwest::Client::new();
-    let ctx = crate::classification::linker::LinkContext {
-        http: &http,
-        api_key: &state.config.cerebras_api_key,
-        db: &state.db,
-        qdrant: &state.qdrant,
-    };
-    // The linker now writes edges + decision cache itself per fresh
-    // pair, so we don't wipe-and-rewrite here. A pair whose endpoints
-    // haven't been re-classified since its prior decision keeps both
-    // its cache row AND its existing document_relations edge (if any)
-    //; no LLM call, no DB churn.
-    let result = crate::classification::linker::link_course(&ctx, course_id, &docs)
-        .await
-        .map_err(AppError::Internal)?;
-
-    tracing::info!(
-        "relink: course {} considered {} doc(s); {} cached, {} re-evaluated, {} live edge(s)",
-        course_id,
-        result.considered,
-        result.cached_hits,
-        result.re_evaluated,
-        result.edges_written,
-    );
-
-    Ok(result.edges_written)
-}
+// `relink_course` moved to `crate::relink_scheduler` (shared with the
+// relink sweeper, which runs outside the axum route tree). The route
+// handler below calls it via `crate::relink_scheduler::relink_course`.
 
 #[derive(Serialize)]
 struct GraphNode {
@@ -1381,6 +1348,8 @@ async fn rebuild_knowledge_graph(
 ) -> Result<Json<RelinkResponse>, AppError> {
     require_course_teacher(&state, course_id, &user).await?;
     require_kg_enabled(&state, course_id).await?;
-    let edges = relink_course(&state, course_id).await?;
+    let edges = crate::relink_scheduler::relink_course(&state, course_id)
+        .await
+        .map_err(AppError::Internal)?;
     Ok(Json(RelinkResponse { edges }))
 }

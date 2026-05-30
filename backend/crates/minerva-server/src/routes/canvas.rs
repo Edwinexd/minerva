@@ -862,7 +862,7 @@ async fn purge_chunks(state: &AppState, course_id: Uuid, doc_id: Uuid) -> Result
     // the only safe option since `purge_chunks` is invoked from
     // multiple call sites (file vs page replace) without a course
     // row in scope.
-    let collection = minerva_ingest::pipeline::collection_name_for_course(&state.db, course_id)
+    let collection = minerva_pipeline::pipeline::collection_name_for_course(&state.db, course_id)
         .await
         .map_err(|e| AppError::Internal(format!("course lookup failed: {}", e)))?;
     let exists = state

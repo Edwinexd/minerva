@@ -1,17 +1,11 @@
-//! Reranker client trait + in-process impl.
+//! Remote (gRPC) reranker client.
 //!
-//! Same shape as [`crate::embedder`]: a protocol-neutral trait plus a
-//! local wrapper that delegates to the existing `FastReranker`. Phase
-//! 2 adds the remote gRPC variant.
-
-use std::sync::Arc;
+//! Same shape as [`crate::embedder`]: a tonic gRPC client over the
+//! protocol-neutral `RerankerClient` trait. The in-process
+//! `LocalRerankerClient` lives in `minerva-rpc-local`.
 
 use async_trait::async_trait;
 use minerva_core::rpc::{BenchmarkError, RerankBenchmarkResult, RerankerClient};
-use minerva_ingest::reranker::{
-    BenchmarkError as InnerBenchmarkError, FastReranker,
-    RerankBenchmarkResult as InnerRerankBenchmarkResult,
-};
 use tokio::sync::Mutex;
 use tonic::transport::{Channel, Endpoint};
 
@@ -19,73 +13,6 @@ use crate::proto::reranker::{
     reranker_client::RerankerClient as ProtoClient, BenchmarkOneRequest, BenchmarkStateRequest,
     GetBenchmarksRequest, RerankBenchmarkResult as ProtoBenchmarkResult, RerankRequest,
 };
-
-/// In-process impl. Delegates to the existing `FastReranker` cache
-/// behind an `Arc`. Phase 0 wiring; deleted in Phase 4 once the gRPC
-/// client is the only variant.
-pub struct LocalRerankerClient {
-    inner: Arc<FastReranker>,
-}
-
-impl LocalRerankerClient {
-    pub fn new(inner: Arc<FastReranker>) -> Self {
-        Self { inner }
-    }
-
-    /// Borrow the underlying FastReranker for code paths that haven't
-    /// yet been routed through the trait. Deleted in Phase 4.
-    pub fn inner(&self) -> &Arc<FastReranker> {
-        &self.inner
-    }
-}
-
-#[async_trait]
-impl RerankerClient for LocalRerankerClient {
-    async fn rerank(
-        &self,
-        model_code: &str,
-        query: String,
-        documents: Vec<String>,
-    ) -> Result<Vec<(usize, f32)>, String> {
-        // `FastReranker::rerank` already returns `Result<_, String>`
-        // (it doesn't expose the BenchmarkError busy/failed distinction
-        // on the non-benchmark path); pass through unchanged.
-        self.inner.rerank(model_code, query, documents).await
-    }
-
-    async fn benchmark_one(
-        &self,
-        model_code: &str,
-    ) -> Result<RerankBenchmarkResult, BenchmarkError> {
-        match self.inner.benchmark_one(model_code).await {
-            Ok(r) => Ok(from_inner_bench(r)),
-            Err(InnerBenchmarkError::Busy) => Err(BenchmarkError::Busy),
-            Err(InnerBenchmarkError::Failed(s)) => Err(BenchmarkError::Failed(s)),
-        }
-    }
-
-    async fn get_benchmarks(&self) -> Vec<RerankBenchmarkResult> {
-        self.inner
-            .get_benchmarks()
-            .await
-            .into_iter()
-            .map(from_inner_bench)
-            .collect()
-    }
-
-    async fn is_benchmark_running(&self) -> bool {
-        self.inner.is_benchmark_running().await
-    }
-}
-
-fn from_inner_bench(r: InnerRerankBenchmarkResult) -> RerankBenchmarkResult {
-    RerankBenchmarkResult {
-        model: r.model,
-        pairs_per_second: r.pairs_per_second,
-        total_ms: r.total_ms,
-        pairs: r.pairs,
-    }
-}
 
 fn from_proto_bench(r: ProtoBenchmarkResult) -> RerankBenchmarkResult {
     RerankBenchmarkResult {

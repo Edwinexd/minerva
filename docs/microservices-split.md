@@ -1,7 +1,48 @@
 # Microservices split
 
-Status: design draft, not yet implemented. See AGENTS.md "Architecture
-debt" for the one-paragraph version this expands on.
+Status: **partially implemented (proper-ms).** The runtime topology (5
+binaries: api / embedder / reranker / worker / scheduler, gRPC between
+them) shipped earlier. The crate-level dependency split is now done for
+the expensive part: see "Implemented so far" below. The original design
+text is kept verbatim afterwards as the reference. See AGENTS.md
+"Architecture debt" for the one-paragraph version.
+
+## Implemented so far (proper-ms)
+
+The actual crate layout diverges from the original sketch below (which
+folded the engine back into `minerva-ingest`). What shipped:
+
+- `minerva-embed-engine` (NEW): the ONLY crate compiling fastembed /
+  candle / hf-hub. Holds `FastEmbedder`, `FastReranker`, `MemBudget`,
+  `compute_budget_bytes`. Linked only by `minerva-embedder` /
+  `minerva-reranker`.
+- `minerva-catalog` (NEW, no-deps): model-id tables
+  (`VALID_LOCAL_MODELS`, `STARTUP_BENCHMARK_MODELS`,
+  `VALID_RERANKER_MODELS`, ...) + the query-prefix helpers, so every
+  tier shares them without pulling the engine.
+- `minerva-mbz` (NEW): the Moodle `.mbz` parser (tar / gzip / xml).
+- `minerva-pipeline`: the old `minerva-ingest`, slimmed and engine-free
+  (pipeline / chunker / pdf / OpenAI-HTTP embed / Classifier trait).
+- `minerva-rpc` (remote gRPC clients, engine-free) split from
+  `minerva-rpc-local` (in-process `Local*` wrappers over the engine).
+- `AppState` no longer compiles the engine ("Leak A"): the in-process
+  embedder/reranker is behind a default-off `local-engine` feature on
+  `minerva-server` (the dev Dockerfile builds with it; prod doesn't).
+  Verified via `cargo tree`: api / worker / scheduler are engine-free.
+- `classification` decoupled from `strategy::common` (shared Cerebras /
+  payload / `RagChunk` helpers moved to `minerva-server::llm`); the
+  worker's doc-claim path decoupled from `routes::*`
+  (`relink_course` -> `relink_scheduler`, `extension_from_filename` ->
+  `minerva-pipeline`).
+
+Deferred (lower value now the engine is isolated; axum/mbz compile in
+seconds): carving `minerva` / `minerva-worker` / `minerva-scheduler`
+into separate crates over a shared axum-free `minerva-app-core`, and the
+`minerva-integrations` crate. That needs splitting `lti.rs` /
+`system_defaults` across the axum boundary and converting `canvas.rs`
+(63 `AppError` sites) for a fully axum-free scheduler.
+
+---
 
 ## Why
 

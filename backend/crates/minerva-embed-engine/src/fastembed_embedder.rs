@@ -326,46 +326,12 @@ struct CustomModelSpec {
     max_length: usize,
 }
 
-/// Per-model query-side prefix for asymmetric retrieval models.
-///
-/// Some embedding models are trained with distinct prompt templates for
-/// queries vs documents (`query: ...` for the search side, `passage: ...`
-/// for the indexed side). Calling them without those prefixes works but
-/// gives up some recall.
-///
-/// We only apply the *query-side* prefix here, and only for models that
-/// have always been query-prefixed in production. The document side is
-/// never touched because:
-/// 1. Existing Qdrant collections were built without prefixes. Switching
-///    document prefixing on at ingest would silently mismatch every
-///    chunk currently in storage; a rebuild is the only correct fix and
-///    that's an explicit migration, not an automatic one.
-/// 2. For arctic-m-v2.0 specifically, the model card *only* prescribes a
-///    query prefix; documents stay bare by design.
-///
-/// Multilingual-e5-* is intentionally not in this list: its training
-/// regime expects both `query:` and `passage:` prefixes, so prefixing
-/// only the query side against bare-embedded documents would be an
-/// asymmetric mismatch that's likely to *hurt* retrieval more than the
-/// missing prefix already does. Fixing E5 properly requires a per-course
-/// re-embed and is out of scope here.
-pub fn query_prefix_for_model(model: &str) -> Option<&'static str> {
-    match model {
-        "Snowflake/snowflake-arctic-embed-m-v2.0" => Some("query: "),
-        _ => None,
-    }
-}
-
-/// Apply the query-side prefix for `model` (if any) to `query` and
-/// return an owned `String`. Cheap when no prefix is registered (one
-/// move, no allocation). Used by the retrieval call sites in
-/// `strategy::common`; the embed pipeline doesn't go through this.
-pub fn format_query_for_model(model: &str, query: &str) -> String {
-    match query_prefix_for_model(model) {
-        Some(prefix) => format!("{prefix}{query}"),
-        None => query.to_string(),
-    }
-}
+// The per-model query-side prefix helpers are pure model-name logic
+// with no engine dependency, so they live in `minerva-catalog` and the
+// api can format a query before calling the remote embedder without
+// linking this crate. Re-exported here for the engine's own tests and
+// any in-process caller.
+pub use minerva_catalog::{format_query_for_model, query_prefix_for_model};
 
 fn custom_model_spec(model_name: &str) -> Option<CustomModelSpec> {
     match model_name {
@@ -1359,7 +1325,7 @@ mod tests {
         // dropdown). If the custom-backend dispatch exists but the
         // catalog entry is missing, course owners can't actually pick
         // the model.
-        use crate::pipeline::VALID_LOCAL_MODELS;
+        use minerva_catalog::VALID_LOCAL_MODELS;
         let entry = VALID_LOCAL_MODELS
             .iter()
             .find(|(name, _)| *name == "Snowflake/snowflake-arctic-embed-m-v2.0")

@@ -1,13 +1,13 @@
 //! Cerebras gpt-oss-120b-backed document classifier.
 
 use async_trait::async_trait;
-use minerva_ingest::classifier::{ClassifiedKind, Classifier};
+use minerva_pipeline::classifier::{ClassifiedKind, Classifier};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::prompts::{CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_TEMPLATE};
 use super::types::{DocumentKind, ALL_KINDS};
-use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage};
+use crate::llm::{cerebras_request_with_retry, record_cerebras_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
 
 /// Cerebras model name for ingest-time classification work. Cerebras

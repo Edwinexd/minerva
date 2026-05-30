@@ -27,6 +27,7 @@ pub mod error;
 pub mod ext_obfuscate;
 pub mod feature_flags;
 pub mod github_url;
+pub mod llm;
 pub mod lti;
 pub mod lti_nrps;
 pub mod model_capabilities;
@@ -264,7 +265,7 @@ pub async fn api_main() -> anyhow::Result<()> {
     // The trait carries `&[(String, u64)]` (matches the protobuf shape
     // for the Phase 1 remote variant); convert the borrowed-string
     // constant once at startup.
-    let startup_models: Vec<(String, u64)> = minerva_ingest::pipeline::STARTUP_BENCHMARK_MODELS
+    let startup_models: Vec<(String, u64)> = minerva_catalog::STARTUP_BENCHMARK_MODELS
         .iter()
         .map(|(m, d)| ((*m).to_string(), *d))
         .collect();
@@ -419,7 +420,7 @@ async fn backfill_document_id_indexes(qdrant: &qdrant_client::Qdrant) {
         course_collections.len()
     );
     for name in course_collections {
-        minerva_ingest::pipeline::ensure_document_id_index(qdrant, &name).await;
+        minerva_pipeline::pipeline::ensure_document_id_index(qdrant, &name).await;
     }
 }
 

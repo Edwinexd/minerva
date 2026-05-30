@@ -32,7 +32,7 @@ use futures::future::join_all;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::strategy::common::{cerebras_request_with_retry, record_cerebras_usage, RagChunk};
+use crate::llm::{cerebras_request_with_retry, record_cerebras_usage, RagChunk};
 use minerva_db::queries::course_token_usage::CATEGORY_ADVERSARIAL_FILTER;
 
 /// Atomic counters bumped by every filter invocation. Surfaced via a

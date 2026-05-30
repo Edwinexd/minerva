@@ -3,11 +3,22 @@ use crate::lti::LtiKeyPair;
 use crate::model_capabilities::CapabilityCache;
 use crate::relink_scheduler::RelinkScheduler;
 use crate::rules::RuleCache;
-use minerva_ingest::fastembed_embedder::FastEmbedder;
+use minerva_ingest::fastembed_embedder::{self, FastEmbedder};
+use minerva_ingest::mem_budget::MemBudget;
 use minerva_ingest::reranker::FastReranker;
 use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use std::sync::{Arc, Mutex};
+
+/// Conservative steady-state floor for "the rest of the pod" outside
+/// the fastembed cache and the `MemBudget` permit pool.
+///
+/// Covers Rust + tokio + sqlx pool + qdrant client + axum + ORT
+/// runtime baseline + glibc fragmentation overhead. Subtracted from
+/// the cgroup limit when sizing the shared budget so concurrent
+/// fat-job activity can't crowd the irreducible-baseline floor out
+/// of memory.
+const BASELINE_RESERVE_MIB: u32 = 1024;
 
 /// Snapshot of the current admin classification backfill, returned by
 /// `GET /admin/classification-stats` so the UI can show progress.
@@ -123,6 +134,17 @@ pub struct AppState {
     /// `Some(_)` while one is running and for the cycle after it
     /// finishes. See `crate::routes::admin::backfill_classifications`.
     pub backfill_tracker: Arc<BackfillTracker>,
+    /// Pod-wide MiB-permit pool that all "fat" background operations
+    /// outside the fastembed cache acquire from: the cross-encoder
+    /// reranker model loads, per-doc ingest jobs, MBZ parse, bulk
+    /// classify-all batches, etc. Sized at startup from
+    /// `cgroup_limit - fastembed_cache_budget - BASELINE_RESERVE_MIB`.
+    /// Anything that allocates non-trivial memory in the background
+    /// is expected to acquire from this before starting and hold the
+    /// guard until the allocation is freed, so concurrent activity
+    /// can't collectively overrun the cgroup. See
+    /// `minerva_ingest::mem_budget`.
+    pub mem_budget: Arc<MemBudget>,
 }
 
 impl AppState {
@@ -137,6 +159,24 @@ impl AppState {
         tracing::info!("LTI 1.3 provider ready (kid={})", lti.kid);
 
         let fastembed = Arc::new(FastEmbedder::new());
+
+        // Shared memory budget for everything that allocates outside
+        // the fastembed cache. Sized in lockstep with the fastembed
+        // cache so the two pools together fit under the cgroup with
+        // `BASELINE_RESERVE_MIB` of slack left for the irreducible
+        // baseline. On a 6 GiB pod with the 55% fastembed fraction
+        // that's roughly 6144 - 3379 - 1024 = ~1740 MiB; tunable via
+        // `MINERVA_MEM_BUDGET_MIB` for ops.
+        let cache_budget_bytes = fastembed_embedder::compute_budget_bytes();
+        let (mem_budget, mem_budget_source) =
+            MemBudget::from_cgroup_with_reserve(cache_budget_bytes, BASELINE_RESERVE_MIB);
+        tracing::info!(
+            "mem_budget: {} MiB ({})",
+            mem_budget.total_mib(),
+            mem_budget_source
+        );
+        let mem_budget = Arc::new(mem_budget);
+
         let reranker = Arc::new(FastReranker::new());
 
         // Sync `VALID_LOCAL_MODELS` into the admin-managed
@@ -203,6 +243,7 @@ impl AppState {
             model_capabilities,
             relink_scheduler: Arc::new(RelinkScheduler::new(db)),
             backfill_tracker: Arc::new(BackfillTracker::default()),
+            mem_budget,
         })
     }
 }

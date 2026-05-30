@@ -37,27 +37,20 @@ spec:
               value: "50051"
             - name: HF_HOME
               value: "/data/hf-cache"
-            # Cache budget explicitly set instead of relying on the
-            # 55%-of-cgroup default. The default fraction was tuned
-            # for the monolith where the other 45% went to HTTP routes
-            # + auth + classifier + chat strategy + sqlx + qdrant
-            # client; in this pod the baseline is tiny (gRPC server +
-            # tokio + ORT runtime + glibc, ~500 MiB-1 GiB), so a
-            # higher fraction is the right shape. 3.8 GiB holds
-            # arctic-m (~1 GiB warmed) + nomic (~2.7 GiB warmed)
-            # with ~100 MiB slack so the small startup-set models
-            # can swap in without evicting either heavy.
-            # k3s on the prod node reports only 2 CPU / 8 GiB
-            # allocatable (host has 15 GiB; reservations eat 7 GiB),
-            # so the embedder has to live in 4 GiB. Cache budget
-            # 2.5 GiB (= 2,684,354,560 bytes = 2.5 * 2^30) holds
-            # arctic-m warmed (~1 GiB) plus the small startup-set
-            # models. Loading nomic (~2.7 GiB) will evict arctic; the
-            # full "hold nomic + arctic both warm" target is parked
-            # until either the kubelet system-reserved is dialled
-            # down or the node gets sized up.
+            # Cache budget MUST exceed the warmed size of the model
+            # every course uses, or that model can never stay resident
+            # and every chat query pays a multi-second cold reload.
+            # Measured at boot: Snowflake/snowflake-arctic-embed-m-v2.0
+            # (146 of 147 active courses) warms to ~3278 MiB. The old
+            # 2560 MiB budget was BELOW that, so arctic churned on the
+            # hot path. 4 GiB (4 * 2^30 = 4294967296) keeps arctic
+            # comfortably resident with ~800 MiB of cache headroom;
+            # baseline (~1 GiB) + arctic (3.3 GiB) sits under the 5 GiB
+            # pod limit. nomic (the 1 remaining course) still cold-
+            # loads on demand and evicts arctic, but that's one course,
+            # not the fleet.
             - name: MINERVA_FASTEMBED_CACHE_BUDGET_BYTES
-              value: "2684354560"
+              value: "4294967296"
             - name: MALLOC_TRIM_THRESHOLD_
               value: "131072"
             - name: MALLOC_ARENA_MAX

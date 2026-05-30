@@ -38,6 +38,42 @@ async fn main() -> anyhow::Result<()> {
     let config = config::Config::from_env()?;
     let state = state::AppState::new(&config).await?;
 
+    // Periodic process-memory probe. The 6 GiB pod limit is sized for
+    // fastembed's model cache (budgeted at 40% of cgroup, ~2.4 GiB) plus
+    // the rest of the steady-state app, and that envelope held until
+    // the cross-encoder reranker + on-disk-hash backfill + a parallel
+    // ingest-worker burst started piling up against each other. We
+    // don't currently have a global budget across those tasks; one is
+    // coming, but until we do, this log gives us a real RSS/HWM/threads
+    // trace right up to a kill, so the next OOM points at the actual
+    // offender instead of needing a guess.
+    //
+    // Cadence: 5 s for the first 5 min of pod life (the fragile
+    // startup window where all background tasks are competing), then
+    // 60 s thereafter so the steady-state log isn't drowned in noise.
+    tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        loop {
+            if let Some(stats) = read_proc_self_status() {
+                tracing::info!(
+                    "memprobe: uptime={}s vm_rss={} MiB vm_hwm={} MiB vm_size={} MiB vm_data={} MiB threads={}",
+                    started.elapsed().as_secs(),
+                    stats.vm_rss_kb / 1024,
+                    stats.vm_hwm_kb / 1024,
+                    stats.vm_size_kb / 1024,
+                    stats.vm_data_kb / 1024,
+                    stats.threads,
+                );
+            }
+            let interval = if started.elapsed() < std::time::Duration::from_secs(5 * 60) {
+                std::time::Duration::from_secs(5)
+            } else {
+                std::time::Duration::from_secs(60)
+            };
+            tokio::time::sleep(interval).await;
+        }
+    });
+
     // One-shot backfill of the document_id payload index across pre-existing
     // course_* collections. New collections get the index at creation time.
     // Runs in the background so a slow/unhealthy Qdrant doesn't block startup.
@@ -288,4 +324,50 @@ async fn backfill_document_id_indexes(qdrant: &qdrant_client::Qdrant) {
     for name in course_collections {
         minerva_ingest::pipeline::ensure_document_id_index(qdrant, &name).await;
     }
+}
+
+/// Selected fields from `/proc/self/status`, all in KiB / counts. Used by
+/// the periodic `memprobe` task to give us a trace of process memory and
+/// thread count right up to an OOM kill, so the next incident points at
+/// the actual offender instead of needing a guess. Only Linux pods set
+/// these; on a non-Linux dev host this returns `None` and the probe
+/// silently skips.
+struct ProcStatus {
+    vm_rss_kb: u64,
+    vm_hwm_kb: u64,
+    vm_size_kb: u64,
+    vm_data_kb: u64,
+    threads: u64,
+}
+
+fn read_proc_self_status() -> Option<ProcStatus> {
+    let content = std::fs::read_to_string("/proc/self/status").ok()?;
+    let mut vm_rss_kb = None;
+    let mut vm_hwm_kb = None;
+    let mut vm_size_kb = None;
+    let mut vm_data_kb = None;
+    let mut threads = None;
+    for line in content.lines() {
+        let parse_kb = |rest: &str| -> Option<u64> {
+            rest.split_whitespace().next().and_then(|s| s.parse().ok())
+        };
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            vm_rss_kb = parse_kb(rest);
+        } else if let Some(rest) = line.strip_prefix("VmHWM:") {
+            vm_hwm_kb = parse_kb(rest);
+        } else if let Some(rest) = line.strip_prefix("VmSize:") {
+            vm_size_kb = parse_kb(rest);
+        } else if let Some(rest) = line.strip_prefix("VmData:") {
+            vm_data_kb = parse_kb(rest);
+        } else if let Some(rest) = line.strip_prefix("Threads:") {
+            threads = parse_kb(rest);
+        }
+    }
+    Some(ProcStatus {
+        vm_rss_kb: vm_rss_kb?,
+        vm_hwm_kb: vm_hwm_kb?,
+        vm_size_kb: vm_size_kb?,
+        vm_data_kb: vm_data_kb?,
+        threads: threads?,
+    })
 }

@@ -366,3 +366,132 @@ through unchanged.
 
 Applied in: course members list, conversation lists, conversation detail
 (feedback + teacher notes), and note CRUD responses.
+
+## Memory Budgeting (monolith bridge until microservices)
+
+The backend is currently a single process holding HTTP/auth/routing,
+the per-doc ingestion worker, the FastEmbed model cache, the
+cross-encoder reranker, the classifier glue, and chat strategy
+execution. All sharing one cgroup, one allocator, one tokio runtime.
+The structural fix is to split these into separate services (see
+"Architecture debt" below); until then we have several pieces of
+defense to keep this from OOM-killing the pod.
+
+### FastEmbed cache LRU (`backend/crates/minerva-ingest/src/fastembed_embedder.rs`)
+
+Bounded model cache keyed by HuggingFace model id. Three things make
+the LRU actually bound RSS, learned the hard way:
+
+1. **Warm before measuring cost.** `FastEmbedder::acquire` runs a
+   warmup inference with `BENCHMARK_CORPUS` padded to 2000 chars
+   (the chunker's default `chunk_size`) at batch-32 *before* recording
+   the per-model `rss_cost_bytes`. ORT's CPU EP lazily allocates an
+   "arena" scratch pool sized to the largest tensor shape it has seen;
+   measuring right after `try_new` only captures weights, not arena.
+   On the prod set this is a 2-3x difference (nomic measures
+   ~2.7 GiB warmed vs ~550 MiB cold), and getting it wrong silently
+   lets the cache footprint blow through the budget.
+   - Warmup input shape must match operational shape on both axes:
+     batch (= `EMBED_BATCH_SIZE`) and sequence length (= chunk size).
+     A batch-1 single-token warmup is essentially useless. A
+     batch-32 short-sentence warmup undersizes by ~10x because
+     attention scratch is O(seq^2).
+
+2. **Sync eviction.** `cache.remove(idx)` only drops the cache's
+   `Arc<ModelDispatcher>`; the dispatcher task and any in-flight
+   `embed()` callers' Arc clones can keep the `LoadedModel` (and its
+   ORT arena) resident. If we proceed straight to loading the
+   replacement, its RSS allocation lands on top of the lingering
+   model and the cgroup limit gets crossed. `wait_for_rss_drop`
+   polls `/proc/self/status` until VmRSS drops by at least half the
+   evicted cost or a 5 s deadline expires. The mutex is *released*
+   during the poll so other acquire callers can make progress.
+   - Glibc holds onto freed pages for a while; you'll see periodic
+     `eviction did not free expected memory within 5s` WARN logs
+     followed by a later memprobe showing the RSS dropped after all.
+     Non-fatal but annoying. A follow-up could `malloc_trim` after
+     drop, or `madvise(MADV_DONTNEED)` on freed arenas; we accept
+     the lag for now because the steady-state still settles
+     correctly.
+
+3. **Pre-load + post-load eviction.** Pre-load eviction uses
+   `max(measured)` from the cache as a cost estimate for the
+   incoming model. A first-of-its-kind larger model exceeds the
+   estimate, so a defensive post-load sweep evicts again once the
+   real cost is known. The freshly-loaded entry has
+   `last_used = Instant::now()` so the LRU never evicts it.
+
+Budget: `DEFAULT_CACHE_BUDGET_FRACTION = 0.55` of the cgroup
+`memory.max`. Was 0.4 before the warmup fix; at 0.4 with honest
+post-warmup costs the working set thrashes (only 1-2 of the 4
+startup-benchmarked models fit). Tunable via
+`MINERVA_FASTEMBED_CACHE_BUDGET_BYTES` (raw bytes, overrides the
+fraction).
+
+`STARTUP_BENCHMARK_MODELS` in `pipeline.rs` is the boot-time warmup
+set. Loading any model in it costs ~1 GiB resident (weights +
+warmed arena); the four-model startup set with sync eviction lands
+at ~3.5 GiB steady-state holding only the last (arctic-m, the
+default). If you add a model here, factor that into the budget.
+
+### MemBudget (`backend/crates/minerva-ingest/src/mem_budget.rs`)
+
+Pod-wide MiB-permit pool for fat background ops that allocate
+*outside* the fastembed cache: cross-encoder reranker loads, per-doc
+ingest jobs, MBZ parse, bulk reclassify-all, KG linker. Sized as
+`cgroup_limit - fastembed_cache_budget - BASELINE_RESERVE_MIB`
+(1024 MiB reserve covers Rust + tokio + sqlx + qdrant client +
+axum + ORT runtime + glibc fragmentation).
+
+Tunable via `MINERVA_MEM_BUDGET_MIB`. On a 6 GiB pod with the 55%
+cache fraction that's ~1.7 GiB.
+
+**Currently constructed in `AppState::new` but not yet wired into
+the reranker, worker, or other consumers.** The primitive is in
+place; consumers acquire from it once the integration ships. The
+shape callers should use: `state.mem_budget.acquire(mib, "label")`
+for a guard that releases on drop, or `try_acquire` for the worker
+deciding whether to claim a new doc without blocking.
+
+### memprobe (`backend/crates/minerva-server/src/main.rs`)
+
+Periodic `tracing::info!` of VmRSS / VmHWM / VmSize / VmData /
+threads from `/proc/self/status`. 5 s interval for the first 5 min
+of pod life (the fragile startup window), 60 s thereafter. Grep
+`memprobe: uptime=` in pod logs. First thing to reach for when the
+next memory incident lands.
+
+### Operational knobs
+
+- `MINERVA_FASTEMBED_CACHE_BUDGET_BYTES`: raw bytes, overrides the
+  55%-of-cgroup default for the embed cache.
+- `MINERVA_MEM_BUDGET_MIB`: total MiB for the shared MemBudget
+  pool. Overrides the `cgroup - cache - reserve` derivation.
+- `MALLOC_TRIM_THRESHOLD_=131072` and `MALLOC_ARENA_MAX=2` are set
+  in the prod pod spec; they encourage glibc to release more
+  aggressively. Necessary but not sufficient with the current
+  workload.
+
+### Architecture debt
+
+The OOM class of incidents only exists because one process holds
+HTTP/auth, the worker, the embedder cache, the reranker, and chat
+strategy in a single cgroup. The clean split is:
+
+- `minerva-api`: HTTP/auth/CRUD only. ~500 MiB pod, scales
+  horizontally.
+- `minerva-embedder`: owns the FastEmbed cache; gRPC/HTTP service
+  with its own memory limit sized for the model working set. The
+  LRU only has to satisfy embedder clients, not "embedder vs worker
+  vs chat all fighting on one heap."
+- `minerva-reranker`: same shape, separately budgeted, separately
+  scalable.
+- `minerva-worker`: pulls from the doc queue, calls embedder /
+  reranker as clients. Scales by replica count independently.
+
+After the split, the warmup-before-measure and sync-eviction
+machinery in this file is still correct (the embedder service still
+needs its LRU to bound real RSS), but `MemBudget` becomes
+single-purpose per service (or unnecessary). Worker OOMs no longer
+take down the API; a reranker model swap no longer evicts a
+worker's embedder cache.

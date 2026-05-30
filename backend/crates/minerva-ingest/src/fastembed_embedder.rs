@@ -701,6 +701,28 @@ impl FastEmbedder {
                 footprint / (1024 * 1024),
                 self.cache_budget_bytes / (1024 * 1024),
             );
+            // Wait for the evicted model to actually drop. `cache.remove`
+            // drops the cache's `Arc<ModelDispatcher>`, but the
+            // dispatcher task and any in-flight `embed()` callers' Arc
+            // clones can still keep the `LoadedModel` (and its ORT
+            // arena) resident. If we proceed straight to loading the
+            // replacement, its RSS allocation lands on top of the
+            // lingering model, and the cgroup limit gets crossed even
+            // though the cache logically has room. Poll RSS until it
+            // visibly drops (or a deadline expires); the next load only
+            // proceeds once memory is physically freed.
+            //
+            // The dispatcher task exits its `select!` else-arm once
+            // both senders close, which happens when the cache's Arc
+            // and every embed caller's Arc drop. In the steady-state
+            // ingest/bench path no embed call is in flight at this
+            // point (the bench acquires sequentially; the worker only
+            // holds the dispatcher Arc during its own embed call), so
+            // the drop is usually <1 s. The 5 s ceiling caps the
+            // worst case where an in-flight embed is mid-batch.
+            drop(cache); // release mutex so other waiters can progress
+            wait_for_rss_drop(evicted.rss_cost_bytes).await;
+            cache = self.cache.lock().await;
         }
 
         let rss_before = read_rss_bytes();
@@ -848,6 +870,15 @@ impl FastEmbedder {
                 footprint / (1024 * 1024),
                 self.cache_budget_bytes / (1024 * 1024),
             );
+            // Same wait-for-physical-drop semantics as the pre-load
+            // sweep above: release the cache mutex so other acquire
+            // callers can make progress, then poll RSS until the
+            // evicted model is actually freed (or the deadline
+            // expires). Without this, the next acquire sees a "thin"
+            // cache but lingering RSS, and loads on top.
+            drop(cache);
+            wait_for_rss_drop(evicted.rss_cost_bytes).await;
+            cache = self.cache.lock().await;
         }
 
         let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
@@ -944,6 +975,46 @@ fn parse_fast_model_name(name: &str) -> Result<EmbeddingModel, String> {
 
         _ => Err(format!("unsupported fastembed model: {}", name)),
     }
+}
+
+/// Poll `/proc/self/status` until VmRSS drops by at least `evicted_cost`
+/// (measured against the value at entry), or `EVICTION_WAIT_BUDGET`
+/// elapses. Used after dropping a cache entry's `Arc<ModelDispatcher>`
+/// to make sure the model is actually freed from RSS before the next
+/// acquire loads a replacement on top of it.
+///
+/// "At least the evicted cost" is generous; we accept any drop of
+/// `>= evicted_cost / 2` because the recorded cost includes the warmup
+/// arena, and tokio's blocking pool can hold scratch buffers across
+/// task boundaries that take a bit longer to release.
+async fn wait_for_rss_drop(evicted_cost: u64) {
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+    const EVICTION_WAIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+    let Some(before) = read_rss_bytes() else {
+        return; // RSS introspection unavailable, can't tell either way
+    };
+    let target_drop = evicted_cost / 2;
+    let deadline = std::time::Instant::now() + EVICTION_WAIT_BUDGET;
+    while std::time::Instant::now() < deadline {
+        tokio::time::sleep(POLL_INTERVAL).await;
+        if let Some(now) = read_rss_bytes() {
+            if before.saturating_sub(now) >= target_drop {
+                tracing::debug!(
+                    "fastembed cache: eviction freed {} MiB (target {} MiB)",
+                    (before - now) / (1024 * 1024),
+                    target_drop / (1024 * 1024),
+                );
+                return;
+            }
+        }
+    }
+    let now = read_rss_bytes().unwrap_or(before);
+    tracing::warn!(
+        "fastembed cache: eviction did not free expected memory within {}s (released {} of {} MiB); next load may be tight",
+        EVICTION_WAIT_BUDGET.as_secs(),
+        before.saturating_sub(now) / (1024 * 1024),
+        evicted_cost / (1024 * 1024),
+    );
 }
 
 fn read_rss_bytes() -> Option<u64> {

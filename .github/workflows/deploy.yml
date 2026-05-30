@@ -47,9 +47,16 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set image tag in kustomization
+        # Rewrites every `newTag:` line in the prod overlay so all five
+        # service images (minerva, minerva-embedder, minerva-reranker,
+        # minerva-worker, minerva-scheduler) roll forward together to
+        # the same tag. Pre-split this only had one tag to set; now
+        # the `sed` matches all of them.
         run: |
           cd k8s/overlays/prod
           sed -i "s/newTag: .*/newTag: ${{ env.IMAGE_TAG }}/" kustomization.yaml
+          echo "Image tags after rewrite:"
+          grep -E "name:|newTag:" kustomization.yaml
 
       - name: Install WireGuard
         run: sudo apt-get update && sudo apt-get install -y wireguard
@@ -82,12 +89,45 @@ jobs:
           echo "${{ secrets.K8S_SECRETS }}" | base64 -d > k8s/overlays/prod/secrets.yaml
 
       - name: Deploy to Kubernetes
+        # Roll-out order: data layer first (postgres + qdrant must be
+        # healthy for any of the apps), then the model servers
+        # (embedder + reranker) so workers + api can connect on first
+        # request, then worker + scheduler (which depend on the model
+        # servers), then the api last (so a chat request never
+        # arrives before its retrieval pipeline is up).
+        #
+        # `kubectl apply -k` creates / updates all five Deployments in
+        # one shot; the rollout-restarts then force a new ReplicaSet
+        # for each existing deployment so a deploy with unchanged
+        # manifests but a new image still cycles the pods.
         run: |
           echo "Deploying image tag: ${{ env.IMAGE_TAG }}"
           kubectl apply -k k8s/overlays/prod
-          kubectl rollout restart deployment/minerva-app -n minerva
+
+          # Wait for the data layer; everything else depends on it.
           kubectl rollout status deployment/postgres -n minerva --timeout=120s
           kubectl rollout status deployment/qdrant -n minerva --timeout=120s
+
+          # Restart + wait for the model servers.
+          kubectl rollout restart deployment/minerva-embedder -n minerva
+          kubectl rollout restart deployment/minerva-reranker -n minerva
+          kubectl rollout status deployment/minerva-embedder -n minerva --timeout=300s
+          kubectl rollout status deployment/minerva-reranker -n minerva --timeout=300s
+
+          # Restart + wait for the workers (they call the model servers).
+          kubectl rollout restart deployment/minerva-worker -n minerva
+          kubectl rollout restart deployment/minerva-scheduler -n minerva
+          kubectl rollout status deployment/minerva-worker -n minerva --timeout=300s
+          kubectl rollout status deployment/minerva-scheduler -n minerva --timeout=300s
+
+          # Api last so user traffic never hits an under-warm
+          # retrieval path. The chat path goes
+          #   api -> embedder.embed_query (gRPC)
+          #   api -> qdrant.search
+          #   api -> reranker.rerank (gRPC)
+          # so embedder + reranker must be up before the api accepts
+          # the first chat request after a rollout.
+          kubectl rollout restart deployment/minerva-app -n minerva
           kubectl rollout status deployment/minerva-app -n minerva --timeout=300s
 
       - name: Deploy Apache config + Lua

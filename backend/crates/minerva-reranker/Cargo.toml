@@ -1,0 +1,26 @@
+[package]
+name = "minerva-reranker"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone gRPC server that owns the FastReranker cache. Same shape
+# as minerva-embedder; see docs/microservices-split.md for the full
+# design.
+
+[[bin]]
+name = "minerva-reranker"
+path = "src/main.rs"
+
+[dependencies]
+minerva-core = { path = "../minerva-core" }
+minerva-ingest = { path = "../minerva-ingest" }
+minerva-rpc = { path = "../minerva-rpc" }
+
+async-trait = "0.1"
+tokio.workspace = true
+tonic.workspace = true
+prost.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow = "1"
+dotenvy.workspace = true

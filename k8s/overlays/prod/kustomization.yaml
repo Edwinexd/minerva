@@ -7,6 +7,19 @@ resources:
   - ../../base
   - secrets.yaml
 
+# Image tag pinning for the five service images. `deploy.yml` rewrites
+# every `newTag:` value to the SHA / semver / `latest` being shipped so
+# all five pods roll forward together. Keep the entry order matching
+# the matrix in `.github/workflows/docker.yml` so the deploy log lines
+# up cleanly with the build log.
 images:
   - name: ghcr.io/edwinexd/minerva
+    newTag: master
+  - name: ghcr.io/edwinexd/minerva-embedder
+    newTag: master
+  - name: ghcr.io/edwinexd/minerva-reranker
+    newTag: master
+  - name: ghcr.io/edwinexd/minerva-worker
+    newTag: master
+  - name: ghcr.io/edwinexd/minerva-scheduler
     newTag: master

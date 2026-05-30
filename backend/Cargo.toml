@@ -4,6 +4,9 @@ members = [
     "crates/minerva-core",
     "crates/minerva-ingest",
     "crates/minerva-db",
+    "crates/minerva-rpc",
+    "crates/minerva-embedder",
+    "crates/minerva-reranker",
 ]
 resolver = "2"
 
@@ -65,3 +68,10 @@ tar = "0.4"
 flate2 = "1"
 quick-xml = { version = "0.40", features = ["serialize"] }
 tempfile = "3"
+
+# gRPC for the internal embedder + reranker model services. Pinned to
+# matching minors so the generated client/server types from `prost-build`
+# at build time stay ABI-compatible with the `tonic` runtime crate.
+tonic = "0.12"
+tonic-build = "0.12"
+prost = "0.13"

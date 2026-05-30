@@ -31,6 +31,32 @@ pub struct Config {
     /// Global service API key for automated pipelines (e.g. transcript fetcher).
     /// Authenticated via `Authorization: Bearer <key>` on service endpoints.
     pub service_api_key: Option<String>,
+    /// gRPC URL of the remote `minerva-embedder` service (e.g.
+    /// `http://minerva-embedder.minerva.svc.cluster.local:50051`). When
+    /// `Some`, the in-process `FastEmbedder` is replaced by a
+    /// `RemoteEmbedderClient` that talks to that pod over HTTP/2.
+    /// When `None`, the binary stays on the in-process variant
+    /// (current monolith behaviour). Phase 4 deletes this Option and
+    /// hard-requires the URL.
+    pub embedder_url: Option<String>,
+    /// gRPC URL of the remote `minerva-reranker` service. Same
+    /// semantics as `embedder_url`.
+    pub reranker_url: Option<String>,
+    /// Whether this binary should run the document-processing worker
+    /// loop (`worker::start`). Default true so the pre-Phase-3 image
+    /// keeps working unchanged; flipped to `false` on the api during
+    /// the Phase 3 cutover once the dedicated `minerva-worker` pod is
+    /// claiming docs from the same queue. The worker binary itself
+    /// ignores this flag (it always runs the worker).
+    pub run_worker: bool,
+    /// Whether this binary should run the periodic scheduler loops
+    /// (Canvas auto-sync, LTI NRPS reconcile, platform-health probe,
+    /// pending-platform cleanup). Default true. Used by Phase 3.5 to
+    /// flip the worker pod off the scheduler loops once the
+    /// dedicated `minerva-scheduler` pod is running them; the api
+    /// honours it too if `run_worker` is also true (back-compat
+    /// monolith path).
+    pub run_scheduler: bool,
     //
     // Note: the four fields that used to live here ;
     //   default_course_daily_token_limit
@@ -89,11 +115,37 @@ impl Config {
             service_api_key: env::var("MINERVA_SERVICE_API_KEY")
                 .ok()
                 .filter(|s| !s.is_empty()),
+            embedder_url: env::var("MINERVA_EMBEDDER_URL")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            reranker_url: env::var("MINERVA_RERANKER_URL")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            // Default `true` so an old image / unflipped env keeps the
+            // pre-Phase-3 monolith behaviour. The Phase 3 cutover
+            // flips it to `false` on the api once the worker pod is
+            // confirmed claiming docs from the same Postgres queue.
+            run_worker: parse_bool_env("MINERVA_RUN_WORKER", true),
+            // Same defaulting story for the Phase 3.5 scheduler flag.
+            run_scheduler: parse_bool_env("MINERVA_RUN_SCHEDULER", true),
         })
     }
 
     pub fn is_admin(&self, eppn: &str) -> bool {
         let username = eppn.split('@').next().unwrap_or(eppn);
         self.admin_usernames.iter().any(|a| a == username)
+    }
+}
+
+/// Parse a `MINERVA_RUN_*` style boolean env var. Accepts the obvious
+/// off-strings (`false`, `0`, `no`, `off`, case-insensitive) and
+/// falls back to `default` for everything else (including unset).
+fn parse_bool_env(name: &str, default: bool) -> bool {
+    match env::var(name) {
+        Ok(v) => {
+            let v = v.to_ascii_lowercase();
+            !(v == "false" || v == "0" || v == "no" || v == "off")
+        }
+        Err(_) => default,
     }
 }

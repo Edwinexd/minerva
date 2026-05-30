@@ -1,27 +1,32 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: minerva-app
+  name: minerva-scheduler
   namespace: minerva
 spec:
+  # Single replica by design: the periodic loops use "find what's
+  # due" DB queries that tolerate two callers, but running one
+  # replica avoids the dupe-work cost and matches the simplest
+  # cron-style operational model. See docs/microservices-split.md
+  # "Periodic tasks: where do they live".
   replicas: 1
   selector:
     matchLabels:
-      app: minerva-app
+      app: minerva-scheduler
   template:
     metadata:
       labels:
-        app: minerva-app
-        # Phase 1 NetworkPolicy gate: only pods with this label can
-        # reach the embedder/reranker ClusterIP services.
+        app: minerva-scheduler
+        # Talks to embedder/reranker through the same NetworkPolicy
+        # gate as the worker; the Canvas auto-sync codepath uses the
+        # same ingest pipeline so we keep the option open even though
+        # the scheduler itself doesn't call embed directly.
         minerva-internal-client: "true"
     spec:
       containers:
-        - name: minerva
-          image: ghcr.io/edwinexd/minerva:latest
+        - name: scheduler
+          image: ghcr.io/edwinexd/minerva-scheduler:latest
           imagePullPolicy: Always
-          ports:
-            - containerPort: 3000
           env:
             - name: DATABASE_URL
               valueFrom:
@@ -30,25 +35,18 @@ spec:
                   key: DATABASE_URL
             - name: QDRANT_URL
               value: "http://qdrant:6334"
+            # No HTTP listener; placeholder values just to satisfy
+            # Config::from_env, which the AppState construction reads.
             - name: MINERVA_HOST
               value: "0.0.0.0"
             - name: MINERVA_PORT
-              value: "3000"
+              value: "0"
             - name: MINERVA_DOCS_PATH
               value: "/data/documents"
-            # Post-split: api routes embed + rerank to the dedicated
-            # pods via gRPC. No local FastEmbedder / FastReranker
-            # cache is constructed, no model weights resident in this
-            # pod, no HF_HOME mount needed.
             - name: MINERVA_EMBEDDER_URL
               value: "http://minerva-embedder.minerva.svc.cluster.local:50051"
             - name: MINERVA_RERANKER_URL
               value: "http://minerva-reranker.minerva.svc.cluster.local:50052"
-            # Worker + schedulers run in their own pods; api doesn't
-            # spawn them. Setting this `false` is the Phase 3 cutover
-            # step from the design doc.
-            - name: MINERVA_RUN_WORKER
-              value: "false"
             - name: MINERVA_HMAC_SECRET
               valueFrom:
                 secretKeyRef:
@@ -75,36 +73,23 @@ spec:
                   name: minerva-secrets
                   key: MINERVA_SERVICE_API_KEY
           volumeMounts:
-            # Shared docs hostPath; api writes uploads + serves
-            # downloads, worker / scheduler also mount it. See
-            # docs/microservices-split.md "Persistent volumes".
+            # Canvas auto-sync writes files to /data/documents via
+            # routes::canvas::run_sync, the same codepath the admin
+            # uses interactively. See docs/microservices-split.md
+            # "/data/documents - shared between api, worker, scheduler".
             - name: app-data
               mountPath: /data
           resources:
-            # req == lim for Guaranteed QoS; we own memory accounting
-            # ourselves. Post-split the api has no FastEmbedder /
-            # FastReranker cache, no in-process worker, just HTTP +
-            # auth + chat strategy + sqlx + qdrant + tonic clients.
-            # Steady state ~500-600 MiB; 1 GiB gives slack for chat
-            # streaming + memprobe + occasional spikes.
+            # req == lim for Guaranteed QoS; see the comment on
+            # minerva-embedder. 256 MiB easily covers the steady
+            # ~50-80 MiB (sqlx pool + reqwest pool + tokio runtime)
+            # plus the per-tick Canvas / NRPS allocation spikes.
             requests:
-              memory: "1Gi"
-              cpu: "1000m"
+              memory: "256Mi"
+              cpu: "200m"
             limits:
-              memory: "1Gi"
-              cpu: "1000m"
-          readinessProbe:
-            httpGet:
-              path: /api/health
-              port: 3000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /api/health
-              port: 3000
-            initialDelaySeconds: 15
-            periodSeconds: 30
+              memory: "256Mi"
+              cpu: "200m"
       volumes:
         - name: app-data
           hostPath:

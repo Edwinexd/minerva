@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package minerva.reranker.v1;
+
+// Cross-encoder reranker service. Called from the api chat path after
+// `embedding_search` returns a candidate pool from Qdrant; the
+// reranker reorders to top-k. Single RPC method; no priority-lane
+// distinction because today only chat calls into it. See
+// docs/microservices-split.md.
+service Reranker {
+  rpc Rerank(RerankRequest) returns (RerankResponse);
+
+  // Admin endpoints, same shape as the embedder service.
+  rpc BenchmarkOne(BenchmarkOneRequest) returns (RerankBenchmarkResult);
+  rpc GetBenchmarks(GetBenchmarksRequest) returns (BenchmarksResponse);
+  rpc IsBenchmarkRunning(BenchmarkStateRequest) returns (BenchmarkStateResponse);
+}
+
+message RerankRequest {
+  // Model id, matches the entries in `VALID_RERANKER_MODELS`.
+  string model_code = 1;
+  string query = 2;
+  repeated string documents = 3;
+}
+
+message RerankResponse {
+  // (index, score) pairs, sorted best-first. Indices reference the
+  // input `documents` array.
+  repeated ScoredIndex results = 1;
+}
+
+message ScoredIndex {
+  uint32 index = 1;
+  float score = 2;
+}
+
+message BenchmarkOneRequest {
+  string model_code = 1;
+}
+
+message GetBenchmarksRequest {}
+
+message BenchmarkStateRequest {}
+
+message BenchmarkStateResponse {
+  bool running = 1;
+}
+
+message RerankBenchmarkResult {
+  string model = 1;
+  double pairs_per_second = 2;
+  double total_ms = 3;
+  uint64 pairs = 4;
+}
+
+message BenchmarksResponse {
+  repeated RerankBenchmarkResult results = 1;
+}

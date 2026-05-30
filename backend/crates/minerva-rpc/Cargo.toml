@@ -1,0 +1,37 @@
+[package]
+name = "minerva-rpc"
+version = "0.1.0"
+edition = "2021"
+
+# Phase 0 introduced the local in-process EmbedderClient /
+# RerankerClient wrappers and lifted call sites onto the trait. Phase 1
+# adds the tonic gRPC server + remote client variants here so the
+# binaries in minerva-embedder / minerva-reranker can serve, and the
+# api / worker can call them via the same trait. See
+# `docs/microservices-split.md` for the full plan.
+
+[dependencies]
+async-trait = "0.1"
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+prost.workspace = true
+tracing.workspace = true
+
+# Trait + protocol-neutral result types live in minerva-core.
+minerva-core = { path = "../minerva-core" }
+# Local wrapper variants delegate to the in-process FastEmbedder /
+# FastReranker. Phase 4 deletes this dep when the local variant goes
+# away.
+minerva-ingest = { path = "../minerva-ingest" }
+
+[build-dependencies]
+tonic-build.workspace = true
+
+[dev-dependencies]
+# Random-port tcp listener bound straight into tonic's serve_with_incoming
+# so the gRPC roundtrip integration test doesn't fight for port 50051
+# with anything else on the dev box.
+tokio-stream = { version = "0.1", features = ["net"] }
+async-trait = "0.1"

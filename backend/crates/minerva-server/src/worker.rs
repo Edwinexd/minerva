@@ -99,17 +99,32 @@ fn schedule_ticker() -> tokio::time::Interval {
     t
 }
 
-/// Start the background document-processing worker.
+/// Start the background document-processing worker plus all the
+/// periodic scheduler loops.
 ///
-/// On startup it resets any documents stuck in `processing` (crash recovery),
-/// then enters a loop that claims pending documents and processes them with
-/// bounded concurrency.
-///
-/// Also spawns the relink sweeper; the debounced background task that
-/// drains the per-course dirty queue and re-runs the cross-doc linker.
-/// Sibling task to the document worker because both have the same
-/// "background sweep over course-scoped state" shape.
+/// Back-compat wrapper used by `api_main` when `MINERVA_RUN_WORKER` is
+/// true (the pre-Phase-3 monolith path). Phase 3.5 splits the two
+/// concerns so the `minerva-worker` and `minerva-scheduler` binaries
+/// can boot just the half they own; see [`start_worker_loops`] and
+/// [`start_scheduler_loops`].
 pub fn start(state: AppState, max_concurrent: usize) {
+    start_worker_loops(state.clone(), max_concurrent);
+    start_scheduler_loops(state);
+}
+
+/// Spawn the worker-side background tasks: the relink sweeper, the
+/// stale-doc sweeper, and the main doc-claim loop.
+///
+/// The relink sweeper stays with the worker (rather than moving to
+/// minerva-scheduler) because its actual sweep does fat work
+/// (reads classifications, rebuilds the cross-doc graph, writes back
+/// to qdrant) and is tightly coupled to the ingest pipeline's output.
+/// The "tick every 60s" shape it shares with the scheduler-bound
+/// tasks is superficial. See `docs/microservices-split.md`.
+///
+/// The stale-doc sweeper is the recovery half of this binary's claim
+/// loop; it must restart with the worker, not the scheduler.
+pub fn start_worker_loops(state: AppState, max_concurrent: usize) {
     relink_scheduler::spawn_sweep(state.clone());
 
     // Periodic sweeper: rescue documents whose processing task died silently
@@ -138,6 +153,23 @@ pub fn start(state: AppState, max_concurrent: usize) {
         });
     }
 
+    spawn_main_claim_loop(state, max_concurrent);
+}
+
+/// Spawn the scheduler-side periodic loops:
+///   - Canvas auto-sync
+///   - LTI NRPS reconcile
+///   - Pending LTI platform cleanup (dynreg)
+///   - LTI platform-health probe (and orphan cascade-delete)
+///
+/// Owned by the [`minerva-scheduler`] binary in Phase 3.5+. During
+/// the dual-running window, the worker binary may also spawn these
+/// via `MINERVA_RUN_SCHEDULER=true` (the Phase 3.5 default) for
+/// safety; the loops' DB queries are idempotent and the "find what's
+/// due" pattern naturally handles two callers.
+///
+/// [`minerva-scheduler`]: ../../bin/minerva-scheduler/
+pub fn start_scheduler_loops(state: AppState) {
     // Canvas auto-sync: periodic re-sync for connections with auto_sync=true
     // whose last_synced_at is older than the configured interval. Runs
     // sequentially across due connections so we don't stampede Canvas.
@@ -406,7 +438,13 @@ pub fn start(state: AppState, max_concurrent: usize) {
             }
         });
     }
+}
 
+/// The main `documents.status = 'pending'` claim loop. Factored out of
+/// `start_worker_loops` so the worker's three concerns (relink sweep,
+/// stale-doc sweep, claim loop) read as three sibling spawns rather
+/// than two helpers around one giant inline future.
+fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
     tokio::spawn(async move {
         // Crash recovery: any document left in 'processing' was interrupted.
         match minerva_db::queries::documents::reset_stale_processing(&state.db).await {

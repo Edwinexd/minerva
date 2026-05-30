@@ -1540,7 +1540,7 @@ struct EmbeddingModelEntry {
     /// the server started. Boot-time `STARTUP_BENCHMARK_MODELS` are
     /// always populated; the rest are only populated after an admin
     /// runs them on demand.
-    benchmark: Option<minerva_ingest::fastembed_embedder::BenchmarkResult>,
+    benchmark: Option<minerva_core::rpc::EmbedBenchmarkResult>,
     /// True if this model is in the boot warmup set. The admin UI
     /// uses this purely as a hint; nothing depends on it server-side.
     warmed_at_startup: bool,
@@ -1577,10 +1577,8 @@ async fn list_embedding_models(
     require_admin(&user)?;
 
     let benchmarks = state.fastembed.get_benchmarks().await;
-    let lookup: std::collections::HashMap<
-        &str,
-        &minerva_ingest::fastembed_embedder::BenchmarkResult,
-    > = benchmarks.iter().map(|b| (b.model.as_str(), b)).collect();
+    let lookup: std::collections::HashMap<&str, &minerva_core::rpc::EmbedBenchmarkResult> =
+        benchmarks.iter().map(|b| (b.model.as_str(), b)).collect();
 
     let warm: std::collections::HashSet<&str> = minerva_ingest::pipeline::STARTUP_BENCHMARK_MODELS
         .iter()
@@ -1791,7 +1789,7 @@ struct RerankerModelEntry {
     /// Latest benchmark result for this model, or null if it hasn't been
     /// run since the server started. Populated on demand by the admin
     /// "Run benchmark" button.
-    benchmark: Option<minerva_ingest::reranker::RerankBenchmarkResult>,
+    benchmark: Option<minerva_core::rpc::RerankBenchmarkResult>,
 }
 
 #[derive(Serialize)]
@@ -1812,10 +1810,8 @@ async fn list_reranker_models(
     require_admin(&user)?;
 
     let benchmarks = state.reranker.get_benchmarks().await;
-    let bench_lookup: std::collections::HashMap<
-        &str,
-        &minerva_ingest::reranker::RerankBenchmarkResult,
-    > = benchmarks.iter().map(|b| (b.model.as_str(), b)).collect();
+    let bench_lookup: std::collections::HashMap<&str, &minerva_core::rpc::RerankBenchmarkResult> =
+        benchmarks.iter().map(|b| (b.model.as_str(), b)).collect();
 
     let policy: std::collections::HashMap<String, (bool, bool)> =
         minerva_db::queries::reranker_models::list_all(&state.db)
@@ -1974,7 +1970,7 @@ struct RunRerankerBenchmarkRequest {
 
 #[derive(Serialize)]
 struct RunRerankerBenchmarkResponse {
-    result: minerva_ingest::reranker::RerankBenchmarkResult,
+    result: minerva_core::rpc::RerankBenchmarkResult,
 }
 
 /// Benchmark one re-ranker model (pairs/sec). Reuses the same
@@ -1994,12 +1990,13 @@ async fn run_reranker_benchmark(
 
     match state.reranker.benchmark_one(&body.model).await {
         Ok(result) => Ok(Json(RunRerankerBenchmarkResponse { result })),
-        Err(minerva_ingest::reranker::BenchmarkError::Busy) => {
+        Err(minerva_core::rpc::BenchmarkError::Busy) => {
             Err(AppError::bad_request("admin.benchmark_busy"))
         }
-        Err(minerva_ingest::reranker::BenchmarkError::Failed(e)) => Err(AppError::Internal(
-            format!("reranker benchmark failed for {}: {}", body.model, e),
-        )),
+        Err(minerva_core::rpc::BenchmarkError::Failed(e)) => Err(AppError::Internal(format!(
+            "reranker benchmark failed for {}: {}",
+            body.model, e
+        ))),
     }
 }
 
@@ -2013,7 +2010,7 @@ struct RunBenchmarkRequest {
 
 #[derive(Serialize)]
 struct RunBenchmarkResponse {
-    result: minerva_ingest::fastembed_embedder::BenchmarkResult,
+    result: minerva_core::rpc::EmbedBenchmarkResult,
 }
 
 async fn run_embedding_benchmark(
@@ -2037,10 +2034,10 @@ async fn run_embedding_benchmark(
 
     match state.fastembed.benchmark_one(&body.model, dimensions).await {
         Ok(result) => Ok(Json(RunBenchmarkResponse { result })),
-        Err(minerva_ingest::fastembed_embedder::BenchmarkError::Busy) => {
+        Err(minerva_core::rpc::BenchmarkError::Busy) => {
             Err(AppError::bad_request("admin.benchmark_busy"))
         }
-        Err(minerva_ingest::fastembed_embedder::BenchmarkError::Failed(e)) => {
+        Err(minerva_core::rpc::BenchmarkError::Failed(e)) => {
             // Failed loads (network/HF, candle init errors, …) are
             // surfaced as Internal so the operator looks at the logs;
             // we don't want to leak stack traces to the client.

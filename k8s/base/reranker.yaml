@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minerva-reranker
+  namespace: minerva
+spec:
+  # Single replica for the same reason as the embedder: FastReranker
+  # cache is per-pod.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minerva-reranker
+  template:
+    metadata:
+      labels:
+        app: minerva-reranker
+        minerva-internal-client: "false"
+    spec:
+      containers:
+        - name: reranker
+          image: ghcr.io/edwinexd/minerva-reranker:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 50052
+              name: grpc
+          env:
+            - name: MINERVA_RERANKER_HOST
+              value: "0.0.0.0"
+            - name: MINERVA_RERANKER_PORT
+              value: "50052"
+            - name: HF_HOME
+              value: "/data/hf-cache"
+            - name: RUST_LOG
+              value: "info"
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /data
+          resources:
+            # req == lim for Guaranteed QoS; see the comment on
+            # minerva-embedder for the full reasoning.
+            #
+            # 2 GiB holds the default multilingual jina v2 base
+            # (~600 MiB warmed) plus one MiniLM-class second model
+            # resident. Admin benchmarks of bge-reranker-v2-m3 (which
+            # warms to ~1.5 GiB) will trigger an LRU eviction on the
+            # secondary slot; the default model stays warm so user
+            # chat turns don't pay a cold load during a benchmark.
+            requests:
+              memory: "2Gi"
+              cpu: "1500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1500m"
+          readinessProbe:
+            tcpSocket:
+              port: 50052
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 50052
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: /data0/minerva/hf-cache-rerank
+            type: DirectoryOrCreate

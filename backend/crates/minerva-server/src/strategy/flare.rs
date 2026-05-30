@@ -1041,8 +1041,8 @@ fn is_sentence_boundary(text: &str) -> bool {
 async fn flare_retrieve(
     client: &reqwest::Client,
     openai_key: &str,
-    fastembed: &Arc<minerva_ingest::fastembed_embedder::FastEmbedder>,
-    reranker: &Arc<minerva_ingest::reranker::FastReranker>,
+    fastembed: &Arc<dyn minerva_core::rpc::EmbedderClient>,
+    reranker: &Arc<dyn minerva_core::rpc::RerankerClient>,
     reranker_model: &str,
     qdrant: &Arc<qdrant_client::Qdrant>,
     collection_name: &str,

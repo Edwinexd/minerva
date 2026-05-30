@@ -8,15 +8,47 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # IMAGE_BASE is the GHCR repo prefix. The api binary keeps the bare
+  # `${{ github.repository }}` name (ghcr.io/edwinexd/minerva) for
+  # backward compat; the four new binaries get suffix repos
+  # (ghcr.io/edwinexd/minerva-embedder, -reranker, -worker, -scheduler).
+  # See the matrix below.
+  IMAGE_BASE: ${{ github.repository }}
 
 jobs:
   build-and-push:
-    name: Build and push image
+    name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      # One image's build failing shouldn't gate the others; we'd rather
+      # see all four failures at once than retry-iterate one at a time.
+      fail-fast: false
+      matrix:
+        include:
+          # Api binary: keeps the bare repo name from the pre-split
+          # world so existing tags / manifests / prod overlays don't
+          # need a global rename. Uses the `runtime-api` stage which
+          # bundles the React frontend; the four service targets use
+          # `runtime-svc` and skip the frontend-builder stage entirely
+          # (saves ~3 min of `npm ci` + build per matrix run).
+          - target: minerva
+            image_suffix: ""
+            runtime_stage: runtime-api
+          - target: minerva-embedder
+            image_suffix: "-embedder"
+            runtime_stage: runtime-svc
+          - target: minerva-reranker
+            image_suffix: "-reranker"
+            runtime_stage: runtime-svc
+          - target: minerva-worker
+            image_suffix: "-worker"
+            runtime_stage: runtime-svc
+          - target: minerva-scheduler
+            image_suffix: "-scheduler"
+            runtime_stage: runtime-svc
     steps:
       - uses: actions/checkout@v6
 
@@ -33,7 +65,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}${{ matrix.image_suffix }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
@@ -46,8 +78,21 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.prod
+          # `target` picks runtime-api (frontend bundled) vs
+          # runtime-svc (no frontend); BuildKit then only walks back
+          # through the stages that target references.
+          target: ${{ matrix.runtime_stage }}
           push: true
+          # TARGET_BIN selects which workspace binary the
+          # backend-builder stage compiles. See docker/Dockerfile.prod
+          # for the matrix of supported values.
+          build-args: |
+            TARGET_BIN=${{ matrix.target }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Per-target cache scope so each target builds against its
+          # own warm cache. The dep-resolve / cargo-fetch / protobuf-
+          # compiler-install stages would otherwise stomp on each
+          # other's cache entries when the matrix runs in parallel.
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}

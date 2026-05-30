@@ -62,6 +62,13 @@ impl DocumentKind {
         }
     }
 
+    // Returns `Option<Self>` rather than `Result<Self, _>` because every
+    // call site uses `.is_none()` or `.expect()`; matching the
+    // `std::str::FromStr` trait shape would force a wrapper error type
+    // we'd never inspect. The clippy lint only flagged this once the
+    // crate gained a `lib` target in Phase 3 (the binary-only crate
+    // never saw this method as part of an exposed API surface).
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "lecture" => Some(DocumentKind::Lecture),

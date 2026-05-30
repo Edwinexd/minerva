@@ -1202,8 +1202,12 @@ mod stream_integration_tests {
                     .build()
                     .unwrap(),
             ),
-            fastembed: std::sync::Arc::new(minerva_ingest::fastembed_embedder::FastEmbedder::new()),
-            reranker: std::sync::Arc::new(minerva_ingest::reranker::FastReranker::new()),
+            fastembed: std::sync::Arc::new(minerva_rpc::LocalEmbedderClient::new(
+                std::sync::Arc::new(minerva_ingest::fastembed_embedder::FastEmbedder::new()),
+            )),
+            reranker: std::sync::Arc::new(minerva_rpc::LocalRerankerClient::new(
+                std::sync::Arc::new(minerva_ingest::reranker::FastReranker::new()),
+            )),
             reranker_model: minerva_ingest::reranker::DEFAULT_RERANK_MODEL.to_string(),
             kg_enabled: false,
             tool_use_enabled: true,

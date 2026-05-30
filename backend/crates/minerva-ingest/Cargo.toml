@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+minerva-core = { path = "../minerva-core" }
 minerva-db = { path = "../minerva-db" }
 
 reqwest.workspace = true
@@ -29,3 +30,12 @@ quick-xml.workspace = true
 tempfile.workspace = true
 
 async-trait = "0.1"
+
+# `malloc_trim(0)` after FastEmbedder LRU eviction. glibc holds freed
+# pages well past Drop, so `wait_for_rss_drop` was observing 0 bytes
+# released even after the dispatcher Arc dropped, then the next model
+# load allocated on top of the lingering arenas and OOM-killed the
+# embedder pod. AGENTS.md's "Sync eviction" section flagged this as
+# the follow-up.
+[target.'cfg(target_env = "gnu")'.dependencies]
+libc = "0.2"

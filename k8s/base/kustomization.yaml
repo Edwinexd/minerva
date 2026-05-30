@@ -11,6 +11,12 @@ resources:
   - qdrant-svc.yaml
   - app.yaml
   - app-svc.yaml
+  - embedder.yaml
+  - embedder-svc.yaml
+  - reranker.yaml
+  - reranker-svc.yaml
+  - worker.yaml
+  - scheduler.yaml
   - backup.yaml
   - qdrant-backup.yaml
   - image-prune.yaml

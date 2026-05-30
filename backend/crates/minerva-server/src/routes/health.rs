@@ -89,10 +89,8 @@ pub async fn embedding_models(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, crate::error::AppError> {
     let benchmarks = state.fastembed.get_benchmarks().await;
-    let bench_lookup: std::collections::HashMap<
-        &str,
-        &minerva_ingest::fastembed_embedder::BenchmarkResult,
-    > = benchmarks.iter().map(|b| (b.model.as_str(), b)).collect();
+    let bench_lookup: std::collections::HashMap<&str, &minerva_core::rpc::EmbedBenchmarkResult> =
+        benchmarks.iter().map(|b| (b.model.as_str(), b)).collect();
 
     let policy: std::collections::HashMap<String, bool> =
         minerva_db::queries::embedding_models::list_all(&state.db)

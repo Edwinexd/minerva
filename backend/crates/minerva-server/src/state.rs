@@ -3,9 +3,11 @@ use crate::lti::LtiKeyPair;
 use crate::model_capabilities::CapabilityCache;
 use crate::relink_scheduler::RelinkScheduler;
 use crate::rules::RuleCache;
+use minerva_core::rpc::{EmbedderClient, RerankerClient};
 use minerva_ingest::fastembed_embedder::{self, FastEmbedder};
 use minerva_ingest::mem_budget::MemBudget;
 use minerva_ingest::reranker::FastReranker;
+use minerva_rpc::{LocalEmbedderClient, LocalRerankerClient};
 use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use std::sync::{Arc, Mutex};
@@ -107,12 +109,15 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub lti: Arc<LtiKeyPair>,
     pub http_client: reqwest::Client,
-    pub fastembed: Arc<FastEmbedder>,
-    /// Cross-encoder re-ranker applied to RAG candidate pools before the
-    /// top-k chunks reach the LLM. Loaded lazily on first use. See
-    /// `minerva_ingest::reranker::FastReranker` and
-    /// `crate::strategy::common::rerank_chunks`.
-    pub reranker: Arc<FastReranker>,
+    /// Embedder client. Phase 0: in-process [`LocalEmbedderClient`]
+    /// wrapping a `FastEmbedder` (zero behaviour change). Phase 1:
+    /// either in-process or a remote gRPC client based on
+    /// `MINERVA_EMBEDDER_URL`. Phase 4: gRPC-only.
+    pub fastembed: Arc<dyn EmbedderClient>,
+    /// Cross-encoder re-ranker client. Phase 0: in-process
+    /// [`LocalRerankerClient`] wrapping a `FastReranker`. Phase 2: gated
+    /// by `MINERVA_RERANKER_URL`. Phase 4: gRPC-only.
+    pub reranker: Arc<dyn RerankerClient>,
     /// In-memory cache of compiled role rules. Reads (every authenticated
     /// request) take an Arc snapshot; writes (admin CRUD on rules) call
     /// `reload`. See `crate::rules`.
@@ -158,7 +163,23 @@ impl AppState {
         let lti = LtiKeyPair::from_seed(&config.lti_key_seed)?;
         tracing::info!("LTI 1.3 provider ready (kid={})", lti.kid);
 
-        let fastembed = Arc::new(FastEmbedder::new());
+        // Embedder client: remote when MINERVA_EMBEDDER_URL is set
+        // (Phase 1 cutover path; talks gRPC to the minerva-embedder
+        // pod), local otherwise (Phase 0 default; in-process
+        // FastEmbedder lives behind the same trait). When remote, we
+        // skip the local FastEmbedder construction so the cache RSS
+        // stays out of the api/worker pod.
+        let fastembed: Arc<dyn EmbedderClient> = if let Some(url) = &config.embedder_url {
+            tracing::info!("embedder: remote ({url})");
+            Arc::new(
+                minerva_rpc::RemoteEmbedderClient::connect(url.clone())
+                    .await
+                    .map_err(|e| anyhow::anyhow!("remote embedder connect: {e}"))?,
+            )
+        } else {
+            tracing::info!("embedder: in-process FastEmbedder");
+            Arc::new(LocalEmbedderClient::new(Arc::new(FastEmbedder::new())))
+        };
 
         // Shared memory budget for everything that allocates outside
         // the fastembed cache. Sized in lockstep with the fastembed
@@ -177,7 +198,18 @@ impl AppState {
         );
         let mem_budget = Arc::new(mem_budget);
 
-        let reranker = Arc::new(FastReranker::new());
+        // Reranker client: same dual-mode pattern as the embedder.
+        let reranker: Arc<dyn RerankerClient> = if let Some(url) = &config.reranker_url {
+            tracing::info!("reranker: remote ({url})");
+            Arc::new(
+                minerva_rpc::RemoteRerankerClient::connect(url.clone())
+                    .await
+                    .map_err(|e| anyhow::anyhow!("remote reranker connect: {e}"))?,
+            )
+        } else {
+            tracing::info!("reranker: in-process FastReranker");
+            Arc::new(LocalRerankerClient::new(Arc::new(FastReranker::new())))
+        };
 
         // Sync `VALID_LOCAL_MODELS` into the admin-managed
         // `embedding_models` table. Existing rows are left alone (so an

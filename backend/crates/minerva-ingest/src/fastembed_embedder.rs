@@ -129,15 +129,20 @@ struct ModelDispatcher {
 }
 
 impl ModelDispatcher {
-    /// Spawn the per-model dispatcher task and return a handle. The
-    /// caller stores this in the cache entry and hands clones to
-    /// `embed`/`embed_query` callers; the task itself owns the model
-    /// and lives until every clone (cache + in-flight callers) is
-    /// dropped.
-    fn spawn(model: LoadedModel) -> Arc<Self> {
+    /// Spawn the per-model dispatcher task and return a handle plus
+    /// the task's `JoinHandle`. The caller stores both in the cache
+    /// entry; the dispatcher Arc gets handed to embed callers, the
+    /// JoinHandle is awaited on eviction so we can prove the
+    /// `LoadedModel` (and its ORT arena) has fully dropped before the
+    /// next model load begins. Without that await we'd see the cache's
+    /// Arc<ModelDispatcher> drop synchronously while the dispatcher
+    /// task is still partway through cleanup, then the next load's
+    /// allocation lands on top of the unreleased arena and OOMs the
+    /// pod.
+    fn spawn(model: LoadedModel) -> (Arc<Self>, tokio::task::JoinHandle<()>) {
         let (high_tx, mut high_rx) = mpsc::unbounded_channel::<EmbedJob>();
         let (low_tx, mut low_rx) = mpsc::unbounded_channel::<EmbedJob>();
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             while let Some(job) = next_job(&mut high_rx, &mut low_rx).await {
                 let model_for_blocking = model.clone();
                 let texts = job.texts;
@@ -151,8 +156,13 @@ impl ModelDispatcher {
                 // itself stays healthy.
                 let _ = job.reply.send(result);
             }
+            // Falling out of the loop here drops the captured `model`
+            // (the outer LoadedModel) which releases the ORT runtime's
+            // hold on the weights. The JoinHandle resolves after this
+            // point; eviction can then call malloc_trim and observe a
+            // real RSS drop.
         });
-        Arc::new(Self { high_tx, low_tx })
+        (Arc::new(Self { high_tx, low_tx }), task)
     }
 
     /// Submit one batch at the given priority and await the embedding
@@ -208,6 +218,14 @@ async fn next_job(
 struct CacheEntry {
     name: String,
     dispatcher: Arc<ModelDispatcher>,
+    /// `JoinHandle` for the per-model dispatcher task. Awaited on
+    /// eviction so we can be certain the task's loop has exited and
+    /// the captured `LoadedModel` has dropped before the next model
+    /// load starts allocating. `Option` so we can `take()` it out of
+    /// the evicted entry without leaving an unusable placeholder
+    /// behind; `None` once we've taken it. The cache itself never
+    /// holds `None` entries.
+    task: Option<tokio::task::JoinHandle<()>>,
     /// Bytes added to process RSS when this model was loaded; measured by
     /// diffing `/proc/self/status:VmRSS` before and after init. Drives both
     /// eviction decisions and per-load logging. On hosts without a readable
@@ -691,37 +709,41 @@ impl FastEmbedder {
                 .min_by_key(|(_, e)| e.last_used)
                 .map(|(i, _)| i)
                 .expect("cache non-empty");
-            let evicted = cache.remove(lru_idx);
+            let mut evicted = cache.remove(lru_idx);
+            let evicted_task = evicted.task.take();
+            let evicted_cost = evicted.rss_cost_bytes;
             let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
             tracing::info!(
                 "fastembed cache: evicting {} ({} MiB) to make room for {} (footprint {} MiB / budget {} MiB)",
                 evicted.name,
-                evicted.rss_cost_bytes / (1024 * 1024),
+                evicted_cost / (1024 * 1024),
                 model_name,
                 footprint / (1024 * 1024),
                 self.cache_budget_bytes / (1024 * 1024),
             );
-            // Wait for the evicted model to actually drop. `cache.remove`
-            // drops the cache's `Arc<ModelDispatcher>`, but the
-            // dispatcher task and any in-flight `embed()` callers' Arc
-            // clones can still keep the `LoadedModel` (and its ORT
-            // arena) resident. If we proceed straight to loading the
-            // replacement, its RSS allocation lands on top of the
-            // lingering model, and the cgroup limit gets crossed even
-            // though the cache logically has room. Poll RSS until it
-            // visibly drops (or a deadline expires); the next load only
-            // proceeds once memory is physically freed.
+            // Drop the evicted CacheEntry (which drops the cache's
+            // last Arc<ModelDispatcher>, closes both senders) THEN
+            // await the dispatcher task's JoinHandle. The task
+            // resolves only after the captured `LoadedModel` has
+            // dropped and ORT has actually released the weights. This
+            // is the part malloc_trim alone couldn't fix: without the
+            // await, the next allocation landed on top of the
+            // unreleased arena and OOM-killed the pod.
             //
-            // The dispatcher task exits its `select!` else-arm once
-            // both senders close, which happens when the cache's Arc
-            // and every embed caller's Arc drop. In the steady-state
-            // ingest/bench path no embed call is in flight at this
-            // point (the bench acquires sequentially; the worker only
-            // holds the dispatcher Arc during its own embed call), so
-            // the drop is usually <1 s. The 5 s ceiling caps the
-            // worst case where an in-flight embed is mid-batch.
-            drop(cache); // release mutex so other waiters can progress
-            wait_for_rss_drop(evicted.rss_cost_bytes).await;
+            // In-flight `embed()` callers' Arc clones keep the
+            // dispatcher senders alive past the cache drop; in that
+            // case the await blocks until those calls complete.
+            // That's the intended behaviour - we'd rather wait than
+            // load on top.
+            //
+            // Mutex is released before the await so other acquire
+            // callers can progress.
+            drop(cache);
+            drop(evicted);
+            if let Some(handle) = evicted_task {
+                let _ = handle.await;
+            }
+            wait_for_rss_drop(evicted_cost).await;
             cache = self.cache.lock().await;
         }
 
@@ -830,11 +852,12 @@ impl FastEmbedder {
         // in-flight caller has returned, both senders drop, the
         // dispatcher's `select!` falls through to its `else` arm, the
         // task exits, and `loaded` is finally dropped, freeing RSS.
-        let dispatcher = ModelDispatcher::spawn(loaded);
+        let (dispatcher, task) = ModelDispatcher::spawn(loaded);
 
         cache.push(CacheEntry {
             name: model_name.to_string(),
             dispatcher: Arc::clone(&dispatcher),
+            task: Some(task),
             rss_cost_bytes: cost,
             last_used: Instant::now(),
         });
@@ -861,23 +884,26 @@ impl FastEmbedder {
                 .min_by_key(|(_, e)| e.last_used)
                 .map(|(i, _)| i)
                 .expect("cache len > 1");
-            let evicted = cache.remove(lru_idx);
+            let mut evicted = cache.remove(lru_idx);
+            let evicted_task = evicted.task.take();
+            let evicted_cost = evicted.rss_cost_bytes;
             let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
             tracing::info!(
                 "fastembed cache: post-load eviction of {} ({} MiB), pre-load estimate was too low (footprint {} MiB / budget {} MiB)",
                 evicted.name,
-                evicted.rss_cost_bytes / (1024 * 1024),
+                evicted_cost / (1024 * 1024),
                 footprint / (1024 * 1024),
                 self.cache_budget_bytes / (1024 * 1024),
             );
-            // Same wait-for-physical-drop semantics as the pre-load
-            // sweep above: release the cache mutex so other acquire
-            // callers can make progress, then poll RSS until the
-            // evicted model is actually freed (or the deadline
-            // expires). Without this, the next acquire sees a "thin"
-            // cache but lingering RSS, and loads on top.
+            // Same await-the-dispatcher-task discipline as the
+            // pre-load sweep above. See the long comment there for
+            // why this is required to keep the cgroup safe.
             drop(cache);
-            wait_for_rss_drop(evicted.rss_cost_bytes).await;
+            drop(evicted);
+            if let Some(handle) = evicted_task {
+                let _ = handle.await;
+            }
+            wait_for_rss_drop(evicted_cost).await;
             cache = self.cache.lock().await;
         }
 
@@ -993,6 +1019,17 @@ async fn wait_for_rss_drop(evicted_cost: u64) {
     let Some(before) = read_rss_bytes() else {
         return; // RSS introspection unavailable, can't tell either way
     };
+
+    // Force glibc to return freed pages to the kernel. Without this the
+    // dispatcher Arc has dropped but ORT's arena pool sits in glibc's
+    // freelist as RSS for an indeterminate time, so the next model load
+    // allocates on top of the lingering arena and OOM-kills the pod.
+    // `malloc_trim(0)` is a no-op on musl + non-Linux; gated by
+    // `cfg(target_env = "gnu")` plus a tokio::spawn_blocking because
+    // the call can take low-tens-of-ms on a fragmented heap and we
+    // don't want to stall the dispatcher loop.
+    trim_glibc_heap().await;
+
     let target_drop = evicted_cost / 2;
     let deadline = std::time::Instant::now() + EVICTION_WAIT_BUDGET;
     while std::time::Instant::now() < deadline {
@@ -1015,6 +1052,40 @@ async fn wait_for_rss_drop(evicted_cost: u64) {
         before.saturating_sub(now) / (1024 * 1024),
         evicted_cost / (1024 * 1024),
     );
+}
+
+/// glibc-specific: ask malloc to return freed pages from its arena
+/// freelist back to the kernel via sbrk + munmap. Without this the
+/// post-eviction RSS stays artificially high because freed ORT arenas
+/// sit in glibc's freelist, even after the Arc<LoadedModel> has
+/// dropped. The next model load then allocates ON TOP of the lingering
+/// arena and trips the cgroup limit.
+///
+/// no-op on musl / non-Linux: nothing to call. The
+/// `cfg(target_env = "gnu")` gate on the libc dep handles the
+/// availability; the wrapping fn always exists so the call site is
+/// portable.
+#[cfg(target_env = "gnu")]
+async fn trim_glibc_heap() {
+    // malloc_trim can take low-tens-of-ms on a fragmented heap; hand
+    // off to the blocking pool so the dispatcher's await point doesn't
+    // block on it.
+    let _ = tokio::task::spawn_blocking(|| {
+        // SAFETY: `malloc_trim` is a glibc extension with a stable
+        // signature `int malloc_trim(size_t pad)`. Returns 1 if memory
+        // was released, 0 otherwise. We don't care about the return
+        // value; we want the side effect.
+        unsafe {
+            libc::malloc_trim(0);
+        }
+    })
+    .await;
+}
+
+#[cfg(not(target_env = "gnu"))]
+async fn trim_glibc_heap() {
+    // musl / macOS: nothing equivalent. Allocator returns pages
+    // promptly on free anyway.
 }
 
 fn read_rss_bytes() -> Option<u64> {

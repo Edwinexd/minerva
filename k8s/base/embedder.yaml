@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minerva-embedder
+  namespace: minerva
+spec:
+  # Single replica: the FastEmbedder LRU is per-pod, so multi-replica
+  # doubles cache RAM. Start with one; add HPA only when chat queue
+  # depth shows it's needed (see docs/microservices-split.md "Open
+  # questions").
+  replicas: 1
+  strategy:
+    # Recreate (not RollingUpdate) because the node can't fit two
+    # embedder pods at once (3.5 GiB each on an 8 GiB allocatable
+    # node). Brief embed downtime during a deploy is the trade.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: minerva-embedder
+  template:
+    metadata:
+      labels:
+        app: minerva-embedder
+        minerva-internal-client: "false"
+    spec:
+      containers:
+        - name: embedder
+          image: ghcr.io/edwinexd/minerva-embedder:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 50051
+              name: grpc
+          env:
+            - name: MINERVA_EMBEDDER_HOST
+              value: "0.0.0.0"
+            - name: MINERVA_EMBEDDER_PORT
+              value: "50051"
+            - name: HF_HOME
+              value: "/data/hf-cache"
+            # Cache budget explicitly set instead of relying on the
+            # 55%-of-cgroup default. The default fraction was tuned
+            # for the monolith where the other 45% went to HTTP routes
+            # + auth + classifier + chat strategy + sqlx + qdrant
+            # client; in this pod the baseline is tiny (gRPC server +
+            # tokio + ORT runtime + glibc, ~500 MiB-1 GiB), so a
+            # higher fraction is the right shape. 3.8 GiB holds
+            # arctic-m (~1 GiB warmed) + nomic (~2.7 GiB warmed)
+            # with ~100 MiB slack so the small startup-set models
+            # can swap in without evicting either heavy.
+            # k3s on the prod node reports only 2 CPU / 8 GiB
+            # allocatable (host has 15 GiB; reservations eat 7 GiB),
+            # so the embedder has to live in 4 GiB. Cache budget
+            # 2.5 GiB (= 2,684,354,560 bytes = 2.5 * 2^30) holds
+            # arctic-m warmed (~1 GiB) plus the small startup-set
+            # models. Loading nomic (~2.7 GiB) will evict arctic; the
+            # full "hold nomic + arctic both warm" target is parked
+            # until either the kubelet system-reserved is dialled
+            # down or the node gets sized up.
+            - name: MINERVA_FASTEMBED_CACHE_BUDGET_BYTES
+              value: "2684354560"
+            - name: MALLOC_TRIM_THRESHOLD_
+              value: "131072"
+            - name: MALLOC_ARENA_MAX
+              value: "2"
+            - name: RUST_LOG
+              value: "info"
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /data
+          resources:
+            # req == lim so the pod gets Guaranteed QoS. We handle our
+            # own memory budgeting inside the process (FastEmbedder LRU
+            # with an explicit MINERVA_FASTEMBED_CACHE_BUDGET_BYTES
+            # set above) so the k8s burstable gap buys nothing useful;
+            # equal values give us a stable cgroup limit from startup,
+            # keep the scheduler from over-promising this pod's memory
+            # to a noisy neighbour, and put us at the top of the
+            # eviction order during real node pressure.
+            #
+            # 5 GiB = 3.8 GiB cache + ~1.2 GiB baseline (gRPC server +
+            # tokio + ORT runtime + glibc + tonic connections). Way
+            # tighter than the auto-fraction sizing would land on,
+            # because the monolith's 45% non-cache baseline was eaten
+            # by code that no longer runs in this pod.
+            # Memory req == lim for Guaranteed QoS; CPU is ranged
+            # because ONNX inference is heavily compute-bound when a
+            # batch arrives but idle between. Low req keeps the
+            # scheduler happy on a 2-CPU node; 2 CPU limit gives the
+            # dispatcher real cores for the bursty embed call.
+            requests:
+              # 5 GiB so the sequential boot benchmark fits. Each
+              # model loads, gets benchmarked, the previous gets
+              # evicted (with proper dispatcher-task await + glibc
+              # trim before the next allocation, see
+              # fastembed_embedder), so peak RSS during nomic load
+              # is baseline ~1 GiB + nomic warmed ~2.7 GiB = ~3.7
+              # GiB, comfortably under 5 GiB.
+              memory: "5Gi"
+              cpu: "200m"
+            limits:
+              memory: "5Gi"
+              cpu: "2000m"
+          # No HTTP endpoint; rely on the gRPC port being open as a
+          # liveness signal. Tonic accepts TCP before model load
+          # completes, so this won't gate startup on warmup.
+          readinessProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: /data0/minerva/hf-cache-embed
+            type: DirectoryOrCreate

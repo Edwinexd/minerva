@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minerva-worker
+  namespace: minerva
+spec:
+  # Single replica to start with; the queue's FOR UPDATE SKIP LOCKED
+  # semantics tolerate multiple claimants if we ever scale this up.
+  replicas: 1
+  strategy:
+    # Recreate so we don't briefly need 2 GiB of worker memory during
+    # rolling update on this tight node.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: minerva-worker
+  template:
+    metadata:
+      labels:
+        app: minerva-worker
+        # Phase 1 NetworkPolicy gate: only pods with this label can
+        # reach the embedder/reranker ClusterIP services. The api
+        # carries the same label on its Deployment.
+        minerva-internal-client: "true"
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/edwinexd/minerva-worker:latest
+          imagePullPolicy: Always
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: minerva-secrets
+                  key: DATABASE_URL
+            - name: QDRANT_URL
+              value: "http://qdrant:6334"
+            # Worker has no HTTP listener; MINERVA_HOST / PORT exist
+            # for AppState construction symmetry only (Config::from_env
+            # reads them with defaults). Not bound by axum here.
+            - name: MINERVA_HOST
+              value: "0.0.0.0"
+            - name: MINERVA_PORT
+              value: "0"
+            - name: MINERVA_DOCS_PATH
+              value: "/data/documents"
+            # Talk to the embedder + reranker pods over gRPC instead
+            # of carrying the FastEmbedder LRU in this pod's cgroup.
+            - name: MINERVA_EMBEDDER_URL
+              value: "http://minerva-embedder.minerva.svc.cluster.local:50051"
+            - name: MINERVA_RERANKER_URL
+              value: "http://minerva-reranker.minerva.svc.cluster.local:50052"
+            - name: MINERVA_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: minerva-secrets
+                  key: MINERVA_HMAC_SECRET
+            - name: MINERVA_ADMINS
+              valueFrom:
+                secretKeyRef:
+                  name: minerva-secrets
+                  key: MINERVA_ADMINS
+            - name: CEREBRAS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minerva-secrets
+                  key: CEREBRAS_API_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minerva-secrets
+                  key: OPENAI_API_KEY
+            - name: MINERVA_SERVICE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minerva-secrets
+                  key: MINERVA_SERVICE_API_KEY
+          volumeMounts:
+            # Both api and worker need RWX on the docs hostPath. See
+            # docs/microservices-split.md "Persistent volumes and
+            # shared filesystem" for why this is safe.
+            - name: app-data
+              mountPath: /data
+          resources:
+            # req == lim for Guaranteed QoS; see the comment on
+            # minerva-embedder for the full reasoning.
+            #
+            # 2 GiB holds the worker's steady state (~512 MiB:
+            # sqlx pool + qdrant client + reqwest pool + classifier
+            # state) plus the MemBudget pool above it. The pool
+            # sizes itself from `cgroup - baseline_reserve` so a
+            # stable cgroup gives MemBudget ~1 GiB to admit
+            # concurrent fat ingest ops (MBZ parse, KG linker,
+            # bulk reclassify) without crowding baseline.
+            # Memory req == lim for Guaranteed QoS; CPU is ranged
+            # since ingest is bursty (extract + chunk + embed-rpc
+            # round-trip per doc) but mostly idle between docs.
+            # 1.5 CPU limit lets concurrent ingest jobs (MemBudget-
+            # bounded) actually use the cores when they're free.
+            requests:
+              memory: "1Gi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1500m"
+          # No HTTP server; rely on the process's tokio runtime
+          # staying alive. K8s restartPolicy=Always handles a panic.
+      volumes:
+        - name: app-data
+          hostPath:
+            path: /data0/minerva/data
+            type: DirectoryOrCreate

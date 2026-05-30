@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use super::common;
 use super::common::RagChunk;
-use minerva_ingest::fastembed_embedder::FastEmbedder;
+use minerva_core::rpc::{EmbedderClient, RerankerClient};
 
 /// Max bytes of serialized JSON returned to the model per tool call.
 /// Beyond this we truncate the result list with a
@@ -46,8 +46,8 @@ pub struct ToolCatalogFlags {
 pub struct ToolDispatchCtx<'a> {
     pub http_client: &'a reqwest::Client,
     pub openai_api_key: &'a str,
-    pub fastembed: &'a Arc<FastEmbedder>,
-    pub reranker: &'a Arc<minerva_ingest::reranker::FastReranker>,
+    pub fastembed: &'a Arc<dyn EmbedderClient>,
+    pub reranker: &'a Arc<dyn RerankerClient>,
     /// Per-course re-ranker model id, forwarded to `rag_lookup` for the
     /// model's tool-driven semantic searches so they re-rank with the
     /// same model as the seed retrieval.

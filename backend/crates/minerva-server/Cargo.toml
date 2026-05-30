@@ -3,14 +3,37 @@ name = "minerva-server"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "minerva"
 path = "src/main.rs"
+
+# Phase 3 of the microservices split: standalone doc-claim worker
+# binary that shares the api crate's module tree (so it can call into
+# classification, relink scheduler, routes::canvas::run_sync, etc.
+# without a separate crate). Selected via TARGET_BIN in
+# `docker/Dockerfile.prod`.
+[[bin]]
+name = "minerva-worker"
+path = "src/bin/minerva-worker.rs"
+
+# Phase 3.5: standalone scheduler binary for the periodic Canvas /
+# LTI NRPS / platform-health / pending-platform-cleanup loops.
+# Same module tree access as the worker for the same reason.
+[[bin]]
+name = "minerva-scheduler"
+path = "src/bin/minerva-scheduler.rs"
 
 [dependencies]
 minerva-core = { path = "../minerva-core" }
 minerva-db = { path = "../minerva-db" }
 minerva-ingest = { path = "../minerva-ingest" }
+# Client wrappers for the embedder + reranker services. Phase 0 uses
+# the in-process `LocalEmbedderClient` / `LocalRerankerClient`;
+# Phase 1/2 wire the remote gRPC variants behind the same trait.
+minerva-rpc = { path = "../minerva-rpc" }
 # Concept-graph integration via the eureka HTTP service has been
 # removed pending a clean HTTP-wrapper rewrite. Previously a path-dep
 # on a vendored `eureka-2` Rust release artifact, which forced

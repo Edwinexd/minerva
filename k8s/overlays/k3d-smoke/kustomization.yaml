@@ -1,0 +1,166 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: minerva
+
+# Smoke test overlay for the local k3d cluster: deploy only the
+# namespace + embedder + reranker Deployments and Services (no
+# postgres/qdrant/api), using host-built test images instead of the
+# ghcr.io tags.
+#
+# Reproducing the smoke test locally:
+#
+#   1. Bring up k3d (matches the prod k3s shape):
+#        k3d cluster create minerva-test --servers 1 --agents 0 \
+#          --port 30090:30090@loadbalancer --wait
+#
+#   2. Build the host-side test images. The two test Dockerfiles
+#      (docker/Dockerfile.embedder-test, docker/Dockerfile.reranker-test)
+#      skip the cargo build inside Docker and just COPY the
+#      cargo-built release binary, which is much faster than the
+#      production Dockerfile.prod path. Because backend/target is in
+#      .dockerignore, the build context has to be assembled in /tmp:
+#        cargo build --release -p minerva-embedder -p minerva-reranker \
+#          --manifest-path backend/Cargo.toml
+#        for bin in embedder reranker; do
+#          mkdir -p /tmp/${bin}-build
+#          cp backend/target/release/minerva-${bin} /tmp/${bin}-build/
+#          sed 's|backend/target/release/minerva-'${bin}'|minerva-'${bin}'|' \
+#              docker/Dockerfile.${bin}-test > /tmp/${bin}-build/Dockerfile
+#          docker build -t minerva-${bin}:test /tmp/${bin}-build
+#        done
+#
+#   3. Import the images into k3d:
+#        k3d image import minerva-embedder:test minerva-reranker:test \
+#          -c minerva-test
+#
+#   4. Apply this overlay (image overrides + per-pod patches included):
+#        kubectl apply -k k8s/overlays/k3d-smoke/
+#        kubectl -n minerva rollout status deploy/minerva-embedder
+#        kubectl -n minerva rollout status deploy/minerva-reranker
+#
+#   5. Verify the gRPC wire path through k8s networking:
+#        kubectl -n minerva port-forward svc/minerva-embedder 50051:50051 &
+#        grpcurl -plaintext \
+#          -import-path backend/crates/minerva-rpc/proto \
+#          -proto embedder.proto \
+#          -d '{}' localhost:50051 \
+#          minerva.embedder.v1.Embedder/IsBenchmarkRunning
+#
+#   6. Tear down:
+#        k3d cluster delete minerva-test
+#
+# Not part of base/ because the prod cluster never needs this overlay.
+
+resources:
+  - ../../base
+
+# Drop the resources from base/ that aren't relevant to the smoke
+# test (postgres, qdrant, app, backups, the image-prune cronjob).
+# `commonAnnotations` is a no-op marker so kustomize sees this as a
+# non-empty merge spec.
+commonAnnotations:
+  minerva.dsv.su.se/overlay: k3d-smoke
+
+images:
+  - name: ghcr.io/edwinexd/minerva-embedder
+    newName: minerva-embedder
+    newTag: test
+  - name: ghcr.io/edwinexd/minerva-reranker
+    newName: minerva-reranker
+    newTag: test
+
+patches:
+  # Test images don't ship a /data/hf-cache volume; the cache lives in
+  # the container's writable layer for the test run. Same for the
+  # imagePullPolicy override so kubelet uses the locally-imported
+  # image instead of pulling from ghcr.io.
+  - target:
+      kind: Deployment
+      name: minerva-embedder
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+      - op: remove
+        path: /spec/template/spec/volumes
+      - op: remove
+        path: /spec/template/spec/containers/0/volumeMounts
+  - target:
+      kind: Deployment
+      name: minerva-reranker
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+      - op: remove
+        path: /spec/template/spec/volumes
+      - op: remove
+        path: /spec/template/spec/containers/0/volumeMounts
+
+  # Drop the resources the smoke test doesn't need. The Deployments
+  # and CronJobs we skip have non-trivial dependencies (DB schema,
+  # external image pulls); the smoke test is scoped to the new
+  # services only.
+  - target: { kind: Deployment, name: minerva-app }
+    patch: |
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: minerva-app
+  - target: { kind: Service, name: minerva-app }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: minerva-app
+  - target: { kind: Deployment, name: postgres }
+    patch: |
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: postgres
+  - target: { kind: Service, name: postgres }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: postgres
+  - target: { kind: Deployment, name: qdrant }
+    patch: |
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: qdrant
+  - target: { kind: Service, name: qdrant }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: qdrant
+  - target: { kind: CronJob, name: postgres-backup }
+    patch: |
+      $patch: delete
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: postgres-backup
+  - target: { kind: CronJob, name: qdrant-backup }
+    patch: |
+      $patch: delete
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: qdrant-backup
+  - target: { kind: CronJob, name: image-prune }
+    patch: |
+      $patch: delete
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: image-prune

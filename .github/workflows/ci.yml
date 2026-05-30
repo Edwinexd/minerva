@@ -29,6 +29,11 @@ jobs:
         with:
           workspaces: backend
 
+      # protoc needed by `tonic-build` (via `prost-build`) in
+      # minerva-rpc's build.rs to compile the .proto files.
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends protobuf-compiler
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -37,6 +42,11 @@ jobs:
 
       - name: Build
         run: cargo build
+
+      # Includes the in-process gRPC roundtrip tests added in the
+      # microservices split (crates/minerva-rpc/tests/grpc_roundtrip.rs).
+      - name: Test
+        run: cargo test --workspace
 
   frontend:
     name: Frontend

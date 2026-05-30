@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package minerva.embedder.v1;
+
+// Embedder service: serves embedding vectors for the api (chat query
+// path) and worker (ingest path) processes. See
+// docs/microservices-split.md for the full service split design.
+//
+// Two RPC methods so the priority lane (high for chat, low for ingest)
+// carries through the wire protocol. The server dispatches each into
+// FastEmbedder's `embed` / `embed_query`, which then go through the
+// same biased select that exists today.
+service Embedder {
+  // High-priority lane. Used by the api on the chat query path.
+  rpc EmbedQuery(EmbedRequest) returns (EmbedResponse);
+  // Low-priority lane. Used by the worker on the ingest path.
+  rpc Embed(EmbedRequest) returns (EmbedResponse);
+
+  // Admin: run the boot benchmark set and persist results in the
+  // server's in-memory benchmark store. Called by api startup and by
+  // the admin "Run all benchmarks" button.
+  rpc RunBenchmarks(RunBenchmarksRequest) returns (BenchmarksResponse);
+  // Admin: run one benchmark. Returns BUSY (mapped from tonic Status
+  // code `FAILED_PRECONDITION`) if another benchmark is already in
+  // flight on the embedder pod.
+  rpc BenchmarkOne(BenchmarkOneRequest) returns (BenchmarkResult);
+  // Admin: latest benchmark per model from the in-memory store.
+  rpc GetBenchmarks(GetBenchmarksRequest) returns (BenchmarksResponse);
+  // Admin: true if an admin-triggered benchmark is currently in flight.
+  rpc IsBenchmarkRunning(BenchmarkStateRequest) returns (BenchmarkStateResponse);
+}
+
+// Identifying batch of texts to embed under the named model. The
+// server caps each batch at `EMBED_BATCH_SIZE` internally (same as the
+// in-process path).
+message EmbedRequest {
+  // HF model id, matches the entries in `pipeline::VALID_LOCAL_MODELS`.
+  string model_name = 1;
+  // Raw texts. The server applies any query-side prefix (see
+  // `format_query_for_model`) only on the EmbedQuery method, never on
+  // Embed; mirrors the today behaviour where the api applies the
+  // prefix before calling embed_query.
+  repeated string texts = 2;
+}
+
+message EmbedResponse {
+  repeated FloatVec vectors = 1;
+}
+
+message FloatVec {
+  repeated float values = 1;
+}
+
+message RunBenchmarksRequest {
+  repeated ModelEntry models = 1;
+}
+
+message BenchmarkOneRequest {
+  string model_name = 1;
+  uint64 dimensions = 2;
+}
+
+message BenchmarkStateRequest {}
+
+message BenchmarkStateResponse {
+  bool running = 1;
+}
+
+message GetBenchmarksRequest {}
+
+message ModelEntry {
+  string model_name = 1;
+  uint64 dimensions = 2;
+}
+
+message BenchmarkResult {
+  string model = 1;
+  uint64 dimensions = 2;
+  double embeddings_per_second = 3;
+  double total_ms = 4;
+  uint64 corpus_size = 5;
+}
+
+message BenchmarksResponse {
+  repeated BenchmarkResult results = 1;
+}

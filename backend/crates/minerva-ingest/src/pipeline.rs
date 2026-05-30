@@ -9,10 +9,11 @@ use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use minerva_core::rpc::EmbedderClient;
+
 use crate::chunker::{self, ChunkerConfig};
 use crate::classifier::Classifier;
 use crate::embedder;
-use crate::fastembed_embedder::FastEmbedder;
 use crate::pdf;
 
 /// Classifier output kind that triggers the embed-skip short-circuit.
@@ -206,7 +207,7 @@ pub async fn process_document(
     qdrant: &Qdrant,
     http_client: &reqwest::Client,
     openai_api_key: &str,
-    fastembed: &Arc<FastEmbedder>,
+    embedder: &Arc<dyn EmbedderClient>,
     classifier: &Arc<dyn Classifier>,
     document_id: Uuid,
     course_id: Uuid,
@@ -374,7 +375,7 @@ pub async fn process_document(
             }
 
             let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
-            let embeddings = fastembed.embed(embedding_model, chunk_texts).await?;
+            let embeddings = embedder.embed(embedding_model, chunk_texts).await?;
 
             if !is_sample_solution {
                 let points: Vec<PointStruct> = chunks

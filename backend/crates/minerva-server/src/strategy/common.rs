@@ -1,7 +1,6 @@
 use axum::response::sse::Event;
 use futures::StreamExt;
-use minerva_ingest::fastembed_embedder::FastEmbedder;
-use minerva_ingest::reranker::FastReranker;
+use minerva_core::rpc::{EmbedderClient, RerankerClient};
 use qdrant_client::qdrant::{value::Kind, ScoredPoint, SearchPointsBuilder};
 use reqwest::Response;
 use std::collections::{HashMap, HashSet};
@@ -313,7 +312,7 @@ pub fn partition_chunks(
 pub async fn embedding_search(
     client: &reqwest::Client,
     openai_key: &str,
-    fastembed: &Arc<FastEmbedder>,
+    fastembed: &Arc<dyn EmbedderClient>,
     qdrant: &qdrant_client::Qdrant,
     collection_name: &str,
     query: &str,
@@ -442,7 +441,7 @@ fn apply_rerank_order(
 /// `top_k`, so a re-ranker hiccup degrades quality but never breaks the
 /// chat turn. Trivial inputs (0 or 1 chunk) skip the model entirely.
 pub async fn rerank_chunks(
-    reranker: &Arc<FastReranker>,
+    reranker: &Arc<dyn RerankerClient>,
     reranker_model: &str,
     query: &str,
     chunks: Vec<RagChunk>,
@@ -789,7 +788,7 @@ const GRAPH_EXPAND_TOTAL_CHUNKS: usize = 4;
 pub async fn expand_context_via_graph(
     db: &sqlx::PgPool,
     qdrant: &qdrant_client::Qdrant,
-    fastembed: &Arc<FastEmbedder>,
+    fastembed: &Arc<dyn EmbedderClient>,
     http_client: &reqwest::Client,
     openai_api_key: &str,
     course_id: uuid::Uuid,
@@ -988,8 +987,8 @@ pub fn build_chat_messages(
 pub async fn rag_lookup(
     client: &reqwest::Client,
     openai_key: &str,
-    fastembed: &Arc<FastEmbedder>,
-    reranker: &Arc<FastReranker>,
+    fastembed: &Arc<dyn EmbedderClient>,
+    reranker: &Arc<dyn RerankerClient>,
     reranker_model: &str,
     qdrant: &qdrant_client::Qdrant,
     collection_name: &str,
@@ -1571,7 +1570,10 @@ mod tests {
     async fn rerank_chunks_short_circuits_trivial_input() {
         // The wrapper's guard paths (<=1 chunk, top_k == 0) must not touch
         // the model, so this runs without any weights on disk.
-        let reranker = std::sync::Arc::new(minerva_ingest::reranker::FastReranker::new());
+        let reranker: std::sync::Arc<dyn minerva_core::rpc::RerankerClient> =
+            std::sync::Arc::new(minerva_rpc::LocalRerankerClient::new(std::sync::Arc::new(
+                minerva_ingest::reranker::FastReranker::new(),
+            )));
         let model = minerva_ingest::reranker::DEFAULT_RERANK_MODEL;
         assert!(rerank_chunks(&reranker, model, "q", Vec::new(), 5)
             .await

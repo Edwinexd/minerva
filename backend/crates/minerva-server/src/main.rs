@@ -98,9 +98,14 @@ async fn main() -> anyhow::Result<()> {
         let state = state.clone();
         tokio::spawn(async move {
             const BATCH: i64 = 50;
+            // Keyset cursor on (created_at, id). Advances past every row
+            // the SELECT returns, including those whose UPDATE fails
+            // (dup-collision, missing file, etc.) so the sweep can't get
+            // stuck re-selecting the same rows forever and OOM the pod.
+            let mut cursor: Option<(chrono::DateTime<chrono::Utc>, uuid::Uuid)> = None;
             loop {
                 let rows = match minerva_db::queries::documents::list_active_missing_content_hash(
-                    &state.db, BATCH,
+                    &state.db, cursor, BATCH,
                 )
                 .await
                 {
@@ -116,11 +121,30 @@ async fn main() -> anyhow::Result<()> {
                     }
                 };
 
-                for (doc_id, course_id, filename, _mime_type) in rows {
+                // Advance the cursor to the last row of this page BEFORE
+                // doing any per-row work, so a transient error mid-batch
+                // can't cause us to re-process the same prefix.
+                if let Some(last) = rows.last() {
+                    cursor = Some((last.4, last.0));
+                }
+
+                for (doc_id, course_id, filename, _mime_type, _created_at) in rows {
                     let ext = routes::documents::extension_from_filename(&filename);
                     let path = format!("{}/{}/{}.{}", config.docs_path, course_id, doc_id, ext);
-                    let bytes = match tokio::fs::read(&path).await {
-                        Ok(b) => b,
+                    // Stream-hash the file in 64 KiB chunks rather than
+                    // slurping it into a Vec<u8>. The sweep hits every
+                    // legacy doc on disk; with multi-MB PDFs that
+                    // churn was leaving glibc badly fragmented while
+                    // fastembed was concurrently loading its models,
+                    // and the pod's 6 GiB ceiling (sized for the
+                    // fastembed cache, not for a parallel allocation
+                    // stream) tripped.
+                    let hash = match routes::documents::compute_content_hash_streaming(
+                        std::path::Path::new(&path),
+                    )
+                    .await
+                    {
+                        Ok(h) => h,
                         Err(e) => {
                             // Files can legitimately be missing for failed
                             // uploads or post-delete races; log at debug and
@@ -134,7 +158,6 @@ async fn main() -> anyhow::Result<()> {
                             continue;
                         }
                     };
-                    let hash = routes::documents::compute_content_hash(&bytes);
                     if let Err(e) = minerva_db::queries::documents::set_content_hash_if_null(
                         &state.db, doc_id, &hash,
                     )
@@ -145,7 +168,9 @@ async fn main() -> anyhow::Result<()> {
                         // active doc in the same course has the same
                         // bytes (a pre-existing duplicate the backfill
                         // can't dedup retroactively without orphaning).
-                        // Log and move on; the row stays NULL.
+                        // Log and move on; the row stays NULL but the
+                        // cursor already advanced past it above, so we
+                        // won't re-pick it on the next iteration.
                         tracing::debug!("content_hash backfill: doc {} skip ({})", doc_id, e);
                     }
                 }

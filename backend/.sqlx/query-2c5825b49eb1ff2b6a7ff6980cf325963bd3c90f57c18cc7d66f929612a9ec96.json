@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, course_id, filename, mime_type\n           FROM documents\n           WHERE content_hash IS NULL\n             AND orphaned_at IS NULL\n           ORDER BY created_at ASC\n           LIMIT $1",
+  "query": "SELECT id, course_id, filename, mime_type, created_at\n           FROM documents\n           WHERE content_hash IS NULL\n             AND orphaned_at IS NULL\n             AND ($1::timestamptz IS NULL OR (created_at, id) > ($1, $2))\n           ORDER BY created_at ASC, id ASC\n           LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -22,10 +22,17 @@
         "ordinal": 3,
         "name": "mime_type",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Timestamptz",
+        "Uuid",
         "Int8"
       ]
     },
@@ -33,8 +40,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "1e48eece050c51d1a5bf05d6431dcc0dbc7ca37477f11e234b45ae9aa22e08ff"
+  "hash": "2c5825b49eb1ff2b6a7ff6980cf325963bd3c90f57c18cc7d66f929612a9ec96"
 }

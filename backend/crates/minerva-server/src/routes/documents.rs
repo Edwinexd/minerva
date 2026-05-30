@@ -141,6 +141,32 @@ pub fn compute_content_hash(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Streaming SHA-256 (hex) of a file on disk. Reuses a fixed 64 KiB
+/// buffer across chunks so peak memory is constant regardless of file
+/// size, instead of slurping a multi-MB doc into a `Vec<u8>` like
+/// `compute_content_hash(&fs::read(path)?)` would. Used by the startup
+/// `content_hash` backfill, which sweeps every legacy doc on disk and
+/// would otherwise leave the glibc heap badly fragmented (cyclic
+/// large-Vec churn while fastembed is concurrently filling its model
+/// cache - the 6 GiB pod limit is sized for the fastembed cache plus
+/// steady-state working set, not for a parallel multi-MB allocation
+/// stream).
+pub async fn compute_content_hash_streaming(path: &std::path::Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncReadExt;
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
 /// Idempotent upload helper used by every route that ingests a document.
 ///
 /// Path: compute the bytes' sha256 -> if `(course_id, content_hash)` matches

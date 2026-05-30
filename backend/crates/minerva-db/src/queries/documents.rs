@@ -324,26 +324,46 @@ pub async fn set_content_hash_if_null(
 }
 
 /// Active (non-orphaned) docs in a course that still need a
-/// `content_hash`. Used by the startup backfill task. Bounded by
-/// `limit` so a huge installation doesn't load the whole table.
+/// `content_hash`, cursor-paginated. Used by the startup backfill task.
+///
+/// `after` is the `(created_at, id)` pair of the last row from the
+/// previous page; the next page starts strictly after that key.
+/// `None` returns the first page. Same composite-key rationale as
+/// `list_awaiting_transcripts_page`.
+///
+/// Without the cursor the backfill would re-select the exact same rows
+/// every iteration whenever an update fails (e.g. the partial unique
+/// index `(course_id, content_hash) WHERE content_hash IS NOT NULL`
+/// rejects a duplicate). Those rows stay NULL forever, so the SELECT
+/// keeps returning them and the loop hot-spins, never terminates, and
+/// OOMs the pod. The cursor advances past failures so the sweep makes
+/// monotonic progress and reaches the empty-page terminator.
 pub async fn list_active_missing_content_hash(
     db: &PgPool,
+    after: Option<(chrono::DateTime<chrono::Utc>, Uuid)>,
     limit: i64,
-) -> Result<Vec<(Uuid, Uuid, String, String)>, sqlx::Error> {
+) -> Result<Vec<(Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>)>, sqlx::Error> {
+    let (after_created_at, after_id) = match after {
+        Some((t, i)) => (Some(t), Some(i)),
+        None => (None, None),
+    };
     let rows = sqlx::query!(
-        r#"SELECT id, course_id, filename, mime_type
+        r#"SELECT id, course_id, filename, mime_type, created_at
            FROM documents
            WHERE content_hash IS NULL
              AND orphaned_at IS NULL
-           ORDER BY created_at ASC
-           LIMIT $1"#,
+             AND ($1::timestamptz IS NULL OR (created_at, id) > ($1, $2))
+           ORDER BY created_at ASC, id ASC
+           LIMIT $3"#,
+        after_created_at,
+        after_id,
         limit,
     )
     .fetch_all(db)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|r| (r.id, r.course_id, r.filename, r.mime_type))
+        .map(|r| (r.id, r.course_id, r.filename, r.mime_type, r.created_at))
         .collect())
 }
 

@@ -37,9 +37,21 @@ const DEFAULT_CACHE_BUDGET_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Fraction of the cgroup memory limit we let the cache consume by default.
 /// The rest of the pod (request handlers, qdrant client buffers, classifier
-/// state, baseline app heap, transient ONNX inference buffers) needs the
-/// remainder. 40% is conservative; the worker doesn't only allocate models.
-const DEFAULT_CACHE_BUDGET_FRACTION: f64 = 0.4;
+/// state, baseline app heap, transient ONNX inference buffers, the
+/// cross-encoder reranker, glibc fragmentation overhead) needs the
+/// remainder.
+///
+/// Was 0.4 until we discovered the per-model cost we were recording (raw
+/// RSS delta after `TextEmbedding::try_new`) didn't include the ORT CPU-EP
+/// arena, which only materializes on the first forward pass. Once we
+/// warm each model on load (see `FastEmbedder::acquire`), the measured
+/// cost is roughly 2-3x what it was, and 40% of cgroup left the budget
+/// too small to hold the four `STARTUP_BENCHMARK_MODELS` coexisting --
+/// arctic-m + nomic alone are ~2.5 GiB. 55% gives ~3.4 GiB of cache room
+/// on the prod 6 GiB pod, enough for the startup set, while leaving
+/// ~2.7 GiB for everything else (baseline ~500 MiB, reranker ~500 MiB,
+/// worker transients ~500 MiB, fragmentation + slack ~1 GiB).
+const DEFAULT_CACHE_BUDGET_FRACTION: f64 = 0.55;
 
 /// Fallback cost when RSS measurement isn't available (non-Linux dev hosts)
 /// or returns nonsense. Picked to be on the high side of the largest model
@@ -729,6 +741,60 @@ impl FastEmbedder {
         })
         .await
         .map_err(|e| format!("spawn_blocking failed: {}", e))??;
+
+        // Warm up the model with a batch matching real operational
+        // shape before taking the RSS measurement. ORT's CPU EP (and
+        // to a lesser extent candle) lazily allocate an "arena" /
+        // scratch pool on the first forward pass that's substantially
+        // larger than the bare model weights and persists for the
+        // lifetime of the session.
+        //
+        // The arena sizes itself to the *largest tensor shape* ORT
+        // has seen. Activation memory scales linearly with batch and
+        // sequence length, and attention scratch is O(seq^2), so the
+        // dominant axis is the chunk length. The two earlier
+        // iterations both undersized this:
+        //
+        //   1. `vec!["warmup"]` (batch-1, ~5 tokens): arena ~5% of
+        //      operational. First real benchmark grew it; OOM.
+        //   2. `BENCHMARK_CORPUS` as-is (batch-32, ~25 tokens/text):
+        //      arena ~10% of operational. The corpus is tuned for
+        //      benchmarking throughput, not arena sizing. First real
+        //      worker batch with 500-token chunks grew it; OOM again.
+        //
+        // So we pad each corpus sentence to `WARMUP_CHARS` (=
+        // chunker's default `chunk_size`, the largest chunk a real
+        // ingest job ever submits), which sizes the arena to
+        // operational chunks at operational batch size. Subsequent
+        // worker / chat inferences with same-or-smaller shapes won't
+        // grow it further.
+        //
+        // Cost: a few hundred ms per model on startup. Trivial
+        // compared to model load itself.
+        //
+        // We deliberately ignore warmup errors: a broken model
+        // shouldn't be reusable, but we still want the load to
+        // succeed and the caller to see the inference error on their
+        // actual request. The next inference will surface the same
+        // error.
+        const WARMUP_CHARS: usize = 2000;
+        let loaded_for_warmup = loaded.clone();
+        let warmup_corpus: Vec<String> = BENCHMARK_CORPUS
+            .iter()
+            .map(|s| {
+                let mut t = String::with_capacity(WARMUP_CHARS + s.len());
+                while t.len() < WARMUP_CHARS {
+                    t.push_str(s);
+                    t.push(' ');
+                }
+                t.truncate(WARMUP_CHARS);
+                t
+            })
+            .collect();
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = run_embed(&loaded_for_warmup, warmup_corpus);
+        })
+        .await;
         let rss_after = read_rss_bytes();
 
         let cost = match (rss_before, rss_after) {
@@ -750,6 +816,39 @@ impl FastEmbedder {
             rss_cost_bytes: cost,
             last_used: Instant::now(),
         });
+
+        // Defensive post-load eviction. The pre-load eviction loop above
+        // uses the `max(rss_cost_bytes)` across previously-cached entries
+        // as the cost estimate for the new model. With honest
+        // post-warmup measurement that estimate is reasonable, but a
+        // first-of-its-kind larger model (e.g. arctic-m loading after a
+        // run of small English models) still costs more than anything
+        // previously seen, so the pre-load eviction can leave us over
+        // budget. Sweep the LRU again now that we know the real cost.
+        // We never evict the entry we just inserted: `last_used =
+        // Instant::now()` makes it the newest, so `min_by_key` picks an
+        // older one.
+        while cache.len() > 1 {
+            let used: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
+            if used <= self.cache_budget_bytes {
+                break;
+            }
+            let lru_idx = cache
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, e)| e.last_used)
+                .map(|(i, _)| i)
+                .expect("cache len > 1");
+            let evicted = cache.remove(lru_idx);
+            let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
+            tracing::info!(
+                "fastembed cache: post-load eviction of {} ({} MiB), pre-load estimate was too low (footprint {} MiB / budget {} MiB)",
+                evicted.name,
+                evicted.rss_cost_bytes / (1024 * 1024),
+                footprint / (1024 * 1024),
+                self.cache_budget_bytes / (1024 * 1024),
+            );
+        }
 
         let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
         let cached_count = cache.len();
@@ -858,7 +957,11 @@ fn read_rss_bytes() -> Option<u64> {
     None
 }
 
-fn compute_budget_bytes() -> u64 {
+/// The byte budget the fastembed model cache is sized at on this pod.
+/// Exposed so the shared `MemBudget` can compute its own total as
+/// `cgroup_limit - this - baseline_reserve` without duplicating the
+/// env-override + cgroup-fraction logic.
+pub fn compute_budget_bytes() -> u64 {
     if let Ok(v) = std::env::var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES") {
         if let Ok(n) = v.parse::<u64>() {
             return n;
@@ -870,13 +973,16 @@ fn compute_budget_bytes() -> u64 {
     DEFAULT_CACHE_BUDGET_BYTES
 }
 
-fn budget_source() -> &'static str {
+fn budget_source() -> String {
     if std::env::var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES").is_ok() {
-        "env override"
+        "env override".to_string()
     } else if read_cgroup_memory_limit().is_some() {
-        "40% of cgroup memory.max"
+        format!(
+            "{}% of cgroup memory.max",
+            (DEFAULT_CACHE_BUDGET_FRACTION * 100.0).round() as u32
+        )
     } else {
-        "static default (no cgroup, no env override)"
+        "static default (no cgroup, no env override)".to_string()
     }
 }
 

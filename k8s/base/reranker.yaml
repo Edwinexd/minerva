@@ -38,29 +38,32 @@ spec:
             - name: hf-cache
               mountPath: /data
           resources:
-            # req == lim for Guaranteed QoS; see the comment on
-            # minerva-embedder for the full reasoning.
+            # Memory req == lim so the cgroup limit is fixed from
+            # startup; see the comment on minerva-embedder for the full
+            # reasoning. (CPU is ranged, so QoS is Burstable, not
+            # Guaranteed - the memory floor is what we care about here.)
             #
-            # 2 GiB holds the default multilingual jina v2 base
-            # (~600 MiB warmed) plus one MiniLM-class second model
-            # resident. Admin benchmarks of bge-reranker-v2-m3 (which
-            # warms to ~1.5 GiB) will trigger an LRU eviction on the
-            # secondary slot; the default model stays warm so user
-            # chat turns don't pay a cold load during a benchmark.
-            # Memory req == lim for Guaranteed QoS; CPU is ranged.
+            # 3 GiB. Measured in prod: the default jina-reranker-v2
+            # base, once the model + ORT arena are warm, sits at
+            # ~1.7 GiB process RSS *at idle* - already above the old
+            # 1500Mi ceiling, so the pod OOMKilled (137) the instant a
+            # real Rerank call faulted the model in, then CrashLooped:
+            # every chat turn logged "rerank failed (transport error)"
+            # and fell back to embedding order. 3 GiB leaves ~1.3 GiB
+            # of headroom over the warm baseline for the cross-encoder
+            # activation spike on the 30-80 candidate over-fetch batch,
+            # plus room for one secondary benchmarked model resident.
+            # Fits the node alongside everything else (node lands at
+            # ~84% memory limits committed, MemoryPressure clear).
+            #
             # Cross-encoder scoring is compute-bound per (query, doc)
-            # pair; with the 30-80 candidate over-fetch this means a
-            # rerank burst wants several cores. Idle between turns.
+            # pair; with the 30-80 candidate over-fetch a rerank burst
+            # wants several cores. Idle between turns.
             requests:
-              # OOMKilled at 1 GiB on the first real Rerank call: model
-              # weights warmed (~600 MiB) + tokio + ORT scratch +
-              # cross-encoder activation tensors for a 30-doc batch was
-              # tipping past 1 GiB. Bump to 1.5 GiB. Fits on the node
-              # alongside everything else at the current trim.
-              memory: "1500Mi"
+              memory: "3Gi"
               cpu: "100m"
             limits:
-              memory: "1500Mi"
+              memory: "3Gi"
               cpu: "1500m"
           readinessProbe:
             tcpSocket:

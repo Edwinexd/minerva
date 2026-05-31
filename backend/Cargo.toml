@@ -30,7 +30,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "migrate", "chrono", "uuid"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "migrate", "chrono", "uuid"] }
 
 # Vector DB
 qdrant-client = "1"
@@ -58,7 +58,7 @@ hex = "0.4"
 rand = "0.10"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 rsa = "0.9"
-rand_chacha = "0.3"
+rand_chacha = "0.9"
 urlencoding = "2"
 
 # Utilities
@@ -79,6 +79,6 @@ tempfile = "3"
 # gRPC for the internal embedder + reranker model services. Pinned to
 # matching minors so the generated client/server types from `prost-build`
 # at build time stay ABI-compatible with the `tonic` runtime crate.
-tonic = "0.12"
-tonic-build = "0.12"
-prost = "0.13"
+tonic = "0.14"
+tonic-build = "0.14"
+prost = "0.14"

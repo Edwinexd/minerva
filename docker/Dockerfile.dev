@@ -2,27 +2,66 @@ FROM rust:latest AS builder
 
 WORKDIR /app/backend
 
-# Phase 1: cache dependencies. Copy each workspace member's
-# Cargo.toml plus the root manifest, stub out their sources, run
-# `cargo build` so cargo downloads and compiles every crate.io dep
-# without paying for source changes on every rebuild.
+# protoc is needed by `tonic-build` (via `prost-build`) to compile the
+# .proto files in `minerva-rpc/proto/`.
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+# Phase 1: cache dependencies. Copy every workspace member's Cargo.toml
+# plus the root manifest, stub out their sources, then build so cargo
+# downloads and compiles every crate.io dep without paying for source
+# changes on every rebuild.
+#
+# Built with `--features local-engine` so the single dev backend embeds
+# / reranks in-process (the dev compose stack runs no separate
+# embedder/reranker pods and sets no MINERVA_EMBEDDER_URL). This pulls
+# fastembed/candle into the dev image; prod images leave the feature
+# off and reach the model-server pods over gRPC.
 COPY backend/Cargo.toml backend/Cargo.lock ./
 COPY backend/crates/minerva-core/Cargo.toml crates/minerva-core/Cargo.toml
+COPY backend/crates/minerva-catalog/Cargo.toml crates/minerva-catalog/Cargo.toml
+COPY backend/crates/minerva-app-core/Cargo.toml crates/minerva-app-core/Cargo.toml
 COPY backend/crates/minerva-db/Cargo.toml crates/minerva-db/Cargo.toml
-COPY backend/crates/minerva-ingest/Cargo.toml crates/minerva-ingest/Cargo.toml
+COPY backend/crates/minerva-embed-engine/Cargo.toml crates/minerva-embed-engine/Cargo.toml
+COPY backend/crates/minerva-mbz/Cargo.toml crates/minerva-mbz/Cargo.toml
+COPY backend/crates/minerva-pipeline/Cargo.toml crates/minerva-pipeline/Cargo.toml
+COPY backend/crates/minerva-rpc/Cargo.toml crates/minerva-rpc/Cargo.toml
+COPY backend/crates/minerva-rpc/build.rs crates/minerva-rpc/build.rs
+COPY backend/crates/minerva-rpc/proto crates/minerva-rpc/proto
+COPY backend/crates/minerva-rpc-local/Cargo.toml crates/minerva-rpc-local/Cargo.toml
 COPY backend/crates/minerva-server/Cargo.toml crates/minerva-server/Cargo.toml
-RUN mkdir -p crates/minerva-core/src crates/minerva-db/src crates/minerva-ingest/src crates/minerva-server/src && \
+COPY backend/crates/minerva-worker/Cargo.toml crates/minerva-worker/Cargo.toml
+COPY backend/crates/minerva-scheduler/Cargo.toml crates/minerva-scheduler/Cargo.toml
+COPY backend/crates/minerva-embedder/Cargo.toml crates/minerva-embedder/Cargo.toml
+COPY backend/crates/minerva-reranker/Cargo.toml crates/minerva-reranker/Cargo.toml
+RUN mkdir -p \
+        crates/minerva-core/src crates/minerva-catalog/src \
+        crates/minerva-app-core/src crates/minerva-db/src \
+        crates/minerva-embed-engine/src crates/minerva-mbz/src \
+        crates/minerva-pipeline/src crates/minerva-rpc/src crates/minerva-rpc-local/src \
+        crates/minerva-server/src \
+        crates/minerva-worker/src crates/minerva-scheduler/src \
+        crates/minerva-embedder/src crates/minerva-reranker/src && \
     echo "fn main() {}" > crates/minerva-server/src/main.rs && \
-    touch crates/minerva-core/src/lib.rs crates/minerva-db/src/lib.rs crates/minerva-ingest/src/lib.rs && \
-    cargo build && \
+    echo "fn main() {}" > crates/minerva-worker/src/main.rs && \
+    echo "fn main() {}" > crates/minerva-scheduler/src/main.rs && \
+    echo "fn main() {}" > crates/minerva-embedder/src/main.rs && \
+    echo "fn main() {}" > crates/minerva-reranker/src/main.rs && \
+    touch crates/minerva-core/src/lib.rs crates/minerva-catalog/src/lib.rs \
+          crates/minerva-app-core/src/lib.rs crates/minerva-db/src/lib.rs \
+          crates/minerva-embed-engine/src/lib.rs crates/minerva-mbz/src/lib.rs \
+          crates/minerva-pipeline/src/lib.rs crates/minerva-rpc/src/lib.rs \
+          crates/minerva-rpc-local/src/lib.rs crates/minerva-server/src/lib.rs && \
+    cargo build -p minerva-server --bin minerva --features local-engine && \
     rm -rf crates/*/src
 
 # Phase 2: build actual code (deps cached). `SQLX_OFFLINE` uses the
-# committed `.sqlx/` cache so the build doesn't need a live
-# postgres at image-build time.
+# committed `.sqlx/` cache so the build doesn't need a live postgres at
+# image-build time.
 COPY backend/ .
 ENV SQLX_OFFLINE=true
-RUN touch crates/*/src/*.rs && cargo build
+RUN find crates -name '*.rs' -exec touch {} + && \
+    cargo build -p minerva-server --bin minerva --features local-engine
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y poppler-utils ca-certificates libssl3 && apt-get clean && rm -r /var/lib/apt/lists/*

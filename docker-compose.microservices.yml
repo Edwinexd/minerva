@@ -1,0 +1,148 @@
+# Local microservices topology, mirroring the k8s prod split so the gRPC
+# wiring and the dedicated worker / scheduler pods can be exercised
+# locally before deploying. Unlike docker-compose.yml (a single backend
+# that embeds in-process via the `local-engine` feature), every service
+# here is built from docker/Dockerfile.prod with its own TARGET_BIN, and
+# the api / worker / scheduler reach the model servers over gRPC, exactly
+# as in prod.
+#
+#   docker compose -f docker-compose.microservices.yml up -d --build
+#
+# Then browse http://localhost:3000 (the api serves the built SPA).
+# Bring down with `... down` (add -v to drop the volumes).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: minerva
+      POSTGRES_PASSWORD: minerva
+      POSTGRES_DB: minerva
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minerva"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ms-postgres-data:/var/lib/postgresql/data
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - ms-qdrant-data:/qdrant/storage
+
+  # gRPC model servers. The ONLY images that link the fastembed/candle
+  # engine. Internal-only; no published ports.
+  embedder:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+      target: runtime-svc
+      args:
+        TARGET_BIN: minerva-embedder
+    environment:
+      - MINERVA_EMBEDDER_HOST=0.0.0.0
+      - MINERVA_EMBEDDER_PORT=50051
+      - HF_HOME=/data/hf-cache
+    volumes:
+      - ms-hf-embed:/data/hf-cache
+
+  reranker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+      target: runtime-svc
+      args:
+        TARGET_BIN: minerva-reranker
+    environment:
+      - MINERVA_RERANKER_HOST=0.0.0.0
+      - MINERVA_RERANKER_PORT=50052
+      - HF_HOME=/data/hf-cache
+    volumes:
+      - ms-hf-rerank:/data/hf-cache
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+      target: runtime-api
+      args:
+        TARGET_BIN: minerva
+    environment:
+      - DATABASE_URL=postgres://minerva:minerva@postgres:5432/minerva
+      - QDRANT_URL=http://qdrant:6334
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MINERVA_SERVICE_API_KEY=${MINERVA_SERVICE_API_KEY:-}
+      - MINERVA_HMAC_SECRET=${MINERVA_HMAC_SECRET:-dev-secret-change-me}
+      - MINERVA_DOCS_PATH=/data/documents
+      - MINERVA_ADMINS=${MINERVA_ADMINS:-edsu8469}
+      - MINERVA_DEV_MODE=true
+      - MINERVA_BASE_URL=http://localhost:3000
+      # gRPC to the model servers (not in-process); MINERVA_RUN_WORKER=false
+      # because the worker pod owns the doc-claim loop.
+      - MINERVA_EMBEDDER_URL=http://embedder:50051
+      - MINERVA_RERANKER_URL=http://reranker:50052
+      - MINERVA_RUN_WORKER=false
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    volumes:
+      - ms-docs:/data
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+      target: runtime-svc
+      args:
+        TARGET_BIN: minerva-worker
+    environment:
+      - DATABASE_URL=postgres://minerva:minerva@postgres:5432/minerva
+      - QDRANT_URL=http://qdrant:6334
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MINERVA_HMAC_SECRET=${MINERVA_HMAC_SECRET:-dev-secret-change-me}
+      - MINERVA_DOCS_PATH=/data/documents
+      - MINERVA_EMBEDDER_URL=http://embedder:50051
+      - MINERVA_RERANKER_URL=http://reranker:50052
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    volumes:
+      - ms-docs:/data
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+      target: runtime-svc
+      args:
+        TARGET_BIN: minerva-scheduler
+    environment:
+      - DATABASE_URL=postgres://minerva:minerva@postgres:5432/minerva
+      - QDRANT_URL=http://qdrant:6334
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MINERVA_HMAC_SECRET=${MINERVA_HMAC_SECRET:-dev-secret-change-me}
+      - MINERVA_DOCS_PATH=/data/documents
+      - MINERVA_EMBEDDER_URL=http://embedder:50051
+      - MINERVA_RERANKER_URL=http://reranker:50052
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ms-docs:/data
+
+volumes:
+  ms-postgres-data:
+  ms-qdrant-data:
+  ms-docs:
+  ms-hf-embed:
+  ms-hf-rerank:

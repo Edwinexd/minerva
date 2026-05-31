@@ -7,8 +7,8 @@ spec:
   # Single replica by design: the periodic loops use "find what's
   # due" DB queries that tolerate two callers, but running one
   # replica avoids the dupe-work cost and matches the simplest
-  # cron-style operational model. See docs/microservices-split.md
-  # "Periodic tasks: where do they live".
+  # cron-style operational model. See docs/ARCHITECTURE.md
+  # "Service topology".
   replicas: 1
   strategy:
     type: Recreate
@@ -76,9 +76,9 @@ spec:
                   key: MINERVA_SERVICE_API_KEY
           volumeMounts:
             # Canvas auto-sync writes files to /data/documents via
-            # routes::canvas::run_sync, the same codepath the admin
-            # uses interactively. See docs/microservices-split.md
-            # "/data/documents - shared between api, worker, scheduler".
+            # minerva_app_core::canvas::run_sync, the same codepath the
+            # admin "Sync now" route calls. See docs/ARCHITECTURE.md
+            # "Service topology".
             - name: app-data
               mountPath: /data
           resources:

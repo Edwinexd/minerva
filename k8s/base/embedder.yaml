@@ -6,8 +6,8 @@ metadata:
 spec:
   # Single replica: the FastEmbedder LRU is per-pod, so multi-replica
   # doubles cache RAM. Start with one; add HPA only when chat queue
-  # depth shows it's needed (see docs/microservices-split.md "Open
-  # questions").
+  # depth shows it's needed (see docs/ARCHITECTURE.md "Service
+  # topology").
   replicas: 1
   strategy:
     # Recreate (not RollingUpdate) because the node can't fit two

@@ -18,9 +18,10 @@ spec:
     metadata:
       labels:
         app: minerva-worker
-        # Phase 1 NetworkPolicy gate: only pods with this label can
-        # reach the embedder/reranker ClusterIP services. The api
-        # carries the same label on its Deployment.
+        # Intended NetworkPolicy selector (policy not yet applied): pods
+        # with this label are the only ones meant to reach the
+        # embedder/reranker ClusterIP services. The api carries the same
+        # label on its Deployment.
         minerva-internal-client: "true"
     spec:
       containers:
@@ -77,8 +78,7 @@ spec:
                   key: MINERVA_SERVICE_API_KEY
           volumeMounts:
             # Both api and worker need RWX on the docs hostPath. See
-            # docs/microservices-split.md "Persistent volumes and
-            # shared filesystem" for why this is safe.
+            # docs/ARCHITECTURE.md "Service topology" for why this is safe.
             - name: app-data
               mountPath: /data
           resources:

@@ -1,42 +1,42 @@
-//! Library face of `minerva-server`. Phase 3 of the microservices
-//! split (see `docs/microservices-split.md`) turns the api crate into
-//! both a library and a binary so the new `minerva-worker` and
-//! `minerva-scheduler` binaries can share its module tree without
-//! duplicating routes, AppState, classification, the relink
-//! scheduler, etc.
+//! Library face of `minerva-server`, the api crate. The microservices
+//! split (see `docs/ARCHITECTURE.md`) carved the fat / axum-free
+//! concerns into sibling crates: `minerva-app-core` holds AppState,
+//! config, classification, the relink + doc-claim loops, the Canvas
+//! sync engine, the LTI NRPS client, and the periodic scheduler loops;
+//! `minerva-worker` and `minerva-scheduler` are standalone binaries
+//! built on it. This crate keeps the axum HTTP route tree + chat
+//! strategy and exposes [`api_main`].
 //!
-//! `src/main.rs` is now a thin wrapper that calls [`api_main`];
-//! `src/bin/minerva-worker.rs` calls [`worker_main`]. Both run the
-//! same `AppState::new` and (since Phase 3.5 hasn't moved the
-//! schedulers yet) the same `worker::start` machinery; the only
-//! difference is whether the HTTP listener is bound.
+//! `src/main.rs` is a thin wrapper that calls [`api_main`]. The worker
+//! and scheduler binaries live in their own crates; this crate links
+//! axum, they do not.
 //!
-//! ## Why two `pub async fn` instead of branching on env in `main`
+//! ## Why an entrypoint fn instead of branching on env in `main`
 //!
 //! Putting `if env == "api" else if env == "worker"` in a single main
-//! ties pod role to runtime config, which is fragile. Two binaries
-//! match the cleaner "image determines role" pattern; the env var
+//! ties pod role to runtime config, which is fragile. Separate binaries
+//! match the cleaner "image determines role" pattern; an env var
 //! controls only the cutover toggle (`MINERVA_RUN_WORKER` on the api
 //! binary).
 
 pub mod auth;
-pub mod classification;
-pub mod config;
 pub mod dev_seed;
 pub mod error;
 pub mod ext_obfuscate;
-pub mod feature_flags;
-pub mod github_url;
 pub mod lti;
-pub mod lti_nrps;
-pub mod model_capabilities;
-pub mod relink_scheduler;
 pub mod routes;
-pub mod rules;
-pub mod state;
 pub mod strategy;
-pub mod system_defaults;
-pub mod worker;
+
+// Modules moved to the axum-free `minerva-app-core` crate. Re-exported
+// at the crate root so existing `crate::config`, `crate::state`,
+// `crate::worker`, `crate::schedulers`, etc. paths across routes /
+// strategy keep resolving. Phase 3.5 moved the Canvas sync engine,
+// the LTI NRPS client, and the periodic scheduler loops down there
+// too, so the standalone `minerva-scheduler` binary links no axum.
+pub use minerva_app_core::{
+    canvas, classification, config, feature_flags, github_url, llm, lti_nrps, model_capabilities,
+    relink_scheduler, rules, schedulers, state, system_defaults, worker,
+};
 
 use axum::response::{IntoResponse, Response};
 use axum::Router;
@@ -56,34 +56,6 @@ fn init_tracing() {
         .init();
 }
 
-/// Spawn the periodic `/proc/self/status` memprobe. Each binary calls
-/// this from its own main; the trace line is labelled by the binary's
-/// own log target so a grep for `memprobe` lands on the right pod.
-fn spawn_memprobe() {
-    tokio::spawn(async move {
-        let started = std::time::Instant::now();
-        loop {
-            if let Some(stats) = read_proc_self_status() {
-                tracing::info!(
-                    "memprobe: uptime={}s vm_rss={} MiB vm_hwm={} MiB vm_size={} MiB vm_data={} MiB threads={}",
-                    started.elapsed().as_secs(),
-                    stats.vm_rss_kb / 1024,
-                    stats.vm_hwm_kb / 1024,
-                    stats.vm_size_kb / 1024,
-                    stats.vm_data_kb / 1024,
-                    stats.threads,
-                );
-            }
-            let interval = if started.elapsed() < std::time::Duration::from_secs(5 * 60) {
-                std::time::Duration::from_secs(5)
-            } else {
-                std::time::Duration::from_secs(60)
-            };
-            tokio::time::sleep(interval).await;
-        }
-    });
-}
-
 /// API binary entrypoint. Boots HTTP routes, the worker (gated on
 /// `MINERVA_RUN_WORKER`), the LTI provider, and the background
 /// backfills + benchmarks. Same body as the pre-Phase-3 `main.rs`,
@@ -95,8 +67,8 @@ pub async fn api_main() -> anyhow::Result<()> {
     let config = config::Config::from_env()?;
     let state = state::AppState::new(&config).await?;
 
-    // Memory probe: see the function's doc for cadence / rationale.
-    spawn_memprobe();
+    // Memory probe: see `minerva_app_core::memprobe` for cadence / rationale.
+    minerva_app_core::memprobe::spawn();
 
     // One-shot backfill of the document_id payload index across pre-existing
     // course_* collections. New collections get the index at creation time.
@@ -114,7 +86,7 @@ pub async fn api_main() -> anyhow::Result<()> {
     // LOCKED` so dual-running during the cutover window is safe; the
     // env var is the eventual off switch.
     if config.run_worker {
-        worker::start(state.clone(), config.max_concurrent_ingests);
+        schedulers::start(state.clone(), config.max_concurrent_ingests);
     } else {
         tracing::info!(
             "worker: disabled in this pod (MINERVA_RUN_WORKER=false); claim loop runs in the minerva-worker pod"
@@ -264,7 +236,7 @@ pub async fn api_main() -> anyhow::Result<()> {
     // The trait carries `&[(String, u64)]` (matches the protobuf shape
     // for the Phase 1 remote variant); convert the borrowed-string
     // constant once at startup.
-    let startup_models: Vec<(String, u64)> = minerva_ingest::pipeline::STARTUP_BENCHMARK_MODELS
+    let startup_models: Vec<(String, u64)> = minerva_catalog::STARTUP_BENCHMARK_MODELS
         .iter()
         .map(|(m, d)| ((*m).to_string(), *d))
         .collect();
@@ -336,63 +308,10 @@ pub async fn api_main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Worker binary entrypoint.
-///
-/// Always spawns the doc-claim loop + stale-doc sweeper + relink
-/// sweeper. Also spawns the periodic scheduler loops (Canvas / LTI
-/// NRPS / platform health / pending platform cleanup) when
-/// `MINERVA_RUN_SCHEDULER` is true (the Phase 3.5 default). The
-/// Phase 3.5 cutover flips it to false on the worker once the
-/// dedicated `minerva-scheduler` pod is confirmed running the loops.
-pub async fn worker_main() -> anyhow::Result<()> {
-    dotenvy::dotenv().ok();
-    init_tracing();
-
-    let config = config::Config::from_env()?;
-    let state = state::AppState::new(&config).await?;
-
-    spawn_memprobe();
-
-    tracing::info!("starting worker (doc claim + stale/relink sweepers)");
-    worker::start_worker_loops(state.clone(), config.max_concurrent_ingests);
-
-    if config.run_scheduler {
-        tracing::info!("starting scheduler loops in-process (MINERVA_RUN_SCHEDULER=true)");
-        worker::start_scheduler_loops(state);
-    } else {
-        tracing::info!(
-            "scheduler: disabled in this pod (MINERVA_RUN_SCHEDULER=false); periodic loops run in the minerva-scheduler pod"
-        );
-    }
-
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("worker: ctrl_c received, shutting down");
-    Ok(())
-}
-
-/// Scheduler binary entrypoint. Boots AppState (so the loops can
-/// reach DB / qdrant / embedder if they need to call route handlers
-/// that happen to require them, e.g. Canvas downloads documents and
-/// the worker pipeline embeds them; the scheduler itself doesn't
-/// embed, but `routes::canvas::run_sync` is the same function the
-/// admin "Sync now" path calls), then spawns just the periodic
-/// scheduler loops and blocks on Ctrl-C.
-pub async fn scheduler_main() -> anyhow::Result<()> {
-    dotenvy::dotenv().ok();
-    init_tracing();
-
-    let config = config::Config::from_env()?;
-    let state = state::AppState::new(&config).await?;
-
-    spawn_memprobe();
-
-    tracing::info!("starting scheduler (canvas / lti nrps / platform health / pending cleanup)");
-    worker::start_scheduler_loops(state);
-
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("scheduler: ctrl_c received, shutting down");
-    Ok(())
-}
+// The scheduler binary entrypoint moved to the standalone
+// `minerva-scheduler` crate (Phase 3.5), mirroring `minerva-worker`. It
+// boots `AppState` and calls `minerva_app_core::schedulers::start_scheduler_loops`
+// directly; nothing in the api crate references it anymore.
 
 /// Walk every `course_*` collection and idempotently add the `document_id`
 /// payload index. Existing indexes return an error from Qdrant which we
@@ -419,52 +338,6 @@ async fn backfill_document_id_indexes(qdrant: &qdrant_client::Qdrant) {
         course_collections.len()
     );
     for name in course_collections {
-        minerva_ingest::pipeline::ensure_document_id_index(qdrant, &name).await;
+        minerva_pipeline::pipeline::ensure_document_id_index(qdrant, &name).await;
     }
-}
-
-/// Selected fields from `/proc/self/status`, all in KiB / counts. Used by
-/// the periodic `memprobe` task to give us a trace of process memory and
-/// thread count right up to an OOM kill, so the next incident points at
-/// the actual offender instead of needing a guess. Only Linux pods set
-/// these; on a non-Linux dev host this returns `None` and the probe
-/// silently skips.
-struct ProcStatus {
-    vm_rss_kb: u64,
-    vm_hwm_kb: u64,
-    vm_size_kb: u64,
-    vm_data_kb: u64,
-    threads: u64,
-}
-
-fn read_proc_self_status() -> Option<ProcStatus> {
-    let content = std::fs::read_to_string("/proc/self/status").ok()?;
-    let mut vm_rss_kb = None;
-    let mut vm_hwm_kb = None;
-    let mut vm_size_kb = None;
-    let mut vm_data_kb = None;
-    let mut threads = None;
-    for line in content.lines() {
-        let parse_kb = |rest: &str| -> Option<u64> {
-            rest.split_whitespace().next().and_then(|s| s.parse().ok())
-        };
-        if let Some(rest) = line.strip_prefix("VmRSS:") {
-            vm_rss_kb = parse_kb(rest);
-        } else if let Some(rest) = line.strip_prefix("VmHWM:") {
-            vm_hwm_kb = parse_kb(rest);
-        } else if let Some(rest) = line.strip_prefix("VmSize:") {
-            vm_size_kb = parse_kb(rest);
-        } else if let Some(rest) = line.strip_prefix("VmData:") {
-            vm_data_kb = parse_kb(rest);
-        } else if let Some(rest) = line.strip_prefix("Threads:") {
-            threads = parse_kb(rest);
-        }
-    }
-    Some(ProcStatus {
-        vm_rss_kb: vm_rss_kb?,
-        vm_hwm_kb: vm_hwm_kb?,
-        vm_size_kb: vm_size_kb?,
-        vm_data_kb: vm_data_kb?,
-        threads: threads?,
-    })
 }

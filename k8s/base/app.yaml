@@ -15,8 +15,9 @@ spec:
     metadata:
       labels:
         app: minerva-app
-        # Phase 1 NetworkPolicy gate: only pods with this label can
-        # reach the embedder/reranker ClusterIP services.
+        # Intended NetworkPolicy selector (policy not yet applied): pods
+        # with this label are the only ones meant to reach the
+        # embedder/reranker ClusterIP services.
         minerva-internal-client: "true"
     spec:
       containers:
@@ -80,7 +81,7 @@ spec:
           volumeMounts:
             # Shared docs hostPath; api writes uploads + serves
             # downloads, worker / scheduler also mount it. See
-            # docs/microservices-split.md "Persistent volumes".
+            # docs/ARCHITECTURE.md "Service topology".
             - name: app-data
               mountPath: /data
           resources:

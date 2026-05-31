@@ -377,7 +377,7 @@ The structural fix is to split these into separate services (see
 "Architecture debt" below); until then we have several pieces of
 defense to keep this from OOM-killing the pod.
 
-### FastEmbed cache LRU (`backend/crates/minerva-ingest/src/fastembed_embedder.rs`)
+### FastEmbed cache LRU (`backend/crates/minerva-embed-engine/src/fastembed_embedder.rs`)
 
 Bounded model cache keyed by HuggingFace model id. Three things make
 the LRU actually bound RSS, learned the hard way:
@@ -434,7 +434,7 @@ warmed arena); the four-model startup set with sync eviction lands
 at ~3.5 GiB steady-state holding only the last (arctic-m, the
 default). If you add a model here, factor that into the budget.
 
-### MemBudget (`backend/crates/minerva-ingest/src/mem_budget.rs`)
+### MemBudget (`backend/crates/minerva-embed-engine/src/mem_budget.rs`)
 
 Pod-wide MiB-permit pool for fat background ops that allocate
 *outside* the fastembed cache: cross-encoder reranker loads, per-doc
@@ -446,12 +446,18 @@ axum + ORT runtime + glibc fragmentation).
 Tunable via `MINERVA_MEM_BUDGET_MIB`. On a 6 GiB pod with the 55%
 cache fraction that's ~1.7 GiB.
 
-**Currently constructed in `AppState::new` but not yet wired into
-the reranker, worker, or other consumers.** The primitive is in
-place; consumers acquire from it once the integration ships. The
-shape callers should use: `state.mem_budget.acquire(mib, "label")`
-for a guard that releases on drop, or `try_acquire` for the worker
-deciding whether to claim a new doc without blocking.
+**No longer constructed in `AppState::new`.** The backend crate split
+moved this primitive into `minerva-embed-engine` (alongside the model
+caches it is sized against) and dropped the `mem_budget` field from
+`AppState`. The split also dissolved its original rationale: the
+permit pool existed because one cgroup held the fastembed cache *and*
+the worker / reranker / chat heaps at once. Post-split the model
+caches live only in the `minerva-embedder` / `minerva-reranker` pods,
+which no longer co-host the fat ingest / MBZ / reclassify ops, so a
+single shared pool on `AppState` no longer maps to the topology. The
+primitive is kept in `minerva-embed-engine` for per-service wiring
+(e.g. the embedder gating concurrent model loads); it currently has
+no live consumer, same as before the split.
 
 ### memprobe (`backend/crates/minerva-server/src/main.rs`)
 

@@ -4,7 +4,7 @@ package minerva.embedder.v1;
 
 // Embedder service: serves embedding vectors for the api (chat query
 // path) and worker (ingest path) processes. See
-// docs/microservices-split.md for the full service split design.
+// docs/ARCHITECTURE.md for the full service split design.
 //
 // Two RPC methods so the priority lane (high for chat, low for ingest)
 // carries through the wire protocol. The server dispatches each into

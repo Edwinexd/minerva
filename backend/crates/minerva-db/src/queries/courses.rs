@@ -27,12 +27,12 @@ pub struct CourseRow {
     /// pipeline to pick a versioned Qdrant collection name; legacy
     /// version=1 maps to `course_{id}` for backward compatibility,
     /// version>=2 maps to `course_{id}_v{n}`. See
-    /// `minerva-ingest::pipeline::collection_name`.
+    /// `minerva-pipeline::pipeline::collection_name`.
     pub embedding_version: i32,
     /// Per-course cross-encoder re-ranker model id. Selected from the
     /// admin-managed `reranker_models` catalog; independent of the
     /// embedding model (changing it needs no re-embed). See
-    /// `minerva_ingest::reranker`.
+    /// `minerva_embed_engine::reranker`.
     pub reranker_model: String,
     pub daily_token_limit: i64,
     pub active: bool,

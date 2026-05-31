@@ -6,7 +6,7 @@ package minerva.reranker.v1;
 // `embedding_search` returns a candidate pool from Qdrant; the
 // reranker reorders to top-k. Single RPC method; no priority-lane
 // distinction because today only chat calls into it. See
-// docs/microservices-split.md.
+// docs/ARCHITECTURE.md.
 service Reranker {
   rpc Rerank(RerankRequest) returns (RerankResponse);
 

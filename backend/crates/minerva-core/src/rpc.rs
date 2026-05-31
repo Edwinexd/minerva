@@ -7,14 +7,14 @@
 //! `minerva-rpc`) and the future remote gRPC client implement these
 //! traits.
 //!
-//! See `docs/microservices-split.md` for the full phased split plan.
+//! See `docs/ARCHITECTURE.md` for the service split design.
 
 use async_trait::async_trait;
 use serde::Serialize;
 
 /// Result of benchmarking one embedding model on the fixed benchmark
 /// corpus. Field-for-field mirror of
-/// `minerva_ingest::fastembed_embedder::BenchmarkResult` so the local
+/// `minerva_embed_engine::fastembed_embedder::BenchmarkResult` so the local
 /// wrapper translates without loss; the Phase 1 gRPC proto maps to the
 /// same shape.
 #[derive(Clone, Debug, Serialize)]

@@ -11,7 +11,7 @@
 //! - `Internal` for everything else
 use std::sync::Arc;
 
-use minerva_ingest::fastembed_embedder::FastEmbedder;
+use minerva_embed_engine::fastembed_embedder::FastEmbedder;
 use minerva_rpc::proto::embedder::{
     embedder_server::Embedder as ProtoService, BenchmarkOneRequest, BenchmarkResult,
     BenchmarkStateRequest, BenchmarkStateResponse, BenchmarksResponse, EmbedRequest, EmbedResponse,
@@ -108,10 +108,10 @@ impl ProtoService for EmbedderService {
             .await
         {
             Ok(r) => Ok(Response::new(to_proto_bench(r))),
-            Err(minerva_ingest::fastembed_embedder::BenchmarkError::Busy) => Err(
+            Err(minerva_embed_engine::fastembed_embedder::BenchmarkError::Busy) => Err(
                 Status::failed_precondition("another benchmark is already running"),
             ),
-            Err(minerva_ingest::fastembed_embedder::BenchmarkError::Failed(e)) => {
+            Err(minerva_embed_engine::fastembed_embedder::BenchmarkError::Failed(e)) => {
                 Err(Status::internal(e))
             }
         }
@@ -137,7 +137,7 @@ impl ProtoService for EmbedderService {
     }
 }
 
-fn to_proto_bench(r: minerva_ingest::fastembed_embedder::BenchmarkResult) -> BenchmarkResult {
+fn to_proto_bench(r: minerva_embed_engine::fastembed_embedder::BenchmarkResult) -> BenchmarkResult {
     BenchmarkResult {
         model: r.model,
         dimensions: r.dimensions,

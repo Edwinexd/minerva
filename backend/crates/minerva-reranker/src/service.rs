@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use minerva_ingest::reranker::{BenchmarkError as InnerBenchmarkError, FastReranker};
+use minerva_embed_engine::reranker::{BenchmarkError as InnerBenchmarkError, FastReranker};
 use minerva_rpc::proto::reranker::{
     reranker_server::Reranker as ProtoService, BenchmarkOneRequest, BenchmarkStateRequest,
     BenchmarkStateResponse, BenchmarksResponse, GetBenchmarksRequest,

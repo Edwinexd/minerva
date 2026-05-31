@@ -182,18 +182,28 @@ def system_overview() -> graphviz.Digraph:
         _box(c, "lua", "mod_lua", icon="apache", subtitle="external-auth invites")
 
     with g.subgraph(name="cluster_app") as c:
-        c.attr(label="minerva-app", **CLUSTER_BASE)
-        _box(c, "api", "axum HTTP API", icon="rust")
-        _box(c, "worker", "ingest worker")
-        _box(c, "kg", "KG linker", subtitle="debounced sweeper")
-        _box(c, "cron", "Schedulers", subtitle="Canvas + transcripts")
+        c.attr(label="minerva-api (axum, scales horizontally)", **CLUSTER_BASE)
+        _box(c, "api", "HTTP API", icon="rust", subtitle="auth + chat strategy")
+
+    with g.subgraph(name="cluster_bg") as c:
+        c.attr(label="Background workers", **CLUSTER_BASE)
+        _box(c, "worker", "minerva-worker", icon="rust",
+             subtitle="ingest + KG linker")
+        _box(c, "cron", "minerva-scheduler", icon="rust",
+             subtitle="Canvas / NRPS / transcripts")
+
+    with g.subgraph(name="cluster_models") as c:
+        c.attr(label="Model servers (internal gRPC)", **CLUSTER_BASE)
+        _box(c, "embedder", "minerva-embedder", icon="huggingface",
+             subtitle="FastEmbedder LRU")
+        _box(c, "reranker", "minerva-reranker", icon="huggingface",
+             subtitle="cross-encoder LRU")
 
     with g.subgraph(name="cluster_state") as c:
         c.attr(label="Stateful", **CLUSTER_BASE)
         _box(c, "pg", "PostgreSQL 16", icon="postgres")
         _box(c, "qd", "Qdrant", icon="qdrant", subtitle="per-course collections")
         _box(c, "docs", "/data0/minerva/data", subtitle="document blobs")
-        _box(c, "hf", "fastembed cache", icon="huggingface")
 
     with g.subgraph(name="cluster_ai") as c:
         c.attr(label="AI providers", **CLUSTER_BASE)
@@ -221,16 +231,23 @@ def system_overview() -> graphviz.Digraph:
     # API <-> LLM (request + SSE response).
     g.edge("api", "llm", dir="both", label="chat")
 
-    # Worker writes embeddings + caches models.
+    # API -> model servers over gRPC (chat query embed + rerank). The api
+    # owns no model weights; it reaches the embedder / reranker pods.
+    g.edge("api", "embedder", label="gRPC")
+    g.edge("api", "reranker", label="gRPC")
+
+    # Worker: claim queue, write vectors, read/write blobs, embed via gRPC
+    # (or OpenAI for openai-provider courses), classify + KG-link via LLM.
+    g.edge("worker", "pg", dir="both")
     g.edge("worker", "qd")
-    g.edge("worker", "hf", dir="both")
+    g.edge("worker", "docs", dir="both")
+    g.edge("worker", "embedder", label="gRPC embed")
     g.edge("worker", "oai", label="embed")
+    g.edge("worker", "llm", dir="both", label="link / classify")
 
-    # KG linker reads from Qdrant + asks LLM.
-    g.edge("kg", "qd", dir="both")
-    g.edge("kg", "llm", dir="both", label="link / classify")
-
-    # Schedulers pull from external content (request + response).
+    # Scheduler: due-row scans + external pulls (downloads land in docs).
+    g.edge("cron", "pg", dir="both")
+    g.edge("cron", "docs")
     g.edge("cron", "canvas", dir="both", label="pull")
     g.edge("cron", "play", dir="both", label="pull")
 

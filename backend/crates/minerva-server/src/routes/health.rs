@@ -99,7 +99,7 @@ pub async fn embedding_models(
             .map(|r| (r.model, r.enabled))
             .collect();
 
-    let models: Vec<Value> = minerva_ingest::pipeline::VALID_LOCAL_MODELS
+    let models: Vec<Value> = minerva_catalog::VALID_LOCAL_MODELS
         .iter()
         .filter(|(name, _)| policy.get(*name).copied().unwrap_or(false))
         .map(|(name, dims)| {
@@ -138,7 +138,7 @@ pub async fn reranker_models(
             .map(|r| (r.model, r.enabled))
             .collect();
 
-    let models: Vec<Value> = minerva_ingest::reranker::VALID_RERANKER_MODELS
+    let models: Vec<Value> = minerva_catalog::VALID_RERANKER_MODELS
         .iter()
         .filter(|name| policy.get(**name).copied().unwrap_or(false))
         .map(|name| json!({ "model": name }))

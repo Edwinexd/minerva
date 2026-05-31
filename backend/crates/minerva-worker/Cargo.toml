@@ -1,0 +1,23 @@
+[package]
+name = "minerva-worker"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone document-ingest worker binary. Depends only on the
+# axum-free `minerva-app-core` (AppState + the doc-claim / relink /
+# stale-doc loops), so this image compiles no axum, no route tree, and
+# no MBZ parser. It reaches the embedder / reranker over gRPC via
+# AppState's remote clients (MINERVA_EMBEDDER_URL / RERANKER_URL).
+
+[[bin]]
+name = "minerva-worker"
+path = "src/main.rs"
+
+[dependencies]
+minerva-app-core = { path = "../minerva-app-core" }
+
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+dotenvy.workspace = true
+anyhow = "1"

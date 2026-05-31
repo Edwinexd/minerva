@@ -10,29 +10,34 @@ path = "src/lib.rs"
 name = "minerva"
 path = "src/main.rs"
 
-# Phase 3 of the microservices split: standalone doc-claim worker
-# binary that shares the api crate's module tree (so it can call into
-# classification, relink scheduler, routes::canvas::run_sync, etc.
-# without a separate crate). Selected via TARGET_BIN in
-# `docker/Dockerfile.prod`.
-[[bin]]
-name = "minerva-worker"
-path = "src/bin/minerva-worker.rs"
+# The doc-claim worker (`minerva-worker`) and the periodic scheduler
+# (`minerva-scheduler`) are now their own crates, built on the axum-free
+# `minerva-app-core`, so their images link no axum / routes / MBZ parser.
 
-# Phase 3.5: standalone scheduler binary for the periodic Canvas /
-# LTI NRPS / platform-health / pending-platform-cleanup loops.
-# Same module tree access as the worker for the same reason.
-[[bin]]
-name = "minerva-scheduler"
-path = "src/bin/minerva-scheduler.rs"
+[features]
+default = []
+# Single-process local-dev build: links the in-process model engine so
+# the one `minerva` binary can embed/rerank without separate
+# embedder/reranker pods. Off in prod images (they reach the model
+# servers over gRPC). The dev Dockerfile builds with
+# `--features local-engine`.
+local-engine = ["minerva-app-core/local-engine"]
 
 [dependencies]
 minerva-core = { path = "../minerva-core" }
+minerva-catalog = { path = "../minerva-catalog" }
+# `axum` feature: turns on app-core's `IntoResponse for AppError` impl so
+# route handlers can return `Result<_, AppError>`. The worker / scheduler
+# binaries depend on app-core WITHOUT this feature, so they link no axum.
+minerva-app-core = { path = "../minerva-app-core", features = ["axum"] }
 minerva-db = { path = "../minerva-db" }
-minerva-ingest = { path = "../minerva-ingest" }
-# Client wrappers for the embedder + reranker services. Phase 0 uses
-# the in-process `LocalEmbedderClient` / `LocalRerankerClient`;
-# Phase 1/2 wire the remote gRPC variants behind the same trait.
+minerva-pipeline = { path = "../minerva-pipeline" }
+# Moodle .mbz importer (api-only; the import-mbz route).
+minerva-mbz = { path = "../minerva-mbz" }
+# Remote gRPC client wrappers for the embedder + reranker services
+# (engine-free). The in-process engine fallback lives in app-core
+# behind its `local-engine` feature, which this crate's `local-engine`
+# enables; the prod api never links the model engine.
 minerva-rpc = { path = "../minerva-rpc" }
 # Concept-graph integration via the eureka HTTP service has been
 # removed pending a clean HTTP-wrapper rewrite. Previously a path-dep

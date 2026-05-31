@@ -1,0 +1,14 @@
+[package]
+name = "minerva-catalog"
+version = "0.1.0"
+edition = "2021"
+
+# Pure-data model catalog: the compile-time tables of embedding /
+# reranker model ids the runtime knows how to load, plus the
+# embedding-provider whitelist. Deliberately dependency-free so every
+# tier can reference the same source of truth without anyone pulling
+# the heavy model engine: the api/server (catalog validation + DB
+# seeding), the engine pods (boot warmup), and the ingest pipeline all
+# depend on this leaf crate rather than on each other.
+
+[dependencies]

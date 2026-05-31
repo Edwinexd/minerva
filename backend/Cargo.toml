@@ -2,9 +2,16 @@
 members = [
     "crates/minerva-server",
     "crates/minerva-core",
-    "crates/minerva-ingest",
+    "crates/minerva-catalog",
+    "crates/minerva-app-core",
+    "crates/minerva-embed-engine",
+    "crates/minerva-mbz",
+    "crates/minerva-pipeline",
+    "crates/minerva-worker",
+    "crates/minerva-scheduler",
     "crates/minerva-db",
     "crates/minerva-rpc",
+    "crates/minerva-rpc-local",
     "crates/minerva-embedder",
     "crates/minerva-reranker",
 ]
@@ -31,7 +38,7 @@ qdrant-client = "1"
 # Qwen/Qwen3-Embedding-0.6B alongside the ONNX-backed fastembed models.
 # That model isn't part of `EmbeddingModel`; it goes through fastembed's
 # separate `Qwen3TextEmbedding` API. See
-# `crates/minerva-ingest/src/fastembed_embedder.rs`.
+# `crates/minerva-embed-engine/src/fastembed_embedder.rs`.
 fastembed = { version = "5", features = ["qwen3"] }
 candle-core = "0.10"
 # Direct hf-hub dep so the custom-ONNX loader (e.g. snowflake-arctic-embed-m-v2.0

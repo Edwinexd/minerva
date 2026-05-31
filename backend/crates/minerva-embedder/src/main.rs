@@ -1,7 +1,7 @@
 //! Standalone gRPC server fronting the FastEmbedder model cache.
 //!
 //! Phase 1 of the microservices split (see
-//! `docs/microservices-split.md`). The api / worker pods call into
+//! `docs/ARCHITECTURE.md`). The api / worker pods call into
 //! this binary via `minerva_rpc::RemoteEmbedderClient` when
 //! `MINERVA_EMBEDDER_URL` is set; otherwise they keep using the
 //! in-process `LocalEmbedderClient` (zero-behaviour-change fallback).
@@ -9,8 +9,9 @@
 //! Architecture:
 //!
 //! - One [`tonic::transport::Server`] listening on `MINERVA_EMBEDDER_PORT`
-//!   (default 50051), no TLS (internal-only ClusterIP traffic, gated
-//!   by k8s NetworkPolicy).
+//!   (default 50051), no TLS (internal-only ClusterIP traffic; a
+//!   restricting NetworkPolicy is planned but not yet applied, see
+//!   docs/ARCHITECTURE.md).
 //! - One process-wide [`FastEmbedder`] cache owned by the service
 //!   impl; both Embed and EmbedQuery RPCs share it, preserving the
 //!   biased high/low priority lanes.
@@ -20,7 +21,7 @@
 
 use std::sync::Arc;
 
-use minerva_ingest::fastembed_embedder::FastEmbedder;
+use minerva_embed_engine::fastembed_embedder::FastEmbedder;
 use minerva_rpc::proto::embedder::embedder_server::EmbedderServer;
 use tonic::transport::Server;
 
@@ -56,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         tracing::info!("running fastembed boot benchmark set...");
         match warmup
-            .run_benchmarks(minerva_ingest::pipeline::STARTUP_BENCHMARK_MODELS)
+            .run_benchmarks(minerva_catalog::STARTUP_BENCHMARK_MODELS)
             .await
         {
             Ok(results) => tracing::info!(

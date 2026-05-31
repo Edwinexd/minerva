@@ -13,19 +13,24 @@ namespace: minerva
 #        k3d cluster create minerva-test --servers 1 --agents 0 \
 #          --port 30090:30090@loadbalancer --wait
 #
-#   2. Build the host-side test images. The two test Dockerfiles
-#      (docker/Dockerfile.embedder-test, docker/Dockerfile.reranker-test)
-#      skip the cargo build inside Docker and just COPY the
-#      cargo-built release binary, which is much faster than the
-#      production Dockerfile.prod path. Because backend/target is in
-#      .dockerignore, the build context has to be assembled in /tmp:
+#   2. Build the host-side test images: COPY the cargo-built release
+#      binary into a slim runtime, which is much faster than the
+#      production Dockerfile.prod path (it compiles from source). The
+#      runtime wrapper is trivial, so the recipe writes a throwaway
+#      Dockerfile inline rather than committing one per service.
+#      backend/target is in .dockerignore, so assemble the context in /tmp:
 #        cargo build --release -p minerva-embedder -p minerva-reranker \
 #          --manifest-path backend/Cargo.toml
 #        for bin in embedder reranker; do
 #          mkdir -p /tmp/${bin}-build
 #          cp backend/target/release/minerva-${bin} /tmp/${bin}-build/
-#          sed 's|backend/target/release/minerva-'${bin}'|minerva-'${bin}'|' \
-#              docker/Dockerfile.${bin}-test > /tmp/${bin}-build/Dockerfile
+#          cat > /tmp/${bin}-build/Dockerfile <<EOF
+#        FROM debian:trixie-slim
+#        RUN apt-get update && apt-get install -y --no-install-recommends \
+#              ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+#        COPY minerva-${bin} /usr/local/bin/minerva-${bin}
+#        CMD ["/usr/local/bin/minerva-${bin}"]
+#        EOF
 #          docker build -t minerva-${bin}:test /tmp/${bin}-build
 #        done
 #

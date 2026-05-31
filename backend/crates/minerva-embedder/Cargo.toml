@@ -6,7 +6,7 @@ edition = "2021"
 # Standalone gRPC server that owns the FastEmbedder model cache. Talks
 # the proto defined in `minerva-rpc::proto::embedder`; the api / worker
 # call into it via `RemoteEmbedderClient`. See
-# `docs/microservices-split.md` for the full design.
+# `docs/ARCHITECTURE.md` for the full design.
 
 [[bin]]
 name = "minerva-embedder"
@@ -14,7 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 minerva-core = { path = "../minerva-core" }
-minerva-ingest = { path = "../minerva-ingest" }
+minerva-catalog = { path = "../minerva-catalog" }
+minerva-embed-engine = { path = "../minerva-embed-engine" }
 minerva-rpc = { path = "../minerva-rpc" }
 
 async-trait = "0.1"

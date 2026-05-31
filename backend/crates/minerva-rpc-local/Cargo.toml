@@ -1,0 +1,18 @@
+[package]
+name = "minerva-rpc-local"
+version = "0.1.0"
+edition = "2021"
+
+# In-process implementations of the embedder / reranker client traits
+# that delegate to the local model engine. Kept SEPARATE from
+# `minerva-rpc` (which holds only the protos + remote gRPC clients) so
+# that depending on the remote clients never drags in the heavy
+# `minerva-embed-engine` (fastembed / candle / hf-hub). The
+# model-server binaries and the single-process local-dev build are the
+# only consumers; api / worker / scheduler use the remote clients from
+# `minerva-rpc` and never link this.
+
+[dependencies]
+async-trait = "0.1"
+minerva-core = { path = "../minerva-core" }
+minerva-embed-engine = { path = "../minerva-embed-engine" }

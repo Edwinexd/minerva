@@ -2830,6 +2830,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "minerva-app-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.8.9",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "hex",
+ "hmac 0.13.0",
+ "jsonwebtoken",
+ "minerva-catalog",
+ "minerva-core",
+ "minerva-db",
+ "minerva-embed-engine",
+ "minerva-pipeline",
+ "minerva-rpc",
+ "minerva-rpc-local",
+ "qdrant-client",
+ "rand 0.10.1",
+ "rand_chacha 0.3.1",
+ "regex",
+ "reqwest 0.13.3",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "minerva-catalog"
+version = "0.1.0"
+
+[[package]]
 name = "minerva-core"
 version = "0.1.0"
 dependencies = [
@@ -2856,14 +2898,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "minerva-embed-engine"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "fastembed",
+ "hf-hub",
+ "libc",
+ "minerva-catalog",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "minerva-embedder"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "dotenvy",
+ "minerva-catalog",
  "minerva-core",
- "minerva-ingest",
+ "minerva-embed-engine",
  "minerva-rpc",
  "prost",
  "tokio",
@@ -2873,29 +2930,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "minerva-ingest"
+name = "minerva-mbz"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "quick-xml",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "minerva-pipeline"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "candle-core",
  "chrono",
- "fastembed",
- "flate2",
  "futures",
- "hf-hub",
- "libc",
+ "hex",
+ "minerva-catalog",
  "minerva-core",
  "minerva-db",
  "pdf-extract",
  "qdrant-client",
- "quick-xml",
  "reqwest 0.13.3",
  "scraper",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "sqlx",
- "tar",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2909,8 +2974,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "dotenvy",
+ "minerva-catalog",
  "minerva-core",
- "minerva-ingest",
+ "minerva-embed-engine",
  "minerva-rpc",
  "prost",
  "tokio",
@@ -2925,7 +2991,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "minerva-core",
- "minerva-ingest",
  "prost",
  "serde",
  "thiserror 2.0.18",
@@ -2934,6 +2999,27 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tracing",
+]
+
+[[package]]
+name = "minerva-rpc-local"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "minerva-core",
+ "minerva-embed-engine",
+]
+
+[[package]]
+name = "minerva-scheduler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dotenvy",
+ "minerva-app-core",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2952,9 +3038,12 @@ dependencies = [
  "hmac 0.13.0",
  "jsonwebtoken",
  "libc",
+ "minerva-app-core",
+ "minerva-catalog",
  "minerva-core",
  "minerva-db",
- "minerva-ingest",
+ "minerva-mbz",
+ "minerva-pipeline",
  "minerva-rpc",
  "qdrant-client",
  "rand 0.10.1",
@@ -2977,6 +3066,18 @@ dependencies = [
  "urlencoding",
  "uuid",
  "wiremock",
+]
+
+[[package]]
+name = "minerva-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dotenvy",
+ "minerva-app-core",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

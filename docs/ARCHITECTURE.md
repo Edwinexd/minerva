@@ -19,6 +19,68 @@ LMS, iframe, and service-account routes carry their own bearer-token or
 HMAC-signed-token middleware. Double-headed arrows indicate read/write
 relationships; single-headed arrows are push-only.
 
+## Service topology
+
+The backend is five Rust binaries built from one Cargo workspace, split by
+what each process must link so a fat ingest OOM can't take down the API and
+the API can scale without carrying model weights:
+
+- **minerva-api** (`minerva-server`) is the only binary that links the axum
+  route tree. It owns HTTP / auth / Shibboleth / LTI / external-invites, all
+  `/api/*` and `/api/service/*` routes, and chat-strategy execution. It holds
+  no model weights and reaches the embedder / reranker over gRPC, so it scales
+  horizontally.
+- **minerva-worker** runs the document-claim loop, the ingest pipeline
+  (`process_document`), the classifier, the MBZ parser, and the stale-doc +
+  relink sweepers. Axum-free.
+- **minerva-scheduler** runs only the periodic pollers: Canvas auto-sync, LTI
+  NRPS reconcile, LTI platform-health probe, and pending-platform cleanup. One
+  replica (so it needs no advisory locks), axum-free, tiny. Kept off the
+  worker's restart lifecycle so an ingest OOM or a worker roll never pauses
+  NRPS or resets the scheduler clocks. It is the sole owner of these loops (the
+  worker no longer runs them as a fallback). If the single pod is down the loops
+  pause and resume on recovery, which is acceptable because every loop is a
+  DB-driven "find what's due" query and the 30-day platform-orphan grace dwarfs
+  any normal outage window.
+- **minerva-embedder** and **minerva-reranker** are stateless gRPC (tonic)
+  model servers, each owning its own FastEmbed / cross-encoder LRU and
+  HuggingFace cache. They are internal-only (ClusterIP, no ingress). Caller
+  pods carry the `minerva-internal-client` label as the intended selector for a
+  NetworkPolicy, and a shared `MINERVA_INTERNAL_RPC_TOKEN` is the planned
+  RPC-auth control. Neither the NetworkPolicy object nor the token check is
+  applied yet, so today any in-cluster pod can reach them unauthenticated.
+  Tracked as the next hardening step.
+
+Shared, axum-free code (AppState, config, the Canvas sync engine, the LTI NRPS
+client, classification, the scheduler loops, `AppError`) lives in
+`minerva-app-core`. The api crate layers axum on top and enables app-core's
+`axum` feature, which switches on `AppError`'s `IntoResponse` impl; the worker
+and scheduler depend on app-core without that feature, so their images link no
+axum 0.8 and no model engine (verified with `cargo tree`: neither pulls
+axum 0.8, fastembed, candle, or ort).
+
+Key invariants:
+
+- **Postgres is the work queue** (`SELECT ... FOR UPDATE SKIP LOCKED` on
+  `documents.status`); there is no message broker, and the claim query is
+  replica-safe so workers can scale out.
+- **The shared filesystem is content-addressed.** api / worker / scheduler
+  share one hostPath at `/data/documents` (every file is written once under a
+  UUID path and the DB row is the synchronization point, so there is never a
+  two-writer race). The embedder and reranker each get a separate hf-cache
+  hostPath. Single-node k3s makes hostPath behave as ReadWriteMany; going
+  multi-node would swap `/data/documents` for an RWX PVC with no code change.
+- **Memory is budgeted per pod.** `MemBudget` (a MiB-permit pool) is sized per
+  service: the worker (pipeline + classifier + MBZ), the embedder (ORT scratch
+  outside its LRU), and the reranker (model loads) each carry one; the api and
+  scheduler hold no fat allocators and run it as a no-op.
+- **One embedder replica by default.** The FastEmbed LRU is per-pod, so a
+  second replica doubles resident model memory; scale out only if the
+  embedder's Status RPC reports queue contention.
+
+All five images come from one `docker/Dockerfile.prod`; a `TARGET_BIN`
+build-arg picks the binary and only the api image bundles the frontend.
+
 ## Document ingest pipeline
 
 ![Ingest pipeline](diagrams/ingest-pipeline.svg)

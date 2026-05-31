@@ -1,0 +1,61 @@
+[package]
+name = "minerva-app-core"
+version = "0.1.0"
+edition = "2021"
+
+# Shared, axum-free application core: AppState, config, the LtiKeyPair,
+# classification, the relink scheduler, the doc-claim worker loops, and
+# the supporting caches. Linked by the api crate (which adds axum +
+# routes on top) and by the standalone minerva-worker binary, so the
+# worker compiles none of the HTTP route tree. Deliberately has no
+# axum / tower / mbz dependency.
+
+[features]
+default = []
+# Single-process local-dev build: links the in-process model engine so
+# AppState can embed/rerank without separate embedder/reranker pods.
+# Off in prod (gRPC to the model servers).
+local-engine = ["dep:minerva-embed-engine", "dep:minerva-rpc-local"]
+# Render `AppError` to an HTTP response (the axum `IntoResponse` impl in
+# `error.rs`). Enabled only by the api crate (`minerva-server`); the
+# worker / scheduler binaries leave it off so their images link no
+# axum / tower.
+axum = ["dep:axum"]
+
+[dependencies]
+minerva-core = { path = "../minerva-core" }
+minerva-catalog = { path = "../minerva-catalog" }
+minerva-db = { path = "../minerva-db" }
+minerva-pipeline = { path = "../minerva-pipeline" }
+minerva-rpc = { path = "../minerva-rpc" }
+minerva-embed-engine = { path = "../minerva-embed-engine", optional = true }
+minerva-rpc-local = { path = "../minerva-rpc-local", optional = true }
+# Optional: only pulled in when the `axum` feature is on (api crate), for
+# the `IntoResponse for AppError` impl. Worker / scheduler builds never
+# enable it, so they link no axum.
+axum = { workspace = true, optional = true }
+
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+futures.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+sqlx.workspace = true
+qdrant-client.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+hex.workspace = true
+rand.workspace = true
+jsonwebtoken.workspace = true
+regex.workspace = true
+rsa.workspace = true
+rand_chacha.workspace = true
+urlencoding.workspace = true
+base64 = "0.22"
+anyhow = "1"
+async-trait = "0.1"
+tempfile.workspace = true

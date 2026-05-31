@@ -4,20 +4,22 @@
 //! The traits + protocol-neutral result types live in
 //! `minerva_core::rpc`; this crate provides the actual transports.
 //!
-//! - [`LocalEmbedderClient`] / [`LocalRerankerClient`]: in-process
-//!   wrappers (Phase 0 default).
-//! - [`embedder::RemoteEmbedderClient`]: tonic gRPC client (Phase 1).
-//!   Wired up when `MINERVA_EMBEDDER_URL` is set on the api/worker.
+//! - [`embedder::RemoteEmbedderClient`]: tonic gRPC client. Wired up
+//!   when `MINERVA_EMBEDDER_URL` is set on the api/worker/scheduler.
 //! - [`proto::embedder`]: generated client + server types from
 //!   `proto/embedder.proto`. The minerva-embedder binary imports the
 //!   server half; this crate's `RemoteEmbedderClient` uses the client
-//!   half. See `docs/microservices-split.md` for the full plan.
+//!   half. See `docs/ARCHITECTURE.md` for the full plan.
+//!
+//! The in-process `LocalEmbedderClient` / `LocalRerankerClient` live in
+//! the sibling `minerva-rpc-local` crate so depending on the remote
+//! clients here never drags in the heavy model engine.
 
 pub mod embedder;
 pub mod reranker;
 
-pub use embedder::{LocalEmbedderClient, RemoteEmbedderClient};
-pub use reranker::{LocalRerankerClient, RemoteRerankerClient};
+pub use embedder::RemoteEmbedderClient;
+pub use reranker::RemoteRerankerClient;
 
 // Re-export the trait + result types for convenience so consumers can
 // `use minerva_rpc::EmbedderClient` instead of reaching into core.

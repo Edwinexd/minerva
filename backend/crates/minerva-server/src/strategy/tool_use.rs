@@ -117,7 +117,7 @@ pub async fn run(
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name =
-        minerva_ingest::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
+        minerva_pipeline::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
 
     // Drop chunks from orphaned docs before any partition; see
     // `simple.rs` for the rationale. Computed once per turn and

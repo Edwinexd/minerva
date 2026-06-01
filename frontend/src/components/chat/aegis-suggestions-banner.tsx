@@ -94,15 +94,6 @@ interface AegisSuggestionsBannerProps {
   onApply: (rewritten: string) => void
   /** Collapse the banner for the current draft. */
   onDismiss: () => void
-  /**
-   * Initial state of the suggestions tray. Default false (collapsed
-   * pill, student opens with the chevron). Study mode passes true
-   * so the suggestions are immediately visible without an extra
-   * click; in an Aegis evaluation the whole point is for the
-   * participant to see what the analyzer said, and a hidden
-   * one-liner is exactly the wrong default.
-   */
-  defaultExpanded?: boolean
 }
 
 export function AegisSuggestionsBanner({
@@ -112,7 +103,6 @@ export function AegisSuggestionsBanner({
   onPreview,
   onApply,
   onDismiss,
-  defaultExpanded = false,
 }: AegisSuggestionsBannerProps) {
   const { t } = useTranslation("student")
 
@@ -120,8 +110,7 @@ export function AegisSuggestionsBanner({
   // one-line pill. Reset to collapsed every time the suggestions
   // change identity (e.g. analyzer fired again on edited input);
   // a stale preview from a different draft would be misleading.
-  // Study mode flips the initial value via `defaultExpanded`.
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [expanded, setExpanded] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(
     () => new Set(suggestions.map((_, i) => i)),
   )

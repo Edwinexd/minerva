@@ -126,7 +126,6 @@ const course: Course = {
     course_kg: false,
     aegis: false,
     concept_graph: false,
-    study_mode: false,
   },
   semester_label: null,
   daisy_offerings: [],

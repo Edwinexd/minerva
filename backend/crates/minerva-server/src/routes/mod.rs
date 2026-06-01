@@ -15,7 +15,6 @@ pub mod lti;
 mod play_designations;
 pub mod service;
 mod signed_urls;
-pub(crate) mod study;
 pub(crate) mod suggested_questions;
 mod system;
 mod usage;
@@ -82,12 +81,10 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/courses/{course_id}", canvas::course_router())
         .nest("/courses/{course_id}", usage::course_router())
         .nest("/courses/{course_id}", suggested_questions::router())
-        .nest("/courses/{course_id}/study", study::router())
         .nest("/admin", admin::router())
         .nest("/admin", external_auth::admin_router())
         .nest("/admin", lti::admin_router())
         .nest("/admin", integration_admin::router())
-        .nest("/admin", study::admin_router())
         .nest("/admin", system::router())
         .nest("/admin", daisy_admin::router())
         // Dev-mode routes (e.g. /admin/dev/seed). Each handler

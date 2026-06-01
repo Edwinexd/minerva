@@ -1,4 +1,3 @@
-pub mod aegis_iterations;
 pub mod api_keys;
 pub mod canvas;
 pub mod conversation_flags;
@@ -28,7 +27,6 @@ pub mod role_rules;
 pub mod role_suggestions;
 pub mod signed_urls;
 pub mod site_integration_keys;
-pub mod study;
 pub mod system_defaults;
 pub mod usage;
 pub mod user_eppn_aliases;

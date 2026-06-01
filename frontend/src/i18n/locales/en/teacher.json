@@ -15,13 +15,8 @@
       "apiKeys": "API Keys",
       "playDesignations": "Play Designations",
       "rag": "RAG Debug",
-      "study": "Study",
       "usage": "Usage"
     }
-  },
-  "study": {
-    "flagOffTitle": "Study mode isn't enabled for this course.",
-    "flagOffBody": "Ask a platform admin to flip the `study_mode` feature flag on under Admin > Course Management > Features. Once enabled, the consent screen, surveys, and per-task chat pipeline will replace the regular conversation list for course members."
   },
   "shared": {
     "loading": "Loading...",
@@ -421,17 +416,7 @@
     "roleTA": "TA",
     "roleTeacher": "Teacher",
     "add": "Add",
-    "remove": "Remove",
-    "removeStudyData": "Remove study data",
-    "removeStudyDataConfirm": "Permanently delete all study data (consent record, surveys, conversations, Aegis history) for {{name}}? This can't be undone. Their course membership stays.",
-    "studyStageTooltip": "Study pipeline stage: {{stage}}",
-    "studyStage": {
-      "consent": "Consent open",
-      "pre_survey": "Pre-survey",
-      "task": "In task",
-      "post_survey": "Post-survey",
-      "done": "Completed"
-    }
+    "remove": "Remove"
   },
   "playDesignations": {
     "title": "Play Designations",

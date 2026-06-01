@@ -21,7 +21,6 @@
       "externalInvites": "Externa inbjudningar",
       "lti": "LTI",
       "integrations": "Integrationer",
-      "study": "Studieläge",
       "system": "System",
       "defaults": "Standardvärden",
       "devTools": "Dev-verktyg"
@@ -35,8 +34,7 @@
     "join": "Gå med i kurs",
     "ltiBind": "Länka kurs",
     "ltiSetup": "Verktygsregistrering",
-    "ltiApprove": "Godkänn plattform",
-    "study": "Studie"
+    "ltiApprove": "Godkänn plattform"
   },
   "footer": {
     "licenseLead": "är licensierad under"

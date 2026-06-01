@@ -46,15 +46,6 @@ interface AegisFeedbackPanelProps {
    * un-dismisses it via the chat-side "Aegis" affordance.
    */
   onHide: () => void
-  /**
-   * When set, the mode badge is rendered as a static label (no
-   * toggle); the value overrides the user's stored preference for
-   * the duration of this render. Used by study mode, which forces
-   * `expert` so every participant runs under the same calibration
-   * (otherwise pre-existing localStorage values would create
-   * mode-confounding noise in the eval data).
-   */
-  forceMode?: import("./use-aegis-mode").AegisMode
 }
 
 /**
@@ -89,14 +80,11 @@ function dateGroupLabel(
 export function AegisFeedbackPanel({
   analyses,
   onHide,
-  forceMode,
 }: AegisFeedbackPanelProps) {
   const { t, i18n } = useTranslation("student")
-  const [storedMode, setStoredMode] = useAegisMode()
-  const mode = forceMode ?? storedMode
-  const modeIsForced = forceMode != null
+  const [mode, setStoredMode] = useAegisMode()
   const toggleMode = () =>
-    setStoredMode(storedMode === "beginner" ? "expert" : "beginner")
+    setStoredMode(mode === "beginner" ? "expert" : "beginner")
 
   // Newest first. We keep persisted rows with empty suggestion
   // lists ("looks good" turns) ; they're a useful signal in the
@@ -120,37 +108,22 @@ export function AegisFeedbackPanel({
             each Beginner/Expert flip changes the rubric the
             analyzer runs under for the next analyze call.
           */}
-          {modeIsForced ? (
-            // Forced mode: render as a static label (not a button)
-            // so it's clear the user can't change it. Title carries
-            // the explanation for screen-reader / hover users.
+          <button
+            type="button"
+            onClick={toggleMode}
+            className="rounded-4xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-pressed={mode === "expert"}
+            title={t("aegis.modeToggleHint")}
+          >
             <Badge
-              variant="default"
-              className="text-xs"
-              title={t("aegis.modeForcedHint")}
+              variant={mode === "expert" ? "default" : "outline"}
+              className="text-xs cursor-pointer"
             >
               {mode === "expert"
                 ? t("aegis.modeExpert")
                 : t("aegis.modeBeginner")}
             </Badge>
-          ) : (
-            <button
-              type="button"
-              onClick={toggleMode}
-              className="rounded-4xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-pressed={mode === "expert"}
-              title={t("aegis.modeToggleHint")}
-            >
-              <Badge
-                variant={mode === "expert" ? "default" : "outline"}
-                className="text-xs cursor-pointer"
-              >
-                {mode === "expert"
-                  ? t("aegis.modeExpert")
-                  : t("aegis.modeBeginner")}
-              </Badge>
-            </button>
-          )}
+          </button>
           <Button
             type="button"
             variant="ghost"

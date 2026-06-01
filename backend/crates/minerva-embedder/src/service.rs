@@ -87,11 +87,13 @@ impl ProtoService for EmbedderService {
             .iter()
             .map(|m| (m.model_name.as_str(), m.dimensions))
             .collect();
-        let results = self
-            .embedder
-            .run_benchmarks(&borrowed)
-            .await
-            .map_err(Status::internal)?;
+        let results = match self.embedder.run_benchmarks(&borrowed).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("embedder: run_benchmarks failed: {e}");
+                return Err(Status::internal(e));
+            }
+        };
         Ok(Response::new(BenchmarksResponse {
             results: results.into_iter().map(to_proto_bench).collect(),
         }))
@@ -102,6 +104,15 @@ impl ProtoService for EmbedderService {
         request: Request<BenchmarkOneRequest>,
     ) -> Result<Response<BenchmarkResult>, Status> {
         let inner = request.into_inner();
+        // Log the start: an on-demand benchmark cold-loads (and on first
+        // use downloads) the model, which can run for minutes; without
+        // this the embedder pod is silent until the result line, so a
+        // slow / failing / OOM-ing run looks like nothing happened.
+        tracing::info!(
+            "embedder: benchmark requested for {} (dim {})",
+            inner.model_name,
+            inner.dimensions
+        );
         match self
             .embedder
             .benchmark_one(&inner.model_name, inner.dimensions)
@@ -112,6 +123,11 @@ impl ProtoService for EmbedderService {
                 Status::failed_precondition("another benchmark is already running"),
             ),
             Err(minerva_embed_engine::fastembed_embedder::BenchmarkError::Failed(e)) => {
+                // Log on the embedder pod (with the model id) before
+                // returning the gRPC error, so the failure reason lives
+                // next to the model that produced it, not only in the
+                // caller's generic 500.
+                tracing::error!("embedder: benchmark failed for {}: {}", inner.model_name, e);
                 Err(Status::internal(e))
             }
         }

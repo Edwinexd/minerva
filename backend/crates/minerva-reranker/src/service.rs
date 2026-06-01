@@ -55,6 +55,11 @@ impl ProtoService for RerankerService {
         request: Request<BenchmarkOneRequest>,
     ) -> Result<Response<ProtoBenchmarkResult>, Status> {
         let inner = request.into_inner();
+        // Log the start: a cold cross-encoder load can run for minutes
+        // (and is exactly where the heavy bge-reranker-v2-m3 used to OOM
+        // the pod), so the reranker pod should show the request, not just
+        // the eventual result line.
+        tracing::info!("reranker: benchmark requested for {}", inner.model_code);
         match self.reranker.benchmark_one(&inner.model_code).await {
             Ok(r) => Ok(Response::new(ProtoBenchmarkResult {
                 model: r.model,
@@ -65,7 +70,12 @@ impl ProtoService for RerankerService {
             Err(InnerBenchmarkError::Busy) => Err(Status::failed_precondition(
                 "another benchmark is already running",
             )),
-            Err(InnerBenchmarkError::Failed(e)) => Err(Status::internal(e)),
+            Err(InnerBenchmarkError::Failed(e)) => {
+                // Surface the failure on the reranker pod (with the model
+                // id) before returning the gRPC error.
+                tracing::error!("reranker: benchmark failed for {}: {}", inner.model_code, e);
+                Err(Status::internal(e))
+            }
         }
     }
 

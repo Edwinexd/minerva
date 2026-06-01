@@ -2948,6 +2948,7 @@ dependencies = [
 name = "minerva-embed-engine"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "candle-core",
  "fastembed",
  "hf-hub",

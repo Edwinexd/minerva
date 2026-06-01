@@ -16,7 +16,6 @@
 
 use async_trait::async_trait;
 use minerva_core::rpc::{BenchmarkError, EmbedBenchmarkResult, EmbedderClient};
-use tokio::sync::Mutex;
 use tonic::transport::{Channel, Endpoint};
 
 use crate::proto::embedder::{
@@ -24,6 +23,28 @@ use crate::proto::embedder::{
     BenchmarkResult as ProtoBenchmarkResult, BenchmarkStateRequest, EmbedRequest,
     GetBenchmarksRequest, ModelEntry, RunBenchmarksRequest,
 };
+
+/// Per-RPC client-side deadlines. These replace the single blanket
+/// `Endpoint::timeout`, which applied the *same* deadline to every RPC
+/// on the channel: a benchmark that cold-loads a multi-GB model
+/// (download + ONNX session build + warmup, minutes) was being cancelled
+/// by the 120s hot-path deadline and surfacing to the operator as a bare
+/// 500, while the embedder kept working server-side. We enforce these
+/// client-side with `tokio::time::timeout` (a dropped tonic call future
+/// cancels the request), so each RPC class gets a deadline that fits it.
+mod timeouts {
+    use std::time::Duration;
+    /// Interactive / ingest embeds. Long enough for a big batch, short
+    /// enough that a genuinely stuck call fails fast.
+    pub const HOT: Duration = Duration::from_secs(120);
+    /// Benchmarks load (and on first use download) a model, then warm it
+    /// before timing. A cold multi-GB model can take several minutes;
+    /// this is generous because a benchmark is a rare, deliberate,
+    /// operator-initiated action.
+    pub const BENCHMARK: Duration = Duration::from_secs(900);
+    /// Cheap metadata reads (in-memory state on the server).
+    pub const META: Duration = Duration::from_secs(30);
+}
 
 fn from_proto_bench(r: ProtoBenchmarkResult) -> EmbedBenchmarkResult {
     EmbedBenchmarkResult {
@@ -40,17 +61,18 @@ fn from_proto_bench(r: ProtoBenchmarkResult) -> EmbedBenchmarkResult {
 /// Wired up by `AppState::new` when `MINERVA_EMBEDDER_URL` is set;
 /// otherwise the api / worker stay on the local in-process variant.
 ///
-/// ## Connection lifetime
+/// ## Connection lifetime + concurrency
 ///
-/// One `tonic::transport::Channel` per client. Channels are cheap
-/// `Arc`-clones internally and multiplex over a single HTTP/2
-/// connection, so we wrap a single `ProtoClient<Channel>` behind a
-/// mutex for the methods that need `&mut self`. tonic codegen takes
-/// `&mut self` on the RPC methods even though the underlying channel
-/// is `Send + Sync`; the mutex is short-lived (we drop it before
-/// awaiting the response stream).
+/// One `tonic::transport::Channel`, held inside a `ProtoClient<Channel>`.
+/// Channels are cheap `Arc`-clones internally and multiplex over a single
+/// HTTP/2 connection, and the tonic-generated client is `Clone`, so each
+/// call clones the client and issues its RPC on that clone. There is no
+/// shared mutex: a long-running benchmark RPC therefore can't block the
+/// hot `embed` path behind a lock (the previous design held a `Mutex`
+/// across the whole RPC await, so a multi-minute benchmark serialized
+/// every embed on the pod).
 pub struct RemoteEmbedderClient {
-    inner: Mutex<ProtoClient<Channel>>,
+    inner: ProtoClient<Channel>,
 }
 
 impl RemoteEmbedderClient {
@@ -61,19 +83,19 @@ impl RemoteEmbedderClient {
     pub async fn connect(url: String) -> Result<Self, String> {
         let endpoint = Endpoint::from_shared(url.clone())
             .map_err(|e| format!("invalid embedder url {url}: {e}"))?
-            // Generous timeouts; embedder can do long benchmark runs
-            // (~30s for the heavier models in the startup set). Idle
-            // connections get pinged via HTTP/2 keepalives so a
-            // dropped TCP doesn't surface as the next request 504-ing.
-            .timeout(std::time::Duration::from_secs(120))
+            // No blanket per-RPC `.timeout()` here: it would cap the long
+            // benchmark RPC at the hot-path deadline. Per-RPC deadlines
+            // are applied at the call sites via `tokio::time::timeout`.
+            // Connection-level knobs stay: bound the initial connect, and
+            // keepalive-ping idle connections so a dropped TCP surfaces
+            // promptly instead of as the next request hanging.
             .connect_timeout(std::time::Duration::from_secs(10))
             .http2_keep_alive_interval(std::time::Duration::from_secs(30))
             .keep_alive_timeout(std::time::Duration::from_secs(20))
             .keep_alive_while_idle(true);
         let channel = endpoint.connect_lazy();
-        let client = ProtoClient::new(channel);
         Ok(Self {
-            inner: Mutex::new(client),
+            inner: ProtoClient::new(channel),
         })
     }
 }
@@ -85,13 +107,11 @@ impl EmbedderClient for RemoteEmbedderClient {
             model_name: model_name.to_string(),
             texts,
         };
-        let resp = {
-            let mut guard = self.inner.lock().await;
-            guard
-                .embed(req)
-                .await
-                .map_err(|e| format!("embed RPC failed: {e}"))?
-        };
+        let mut client = self.inner.clone();
+        let resp = tokio::time::timeout(timeouts::HOT, client.embed(req))
+            .await
+            .map_err(|_| format!("embed RPC timed out after {}s", timeouts::HOT.as_secs()))?
+            .map_err(|e| format!("embed RPC failed: {e}"))?;
         Ok(resp
             .into_inner()
             .vectors
@@ -109,13 +129,16 @@ impl EmbedderClient for RemoteEmbedderClient {
             model_name: model_name.to_string(),
             texts,
         };
-        let resp = {
-            let mut guard = self.inner.lock().await;
-            guard
-                .embed_query(req)
-                .await
-                .map_err(|e| format!("embed_query RPC failed: {e}"))?
-        };
+        let mut client = self.inner.clone();
+        let resp = tokio::time::timeout(timeouts::HOT, client.embed_query(req))
+            .await
+            .map_err(|_| {
+                format!(
+                    "embed_query RPC timed out after {}s",
+                    timeouts::HOT.as_secs()
+                )
+            })?
+            .map_err(|e| format!("embed_query RPC failed: {e}"))?;
         Ok(resp
             .into_inner()
             .vectors
@@ -137,13 +160,16 @@ impl EmbedderClient for RemoteEmbedderClient {
                 })
                 .collect(),
         };
-        let resp = {
-            let mut guard = self.inner.lock().await;
-            guard
-                .run_benchmarks(req)
-                .await
-                .map_err(|e| format!("run_benchmarks RPC failed: {e}"))?
-        };
+        let mut client = self.inner.clone();
+        let resp = tokio::time::timeout(timeouts::BENCHMARK, client.run_benchmarks(req))
+            .await
+            .map_err(|_| {
+                format!(
+                    "run_benchmarks RPC timed out after {}s",
+                    timeouts::BENCHMARK.as_secs()
+                )
+            })?
+            .map_err(|e| format!("run_benchmarks RPC failed: {e}"))?;
         Ok(resp
             .into_inner()
             .results
@@ -161,50 +187,69 @@ impl EmbedderClient for RemoteEmbedderClient {
             model_name: model_name.to_string(),
             dimensions,
         };
-        let resp = {
-            let mut guard = self.inner.lock().await;
-            guard.benchmark_one(req).await
-        };
-        match resp {
-            Ok(r) => Ok(from_proto_bench(r.into_inner())),
-            Err(s) if s.code() == tonic::Code::FailedPrecondition => Err(BenchmarkError::Busy),
-            Err(s) => Err(BenchmarkError::Failed(format!(
+        let mut client = self.inner.clone();
+        match tokio::time::timeout(timeouts::BENCHMARK, client.benchmark_one(req)).await {
+            Err(_elapsed) => Err(BenchmarkError::Failed(format!(
+                "benchmark_one RPC timed out after {}s (model load + warmup exceeded the deadline)",
+                timeouts::BENCHMARK.as_secs()
+            ))),
+            Ok(Ok(r)) => Ok(from_proto_bench(r.into_inner())),
+            Ok(Err(s)) if s.code() == tonic::Code::FailedPrecondition => Err(BenchmarkError::Busy),
+            Ok(Err(s)) => Err(BenchmarkError::Failed(format!(
                 "benchmark_one RPC failed: {s}"
             ))),
         }
     }
 
     async fn get_benchmarks(&self) -> Vec<EmbedBenchmarkResult> {
-        let resp = {
-            let mut guard = self.inner.lock().await;
-            guard.get_benchmarks(GetBenchmarksRequest {}).await
-        };
-        match resp {
-            Ok(r) => r
+        let mut client = self.inner.clone();
+        match tokio::time::timeout(
+            timeouts::META,
+            client.get_benchmarks(GetBenchmarksRequest {}),
+        )
+        .await
+        {
+            Ok(Ok(r)) => r
                 .into_inner()
                 .results
                 .into_iter()
                 .map(from_proto_bench)
                 .collect(),
-            Err(e) => {
+            Ok(Err(e)) => {
                 // Match the local variant's signature (no Result), but
                 // a network failure shouldn't poison the admin page;
                 // log and return empty so the UI degrades gracefully.
                 tracing::warn!("embedder get_benchmarks RPC failed: {e}");
                 Vec::new()
             }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    "embedder get_benchmarks RPC timed out after {}s",
+                    timeouts::META.as_secs()
+                );
+                Vec::new()
+            }
         }
     }
 
     async fn is_benchmark_running(&self) -> bool {
-        let resp = {
-            let mut guard = self.inner.lock().await;
-            guard.is_benchmark_running(BenchmarkStateRequest {}).await
-        };
-        match resp {
-            Ok(r) => r.into_inner().running,
-            Err(e) => {
+        let mut client = self.inner.clone();
+        match tokio::time::timeout(
+            timeouts::META,
+            client.is_benchmark_running(BenchmarkStateRequest {}),
+        )
+        .await
+        {
+            Ok(Ok(r)) => r.into_inner().running,
+            Ok(Err(e)) => {
                 tracing::warn!("embedder is_benchmark_running RPC failed: {e}");
+                false
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    "embedder is_benchmark_running RPC timed out after {}s",
+                    timeouts::META.as_secs()
+                );
                 false
             }
         }

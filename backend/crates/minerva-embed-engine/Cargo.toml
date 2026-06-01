@@ -13,6 +13,7 @@ edition = "2021"
 [dependencies]
 minerva-catalog = { path = "../minerva-catalog" }
 
+async-trait = "0.1"
 candle-core.workspace = true
 fastembed.workspace = true
 hf-hub.workspace = true

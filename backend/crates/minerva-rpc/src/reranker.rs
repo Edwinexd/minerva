@@ -6,13 +6,26 @@
 
 use async_trait::async_trait;
 use minerva_core::rpc::{BenchmarkError, RerankBenchmarkResult, RerankerClient};
-use tokio::sync::Mutex;
 use tonic::transport::{Channel, Endpoint};
 
 use crate::proto::reranker::{
     reranker_client::RerankerClient as ProtoClient, BenchmarkOneRequest, BenchmarkStateRequest,
     GetBenchmarksRequest, RerankBenchmarkResult as ProtoBenchmarkResult, RerankRequest,
 };
+
+/// Per-RPC client-side deadlines; see [`crate::embedder`] for the full
+/// rationale (one blanket channel timeout can't fit both the hot rerank
+/// path and a multi-minute cold benchmark load, so each RPC class gets
+/// its own, enforced via `tokio::time::timeout`).
+mod timeouts {
+    use std::time::Duration;
+    /// Interactive rerank of a chat turn's candidate pool.
+    pub const HOT: Duration = Duration::from_secs(120);
+    /// Cold cross-encoder load (download + ONNX session build + warmup).
+    pub const BENCHMARK: Duration = Duration::from_secs(900);
+    /// Cheap metadata reads.
+    pub const META: Duration = Duration::from_secs(30);
+}
 
 fn from_proto_bench(r: ProtoBenchmarkResult) -> RerankBenchmarkResult {
     RerankBenchmarkResult {
@@ -24,25 +37,27 @@ fn from_proto_bench(r: ProtoBenchmarkResult) -> RerankBenchmarkResult {
 }
 
 /// gRPC variant: talks to a remote minerva-reranker pod. Same lifetime
-///   and shape as [`crate::embedder::RemoteEmbedderClient`]; see that
-///   doc comment for the channel and mutex reasoning.
+/// and concurrency shape as [`crate::embedder::RemoteEmbedderClient`]:
+/// the tonic client is `Clone` and multiplexes over one HTTP/2
+/// connection, so each call clones it and there's no shared mutex for a
+/// long benchmark to block the hot rerank path on.
 pub struct RemoteRerankerClient {
-    inner: Mutex<ProtoClient<Channel>>,
+    inner: ProtoClient<Channel>,
 }
 
 impl RemoteRerankerClient {
     pub async fn connect(url: String) -> Result<Self, String> {
         let endpoint = Endpoint::from_shared(url.clone())
             .map_err(|e| format!("invalid reranker url {url}: {e}"))?
-            .timeout(std::time::Duration::from_secs(120))
+            // No blanket per-RPC `.timeout()`; per-RPC deadlines are
+            // applied at the call sites. Connection-level knobs stay.
             .connect_timeout(std::time::Duration::from_secs(10))
             .http2_keep_alive_interval(std::time::Duration::from_secs(30))
             .keep_alive_timeout(std::time::Duration::from_secs(20))
             .keep_alive_while_idle(true);
         let channel = endpoint.connect_lazy();
-        let client = ProtoClient::new(channel);
         Ok(Self {
-            inner: Mutex::new(client),
+            inner: ProtoClient::new(channel),
         })
     }
 }
@@ -60,13 +75,11 @@ impl RerankerClient for RemoteRerankerClient {
             query,
             documents,
         };
-        let resp = {
-            let mut guard = self.inner.lock().await;
-            guard
-                .rerank(req)
-                .await
-                .map_err(|e| format!("rerank RPC failed: {e}"))?
-        };
+        let mut client = self.inner.clone();
+        let resp = tokio::time::timeout(timeouts::HOT, client.rerank(req))
+            .await
+            .map_err(|_| format!("rerank RPC timed out after {}s", timeouts::HOT.as_secs()))?
+            .map_err(|e| format!("rerank RPC failed: {e}"))?;
         Ok(resp
             .into_inner()
             .results
@@ -82,47 +95,66 @@ impl RerankerClient for RemoteRerankerClient {
         let req = BenchmarkOneRequest {
             model_code: model_code.to_string(),
         };
-        let resp = {
-            let mut guard = self.inner.lock().await;
-            guard.benchmark_one(req).await
-        };
-        match resp {
-            Ok(r) => Ok(from_proto_bench(r.into_inner())),
-            Err(s) if s.code() == tonic::Code::FailedPrecondition => Err(BenchmarkError::Busy),
-            Err(s) => Err(BenchmarkError::Failed(format!(
+        let mut client = self.inner.clone();
+        match tokio::time::timeout(timeouts::BENCHMARK, client.benchmark_one(req)).await {
+            Err(_elapsed) => Err(BenchmarkError::Failed(format!(
+                "reranker benchmark_one RPC timed out after {}s (model load + warmup exceeded the deadline)",
+                timeouts::BENCHMARK.as_secs()
+            ))),
+            Ok(Ok(r)) => Ok(from_proto_bench(r.into_inner())),
+            Ok(Err(s)) if s.code() == tonic::Code::FailedPrecondition => Err(BenchmarkError::Busy),
+            Ok(Err(s)) => Err(BenchmarkError::Failed(format!(
                 "reranker benchmark_one RPC failed: {s}"
             ))),
         }
     }
 
     async fn get_benchmarks(&self) -> Vec<RerankBenchmarkResult> {
-        let resp = {
-            let mut guard = self.inner.lock().await;
-            guard.get_benchmarks(GetBenchmarksRequest {}).await
-        };
-        match resp {
-            Ok(r) => r
+        let mut client = self.inner.clone();
+        match tokio::time::timeout(
+            timeouts::META,
+            client.get_benchmarks(GetBenchmarksRequest {}),
+        )
+        .await
+        {
+            Ok(Ok(r)) => r
                 .into_inner()
                 .results
                 .into_iter()
                 .map(from_proto_bench)
                 .collect(),
-            Err(e) => {
+            Ok(Err(e)) => {
                 tracing::warn!("reranker get_benchmarks RPC failed: {e}");
+                Vec::new()
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    "reranker get_benchmarks RPC timed out after {}s",
+                    timeouts::META.as_secs()
+                );
                 Vec::new()
             }
         }
     }
 
     async fn is_benchmark_running(&self) -> bool {
-        let resp = {
-            let mut guard = self.inner.lock().await;
-            guard.is_benchmark_running(BenchmarkStateRequest {}).await
-        };
-        match resp {
-            Ok(r) => r.into_inner().running,
-            Err(e) => {
+        let mut client = self.inner.clone();
+        match tokio::time::timeout(
+            timeouts::META,
+            client.is_benchmark_running(BenchmarkStateRequest {}),
+        )
+        .await
+        {
+            Ok(Ok(r)) => r.into_inner().running,
+            Ok(Err(e)) => {
                 tracing::warn!("reranker is_benchmark_running RPC failed: {e}");
+                false
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    "reranker is_benchmark_running RPC timed out after {}s",
+                    timeouts::META.as_secs()
+                );
                 false
             }
         }

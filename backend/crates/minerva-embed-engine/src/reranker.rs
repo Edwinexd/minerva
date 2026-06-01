@@ -38,23 +38,31 @@
 //! ## Concurrency / lifetime
 //!
 //! Models load lazily on first use (download + ONNX session build, both
-//! slow) and then stay resident for the process lifetime in a per-model
-//! cache, keyed by model id. The resident set is bounded by the
-//! admin-enabled catalog (at most [`VALID_RERANKER_MODELS`] entries, and
-//! in practice the one or two models courses actually select). Inference
-//! (`TextRerank::rerank`) takes `&mut self` and is CPU-bound, so it runs
-//! inside `spawn_blocking` behind an `Arc<Mutex<_>>`, exactly like the
-//! embedder's per-model handle. Re-ranking only ever happens on the
-//! interactive chat path (never bulk ingest), so there is no
+//! slow) and then live in a memory-budgeted LRU cache keyed by model id.
+//! That cache is the shared [`crate::model_cache::ModelCache`], the same
+//! one the embedder uses: it warms each model before measuring its RSS,
+//! evicts LRU under a budget (`MINERVA_RERANKER_CACHE_BUDGET_BYTES`, else
+//! a fraction of the cgroup limit), and refuses up front any model whose
+//! estimated cost can't fit. This is what stops benchmarking the heavy
+//! `rozgo/bge-reranker-v2-m3` from stacking on top of a resident jina
+//! model and OOM-killing the pod (the old cache never evicted).
+//!
+//! Inference (`TextRerank::rerank`) takes `&mut self` and is CPU-bound,
+//! so it runs inside `spawn_blocking` behind an `Arc<Mutex<_>>`, exactly
+//! like the embedder's per-model handle. Re-ranking only ever happens on
+//! the interactive chat path (never bulk ingest), so there is no
 //! ingest-vs-chat priority contention to manage here; a plain mutex per
-//! model is sufficient.
+//! model is sufficient (no dispatcher task, unlike the embedder).
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use async_trait::async_trait;
 use fastembed::{RerankInitOptions, RerankerModel, TextRerank};
 use serde::Serialize;
+
+use crate::mem;
+use crate::model_cache::{ModelCache, ModelLoader};
 
 /// Default cross-encoder. Multilingual (Swedish + English), the lightest
 /// multilingual model in fastembed's reranker catalog. Mirrored by the
@@ -81,6 +89,20 @@ const RERANK_MAX_LENGTH: usize = 512;
 /// Candidates scored per inference batch. Keeps peak tensor memory
 /// predictable when the candidate pool is large.
 const RERANK_BATCH_SIZE: usize = 16;
+
+/// Fallback budget when the cgroup limit can't be read and no env
+/// override is set. Mirrors the embedder's fallback.
+const DEFAULT_CACHE_BUDGET_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Fraction of the cgroup memory limit the reranker cache may consume
+/// when no explicit `MINERVA_RERANKER_CACHE_BUDGET_BYTES` is set. In
+/// prod we set the byte budget explicitly (see `k8s/base/reranker.yaml`)
+/// so this fraction is just the no-env fallback; 0.55 matches the
+/// embedder so the math reads the same across both caches.
+const DEFAULT_CACHE_BUDGET_FRACTION: f64 = 0.55;
+
+/// Env var overriding the reranker cache budget with a raw byte count.
+const CACHE_BUDGET_ENV: &str = "MINERVA_RERANKER_CACHE_BUDGET_BYTES";
 
 /// Result of benchmarking one re-ranker model.
 ///
@@ -153,17 +175,13 @@ const RERANK_BENCHMARK_DOCS: &[&str] = &[
     "Regularization trades a little training accuracy for better test accuracy.",
 ];
 
-/// Lazily-loaded, per-model cross-encoder re-ranker cache.
+/// Lazily-loaded, memory-budgeted cross-encoder re-ranker cache.
 ///
-/// Cheap to construct (empty cache); each model is loaded on first use
-/// and kept resident afterwards. Keyed by the catalog model id.
+/// Cheap to construct (empty cache); each model is loaded + warmed on
+/// first use and kept resident afterwards, subject to the shared
+/// [`ModelCache`] budget + LRU eviction.
 pub struct FastReranker {
-    /// `model_id -> loaded handle`. The outer `tokio::sync::Mutex`
-    /// guards admission (lookup + load + insert); held across the load
-    /// so two concurrent first-uses of the same model don't both
-    /// download it. The inner `std::sync::Mutex<TextRerank>` serialises
-    /// the `&mut self` inference call inside `spawn_blocking`.
-    cache: tokio::sync::Mutex<HashMap<String, Arc<Mutex<TextRerank>>>>,
+    cache: ModelCache<RerankerLoader>,
     /// Latest benchmark result per model, populated on demand by the
     /// admin "Run benchmark" button. In-memory only (lost on restart),
     /// same as the embedder's benchmark store.
@@ -182,8 +200,22 @@ impl Default for FastReranker {
 
 impl FastReranker {
     pub fn new() -> Self {
+        let cache_budget_bytes = mem::budget_bytes(
+            CACHE_BUDGET_ENV,
+            DEFAULT_CACHE_BUDGET_FRACTION,
+            DEFAULT_CACHE_BUDGET_BYTES,
+        );
+        tracing::info!(
+            "reranker cache: budget {} MiB ({})",
+            cache_budget_bytes / (1024 * 1024),
+            mem::budget_source(CACHE_BUDGET_ENV, DEFAULT_CACHE_BUDGET_FRACTION),
+        );
+        // Publish the static budget immediately so the Models dashboard
+        // has the denominator before the first model loads; re-published
+        // on every load by the cache.
+        metrics::gauge!("reranker_cache_budget_bytes").set(cache_budget_bytes as f64);
         Self {
-            cache: tokio::sync::Mutex::new(HashMap::new()),
+            cache: ModelCache::new(RerankerLoader, cache_budget_bytes),
             benchmarks: tokio::sync::Mutex::new(Vec::new()),
             benchmark_lock: tokio::sync::Mutex::new(()),
         }
@@ -256,46 +288,12 @@ impl FastReranker {
         self.benchmark_lock.try_lock().is_err()
     }
 
-    /// Get (loading on first use) the handle for `model_code`. Holds the
-    /// admission lock across the load so a concurrent first-use of the
-    /// same model waits rather than racing a second download.
+    /// Get (loading on first use) the handle for `model_code`, delegated
+    /// to the shared budgeted cache. On a miss the cache evicts LRU under
+    /// budget, refuses up front if the model provably can't fit, loads +
+    /// warms + measures it, and inserts it.
     async fn handle(&self, model_code: &str) -> Result<Arc<Mutex<TextRerank>>, String> {
-        let mut cache = self.cache.lock().await;
-        if let Some(handle) = cache.get(model_code) {
-            metrics::counter!("reranker_cache_hits_total", "model" => model_code.to_string())
-                .increment(1);
-            return Ok(Arc::clone(handle));
-        }
-        metrics::counter!("reranker_cache_misses_total", "model" => model_code.to_string())
-            .increment(1);
-        let code = model_code.to_string();
-        let load_start = std::time::Instant::now();
-        let loaded =
-            tokio::task::spawn_blocking(move || -> Result<Arc<Mutex<TextRerank>>, String> {
-                let model: RerankerModel = code
-                    .parse()
-                    .map_err(|e| format!("unknown reranker model {code}: {e}"))?;
-                let rerank = TextRerank::try_new(
-                    RerankInitOptions::new(model)
-                        .with_max_length(RERANK_MAX_LENGTH)
-                        .with_show_download_progress(true),
-                )
-                .map_err(|e| format!("reranker init failed for {code}: {e}"))?;
-                tracing::info!("reranker: loaded model {code}");
-                Ok(Arc::new(Mutex::new(rerank)))
-            })
-            .await
-            .map_err(|e| format!("reranker load spawn_blocking failed: {e}"))??;
-        metrics::histogram!("reranker_model_load_seconds", "model" => model_code.to_string())
-            .record(load_start.elapsed().as_secs_f64());
-        cache.insert(model_code.to_string(), Arc::clone(&loaded));
-        // Resident-model gauges for the Models dashboard. The reranker
-        // cache never evicts (bounded by the small admin catalog), so
-        // these only climb from 0 to 1 per model; the timeline still
-        // shows when each model first loaded.
-        metrics::gauge!("reranker_models_loaded", "model" => model_code.to_string()).set(1.0);
-        metrics::gauge!("reranker_cache_models_count").set(cache.len() as f64);
-        Ok(loaded)
+        self.cache.acquire(model_code).await
     }
 
     /// Score every `(query, document)` pair with the `model_code`
@@ -317,19 +315,141 @@ impl FastReranker {
             return Ok(Vec::new());
         }
         let handle = self.handle(model_code).await?;
-        tokio::task::spawn_blocking(move || -> Result<Vec<(usize, f32)>, String> {
-            let mut model = handle
-                .lock()
-                .map_err(|e| format!("reranker lock poisoned: {e}"))?;
-            // `return_documents = false`: we only need indices + scores;
-            // the caller still owns the original chunk objects.
-            let results = model
-                .rerank(query, &documents, false, Some(RERANK_BATCH_SIZE))
-                .map_err(|e| format!("rerank inference failed: {e}"))?;
-            Ok(results.into_iter().map(|r| (r.index, r.score)).collect())
+        tokio::task::spawn_blocking(move || run_rerank(&handle, query, documents))
+            .await
+            .map_err(|e| format!("rerank spawn_blocking failed: {e}"))?
+    }
+}
+
+/// Synchronous cross-encoder scoring; runs inside `spawn_blocking` so the
+/// (blocking) inner mutex and the (blocking) inference call don't tie up
+/// the tokio runtime. Shared by `rerank` and the cache warmup pass.
+fn run_rerank(
+    model: &Arc<Mutex<TextRerank>>,
+    query: String,
+    documents: Vec<String>,
+) -> Result<Vec<(usize, f32)>, String> {
+    let mut model = model
+        .lock()
+        .map_err(|e| format!("reranker lock poisoned: {e}"))?;
+    // `return_documents = false`: we only need indices + scores; the
+    // caller still owns the original chunk objects.
+    let results = model
+        .rerank(query, &documents, false, Some(RERANK_BATCH_SIZE))
+        .map_err(|e| format!("rerank inference failed: {e}"))?;
+    Ok(results.into_iter().map(|r| (r.index, r.score)).collect())
+}
+
+/// Cross-encoder side of the shared [`ModelCache`]. There's no dispatcher
+/// task (rerank only runs on the chat path, no ingest-vs-chat priority to
+/// manage), so the handle is the loaded model directly and the teardown
+/// token is `()`.
+struct RerankerLoader;
+
+#[async_trait]
+impl ModelLoader for RerankerLoader {
+    type Raw = Arc<Mutex<TextRerank>>;
+    type Handle = Arc<Mutex<TextRerank>>;
+    type Teardown = ();
+
+    fn label(&self) -> &'static str {
+        "reranker"
+    }
+
+    fn estimate_bytes(&self, model_id: &str) -> Option<u64> {
+        mem::estimated_model_rss_bytes(model_id)
+    }
+
+    async fn load(&self, model_id: &str) -> Result<Arc<Mutex<TextRerank>>, String> {
+        let code = model_id.to_string();
+        tokio::task::spawn_blocking(move || -> Result<Arc<Mutex<TextRerank>>, String> {
+            let model: RerankerModel = code
+                .parse()
+                .map_err(|e| format!("unknown reranker model {code}: {e}"))?;
+            let rerank = TextRerank::try_new(
+                RerankInitOptions::new(model)
+                    .with_max_length(RERANK_MAX_LENGTH)
+                    .with_show_download_progress(true),
+            )
+            .map_err(|e| format!("reranker init failed for {code}: {e}"))?;
+            tracing::info!("reranker: loaded model {code}");
+            Ok(Arc::new(Mutex::new(rerank)))
         })
         .await
-        .map_err(|e| format!("rerank spawn_blocking failed: {e}"))?
+        .map_err(|e| format!("reranker load spawn_blocking failed: {e}"))?
+    }
+
+    async fn warmup(&self, raw: &Arc<Mutex<TextRerank>>) {
+        // Warm at operational shape (~RERANK_MAX_LENGTH tokens/pair, batch
+        // RERANK_BATCH_SIZE) before the cache measures RSS, same ORT-arena
+        // reasoning as the embedder: pad each passage to ~2000 chars so the
+        // arena sizes to real chunk length, not the short benchmark
+        // sentences. Errors ignored; the next real rerank surfaces them.
+        const WARMUP_CHARS: usize = 2000;
+        let model = raw.clone();
+        let query = RERANK_BENCHMARK_QUERY.to_string();
+        let docs: Vec<String> = RERANK_BENCHMARK_DOCS
+            .iter()
+            .map(|s| {
+                let mut t = String::with_capacity(WARMUP_CHARS + s.len());
+                while t.len() < WARMUP_CHARS {
+                    t.push_str(s);
+                    t.push(' ');
+                }
+                t.truncate(WARMUP_CHARS);
+                t
+            })
+            .collect();
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = run_rerank(&model, query, docs);
+        })
+        .await;
+    }
+
+    fn finalize(&self, raw: Arc<Mutex<TextRerank>>) -> (Arc<Mutex<TextRerank>>, ()) {
+        // No dispatcher to spawn: the loaded model is the cached handle.
+        (raw, ())
+    }
+
+    async fn teardown(&self, handle: Arc<Mutex<TextRerank>>, _teardown: ()) {
+        // No background task to await: just drop the cache's Arc. In-flight
+        // rerank callers keep their own clone until done; the cache's
+        // `wait_for_rss_drop` (run right after this) waits for the pages to
+        // actually leave RSS before the next load allocates on top.
+        drop(handle);
+    }
+
+    fn metric_hit(&self, model_id: &str) {
+        metrics::counter!("reranker_cache_hits_total", "model" => model_id.to_string())
+            .increment(1);
+    }
+
+    fn metric_miss(&self, model_id: &str) {
+        metrics::counter!("reranker_cache_misses_total", "model" => model_id.to_string())
+            .increment(1);
+    }
+
+    fn metric_evicted(&self, model_id: &str) {
+        metrics::counter!("reranker_evictions_total", "model" => model_id.to_string()).increment(1);
+        metrics::gauge!("reranker_models_loaded", "model" => model_id.to_string()).set(0.0);
+        metrics::gauge!("reranker_model_rss_cost_bytes", "model" => model_id.to_string()).set(0.0);
+    }
+
+    fn metric_resident(&self, model_id: &str, cost_bytes: u64) {
+        metrics::gauge!("reranker_models_loaded", "model" => model_id.to_string()).set(1.0);
+        metrics::gauge!("reranker_model_rss_cost_bytes", "model" => model_id.to_string())
+            .set(cost_bytes as f64);
+    }
+
+    fn metric_load_seconds(&self, model_id: &str, secs: f64) {
+        metrics::histogram!("reranker_model_load_seconds", "model" => model_id.to_string())
+            .record(secs);
+    }
+
+    fn metric_totals(&self, count: usize, footprint_bytes: u64, budget_bytes: u64) {
+        metrics::gauge!("reranker_cache_models_count").set(count as f64);
+        metrics::gauge!("reranker_cache_footprint_bytes").set(footprint_bytes as f64);
+        metrics::gauge!("reranker_cache_budget_bytes").set(budget_bytes as f64);
     }
 }
 
@@ -354,6 +474,21 @@ mod tests {
         for id in VALID_RERANKER_MODELS {
             let parsed: Result<RerankerModel, _> = id.parse();
             assert!(parsed.is_ok(), "catalog reranker id not recognized: {id}");
+        }
+    }
+
+    #[test]
+    fn every_catalog_id_has_a_memory_estimate() {
+        // The admission gate can only refuse an oversized load up front if
+        // it has an a-priori estimate. A catalog model with no entry in
+        // `mem::estimated_model_rss_bytes` silently falls back to
+        // load-anyway, which is exactly the OOM path we're closing. Keep
+        // the estimate table in lockstep with the catalog.
+        for id in VALID_RERANKER_MODELS {
+            assert!(
+                mem::estimated_model_rss_bytes(id).is_some(),
+                "reranker {id} is missing a memory estimate in mem::estimated_model_rss_bytes",
+            );
         }
     }
 

@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
+use async_trait::async_trait;
 use candle_core::{DType, Device};
 use fastembed::{
     EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, QuantizationMode,
@@ -9,6 +9,9 @@ use fastembed::{
 use hf_hub::api::sync::ApiBuilder;
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
+
+use crate::mem;
+use crate::model_cache::{ModelCache, ModelLoader};
 
 /// Result of benchmarking a single embedding model.
 #[derive(Clone, Debug, Serialize)]
@@ -52,12 +55,6 @@ const DEFAULT_CACHE_BUDGET_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// ~2.7 GiB for everything else (baseline ~500 MiB, reranker ~500 MiB,
 /// worker transients ~500 MiB, fragmentation + slack ~1 GiB).
 const DEFAULT_CACHE_BUDGET_FRACTION: f64 = 0.55;
-
-/// Fallback cost when RSS measurement isn't available (non-Linux dev hosts)
-/// or returns nonsense. Picked to be on the high side of the largest model
-/// we currently load through the ONNX path, so the budget logic still
-/// throttles correctly without a real measurement.
-const ESTIMATED_MODEL_COST_BYTES: u64 = 800 * 1024 * 1024;
 
 /// What's currently sitting in the cache. Two backends:
 /// * **ONNX** (the default fastembed path); `TextEmbedding`.
@@ -215,26 +212,6 @@ async fn next_job(
     }
 }
 
-struct CacheEntry {
-    name: String,
-    dispatcher: Arc<ModelDispatcher>,
-    /// `JoinHandle` for the per-model dispatcher task. Awaited on
-    /// eviction so we can be certain the task's loop has exited and
-    /// the captured `LoadedModel` has dropped before the next model
-    /// load starts allocating. `Option` so we can `take()` it out of
-    /// the evicted entry without leaving an unusable placeholder
-    /// behind; `None` once we've taken it. The cache itself never
-    /// holds `None` entries.
-    task: Option<tokio::task::JoinHandle<()>>,
-    /// Bytes added to process RSS when this model was loaded; measured by
-    /// diffing `/proc/self/status:VmRSS` before and after init. Drives both
-    /// eviction decisions and per-load logging. On hosts without a readable
-    /// VmRSS (e.g. macOS dev) this falls back to `ESTIMATED_MODEL_COST_BYTES`
-    /// so the budget still throttles.
-    rss_cost_bytes: u64,
-    last_used: Instant,
-}
-
 /// Memory-budgeted LRU cache over fastembed / Qwen3 models.
 ///
 /// Why a budget instead of a fixed slot count: model footprints differ by
@@ -263,10 +240,9 @@ struct CacheEntry {
 ///    admin-triggered benchmark can be queued at a time, the rest are
 ///    rejected up front.
 pub struct FastEmbedder {
-    cache: tokio::sync::Mutex<Vec<CacheEntry>>,
+    cache: ModelCache<EmbedderLoader>,
     benchmarks: tokio::sync::Mutex<Vec<BenchmarkResult>>,
     benchmark_lock: tokio::sync::Mutex<()>,
-    cache_budget_bytes: u64,
 }
 
 /// Backend dispatch for a model id.
@@ -427,13 +403,12 @@ impl FastEmbedder {
         );
         // Publish the static budget immediately so the Models dashboard
         // has the denominator for "cache footprint vs budget" even before
-        // the first model loads. Re-published on every load in `acquire`.
+        // the first model loads. Re-published on every load by the cache.
         metrics::gauge!("fastembed_cache_budget_bytes").set(cache_budget_bytes as f64);
         Self {
-            cache: tokio::sync::Mutex::new(Vec::new()),
+            cache: ModelCache::new(EmbedderLoader, cache_budget_bytes),
             benchmarks: tokio::sync::Mutex::new(Vec::new()),
             benchmark_lock: tokio::sync::Mutex::new(()),
-            cache_budget_bytes,
         }
     }
 
@@ -636,303 +611,15 @@ impl FastEmbedder {
         self.benchmark_lock.try_lock().is_err()
     }
 
-    /// Cache admission. If the requested model is in the cache, bump its
-    /// `last_used` and return a clone of its dispatcher handle.
-    /// Otherwise evict LRU entries until the new model's estimated cost
-    /// fits under the budget, then load the model through the
-    /// appropriate backend, spawn its dispatcher task, measure the RSS
-    /// delta, and insert it.
-    ///
-    /// Returns an `Arc<ModelDispatcher>` rather than a raw model handle
-    /// so the caller submits jobs through the per-model priority queue
-    /// instead of running inference inline. See `ModelDispatcher` for
-    /// the priority semantics.
+    /// Cache admission, delegated to the shared [`ModelCache`]. On a
+    /// miss the cache evicts LRU under the budget, refuses up front
+    /// if the model provably can't fit (see `ModelCache::acquire`'s
+    /// admission gate), loads via [`EmbedderLoader`], warms +
+    /// measures it, and inserts it. Returns the per-model
+    /// `Arc<ModelDispatcher>` so callers submit jobs through the
+    /// priority queue rather than running inference inline.
     async fn acquire(&self, model_name: &str) -> Result<Arc<ModelDispatcher>, String> {
-        let mut cache = self.cache.lock().await;
-
-        if let Some(idx) = cache.iter().position(|e| e.name == model_name) {
-            cache[idx].last_used = Instant::now();
-            metrics::counter!("fastembed_cache_hits_total", "model" => model_name.to_string())
-                .increment(1);
-            return Ok(Arc::clone(&cache[idx].dispatcher));
-        }
-
-        // Pick an estimate for the new model's cost. If we've measured
-        // anything, the largest measured value is a reasonable upper bound;
-        // otherwise fall back to a generous default so the budget still
-        // throttles on hosts without RSS introspection.
-        let estimate = cache
-            .iter()
-            .map(|e| e.rss_cost_bytes)
-            .max()
-            .unwrap_or(ESTIMATED_MODEL_COST_BYTES);
-
-        // Evict LRU until adding `estimate` would fit under the budget.
-        // If the cache is empty we just load whatever's asked for; the
-        // pod's memory limit is the backstop.
-        while !cache.is_empty() {
-            let used: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
-            if used + estimate <= self.cache_budget_bytes {
-                break;
-            }
-            let lru_idx = cache
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, e)| e.last_used)
-                .map(|(i, _)| i)
-                .expect("cache non-empty");
-            let mut evicted = cache.remove(lru_idx);
-            metrics::counter!("fastembed_evictions_total", "model" => evicted.name.clone())
-                .increment(1);
-            // Model left the resident set: flip its "loaded" gauge to 0
-            // and clear its RSS-cost gauge so the dashboard state timeline
-            // and per-model weight reflect the eviction immediately.
-            metrics::gauge!("fastembed_models_loaded", "model" => evicted.name.clone()).set(0.0);
-            metrics::gauge!("fastembed_model_rss_cost_bytes", "model" => evicted.name.clone())
-                .set(0.0);
-            let evicted_task = evicted.task.take();
-            let evicted_cost = evicted.rss_cost_bytes;
-            let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
-            tracing::info!(
-                "fastembed cache: evicting {} ({} MiB) to make room for {} (footprint {} MiB / budget {} MiB)",
-                evicted.name,
-                evicted_cost / (1024 * 1024),
-                model_name,
-                footprint / (1024 * 1024),
-                self.cache_budget_bytes / (1024 * 1024),
-            );
-            // Drop the evicted CacheEntry (which drops the cache's
-            // last Arc<ModelDispatcher>, closes both senders) THEN
-            // await the dispatcher task's JoinHandle. The task
-            // resolves only after the captured `LoadedModel` has
-            // dropped and ORT has actually released the weights. This
-            // is the part malloc_trim alone couldn't fix: without the
-            // await, the next allocation landed on top of the
-            // unreleased arena and OOM-killed the pod.
-            //
-            // In-flight `embed()` callers' Arc clones keep the
-            // dispatcher senders alive past the cache drop; in that
-            // case the await blocks until those calls complete.
-            // That's the intended behaviour - we'd rather wait than
-            // load on top.
-            //
-            // Mutex is released before the await so other acquire
-            // callers can progress.
-            drop(cache);
-            drop(evicted);
-            if let Some(handle) = evicted_task {
-                let _ = handle.await;
-            }
-            wait_for_rss_drop(evicted_cost).await;
-            cache = self.cache.lock().await;
-        }
-
-        metrics::counter!("fastembed_cache_misses_total", "model" => model_name.to_string())
-            .increment(1);
-        let load_start = Instant::now();
-        let rss_before = read_rss_bytes();
-        let backend = backend_for(model_name);
-        let name = model_name.to_string();
-        let loaded = tokio::task::spawn_blocking(move || -> Result<LoadedModel, String> {
-            match backend {
-                Backend::Fast => {
-                    let model_enum = parse_fast_model_name(&name)?;
-                    let m = TextEmbedding::try_new(
-                        InitOptions::new(model_enum).with_show_download_progress(true),
-                    )
-                    .map_err(|e| format!("fastembed init failed for {}: {}", name, e))?;
-                    Ok(LoadedModel::Fast(Arc::new(Mutex::new(m))))
-                }
-                Backend::Qwen3 => {
-                    // CPU + F32 is the safe default. F16 would halve memory
-                    // (~1.2 GB vs 2.4 GB for 0.6B) but candle's CPU F16
-                    // path is slower than F32 in the ggml/candle
-                    // benchmarks I've seen, so we keep F32 unless prod
-                    // RAM becomes the bottleneck.
-                    let m = Qwen3TextEmbedding::from_hf(
-                        &name,
-                        &Device::Cpu,
-                        DType::F32,
-                        QWEN3_MAX_LENGTH,
-                    )
-                    .map_err(|e| format!("qwen3 init failed for {}: {}", name, e))?;
-                    Ok(LoadedModel::Qwen3(Arc::new(Mutex::new(m))))
-                }
-                Backend::Custom => {
-                    let spec = custom_model_spec(&name)
-                        .ok_or_else(|| format!("no custom-model spec for {}", name))?;
-                    let m = load_custom_model(&spec)?;
-                    Ok(LoadedModel::Fast(Arc::new(Mutex::new(m))))
-                }
-            }
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking failed: {}", e))??;
-        metrics::histogram!("fastembed_model_load_seconds", "model" => model_name.to_string())
-            .record(load_start.elapsed().as_secs_f64());
-
-        // Warm up the model with a batch matching real operational
-        // shape before taking the RSS measurement. ORT's CPU EP (and
-        // to a lesser extent candle) lazily allocate an "arena" /
-        // scratch pool on the first forward pass that's substantially
-        // larger than the bare model weights and persists for the
-        // lifetime of the session.
-        //
-        // The arena sizes itself to the *largest tensor shape* ORT
-        // has seen. Activation memory scales linearly with batch and
-        // sequence length, and attention scratch is O(seq^2), so the
-        // dominant axis is the chunk length. The two earlier
-        // iterations both undersized this:
-        //
-        //   1. `vec!["warmup"]` (batch-1, ~5 tokens): arena ~5% of
-        //      operational. First real benchmark grew it; OOM.
-        //   2. `BENCHMARK_CORPUS` as-is (batch-32, ~25 tokens/text):
-        //      arena ~10% of operational. The corpus is tuned for
-        //      benchmarking throughput, not arena sizing. First real
-        //      worker batch with 500-token chunks grew it; OOM again.
-        //
-        // So we pad each corpus sentence to `WARMUP_CHARS` (=
-        // chunker's default `chunk_size`, the largest chunk a real
-        // ingest job ever submits), which sizes the arena to
-        // operational chunks at operational batch size. Subsequent
-        // worker / chat inferences with same-or-smaller shapes won't
-        // grow it further.
-        //
-        // Cost: a few hundred ms per model on startup. Trivial
-        // compared to model load itself.
-        //
-        // We deliberately ignore warmup errors: a broken model
-        // shouldn't be reusable, but we still want the load to
-        // succeed and the caller to see the inference error on their
-        // actual request. The next inference will surface the same
-        // error.
-        const WARMUP_CHARS: usize = 2000;
-        let loaded_for_warmup = loaded.clone();
-        let warmup_corpus: Vec<String> = BENCHMARK_CORPUS
-            .iter()
-            .map(|s| {
-                let mut t = String::with_capacity(WARMUP_CHARS + s.len());
-                while t.len() < WARMUP_CHARS {
-                    t.push_str(s);
-                    t.push(' ');
-                }
-                t.truncate(WARMUP_CHARS);
-                t
-            })
-            .collect();
-        let _ = tokio::task::spawn_blocking(move || {
-            let _ = run_embed(&loaded_for_warmup, warmup_corpus);
-        })
-        .await;
-        let rss_after = read_rss_bytes();
-
-        let cost = match (rss_before, rss_after) {
-            (Some(b), Some(a)) => a.saturating_sub(b),
-            _ => ESTIMATED_MODEL_COST_BYTES,
-        };
-
-        // Spawn the per-model dispatcher and hand both the cache and
-        // the caller their own `Arc` clone. The task keeps running as
-        // long as either Arc lives; when the entry is evicted AND every
-        // in-flight caller has returned, both senders drop, the
-        // dispatcher's `select!` falls through to its `else` arm, the
-        // task exits, and `loaded` is finally dropped, freeing RSS.
-        let (dispatcher, task) = ModelDispatcher::spawn(loaded);
-
-        cache.push(CacheEntry {
-            name: model_name.to_string(),
-            dispatcher: Arc::clone(&dispatcher),
-            task: Some(task),
-            rss_cost_bytes: cost,
-            last_used: Instant::now(),
-        });
-        // New model is resident: light up its "loaded" gauge and record
-        // its measured RSS cost, so the dashboard shows which models
-        // occupy the cache and how heavy each one is.
-        metrics::gauge!("fastembed_models_loaded", "model" => model_name.to_string()).set(1.0);
-        metrics::gauge!("fastembed_model_rss_cost_bytes", "model" => model_name.to_string())
-            .set(cost as f64);
-
-        // Defensive post-load eviction. The pre-load eviction loop above
-        // uses the `max(rss_cost_bytes)` across previously-cached entries
-        // as the cost estimate for the new model. With honest
-        // post-warmup measurement that estimate is reasonable, but a
-        // first-of-its-kind larger model (e.g. arctic-m loading after a
-        // run of small English models) still costs more than anything
-        // previously seen, so the pre-load eviction can leave us over
-        // budget. Sweep the LRU again now that we know the real cost.
-        // We never evict the entry we just inserted: `last_used =
-        // Instant::now()` makes it the newest, so `min_by_key` picks an
-        // older one.
-        while cache.len() > 1 {
-            let used: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
-            if used <= self.cache_budget_bytes {
-                break;
-            }
-            let lru_idx = cache
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, e)| e.last_used)
-                .map(|(i, _)| i)
-                .expect("cache len > 1");
-            let mut evicted = cache.remove(lru_idx);
-            metrics::counter!("fastembed_evictions_total", "model" => evicted.name.clone())
-                .increment(1);
-            // Model left the resident set: flip its "loaded" gauge to 0
-            // and clear its RSS-cost gauge so the dashboard state timeline
-            // and per-model weight reflect the eviction immediately.
-            metrics::gauge!("fastembed_models_loaded", "model" => evicted.name.clone()).set(0.0);
-            metrics::gauge!("fastembed_model_rss_cost_bytes", "model" => evicted.name.clone())
-                .set(0.0);
-            let evicted_task = evicted.task.take();
-            let evicted_cost = evicted.rss_cost_bytes;
-            let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
-            tracing::info!(
-                "fastembed cache: post-load eviction of {} ({} MiB), pre-load estimate was too low (footprint {} MiB / budget {} MiB)",
-                evicted.name,
-                evicted_cost / (1024 * 1024),
-                footprint / (1024 * 1024),
-                self.cache_budget_bytes / (1024 * 1024),
-            );
-            // Same await-the-dispatcher-task discipline as the
-            // pre-load sweep above. See the long comment there for
-            // why this is required to keep the cgroup safe.
-            drop(cache);
-            drop(evicted);
-            if let Some(handle) = evicted_task {
-                let _ = handle.await;
-            }
-            wait_for_rss_drop(evicted_cost).await;
-            cache = self.cache.lock().await;
-        }
-
-        let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
-        let cached_count = cache.len();
-        // Publish the post-admission cache aggregates for the Models
-        // dashboard: how many models are resident, their summed measured
-        // RSS, and the budget ceiling they are packed against.
-        metrics::gauge!("fastembed_cache_models_count").set(cached_count as f64);
-        metrics::gauge!("fastembed_cache_footprint_bytes").set(footprint as f64);
-        metrics::gauge!("fastembed_cache_budget_bytes").set(self.cache_budget_bytes as f64);
-        match (rss_before, rss_after) {
-            (Some(_), Some(after)) => tracing::info!(
-                "fastembed: loaded model {} (+{} MiB, RSS now {} MiB, cache footprint {} MiB / budget {} MiB, {} cached)",
-                model_name,
-                cost / (1024 * 1024),
-                after / (1024 * 1024),
-                footprint / (1024 * 1024),
-                self.cache_budget_bytes / (1024 * 1024),
-                cached_count,
-            ),
-            _ => tracing::info!(
-                "fastembed: loaded model {} (RSS measurement unavailable, assumed +{} MiB, {} cached)",
-                model_name,
-                cost / (1024 * 1024),
-                cached_count,
-            ),
-        };
-
-        Ok(dispatcher)
+        self.cache.acquire(model_name).await
     }
 }
 
@@ -1008,156 +695,168 @@ fn parse_fast_model_name(name: &str) -> Result<EmbeddingModel, String> {
     }
 }
 
-/// Poll `/proc/self/status` until VmRSS drops by at least `evicted_cost`
-/// (measured against the value at entry), or `EVICTION_WAIT_BUDGET`
-/// elapses. Used after dropping a cache entry's `Arc<ModelDispatcher>`
-/// to make sure the model is actually freed from RSS before the next
-/// acquire loads a replacement on top of it.
-///
-/// "At least the evicted cost" is generous; we accept any drop of
-/// `>= evicted_cost / 2` because the recorded cost includes the warmup
-/// arena, and tokio's blocking pool can hold scratch buffers across
-/// task boundaries that take a bit longer to release.
-async fn wait_for_rss_drop(evicted_cost: u64) {
-    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
-    const EVICTION_WAIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
-    let Some(before) = read_rss_bytes() else {
-        return; // RSS introspection unavailable, can't tell either way
-    };
-
-    // Force glibc to return freed pages to the kernel. Without this the
-    // dispatcher Arc has dropped but ORT's arena pool sits in glibc's
-    // freelist as RSS for an indeterminate time, so the next model load
-    // allocates on top of the lingering arena and OOM-kills the pod.
-    // `malloc_trim(0)` is a no-op on musl + non-Linux; gated by
-    // `cfg(target_env = "gnu")` plus a tokio::spawn_blocking because
-    // the call can take low-tens-of-ms on a fragmented heap and we
-    // don't want to stall the dispatcher loop.
-    trim_glibc_heap().await;
-
-    let target_drop = evicted_cost / 2;
-    let deadline = std::time::Instant::now() + EVICTION_WAIT_BUDGET;
-    while std::time::Instant::now() < deadline {
-        tokio::time::sleep(POLL_INTERVAL).await;
-        if let Some(now) = read_rss_bytes() {
-            if before.saturating_sub(now) >= target_drop {
-                tracing::debug!(
-                    "fastembed cache: eviction freed {} MiB (target {} MiB)",
-                    (before - now) / (1024 * 1024),
-                    target_drop / (1024 * 1024),
-                );
-                return;
-            }
-        }
-    }
-    let now = read_rss_bytes().unwrap_or(before);
-    tracing::warn!(
-        "fastembed cache: eviction did not free expected memory within {}s (released {} of {} MiB); next load may be tight",
-        EVICTION_WAIT_BUDGET.as_secs(),
-        before.saturating_sub(now) / (1024 * 1024),
-        evicted_cost / (1024 * 1024),
-    );
-}
-
-/// glibc-specific: ask malloc to return freed pages from its arena
-/// freelist back to the kernel via sbrk + munmap. Without this the
-/// post-eviction RSS stays artificially high because freed ORT arenas
-/// sit in glibc's freelist, even after the Arc<LoadedModel> has
-/// dropped. The next model load then allocates ON TOP of the lingering
-/// arena and trips the cgroup limit.
-///
-/// no-op on musl / non-Linux: nothing to call. The
-/// `cfg(target_env = "gnu")` gate on the libc dep handles the
-/// availability; the wrapping fn always exists so the call site is
-/// portable.
-#[cfg(target_env = "gnu")]
-async fn trim_glibc_heap() {
-    // malloc_trim can take low-tens-of-ms on a fragmented heap; hand
-    // off to the blocking pool so the dispatcher's await point doesn't
-    // block on it.
-    let _ = tokio::task::spawn_blocking(|| {
-        // SAFETY: `malloc_trim` is a glibc extension with a stable
-        // signature `int malloc_trim(size_t pad)`. Returns 1 if memory
-        // was released, 0 otherwise. We don't care about the return
-        // value; we want the side effect.
-        unsafe {
-            libc::malloc_trim(0);
-        }
-    })
-    .await;
-}
-
-#[cfg(not(target_env = "gnu"))]
-async fn trim_glibc_heap() {
-    // musl / macOS: nothing equivalent. Allocator returns pages
-    // promptly on free anyway.
-}
-
-fn read_rss_bytes() -> Option<u64> {
-    let content = std::fs::read_to_string("/proc/self/status").ok()?;
-    for line in content.lines() {
-        if let Some(rest) = line.strip_prefix("VmRSS:") {
-            let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
-            return Some(kb * 1024);
-        }
-    }
-    None
-}
-
 /// The byte budget the fastembed model cache is sized at on this pod.
 /// Exposed so the shared `MemBudget` can compute its own total as
 /// `cgroup_limit - this - baseline_reserve` without duplicating the
-/// env-override + cgroup-fraction logic.
+/// env-override + cgroup-fraction logic. The RSS / cgroup / eviction
+/// primitives moved to [`crate::mem`] so the reranker cache can share
+/// them; this just binds the embedder's env-var name + fraction +
+/// fallback.
 pub fn compute_budget_bytes() -> u64 {
-    if let Ok(v) = std::env::var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES") {
-        if let Ok(n) = v.parse::<u64>() {
-            return n;
-        }
-    }
-    if let Some(limit) = read_cgroup_memory_limit() {
-        return ((limit as f64) * DEFAULT_CACHE_BUDGET_FRACTION) as u64;
-    }
-    DEFAULT_CACHE_BUDGET_BYTES
+    mem::budget_bytes(
+        "MINERVA_FASTEMBED_CACHE_BUDGET_BYTES",
+        DEFAULT_CACHE_BUDGET_FRACTION,
+        DEFAULT_CACHE_BUDGET_BYTES,
+    )
 }
 
 fn budget_source() -> String {
-    if std::env::var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES").is_ok() {
-        "env override".to_string()
-    } else if read_cgroup_memory_limit().is_some() {
-        format!(
-            "{}% of cgroup memory.max",
-            (DEFAULT_CACHE_BUDGET_FRACTION * 100.0).round() as u32
-        )
-    } else {
-        "static default (no cgroup, no env override)".to_string()
-    }
+    mem::budget_source(
+        "MINERVA_FASTEMBED_CACHE_BUDGET_BYTES",
+        DEFAULT_CACHE_BUDGET_FRACTION,
+    )
 }
 
-fn read_cgroup_memory_limit() -> Option<u64> {
-    // Try cgroup v2 first; fall back to v1. Both expose a single number in
-    // bytes. v2 uses "max" (literal) for unlimited; v1 uses a sentinel that
-    // exceeds physical memory. In either unlimited case we return None so
-    // the caller falls back to the static default.
-    if let Ok(s) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
-        let trimmed = s.trim();
-        if trimmed == "max" {
-            return None;
-        }
-        if let Ok(n) = trimmed.parse::<u64>() {
-            return Some(n);
-        }
+/// Embedding-model side of the shared [`ModelCache`]. Carries the
+/// backend dispatch, the warmup-before-measure pass, the per-model
+/// dispatcher spawn, and the `fastembed_*` metric emission; the generic
+/// cache drives the LRU / budget / eviction / admission gate around it.
+struct EmbedderLoader;
+
+#[async_trait]
+impl ModelLoader for EmbedderLoader {
+    type Raw = LoadedModel;
+    type Handle = Arc<ModelDispatcher>;
+    type Teardown = tokio::task::JoinHandle<()>;
+
+    fn label(&self) -> &'static str {
+        "fastembed"
     }
-    if let Ok(s) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
-        if let Ok(n) = s.trim().parse::<u64>() {
-            // v1 sentinel "unlimited" tends to be a value larger than any
-            // realistic RAM. Treat anything north of 1 PiB as unlimited.
-            if n >= 1u64 << 50 {
-                return None;
+
+    fn estimate_bytes(&self, model_id: &str) -> Option<u64> {
+        mem::estimated_model_rss_bytes(model_id)
+    }
+
+    async fn load(&self, model_id: &str) -> Result<LoadedModel, String> {
+        let backend = backend_for(model_id);
+        let name = model_id.to_string();
+        tokio::task::spawn_blocking(move || -> Result<LoadedModel, String> {
+            match backend {
+                Backend::Fast => {
+                    let model_enum = parse_fast_model_name(&name)?;
+                    let m = TextEmbedding::try_new(
+                        InitOptions::new(model_enum).with_show_download_progress(true),
+                    )
+                    .map_err(|e| format!("fastembed init failed for {}: {}", name, e))?;
+                    Ok(LoadedModel::Fast(Arc::new(Mutex::new(m))))
+                }
+                Backend::Qwen3 => {
+                    // CPU + F32 is the safe default. F16 would halve memory
+                    // (~1.2 GB vs 2.4 GB for 0.6B) but candle's CPU F16 path
+                    // is slower than F32 in the ggml/candle benchmarks I've
+                    // seen, so we keep F32 unless prod RAM becomes the
+                    // bottleneck.
+                    let m = Qwen3TextEmbedding::from_hf(
+                        &name,
+                        &Device::Cpu,
+                        DType::F32,
+                        QWEN3_MAX_LENGTH,
+                    )
+                    .map_err(|e| format!("qwen3 init failed for {}: {}", name, e))?;
+                    Ok(LoadedModel::Qwen3(Arc::new(Mutex::new(m))))
+                }
+                Backend::Custom => {
+                    let spec = custom_model_spec(&name)
+                        .ok_or_else(|| format!("no custom-model spec for {}", name))?;
+                    let m = load_custom_model(&spec)?;
+                    Ok(LoadedModel::Fast(Arc::new(Mutex::new(m))))
+                }
             }
-            return Some(n);
-        }
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking failed: {}", e))?
     }
-    None
+
+    async fn warmup(&self, raw: &LoadedModel) {
+        // Warm with a batch matching real operational shape before the
+        // cache measures RSS. ORT's CPU EP lazily allocates an arena on
+        // the first forward pass that's substantially larger than the
+        // bare weights and persists for the session's lifetime; the arena
+        // sizes itself to the largest tensor shape seen, and attention
+        // scratch is O(seq^2), so we pad each corpus sentence to
+        // `WARMUP_CHARS` (the chunker's default chunk size, the largest
+        // chunk a real ingest job submits). A too-small warmup undersizes
+        // the arena and the first real batch grows it -> OOM. Errors are
+        // ignored: a broken model surfaces on the caller's real request.
+        const WARMUP_CHARS: usize = 2000;
+        let loaded_for_warmup = raw.clone();
+        let warmup_corpus: Vec<String> = BENCHMARK_CORPUS
+            .iter()
+            .map(|s| {
+                let mut t = String::with_capacity(WARMUP_CHARS + s.len());
+                while t.len() < WARMUP_CHARS {
+                    t.push_str(s);
+                    t.push(' ');
+                }
+                t.truncate(WARMUP_CHARS);
+                t
+            })
+            .collect();
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = run_embed(&loaded_for_warmup, warmup_corpus);
+        })
+        .await;
+    }
+
+    fn finalize(&self, raw: LoadedModel) -> (Arc<ModelDispatcher>, tokio::task::JoinHandle<()>) {
+        // Spawn the per-model dispatcher; the cache holds the returned
+        // Arc + JoinHandle. See `ModelDispatcher`.
+        ModelDispatcher::spawn(raw)
+    }
+
+    async fn teardown(&self, handle: Arc<ModelDispatcher>, task: tokio::task::JoinHandle<()>) {
+        // Drop the cache's dispatcher Arc, then await the task so the
+        // captured `LoadedModel` (and its ORT arena) has provably dropped
+        // before the next load allocates. In-flight embed callers' Arc
+        // clones keep the dispatcher alive past this drop; the await
+        // blocks until those calls complete. See `ModelDispatcher::spawn`.
+        drop(handle);
+        let _ = task.await;
+    }
+
+    fn metric_hit(&self, model_id: &str) {
+        metrics::counter!("fastembed_cache_hits_total", "model" => model_id.to_string())
+            .increment(1);
+    }
+
+    fn metric_miss(&self, model_id: &str) {
+        metrics::counter!("fastembed_cache_misses_total", "model" => model_id.to_string())
+            .increment(1);
+    }
+
+    fn metric_evicted(&self, model_id: &str) {
+        metrics::counter!("fastembed_evictions_total", "model" => model_id.to_string())
+            .increment(1);
+        metrics::gauge!("fastembed_models_loaded", "model" => model_id.to_string()).set(0.0);
+        metrics::gauge!("fastembed_model_rss_cost_bytes", "model" => model_id.to_string()).set(0.0);
+    }
+
+    fn metric_resident(&self, model_id: &str, cost_bytes: u64) {
+        metrics::gauge!("fastembed_models_loaded", "model" => model_id.to_string()).set(1.0);
+        metrics::gauge!("fastembed_model_rss_cost_bytes", "model" => model_id.to_string())
+            .set(cost_bytes as f64);
+    }
+
+    fn metric_load_seconds(&self, model_id: &str, secs: f64) {
+        metrics::histogram!("fastembed_model_load_seconds", "model" => model_id.to_string())
+            .record(secs);
+    }
+
+    fn metric_totals(&self, count: usize, footprint_bytes: u64, budget_bytes: u64) {
+        metrics::gauge!("fastembed_cache_models_count").set(count as f64);
+        metrics::gauge!("fastembed_cache_footprint_bytes").set(footprint_bytes as f64);
+        metrics::gauge!("fastembed_cache_budget_bytes").set(budget_bytes as f64);
+    }
 }
 
 /// Representative text corpus for benchmarking embedding throughput.
@@ -1217,6 +916,21 @@ mod tests {
         // test just guards against a panic in compute_budget_bytes.
         let n = compute_budget_bytes();
         assert!(n > 0);
+    }
+
+    #[test]
+    fn every_local_model_has_a_memory_estimate() {
+        // The admission gate can only refuse an oversized load up front
+        // for models it has an a-priori estimate for; a catalog model with
+        // no entry in `mem::estimated_model_rss_bytes` silently reverts to
+        // load-anyway. Keep the estimate table in lockstep with the
+        // catalog so the gate covers every model a teacher can pick.
+        for (id, _dim) in minerva_catalog::VALID_LOCAL_MODELS {
+            assert!(
+                mem::estimated_model_rss_bytes(id).is_some(),
+                "embedding model {id} is missing a memory estimate in mem::estimated_model_rss_bytes",
+            );
+        }
     }
 
     #[test]

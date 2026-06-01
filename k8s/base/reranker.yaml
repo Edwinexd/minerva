@@ -41,6 +41,17 @@ spec:
               value: "50052"
             - name: HF_HOME
               value: "/data/hf-cache"
+            # Reranker model-cache budget (raw bytes). The cache evicts
+            # LRU to stay under this and refuses up front any model whose
+            # estimated warmed RSS exceeds it. 3 GiB (3 * 2^30) admits the
+            # heaviest catalog model (rozgo/bge-reranker-v2-m3, ~2.8 GiB
+            # warmed) on its own, but jina (~1.8 GiB) + bge-m3 together
+            # (~4.6 GiB) can't coexist, so benchmarking bge-m3 evicts jina
+            # rather than stacking and OOMing (the old cache never
+            # evicted). Peak RSS = baseline + one model stays under the
+            # 4 GiB pod limit.
+            - name: MINERVA_RERANKER_CACHE_BUDGET_BYTES
+              value: "3221225472"
             - name: RUST_LOG
               value: "info"
           volumeMounts:
@@ -52,27 +63,30 @@ spec:
             # reasoning. (CPU is ranged, so QoS is Burstable, not
             # Guaranteed - the memory floor is what we care about here.)
             #
-            # 3 GiB. Measured in prod: the default jina-reranker-v2
-            # base, once the model + ORT arena are warm, sits at
-            # ~1.7 GiB process RSS *at idle* - already above the old
-            # 1500Mi ceiling, so the pod OOMKilled (137) the instant a
-            # real Rerank call faulted the model in, then CrashLooped:
-            # every chat turn logged "rerank failed (transport error)"
-            # and fell back to embedding order. 3 GiB leaves ~1.3 GiB
-            # of headroom over the warm baseline for the cross-encoder
-            # activation spike on the 30-80 candidate over-fetch batch,
-            # plus room for one secondary benchmarked model resident.
-            # Fits the node alongside everything else (node lands at
-            # ~84% memory limits committed, MemoryPressure clear).
+            # 4 GiB. The default jina-reranker-v2 base sits at ~1.7 GiB
+            # warm; the heavy multilingual rozgo/bge-reranker-v2-m3 warms
+            # to ~2.8 GiB. The pod used to be 3 GiB with a cache that
+            # NEVER evicted, so benchmarking bge-m3 loaded it on top of
+            # the resident jina (~1.7 + ~2.8 = ~4.5 GiB) and OOMKilled
+            # (137) -> CrashLoop -> the app saw "transport error" and the
+            # benchmark 500'd. The cache now shares the embedder's
+            # budgeted LRU: it evicts to stay under
+            # MINERVA_RERANKER_CACHE_BUDGET_BYTES (3 GiB, set above) and
+            # refuses up front anything that can't fit, so at most one
+            # heavy model is resident. 4 GiB = 3 GiB cache budget +
+            # ~1 GiB baseline/activation headroom for the cross-encoder
+            # spike on the 30-80 candidate over-fetch. Bumping +1 GiB over
+            # the old 3 GiB keeps the node schedulable (requests-based;
+            # limits oversubscribe).
             #
             # Cross-encoder scoring is compute-bound per (query, doc)
             # pair; with the 30-80 candidate over-fetch a rerank burst
             # wants several cores. Idle between turns.
             requests:
-              memory: "3Gi"
+              memory: "4Gi"
               cpu: "100m"
             limits:
-              memory: "3Gi"
+              memory: "4Gi"
               cpu: "1500m"
           readinessProbe:
             tcpSocket:

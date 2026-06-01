@@ -1,7 +1,7 @@
 //! Process-wide Prometheus metrics for every Minerva service binary.
 //!
 //! Each binary calls [`init`] once from `main`, passing its service name
-//! (e.g. `"minerva-api"`). That installs a global `metrics` recorder and
+//! (e.g. `"minerva-app"`). That installs a global `metrics` recorder and
 //! spawns a tiny HTTP listener serving the Prometheus text exposition
 //! format on `MINERVA_METRICS_PORT` (default [`DEFAULT_METRICS_PORT`]).
 //! Grafana Alloy scrapes the pod on that port, selected by the

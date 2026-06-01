@@ -31,7 +31,7 @@ spec:
         minerva-internal-client: "false"
     spec:
       containers:
-        - name: embedder
+        - name: minerva-embedder
           image: ghcr.io/edwinexd/minerva-embedder:latest
           imagePullPolicy: Always
           ports:

@@ -27,7 +27,7 @@ spec:
         minerva-internal-client: "true"
     spec:
       containers:
-        - name: minerva
+        - name: minerva-app
           image: ghcr.io/edwinexd/minerva:latest
           imagePullPolicy: Always
           ports:

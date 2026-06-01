@@ -68,14 +68,14 @@ pub async fn api_main() -> anyhow::Result<()> {
     // Prometheus exporter + /metrics listener. Must precede any facade
     // emission (the HTTP middleware, memprobe gauges) so the recorder is
     // installed before the first sample.
-    minerva_metrics::init("minerva-api");
+    minerva_metrics::init("minerva-app");
 
     let config = config::Config::from_env()?;
     let state = state::AppState::new(&config).await?;
 
     // Memory probe: see `minerva_metrics::spawn_memprobe` for cadence /
     // rationale. Emits the `memprobe: uptime=...` log line + RSS gauges.
-    minerva_metrics::spawn_memprobe("minerva-api");
+    minerva_metrics::spawn_memprobe("minerva-app");
 
     // One-shot backfill of the document_id payload index across pre-existing
     // course_* collections. New collections get the index at creation time.

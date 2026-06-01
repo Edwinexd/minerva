@@ -26,7 +26,7 @@ spec:
         minerva-internal-client: "false"
     spec:
       containers:
-        - name: reranker
+        - name: minerva-reranker
           image: ghcr.io/edwinexd/minerva-reranker:latest
           imagePullPolicy: Always
           ports:

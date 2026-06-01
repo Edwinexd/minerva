@@ -32,7 +32,7 @@ spec:
         minerva-internal-client: "true"
     spec:
       containers:
-        - name: worker
+        - name: minerva-worker
           image: ghcr.io/edwinexd/minerva-worker:latest
           imagePullPolicy: Always
           ports:

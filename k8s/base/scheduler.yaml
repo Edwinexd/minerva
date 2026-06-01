@@ -31,7 +31,7 @@ spec:
         minerva-internal-client: "true"
     spec:
       containers:
-        - name: scheduler
+        - name: minerva-scheduler
           image: ghcr.io/edwinexd/minerva-scheduler:latest
           imagePullPolicy: Always
           ports:

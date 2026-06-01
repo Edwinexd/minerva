@@ -1,0 +1,306 @@
+{
+  "uid": "minerva-models",
+  "title": "Minerva - Models & Caches",
+  "tags": ["minerva", "models", "embedder", "reranker"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Embedder (FastEmbed LRU cache)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "state-timeline",
+      "title": "Embedder models resident",
+      "description": "fastembed_models_loaded as a state band per model id: green = currently in the LRU cache, red = evicted (the gauge is set to 1 on load and 0 on eviction). This is the direct answer to 'which models are loaded right now, and which got swapped out'. The embedder is single-replica with a memory-budgeted LRU, so a model flipping red means the budget forced an eviction to make room. Metric originates in the minerva-embedder pod (prod) or minerva-app under the local-engine dev build.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 80, "lineWidth": 0 },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "evicted", "color": "red", "index": 0 }, "1": { "text": "resident", "color": "green", "index": 1 } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "mergeValues": true, "showValue": "never", "rowHeight": 0.9, "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "fastembed_models_loaded",
+          "legendFormat": "{{model}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Embedder model load rate",
+      "description": "rate(fastembed_model_load_seconds_count) by model: how often each model is (re)loaded from disk/Hub into an ONNX/candle session. A cold first use shows one load; a model that keeps reappearing here is being repeatedly evicted and reloaded (cache thrash), which on this single OOM-prone pod is the early-warning signal that the cache budget is too small for the working set of models in active use.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "lineWidth": 1, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (model) (rate(fastembed_model_load_seconds_count{}[15m]))",
+          "legendFormat": "{{model}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Embedder cache footprint vs budget",
+      "description": "fastembed_cache_footprint_bytes (sum of each resident model's measured RSS cost) against fastembed_cache_budget_bytes (the dashed ceiling, default 55% of the pod cgroup limit, overridable via MINERVA_FASTEMBED_CACHE_BUDGET_BYTES). When footprint approaches the budget line, the next distinct model load triggers an LRU eviction. Footprint is the cache's own accounting, not process RSS; cross-check with the memprobe RSS gauge on the Memory & OOM dashboard.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "budget" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(fastembed_cache_footprint_bytes)",
+          "legendFormat": "footprint"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(fastembed_cache_budget_bytes)",
+          "legendFormat": "budget"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Per-model RSS cost (embedder)",
+      "description": "fastembed_model_rss_cost_bytes by model: the warmed RSS each resident model contributes to the footprint, measured by diffing VmRSS across load + a shape-matched warmup pass (so the ORT arena is included, not just weights). Zero means evicted. This is how you see which model is the heavyweight forcing evictions; e.g. nomic warmed is ~2.7 GiB vs a small English model at a few hundred MiB.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "fastembed_model_rss_cost_bytes > 0",
+          "legendFormat": "{{model}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Embedder cache hit ratio (5m)",
+      "description": "hits / (hits + misses) over 5m. A hit is an embed request whose model was already resident; a miss is a cold load (slow, allocates). Low ratio under steady traffic means thrash. Reads 0 when idle (no embed traffic), since the denominator is clamped to 1 to avoid divide-by-zero.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 0.8 }, { "color": "green", "value": 0.95 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(fastembed_cache_hits_total[5m])) / clamp_min(sum(rate(fastembed_cache_hits_total[5m])) + sum(rate(fastembed_cache_misses_total[5m])), 1)"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Embedder evictions",
+      "description": "rate(fastembed_evictions_total) by model: how often each model is dropped from the LRU. Paired with the load-rate panel, sustained eviction + reload of the same models is the definition of cache thrash and the lever for raising the cache budget (or trimming the active model set).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "lineWidth": 1, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (model) (rate(fastembed_evictions_total[15m]))",
+          "legendFormat": "{{model}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Embedder model load duration (p50/p95)",
+      "description": "histogram_quantile over fastembed_model_load_seconds_bucket. This is wall-clock for download (first time) + ONNX/candle session build + the shape-matched warmup pass, all on the spawn_blocking pool. The window is wide (1h) because loads are rare events; a rising p95 means models are getting heavier or the Hub fetch is slow.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(fastembed_model_load_seconds_bucket[1h])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(fastembed_model_load_seconds_bucket[1h])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Embedder models resident (count)",
+      "description": "fastembed_cache_models_count: how many distinct models are currently held in the LRU. Bounded implicitly by the cache budget divided by per-model RSS cost.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(fastembed_cache_models_count)"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Reranker (cross-encoder cache)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "state-timeline",
+      "title": "Reranker models resident",
+      "description": "reranker_models_loaded per cross-encoder model id. The reranker cache never evicts (it is bounded by the small admin-enabled catalog, in practice one or two models), so a band goes green on first use and stays green; the transition marks when a course first selected that re-ranker. Metric originates in the minerva-reranker pod (prod).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 25 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 80, "lineWidth": 0 },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "not loaded", "color": "red", "index": 0 }, "1": { "text": "resident", "color": "green", "index": 1 } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "mergeValues": true, "showValue": "never", "rowHeight": 0.9, "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "reranker_models_loaded",
+          "legendFormat": "{{model}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Reranker model load rate",
+      "description": "rate(reranker_model_load_seconds_count) by model. Because the reranker never evicts, this should show a single load per model per pod lifetime; repeated loads of the same model would mean the pod is restarting (correlate with the restart panel on the Memory & OOM dashboard).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "lineWidth": 1, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (model) (rate(reranker_model_load_seconds_count[15m]))",
+          "legendFormat": "{{model}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Reranker cache hit ratio (5m)",
+      "description": "hits / (hits + misses) over 5m for the reranker handle cache. Since re-ranking is interactive-only (chat path) and the cache never evicts, this sits at ~100% once the course's model is warm; a dip marks a cold load after a restart. Reads 0 when idle.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 32 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 0.8 }, { "color": "green", "value": 0.95 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(reranker_cache_hits_total[5m])) / clamp_min(sum(rate(reranker_cache_hits_total[5m])) + sum(rate(reranker_cache_misses_total[5m])), 1)"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Reranker model load duration (p50/p95)",
+      "description": "histogram_quantile over reranker_model_load_seconds_bucket: download (first time) + ONNX session build for the cross-encoder. Wide 1h window because loads are rare. The default jina-reranker-v2-base-multilingual is ~278M params.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(reranker_model_load_seconds_bucket[1h])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(reranker_model_load_seconds_bucket[1h])))",
+          "legendFormat": "p95"
+        }
+      ]
+    }
+  ]
+}

@@ -4,18 +4,19 @@
   "tags": ["minerva", "memory", "oom"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
   "templating": {
     "list": [
       {
-        "name": "service",
-        "label": "Service",
+        "name": "workload",
+        "label": "Workload",
+        "description": "Container name, used as the stable per-workload key. cAdvisor and kube-state-metrics carry no `service`/`app` label, so the old `service` variable could not filter the cgroup/OOM panels; `container` is the one label common to cAdvisor, KSM and the app metrics, and (unlike `pod`) it survives pod replacement. Sourced from cAdvisor so postgres/qdrant (which emit no app metrics) are still selectable.",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": { "query": "label_values(process_vm_rss_bytes, service)", "refId": "ServiceVar" },
-        "refresh": 1,
+        "query": { "query": "label_values(container_memory_working_set_bytes{namespace=\"minerva\", container!=\"\", container!=\"POD\"}, container)", "refId": "WorkloadVar" },
+        "refresh": 2,
         "includeAll": true,
         "multi": true,
         "allValue": ".*",
@@ -30,7 +31,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Container working set vs memory limit",
-      "description": "Per-pod cgroup working set (cAdvisor) against the configured memory limit. The gap to the limit line is OOM headroom; this is the panel to open first during a memory incident.",
+      "description": "Per-workload cgroup working set (cAdvisor) against the configured memory limit, aggregated max-by-container so it is one continuous line per workload across pod replacement (a rolling deploy briefly runs two pods; `max by (container)` follows the live one instead of spawning a ghost series per pod name). The gap to the dashed limit line is OOM headroom; open this first during a memory incident.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
       "fieldConfig": {
@@ -53,14 +54,14 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "container_memory_working_set_bytes{namespace=\"minerva\", container!=\"\", container!=\"POD\"}",
-          "legendFormat": "{{pod}}/{{container}}"
+          "expr": "max by (container) (container_memory_working_set_bytes{namespace=\"minerva\", container=~\"$workload\", container!=\"\", container!=\"POD\"})",
+          "legendFormat": "{{container}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "container_spec_memory_limit_bytes{namespace=\"minerva\", container!=\"\", container!=\"POD\"} > 0",
-          "legendFormat": "limit {{pod}}/{{container}}"
+          "expr": "max by (container) (container_spec_memory_limit_bytes{namespace=\"minerva\", container=~\"$workload\", container!=\"\", container!=\"POD\"} > 0)",
+          "legendFormat": "limit {{container}}"
         }
       ]
     },
@@ -68,7 +69,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Process RSS by service (memprobe)",
-      "description": "process_vm_rss_bytes from the in-process memprobe, one series per service. Cross-check against the cAdvisor working set above; divergence points at page-cache vs anon RSS.",
+      "description": "process_vm_rss_bytes from the in-process memprobe. Aggregated max-by-service so a rolling deploy (two pods of one service briefly co-existing) stays one line instead of two identically-labelled ones. Filtered by $workload via the `container` label. Cross-check against the cAdvisor working set above; divergence points at page-cache vs anon RSS.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
       "fieldConfig": {
@@ -80,7 +81,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "process_vm_rss_bytes{namespace=\"minerva\", service=~\"$service\"}",
+          "expr": "max by (service) (process_vm_rss_bytes{namespace=\"minerva\", container=~\"$workload\"})",
           "legendFormat": "{{service}}"
         }
       ]
@@ -89,7 +90,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Working set as % of limit",
-      "description": "container_memory_working_set_bytes / container_spec_memory_limit_bytes. Both come from cAdvisor with identical labels, so the division is clean. Sustained approach to 100% precedes an OOMKill.",
+      "description": "max-by-container working set / limit (both from cAdvisor, identical labels, so the division is clean and replacement-proof). Sustained approach to 100% precedes an OOMKill.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
       "fieldConfig": {
@@ -107,8 +108,8 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "100 * container_memory_working_set_bytes{namespace=\"minerva\", container!=\"\", container!=\"POD\"} / (container_spec_memory_limit_bytes{namespace=\"minerva\", container!=\"\", container!=\"POD\"} > 0)",
-          "legendFormat": "{{pod}}/{{container}}"
+          "expr": "100 * max by (container) (container_memory_working_set_bytes{namespace=\"minerva\", container=~\"$workload\", container!=\"\", container!=\"POD\"}) / max by (container) (container_spec_memory_limit_bytes{namespace=\"minerva\", container=~\"$workload\", container!=\"\", container!=\"POD\"} > 0)",
+          "legendFormat": "{{container}}"
         }
       ]
     },
@@ -116,7 +117,7 @@
       "id": 4,
       "type": "table",
       "title": "OOMKilled containers (last terminated reason)",
-      "description": "kube_pod_container_status_last_terminated_reason filtered to OOMKilled. A row here means the container's last exit was an OOM kill.",
+      "description": "kube_pod_container_status_last_terminated_reason filtered to OOMKilled, scoped by $workload. A row means that container's last exit was an OOM kill. Pod name is kept here on purpose; when chasing an OOM you want the exact (now-replaced) pod.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 17 },
       "fieldConfig": { "defaults": {}, "overrides": [] },
@@ -125,7 +126,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "kube_pod_container_status_last_terminated_reason{namespace=\"minerva\", reason=\"OOMKilled\"} == 1",
+          "expr": "kube_pod_container_status_last_terminated_reason{namespace=\"minerva\", reason=\"OOMKilled\", container=~\"$workload\"} == 1",
           "format": "table",
           "instant": true
         }
@@ -137,18 +138,18 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Container restarts (cumulative)",
-      "description": "kube_pod_container_status_restarts_total. A step up is a restart; correlate the timestamp with the working-set panel to confirm an OOM-driven crashloop.",
+      "title": "Container restarts (last 1h)",
+      "description": "increase(kube_pod_container_status_restarts_total[1h]) summed by container. Plotting the *increase* rather than the raw cumulative counter is deliberate: the cumulative series resets to 0 every time a pod is replaced, so on a normal rolling deploy the old chart dropped to zero and looked like a metric glitch. The windowed increase is replacement-proof and reads as what you actually care about: is anything crash-looping right now. A clean deploy stays flat at ~0; a crash-looping pod climbs.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 17 },
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 0, "lineWidth": 1, "showPoints": "always" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "lineWidth": 1, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "kube_pod_container_status_restarts_total{namespace=\"minerva\"}",
-          "legendFormat": "{{pod}}/{{container}}"
+          "expr": "sum by (container) (increase(kube_pod_container_status_restarts_total{namespace=\"minerva\", container=~\"$workload\"}[1h]))",
+          "legendFormat": "{{container}}"
         }
       ]
     },
@@ -156,7 +157,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Threads by service (memprobe)",
-      "description": "process_threads. A runaway thread count is an independent leak signal that shows up before RSS does.",
+      "description": "process_threads, max-by-service (replacement-proof). A runaway thread count is an independent leak signal that shows up before RSS does.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 17 },
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 1, "showPoints": "never" } }, "overrides": [] },
@@ -165,7 +166,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "process_threads{namespace=\"minerva\", service=~\"$service\"}",
+          "expr": "max by (service) (process_threads{namespace=\"minerva\", container=~\"$workload\"})",
           "legendFormat": "{{service}}"
         }
       ]
@@ -174,7 +175,7 @@
       "id": 7,
       "type": "timeseries",
       "title": "Peak RSS (VmHWM) by service",
-      "description": "process_vm_hwm_bytes: the high-water mark of RSS since process start. The startup spike (embedder benchmark warmup) shows here even after steady-state RSS settles back down.",
+      "description": "process_vm_hwm_bytes: the high-water mark of RSS since process start, so it resets when a pod is replaced. max-by-service keeps it on one continuous line through a rolling deploy (it tracks whichever pod has the higher HWM, i.e. the old one until it ages out). The startup spike (embedder benchmark warmup) shows here even after steady-state RSS settles back down.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 25 },
       "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1, "showPoints": "never" } }, "overrides": [] },
@@ -183,7 +184,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "process_vm_hwm_bytes{namespace=\"minerva\", service=~\"$service\"}",
+          "expr": "max by (service) (process_vm_hwm_bytes{namespace=\"minerva\", container=~\"$workload\"})",
           "legendFormat": "{{service}}"
         }
       ]

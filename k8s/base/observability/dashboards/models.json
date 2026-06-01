@@ -40,7 +40,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "fastembed_models_loaded",
+          "expr": "max by (model) (fastembed_models_loaded)",
           "legendFormat": "{{model}}"
         }
       ]
@@ -111,7 +111,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "fastembed_model_rss_cost_bytes > 0",
+          "expr": "max by (model) (fastembed_model_rss_cost_bytes) > 0",
           "legendFormat": "{{model}}"
         }
       ]
@@ -230,7 +230,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "reranker_models_loaded",
+          "expr": "max by (model) (reranker_models_loaded)",
           "legendFormat": "{{model}}"
         }
       ]

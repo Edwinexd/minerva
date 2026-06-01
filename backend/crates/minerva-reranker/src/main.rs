@@ -39,6 +39,27 @@ async fn main() -> anyhow::Result<()> {
 
     let reranker = Arc::new(FastReranker::new());
 
+    // Boot warmup: load + benchmark the default cross-encoder so the
+    // reranker pod is warm by the time the first chat reranks, instead of
+    // making that student pay the cold download + ONNX session build (and
+    // leaving every reranker_* metric empty until then). Mirrors the
+    // embedder's boot benchmark. Background-spawned so the gRPC listener
+    // accepts connections immediately; a rerank that arrives before warmup
+    // finishes just blocks on the same load.
+    let warmup = reranker.clone();
+    tokio::spawn(async move {
+        let model = minerva_embed_engine::reranker::DEFAULT_RERANK_MODEL;
+        tracing::info!("running reranker boot warmup for {model}...");
+        match warmup.benchmark_one(model).await {
+            Ok(r) => tracing::info!(
+                "reranker boot warmup complete: {} at {:.1} pairs/sec",
+                r.model,
+                r.pairs_per_second
+            ),
+            Err(e) => tracing::warn!("reranker boot warmup failed: {e}"),
+        }
+    });
+
     let service = service::RerankerService::new(reranker);
 
     tracing::info!("minerva-reranker listening on {addr}");

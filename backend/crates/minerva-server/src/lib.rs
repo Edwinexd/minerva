@@ -136,13 +136,21 @@ pub async fn api_main() -> anyhow::Result<()> {
     // One-shot backfill of `documents.content_hash` for pre-existing rows.
     // The column was added in the slice-1 schema migration; new uploads
     // populate it server-side, but legacy rows stay NULL until something
-    // reads the file back off disk and hashes it. Until then, the partial
-    // unique index `(course_id, content_hash) WHERE content_hash IS NOT NULL`
-    // simply skips them, so they don't conflict, but server-side dedup
-    // doesn't work for those docs either. We rate-limit to one batch /
-    // second so an installation with 10k legacy rows doesn't saturate
-    // disk I/O on a single pod restart. Self-terminates when the table
-    // is fully backfilled.
+    // reads the file back off disk and hashes it. Until then, server-side
+    // dedup doesn't work for those docs.
+    //
+    // Some legacy rows are byte-for-byte duplicates of another active doc
+    // in the same course (they predate the dedup index, so the upload path
+    // never got the chance to collapse them). Those can never receive a
+    // hash without violating the partial unique index, so the per-row
+    // handler orphans them (the same reconciliation the upload path
+    // performs) rather than leaving them NULL to be re-hashed on every
+    // restart. With duplicates orphaned, the sweep genuinely converges and
+    // logs "complete" once, instead of looping the same impossible work on
+    // every boot.
+    //
+    // We rate-limit to one batch / second so an installation with 10k
+    // legacy rows doesn't saturate disk I/O on a single pod restart.
     {
         let state = state.clone();
         let docs_path = config.docs_path.clone();
@@ -208,20 +216,89 @@ pub async fn api_main() -> anyhow::Result<()> {
                             continue;
                         }
                     };
-                    if let Err(e) = minerva_db::queries::documents::set_content_hash_if_null(
+                    match minerva_db::queries::documents::set_content_hash_if_null(
                         &state.db, doc_id, &hash,
                     )
                     .await
                     {
-                        // Most likely a unique-index collision against an
-                        // active row that already has this hash: another
-                        // active doc in the same course has the same
-                        // bytes (a pre-existing duplicate the backfill
-                        // can't dedup retroactively without orphaning).
-                        // Log and move on; the row stays NULL but the
-                        // cursor already advanced past it above, so we
-                        // won't re-pick it on the next iteration.
-                        tracing::debug!("content_hash backfill: doc {} skip ({})", doc_id, e);
+                        Ok(_) => {}
+                        Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+                            // Collision: another active first-class doc in this
+                            // course already holds this content_hash (that's what
+                            // the partial unique index
+                            // `idx_documents_course_content_hash_active`
+                            // rejected). This row is a byte-for-byte duplicate
+                            // that predates content-hash dedup; today's upload
+                            // path (`upload_document`) would have returned the
+                            // existing doc rather than creating this one. It can
+                            // never receive a hash, so if we just skip it the
+                            // backfill re-reads and re-hashes it off disk on
+                            // every restart and never truly completes.
+                            //
+                            // Reconcile it exactly as the upload path supersedes
+                            // a doc: orphan it. Orphaning keeps its chunks for
+                            // old citations but drops it from new retrieval, and
+                            // `orphaned_at IS NOT NULL` excludes it from this
+                            // sweep's SELECT, so the backfill converges to a real
+                            // "complete" instead of looping forever. Its bytes
+                            // survive in the doc that kept the hash.
+                            //
+                            // Guard against the unlikely race where the holder
+                            // was itself orphaned between our failed UPDATE and
+                            // this lookup: only orphan when a *different* active
+                            // doc still holds the hash, so we never drop the last
+                            // live copy of the content. If the slot is now free,
+                            // leave the row NULL; the next sweep fills it.
+                            match minerva_db::queries::documents::find_active_by_content_hash(
+                                &state.db, course_id, &hash,
+                            )
+                            .await
+                            {
+                                Ok(Some(holder)) if holder.id != doc_id => {
+                                    match minerva_db::queries::documents::orphan(
+                                        &state.db, doc_id,
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => tracing::info!(
+                                            "content_hash backfill: orphaned doc {} as a duplicate of active doc {} in course {}",
+                                            doc_id,
+                                            holder.id,
+                                            course_id
+                                        ),
+                                        Err(e) => tracing::warn!(
+                                            "content_hash backfill: failed to orphan duplicate doc {}: {}",
+                                            doc_id,
+                                            e
+                                        ),
+                                    }
+                                }
+                                Ok(_) => {
+                                    tracing::debug!(
+                                        "content_hash backfill: doc {} collided but no other active doc holds the hash now; leaving NULL for the next sweep",
+                                        doc_id
+                                    );
+                                }
+                                Err(e) => tracing::warn!(
+                                    "content_hash backfill: doc {} lookup after collision failed: {}",
+                                    doc_id,
+                                    e
+                                ),
+                            }
+                        }
+                        Err(e) => {
+                            // NOT a collision: a transient DB error (connection
+                            // drop, pool timeout, deadlock, ...). The cursor
+                            // already advanced past this row, so it silently
+                            // stays NULL until the next restart re-scans it.
+                            // Surface it at warn rather than presuming it was a
+                            // duplicate and burying it at debug.
+                            tracing::warn!(
+                                "content_hash backfill: doc {} update failed unexpectedly: {}",
+                                doc_id,
+                                e
+                            );
+                        }
                     }
                 }
 

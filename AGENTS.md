@@ -110,10 +110,23 @@ kubectl get pods -n minerva    # Check status
 
 **Namespace:** `minerva`
 
-**Deployments:**
-- `minerva-app`: Main app (port 3000, NodePort 30090), health: `/api/health`
+**Deployments** (the backend is split into five single-replica services;
+see "Memory Budgeting" for why each is isolated):
+- `minerva-app`: HTTP/auth/CRUD API (port 3000, NodePort 30090), health:
+  `/api/health`. Holds gRPC clients to the embedder/reranker.
+- `minerva-embedder`: owns the FastEmbed LRU model cache (gRPC 50051,
+  metrics 9464). OOM-prone; the embedder model-cache metrics originate here.
+- `minerva-reranker`: owns the cross-encoder cache (gRPC 50052, metrics
+  9464). The other OOM-prone pod.
+- `minerva-worker`: drains the ingest doc queue, calls embedder/reranker.
+- `minerva-scheduler`: periodic loops (Canvas auto-sync, backfills).
 - `postgres`: PostgreSQL (port 5432, ClusterIP)
 - `qdrant`: Vector DB (ports 6333/6334, ClusterIP)
+
+For each workload the container name, metrics `service=` label, `app` pod
+label, and Deployment name are all the same string
+(`minerva-{app,embedder,reranker,worker,scheduler}`), so one dashboard
+variable keys cAdvisor, kube-state-metrics, and app metrics alike.
 
 **Layout:** Kustomize base + prod overlay (`k8s/base/`, `k8s/overlays/prod/`)
 
@@ -204,7 +217,7 @@ transformer scopes everything to `minerva`.
   winding down). Tails each pod's CRI logs off the node, attaches
   namespace/pod/container/app labels, pushes to Loki. Deliberately
   format-agnostic: ships the raw line, no JSON parsing. The five services
-  are mixed JSON (embedder/reranker) and text (api/worker/scheduler);
+  are mixed JSON (embedder/reranker) and text (app/worker/scheduler);
   structure is extracted at query time (`| json | level="ERROR"`), so
   local-dev log formatting is untouched.
 - `grafana`: dashboards + Explore. Auth-proxy mode, NO password (see
@@ -214,7 +227,11 @@ transformer scopes everything to `minerva`.
 `minerva_metrics::init("<service>")` once in `main`, which installs a
 process-wide Prometheus recorder and an HTTP listener on
 `MINERVA_METRICS_PORT` (default `9464`; set `0` to disable, e.g. local
-dev). The `service="..."` global label distinguishes the five pods. Code
+dev). The `service="..."` global label distinguishes the five pods and is
+kept byte-identical to each pod's container name, `app` pod label, and
+Deployment name (`minerva-app`, `minerva-embedder`, `minerva-reranker`,
+`minerva-worker`, `minerva-scheduler`), so one dashboard variable can cross
+cAdvisor, kube-state-metrics, and app metrics. Code
 emits via the lightweight `metrics` facade (`counter!`/`gauge!`/
 `histogram!`), which is a no-op until a binary installs the recorder, so
 library crates depend only on the facade.
@@ -230,12 +247,32 @@ library crates depend only on the facade.
   matched route template (`/api/courses/:id`), never the raw URL, so label
   cardinality stays bounded. Buckets for any `*_seconds` metric are set in
   `minerva_metrics::init`.
+- **Model-cache metrics** (emitted in the embedder/reranker pods from
+  `minerva-embed-engine`): `fastembed_models_loaded{model}` and
+  `reranker_models_loaded{model}` are 1/0 gauges of which models are
+  resident (set to 1 on load, 0 on eviction), so a state-timeline shows
+  exactly which models are loaded and when they swap. Plus
+  `fastembed_model_rss_cost_bytes{model}` (per-model warmed RSS),
+  `fastembed_cache_footprint_bytes` / `fastembed_cache_budget_bytes` (LRU
+  footprint vs ceiling), `fastembed_cache_models_count` /
+  `reranker_cache_models_count`, and the pre-existing `*_cache_hits_total`
+  / `*_cache_misses_total` / `fastembed_evictions_total` /
+  `*_model_load_seconds` (load frequency is
+  `rate(*_model_load_seconds_count)`).
 
 **Dashboards** are git-managed JSON under
-`k8s/base/observability/dashboards/` (memory-oom, services-app, infra),
-assembled into the `grafana-dashboards` ConfigMap by `configMapGenerator`
-(no hash suffix) and hot-reloaded by Grafana's file provider. Edit = file
-diff, not a click in a UI whose state lives only in Grafana's DB.
+`k8s/base/observability/dashboards/` (memory-oom, services-app, infra,
+models), assembled into the `grafana-dashboards` ConfigMap by
+`configMapGenerator` (no hash suffix) and hot-reloaded by Grafana's file
+provider. Edit = file diff, not a click in a UI whose state lives only in
+Grafana's DB.
+
+`memory-oom` keys every panel on the `container` label (the `$workload`
+variable) instead of `service`, because cAdvisor and kube-state-metrics
+carry no `service` label; aggregating `max`/`sum by (container)` also
+collapses a rolling deploy's two pods into one line rather than leaving a
+ghost series per replaced pod name. `models` charts the model-cache
+metrics above.
 
 **Grafana auth (no password to manage).** Native SAML is Grafana
 Enterprise-only and there's no OSS plugin, so we don't use SAML. Instead
@@ -457,15 +494,17 @@ through unchanged.
 Applied in: course members list, conversation lists, conversation detail
 (feedback + teacher notes), and note CRUD responses.
 
-## Memory Budgeting (monolith bridge until microservices)
+## Memory Budgeting (per-service, post-split)
 
-The backend is currently a single process holding HTTP/auth/routing,
-the per-doc ingestion worker, the FastEmbed model cache, the
-cross-encoder reranker, the classifier glue, and chat strategy
-execution. All sharing one cgroup, one allocator, one tokio runtime.
-The structural fix is to split these into separate services (see
-"Architecture debt" below); until then we have several pieces of
-defense to keep this from OOM-killing the pod.
+The backend used to be one process holding HTTP/auth/routing, the
+ingestion worker, the FastEmbed model cache, the cross-encoder reranker,
+the classifier glue, and chat strategy in a single cgroup / allocator /
+tokio runtime. That split has shipped: there are now five services
+(`minerva-app`, `minerva-embedder`, `minerva-reranker`, `minerva-worker`,
+`minerva-scheduler`), each its own pod, image, and cgroup, wired by gRPC
+(the app/worker hold `Remote{Embedder,Reranker}Client`; the model caches
+live only in the embedder/reranker pods). The defenses below are what keep
+the two model-cache pods, the OOM-prone ones, under their limits.
 
 ### FastEmbed cache LRU (`backend/crates/minerva-embed-engine/src/fastembed_embedder.rs`)
 
@@ -568,26 +607,26 @@ next memory incident lands.
   aggressively. Necessary but not sufficient with the current
   workload.
 
-### Architecture debt
+### Service split (shipped)
 
-The OOM class of incidents only exists because one process holds
-HTTP/auth, the worker, the embedder cache, the reranker, and chat
-strategy in a single cgroup. The clean split is:
+The OOM class of incidents came from one process holding HTTP/auth, the
+worker, the embedder cache, the reranker, and chat strategy in a single
+cgroup. That is now split:
 
-- `minerva-api`: HTTP/auth/CRUD only. ~500 MiB pod, scales
-  horizontally.
-- `minerva-embedder`: owns the FastEmbed cache; gRPC/HTTP service
-  with its own memory limit sized for the model working set. The
-  LRU only has to satisfy embedder clients, not "embedder vs worker
-  vs chat all fighting on one heap."
+- `minerva-app`: HTTP/auth/CRUD only; holds gRPC clients to the model
+  services. Scales horizontally.
+- `minerva-embedder`: owns the FastEmbed cache; gRPC service with its own
+  memory limit sized for the model working set. The LRU only has to
+  satisfy embedder clients, not "embedder vs worker vs chat on one heap."
 - `minerva-reranker`: same shape, separately budgeted, separately
   scalable.
-- `minerva-worker`: pulls from the doc queue, calls embedder /
-  reranker as clients. Scales by replica count independently.
+- `minerva-worker`: pulls from the doc queue, calls embedder / reranker as
+  clients. Scales by replica count independently.
+- `minerva-scheduler`: periodic loops (Canvas auto-sync, backfills), also
+  a client of the model services.
 
-After the split, the warmup-before-measure and sync-eviction
-machinery in this file is still correct (the embedder service still
-needs its LRU to bound real RSS), but `MemBudget` becomes
-single-purpose per service (or unnecessary). Worker OOMs no longer
-take down the API; a reranker model swap no longer evicts a
-worker's embedder cache.
+The warmup-before-measure and sync-eviction machinery in
+`fastembed_embedder.rs` is still correct (the embedder service still needs
+its LRU to bound real RSS); `MemBudget` is now single-purpose per service
+(currently no live consumer, see above). A worker OOM no longer takes down
+the API; a reranker model swap no longer evicts a worker's embedder cache.

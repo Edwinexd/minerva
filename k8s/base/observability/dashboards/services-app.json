@@ -138,8 +138,8 @@
     {
       "id": 6,
       "type": "logs",
-      "title": "Recent error logs (all services)",
-      "description": "Loki: lines containing error/panic across the namespace. JSON services (embedder/reranker) can be refined with `| json | level=\"ERROR\"`.",
+      "title": "Recent error logs (application services)",
+      "description": "Loki error/warn/panic lines. Excludes the observability stack's OWN logs (grafana/loki/prometheus/alloy/ksm/node-exporter): Grafana echoes this very query string when it runs, and the unfiltered `|~ \"error|panic|warn\"` matched that echo, so the panel filled with its own benign query logs. JSON services (embedder/reranker) can be refined further with `| json | level=\"ERROR\"`.",
       "datasource": { "type": "loki", "uid": "loki" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
       "options": { "showTime": true, "wrapLogMessage": true, "dedupStrategy": "none", "enableLogDetails": true, "sortOrder": "Descending" },
@@ -147,7 +147,7 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{namespace=\"minerva\"} |~ \"(?i)error|panic|warn\""
+          "expr": "{namespace=\"minerva\", app!~\"grafana|loki|prometheus|alloy|kube-state-metrics|node-exporter\"} |~ \"(?i)error|panic|warn\""
         }
       ]
     }

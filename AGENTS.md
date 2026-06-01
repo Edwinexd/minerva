@@ -182,6 +182,96 @@ kubectl rollout status -n minerva deploy/qdrant
 ```
 Once verified healthy, delete the `qdrant.pre-restore.*` dir to reclaim space.
 
+## Observability
+
+Self-hosted, fully on-prem (student logs carry PII; nothing ships to a
+third party). Plain manifests under `k8s/base/observability/`, no
+prometheus-operator and no Helm, to match the repo's `kubectl apply -k`
+flow and keep runtime overhead off the single OOM-prone node. Pulled into
+`k8s/base/kustomization.yaml`, so prod gets it and the namespace
+transformer scopes everything to `minerva`.
+
+**Components** (all in the `minerva` namespace):
+- `prometheus`: one Deployment, 15d retention, hostPath TSDB at
+  `/data0/minerva/observability/prometheus`. Scrapes by pod
+  service-discovery (annotation `prometheus.io/scrape`), plus cAdvisor +
+  kubelet off the node via the apiserver proxy with the SA token.
+- `node-exporter` (DaemonSet) + `kube-state-metrics`: node + object-state
+  metrics. Both annotated, so the one generic pods scrape job covers them.
+- `loki`: single-binary, filesystem store, 7d retention, hostPath at
+  `/data0/minerva/observability/loki`.
+- `alloy` (DaemonSet): the log shipper (Promtail's replacement; Promtail is
+  winding down). Tails each pod's CRI logs off the node, attaches
+  namespace/pod/container/app labels, pushes to Loki. Deliberately
+  format-agnostic: ships the raw line, no JSON parsing. The five services
+  are mixed JSON (embedder/reranker) and text (api/worker/scheduler);
+  structure is extracted at query time (`| json | level="ERROR"`), so
+  local-dev log formatting is untouched.
+- `grafana`: dashboards + Explore. Auth-proxy mode, NO password (see
+  below).
+
+**App metrics** come from the `minerva-metrics` crate. Every binary calls
+`minerva_metrics::init("<service>")` once in `main`, which installs a
+process-wide Prometheus recorder and an HTTP listener on
+`MINERVA_METRICS_PORT` (default `9464`; set `0` to disable, e.g. local
+dev). The `service="..."` global label distinguishes the five pods. Code
+emits via the lightweight `metrics` facade (`counter!`/`gauge!`/
+`histogram!`), which is a no-op until a binary installs the recorder, so
+library crates depend only on the facade.
+
+- `memprobe` moved from `minerva-app-core` into `minerva-metrics`
+  (`spawn_memprobe`). All five binaries now run it, including the
+  embedder/reranker pods, which had none before; those are the OOM-prone
+  pods, so their `process_vm_rss_bytes` gauges are the highest-value
+  series. The `memprobe: uptime=...` log line is byte-identical to before,
+  so existing log greps still work; the gauges are additive.
+- HTTP metrics (`http_requests_total`, `http_request_duration_seconds`)
+  come from a `route_layer` middleware on the api router. `path` is the
+  matched route template (`/api/courses/:id`), never the raw URL, so label
+  cardinality stays bounded. Buckets for any `*_seconds` metric are set in
+  `minerva_metrics::init`.
+
+**Dashboards** are git-managed JSON under
+`k8s/base/observability/dashboards/` (memory-oom, services-app, infra),
+assembled into the `grafana-dashboards` ConfigMap by `configMapGenerator`
+(no hash suffix) and hot-reloaded by Grafana's file provider. Edit = file
+diff, not a click in a UI whose state lives only in Grafana's DB.
+
+**Grafana auth (no password to manage).** Native SAML is Grafana
+Enterprise-only and there's no OSS plugin, so we don't use SAML. Instead
+Grafana runs in auth-proxy mode and trusts `X-WEBAUTH-USER`. The Apache
+`/grafana` `<Location>` (in `apache/minerva-app.conf`) is Shibboleth-gated,
+`Require shib-user edsu8469@su.se` (only the one operator), and sets
+`X-WEBAUTH-USER` from the Shib-verified `REMOTE_USER`. The header is unset
+`early` like the other identity headers so a client can't forge it.
+Grafana auto-creates the user as org Admin and the login form is disabled,
+so the header is the only way in. Served under `/grafana` via NodePort
+30091 (same host-Apache-to-NodePort pattern as the app on 30090).
+
+**Validated on k3d.** The stack was brought up end-to-end on a throwaway
+k3d cluster: `kubernetes-cadvisor` / `kubernetes-kubelet` /
+`kube-state-metrics` / `node-exporter` targets all UP, Loki ingesting via
+Alloy, all three dashboards provisioned, and the Grafana auth-proxy
+accepting `X-WEBAUTH-USER` (auto-creating the org-Admin user) while
+rejecting a header-less request with 401. That shook out several real
+bugs now fixed in the manifests: kube-state-metrics `/readyz` lives on the
+telemetry port 8081 (not 8080); the `grafana-dashboards` configMapGenerator
+needs the kustomization's own `namespace: minerva` or it lands in
+`default`; Alloy needs its config ConfigMap mounted at `/etc/alloy` or it
+silently runs the image default and ships nothing; and Grafana's
+`/metrics` moves to `/grafana/metrics` under `serve_from_sub_path`.
+
+**Prod-specific first-deploy checks** (k3d can't cover these):
+- `GF_AUTH_PROXY_WHITELIST` in `grafana.yaml` must contain the source IP
+  Grafana sees from the Apache-to-NodePort hop on the real node (k3d's
+  loadbalancer path validated `127.0.0.1` + `10.42/16`, but the prod hop
+  may present a different IP). If login 407s, read the rejected IP from
+  Grafana logs and widen it.
+- Image tags in the manifests are pinned; bump if a pull fails.
+- Break-glass Grafana admin password: optional Secret `grafana-admin`
+  key `admin-password`. Absent by default (login form disabled anyway);
+  reach via `kubectl exec ... grafana-cli` if ever needed.
+
 ## URL Document Routing
 
 Documents have a parent-child shape (column `documents.parent_document_id`,

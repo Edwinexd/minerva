@@ -62,6 +62,7 @@ COPY backend/crates/minerva-worker/Cargo.toml crates/minerva-worker/Cargo.toml
 COPY backend/crates/minerva-scheduler/Cargo.toml crates/minerva-scheduler/Cargo.toml
 COPY backend/crates/minerva-embedder/Cargo.toml crates/minerva-embedder/Cargo.toml
 COPY backend/crates/minerva-reranker/Cargo.toml crates/minerva-reranker/Cargo.toml
+COPY backend/crates/minerva-metrics/Cargo.toml crates/minerva-metrics/Cargo.toml
 # minerva-server is a lib + the `minerva` (api) bin; minerva-worker /
 # minerva-scheduler / minerva-embedder / minerva-reranker are their own
 # bin crates. Stub every crate's lib/main so cargo resolves the graph
@@ -73,7 +74,8 @@ RUN mkdir -p \
         crates/minerva-pipeline/src crates/minerva-rpc/src crates/minerva-rpc-local/src \
         crates/minerva-server/src \
         crates/minerva-worker/src crates/minerva-scheduler/src \
-        crates/minerva-embedder/src crates/minerva-reranker/src && \
+        crates/minerva-embedder/src crates/minerva-reranker/src \
+        crates/minerva-metrics/src && \
     echo "fn main() {}" > crates/minerva-server/src/main.rs && \
     echo "fn main() {}" > crates/minerva-worker/src/main.rs && \
     echo "fn main() {}" > crates/minerva-scheduler/src/main.rs && \
@@ -83,14 +85,16 @@ RUN mkdir -p \
           crates/minerva-app-core/src/lib.rs crates/minerva-db/src/lib.rs \
           crates/minerva-embed-engine/src/lib.rs crates/minerva-mbz/src/lib.rs \
           crates/minerva-pipeline/src/lib.rs crates/minerva-rpc/src/lib.rs \
-          crates/minerva-rpc-local/src/lib.rs crates/minerva-server/src/lib.rs && \
+          crates/minerva-rpc-local/src/lib.rs crates/minerva-server/src/lib.rs \
+          crates/minerva-metrics/src/lib.rs && \
     cargo build --release --bin ${TARGET_BIN} && \
     rm -rf crates/minerva-core/src crates/minerva-catalog/src \
            crates/minerva-app-core/src crates/minerva-db/src \
            crates/minerva-embed-engine/src crates/minerva-mbz/src \
            crates/minerva-pipeline/src crates/minerva-rpc/src crates/minerva-rpc-local/src \
            crates/minerva-server/src crates/minerva-worker/src crates/minerva-scheduler/src \
-           crates/minerva-embedder/src crates/minerva-reranker/src
+           crates/minerva-embedder/src crates/minerva-reranker/src \
+           crates/minerva-metrics/src
 
 # Phase 2: build actual code (deps cached). `touch` defeats cargo's
 # mtime-based incremental check for the stub-replaced sources.

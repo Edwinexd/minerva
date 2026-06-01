@@ -1,0 +1,136 @@
+# kube-state-metrics: object-state metrics (pod phase, restart counts,
+# container resource requests/limits, OOMKilled terminations, deployment
+# replicas). The `kube_pod_container_status_last_terminated_reason` and
+# `kube_pod_container_resource_limits` series are what let a Grafana panel
+# say "this pod hit its memory limit and got OOMKilled", joined against the
+# cAdvisor working-set gauge.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-state-metrics
+  namespace: minerva
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: minerva-kube-state-metrics
+rules:
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - secrets
+      - nodes
+      - pods
+      - services
+      - serviceaccounts
+      - resourcequotas
+      - replicationcontrollers
+      - limitranges
+      - persistentvolumeclaims
+      - persistentvolumes
+      - namespaces
+      - endpoints
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "daemonsets", "deployments", "replicasets"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: minerva-kube-state-metrics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: minerva-kube-state-metrics
+subjects:
+  - kind: ServiceAccount
+    name: kube-state-metrics
+    namespace: minerva
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: minerva
+  labels:
+    app: kube-state-metrics
+    app.kubernetes.io/part-of: minerva-observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+      labels:
+        app: kube-state-metrics
+        app.kubernetes.io/part-of: minerva-observability
+    spec:
+      serviceAccountName: kube-state-metrics
+      securityContext:
+        runAsUser: 65534
+        runAsNonRoot: true
+      containers:
+        - name: kube-state-metrics
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.14.0
+          ports:
+            - containerPort: 8080
+              name: metrics
+            # Telemetry port serves ksm's own process metrics AND the
+            # /readyz endpoint; the main metrics port (8080) only has
+            # /healthz + /livez, so readiness must probe 8081.
+            - containerPort: 8081
+              name: telemetry
+          resources:
+            requests:
+              memory: "48Mi"
+              cpu: "20m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-state-metrics
+  namespace: minerva
+  labels:
+    app: kube-state-metrics
+    app.kubernetes.io/part-of: minerva-observability
+spec:
+  type: ClusterIP
+  selector:
+    app: kube-state-metrics
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: 8080

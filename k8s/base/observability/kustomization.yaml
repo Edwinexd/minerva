@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Scope everything to the minerva namespace even when this directory is
+# applied on its own (`kubectl apply -k k8s/base/observability`). The
+# parent k8s/base kustomization also sets this, so it's idempotent when
+# pulled in there; but without it here, the configMapGenerator output
+# (grafana-dashboards) gets no namespace and lands in `default`, and the
+# Grafana pod in `minerva` can't mount it.
+namespace: minerva
+
+# Self-contained observability stack: Prometheus + node-exporter +
+# kube-state-metrics (metrics), Loki + Alloy (logs), Grafana (dashboards).
+# Hand-rolled plain manifests, no prometheus-operator and no Helm, to match
+# this repo's `kubectl apply -k` flow and keep runtime overhead low on the
+# single OOM-prone node. Pulled into k8s/base/kustomization.yaml so prod
+# gets it; the namespace transformer there scopes everything to `minerva`.
+
+resources:
+  - prometheus.yaml
+  - node-exporter.yaml
+  - kube-state-metrics.yaml
+  - loki.yaml
+  - alloy.yaml
+  - grafana.yaml
+
+# Dashboards are git-managed as standalone JSON files under dashboards/.
+# kustomize assembles them into the `grafana-dashboards` ConfigMap that
+# grafana.yaml mounts at /var/lib/grafana/dashboards; Grafana's file
+# provider hot-reloads on change. Editing a dashboard is a normal file
+# diff, not a click in a UI whose state lives only in Grafana's DB.
+configMapGenerator:
+  - name: grafana-dashboards
+    files:
+      - dashboards/memory-oom.json
+      - dashboards/services-app.json
+      - dashboards/infra.json
+
+# Fixed name (no hash suffix) so grafana.yaml's volume reference stays
+# valid and edits update the ConfigMap in place for the file provider to
+# pick up.
+generatorOptions:
+  disableNameSuffixHash: true

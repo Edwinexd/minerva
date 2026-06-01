@@ -14,6 +14,13 @@ spec:
       app: minerva-reranker
   template:
     metadata:
+      annotations:
+        # Prometheus pod-SD scrape config (see k8s/base/observability/).
+        # The reranker pod (3Gi, cross-encoder cache) is the other
+        # OOM-prone pod alongside the embedder.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9464"
+        prometheus.io/path: "/metrics"
       labels:
         app: minerva-reranker
         minerva-internal-client: "false"
@@ -25,6 +32,8 @@ spec:
           ports:
             - containerPort: 50052
               name: grpc
+            - containerPort: 9464
+              name: metrics
           env:
             - name: MINERVA_RERANKER_HOST
               value: "0.0.0.0"

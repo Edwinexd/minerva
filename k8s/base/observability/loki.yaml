@@ -1,0 +1,164 @@
+# Loki: single-binary, filesystem-backed log store. No object store, no
+# microservice mode; one process is right for this node's volume. 7-day
+# retention enforced by the compactor. Logs can carry student PII, so this
+# stays fully on-prem (the hosting decision): nothing ships to Grafana
+# Cloud.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: minerva
+data:
+  loki.yaml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9095
+      log_level: info
+
+    common:
+      instance_addr: 127.0.0.1
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+
+    schema_config:
+      configs:
+        - from: 2024-01-01
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+
+    limits_config:
+      retention_period: 168h
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+      allow_structured_metadata: true
+      volume_enabled: true
+      # The five services emit JSON logs; cap line length defensively so a
+      # pathological log line can't balloon ingester memory on this node.
+      max_line_size: 256kb
+
+    compactor:
+      working_directory: /loki/compactor
+      retention_enabled: true
+      delete_request_store: filesystem
+
+    ruler:
+      storage:
+        type: local
+        local:
+          directory: /loki/rules
+
+    # Don't phone home.
+    analytics:
+      reporting_enabled: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: minerva
+  labels:
+    app: loki
+    app.kubernetes.io/part-of: minerva-observability
+spec:
+  replicas: 1
+  strategy:
+    # Single hostPath store; never two writers.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3100"
+        prometheus.io/path: "/metrics"
+      labels:
+        app: loki
+        app.kubernetes.io/part-of: minerva-observability
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      initContainers:
+        - name: chown-store
+          image: busybox:1.37
+          command: ["sh", "-c", "chown -R 10001:10001 /loki"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: store
+              mountPath: /loki
+      containers:
+        - name: loki
+          image: grafana/loki:3.3.2
+          args:
+            - -config.file=/etc/loki/loki.yaml
+          ports:
+            - containerPort: 3100
+              name: http
+            - containerPort: 9095
+              name: grpc
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+            - name: store
+              mountPath: /loki
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3100
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 3100
+            initialDelaySeconds: 45
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: loki-config
+        - name: store
+          hostPath:
+            path: /data0/minerva/observability/loki
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: minerva
+  labels:
+    app: loki
+    app.kubernetes.io/part-of: minerva-observability
+spec:
+  type: ClusterIP
+  selector:
+    app: loki
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3100

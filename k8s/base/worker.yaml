@@ -16,6 +16,13 @@ spec:
       app: minerva-worker
   template:
     metadata:
+      annotations:
+        # Prometheus pod-SD scrape config (see k8s/base/observability/).
+        # The worker exposes the metrics listener even though it runs no
+        # HTTP API, so ingest-queue + memprobe gauges are scrapeable.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9464"
+        prometheus.io/path: "/metrics"
       labels:
         app: minerva-worker
         # Intended NetworkPolicy selector (policy not yet applied): pods
@@ -28,6 +35,9 @@ spec:
         - name: worker
           image: ghcr.io/edwinexd/minerva-worker:latest
           imagePullPolicy: Always
+          ports:
+            - containerPort: 9464
+              name: metrics
           env:
             - name: DATABASE_URL
               valueFrom:

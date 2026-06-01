@@ -1,0 +1,176 @@
+{
+  "uid": "minerva-memory-oom",
+  "title": "Minerva - Memory & OOM",
+  "tags": ["minerva", "memory", "oom"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Container working set vs memory limit",
+      "description": "Per-pod cgroup working set (cAdvisor) against the configured memory limit. The gap to the limit line is OOM headroom; this is the panel to open first during a memory incident.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "limit .*" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "container_memory_working_set_bytes{namespace=\"minerva\", container!=\"\", container!=\"POD\"}",
+          "legendFormat": "{{pod}}/{{container}}"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "container_spec_memory_limit_bytes{namespace=\"minerva\", container!=\"\", container!=\"POD\"} > 0",
+          "legendFormat": "limit {{pod}}/{{container}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Process RSS by service (memprobe)",
+      "description": "process_vm_rss_bytes from the in-process memprobe, one series per service. Cross-check against the cAdvisor working set above; divergence points at page-cache vs anon RSS.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "process_vm_rss_bytes{namespace=\"minerva\"}",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Working set as % of limit",
+      "description": "container_memory_working_set_bytes / container_spec_memory_limit_bytes. Both come from cAdvisor with identical labels, so the division is clean. Sustained approach to 100% precedes an OOMKill.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 80 }, { "color": "red", "value": 90 } ] },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never", "thresholdsStyle": { "mode": "line" } }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 * container_memory_working_set_bytes{namespace=\"minerva\", container!=\"\", container!=\"POD\"} / (container_spec_memory_limit_bytes{namespace=\"minerva\", container!=\"\", container!=\"POD\"} > 0)",
+          "legendFormat": "{{pod}}/{{container}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "OOMKilled containers (last terminated reason)",
+      "description": "kube_pod_container_status_last_terminated_reason filtered to OOMKilled. A row here means the container's last exit was an OOM kill.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 17 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "kube_pod_container_status_last_terminated_reason{namespace=\"minerva\", reason=\"OOMKilled\"} == 1",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "endpoint": true, "instance": true, "job": true, "service": true, "uid": true }, "renameByName": { "pod": "Pod", "container": "Container", "reason": "Reason" } } }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Container restarts (cumulative)",
+      "description": "kube_pod_container_status_restarts_total. A step up is a restart; correlate the timestamp with the working-set panel to confirm an OOM-driven crashloop.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 17 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 0, "lineWidth": 1, "showPoints": "always" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "kube_pod_container_status_restarts_total{namespace=\"minerva\"}",
+          "legendFormat": "{{pod}}/{{container}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Threads by service (memprobe)",
+      "description": "process_threads. A runaway thread count is an independent leak signal that shows up before RSS does.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 17 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 1, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "process_threads{namespace=\"minerva\"}",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Peak RSS (VmHWM) by service",
+      "description": "process_vm_hwm_bytes: the high-water mark of RSS since process start. The startup spike (embedder benchmark warmup) shows here even after steady-state RSS settles back down.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 25 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "process_vm_hwm_bytes{namespace=\"minerva\"}",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    }
+  ]
+}

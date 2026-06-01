@@ -19,6 +19,13 @@ spec:
       app: minerva-embedder
   template:
     metadata:
+      annotations:
+        # Prometheus pod-SD scrape config (see k8s/base/observability/).
+        # The embedder pod's RSS gauges are the highest-value series in
+        # the stack: this is where model-load OOMs originate.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9464"
+        prometheus.io/path: "/metrics"
       labels:
         app: minerva-embedder
         minerva-internal-client: "false"
@@ -30,6 +37,8 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
+            - containerPort: 9464
+              name: metrics
           env:
             - name: MINERVA_EMBEDDER_HOST
               value: "0.0.0.0"

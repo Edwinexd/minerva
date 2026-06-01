@@ -1,0 +1,236 @@
+# Prometheus: single Deployment, no prometheus-operator.
+#
+# Why plain manifests instead of kube-prometheus-stack: this repo deploys
+# via `kubectl apply -k` (no Helm, no helm-controller in the flow), and the
+# whole point of this stack is watching a memory-constrained single node.
+# The operator + CRDs + their own RSS are exactly the overhead we don't
+# want here. One Prometheus, one scrape config, full control over
+# retention and resource limits.
+#
+# Scrape model: pod service-discovery. App pods advertise
+# `prometheus.io/scrape` + `prometheus.io/port: "9464"`; node-exporter and
+# kube-state-metrics carry the same annotations so the one generic
+# `kubernetes-pods` job covers them too. cAdvisor (container_memory_*) and
+# kubelet come off the node via the apiserver proxy with the SA token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: minerva
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: minerva-prometheus
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy", "nodes/metrics", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: minerva-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: minerva-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: minerva
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: minerva
+data:
+  prometheus.yml: |
+    global:
+      # 30s keeps the TSDB small on a node we're trying not to stress;
+      # memory gauges move slowly enough that 30s resolution is plenty.
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      external_labels:
+        cluster: minerva
+
+    scrape_configs:
+      # Prometheus' own metrics.
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+
+      # Generic annotation-driven pod scraping. Covers the five Minerva
+      # services (:9464), plus node-exporter and kube-state-metrics, plus
+      # grafana / loki / alloy self-metrics, all by annotation.
+      - job_name: kubernetes-pods
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
+
+      # Per-container resource usage from the kubelet's cAdvisor endpoint,
+      # via the apiserver proxy. This is the source of
+      # container_memory_working_set_bytes / container_cpu_* and the OOM
+      # signal that today only exists as memprobe log lines.
+      - job_name: kubernetes-cadvisor
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+
+      # Kubelet's own metrics (node-level resource + volume stats).
+      - job_name: kubernetes-kubelet
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/$1/proxy/metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: minerva
+  labels:
+    app: prometheus
+    app.kubernetes.io/part-of: minerva-observability
+spec:
+  replicas: 1
+  strategy:
+    # Single hostPath TSDB; never run two writers against it.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+        app.kubernetes.io/part-of: minerva-observability
+    spec:
+      serviceAccountName: prometheus
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+      initContainers:
+        # hostPath is created 0755 root:root by the kubelet; chown it so
+        # the nobody-uid Prometheus can write its TSDB. fsGroup alone is
+        # unreliable on hostPath across k3d / k3s, so be explicit.
+        - name: chown-tsdb
+          image: busybox:1.37
+          command: ["sh", "-c", "chown -R 65534:65534 /prometheus"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: tsdb
+              mountPath: /prometheus
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.1.0
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=15d
+            - --web.enable-lifecycle
+          ports:
+            - containerPort: 9090
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: tsdb
+              mountPath: /prometheus
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "768Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: tsdb
+          hostPath:
+            path: /data0/minerva/observability/prometheus
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: minerva
+  labels:
+    app: prometheus
+    app.kubernetes.io/part-of: minerva-observability
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090

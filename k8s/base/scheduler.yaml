@@ -17,6 +17,11 @@ spec:
       app: minerva-scheduler
   template:
     metadata:
+      annotations:
+        # Prometheus pod-SD scrape config (see k8s/base/observability/).
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9464"
+        prometheus.io/path: "/metrics"
       labels:
         app: minerva-scheduler
         # Talks to embedder/reranker through the same NetworkPolicy
@@ -29,6 +34,9 @@ spec:
         - name: scheduler
           image: ghcr.io/edwinexd/minerva-scheduler:latest
           imagePullPolicy: Always
+          ports:
+            - containerPort: 9464
+              name: metrics
           env:
             - name: DATABASE_URL
               valueFrom:

@@ -20,3 +20,4 @@ resources:
   - backup.yaml
   - qdrant-backup.yaml
   - image-prune.yaml
+  - observability

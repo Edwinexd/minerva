@@ -1,0 +1,209 @@
+# Grafana: dashboards + Explore over Prometheus and Loki.
+#
+# Auth: NO password to manage. Grafana runs in auth-proxy mode and trusts
+# the `X-WEBAUTH-USER` header that the Apache `/grafana` vhost sets from the
+# Shibboleth `REMOTE_USER` (see apache/minerva-app.conf). Apache enforces
+# Shibboleth + `Require user edsu8469@su.se`, strips any client-supplied
+# X-WEBAUTH-USER, then proxies here. The login form is disabled, so the
+# header is the only way in; the auto-created user lands as org Admin.
+#
+# SAML is deliberately NOT used: native SAML is a Grafana Enterprise
+# feature and there's no OSS plugin for it. Auth-proxy behind the existing
+# Shibboleth-terminating Apache is the no-password OSS path.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: minerva
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        jsonData:
+          timeInterval: 30s
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: http://loki:3100
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: minerva
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: minerva
+        orgId: 1
+        folder: Minerva
+        type: file
+        disableDeletion: false
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards
+          foldersFromFilesStructure: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: minerva
+  labels:
+    app: grafana
+    app.kubernetes.io/part-of: minerva-observability
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        # serve_from_sub_path relocates every route, including /metrics,
+        # under /grafana; scraping bare /metrics hits the SPA and returns
+        # HTML, which fails the scrape.
+        prometheus.io/path: "/grafana/metrics"
+      labels:
+        app: grafana
+        app.kubernetes.io/part-of: minerva-observability
+    spec:
+      securityContext:
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+      initContainers:
+        - name: chown-data
+          image: busybox:1.37
+          command: ["sh", "-c", "chown -R 472:472 /var/lib/grafana"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.4.0
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            # Served under /grafana behind Apache.
+            - name: GF_SERVER_ROOT_URL
+              value: "https://minerva.dsv.su.se/grafana"
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "true"
+            # Auth-proxy: trust the header Apache sets from REMOTE_USER.
+            - name: GF_AUTH_PROXY_ENABLED
+              value: "true"
+            - name: GF_AUTH_PROXY_HEADER_NAME
+              value: "X-WEBAUTH-USER"
+            - name: GF_AUTH_PROXY_HEADER_PROPERTY
+              value: "username"
+            - name: GF_AUTH_PROXY_AUTO_SIGN_UP
+              value: "true"
+            # Defense-in-depth: only accept the identity header from the
+            # in-cluster proxy hops. The real gate is that this Service is
+            # NodePort-only (reachable from the node, where Apache runs)
+            # and Apache enforces Shibboleth. VERIFY on first deploy: if
+            # login 407s, check Grafana logs for the rejected source IP and
+            # widen this list. k3s defaults: pods 10.42/16, svc 10.43/16.
+            - name: GF_AUTH_PROXY_WHITELIST
+              value: "127.0.0.1,10.42.0.0/16,10.43.0.0/16"
+            # No password UI at all; the header is the only way in.
+            - name: GF_AUTH_DISABLE_LOGIN_FORM
+              value: "true"
+            # The single Shibboleth-authenticated user (edsu8469) is the
+            # admin. No other users exist.
+            - name: GF_USERS_AUTO_ASSIGN_ORG_ROLE
+              value: "Admin"
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            # Break-glass local admin. Optional: if the Secret/key is
+            # absent the pod still starts (login form is disabled anyway,
+            # so the only reach is `kubectl exec ... grafana-cli`).
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-password
+                  optional: true
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+          resources:
+            requests:
+              memory: "96Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: data
+          hostPath:
+            path: /data0/minerva/observability/grafana
+            type: DirectoryOrCreate
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: minerva
+  labels:
+    app: grafana
+    app.kubernetes.io/part-of: minerva-observability
+spec:
+  # NodePort so the host's Apache can reach it at 127.0.0.1:30091 (same
+  # pattern as minerva-app on 30090). Not exposed beyond the node; Apache
+  # + Shibboleth is the public edge.
+  type: NodePort
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      nodePort: 30091

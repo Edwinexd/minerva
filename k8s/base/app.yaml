@@ -13,6 +13,12 @@ spec:
       app: minerva-app
   template:
     metadata:
+      annotations:
+        # Prometheus pod-SD scrape config (see k8s/base/observability/).
+        # Scraped on the dedicated metrics port, not the public 3000.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9464"
+        prometheus.io/path: "/metrics"
       labels:
         app: minerva-app
         # Intended NetworkPolicy selector (policy not yet applied): pods
@@ -26,6 +32,8 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
+            - containerPort: 9464
+              name: metrics
           env:
             - name: DATABASE_URL
               valueFrom:

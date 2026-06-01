@@ -425,6 +425,10 @@ impl FastEmbedder {
             cache_budget_bytes / (1024 * 1024),
             budget_source(),
         );
+        // Publish the static budget immediately so the Models dashboard
+        // has the denominator for "cache footprint vs budget" even before
+        // the first model loads. Re-published on every load in `acquire`.
+        metrics::gauge!("fastembed_cache_budget_bytes").set(cache_budget_bytes as f64);
         Self {
             cache: tokio::sync::Mutex::new(Vec::new()),
             benchmarks: tokio::sync::Mutex::new(Vec::new()),
@@ -680,6 +684,12 @@ impl FastEmbedder {
             let mut evicted = cache.remove(lru_idx);
             metrics::counter!("fastembed_evictions_total", "model" => evicted.name.clone())
                 .increment(1);
+            // Model left the resident set: flip its "loaded" gauge to 0
+            // and clear its RSS-cost gauge so the dashboard state timeline
+            // and per-model weight reflect the eviction immediately.
+            metrics::gauge!("fastembed_models_loaded", "model" => evicted.name.clone()).set(0.0);
+            metrics::gauge!("fastembed_model_rss_cost_bytes", "model" => evicted.name.clone())
+                .set(0.0);
             let evicted_task = evicted.task.take();
             let evicted_cost = evicted.rss_cost_bytes;
             let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
@@ -836,6 +846,12 @@ impl FastEmbedder {
             rss_cost_bytes: cost,
             last_used: Instant::now(),
         });
+        // New model is resident: light up its "loaded" gauge and record
+        // its measured RSS cost, so the dashboard shows which models
+        // occupy the cache and how heavy each one is.
+        metrics::gauge!("fastembed_models_loaded", "model" => model_name.to_string()).set(1.0);
+        metrics::gauge!("fastembed_model_rss_cost_bytes", "model" => model_name.to_string())
+            .set(cost as f64);
 
         // Defensive post-load eviction. The pre-load eviction loop above
         // uses the `max(rss_cost_bytes)` across previously-cached entries
@@ -862,6 +878,12 @@ impl FastEmbedder {
             let mut evicted = cache.remove(lru_idx);
             metrics::counter!("fastembed_evictions_total", "model" => evicted.name.clone())
                 .increment(1);
+            // Model left the resident set: flip its "loaded" gauge to 0
+            // and clear its RSS-cost gauge so the dashboard state timeline
+            // and per-model weight reflect the eviction immediately.
+            metrics::gauge!("fastembed_models_loaded", "model" => evicted.name.clone()).set(0.0);
+            metrics::gauge!("fastembed_model_rss_cost_bytes", "model" => evicted.name.clone())
+                .set(0.0);
             let evicted_task = evicted.task.take();
             let evicted_cost = evicted.rss_cost_bytes;
             let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
@@ -886,6 +908,12 @@ impl FastEmbedder {
 
         let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
         let cached_count = cache.len();
+        // Publish the post-admission cache aggregates for the Models
+        // dashboard: how many models are resident, their summed measured
+        // RSS, and the budget ceiling they are packed against.
+        metrics::gauge!("fastembed_cache_models_count").set(cached_count as f64);
+        metrics::gauge!("fastembed_cache_footprint_bytes").set(footprint as f64);
+        metrics::gauge!("fastembed_cache_budget_bytes").set(self.cache_budget_bytes as f64);
         match (rss_before, rss_after) {
             (Some(_), Some(after)) => tracing::info!(
                 "fastembed: loaded model {} (+{} MiB, RSS now {} MiB, cache footprint {} MiB / budget {} MiB, {} cached)",

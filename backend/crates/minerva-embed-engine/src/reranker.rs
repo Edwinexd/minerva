@@ -289,6 +289,12 @@ impl FastReranker {
         metrics::histogram!("reranker_model_load_seconds", "model" => model_code.to_string())
             .record(load_start.elapsed().as_secs_f64());
         cache.insert(model_code.to_string(), Arc::clone(&loaded));
+        // Resident-model gauges for the Models dashboard. The reranker
+        // cache never evicts (bounded by the small admin catalog), so
+        // these only climb from 0 to 1 per model; the timeline still
+        // shows when each model first loaded.
+        metrics::gauge!("reranker_models_loaded", "model" => model_code.to_string()).set(1.0);
+        metrics::gauge!("reranker_cache_models_count").set(cache.len() as f64);
         Ok(loaded)
     }
 

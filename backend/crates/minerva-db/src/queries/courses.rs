@@ -774,8 +774,6 @@ pub struct MergeOutcome {
 ///     (play designations, canvas connections, role suggestions,
 ///     feature flags, relink queue, suggested questions): survivor wins;
 ///     non-colliding source rows move, the rest are dropped.
-///   * Study mode: if the survivor already has a study config, the
-///     source's study_* data is dropped; otherwise it moves.
 ///   * Everything else with a plain course_id (conversations, api keys,
 ///     signed urls, LTI links, KG caches, token usage, Daisy offerings):
 ///     re-pointed at the survivor.
@@ -1105,74 +1103,6 @@ pub async fn merge_courses(
     .fetch_one(&mut *tx)
     .await?
     .unwrap_or(0);
-
-    // Study mode: survivor's config wins if it has one; otherwise move
-    // the source's study_* data over.
-    let survivor_has_study = sqlx::query_scalar!(
-        r#"SELECT EXISTS(SELECT 1 FROM study_courses WHERE course_id = $1) AS "e!""#,
-        survivor_id,
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    if survivor_has_study {
-        sqlx::query!(
-            "DELETE FROM study_task_conversations WHERE course_id = $1",
-            source_id,
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "DELETE FROM study_participant_state WHERE course_id = $1",
-            source_id,
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!("DELETE FROM study_surveys WHERE course_id = $1", source_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query!("DELETE FROM study_tasks WHERE course_id = $1", source_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query!("DELETE FROM study_courses WHERE course_id = $1", source_id)
-            .execute(&mut *tx)
-            .await?;
-    } else {
-        sqlx::query!(
-            "UPDATE study_task_conversations SET course_id = $1 WHERE course_id = $2",
-            survivor_id,
-            source_id,
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "UPDATE study_participant_state SET course_id = $1 WHERE course_id = $2",
-            survivor_id,
-            source_id,
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "UPDATE study_surveys SET course_id = $1 WHERE course_id = $2",
-            survivor_id,
-            source_id,
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "UPDATE study_tasks SET course_id = $1 WHERE course_id = $2",
-            survivor_id,
-            source_id,
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "UPDATE study_courses SET course_id = $1 WHERE course_id = $2",
-            survivor_id,
-            source_id,
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
 
     // Finally archive the now-empty source.
     sqlx::query!(

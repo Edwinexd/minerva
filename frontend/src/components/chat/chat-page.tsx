@@ -24,7 +24,6 @@ import {
   type ChatSurfaceLabels,
   type ChatSurfaceLayout,
 } from "./chat-surface"
-import type { AegisMode } from "./use-aegis-mode"
 
 export function ChatRouteComponent({
   useParams,
@@ -170,18 +169,14 @@ function ChatPage({
   )
 }
 
-// Exported so the study mode's `<TaskRunner>` can reuse the full
-// chat UX (transcript + composer + Aegis panel) without dragging
-// in the conversation-list sidebar that ChatPage wraps it with.
-// Study mode pins a per-task conversation_id and forces aegisEnabled
-// true, so passing those through is enough; no other study-specific
-// branching lives in here.
+// Exported so it can be reused wherever the full chat UX (transcript
+// + composer + Aegis panel) is needed without the conversation-list
+// sidebar that ChatPage wraps it with.
 export function ChatWindow({
   courseId,
   conversationId,
   readOnly = false,
   aegisEnabled = false,
-  forceAegisMode,
 }: {
   courseId: string
   conversationId: string | null
@@ -193,26 +188,11 @@ export function ChatWindow({
    * panel auto-hides on courses where the admin hasn't opted in.
    */
   aegisEnabled?: boolean
-  /**
-   * When set, the Aegis analyzer's calibration mode is locked to
-   * this value for the duration of this chat window; the panel's
-   * Beginner/Expert toggle is disabled and the user's stored
-   * preference is ignored. Study mode pins this to "expert" so
-   * every participant runs under the same rubric (otherwise prior
-   * localStorage values from regular chat use would inject mode
-   * variance into the eval data).
-   */
-  forceAegisMode?: AegisMode
 }) {
   const navigate = useNavigate()
   const { t } = useTranslation("student")
   // Course is already loaded by the parent ChatPage; React Query
-  // dedups so this is a cache hit. Pulled in here (rather than
-  // threaded as a prop) so study mode's TaskRunner caller doesn't
-  // have to wire it through; study sessions always have a
-  // non-null conversationId so the greeting block below never
-  // fires for them anyway, and TaskRunner already has its own
-  // task framing.
+  // dedups so this is a cache hit.
   const { data: course } = useQuery(courseQuery(courseId))
   // Only paid on /new; resuming an existing chat doesn't fetch.
   const { data: suggestions } = useQuery({
@@ -250,9 +230,8 @@ export function ChatWindow({
   //
   // No mark-read for `conversationId === null` (i.e. /new); the
   // route hasn't created a row yet, and the empty-state has nothing
-  // to mark read. We also skip readOnly contexts (study mode read-
-  // only views) since those are pre-recorded research data, not the
-  // user's own chat surface.
+  // to mark read. We also skip readOnly contexts since those aren't
+  // the user's own chat surface.
   useEffect(() => {
     if (conversationId === null || readOnly) return
     void api
@@ -353,12 +332,6 @@ export function ChatWindow({
             content: draft,
             suggestions: selected,
             mode,
-            // Lets the backend's per-conversation Aegis gate honour
-            // study-mode off-rounds even when the umbrella flag is
-            // forced on. Null is fine for brand-new composers (no
-            // conv yet); the backend falls back to the umbrella in
-            // that case.
-            conversation_id: conversationId,
           }),
         })
         if (!res.ok) {
@@ -373,7 +346,7 @@ export function ChatWindow({
         return null
       }
     },
-    [courseId, conversationId, buildHeaders],
+    [courseId, buildHeaders],
   )
 
   const onAfterSend = useCallback<ChatSurfaceAdapter<Message>["onAfterSend"]>(
@@ -478,7 +451,6 @@ export function ChatWindow({
     ),
     readOnly,
     aegisEnabled,
-    forceAegisMode,
     labels,
     layout,
   }

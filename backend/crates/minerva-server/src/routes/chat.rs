@@ -1322,22 +1322,9 @@ pub(crate) async fn analyze_prompt_for_user(
     mode: AegisModeWire,
     previous_suggestions: Vec<AegisSuggestionPayload>,
 ) -> Result<Option<AegisAnalysisPayload>, AppError> {
-    // Per-conversation gate: in study mode the umbrella aegis flag is
-    // forced TRUE for the course, but individual rounds may opt out
-    // (the DM2731 design has rounds 1+3 without support, round 2 with).
-    // `aegis_enabled_for_conversation` falls back to the umbrella when
-    // the conversation isn't bound to a study task.
-    if !crate::feature_flags::aegis_enabled_for_conversation(&state.db, course_id, conversation_id)
-        .await
-    {
+    if !crate::feature_flags::aegis_enabled(&state.db, course_id).await {
         return Ok(None);
     }
-
-    // Hold on to the draft text + conversation id so we can persist
-    // the iteration row at the end without having to re-fetch
-    // anything. `content` is moved into the trail below; clone now
-    // (cheap; drafts are short).
-    let iteration_draft = conversation_id.map(|cid| (cid, content.clone()));
 
     // Build the trail oldest-first, current-turn-LAST. When a
     // conversation_id is given, scope-check it before pulling
@@ -1469,46 +1456,6 @@ pub(crate) async fn analyze_prompt_for_user(
     // value the analyzer just used.
     let payload = verdict.map(|v| AegisAnalysisPayload::from_verdict(v, mode));
 
-    // Persist a live-iteration row for the study export. Gates:
-    //   1. The frontend supplied a conversation_id (anonymous
-    //      pre-conversation analyzers don't fit any conversation
-    //      and have no participant to associate with).
-    //   2. The course is in study_mode (non-study aegis users
-    //      haven't consented to keystroke-level draft capture).
-    //   3. The analyzer returned a verdict (None means soft-failed
-    //      upstream; nothing useful to log).
-    //
-    // Best-effort: a DB error here must not break the analyze
-    // path, since the chat UI shows the live verdict regardless.
-    // Logged at warn so we notice if the table starts dropping
-    // writes silently.
-    if let (Some((cid, draft)), Some(p)) = (iteration_draft, payload.as_ref()) {
-        if crate::feature_flags::study_mode_enabled(&state.db, course_id).await {
-            let mode_str = serde_json::to_value(p.mode)
-                .ok()
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| "beginner".to_string());
-            let suggestions_json = serde_json::to_value(&p.suggestions)
-                .unwrap_or(serde_json::Value::Array(Vec::new()));
-            if let Err(e) = minerva_db::queries::aegis_iterations::insert(
-                &state.db,
-                cid,
-                &draft,
-                &suggestions_json,
-                &mode_str,
-                &p.model_used,
-            )
-            .await
-            {
-                tracing::warn!(
-                    "aegis_iterations.insert failed for conversation {}: {}",
-                    cid,
-                    e,
-                );
-            }
-        }
-    }
-
     Ok(payload)
 }
 
@@ -1558,14 +1505,6 @@ pub(crate) struct RewritePromptRequest {
     /// (beginner stays casual; expert stays terse).
     #[serde(default)]
     pub mode: AegisModeWire,
-    /// Conversation context for the rewrite. Optional because the
-    /// composer can rewrite a draft before the first message lands
-    /// (no conversation_id yet). When supplied, the route uses it
-    /// to honour study mode's per-task Aegis gate; a round-1/3
-    /// (no-support) conversation refuses rewrite even though the
-    /// course-level umbrella is forced on.
-    #[serde(default)]
-    pub conversation_id: Option<Uuid>,
 }
 
 /// Shared rewrite pipeline. Caller is responsible for proving the
@@ -1578,18 +1517,11 @@ pub(crate) async fn rewrite_prompt_for_user(
     content: String,
     suggestions: Vec<AegisSuggestionPayload>,
     mode: AegisModeWire,
-    conversation_id: Option<Uuid>,
 ) -> Result<AegisRewriteResponse, AppError> {
-    // Per-conversation gate: respects study mode's per-task on/off
-    // when the rewrite happens inside a known study-task chat. Falls
-    // back to the umbrella for non-study chats and for pre-conv
-    // rewrites (no conversation_id yet on a brand-new composer).
-    if !crate::feature_flags::aegis_enabled_for_conversation(&state.db, course_id, conversation_id)
-        .await
-    {
+    if !crate::feature_flags::aegis_enabled(&state.db, course_id).await {
         // Aegis off -> rewrite makes no sense to expose. 404 reads
         // cleaner than 400 here since the route conceptually
-        // doesn't exist for this course / round.
+        // doesn't exist for this course.
         return Err(AppError::NotFound);
     }
     // Map wire-shape suggestions to the analyzer's internal struct
@@ -1635,15 +1567,9 @@ async fn rewrite_prompt_route(
     Json(body): Json<RewritePromptRequest>,
 ) -> Result<Json<AegisRewriteResponse>, AppError> {
     verify_course_access(&state, course_id, user.id).await?;
-    let resp = rewrite_prompt_for_user(
-        &state,
-        course_id,
-        body.content,
-        body.suggestions,
-        body.mode,
-        body.conversation_id,
-    )
-    .await?;
+    let resp =
+        rewrite_prompt_for_user(&state, course_id, body.content, body.suggestions, body.mode)
+            .await?;
     Ok(Json(resp))
 }
 
@@ -1654,11 +1580,6 @@ async fn send_message(
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course = verify_course_access(&state, course_id, user.id).await?;
-    // Study-mode lockout: a participant who has finished the post-survey
-    // can no longer send messages. No-op for non-study courses and for
-    // members who haven't entered the pipeline yet. Cheap (one indexed
-    // lookup) and runs before any LLM work.
-    crate::routes::study::ensure_not_locked_out(&state, course_id, user.id).await?;
     run_chat_message(
         &state,
         course,
@@ -1678,7 +1599,6 @@ async fn start_conversation(
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course = verify_course_access(&state, course_id, user.id).await?;
-    crate::routes::study::ensure_not_locked_out(&state, course_id, user.id).await?;
     run_chat_message(
         &state,
         course,
@@ -1852,12 +1772,7 @@ pub(super) async fn run_chat_message(
     // The student already saw the panel during typing; missing
     // a History entry is the right failure mode.
     if let Some(analysis) = prompt_analysis {
-        // Per-conversation gate so study mode's off-rounds don't
-        // accidentally persist analyses just because the umbrella
-        // forces aegis on at the course level.
-        if crate::feature_flags::aegis_enabled_for_conversation(&state.db, course_id, Some(conv_id))
-            .await
-        {
+        if crate::feature_flags::aegis_enabled(&state.db, course_id).await {
             // Trim to the same ceiling the analyzer schema
             // enforces, in case a hand-crafted body exceeds.
             let mut suggestions = analysis.suggestions;

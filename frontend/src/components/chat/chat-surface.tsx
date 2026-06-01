@@ -159,9 +159,8 @@ export interface ChatSurfaceAdapter<M extends ChatBubbleMessage> {
    * Call /aegis/analyze for the current draft. Shape parity with
    * the hook's `doFetch` parameter; auth wiring is the adapter's
    * problem. `mode` is resolved inside the surface (stored
-   * preference + the optional `forceAegisMode` override) and
-   * threaded through so the adapter doesn't need to re-read the
-   * mode hook itself.
+   * preference) and threaded through so the adapter doesn't need
+   * to re-read the mode hook itself.
    */
   fetchLiveAnalysis: (
     content: string,
@@ -222,12 +221,6 @@ export interface ChatSurfaceAdapter<M extends ChatBubbleMessage> {
   readOnly: boolean
   /** Per-course Aegis feature flag. */
   aegisEnabled: boolean
-  /**
-   * Lock the Aegis mode for this surface (study mode pins "expert").
-   * When set, the panel's mode toggle is disabled and any stored
-   * preference is ignored.
-   */
-  forceAegisMode?: AegisMode
 
   /**
    * Translation-namespace-resolved labels.
@@ -291,7 +284,6 @@ export function ChatSurface<M extends ChatBubbleMessage>({
     getPersistedThinking,
     readOnly,
     aegisEnabled,
-    forceAegisMode,
     labels,
     layout,
   } = adapter
@@ -302,11 +294,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
 
   // Subject-expertise mode (Beginner/Expert). The panel toggle
   // writes through `useAegisMode`; we only need the value here.
-  // `forceAegisMode` overrides for callers like study mode that
-  // pin calibration so the eval data isn't polluted by whatever
-  // localStorage value the participant happened to have.
-  const [storedAegisMode] = useAegisMode()
-  const aegisMode = forceAegisMode ?? storedAegisMode
+  const [aegisMode] = useAegisMode()
 
   // Storage-backed; the panel X writes false, the floating pill
   // brings it back. Default true so an aegis-on course shows the
@@ -636,11 +624,6 @@ export function ChatSurface<M extends ChatBubbleMessage>({
                 onPreview={handlePreviewIdeas}
                 onApply={handleApplyRewrite}
                 onDismiss={() => setBannerDismissedFor(input)}
-                // Study mode: the participant should see suggestions
-                // immediately rather than needing to find the chevron.
-                // Re-using `forceAegisMode` as the study marker since
-                // the two policies always travel together.
-                defaultExpanded={forceAegisMode != null}
               />
             )}
             {aegisEnabled && !showBanner && (
@@ -727,7 +710,6 @@ export function ChatSurface<M extends ChatBubbleMessage>({
             <AegisFeedbackPanel
               analyses={promptAnalyses}
               onHide={() => setPanelVisible(false)}
-              forceMode={forceAegisMode}
             />
           </aside>
         </>

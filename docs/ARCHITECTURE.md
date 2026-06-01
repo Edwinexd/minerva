@@ -25,7 +25,7 @@ The backend is five Rust binaries built from one Cargo workspace, split by
 what each process must link so a fat ingest OOM can't take down the API and
 the API can scale without carrying model weights:
 
-- **minerva-api** (`minerva-server`) is the only binary that links the axum
+- **minerva-app** (`minerva-server`) is the only binary that links the axum
   route tree. It owns HTTP / auth / Shibboleth / LTI / external-invites, all
   `/api/*` and `/api/service/*` routes, and chat-strategy execution. It holds
   no model weights and reaches the embedder / reranker over gRPC, so it scales

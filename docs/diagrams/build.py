@@ -182,7 +182,7 @@ def system_overview() -> graphviz.Digraph:
         _box(c, "lua", "mod_lua", icon="apache", subtitle="external-auth invites")
 
     with g.subgraph(name="cluster_app") as c:
-        c.attr(label="minerva-api (axum, scales horizontally)", **CLUSTER_BASE)
+        c.attr(label="minerva-app (axum, scales horizontally)", **CLUSTER_BASE)
         _box(c, "api", "HTTP API", icon="rust", subtitle="auth + chat strategy")
 
     with g.subgraph(name="cluster_bg") as c:

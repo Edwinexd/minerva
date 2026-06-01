@@ -93,6 +93,14 @@ spec:
       containers:
         - name: kube-state-metrics
           image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.14.0
+          # Scope collectors to exactly what the ClusterRole grants. ksm's
+          # default set also watches volumeattachments, webhook configs,
+          # storageclasses, CSRs, etc.; we don't need those and don't grant
+          # them, so the defaults spam "cannot list ... forbidden" on every
+          # reflector resync. Listing resources here keeps RBAC and the
+          # collector set in lockstep (and avoids over-broad permissions).
+          args:
+            - "--resources=configmaps,cronjobs,daemonsets,deployments,endpoints,horizontalpodautoscalers,ingresses,jobs,leases,limitranges,namespaces,nodes,persistentvolumeclaims,persistentvolumes,poddisruptionbudgets,pods,replicasets,resourcequotas,secrets,services,statefulsets"
           ports:
             - containerPort: 8080
               name: metrics

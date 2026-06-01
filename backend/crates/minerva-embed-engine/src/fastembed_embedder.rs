@@ -648,6 +648,8 @@ impl FastEmbedder {
 
         if let Some(idx) = cache.iter().position(|e| e.name == model_name) {
             cache[idx].last_used = Instant::now();
+            metrics::counter!("fastembed_cache_hits_total", "model" => model_name.to_string())
+                .increment(1);
             return Ok(Arc::clone(&cache[idx].dispatcher));
         }
 
@@ -676,6 +678,8 @@ impl FastEmbedder {
                 .map(|(i, _)| i)
                 .expect("cache non-empty");
             let mut evicted = cache.remove(lru_idx);
+            metrics::counter!("fastembed_evictions_total", "model" => evicted.name.clone())
+                .increment(1);
             let evicted_task = evicted.task.take();
             let evicted_cost = evicted.rss_cost_bytes;
             let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();
@@ -713,6 +717,9 @@ impl FastEmbedder {
             cache = self.cache.lock().await;
         }
 
+        metrics::counter!("fastembed_cache_misses_total", "model" => model_name.to_string())
+            .increment(1);
+        let load_start = Instant::now();
         let rss_before = read_rss_bytes();
         let backend = backend_for(model_name);
         let name = model_name.to_string();
@@ -751,6 +758,8 @@ impl FastEmbedder {
         })
         .await
         .map_err(|e| format!("spawn_blocking failed: {}", e))??;
+        metrics::histogram!("fastembed_model_load_seconds", "model" => model_name.to_string())
+            .record(load_start.elapsed().as_secs_f64());
 
         // Warm up the model with a batch matching real operational
         // shape before taking the RSS measurement. ORT's CPU EP (and
@@ -851,6 +860,8 @@ impl FastEmbedder {
                 .map(|(i, _)| i)
                 .expect("cache len > 1");
             let mut evicted = cache.remove(lru_idx);
+            metrics::counter!("fastembed_evictions_total", "model" => evicted.name.clone())
+                .increment(1);
             let evicted_task = evicted.task.take();
             let evicted_cost = evicted.rss_cost_bytes;
             let footprint: u64 = cache.iter().map(|e| e.rss_cost_bytes).sum();

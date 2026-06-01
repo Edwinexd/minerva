@@ -1761,6 +1761,7 @@ pub(super) async fn run_chat_message(
         let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user_id, course_id)
             .await?;
         if used >= course.daily_token_limit {
+            metrics::counter!("chat_quota_exceeded_total", "scope" => "course").increment(1);
             return Err(AppError::QuotaExceeded);
         }
     }

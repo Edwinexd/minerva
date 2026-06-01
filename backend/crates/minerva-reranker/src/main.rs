@@ -24,6 +24,12 @@ async fn main() -> anyhow::Result<()> {
         .json()
         .init();
 
+    // Prometheus exporter + the shared memprobe. The reranker pod owns the
+    // FastReranker cross-encoder cache (the 3Gi pod from the OOM-fix
+    // commit), so its RSS gauges matter as much as the embedder's.
+    minerva_metrics::init("minerva-reranker");
+    minerva_metrics::spawn_memprobe("minerva-reranker");
+
     let port: u16 = std::env::var("MINERVA_RERANKER_PORT")
         .ok()
         .and_then(|s| s.parse().ok())

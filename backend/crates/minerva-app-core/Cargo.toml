@@ -43,6 +43,7 @@ futures.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 tracing.workspace = true
+metrics.workspace = true
 thiserror.workspace = true
 sqlx.workspace = true
 qdrant-client.workspace = true

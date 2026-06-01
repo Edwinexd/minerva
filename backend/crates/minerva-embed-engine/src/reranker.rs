@@ -262,9 +262,14 @@ impl FastReranker {
     async fn handle(&self, model_code: &str) -> Result<Arc<Mutex<TextRerank>>, String> {
         let mut cache = self.cache.lock().await;
         if let Some(handle) = cache.get(model_code) {
+            metrics::counter!("reranker_cache_hits_total", "model" => model_code.to_string())
+                .increment(1);
             return Ok(Arc::clone(handle));
         }
+        metrics::counter!("reranker_cache_misses_total", "model" => model_code.to_string())
+            .increment(1);
         let code = model_code.to_string();
+        let load_start = std::time::Instant::now();
         let loaded =
             tokio::task::spawn_blocking(move || -> Result<Arc<Mutex<TextRerank>>, String> {
                 let model: RerankerModel = code
@@ -281,6 +286,8 @@ impl FastReranker {
             })
             .await
             .map_err(|e| format!("reranker load spawn_blocking failed: {e}"))??;
+        metrics::histogram!("reranker_model_load_seconds", "model" => model_code.to_string())
+            .record(load_start.elapsed().as_secs_f64());
         cache.insert(model_code.to_string(), Arc::clone(&loaded));
         Ok(loaded)
     }

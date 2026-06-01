@@ -39,6 +39,13 @@ async fn main() -> anyhow::Result<()> {
         .json()
         .init();
 
+    // Prometheus exporter + the shared memprobe. The embedder pod owns the
+    // FastEmbedder model cache and is one of the two OOM-prone pods, so its
+    // RSS gauges (process_vm_rss_bytes, service="minerva-embedder") are the
+    // highest-value series in the whole stack.
+    minerva_metrics::init("minerva-embedder");
+    minerva_metrics::spawn_memprobe("minerva-embedder");
+
     let port: u16 = std::env::var("MINERVA_EMBEDDER_PORT")
         .ok()
         .and_then(|s| s.parse().ok())

@@ -16,7 +16,6 @@ pub mod github_url;
 pub mod llm;
 pub mod lti;
 pub mod lti_nrps;
-pub mod memprobe;
 pub mod model_capabilities;
 pub mod relink_scheduler;
 pub mod rules;

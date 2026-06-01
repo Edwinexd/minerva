@@ -39,6 +39,8 @@ minerva-mbz = { path = "../minerva-mbz" }
 # behind its `local-engine` feature, which this crate's `local-engine`
 # enables; the prod api never links the model engine.
 minerva-rpc = { path = "../minerva-rpc" }
+# Process metrics + Prometheus exporter, plus the relocated memprobe.
+minerva-metrics = { path = "../minerva-metrics" }
 # Concept-graph integration via the eureka HTTP service has been
 # removed pending a clean HTTP-wrapper rewrite. Previously a path-dep
 # on a vendored `eureka-2` Rust release artifact, which forced
@@ -60,6 +62,8 @@ uuid.workspace = true
 chrono.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# `metrics` facade for the HTTP request middleware (counter! / histogram!).
+metrics.workspace = true
 thiserror.workspace = true
 dotenvy.workspace = true
 sqlx.workspace = true

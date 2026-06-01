@@ -13,7 +13,7 @@
 //! an ingest OOM can't pause NRPS reconciliation and a worker roll
 //! doesn't reset these scheduler clocks.
 
-use minerva_app_core::{config::Config, memprobe, schedulers, state::AppState};
+use minerva_app_core::{config::Config, schedulers, state::AppState};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -26,12 +26,15 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    minerva_metrics::init("minerva-scheduler");
+
     let config = Config::from_env()?;
     let state = AppState::new(&config).await?;
 
-    // Same probe as the api / worker pods, tagged with this binary's
-    // log target so a `memprobe` grep lands on the scheduler pod.
-    memprobe::spawn();
+    // Same probe as the api / worker pods. The `service` global label
+    // (set in `init`) tags the gauges, and the binary's log target tags
+    // the trace line, so a `memprobe` grep lands on the scheduler pod.
+    minerva_metrics::spawn_memprobe("minerva-scheduler");
 
     tracing::info!(
         "starting minerva-scheduler (canvas / lti nrps / platform health / pending cleanup)"

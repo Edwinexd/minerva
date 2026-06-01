@@ -510,6 +510,21 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
     .await
 }
 
+/// Count documents grouped by `status`, for the worker's
+/// `worker_queue_depth` gauge. Uses the runtime query API (not the
+/// `query!` macro) deliberately: this is a metrics-only aggregate read,
+/// and a compile-time-checked macro would add an entry to `backend/.sqlx`
+/// that every contributor would have to regenerate, for a query that
+/// touches no typed columns. The cast to `text` makes the status a plain
+/// `String` regardless of the column's underlying type.
+pub async fn count_by_status(db: &PgPool) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    sqlx::query_as::<_, (String, i64)>(
+        "SELECT status::text, COUNT(*) FROM documents GROUP BY status",
+    )
+    .fetch_all(db)
+    .await
+}
+
 /// List documents awaiting external transcript processing, cursor-paginated.
 ///
 /// `after` is the `(created_at, id)` pair of the last row from the

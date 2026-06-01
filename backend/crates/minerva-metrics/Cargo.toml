@@ -1,0 +1,19 @@
+[package]
+name = "minerva-metrics"
+version = "0.1.0"
+edition = "2021"
+
+# Process-wide Prometheus exporter + the shared /proc memprobe, linked by
+# every Minerva service binary (api / worker / scheduler / embedder /
+# reranker). Each binary calls `init(service)` once from main to install
+# the global recorder + spawn the HTTP listener Grafana Alloy scrapes, and
+# `spawn_memprobe(service)` for the periodic VmRSS gauges. Library crates
+# emit through the lightweight `metrics` facade (counter!/gauge!/
+# histogram!) and never depend on this crate, so the facade calls stay
+# no-ops until a binary installs the recorder. See k8s/base/observability/.
+
+[dependencies]
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+tokio.workspace = true
+tracing.workspace = true

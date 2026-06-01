@@ -1146,6 +1146,24 @@ pub async fn finalize(
     )
     .await;
 
+    // Token-spend counters. Labelled only by `kind` (4 bounded values), not
+    // by course/user/owner: those identifiers are unbounded and would blow
+    // up Prometheus label cardinality. Per-course spend lives in the DB
+    // (usage_daily) and the cap-enforcement counters below; this is the
+    // fleet-wide spend rate.
+    metrics::counter!("chat_tokens_total", "kind" => "prompt")
+        .increment(prompt_tokens.max(0) as u64);
+    metrics::counter!("chat_tokens_total", "kind" => "completion")
+        .increment(completion_tokens.max(0) as u64);
+    if let Some(rp) = research_prompt_tokens {
+        metrics::counter!("chat_tokens_total", "kind" => "research_prompt")
+            .increment(rp.max(0) as u64);
+    }
+    if let Some(rc) = research_completion_tokens {
+        metrics::counter!("chat_tokens_total", "kind" => "research_completion")
+            .increment(rc.max(0) as u64);
+    }
+
     // On a guarded turn the `done` event omits `chunks_used` ; the
     // seed RAG is keyed off the student's pasted assignment text, so
     // the retrieved chunks may contain the assignment_brief itself

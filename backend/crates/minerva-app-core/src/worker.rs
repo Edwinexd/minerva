@@ -56,6 +56,36 @@ const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 /// How often the periodic sweeper runs.
 const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
 
+/// All `documents.status` values, so the queue-depth gauge can reset each
+/// to zero before overlaying live counts (see `emit_queue_depth`).
+const KNOWN_STATUSES: [&str; 7] = [
+    "pending",
+    "processing",
+    "ready",
+    "failed",
+    "awaiting_transcript",
+    "unsupported",
+    "tracked",
+];
+
+/// Publish the `worker_queue_depth{status=...}` gauge. Zeroes the full
+/// known-status set first so a status that drops to zero rows reports 0
+/// rather than going stale at its last value (a GROUP BY omits empty
+/// groups, so without this a drained backlog would read as still-full).
+async fn emit_queue_depth(db: &sqlx::PgPool) {
+    for s in KNOWN_STATUSES {
+        metrics::gauge!("worker_queue_depth", "status" => s).set(0.0);
+    }
+    match minerva_db::queries::documents::count_by_status(db).await {
+        Ok(counts) => {
+            for (status, n) in counts {
+                metrics::gauge!("worker_queue_depth", "status" => status).set(n as f64);
+            }
+        }
+        Err(e) => tracing::warn!("worker: queue-depth count failed: {}", e),
+    }
+}
+
 /// A document whose `processing_started_at` is older than this is considered
 /// wedged and will be reset to `pending` by the sweeper. Must comfortably
 /// exceed any legitimate processing time (largest transcripts + model load).
@@ -138,7 +168,16 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
         ));
         let noop_classifier: Arc<dyn Classifier> = Arc::new(NoopClassifier);
 
+        // Throttle the queue-depth gauge: the busy path loops faster than
+        // POLL_INTERVAL, and a backlog doesn't need sub-5s resolution.
+        let mut last_depth_emit: Option<std::time::Instant> = None;
+
         loop {
+            if last_depth_emit.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(5)) {
+                emit_queue_depth(&state.db).await;
+                last_depth_emit = Some(std::time::Instant::now());
+            }
+
             // Calculate how many slots are free so we only claim what we can process.
             let available = semaphore.available_permits() as i32;
             if available == 0 {
@@ -311,6 +350,7 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
                     let path = std::path::Path::new(&file_path);
                     let client = reqwest::Client::new();
 
+                    let ingest_start = std::time::Instant::now();
                     match minerva_pipeline::pipeline::process_document(
                         &db,
                         &qdrant,
@@ -330,6 +370,10 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
                     .await
                     {
                         Ok(result) => {
+                            metrics::histogram!("worker_document_ingest_seconds", "outcome" => "success")
+                                .record(ingest_start.elapsed().as_secs_f64());
+                            metrics::counter!("worker_ingest_total", "outcome" => "success")
+                                .increment(1);
                             tracing::info!(
                                 "worker: document {} processed: {} chunks, {} embedding tokens",
                                 doc.id,
@@ -358,6 +402,10 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
                             }
                         }
                         Err(e) => {
+                            metrics::histogram!("worker_document_ingest_seconds", "outcome" => "failed")
+                                .record(ingest_start.elapsed().as_secs_f64());
+                            metrics::counter!("worker_ingest_total", "outcome" => "failed")
+                                .increment(1);
                             tracing::error!("worker: document {} processing failed: {}", doc.id, e);
                             set_failed(&db, doc.id, &e).await;
                         }
@@ -370,10 +418,14 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
                     match inner.await {
                         Ok(()) => {}
                         Err(e) if e.is_panic() => {
+                            metrics::counter!("worker_ingest_total", "outcome" => "panicked")
+                                .increment(1);
                             tracing::error!("worker: document {} task panicked: {:?}", doc_id, e,);
                             set_failed(&inner_db, doc_id, "processing task panicked").await;
                         }
                         Err(e) => {
+                            metrics::counter!("worker_ingest_total", "outcome" => "cancelled")
+                                .increment(1);
                             tracing::error!("worker: document {} task cancelled: {}", doc_id, e,);
                             set_failed(&inner_db, doc_id, "processing task cancelled").await;
                         }

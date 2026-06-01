@@ -49,6 +49,7 @@ pub(crate) async fn enforce_owner_cap(state: &AppState, owner_id: Uuid) -> Resul
     }
     let used = minerva_db::queries::usage::get_owner_daily_tokens(&state.db, owner_id).await?;
     if used >= owner.owner_daily_token_limit {
+        metrics::counter!("chat_quota_exceeded_total", "scope" => "owner").increment(1);
         return Err(AppError::OwnerQuotaExceeded);
     }
     Ok(())

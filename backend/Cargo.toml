@@ -14,6 +14,7 @@ members = [
     "crates/minerva-rpc-local",
     "crates/minerva-embedder",
     "crates/minerva-reranker",
+    "crates/minerva-metrics",
 ]
 resolver = "2"
 
@@ -82,3 +83,11 @@ tempfile = "3"
 tonic = "0.12"
 tonic-build = "0.12"
 prost = "0.13"
+
+# Observability. `metrics` is the lightweight facade any crate emits
+# through; `metrics-exporter-prometheus` is installed only by the binaries
+# via `minerva-metrics`. default-features off drops the push-gateway
+# client (we only ever pull-scrape via Alloy); `http-listener` keeps the
+# built-in hyper `/metrics` server so worker / scheduler need no axum.
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }

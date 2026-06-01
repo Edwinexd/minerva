@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 minerva-app-core = { path = "../minerva-app-core" }
+minerva-metrics = { path = "../minerva-metrics" }
 
 tokio.workspace = true
 tracing.workspace = true

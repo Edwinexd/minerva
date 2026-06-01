@@ -24,6 +24,7 @@ pub mod dev_seed;
 pub mod error;
 pub mod ext_obfuscate;
 pub mod lti;
+mod metrics_mw;
 pub mod routes;
 pub mod strategy;
 
@@ -64,11 +65,17 @@ pub async fn api_main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     init_tracing();
 
+    // Prometheus exporter + /metrics listener. Must precede any facade
+    // emission (the HTTP middleware, memprobe gauges) so the recorder is
+    // installed before the first sample.
+    minerva_metrics::init("minerva-api");
+
     let config = config::Config::from_env()?;
     let state = state::AppState::new(&config).await?;
 
-    // Memory probe: see `minerva_app_core::memprobe` for cadence / rationale.
-    minerva_app_core::memprobe::spawn();
+    // Memory probe: see `minerva_metrics::spawn_memprobe` for cadence /
+    // rationale. Emits the `memprobe: uptime=...` log line + RSS gauges.
+    minerva_metrics::spawn_memprobe("minerva-api");
 
     // One-shot backfill of the document_id payload index across pre-existing
     // course_* collections. New collections get the index at creation time.
@@ -295,6 +302,12 @@ pub async fn api_main() -> anyhow::Result<()> {
     }
 
     let app = app
+        // `route_layer` runs only for requests that matched a route, and
+        // crucially runs *after* routing, so `MatchedPath` is populated
+        // with the full route template inside the metrics middleware. It
+        // also skips the static-file / dev-proxy fallback, which we don't
+        // want cluttering the HTTP metrics anyway.
+        .route_layer(axum::middleware::from_fn(metrics_mw::track_metrics))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

@@ -19,6 +19,7 @@ hf-hub.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+metrics.workspace = true
 
 # `malloc_trim(0)` after FastEmbedder LRU eviction. glibc holds freed
 # pages well past Drop, so `wait_for_rss_drop` was observing 0 bytes

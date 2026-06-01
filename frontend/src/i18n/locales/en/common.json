@@ -212,6 +212,7 @@
     "intro": "Minerva is made possible by contributions from people beyond the core dev team. Thank you.",
     "contributorsHeading": "Contributors",
     "roles": {
+      "aegis": "Aegis design, development & evaluation",
       "logoDesign": "Logo design"
     }
   },

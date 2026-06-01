@@ -13,6 +13,14 @@ interface Credit {
  */
 const CREDITS: Credit[] = [
   {
+    name: "Emil Cromnier",
+    role: "acknowledgements.roles.aegis",
+  },
+  {
+    name: "Kristina Högberg",
+    role: "acknowledgements.roles.aegis",
+  },
+  {
     name: "Tilly Makrof-Johansson",
     email: "tilly.makrof-johansson@dsv.su.se",
     role: "acknowledgements.roles.logoDesign",

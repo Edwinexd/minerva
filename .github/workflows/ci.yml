@@ -241,6 +241,19 @@ jobs:
             exit 1
           fi
 
+  validate-dashboards:
+    name: Grafana dashboards are valid
+    # Validates the git-managed Grafana dashboards (JSON well-formed, panels
+    # tile the 24-col grid with no overlaps/gaps, datasource uids exist,
+    # uids unique, configMapGenerator file list in sync). Mirrors the
+    # `validate-dashboards` pre-commit hook so a contributor who skips
+    # pre-commit is still caught here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check
+        run: python3 scripts/validate-dashboards.py
+
   migrations-immutable:
     name: Migrations are immutable once committed
     # Blocks any PR or push that modifies an existing

@@ -5,6 +5,9 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        # k8s manifests bundle several objects per file with `---`
+        # separators (e.g. observability/*.yaml: SA + Role + Deploy + Svc).
+        args: ["--allow-multiple-documents"]
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
@@ -26,6 +29,20 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      - id: validate-dashboards
+        name: validate grafana dashboards
+        # Grafana dashboards under k8s/base/observability/dashboards/ are
+        # provisioned from disk; a malformed one (bad JSON, overlapping
+        # panels, a row that doesn't tile to the full 24-col grid, a typo'd
+        # datasource uid, a file missing from the configMapGenerator) ships
+        # silently and just fails to render. This script is the build-time
+        # error. pass_filenames: false because it globs the dashboards dir
+        # itself (needed for the cross-file uid + kustomization checks).
+        entry: python3 scripts/validate-dashboards.py
+        language: system
+        pass_filenames: false
+        files: ^k8s/base/observability/(dashboards/.*\.json|kustomization\.yaml)$
 
       - id: ban-emdashes
         name: ban emdashes

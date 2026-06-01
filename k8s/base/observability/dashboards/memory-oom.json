@@ -7,7 +7,23 @@
   "version": 1,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(process_vm_rss_bytes, service)", "refId": "ServiceVar" },
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "sort": 1
+      }
+    ]
+  },
   "annotations": { "list": [] },
   "panels": [
     {
@@ -64,7 +80,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "process_vm_rss_bytes{namespace=\"minerva\"}",
+          "expr": "process_vm_rss_bytes{namespace=\"minerva\", service=~\"$service\"}",
           "legendFormat": "{{service}}"
         }
       ]
@@ -149,7 +165,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "process_threads{namespace=\"minerva\"}",
+          "expr": "process_threads{namespace=\"minerva\", service=~\"$service\"}",
           "legendFormat": "{{service}}"
         }
       ]
@@ -167,7 +183,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "process_vm_hwm_bytes{namespace=\"minerva\"}",
+          "expr": "process_vm_hwm_bytes{namespace=\"minerva\", service=~\"$service\"}",
           "legendFormat": "{{service}}"
         }
       ]

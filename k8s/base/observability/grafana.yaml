@@ -105,6 +105,10 @@ spec:
               value: "https://minerva.dsv.su.se/grafana"
             - name: GF_SERVER_SERVE_FROM_SUB_PATH
               value: "true"
+            # Land on the memory/OOM dashboard at login instead of the
+            # empty default home (the provisioned file path on disk).
+            - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
+              value: "/var/lib/grafana/dashboards/memory-oom.json"
             # Auth-proxy: trust the header Apache sets from REMOTE_USER.
             - name: GF_AUTH_PROXY_ENABLED
               value: "true"

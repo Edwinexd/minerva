@@ -48,6 +48,26 @@ pub async fn list_by_course(
     .await
 }
 
+/// Fetch a single offering by its Daisy momenttillfID. Used by the
+/// staging diff to read the snapshot the last apply wrote, so the
+/// admin review page can show which metadata fields a re-apply would
+/// actually change rather than a blanket "Update".
+pub async fn find_by_momenttillf_id(
+    db: &PgPool,
+    momenttillf_id: &str,
+) -> Result<Option<DaisyOfferingRow>, sqlx::Error> {
+    sqlx::query_as!(
+        DaisyOfferingRow,
+        r#"SELECT momenttillf_id, course_id, course_code, name, semester_label,
+                  info_url, syllabus_url, unit, last_synced_at, created_at
+           FROM course_daisy_offerings
+           WHERE momenttillf_id = $1"#,
+        momenttillf_id,
+    )
+    .fetch_optional(db)
+    .await
+}
+
 /// Bump `last_synced_at` on a single offering without touching its
 /// metadata. Called after the Daisy apply finishes its membership
 /// additions so the timestamp reflects the full sync.

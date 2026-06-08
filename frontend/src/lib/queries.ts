@@ -382,6 +382,38 @@ export interface DaisyPendingParticipant {
   kind: string
 }
 
+/** One offering-metadata field a re-apply would overwrite. */
+export interface DaisyFieldChange {
+  /** `name` | `course_code` | `semester_label` | `info_url` | `syllabus_url` | `unit`. */
+  field: string
+  old: string | null
+  new: string | null
+}
+
+/** A participant a re-apply would add as a member or re-role. */
+export interface DaisyMemberChange {
+  display_name: string | null
+  primary_eppn: string | null
+  /** `"added"` | `"role_changed"`. */
+  change: string
+  /** Resulting Minerva role: `"teacher"` | `"ta"`. */
+  role: string
+  /** Prior role; set only when `change === "role_changed"`. */
+  previous_role: string | null
+}
+
+/**
+ * What applying a pending row would actually change. Computed live by
+ * the backend; rows whose diff is empty are filtered out server-side,
+ * so every returned row has either `is_new_course` set or at least one
+ * metadata/member change.
+ */
+export interface DaisyOfferingDiff {
+  is_new_course: boolean
+  metadata_changes: DaisyFieldChange[]
+  member_changes: DaisyMemberChange[]
+}
+
 export interface DaisyPendingImport {
   id: string
   momenttillf_id: string
@@ -398,6 +430,8 @@ export interface DaisyPendingImport {
    * `courses.id` an Apply would refresh.
    */
   existing_course_id: string | null
+  /** What an Apply would change (drives the per-row status display). */
+  diff: DaisyOfferingDiff
   first_seen_at: string
   last_seen_at: string
 }

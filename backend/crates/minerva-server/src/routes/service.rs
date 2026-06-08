@@ -623,6 +623,10 @@ pub(super) struct DaisyImportSummary {
     /// Staging path: rows written to `daisy_pending_imports` for
     /// admin review. Set when `daisy_settings.auto_apply` is FALSE.
     pub courses_staged: usize,
+    /// Staging path: offerings a re-apply would not change (no new
+    /// course, no metadata delta, no member delta), so they are skipped
+    /// instead of re-staged. Keeps the review page to genuine changes.
+    pub courses_skipped: usize,
     /// TRUE when this request hit the staging path (everything in
     /// `courses_staged` rather than `courses_created`/`updated`).
     /// Lets the python caller distinguish "staged for review" from
@@ -667,6 +671,197 @@ fn minerva_role_for(kind: &str, daisy_roles: &[String]) -> (&'static str, bool) 
         "student" => ("ta", false),
         _ => ("teacher", is_course_responsible(daisy_roles)),
     }
+}
+
+/// What a re-apply of one Daisy offering would actually change, used to
+/// gate staging and to drive the admin review page. The daily sync
+/// re-sends every current+next-semester offering, so most rows map to
+/// a course that already exists with identical data; without this the
+/// review page perpetually lists the whole catalogue as "Update". A
+/// row is only worth staging (and showing) when this diff is non-empty.
+#[derive(Serialize, Default)]
+pub(super) struct OfferingDiff {
+    /// No matching course yet; an apply would INSERT one. New offerings
+    /// are always worth staging, so this alone makes the diff non-empty.
+    pub is_new_course: bool,
+    /// Offering-metadata fields a re-apply would overwrite (an Update
+    /// only ever refreshes the `course_daisy_offerings` snapshot, never
+    /// the live `courses` row, so this compares against that snapshot).
+    pub metadata_changes: Vec<FieldChange>,
+    /// Participants a re-apply would add as members, or whose course
+    /// role it would change. Resolved read-only: a participant whose
+    /// eppn matches no user counts as "added" because the apply path
+    /// `find_or_create`s the user.
+    pub member_changes: Vec<MemberChange>,
+}
+
+impl OfferingDiff {
+    /// True when applying this offering would change nothing an admin
+    /// can see (no new course, no metadata delta, no member delta).
+    pub(super) fn is_empty(&self) -> bool {
+        !self.is_new_course && self.metadata_changes.is_empty() && self.member_changes.is_empty()
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct FieldChange {
+    /// Stable field key (`name`, `course_code`, `semester_label`,
+    /// `info_url`, `syllabus_url`, `unit`); the frontend maps it to a
+    /// localized label.
+    pub field: &'static str,
+    pub old: Option<String>,
+    pub new: Option<String>,
+}
+
+#[derive(Serialize)]
+pub(super) struct MemberChange {
+    pub display_name: Option<String>,
+    pub primary_eppn: Option<String>,
+    /// `"added"` or `"role_changed"`.
+    pub change: &'static str,
+    /// Resulting Minerva role the apply would set (`teacher` / `ta`).
+    pub role: &'static str,
+    /// Prior role; set only when `change == "role_changed"`.
+    pub previous_role: Option<String>,
+}
+
+/// Trim and collapse empty-to-`None` so `Some("")` and `None` (and
+/// stray whitespace) never read as a change between Daisy snapshots.
+fn norm_opt(v: Option<&str>) -> Option<String> {
+    v.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
+fn push_field_change(
+    changes: &mut Vec<FieldChange>,
+    field: &'static str,
+    old: Option<&str>,
+    new: Option<&str>,
+) {
+    let (old, new) = (norm_opt(old), norm_opt(new));
+    if old != new {
+        changes.push(FieldChange { field, old, new });
+    }
+}
+
+/// Compute what applying `input` would change, read-only (never creates
+/// users or touches `courses`). Shared by `stage_one` (to decide
+/// whether to stage at all) and the admin list endpoint (to show the
+/// diff and drop rows that converged since they were staged).
+pub(super) async fn compute_offering_diff(
+    state: &AppState,
+    input: &DaisyCourseInputPayload,
+    existing_course_id: Option<Uuid>,
+) -> Result<OfferingDiff, AppError> {
+    let Some(course_id) = existing_course_id else {
+        return Ok(OfferingDiff {
+            is_new_course: true,
+            ..Default::default()
+        });
+    };
+
+    let momenttillf_id = input.momenttillf_id.trim();
+    let mut diff = OfferingDiff::default();
+
+    // Metadata: compare against the snapshot the last apply wrote. The
+    // offering row is guaranteed to exist (existing_course_id was
+    // resolved via the offerings join), but stay defensive on a race.
+    if let Some(o) = minerva_db::queries::course_daisy_offerings::find_by_momenttillf_id(
+        &state.db,
+        momenttillf_id,
+    )
+    .await?
+    {
+        push_field_change(
+            &mut diff.metadata_changes,
+            "course_code",
+            o.course_code.as_deref(),
+            Some(input.beteckning.as_str()),
+        );
+        push_field_change(
+            &mut diff.metadata_changes,
+            "name",
+            o.name.as_deref(),
+            Some(input.name.as_str()),
+        );
+        push_field_change(
+            &mut diff.metadata_changes,
+            "semester_label",
+            o.semester_label.as_deref(),
+            input.semester_label.as_deref(),
+        );
+        push_field_change(
+            &mut diff.metadata_changes,
+            "info_url",
+            o.info_url.as_deref(),
+            input.info_url.as_deref(),
+        );
+        push_field_change(
+            &mut diff.metadata_changes,
+            "syllabus_url",
+            o.syllabus_url.as_deref(),
+            input.syllabus_url.as_deref(),
+        );
+        push_field_change(
+            &mut diff.metadata_changes,
+            "unit",
+            o.unit.as_deref(),
+            input.unit.as_deref(),
+        );
+    }
+
+    // Members: replicate apply_one's resolution read-only. A participant
+    // whose eppns resolve to no user would be created+added on apply, so
+    // it counts as "added"; an existing user not yet a member is also
+    // "added"; a member whose role would flip is "role_changed".
+    let members = minerva_db::queries::courses::list_members(&state.db, course_id).await?;
+    for participant in &input.participants {
+        let eppns: Vec<String> = participant
+            .eppns
+            .iter()
+            .map(|e| normalize_eppn(e))
+            .filter(|e| !e.is_empty())
+            .collect();
+        if eppns.is_empty() {
+            continue;
+        }
+        let (role, _eligible) = minerva_role_for(&participant.kind, &participant.daisy_roles);
+
+        let mut user_id: Option<Uuid> = None;
+        for eppn in &eppns {
+            if let Some((row, _via_alias)) =
+                minerva_db::queries::users::find_by_eppn_or_alias(&state.db, eppn).await?
+            {
+                user_id = Some(row.id);
+                break;
+            }
+        }
+
+        let change = match user_id.and_then(|uid| members.iter().find(|m| m.user_id == uid)) {
+            // Resolved user already a member with this role: no change.
+            Some(m) if m.role == role => continue,
+            // Resolved user already a member, different role: a flip.
+            Some(m) => MemberChange {
+                display_name: participant.display_name.clone(),
+                primary_eppn: eppns.first().cloned(),
+                change: "role_changed",
+                role,
+                previous_role: Some(m.role.clone()),
+            },
+            // New member (resolved-but-not-a-member, or no user yet).
+            None => MemberChange {
+                display_name: participant.display_name.clone(),
+                primary_eppn: eppns.first().cloned(),
+                change: "added",
+                role,
+                previous_role: None,
+            },
+        };
+        diff.member_changes.push(change);
+    }
+
+    Ok(diff)
 }
 
 /// Idempotently bulk-import Daisy course offerings + participants.
@@ -766,9 +961,10 @@ async fn import_daisy_courses(
     }
 
     tracing::info!(
-        "daisy import: received={} staged={} created={} updated={} members_added={} aliases={} auto_apply={}",
+        "daisy import: received={} staged={} skipped={} created={} updated={} members_added={} aliases={} auto_apply={}",
         summary.courses_received,
         summary.courses_staged,
+        summary.courses_skipped,
         summary.courses_created,
         summary.courses_updated,
         summary.members_added,
@@ -800,19 +996,37 @@ async fn stage_one(
         return Err(AppError::bad_request("daisy.course_missing_semester"));
     }
 
-    // Snapshot the resolved-participant list verbatim. The admin
-    // Apply route deserialises it back into a Vec<DaisyParticipantInput>
-    // and routes it through apply_one; the round-trip is exercised by
-    // the (de)serialise derive pair on both structs.
-    let participants_json = serde_json::to_value(&input.participants)
-        .map_err(|e| AppError::Internal(format!("serialise participants: {e}")))?;
-
     // If a course with this momenttillf_id already exists, surface
     // the link so the admin UI can render "Update" instead of "New".
     let existing_course_id =
         minerva_db::queries::courses::find_by_daisy_momenttillf_id(&state.db, momenttillf_id)
             .await?
             .map(|c| c.id);
+
+    // Gate on a real diff. The daily sync re-sends every current+next
+    // semester offering, so the vast majority map to a course that
+    // already exists with byte-identical data; staging those would keep
+    // the review page perpetually full of no-op "Update" rows. Only
+    // stage when applying would actually change something, and drop any
+    // stale row a previous sync left for an offering that has since
+    // converged (e.g. the admin applied it, or Daisy reverted).
+    let diff = compute_offering_diff(state, input, existing_course_id).await?;
+    if diff.is_empty() {
+        minerva_db::queries::daisy_pending_imports::delete_by_momenttillf_id(
+            &state.db,
+            momenttillf_id,
+        )
+        .await?;
+        summary.courses_skipped += 1;
+        return Ok(());
+    }
+
+    // Snapshot the resolved-participant list verbatim. The admin
+    // Apply route deserialises it back into a Vec<DaisyParticipantInput>
+    // and routes it through apply_one; the round-trip is exercised by
+    // the (de)serialise derive pair on both structs.
+    let participants_json = serde_json::to_value(&input.participants)
+        .map_err(|e| AppError::Internal(format!("serialise participants: {e}")))?;
 
     minerva_db::queries::daisy_pending_imports::upsert(
         &state.db,
@@ -1120,5 +1334,72 @@ mod daisy_import_tests {
         let (role, owner) = minerva_role_for("future_kind", &[s("Examination")]);
         assert_eq!(role, "teacher");
         assert!(!owner);
+    }
+}
+
+#[cfg(test)]
+mod offering_diff_tests {
+    use super::{norm_opt, push_field_change, FieldChange, MemberChange, OfferingDiff};
+
+    #[test]
+    fn norm_opt_trims_and_empties_to_none() {
+        assert_eq!(norm_opt(Some("  hi ")).as_deref(), Some("hi"));
+        assert_eq!(norm_opt(Some("   ")), None);
+        assert_eq!(norm_opt(Some("")), None);
+        assert_eq!(norm_opt(None), None);
+    }
+
+    #[test]
+    fn push_field_change_ignores_whitespace_and_empty_vs_none() {
+        let mut changes: Vec<FieldChange> = Vec::new();
+        // Trailing whitespace is not a real change.
+        push_field_change(&mut changes, "name", Some("Algebra"), Some("Algebra "));
+        // Empty string and NULL collapse to the same value.
+        push_field_change(&mut changes, "unit", Some(""), None);
+        assert!(changes.is_empty(), "no genuine change should be recorded");
+
+        // A real edit is recorded with normalized old/new.
+        push_field_change(&mut changes, "name", Some("Algebra"), Some("Algebra II"));
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "name");
+        assert_eq!(changes[0].old.as_deref(), Some("Algebra"));
+        assert_eq!(changes[0].new.as_deref(), Some("Algebra II"));
+    }
+
+    #[test]
+    fn is_empty_reflects_each_dimension() {
+        // A converged update (no new course, no field/member deltas).
+        assert!(OfferingDiff::default().is_empty());
+
+        // A brand-new offering is always worth staging.
+        let new_course = OfferingDiff {
+            is_new_course: true,
+            ..Default::default()
+        };
+        assert!(!new_course.is_empty());
+
+        // A metadata-only delta is non-empty.
+        let meta = OfferingDiff {
+            metadata_changes: vec![FieldChange {
+                field: "syllabus_url",
+                old: None,
+                new: Some("https://example.test/s".into()),
+            }],
+            ..Default::default()
+        };
+        assert!(!meta.is_empty());
+
+        // A member-only delta is non-empty.
+        let member = OfferingDiff {
+            member_changes: vec![MemberChange {
+                display_name: Some("Ada".into()),
+                primary_eppn: Some("ada@su.se".into()),
+                change: "added",
+                role: "teacher",
+                previous_role: None,
+            }],
+            ..Default::default()
+        };
+        assert!(!member.is_empty());
     }
 }

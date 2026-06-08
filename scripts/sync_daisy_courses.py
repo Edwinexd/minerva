@@ -257,6 +257,7 @@ def merge_summary(into: dict, batch_summary: dict) -> None:
         "courses_created",
         "courses_updated",
         "courses_staged",
+        "courses_skipped",
         "members_added",
         "aliases_registered",
         "designations_created",

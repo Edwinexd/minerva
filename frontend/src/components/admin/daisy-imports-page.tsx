@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useMemo, useState } from "react"
 import {
   daisyPendingQuery,
+  type DaisyOfferingDiff,
   type DaisyPendingImport,
   type DaisyPendingListResponse,
 } from "@/lib/queries"
@@ -295,7 +296,6 @@ function PendingRow({
   onDismiss: () => void
 }) {
   const { t } = useTranslation("admin")
-  const isUpdate = row.existing_course_id !== null
   return (
     <tr className="border-b align-top hover:bg-muted/30">
       <td className="px-2 py-2">
@@ -320,11 +320,7 @@ function PendingRow({
         )}
       </td>
       <td className="px-2 py-2">
-        <Badge variant={isUpdate ? "secondary" : "default"}>
-          {isUpdate
-            ? t("daisyImports.statusUpdate")
-            : t("daisyImports.statusNew")}
-        </Badge>
+        <DiffSummary diff={row.diff} />
       </td>
       <td className="px-2 py-2">
         <div>
@@ -362,6 +358,87 @@ function PendingRow({
         </Button>
       </td>
     </tr>
+  )
+}
+
+type TFn = (key: string, opts?: Record<string, unknown>) => string
+
+function roleLabel(t: TFn, role: string): string {
+  return role === "ta"
+    ? t("daisyImports.roleTa")
+    : t("daisyImports.roleTeacher")
+}
+
+function fieldLabel(t: TFn, field: string): string {
+  switch (field) {
+    case "name":
+      return t("daisyImports.fieldName")
+    case "course_code":
+      return t("daisyImports.fieldCode")
+    case "semester_label":
+      return t("daisyImports.fieldSemester")
+    case "info_url":
+      return t("daisyImports.fieldInfoUrl")
+    case "syllabus_url":
+      return t("daisyImports.fieldSyllabus")
+    case "unit":
+      return t("daisyImports.fieldUnit")
+    default:
+      return field
+  }
+}
+
+/**
+ * Per-row status. The backend only returns rows whose apply would
+ * actually change something, so this never renders an empty cell: a
+ * brand-new offering shows the "New" badge, an update spells out the
+ * specific member additions / role changes and the metadata fields a
+ * re-apply would overwrite (old -> new in the chip's tooltip).
+ */
+function DiffSummary({ diff }: { diff: DaisyOfferingDiff }) {
+  const { t } = useTranslation("admin")
+
+  if (diff.is_new_course) {
+    return <Badge variant="default">{t("daisyImports.statusNew")}</Badge>
+  }
+
+  return (
+    <div className="space-y-1">
+      {diff.member_changes.map((mc, i) => {
+        const who = mc.display_name ?? mc.primary_eppn ?? "?"
+        return (
+          <div key={`m-${i}`} className="text-xs">
+            {mc.change === "role_changed"
+              ? t("daisyImports.diffMemberRole", {
+                  name: who,
+                  from: roleLabel(t, mc.previous_role ?? ""),
+                  to: roleLabel(t, mc.role),
+                })
+              : t("daisyImports.diffMemberAdded", {
+                  name: who,
+                  role: roleLabel(t, mc.role),
+                })}
+          </div>
+        )
+      })}
+      {diff.metadata_changes.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {diff.metadata_changes.map((fc) => (
+            <Badge
+              key={fc.field}
+              variant="secondary"
+              title={t("daisyImports.diffFieldDetail", {
+                field: fieldLabel(t, fc.field),
+                from: fc.old ?? t("daisyImports.noValue"),
+                to: fc.new ?? t("daisyImports.noValue"),
+              })}
+            >
+              {fieldLabel(t, fc.field)}
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

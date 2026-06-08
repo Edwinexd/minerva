@@ -135,6 +135,25 @@ pub async fn delete(db: &PgPool, id: Uuid) -> Result<Option<PendingImportRow>, s
     .await
 }
 
+/// Delete any staging row for a momenttillfID, returning whether one
+/// was removed. The daily sync calls this when a re-sync of an
+/// already-imported offering would change nothing: a stale row left by
+/// an earlier sync (since applied or converged) is dropped so the
+/// review page only ever lists offerings a re-apply would actually
+/// change.
+pub async fn delete_by_momenttillf_id(
+    db: &PgPool,
+    momenttillf_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "DELETE FROM daisy_pending_imports WHERE momenttillf_id = $1",
+        momenttillf_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn count(db: &PgPool) -> Result<i64, sqlx::Error> {
     let row = sqlx::query!(r#"SELECT COUNT(*) AS "n!" FROM daisy_pending_imports"#)
         .fetch_one(db)

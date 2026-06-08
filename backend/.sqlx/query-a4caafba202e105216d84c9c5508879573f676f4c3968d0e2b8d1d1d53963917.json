@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM daisy_pending_imports WHERE momenttillf_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a4caafba202e105216d84c9c5508879573f676f4c3968d0e2b8d1d1d53963917"
+}

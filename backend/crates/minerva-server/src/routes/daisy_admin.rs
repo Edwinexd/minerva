@@ -22,7 +22,8 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::routes::service::{
-    apply_one, DaisyCourseInputPayload, DaisyImportSummary, DaisyParticipantInput,
+    apply_one, compute_offering_diff, DaisyCourseInputPayload, DaisyImportSummary,
+    DaisyParticipantInput, OfferingDiff,
 };
 use crate::state::AppState;
 
@@ -62,6 +63,11 @@ struct PendingImportView {
     /// existing courses.id (Apply will refresh metadata + additively
     /// sync members). Frontend renders a "New" or "Update" badge.
     existing_course_id: Option<Uuid>,
+    /// What a re-apply would actually change (new course, metadata
+    /// deltas, member deltas), recomputed live against the current DB so
+    /// the row never shows a stale change. Rows whose diff is empty are
+    /// filtered out of the response entirely.
+    diff: OfferingDiff,
     first_seen_at: chrono::DateTime<chrono::Utc>,
     last_seen_at: chrono::DateTime<chrono::Utc>,
 }
@@ -118,14 +124,44 @@ async fn list_pending(
             };
         let participant_count = participants.len();
         let participant_views = participants
-            .into_iter()
+            .iter()
             .map(|p| PendingParticipantView {
-                display_name: p.display_name,
-                eppns: p.eppns,
-                daisy_roles: p.daisy_roles,
-                kind: p.kind,
+                display_name: p.display_name.clone(),
+                eppns: p.eppns.clone(),
+                daisy_roles: p.daisy_roles.clone(),
+                kind: p.kind.clone(),
             })
             .collect();
+
+        // Re-derive the course link fresh: a course may have been
+        // created, merged, or archived since this row was staged, so the
+        // stored `existing_course_id` can be stale. Then recompute the
+        // diff against current DB state and drop rows that have since
+        // converged (e.g. the admin applied the change by hand, or
+        // membership caught up out-of-band). The staging row itself is
+        // left for the next daily sync to delete via `stage_one`.
+        let existing_course_id = minerva_db::queries::courses::find_by_daisy_momenttillf_id(
+            &state.db,
+            &row.momenttillf_id,
+        )
+        .await?
+        .map(|c| c.id);
+
+        let payload = DaisyCourseInputPayload {
+            momenttillf_id: row.momenttillf_id.clone(),
+            beteckning: row.course_code.clone(),
+            name: row.name.clone(),
+            semester_label: Some(row.semester_label.clone()),
+            info_url: row.daisy_info_url.clone(),
+            syllabus_url: row.daisy_syllabus_url.clone(),
+            unit: row.daisy_unit.clone(),
+            participants,
+        };
+        let diff = compute_offering_diff(&state, &payload, existing_course_id).await?;
+        if diff.is_empty() {
+            continue;
+        }
+
         pending.push(PendingImportView {
             id: row.id,
             momenttillf_id: row.momenttillf_id,
@@ -137,7 +173,8 @@ async fn list_pending(
             daisy_unit: row.daisy_unit,
             participant_count,
             participants: participant_views,
-            existing_course_id: row.existing_course_id,
+            existing_course_id,
+            diff,
             first_seen_at: row.first_seen_at,
             last_seen_at: row.last_seen_at,
         });

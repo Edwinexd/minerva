@@ -72,6 +72,15 @@ pub fn router() -> Router<AppState> {
         .route("/reranker-models/default", put(set_default_reranker_model))
         .route("/reranker-benchmark", post(run_reranker_benchmark))
         .route(
+            "/chat-models",
+            get(list_chat_models).put(update_chat_model_enabled),
+        )
+        .route("/chat-models/default", put(set_default_chat_model))
+        .route(
+            "/chat-models/utility-default",
+            put(set_utility_default_chat_model),
+        )
+        .route(
             "/system-defaults",
             get(list_system_defaults).put(update_system_default),
         )
@@ -1767,6 +1776,219 @@ async fn set_default_embedding_model(
         model: row.model,
         is_default: row.is_default,
     }))
+}
+
+// ── Chat / utility model catalog (admin) ───────────────────────────
+
+/// Convert a stored `NUMERIC` rate to `f64` for the JSON wire. Storage
+/// and cost computation stay `Decimal`; only the API boundary to the
+/// JS frontend (whose numbers are f64 anyway) downcasts. `None` (unknown
+/// price) passes through as JSON null so the UI can render an "unpriced"
+/// badge distinct from a typed `0` (free).
+fn rate_to_f64(d: Option<rust_decimal::Decimal>) -> Option<f64> {
+    use rust_decimal::prelude::ToPrimitive;
+    d.and_then(|v| v.to_f64())
+}
+
+#[derive(Serialize)]
+struct ChatModelEntry {
+    model: String,
+    provider: String,
+    display_name: String,
+    enabled: bool,
+    is_default: bool,
+    is_utility_default: bool,
+    /// USD per 1M tokens. `null` = unknown (unusable; cannot be enabled);
+    /// `0.0` = genuinely free (on-prem, usable).
+    input_usd_per_mtok: Option<f64>,
+    output_usd_per_mtok: Option<f64>,
+    supports_logprobs: bool,
+    supports_tool_use: bool,
+    /// Whether the provider this model belongs to has a configured key
+    /// in the runtime registry. A model whose provider key is absent
+    /// cannot be enabled (the UI greys out the toggle).
+    provider_available: bool,
+    /// How many active courses currently select this chat model.
+    courses_using: i64,
+    price_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Serialize)]
+struct ChatModelsResponse {
+    models: Vec<ChatModelEntry>,
+}
+
+/// List the chat-model catalog with admin policy, prices, provider
+/// availability, and per-model course usage. Mirrors
+/// `list_embedding_models`; adds provider + price columns.
+async fn list_chat_models(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<ChatModelsResponse>, AppError> {
+    require_admin(&user)?;
+
+    // Per-model usage counts across active courses. The `courses.model`
+    // column holds the chat model id.
+    let usage_rows = sqlx::query!(
+        r#"SELECT model, COUNT(*)::BIGINT AS "count!"
+           FROM courses
+           WHERE active = true
+           GROUP BY model"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let usage: std::collections::HashMap<String, i64> =
+        usage_rows.into_iter().map(|r| (r.model, r.count)).collect();
+
+    let rows = minerva_db::queries::chat_models::list_all(&state.db).await?;
+    let models = rows
+        .into_iter()
+        .map(|r| ChatModelEntry {
+            provider_available: state.llm.has(&r.provider),
+            courses_using: usage.get(&r.model).copied().unwrap_or(0),
+            input_usd_per_mtok: rate_to_f64(r.input_usd_per_mtok),
+            output_usd_per_mtok: rate_to_f64(r.output_usd_per_mtok),
+            model: r.model,
+            provider: r.provider,
+            display_name: r.display_name,
+            enabled: r.enabled,
+            is_default: r.is_default,
+            is_utility_default: r.is_utility_default,
+            supports_logprobs: r.supports_logprobs,
+            supports_tool_use: r.supports_tool_use,
+            price_updated_at: r.price_updated_at,
+        })
+        .collect();
+
+    Ok(Json(ChatModelsResponse { models }))
+}
+
+#[derive(Deserialize)]
+struct UpdateChatModelRequest {
+    model: String,
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+struct UpdateChatModelResponse {
+    model: String,
+    enabled: bool,
+}
+
+/// Toggle the admin-managed `enabled` flag for one chat model. Enabling
+/// is guarded twice: the model's provider must have a configured key
+/// (`chat_model.provider_unavailable`), and both USD rates must be known
+/// (`chat_model.price_required`; `0` is allowed, NULL is not). Disabling
+/// is always allowed.
+async fn update_chat_model_enabled(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<UpdateChatModelRequest>,
+) -> Result<Json<UpdateChatModelResponse>, AppError> {
+    require_admin(&user)?;
+
+    let row = minerva_db::queries::chat_models::find(&state.db, &body.model)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if body.enabled {
+        if !state.llm.has(&row.provider) {
+            return Err(AppError::bad_request_with(
+                "chat_model.provider_unavailable",
+                [("provider", row.provider.clone())],
+            ));
+        }
+        if row.input_usd_per_mtok.is_none() || row.output_usd_per_mtok.is_none() {
+            return Err(AppError::bad_request_with(
+                "chat_model.price_required",
+                [("model", row.model.clone())],
+            ));
+        }
+    }
+
+    let updated =
+        minerva_db::queries::chat_models::set_enabled(&state.db, &body.model, body.enabled)
+            .await?
+            .ok_or(AppError::NotFound)?;
+
+    tracing::info!(
+        "admin {} set chat model {} enabled={}",
+        user.id,
+        updated.model,
+        updated.enabled,
+    );
+
+    Ok(Json(UpdateChatModelResponse {
+        model: updated.model,
+        enabled: updated.enabled,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SetChatModelDefaultRequest {
+    model: String,
+}
+
+#[derive(Serialize)]
+struct SetChatModelDefaultResponse {
+    model: String,
+}
+
+/// Promote one chat model to the course-chat default for new courses.
+/// The target must be enabled. Atomic in `set_default`.
+async fn set_default_chat_model(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<SetChatModelDefaultRequest>,
+) -> Result<Json<SetChatModelDefaultResponse>, AppError> {
+    require_admin(&user)?;
+    let row = map_set_default(
+        minerva_db::queries::chat_models::set_default(&state.db, &body.model).await,
+        &body.model,
+    )?;
+    tracing::info!("admin {} set chat model {} as course default", user.id, row);
+    Ok(Json(SetChatModelDefaultResponse { model: row }))
+}
+
+/// Promote one chat model to the utility default (classification / KG /
+/// aegis / suggested-questions). The target must be enabled.
+async fn set_utility_default_chat_model(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<SetChatModelDefaultRequest>,
+) -> Result<Json<SetChatModelDefaultResponse>, AppError> {
+    require_admin(&user)?;
+    let row = map_set_default(
+        minerva_db::queries::chat_models::set_utility_default(&state.db, &body.model).await,
+        &body.model,
+    )?;
+    tracing::info!(
+        "admin {} set chat model {} as utility default",
+        user.id,
+        row
+    );
+    Ok(Json(SetChatModelDefaultResponse { model: row }))
+}
+
+/// Map a `chat_models::set_default` / `set_utility_default` result to the
+/// model id or an `AppError`, sharing the NotFound / Disabled / Db arms.
+fn map_set_default(
+    result: Result<
+        minerva_db::queries::chat_models::ChatModelRow,
+        minerva_db::queries::chat_models::SetDefaultError,
+    >,
+    model: &str,
+) -> Result<String, AppError> {
+    use minerva_db::queries::chat_models::SetDefaultError;
+    match result {
+        Ok(row) => Ok(row.model),
+        Err(SetDefaultError::NotFound) => Err(AppError::NotFound),
+        Err(SetDefaultError::Disabled) => Err(AppError::bad_request_with(
+            "chat_model.default_disabled",
+            [("model", model.to_string())],
+        )),
+        Err(SetDefaultError::Db(e)) => Err(AppError::from(e)),
+    }
 }
 
 // ── Re-ranker model catalog (admin) ────────────────────────────────

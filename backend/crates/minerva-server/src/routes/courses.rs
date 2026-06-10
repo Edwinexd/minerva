@@ -486,6 +486,26 @@ pub(crate) async fn apply_course_update(
         ));
     }
 
+    // Validate the chat model against the admin-managed `chat_models`
+    // catalog: a teacher may only switch to an enabled model. Same
+    // two-layer ergonomics as the embedding / reranker gates, bypassed
+    // when the value is unchanged or the caller is an admin (admins
+    // force-migrate courses onto any model, including disabled ones).
+    // The model's provider is resolved from `chat_models.provider` at
+    // chat time via the registry.
+    if let Some(ref model) = body.model {
+        let unchanged = model.as_str() == existing.model.as_str();
+        if !unchanged && !is_admin {
+            let enabled = minerva_db::queries::chat_models::is_enabled(&state.db, model).await?;
+            if !enabled {
+                return Err(AppError::bad_request_with(
+                    "course.chat_model_disabled",
+                    [("model", model.clone())],
+                ));
+            }
+        }
+    }
+
     // Validate embedding_provider
     if let Some(ref provider) = body.embedding_provider {
         if !minerva_catalog::VALID_EMBEDDING_PROVIDERS.contains(&provider.as_str()) {

@@ -147,6 +147,34 @@ pub async fn reranker_models(
     Ok(Json(json!({ "models": models })))
 }
 
+/// Auth-gated catalog feed for the teacher chat-model dropdown. Returns
+/// `{ models: [{model, display_name, provider, input_usd_per_mtok,
+/// output_usd_per_mtok}] }` filtered to `enabled = true` rows. Prices
+/// are surfaced so the picker can show an estimated `$`/Mtok next to
+/// each option; `null` means unpriced (such a row can't be enabled, so
+/// in practice never appears here). Decimal downcasts to f64 only at
+/// this JSON boundary.
+pub async fn chat_models(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, crate::error::AppError> {
+    use rust_decimal::prelude::ToPrimitive;
+    let rows = minerva_db::queries::chat_models::list_all(&state.db).await?;
+    let models: Vec<Value> = rows
+        .into_iter()
+        .filter(|r| r.enabled)
+        .map(|r| {
+            json!({
+                "model": r.model,
+                "display_name": r.display_name,
+                "provider": r.provider,
+                "input_usd_per_mtok": r.input_usd_per_mtok.and_then(|v| v.to_f64()),
+                "output_usd_per_mtok": r.output_usd_per_mtok.and_then(|v| v.to_f64()),
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "models": models })))
+}
+
 fn fallback_models() -> Vec<Value> {
     // Used only when the Cerebras `/v1/models` endpoint is unreachable
     // or returns garbage. Lists the model(s) we actually expect every

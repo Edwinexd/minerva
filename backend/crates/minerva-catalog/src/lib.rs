@@ -107,6 +107,7 @@ pub fn provider_pricing_url(provider: &str) -> Option<&'static str> {
         "anthropic" => Some("https://www.anthropic.com/pricing"),
         "cerebras" => Some("https://www.cerebras.ai/pricing"),
         "groq" => Some("https://groq.com/pricing"),
+        "gemini" => Some("https://ai.google.dev/gemini-api/docs/pricing"),
         _ => None,
     }
 }

@@ -13,8 +13,8 @@ use crate::error::AppError;
 // (axum-free). Re-exported here so the chat strategies keep referring to
 // them via `strategy::common`.
 pub use crate::llm::{
-    cerebras_request_with_retry, cerebras_request_with_retry_to, extract_cerebras_usage,
-    payload_int, payload_string, record_cerebras_usage, RagChunk, CEREBRAS_CHAT_COMPLETIONS_URL,
+    extract_openai_usage, openai_chat_request, payload_int, payload_string, record_pipeline_usage,
+    RagChunk, CEREBRAS_CHAT_COMPLETIONS_URL,
 };
 
 /// Minimum retrieval score (cosine similarity in [0, 1]) below which an

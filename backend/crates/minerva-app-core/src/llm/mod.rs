@@ -78,21 +78,12 @@ pub fn payload_int(
     }
 }
 
-/// Send a request to the Cerebras API with retry on 5XX / network errors.
-/// Returns the successful response or the last error as a formatted string.
-pub async fn cerebras_request_with_retry(
-    client: &reqwest::Client,
-    api_key: &str,
-    body: &serde_json::Value,
-) -> Result<Response, String> {
-    cerebras_request_with_retry_to(client, CEREBRAS_CHAT_COMPLETIONS_URL, api_key, body).await
-}
-
-/// Same as `cerebras_request_with_retry` but posts to `url` instead of the
-/// production endpoint. Exists so integration tests can point FLARE at a
-/// mock server without exposing URL-override plumbing throughout the rest
-/// of the codebase.
-pub async fn cerebras_request_with_retry_to(
+/// POST an OpenAI-compatible `/chat/completions` request to `url` with
+/// `Bearer` auth and retry on 5XX / network errors. Provider-agnostic:
+/// any OpenAI-compatible endpoint (Cerebras, OpenAI, Groq, Gemini's
+/// OpenAI-compat endpoint, a self-hosted proxy, ...) works by passing
+/// its URL + key. Returns the successful response or the last error.
+pub async fn openai_chat_request(
     client: &reqwest::Client,
     url: &str,
     api_key: &str,
@@ -103,12 +94,7 @@ pub async fn cerebras_request_with_retry_to(
     for attempt in 0..=MAX_RETRIES {
         if attempt > 0 {
             let backoff = INITIAL_BACKOFF * 2u32.pow(attempt - 1);
-            tracing::warn!(
-                "cerebras: retry {}/{} after {:?}",
-                attempt,
-                MAX_RETRIES,
-                backoff
-            );
+            tracing::warn!("llm: retry {}/{} after {:?}", attempt, MAX_RETRIES, backoff);
             tokio::time::sleep(backoff).await;
         }
 
@@ -127,17 +113,17 @@ pub async fn cerebras_request_with_retry_to(
                 }
                 if status.is_server_error() {
                     let body_text = response.text().await.unwrap_or_default();
-                    last_err = format!("Cerebras API error {}: {}", status, body_text);
-                    tracing::warn!("cerebras: {}", last_err);
+                    last_err = format!("LLM API error {}: {}", status, body_text);
+                    tracing::warn!("llm: {}", last_err);
                     continue;
                 }
                 // Client errors (4XX) are not retryable
                 let body_text = response.text().await.unwrap_or_default();
-                return Err(format!("Cerebras API error {}: {}", status, body_text));
+                return Err(format!("LLM API error {}: {}", status, body_text));
             }
             Err(e) if e.is_timeout() || e.is_connect() => {
                 last_err = format!("Request failed: {}", e);
-                tracing::warn!("cerebras: {}", last_err);
+                tracing::warn!("llm: {}", last_err);
                 continue;
             }
             Err(e) => {
@@ -154,7 +140,7 @@ pub async fn cerebras_request_with_retry_to(
 /// when the usage block is missing or malformed; callers should
 /// just skip token recording in that case (we never block a chat
 /// path because tracking failed).
-pub fn extract_cerebras_usage(payload: &serde_json::Value) -> Option<(i32, i32)> {
+pub fn extract_openai_usage(payload: &serde_json::Value) -> Option<(i32, i32)> {
     let usage = payload.get("usage")?;
     let p = usage.get("prompt_tokens")?.as_i64()?;
     let c = usage.get("completion_tokens")?.as_i64()?;
@@ -166,14 +152,14 @@ pub fn extract_cerebras_usage(payload: &serde_json::Value) -> Option<(i32, i32)>
 /// either missing-usage or DB error and returns silently. Used
 /// from every classification call site so they don't all repeat
 /// the same boilerplate.
-pub async fn record_cerebras_usage(
+pub async fn record_pipeline_usage(
     db: &sqlx::PgPool,
     course_id: uuid::Uuid,
     category: &'static str,
     model: &str,
     payload: &serde_json::Value,
 ) {
-    let Some((prompt_tokens, completion_tokens)) = extract_cerebras_usage(payload) else {
+    let Some((prompt_tokens, completion_tokens)) = extract_openai_usage(payload) else {
         tracing::warn!(
             "course_token_usage: skipping record for course={} category={}: usage block missing/malformed",
             course_id,

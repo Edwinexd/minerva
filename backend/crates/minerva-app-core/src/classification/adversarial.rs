@@ -32,7 +32,7 @@ use futures::future::join_all;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{cerebras_request_with_retry_to, record_cerebras_usage, RagChunk};
+use crate::llm::{openai_chat_request, record_pipeline_usage, RagChunk};
 use minerva_db::queries::course_token_usage::CATEGORY_ADVERSARIAL_FILTER;
 
 /// Atomic counters bumped by every filter invocation. Surfaced via a
@@ -118,15 +118,14 @@ async fn is_solution_chunk(
         ],
     });
 
-    let response =
-        match cerebras_request_with_retry_to(http, &util.endpoint, &util.api_key, &body).await {
-            Ok(r) => r,
-            Err(e) => {
-                CHUNKS_PER_CHECK_FAILED.fetch_add(1, Ordering::Relaxed);
-                tracing::warn!("adversarial: request failed, failing open: {e}");
-                return false;
-            }
-        };
+    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => {
+            CHUNKS_PER_CHECK_FAILED.fetch_add(1, Ordering::Relaxed);
+            tracing::warn!("adversarial: request failed, failing open: {e}");
+            return false;
+        }
+    };
 
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
@@ -137,7 +136,7 @@ async fn is_solution_chunk(
         }
     };
 
-    record_cerebras_usage(
+    record_pipeline_usage(
         db,
         course_id,
         CATEGORY_ADVERSARIAL_FILTER,

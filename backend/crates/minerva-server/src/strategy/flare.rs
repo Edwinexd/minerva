@@ -787,7 +787,7 @@ async fn stream_with_logprobs(
         "stream_options": { "include_usage": true },
     });
 
-    let response = common::cerebras_request_with_retry_to(client, base_url, api_key, &body).await?;
+    let response = common::openai_chat_request(client, base_url, api_key, &body).await?;
 
     let mut stream = response.bytes_stream();
     // Raw TCP frames may split multi-byte UTF-8 codepoints; accumulate bytes

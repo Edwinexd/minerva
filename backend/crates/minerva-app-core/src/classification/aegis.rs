@@ -51,7 +51,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{cerebras_request_with_retry_to, record_cerebras_usage};
+use crate::llm::{openai_chat_request, record_pipeline_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_AEGIS;
 
 // Both analyzer fires (cold-start and follow-up) run on the
@@ -603,14 +603,13 @@ pub async fn analyze_prompt(
     // range; matches the rewrite path's setting.
     body["reasoning_effort"] = serde_json::Value::String("low".to_string());
 
-    let response =
-        match cerebras_request_with_retry_to(http, &util.endpoint, &util.api_key, &body).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("aegis: request failed: {}", e);
-                return Err(format!("cerebras request failed: {e}"));
-            }
-        };
+    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("aegis: request failed: {}", e);
+            return Err(format!("cerebras request failed: {e}"));
+        }
+    };
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
         Err(e) => {
@@ -618,7 +617,7 @@ pub async fn analyze_prompt(
             return Err(format!("cerebras response not JSON: {e}"));
         }
     };
-    record_cerebras_usage(db, course_id, CATEGORY_AEGIS, &model_used, &payload).await;
+    record_pipeline_usage(db, course_id, CATEGORY_AEGIS, &model_used, &payload).await;
 
     let raw = payload["choices"][0]["message"]["content"]
         .as_str()
@@ -781,14 +780,13 @@ pub async fn rewrite_prompt(
         ],
     });
 
-    let response =
-        match cerebras_request_with_retry_to(http, &util.endpoint, &util.api_key, &body).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("aegis rewrite: request failed: {}", e);
-                return Err(format!("cerebras request failed: {e}"));
-            }
-        };
+    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("aegis rewrite: request failed: {}", e);
+            return Err(format!("cerebras request failed: {e}"));
+        }
+    };
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
         Err(e) => {
@@ -796,7 +794,7 @@ pub async fn rewrite_prompt(
             return Err(format!("cerebras response not JSON: {e}"));
         }
     };
-    record_cerebras_usage(db, course_id, CATEGORY_AEGIS, &util.model, &payload).await;
+    record_pipeline_usage(db, course_id, CATEGORY_AEGIS, &util.model, &payload).await;
 
     let rewritten = payload["choices"][0]["message"]["content"]
         .as_str()

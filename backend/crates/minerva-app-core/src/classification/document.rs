@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::prompts::{CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_TEMPLATE};
 use super::types::{DocumentKind, ALL_KINDS};
-use crate::llm::{cerebras_request_with_retry_to, record_cerebras_usage};
+use crate::llm::{openai_chat_request, record_pipeline_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
 
 /// Soft cap on excerpt length sent to the model. Head/tail split so
@@ -95,13 +95,8 @@ impl CerebrasClassifier {
             }
         });
 
-        let response = cerebras_request_with_retry_to(
-            &self.http,
-            &self.util.endpoint,
-            &self.util.api_key,
-            &body,
-        )
-        .await?;
+        let response =
+            openai_chat_request(&self.http, &self.util.endpoint, &self.util.api_key, &body).await?;
         let payload: serde_json::Value = response
             .json()
             .await
@@ -112,7 +107,7 @@ impl CerebrasClassifier {
         // classifier (e.g. a smaller-model fallback for routine cases
         // or a high-effort retry for low-confidence ones) would
         // automatically split into separate rows.
-        record_cerebras_usage(
+        record_pipeline_usage(
             &self.db,
             course_id,
             CATEGORY_DOCUMENT_CLASSIFIER,

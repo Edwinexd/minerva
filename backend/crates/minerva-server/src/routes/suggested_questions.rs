@@ -29,9 +29,7 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::strategy::common::{
-    cerebras_request_with_retry_to, record_cerebras_usage, scroll_doc_chunks,
-};
+use crate::strategy::common::{openai_chat_request, record_pipeline_usage, scroll_doc_chunks};
 
 // Runs on the admin-selected utility model (resolved per call); a
 // JSON-schema-constrained output keeps the shape correct and
@@ -194,16 +192,15 @@ async fn regenerate(
         }
     });
 
-    let response =
-        cerebras_request_with_retry_to(&state.http_client, &util.endpoint, &util.api_key, &body)
-            .await
-            .map_err(AppError::Internal)?;
+    let response = openai_chat_request(&state.http_client, &util.endpoint, &util.api_key, &body)
+        .await
+        .map_err(AppError::Internal)?;
     let payload: serde_json::Value = response
         .json()
         .await
         .map_err(|e| AppError::Internal(format!("suggested-questions: response not JSON: {e}")))?;
 
-    record_cerebras_usage(
+    record_pipeline_usage(
         &state.db,
         course_id,
         CATEGORY_SUGGESTED_QUESTIONS,

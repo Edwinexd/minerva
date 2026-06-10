@@ -35,6 +35,7 @@ pub const PROVIDER_CEREBRAS: &str = "cerebras";
 pub const PROVIDER_OPENAI: &str = "openai";
 pub const PROVIDER_ANTHROPIC: &str = "anthropic";
 pub const PROVIDER_GROQ: &str = "groq";
+pub const PROVIDER_GEMINI: &str = "gemini";
 
 /// One normalized streaming delta from any provider.
 #[derive(Debug, Clone, Default)]
@@ -358,13 +359,8 @@ impl ChatProvider for OpenAiCompatibleProvider {
         let mut req = req;
         req.stream = false;
         let body = self.build_body(&req);
-        let response = super::cerebras_request_with_retry_to(
-            &self.client,
-            &self.chat_url,
-            &self.api_key,
-            &body,
-        )
-        .await?;
+        let response =
+            super::openai_chat_request(&self.client, &self.chat_url, &self.api_key, &body).await?;
         let payload: Value = response
             .json()
             .await
@@ -380,7 +376,7 @@ impl ChatProvider for OpenAiCompatibleProvider {
             .as_str()
             .unwrap_or_default()
             .to_string();
-        let (prompt, completion) = super::extract_cerebras_usage(&payload).unwrap_or((0, 0));
+        let (prompt, completion) = super::extract_openai_usage(&payload).unwrap_or((0, 0));
         Ok((
             text,
             ChatUsage {
@@ -419,13 +415,8 @@ impl ChatProvider for OpenAiCompatibleProvider {
         let mut req = req;
         req.stream = true;
         let body = self.build_body(&req);
-        let response = super::cerebras_request_with_retry_to(
-            &self.client,
-            &self.chat_url,
-            &self.api_key,
-            &body,
-        )
-        .await?;
+        let response =
+            super::openai_chat_request(&self.client, &self.chat_url, &self.api_key, &body).await?;
 
         let mut stream = response.bytes_stream();
         // Raw TCP frames may split multi-byte UTF-8 codepoints across
@@ -829,8 +820,11 @@ impl LlmRegistry {
     pub fn from_config(client: reqwest::Client, config: &Config) -> Self {
         let mut providers: HashMap<String, Arc<dyn ChatProvider>> = HashMap::new();
 
-        // OpenAI-compatible providers: (id, default base, key).
-        let openai_compatible: [(&str, &str, String); 3] = [
+        // OpenAI-compatible providers: (id, default base, key). Gemini is
+        // included here via Google's OpenAI-compatible endpoint, which
+        // serves `/chat/completions` + `/models` and supports
+        // `response_format` json_schema, so it needs no separate impl.
+        let openai_compatible: [(&str, &str, String); 4] = [
             (
                 PROVIDER_CEREBRAS,
                 "https://api.cerebras.ai/v1",
@@ -845,6 +839,11 @@ impl LlmRegistry {
                 PROVIDER_GROQ,
                 "https://api.groq.com/openai/v1",
                 config.groq_api_key.clone(),
+            ),
+            (
+                PROVIDER_GEMINI,
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                config.gemini_api_key.clone(),
             ),
         ];
 

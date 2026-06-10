@@ -14,6 +14,9 @@ pub struct Config {
     pub anthropic_api_key: String,
     /// Groq API key. Optional; enables the `groq` LLM provider.
     pub groq_api_key: String,
+    /// Google Gemini API key. Optional; enables the `gemini` LLM provider
+    /// via Google's OpenAI-compatible endpoint.
+    pub gemini_api_key: String,
     pub hmac_secret: String,
     pub docs_path: String,
     /// Comma-separated list of admin eppn usernames (prefix before @).
@@ -91,6 +94,7 @@ impl Config {
             openai_api_key: env::var("OPENAI_API_KEY").unwrap_or_default(),
             anthropic_api_key: env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
             groq_api_key: env::var("GROQ_API_KEY").unwrap_or_default(),
+            gemini_api_key: env::var("GEMINI_API_KEY").unwrap_or_default(),
             hmac_secret: env::var("MINERVA_HMAC_SECRET")?,
             docs_path: env::var("MINERVA_DOCS_PATH")
                 .unwrap_or_else(|_| "./data/documents".to_string()),

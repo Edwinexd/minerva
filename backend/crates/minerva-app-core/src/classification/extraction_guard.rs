@@ -35,7 +35,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{cerebras_request_with_retry_to, record_cerebras_usage};
+use crate::llm::{openai_chat_request, record_pipeline_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
 
 // ── Cerebras model selection ───────────────────────────────────────
@@ -176,17 +176,16 @@ pub async fn classify_intent(
         }
     });
 
-    let response =
-        match cerebras_request_with_retry_to(http, &util.endpoint, &util.api_key, &body).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("extraction_guard: intent request failed (fail-open): {}", e);
-                return IntentVerdict {
-                    is_extraction: false,
-                    rationale: format!("intent classifier failed: {e}"),
-                };
-            }
-        };
+    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("extraction_guard: intent request failed (fail-open): {}", e);
+            return IntentVerdict {
+                is_extraction: false,
+                rationale: format!("intent classifier failed: {e}"),
+            };
+        }
+    };
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
         Err(e) => {
@@ -197,7 +196,7 @@ pub async fn classify_intent(
             };
         }
     };
-    record_cerebras_usage(
+    record_pipeline_usage(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
@@ -306,17 +305,16 @@ pub async fn check_output_for_solution(
         }
     });
 
-    let response =
-        match cerebras_request_with_retry_to(http, &util.endpoint, &util.api_key, &body).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("extraction_guard: output check failed (fail-open): {}", e);
-                return OutputVerdict {
-                    is_complete_solution: false,
-                    rationale: format!("output check failed: {e}"),
-                };
-            }
-        };
+    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("extraction_guard: output check failed (fail-open): {}", e);
+            return OutputVerdict {
+                is_complete_solution: false,
+                rationale: format!("output check failed: {e}"),
+            };
+        }
+    };
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
         Err(e) => {
@@ -327,7 +325,7 @@ pub async fn check_output_for_solution(
             };
         }
     };
-    record_cerebras_usage(
+    record_pipeline_usage(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
@@ -400,19 +398,18 @@ pub async fn generate_socratic_rewrite(
             { "role": "user", "content": user_payload.to_string() },
         ],
     });
-    let response =
-        match cerebras_request_with_retry_to(http, &util.endpoint, &util.api_key, &body).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("extraction_guard: rewrite request failed: {}", e);
-                return fallback;
-            }
-        };
+    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("extraction_guard: rewrite request failed: {}", e);
+            return fallback;
+        }
+    };
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
         Err(_) => return fallback,
     };
-    record_cerebras_usage(
+    record_pipeline_usage(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
@@ -537,20 +534,19 @@ pub async fn classify_engagement(
         }
     });
 
-    let response =
-        match cerebras_request_with_retry_to(http, &util.endpoint, &util.api_key, &body).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(
-                    "extraction_guard: engagement request failed (defaulting to engaged): {}",
-                    e
-                );
-                return EngagementVerdict {
-                    engaged: true,
-                    rationale: format!("engagement classifier failed: {e}"),
-                };
-            }
-        };
+    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                "extraction_guard: engagement request failed (defaulting to engaged): {}",
+                e
+            );
+            return EngagementVerdict {
+                engaged: true,
+                rationale: format!("engagement classifier failed: {e}"),
+            };
+        }
+    };
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
         Err(e) => {
@@ -564,7 +560,7 @@ pub async fn classify_engagement(
             };
         }
     };
-    record_cerebras_usage(
+    record_pipeline_usage(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,

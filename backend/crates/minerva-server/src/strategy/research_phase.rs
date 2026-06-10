@@ -819,7 +819,7 @@ async fn stream_research_turn(
         body["top_logprobs"] = serde_json::Value::Number(1.into());
     }
 
-    let response = common::cerebras_request_with_retry_to(
+    let response = common::openai_chat_request(
         http_client,
         &ctx.cerebras_base_url,
         &ctx.cerebras_api_key,

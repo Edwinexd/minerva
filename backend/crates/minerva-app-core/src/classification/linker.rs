@@ -46,9 +46,7 @@ use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{
-    cerebras_request_with_retry_to, payload_int, payload_string, record_cerebras_usage,
-};
+use crate::llm::{openai_chat_request, payload_int, payload_string, record_pipeline_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_LINKER;
 
 // The per-pair link decision runs on the admin-selected utility model
@@ -1259,19 +1257,18 @@ async fn classify_one_pair(
         }
     });
 
-    let response =
-        match cerebras_request_with_retry_to(http, &util.endpoint, &util.api_key, &body).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(
-                    "linker: per-pair request failed for {}<->{}: {}",
-                    p.a_id,
-                    p.b_id,
-                    e
-                );
-                return None;
-            }
-        };
+    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                "linker: per-pair request failed for {}<->{}: {}",
+                p.a_id,
+                p.b_id,
+                e
+            );
+            return None;
+        }
+    };
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
         Err(e) => {
@@ -1288,7 +1285,7 @@ async fn classify_one_pair(
     // call against `course_id` in the `linker` category, regardless
     // of whether the call ultimately produced an edge; the cost
     // was paid either way.
-    record_cerebras_usage(db, course_id, CATEGORY_LINKER, &util.model, &payload).await;
+    record_pipeline_usage(db, course_id, CATEGORY_LINKER, &util.model, &payload).await;
     // Guard against finish_reason=length producing an empty content
     // field; caller would otherwise see this as "no edge" without
     // knowing the model was cut off mid-token.

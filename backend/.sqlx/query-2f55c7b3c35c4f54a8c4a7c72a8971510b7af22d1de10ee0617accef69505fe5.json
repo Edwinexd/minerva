@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature,\n               c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy,\n               c.tool_use_enabled, c.embedding_provider, c.embedding_model,\n               c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at,\n               c.updated_at, c.semester_label, c.auto_managed, c.course_code\n            FROM courses c\n            JOIN course_daisy_offerings o ON o.course_id = c.id\n            WHERE o.momenttillf_id = $1 AND c.active = true",
+  "query": "UPDATE courses SET\n            name = COALESCE($2, name),\n            description = COALESCE($3, description),\n            context_ratio = COALESCE($4, context_ratio),\n            temperature = COALESCE($5, temperature),\n            model = COALESCE($6, model),\n            system_prompt = COALESCE($7, system_prompt),\n            max_chunks = COALESCE($8, max_chunks),\n            strategy = COALESCE($9, strategy),\n            tool_use_enabled = COALESCE($10, tool_use_enabled),\n            daily_cost_limit_usd = COALESCE($11, daily_cost_limit_usd),\n            embedding_provider = COALESCE($12, embedding_provider),\n            embedding_model = COALESCE($13, embedding_model),\n            min_score = COALESCE($14, min_score),\n            semester_label = COALESCE($15, semester_label),\n            reranker_model = COALESCE($16, reranker_model),\n            updated_at = NOW()\n        WHERE id = $1 AND active = true\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code",
   "describe": {
     "columns": [
       {
@@ -85,8 +85,8 @@
       },
       {
         "ordinal": 16,
-        "name": "daily_token_limit",
-        "type_info": "Int8"
+        "name": "daily_cost_limit_usd",
+        "type_info": "Numeric"
       },
       {
         "ordinal": 17,
@@ -121,6 +121,21 @@
     ],
     "parameters": {
       "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Float8",
+        "Float8",
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Bool",
+        "Numeric",
+        "Text",
+        "Text",
+        "Float4",
+        "Text",
         "Text"
       ]
     },
@@ -150,5 +165,5 @@
       true
     ]
   },
-  "hash": "9144043e942eb4f751ac881f2235a4e4bc1880ec0bff1b88ba9c83fe20189694"
+  "hash": "2f55c7b3c35c4f54a8c4a7c72a8971510b7af22d1de10ee0617accef69505fe5"
 }

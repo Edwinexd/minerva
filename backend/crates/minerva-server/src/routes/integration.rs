@@ -167,7 +167,7 @@ async fn ensure_user(
         &eppn,
         body.display_name.as_deref(),
         "student",
-        crate::system_defaults::owner_daily_token_limit(&state.db).await,
+        crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
     )
     .await?;
     Ok(Json(UserInfo {
@@ -204,7 +204,7 @@ async fn add_member(
         &eppn,
         body.display_name.as_deref(),
         "student",
-        crate::system_defaults::owner_daily_token_limit(&state.db).await,
+        crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
     )
     .await?;
     let user_id = user.id;
@@ -558,7 +558,7 @@ async fn create_embed_token(
         &eppn,
         body.display_name.as_deref(),
         "student",
-        crate::system_defaults::owner_daily_token_limit(&state.db).await,
+        crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
     )
     .await?;
     let user_id = user.id;

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at FROM users ORDER BY eppn",
+  "query": "INSERT INTO users (id, eppn, display_name, role, owner_daily_cost_limit_usd)\n         VALUES ($1, $2, $3, $4, $5)\n         ON CONFLICT (eppn) DO NOTHING\n         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_cost_limit_usd, privacy_acknowledged_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -35,8 +35,8 @@
       },
       {
         "ordinal": 6,
-        "name": "owner_daily_token_limit",
-        "type_info": "Int8"
+        "name": "owner_daily_cost_limit_usd",
+        "type_info": "Numeric"
       },
       {
         "ordinal": 7,
@@ -55,7 +55,13 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Numeric"
+      ]
     },
     "nullable": [
       false,
@@ -70,5 +76,5 @@
       false
     ]
   },
-  "hash": "0d483ee3636678064de0872a65fe89feb2425d9cde748fae3a59941353961868"
+  "hash": "a6112ba7da3b9c4e8e444c3886e995dd8e369c1489e2722514290f925fc6fedc"
 }

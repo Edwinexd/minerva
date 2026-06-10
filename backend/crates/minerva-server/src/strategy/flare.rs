@@ -230,7 +230,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         cerebras_base_url: &ctx.cerebras_base_url,
         cerebras_api_key: &ctx.cerebras_api_key,
         max_chunks: ctx.max_chunks,
-        daily_token_limit: ctx.daily_token_limit,
+        daily_token_limit: ctx.daily_token_budget,
         unclassified_doc_ids,
         kg_enabled: ctx.kg_enabled,
     };

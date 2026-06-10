@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses ORDER BY active DESC, updated_at DESC",
+  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses ORDER BY active DESC, updated_at DESC",
   "describe": {
     "columns": [
       {
@@ -85,8 +85,8 @@
       },
       {
         "ordinal": 16,
-        "name": "daily_token_limit",
-        "type_info": "Int8"
+        "name": "daily_cost_limit_usd",
+        "type_info": "Numeric"
       },
       {
         "ordinal": 17,
@@ -148,5 +148,5 @@
       true
     ]
   },
-  "hash": "ffa9ccf1587a11280fa0f81dbce113fb6028e2c4dc02b1cbcc440d568ebdacbb"
+  "hash": "acd087f051bac780f6fba4d650f4f3883db7074ff778d9dd30dafc2fa938d6d4"
 }

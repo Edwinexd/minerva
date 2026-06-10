@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -142,6 +143,69 @@ pub async fn get_owner_daily_tokens(db: &PgPool, owner_id: Uuid) -> Result<i64, 
     .fetch_one(db)
     .await?;
     Ok(row)
+}
+
+/// Today's USD spend for one student in one course: tokens x each
+/// model's current rate, summed across the per-model usage rows. Cost is
+/// derived on read (the ledger stores tokens + model), so a later
+/// re-price changes future enforcement without rewriting today's
+/// already-recorded tokens. Unpriced models (NULL rate) contribute 0.
+pub async fn get_user_daily_cost(
+    db: &PgPool,
+    user_id: Uuid,
+    course_id: Uuid,
+) -> Result<Decimal, sqlx::Error> {
+    let cost = sqlx::query_scalar!(
+        r#"SELECT COALESCE(SUM(
+               (u.prompt_tokens * cm.input_usd_per_mtok
+                + u.completion_tokens * cm.output_usd_per_mtok) / 1000000
+           ), 0)::numeric AS "cost!"
+           FROM usage_daily u
+           JOIN chat_models cm ON cm.model = u.model
+           WHERE u.user_id = $1 AND u.course_id = $2 AND u.date = CURRENT_DATE"#,
+        user_id,
+        course_id,
+    )
+    .fetch_one(db)
+    .await?;
+    Ok(cost)
+}
+
+/// Today's total USD spend across every course owned by `owner_id`:
+/// student chat spend (`usage_daily`) PLUS pipeline / classification
+/// spend (`course_token_usage`), each computed as tokens x the model's
+/// current rate. This is what the per-owner cap enforces against.
+pub async fn get_owner_daily_cost(db: &PgPool, owner_id: Uuid) -> Result<Decimal, sqlx::Error> {
+    let cost = sqlx::query_scalar!(
+        r#"
+        WITH chat AS (
+            SELECT COALESCE(SUM(
+                (u.prompt_tokens * cm.input_usd_per_mtok
+                 + u.completion_tokens * cm.output_usd_per_mtok) / 1000000
+            ), 0) AS c
+            FROM usage_daily u
+            JOIN courses co ON co.id = u.course_id
+            JOIN chat_models cm ON cm.model = u.model
+            WHERE co.owner_id = $1 AND u.date = CURRENT_DATE
+        ),
+        pipeline AS (
+            SELECT COALESCE(SUM(
+                (ctu.prompt_tokens * cm.input_usd_per_mtok
+                 + ctu.completion_tokens * cm.output_usd_per_mtok) / 1000000
+            ), 0) AS c
+            FROM course_token_usage ctu
+            JOIN courses co ON co.id = ctu.course_id
+            JOIN chat_models cm ON cm.model = ctu.model
+            WHERE co.owner_id = $1 AND ctu.created_at >= CURRENT_DATE
+        )
+        SELECT (chat.c + pipeline.c)::numeric AS "cost!"
+        FROM chat, pipeline
+        "#,
+        owner_id,
+    )
+    .fetch_one(db)
+    .await?;
+    Ok(cost)
 }
 
 #[derive(Debug)]

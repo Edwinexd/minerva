@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code\n        FROM courses c\n        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1 OR cm.role = 'teacher')\n        ORDER BY c.updated_at DESC",
+  "query": "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
   "describe": {
     "columns": [
       {
@@ -85,8 +85,8 @@
       },
       {
         "ordinal": 16,
-        "name": "daily_token_limit",
-        "type_info": "Int8"
+        "name": "daily_cost_limit_usd",
+        "type_info": "Numeric"
       },
       {
         "ordinal": 17,
@@ -150,5 +150,5 @@
       true
     ]
   },
-  "hash": "02d962220d4232afcb983b1dd78d5a9ec8b321ef2d45802535770aad391d3af1"
+  "hash": "bb0175aa9305245b2d1df7d70d6faeb40382d1cd6f563117799b668094b533cf"
 }

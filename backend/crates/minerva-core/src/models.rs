@@ -98,7 +98,10 @@ pub struct User {
     pub role: UserRole,
     pub suspended: bool,
     pub role_manually_set: bool,
-    pub owner_daily_token_limit: i64,
+    /// Per-owner daily AI spending cap in USD (sum across owned courses).
+    /// 0 = unlimited. Spend is computed on read from token usage x each
+    /// model's current rate; this is just the budget.
+    pub owner_daily_cost_limit_usd: rust_decimal::Decimal,
     pub privacy_acknowledged_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -172,7 +175,8 @@ pub struct Course {
     pub model: String,
     pub system_prompt: Option<String>,
     pub max_chunks: i32,
-    pub daily_token_limit: i64,
+    /// Per-student-per-course daily AI spending cap in USD. 0 = unlimited.
+    pub daily_cost_limit_usd: rust_decimal::Decimal,
     pub active: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

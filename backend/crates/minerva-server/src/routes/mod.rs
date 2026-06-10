@@ -43,11 +43,11 @@ pub(crate) async fn enforce_owner_cap(state: &AppState, owner_id: Uuid) -> Resul
             "course owner {owner_id} not found in users table"
         )));
     };
-    if owner.owner_daily_token_limit <= 0 {
+    if owner.owner_daily_cost_limit_usd <= rust_decimal::Decimal::ZERO {
         return Ok(());
     }
-    let used = minerva_db::queries::usage::get_owner_daily_tokens(&state.db, owner_id).await?;
-    if used >= owner.owner_daily_token_limit {
+    let used = minerva_db::queries::usage::get_owner_daily_cost(&state.db, owner_id).await?;
+    if used >= owner.owner_daily_cost_limit_usd {
         metrics::counter!("chat_quota_exceeded_total", "scope" => "owner").increment(1);
         return Err(AppError::OwnerQuotaExceeded);
     }

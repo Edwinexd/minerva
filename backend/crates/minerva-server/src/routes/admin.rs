@@ -16,8 +16,8 @@ pub fn router() -> Router<AppState> {
         .route("/users/{id}/role-lock", delete(clear_role_lock))
         .route("/users/{id}/suspended", put(update_user_suspended))
         .route(
-            "/users/{id}/owner-daily-token-limit",
-            put(update_owner_daily_token_limit),
+            "/users/{id}/owner-daily-cost-limit-usd",
+            put(update_owner_daily_cost_limit_usd),
         )
         .route("/users/{id}/daily-usage", delete(reset_user_daily_usage))
         .route("/role-rules", get(list_role_rules).post(create_role_rule))
@@ -474,7 +474,7 @@ struct UserResponse {
     role: String,
     suspended: bool,
     role_manually_set: bool,
-    owner_daily_token_limit: i64,
+    owner_daily_cost_limit_usd: rust_decimal::Decimal,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -495,7 +495,7 @@ async fn list_users(
                 role: r.role,
                 suspended: r.suspended,
                 role_manually_set: r.role_manually_set,
-                owner_daily_token_limit: r.owner_daily_token_limit,
+                owner_daily_cost_limit_usd: r.owner_daily_cost_limit_usd,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             })
@@ -573,34 +573,31 @@ async fn update_user_suspended(
 
 #[derive(Deserialize)]
 struct UpdateOwnerLimitRequest {
-    limit: i64,
+    /// Per-owner daily spending cap in USD. 0 = unlimited.
+    limit: rust_decimal::Decimal,
 }
 
-/// Sanity ceiling on the per-owner daily cap. Picked to leave 6+ orders of
-/// magnitude of headroom before a sum across all owned courses overflows
-/// BIGINT (i64::MAX is ~9.2e18). 1 trillion tokens/day is also wildly
-/// beyond any realistic spend, so this is purely a footgun guard against
-/// admin typos / fat-finger.
-const OWNER_LIMIT_MAX: i64 = 1_000_000_000_000;
-
-async fn update_owner_daily_token_limit(
+async fn update_owner_daily_cost_limit_usd(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateOwnerLimitRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_admin(&user)?;
-    if body.limit < 0 {
+    // Sanity ceiling on the per-owner daily USD cap: a footgun guard
+    // against admin typos, far above any realistic spend.
+    let owner_limit_max = rust_decimal::Decimal::from(1_000_000);
+    if body.limit < rust_decimal::Decimal::ZERO {
         return Err(AppError::bad_request("admin.limit_negative"));
     }
-    if body.limit > OWNER_LIMIT_MAX {
+    if body.limit > owner_limit_max {
         return Err(AppError::bad_request_with(
             "admin.limit_too_large",
-            [("max", OWNER_LIMIT_MAX.to_string())],
+            [("max", owner_limit_max.to_string())],
         ));
     }
     let updated =
-        minerva_db::queries::users::update_owner_daily_token_limit(&state.db, id, body.limit)
+        minerva_db::queries::users::update_owner_daily_cost_limit_usd(&state.db, id, body.limit)
             .await?;
     if !updated {
         return Err(AppError::NotFound);
@@ -1258,7 +1255,7 @@ struct BulkCoursePatch {
     embedding_provider: Option<String>,
     embedding_model: Option<String>,
     reranker_model: Option<String>,
-    daily_token_limit: Option<i64>,
+    daily_cost_limit_usd: Option<rust_decimal::Decimal>,
     semester_label: Option<String>,
 }
 
@@ -1279,7 +1276,7 @@ impl BulkCoursePatch {
             && self.embedding_provider.is_none()
             && self.embedding_model.is_none()
             && self.reranker_model.is_none()
-            && self.daily_token_limit.is_none()
+            && self.daily_cost_limit_usd.is_none()
             && self.semester_label.is_none()
     }
 }
@@ -1363,7 +1360,7 @@ async fn apply_bulk_one(
             embedding_provider: patch.embedding_provider.clone(),
             embedding_model: patch.embedding_model.clone(),
             reranker_model: patch.reranker_model.clone(),
-            daily_token_limit: patch.daily_token_limit,
+            daily_cost_limit_usd: patch.daily_cost_limit_usd,
             semester_label: patch.semester_label.clone(),
         };
         crate::routes::courses::apply_course_update(state, &existing, fields, true).await?;

@@ -51,11 +51,12 @@ pub struct GenerationContext {
     pub history: Vec<minerva_db::queries::conversations::MessageRow>,
     pub user_content: String,
     pub is_first_message: bool,
-    /// Per-student-per-course daily token limit copied from `courses.daily_token_limit`.
-    /// 0 = unlimited (no per-course cap configured). Used by FLARE as an input to
-    /// the single-response fail-safe so one answer cannot burn more than 2x a
-    /// student's daily allowance.
-    pub daily_token_limit: i64,
+    /// Per-response token budget for the tool-use / FLARE fail-safe: the
+    /// course's daily USD cap converted to a token count at the chosen
+    /// model's blended rate (the route handler does the conversion). 0 =
+    /// unlimited (no cap, or a free model). One answer cannot burn more
+    /// than 2x this; see `tool_use::per_response_token_cap`.
+    pub daily_token_budget: i64,
     pub db: sqlx::PgPool,
     pub qdrant: std::sync::Arc<qdrant_client::Qdrant>,
     pub fastembed: std::sync::Arc<dyn minerva_core::rpc::EmbedderClient>,

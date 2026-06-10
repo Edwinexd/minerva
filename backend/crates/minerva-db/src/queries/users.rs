@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -9,7 +10,9 @@ pub struct UserRow {
     pub role: String,
     pub suspended: bool,
     pub role_manually_set: bool,
-    pub owner_daily_token_limit: i64,
+    /// Per-owner daily AI spending cap in USD (summed across owned
+    /// courses). 0 = unlimited. Spend is derived on read.
+    pub owner_daily_cost_limit_usd: Decimal,
     pub privacy_acknowledged_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -18,7 +21,7 @@ pub struct UserRow {
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<UserRow>, sqlx::Error> {
     sqlx::query_as!(
         UserRow,
-        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at FROM users WHERE id = $1",
+        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_cost_limit_usd, privacy_acknowledged_at, created_at, updated_at FROM users WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -28,7 +31,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<UserRow>, sqlx::
 pub async fn find_by_eppn(db: &PgPool, eppn: &str) -> Result<Option<UserRow>, sqlx::Error> {
     sqlx::query_as!(
         UserRow,
-        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at FROM users WHERE eppn = $1",
+        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_cost_limit_usd, privacy_acknowledged_at, created_at, updated_at FROM users WHERE eppn = $1",
         eppn,
     )
     .fetch_optional(db)
@@ -75,19 +78,19 @@ pub async fn find_or_create_by_eppn(
     eppn: &str,
     display_name: Option<&str>,
     role: &str,
-    default_owner_daily_token_limit: i64,
+    default_owner_daily_cost_limit_usd: Decimal,
 ) -> Result<(UserRow, bool), sqlx::Error> {
     let inserted = sqlx::query_as!(
         UserRow,
-        "INSERT INTO users (id, eppn, display_name, role, owner_daily_token_limit)
+        "INSERT INTO users (id, eppn, display_name, role, owner_daily_cost_limit_usd)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (eppn) DO NOTHING
-         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at",
+         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_cost_limit_usd, privacy_acknowledged_at, created_at, updated_at",
         Uuid::new_v4(),
         eppn,
         display_name,
         role,
-        default_owner_daily_token_limit,
+        default_owner_daily_cost_limit_usd,
     )
     .fetch_optional(db)
     .await?;
@@ -108,8 +111,8 @@ pub async fn find_or_create_by_eppn(
 /// preserved; the admin's manual choice wins over rule-based promotion.
 /// `display_name` is always refreshed from the IdP via COALESCE (not gated
 /// by the role lock); the lock applies only to `role`. The
-/// `default_owner_daily_token_limit` is applied only on INSERT, never on
-/// update, so admin overrides via `update_owner_daily_token_limit` are
+/// `default_owner_daily_cost_limit_usd` is applied only on INSERT, never on
+/// update, so admin overrides via `update_owner_daily_cost_limit_usd` are
 /// sticky.
 pub async fn upsert(
     db: &PgPool,
@@ -117,22 +120,22 @@ pub async fn upsert(
     eppn: &str,
     display_name: Option<&str>,
     role: &str,
-    default_owner_daily_token_limit: i64,
+    default_owner_daily_cost_limit_usd: Decimal,
 ) -> Result<UserRow, sqlx::Error> {
     sqlx::query_as!(
         UserRow,
-        "INSERT INTO users (id, eppn, display_name, role, owner_daily_token_limit)
+        "INSERT INTO users (id, eppn, display_name, role, owner_daily_cost_limit_usd)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (eppn) DO UPDATE SET
             display_name = COALESCE($3, users.display_name),
             role = CASE WHEN users.role_manually_set THEN users.role ELSE $4 END,
             updated_at = NOW()
-         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at",
+         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_cost_limit_usd, privacy_acknowledged_at, created_at, updated_at",
         id,
         eppn,
         display_name,
         role,
-        default_owner_daily_token_limit,
+        default_owner_daily_cost_limit_usd,
     )
     .fetch_one(db)
     .await
@@ -141,7 +144,7 @@ pub async fn upsert(
 pub async fn list_all(db: &PgPool) -> Result<Vec<UserRow>, sqlx::Error> {
     sqlx::query_as!(
         UserRow,
-        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at FROM users ORDER BY eppn",
+        "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_cost_limit_usd, privacy_acknowledged_at, created_at, updated_at FROM users ORDER BY eppn",
     )
     .fetch_all(db)
     .await
@@ -199,13 +202,13 @@ pub async fn acknowledge_privacy(db: &PgPool, user_id: Uuid) -> Result<bool, sql
     Ok(result.rows_affected() > 0)
 }
 
-pub async fn update_owner_daily_token_limit(
+pub async fn update_owner_daily_cost_limit_usd(
     db: &PgPool,
     user_id: Uuid,
-    limit: i64,
+    limit: Decimal,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
-        "UPDATE users SET owner_daily_token_limit = $1, updated_at = NOW() WHERE id = $2",
+        "UPDATE users SET owner_daily_cost_limit_usd = $1, updated_at = NOW() WHERE id = $2",
         limit,
         user_id,
     )

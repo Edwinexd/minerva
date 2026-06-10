@@ -1201,7 +1201,7 @@ mod stream_integration_tests {
             history: Vec::<MessageRow>::new(),
             user_content: "Hello".to_string(),
             is_first_message: true,
-            daily_token_limit: 0,
+            daily_token_budget: 0,
             db: sqlx::postgres::PgPoolOptions::new()
                 .max_connections(1)
                 .connect_lazy("postgres://nobody:nobody@127.0.0.1:65535/none")

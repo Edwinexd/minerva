@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code\n        FROM courses c\n        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1 OR cm.role IN ('teacher', 'ta'))\n        ORDER BY c.updated_at DESC",
+  "query": "SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature,\n               c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy,\n               c.tool_use_enabled, c.embedding_provider, c.embedding_model,\n               c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.active, c.created_at,\n               c.updated_at, c.semester_label, c.auto_managed, c.course_code\n            FROM courses c\n            JOIN course_daisy_offerings o ON o.course_id = c.id\n            WHERE o.momenttillf_id = $1 AND c.active = true",
   "describe": {
     "columns": [
       {
@@ -85,8 +85,8 @@
       },
       {
         "ordinal": 16,
-        "name": "daily_token_limit",
-        "type_info": "Int8"
+        "name": "daily_cost_limit_usd",
+        "type_info": "Numeric"
       },
       {
         "ordinal": 17,
@@ -121,7 +121,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
@@ -150,5 +150,5 @@
       true
     ]
   },
-  "hash": "17f24a3ad4fb77cdf9450d0775e04851ff3dcaa4911c1e0362a20a074277ad40"
+  "hash": "0dbfa99a558df085e193ff39033a3d9ee8448bf2f1a6306c7ff5c4a828fe87df"
 }

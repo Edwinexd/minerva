@@ -1097,7 +1097,7 @@ pub(super) async fn apply_one(
     // `default_owner_cap` is read once for any users we create; existing
     // users keep whatever cap they already have (find_or_create's
     // grandfathering semantics).
-    let default_owner_cap = crate::system_defaults::owner_daily_token_limit(&state.db).await;
+    let default_owner_cap = crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await;
     let mut resolved: Vec<ResolvedParticipant> = Vec::with_capacity(input.participants.len());
 
     for participant in &input.participants {
@@ -1207,7 +1207,8 @@ pub(super) async fn apply_one(
             syllabus_url: input.syllabus_url.as_deref(),
             unit: input.unit.as_deref(),
             owner_id,
-            daily_token_limit: crate::system_defaults::course_daily_token_limit(&state.db).await,
+            daily_cost_limit_usd: crate::system_defaults::course_daily_cost_limit_usd(&state.db)
+                .await,
             model: Some(model.as_str()),
             temperature: Some(crate::system_defaults::course_temperature(&state.db).await),
             context_ratio: Some(crate::system_defaults::course_context_ratio(&state.db).await),

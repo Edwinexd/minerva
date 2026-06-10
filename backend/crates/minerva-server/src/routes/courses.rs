@@ -2,6 +2,7 @@ use axum::extract::{Extension, Path, State};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use minerva_core::models::User;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -85,7 +86,7 @@ struct UpdateCourseRequest {
     /// `reranker_models` catalog (enabled unless admin / unchanged).
     /// No re-embed: applies on the next chat turn.
     reranker_model: Option<String>,
-    daily_token_limit: Option<i64>,
+    daily_cost_limit_usd: Option<Decimal>,
     /// Admin / owner backfill: stamp or rewrite the per-semester
     /// label on an existing course. Format-validated identically to
     /// `CreateCourseRequest::semester_label`.
@@ -140,7 +141,7 @@ pub(crate) struct CourseResponse {
     /// admin-managed `reranker_models` catalog; changing it has no
     /// re-embed cost. Frontend renders a dropdown on the config page.
     reranker_model: String,
-    daily_token_limit: i64,
+    daily_cost_limit_usd: Decimal,
     active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
@@ -244,7 +245,7 @@ impl CourseResponse {
             embedding_model: row.embedding_model,
             embedding_version: row.embedding_version,
             reranker_model: row.reranker_model,
-            daily_token_limit: row.daily_token_limit,
+            daily_cost_limit_usd: row.daily_cost_limit_usd,
             active: row.active,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -356,7 +357,7 @@ async fn create_course(
         description: body.description,
         owner_id: user.id,
         semester_label,
-        daily_token_limit: crate::system_defaults::course_daily_token_limit(&state.db).await,
+        daily_cost_limit_usd: crate::system_defaults::course_daily_cost_limit_usd(&state.db).await,
         model: Some(crate::system_defaults::course_model(&state.db).await),
         temperature: Some(crate::system_defaults::course_temperature(&state.db).await),
         context_ratio: Some(crate::system_defaults::course_context_ratio(&state.db).await),
@@ -428,7 +429,7 @@ pub(crate) struct CourseUpdateFields {
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
     pub reranker_model: Option<String>,
-    pub daily_token_limit: Option<i64>,
+    pub daily_cost_limit_usd: Option<Decimal>,
     pub semester_label: Option<String>,
 }
 
@@ -685,7 +686,7 @@ pub(crate) async fn apply_course_update(
         embedding_provider: None,
         embedding_model: None,
         reranker_model: body.reranker_model,
-        daily_token_limit: body.daily_token_limit,
+        daily_cost_limit_usd: body.daily_cost_limit_usd,
         semester_label: validated_semester_label,
     };
 
@@ -722,7 +723,7 @@ async fn update_course(
         embedding_provider: body.embedding_provider,
         embedding_model: body.embedding_model,
         reranker_model: body.reranker_model,
-        daily_token_limit: body.daily_token_limit,
+        daily_cost_limit_usd: body.daily_cost_limit_usd,
         semester_label: body.semester_label,
     };
 
@@ -832,7 +833,7 @@ async fn add_member(
         &eppn,
         None,
         "student",
-        crate::system_defaults::owner_daily_token_limit(&state.db).await,
+        crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
     )
     .await?;
     let target_id = target.id;

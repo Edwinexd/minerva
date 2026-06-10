@@ -1677,10 +1677,10 @@ pub(super) async fn run_chat_message(
         return Err(AppError::PrivacyNotAcknowledged);
     }
 
-    if course.daily_token_limit > 0 {
-        let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user_id, course_id)
-            .await?;
-        if used >= course.daily_token_limit {
+    if course.daily_cost_limit_usd > rust_decimal::Decimal::ZERO {
+        let used =
+            minerva_db::queries::usage::get_user_daily_cost(&state.db, user_id, course_id).await?;
+        if used >= course.daily_cost_limit_usd {
             metrics::counter!("chat_quota_exceeded_total", "scope" => "course").increment(1);
             return Err(AppError::QuotaExceeded);
         }
@@ -1839,6 +1839,29 @@ pub(super) async fn run_chat_message(
         .map(|(url, key)| (url.to_string(), key.to_string()))
         .unwrap_or_default();
 
+    // Convert the course's daily USD cap to a token budget for the
+    // tool-use / FLARE per-response fail-safe, at the model's blended
+    // (50/50) rate. 0 (no cap) or a free model -> 0 (no token cap).
+    let daily_token_budget: i64 = if course.daily_cost_limit_usd > rust_decimal::Decimal::ZERO {
+        match minerva_db::queries::chat_models::rates_of(&state.db, &course.model).await? {
+            Some((in_rate, out_rate)) => {
+                let blended = (in_rate + out_rate) / rust_decimal::Decimal::from(2);
+                if blended > rust_decimal::Decimal::ZERO {
+                    use rust_decimal::prelude::ToPrimitive;
+                    ((course.daily_cost_limit_usd * rust_decimal::Decimal::from(1_000_000))
+                        / blended)
+                        .to_i64()
+                        .unwrap_or(i64::MAX)
+                } else {
+                    0
+                }
+            }
+            None => 0,
+        }
+    } else {
+        0
+    };
+
     let ctx = strategy::GenerationContext {
         course_name: course.name,
         custom_prompt: course.system_prompt,
@@ -1859,7 +1882,7 @@ pub(super) async fn run_chat_message(
         history,
         user_content,
         is_first_message,
-        daily_token_limit: course.daily_token_limit,
+        daily_token_budget,
         db: state.db.clone(),
         qdrant: Arc::clone(&state.qdrant),
         fastembed: Arc::clone(&state.fastembed),

@@ -455,7 +455,7 @@ async fn upsert_seed_user(
         role,
         // Unlimited owner-cap for seed users so an over-zealous test
         // session doesn't hit the per-owner ceiling mid-demo.
-        0,
+        rust_decimal::Decimal::ZERO,
     )
     .await?;
     // Force-set the role even when the row already existed (e.g. an
@@ -494,7 +494,7 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             name: config.name.to_string(),
             description: config.description.map(|s| s.to_string()),
             owner_id: config.owner_id,
-            daily_token_limit: 0, // unlimited per-student for seed
+            daily_cost_limit_usd: rust_decimal::Decimal::ZERO, // unlimited per-student for seed
             // Seed leaves the AI knobs at SQL DEFAULT; the immediate
             // `update()` below overrides each seed course's policy
             // (model, strategy, tool_use, etc.) explicitly.
@@ -540,7 +540,7 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             // Leave the re-ranker at the catalog default (multilingual);
             // None = no change from the row's SQL DEFAULT.
             reranker_model: None,
-            daily_token_limit: None,
+            daily_cost_limit_usd: None,
             semester_label: None,
         },
     )

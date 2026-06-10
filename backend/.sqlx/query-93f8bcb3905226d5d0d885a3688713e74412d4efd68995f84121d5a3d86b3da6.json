@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO courses (\n            id, name, description, owner_id, daily_token_limit,\n            model, temperature, context_ratio, max_chunks, min_score,\n            strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt,\n            semester_label, reranker_model\n        ) VALUES (\n            $1, $2, $3, $4, $5,\n            COALESCE($6, 'gpt-oss-120b'),\n            COALESCE($7::DOUBLE PRECISION, 0.3),\n            COALESCE($8::DOUBLE PRECISION, 0.7),\n            COALESCE($9::INTEGER, 10),\n            COALESCE($10::REAL, 0.0),\n            COALESCE($11, 'simple'),\n            COALESCE($12::BOOLEAN, FALSE),\n            COALESCE($13, 'local'),\n            COALESCE($14, 'sentence-transformers/all-MiniLM-L6-v2'),\n            $15,\n            $16,\n            COALESCE($17, 'jinaai/jina-reranker-v2-base-multilingual')\n        )\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code",
+  "query": "INSERT INTO courses (\n            id, name, description, owner_id, daily_cost_limit_usd,\n            model, temperature, context_ratio, max_chunks, min_score,\n            strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt,\n            semester_label, reranker_model\n        ) VALUES (\n            $1, $2, $3, $4, $5,\n            COALESCE($6, 'gpt-oss-120b'),\n            COALESCE($7::DOUBLE PRECISION, 0.3),\n            COALESCE($8::DOUBLE PRECISION, 0.7),\n            COALESCE($9::INTEGER, 10),\n            COALESCE($10::REAL, 0.0),\n            COALESCE($11, 'simple'),\n            COALESCE($12::BOOLEAN, FALSE),\n            COALESCE($13, 'local'),\n            COALESCE($14, 'sentence-transformers/all-MiniLM-L6-v2'),\n            $15,\n            $16,\n            COALESCE($17, 'jinaai/jina-reranker-v2-base-multilingual')\n        )\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code",
   "describe": {
     "columns": [
       {
@@ -85,8 +85,8 @@
       },
       {
         "ordinal": 16,
-        "name": "daily_token_limit",
-        "type_info": "Int8"
+        "name": "daily_cost_limit_usd",
+        "type_info": "Numeric"
       },
       {
         "ordinal": 17,
@@ -125,7 +125,7 @@
         "Text",
         "Text",
         "Uuid",
-        "Int8",
+        "Numeric",
         "Text",
         "Float8",
         "Float8",
@@ -166,5 +166,5 @@
       true
     ]
   },
-  "hash": "009bc692ccc6fa394a00f1101c97a44337cc12d1cf1c81db387f13e4204c4632"
+  "hash": "93f8bcb3905226d5d0d885a3688713e74412d4efd68995f84121d5a3d86b3da6"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO users (id, eppn, display_name, role, owner_daily_token_limit)\n         VALUES ($1, $2, $3, $4, $5)\n         ON CONFLICT (eppn) DO UPDATE SET\n            display_name = COALESCE($3, users.display_name),\n            role = CASE WHEN users.role_manually_set THEN users.role ELSE $4 END,\n            updated_at = NOW()\n         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_token_limit, privacy_acknowledged_at, created_at, updated_at",
+  "query": "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_cost_limit_usd, privacy_acknowledged_at, created_at, updated_at FROM users WHERE eppn = $1",
   "describe": {
     "columns": [
       {
@@ -35,8 +35,8 @@
       },
       {
         "ordinal": 6,
-        "name": "owner_daily_token_limit",
-        "type_info": "Int8"
+        "name": "owner_daily_cost_limit_usd",
+        "type_info": "Numeric"
       },
       {
         "ordinal": 7,
@@ -56,11 +56,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Int8"
+        "Text"
       ]
     },
     "nullable": [
@@ -76,5 +72,5 @@
       false
     ]
   },
-  "hash": "4b981bab6348e09340101115b182465b9a6c06990f1880ee7f527b1c6b52a858"
+  "hash": "dbd9a809f9f15091e81cec9739b7d0902160a4c2655cd499bdc8178c7b0947c7"
 }

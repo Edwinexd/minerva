@@ -26,6 +26,7 @@
 //! the seed path and the admin PUT route call into it so an env-var
 //! typo can't ship a malformed row past startup.
 
+use rust_decimal::Decimal;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use sqlx::PgPool;
@@ -45,10 +46,10 @@ pub mod keys {
     pub const COURSE_TOOL_USE_ENABLED: &str = "course.tool_use_enabled";
     pub const COURSE_EMBEDDING_PROVIDER: &str = "course.embedding_provider";
     pub const COURSE_SYSTEM_PROMPT: &str = "course.system_prompt";
-    pub const COURSE_DAILY_TOKEN_LIMIT: &str = "course.daily_token_limit";
+    pub const COURSE_DAILY_COST_LIMIT_USD: &str = "course.daily_cost_limit_usd";
 
     // ----- Platform-wide knobs (read live) -----
-    pub const OWNER_DAILY_TOKEN_LIMIT: &str = "platform.owner_daily_token_limit";
+    pub const OWNER_DAILY_COST_LIMIT_USD: &str = "platform.owner_daily_cost_limit_usd";
     pub const MAX_UPLOAD_BYTES: &str = "platform.max_upload_bytes";
     pub const MAX_MBZ_UPLOAD_BYTES: &str = "platform.max_mbz_upload_bytes";
     pub const CANVAS_AUTO_SYNC_INTERVAL_HOURS: &str = "platform.canvas_auto_sync_interval_hours";
@@ -213,30 +214,31 @@ pub fn registry() -> Vec<KnobDef> {
             fallback: Value::Null,
         },
         KnobDef {
-            key: keys::COURSE_DAILY_TOKEN_LIMIT,
+            key: keys::COURSE_DAILY_COST_LIMIT_USD,
             category: CourseAi,
-            label_key: "defaults.course.dailyTokenLimit.label",
-            description_key: "defaults.course.dailyTokenLimit.description",
-            // 0 means unlimited; max is a sanity ceiling not a policy.
-            kind: KnobKind::Int {
-                min: 0,
-                max: 1_000_000_000,
+            label_key: "defaults.course.dailyCostLimitUsd.label",
+            description_key: "defaults.course.dailyCostLimitUsd.description",
+            // USD/student/day. 0 means unlimited; max is a sanity ceiling.
+            kind: KnobKind::Float {
+                min: 0.0,
+                max: 1000.0,
             },
-            env_var: Some("MINERVA_DEFAULT_COURSE_DAILY_TOKEN_LIMIT"),
-            fallback: json!(100_000),
+            env_var: Some("MINERVA_DEFAULT_COURSE_DAILY_USD"),
+            fallback: json!(0.50),
         },
         // ---------- Platform-wide knobs ----------
         KnobDef {
-            key: keys::OWNER_DAILY_TOKEN_LIMIT,
+            key: keys::OWNER_DAILY_COST_LIMIT_USD,
             category: Platform,
-            label_key: "defaults.platform.ownerDailyTokenLimit.label",
-            description_key: "defaults.platform.ownerDailyTokenLimit.description",
-            kind: KnobKind::Int {
-                min: 0,
-                max: 10_000_000_000,
+            label_key: "defaults.platform.ownerDailyCostLimitUsd.label",
+            description_key: "defaults.platform.ownerDailyCostLimitUsd.description",
+            // USD/owner/day across all owned courses. 0 = unlimited.
+            kind: KnobKind::Float {
+                min: 0.0,
+                max: 100000.0,
             },
-            env_var: Some("MINERVA_DEFAULT_OWNER_DAILY_TOKEN_LIMIT"),
-            fallback: json!(500_000),
+            env_var: Some("MINERVA_DEFAULT_OWNER_DAILY_USD"),
+            fallback: json!(2.50),
         },
         KnobDef {
             key: keys::MAX_UPLOAD_BYTES,
@@ -473,12 +475,16 @@ pub async fn course_system_prompt(db: &PgPool) -> Option<String> {
     fetch(db, keys::COURSE_SYSTEM_PROMPT).await
 }
 
-pub async fn course_daily_token_limit(db: &PgPool) -> i64 {
-    fetch(db, keys::COURSE_DAILY_TOKEN_LIMIT).await
+pub async fn course_daily_cost_limit_usd(db: &PgPool) -> Decimal {
+    rust_decimal::Decimal::from_f64_retain(
+        fetch::<f64>(db, keys::COURSE_DAILY_COST_LIMIT_USD).await,
+    )
+    .unwrap_or_default()
 }
 
-pub async fn owner_daily_token_limit(db: &PgPool) -> i64 {
-    fetch(db, keys::OWNER_DAILY_TOKEN_LIMIT).await
+pub async fn owner_daily_cost_limit_usd(db: &PgPool) -> Decimal {
+    rust_decimal::Decimal::from_f64_retain(fetch::<f64>(db, keys::OWNER_DAILY_COST_LIMIT_USD).await)
+        .unwrap_or_default()
 }
 
 pub async fn max_upload_bytes(db: &PgPool) -> i64 {

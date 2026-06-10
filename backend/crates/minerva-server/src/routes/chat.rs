@@ -1815,15 +1815,25 @@ pub(super) async fn run_chat_message(
         }
     }
 
-    // Resolve the chat provider for this course's model. Today every
-    // course model is the Cerebras default; step 2 derives the provider
-    // id from `chat_models.provider`. The bespoke FLARE / research loops
-    // read the raw OpenAI-compatible `(url, key)`, sourced from the same
-    // provider so they stay in lockstep with the registry.
-    let provider = state
-        .llm
-        .get(crate::llm::provider::PROVIDER_CEREBRAS)
-        .expect("cerebras provider must be configured (CEREBRAS_API_KEY)");
+    // Resolve the chat provider for this course's model from the
+    // `chat_models.provider` mapping (falling back to Cerebras for a
+    // model not in the catalog, e.g. a legacy row). The simple / writeup
+    // strategies are fully provider-agnostic (they call
+    // `provider.stream`). The bespoke FLARE / research loops are
+    // OpenAI-shaped and read the raw `(url, key)` from
+    // `openai_endpoint()`; for a non-OpenAI-compatible provider that is
+    // empty, but the config-save capability gate keeps FLARE off such
+    // models, and the catalog ships no tool-use Anthropic model, so those
+    // loops only ever run against OpenAI-compatible providers.
+    let provider_id = minerva_db::queries::chat_models::provider_of(&state.db, &course.model)
+        .await?
+        .unwrap_or_else(|| crate::llm::provider::PROVIDER_CEREBRAS.to_string());
+    let provider = state.llm.get(&provider_id).ok_or_else(|| {
+        AppError::Internal(format!(
+            "chat provider '{}' for model '{}' is not configured",
+            provider_id, course.model
+        ))
+    })?;
     let (cerebras_base_url, cerebras_api_key) = provider
         .openai_endpoint()
         .map(|(url, key)| (url.to_string(), key.to_string()))

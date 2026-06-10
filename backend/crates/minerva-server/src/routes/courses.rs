@@ -472,13 +472,20 @@ pub(crate) async fn apply_course_update(
         .as_deref()
         .unwrap_or(existing.strategy.as_str());
     let effective_tool_use = body.tool_use_enabled.unwrap_or(existing.tool_use_enabled);
-    if let Err(mismatch) = crate::model_capabilities::validate_config(
-        &state.model_capabilities,
-        effective_model,
-        effective_strategy,
-        effective_tool_use,
-    )
-    .await
+    // Capabilities are read from the chat_models catalog
+    // (provider-agnostic), not a Cerebras probe: an Anthropic model
+    // declares supports_logprobs=false and is therefore rejected for the
+    // FLARE strategy. A model not in the catalog default-denies both
+    // capabilities, same conservative posture as an unprobeable model.
+    let caps = match minerva_db::queries::chat_models::find(&state.db, effective_model).await? {
+        Some(row) => crate::model_capabilities::Capabilities {
+            supports_tools: row.supports_tool_use,
+            supports_logprobs: row.supports_logprobs,
+        },
+        None => crate::model_capabilities::Capabilities::none(),
+    };
+    if let Err(mismatch) =
+        crate::model_capabilities::validate_caps(caps, effective_strategy, effective_tool_use)
     {
         return Err(AppError::bad_request_with(
             mismatch.translation_key(),

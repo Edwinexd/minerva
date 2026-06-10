@@ -16,8 +16,8 @@ use reqwest::Response;
 pub mod provider;
 
 pub use provider::{
-    ChatDelta, ChatProvider, ChatRequest, ChatUsage, LlmRegistry, OpenAiCompatibleProvider,
-    ProviderKind,
+    AnthropicProvider, ChatDelta, ChatProvider, ChatRequest, ChatUsage, LlmRegistry,
+    OpenAiCompatibleProvider, ProviderKind,
 };
 
 /// Production Cerebras chat-completions endpoint.

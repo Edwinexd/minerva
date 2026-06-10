@@ -186,6 +186,30 @@ impl AppState {
             }
         }
 
+        // Sync the chat-model catalog. New entries land disabled with
+        // price NULL (unusable until an admin enables + prices them);
+        // existing rows keep their admin toggles + prices across
+        // restarts. The seeded `gpt-oss-120b` row (enabled + default +
+        // utility-default + priced) comes from the migration, not here.
+        // See `20260610000001_chat_models.sql`.
+        for seed in minerva_catalog::VALID_CHAT_MODELS {
+            let inserted = minerva_db::queries::chat_models::seed_if_missing(
+                &db,
+                seed.model,
+                seed.provider,
+                seed.display_name,
+                seed.supports_logprobs,
+                seed.supports_tool_use,
+            )
+            .await?;
+            if inserted {
+                tracing::info!(
+                    "chat_models: seeded new catalog entry {} (enabled=false)",
+                    seed.model
+                );
+            }
+        }
+
         // Seed `system_defaults` for every knob in the registry that
         // isn't already in the DB. Existing rows are left alone (so
         // an admin's edit in the UI persists across restarts);

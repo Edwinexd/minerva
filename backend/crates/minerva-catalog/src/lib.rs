@@ -89,6 +89,61 @@ pub const STARTUP_BENCHMARK_MODELS: &[(&str, u64)] = &[
 /// OpenAI embedding model used when a course's provider is `"openai"`.
 pub const OPENAI_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 
+/// One chat / utility LLM model the runtime knows how to talk to, keyed
+/// by the provider's own model id. Mirrors the embedding/reranker
+/// catalog pattern: this slice is "code exists for these"; the admin
+/// *policy* layer (enable / default / per-model price) lives in the
+/// `chat_models` DB table.
+///
+/// Prices are deliberately NOT in code: they are admin-entered (and
+/// scrape-assisted) per deployment, since the same model id costs
+/// different amounts across providers and over time. New rows seed with
+/// price NULL (unusable until priced); the one exception is the seeded
+/// `gpt-oss-120b` row, whose Cerebras rates are pinned in the
+/// `chat_models` migration.
+#[derive(Debug, Clone, Copy)]
+pub struct ChatModelSeed {
+    pub model: &'static str,
+    /// Registry provider id (`cerebras`, `openai`, `anthropic`, `groq`).
+    pub provider: &'static str,
+    pub display_name: &'static str,
+    pub supports_logprobs: bool,
+    pub supports_tool_use: bool,
+}
+
+/// Compile-time catalog of chat-model ids the runtime can route to.
+/// Seeded into `chat_models` at startup (`seed_if_missing`); new entries
+/// land `enabled = FALSE` with price NULL so they never auto-appear or
+/// bill until an admin enables and prices them.
+pub const VALID_CHAT_MODELS: &[ChatModelSeed] = &[
+    ChatModelSeed {
+        model: "gpt-oss-120b",
+        provider: "cerebras",
+        display_name: "GPT-OSS 120B (Cerebras)",
+        supports_logprobs: true,
+        supports_tool_use: true,
+    },
+    ChatModelSeed {
+        model: "gpt-4o-mini",
+        provider: "openai",
+        display_name: "GPT-4o mini",
+        supports_logprobs: true,
+        supports_tool_use: true,
+    },
+    ChatModelSeed {
+        model: "gpt-4o",
+        provider: "openai",
+        display_name: "GPT-4o",
+        supports_logprobs: true,
+        supports_tool_use: true,
+    },
+    // Anthropic (and any other provider) models are added per-deployment.
+    // The Anthropic provider + capability gating are wired in the
+    // registry; a deployment seeds its chosen model ids here. Models with
+    // no per-token logprobs set `supports_logprobs: false`, which gates
+    // them out of the FLARE strategy at config-save time.
+];
+
 /// Default cross-encoder. Multilingual (Swedish + English), the lightest
 /// multilingual model in fastembed's reranker catalog. Mirrored by the
 /// `courses.reranker_model` column DEFAULT and the `reranker_models`

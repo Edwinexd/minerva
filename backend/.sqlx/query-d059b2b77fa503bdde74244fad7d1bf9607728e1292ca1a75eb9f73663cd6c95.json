@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT model, provider, display_name, enabled, is_default,\n                  is_utility_default, input_usd_per_mtok, output_usd_per_mtok,\n                  supports_logprobs, supports_tool_use, price_source_url,\n                  price_updated_at, created_at, updated_at\n           FROM chat_models\n           WHERE model = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_default",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_utility_default",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "input_usd_per_mtok",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "output_usd_per_mtok",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "supports_logprobs",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "supports_tool_use",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "price_source_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "price_updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d059b2b77fa503bdde74244fad7d1bf9607728e1292ca1a75eb9f73663cd6c95"
+}

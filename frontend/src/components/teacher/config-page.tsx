@@ -2,11 +2,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import {
   courseQuery,
-  modelsQuery,
+  chatModelsQuery,
   embeddingModelsQuery,
   rerankerModelsQuery,
   courseKgTokenUsageQuery,
 } from "@/lib/queries"
+import { chatModelDisplayName } from "@/lib/chat-models"
+import { formatUsd } from "@/lib/currency"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
@@ -297,7 +299,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   const { t } = useTranslation("teacher")
   const { t: tCommon } = useTranslation("common")
   const formatError = useApiErrorMessage()
-  const { data: modelsData } = useQuery(modelsQuery)
+  const { data: chatModelsData } = useQuery(chatModelsQuery)
   // Backend filters this list to admin-enabled catalog rows. If an
   // admin disabled the model this course is currently on, it won't be
   // here; we patch the current course's model back into the option
@@ -501,9 +503,29 @@ function CourseConfigForm({ course }: { course: Course }) {
                 <SelectValue placeholder={t("config.modelPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
-                {modelsData?.models.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name}
+                {(chatModelsData?.models.some((m) => m.model === model)
+                  ? chatModelsData.models
+                  : [
+                      // Patch in the course's current model even if an
+                      // admin has since disabled it, so the picker shows
+                      // the real value instead of blanking.
+                      {
+                        model,
+                        display_name: model,
+                        provider: "",
+                        input_usd_per_mtok: null,
+                        output_usd_per_mtok: null,
+                      },
+                      ...(chatModelsData?.models ?? []),
+                    ]
+                ).map((m) => (
+                  <SelectItem key={m.model} value={m.model}>
+                    {chatModelDisplayName(m)}
+                    {m.provider ? ` (${m.provider})` : ""}
+                    {m.input_usd_per_mtok !== null &&
+                    m.output_usd_per_mtok !== null
+                      ? ` - ${formatUsd(m.input_usd_per_mtok)} / ${formatUsd(m.output_usd_per_mtok)} per Mtok`
+                      : ""}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -1117,6 +1117,47 @@ pub async fn finalize(
             .increment(rc.max(0) as u64);
     }
 
+    // Fleet-wide $ spend rate, computed on emit from the model's current
+    // rate (NOT stored in the ledger; the ledger keeps tokens + model and
+    // derives $ on read). Encoded as micro-USD so it fits the `metrics`
+    // u64 counter; dashboards divide by 1e6. Labels (provider, model,
+    // kind) are bounded by the catalog, so cardinality is safe. An
+    // unknown price bumps `chat_unpriced_calls_total` instead, which in
+    // steady state never fires (unpriced models can't be enabled).
+    match minerva_db::queries::chat_models::rates_of(&ctx.db, &ctx.model).await {
+        Ok(Some((in_rate, out_rate))) => {
+            let to_micro = |d: rust_decimal::Decimal| -> u64 {
+                use rust_decimal::prelude::ToPrimitive;
+                (d * rust_decimal::Decimal::from(1_000_000))
+                    .round()
+                    .to_u64()
+                    .unwrap_or(0)
+            };
+            let provider = ctx.provider.id().to_string();
+            let prompt_cost =
+                crate::llm::cost_usd(prompt_tokens.max(0) as i64, 0, in_rate, out_rate);
+            let completion_cost =
+                crate::llm::cost_usd(0, completion_tokens.max(0) as i64, in_rate, out_rate);
+            metrics::counter!("chat_cost_microusd_total",
+                "provider" => provider.clone(), "model" => ctx.model.clone(), "kind" => "prompt")
+            .increment(to_micro(prompt_cost));
+            metrics::counter!("chat_cost_microusd_total",
+                "provider" => provider, "model" => ctx.model.clone(), "kind" => "completion")
+            .increment(to_micro(completion_cost));
+        }
+        Ok(None) => {
+            metrics::counter!("chat_unpriced_calls_total", "model" => ctx.model.clone())
+                .increment(1);
+        }
+        Err(e) => {
+            tracing::warn!(
+                "chat_cost metric: rate lookup failed for {}: {}",
+                ctx.model,
+                e
+            );
+        }
+    }
+
     // On a guarded turn the `done` event omits `chunks_used` ; the
     // seed RAG is keyed off the student's pasted assignment text, so
     // the retrieved chunks may contain the assignment_brief itself

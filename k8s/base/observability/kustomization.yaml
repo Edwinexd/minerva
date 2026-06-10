@@ -36,6 +36,7 @@ configMapGenerator:
       - dashboards/services-app.json
       - dashboards/infra.json
       - dashboards/models.json
+      - dashboards/cost.json
 
 # Fixed name (no hash suffix) so grafana.yaml's volume reference stays
 # valid and edits update the ConfigMap in place for the file provider to

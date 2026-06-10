@@ -47,7 +47,8 @@ export interface Course {
    * without a rotation dialog.
    */
   reranker_model: string
-  daily_token_limit: number
+  /** Per-student-per-course daily AI spending cap in USD. 0 = unlimited. */
+  daily_cost_limit_usd: number
   active: boolean
   created_at: string
   updated_at: string
@@ -148,7 +149,8 @@ export interface AdminUser {
   role: string
   suspended: boolean
   role_manually_set: boolean
-  owner_daily_token_limit: number
+  /** Per-owner daily AI spending cap in USD across owned courses. 0 = unlimited. */
+  owner_daily_cost_limit_usd: number
   created_at: string
   updated_at: string
 }

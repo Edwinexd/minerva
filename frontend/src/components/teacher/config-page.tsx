@@ -323,7 +323,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [embeddingProvider, setEmbeddingProvider] = useState(course.embedding_provider)
   const [embeddingModel, setEmbeddingModel] = useState(course.embedding_model)
   const [rerankerModel, setRerankerModel] = useState(course.reranker_model)
-  const [dailyTokenLimit, setDailyTokenLimit] = useState(course.daily_token_limit)
+  const [dailyCostLimitUsd, setDailyCostLimitUsd] = useState(course.daily_cost_limit_usd)
   // Backfill / rename of the per-semester grouping label. Empty
   // string means "no change" on submit (we only POST a label when
   // the field is non-empty, since UpdateCourseRequest treats the
@@ -365,7 +365,7 @@ function CourseConfigForm({ course }: { course: Course }) {
       embedding_provider: embeddingProvider,
       embedding_model: embeddingModel,
       reranker_model: rerankerModel,
-      daily_token_limit: dailyTokenLimit,
+      daily_cost_limit_usd: dailyCostLimitUsd,
       // Only include the key when the editable value actually changed
       // (and the field is editable in the first place). UpdateCourseRequest
       // treats a missing key as "no change"; sending the existing value
@@ -712,16 +712,19 @@ function CourseConfigForm({ course }: { course: Course }) {
           <Separator />
 
           <div className="space-y-2">
-            <Label htmlFor="dailyTokenLimit">{t("config.dailyTokenLimitLabel")}</Label>
+            <Label htmlFor="dailyCostLimitUsd">{t("config.dailyCostLimitUsdLabel")}</Label>
             <Input
-              id="dailyTokenLimit"
+              id="dailyCostLimitUsd"
               type="number"
-              value={dailyTokenLimit}
-              onChange={(e) => setDailyTokenLimit(parseInt(e.target.value) || 0)}
+              step="0.01"
+              value={dailyCostLimitUsd}
+              onChange={(e) =>
+                setDailyCostLimitUsd(parseFloat(e.target.value) || 0)
+              }
               min={0}
             />
             <p className="text-xs text-muted-foreground">
-              {t("config.dailyTokenLimitHelp")}
+              {t("config.dailyCostLimitUsdHelp")}
             </p>
           </div>
 

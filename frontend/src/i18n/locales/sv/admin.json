@@ -306,7 +306,7 @@
       "active": "aktiv",
       "archived": "arkiverad"
     },
-    "tokenLimitUnlimited": "obegränsat",
+    "costLimitUnlimited": "obegränsat",
     "settingsLink": "Inställningar",
     "empty": "Inga kurser matchar filtret.",
     "featuresButton": "Funktioner ({{enabled}}/{{total}})",
@@ -405,8 +405,8 @@
         "contextRatio": "Kontextandel ({{percent}}%)",
         "maxChunks": "Max antal segment",
         "minScore": "Minsta likhet ({{value}})",
-        "dailyTokenLimit": "Daglig tokengräns / student",
-        "dailyTokenLimitHelp": "0 betyder obegränsat.",
+        "dailyCostLimitUsd": "Daglig kostnadsgräns / student (USD)",
+        "dailyCostLimitUsdHelp": "0 betyder obegränsat.",
         "semesterLabel": "Terminsetikett",
         "semesterLabelHelp": "Stämpla en termin på varje markerad kurs, t.ex. VT2026. Daisy-hanterade kurser skrivs över vid nästa synk.",
         "reranker": "Omrankningsmodell",
@@ -679,15 +679,15 @@
         "label": "Standard systemprompt",
         "description": "Läggs till före varje chatt i en ny kurs. Lämna tom för inbyggd standard."
       },
-      "dailyTokenLimit": {
-        "label": "Standard dagligt tokentak per student",
+      "dailyCostLimitUsd": {
+        "label": "Standard daglig kostnadsgräns per student (USD)",
         "description": "Tillämpas på nya kurser. 0 = obegränsat."
       }
     },
     "platform": {
-      "ownerDailyTokenLimit": {
-        "label": "Standard dagligt tokentak per ägare",
-        "description": "Tillämpas vid första inloggning. Summerar tokens över alla ägda kurser. 0 = obegränsat."
+      "ownerDailyCostLimitUsd": {
+        "label": "Standard daglig kostnadsgräns per ägare (USD)",
+        "description": "Tillämpas vid första inloggning. Summerar kostnad över alla ägda kurser. 0 = obegränsat."
       },
       "maxUploadBytes": {
         "label": "Max uppladdningsstorlek (ett dokument, bytes)",

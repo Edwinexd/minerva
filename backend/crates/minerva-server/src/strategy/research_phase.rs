@@ -1183,6 +1183,15 @@ mod stream_integration_tests {
             course_id: uuid::Uuid::nil(),
             conversation_id: uuid::Uuid::nil(),
             user_id: uuid::Uuid::nil(),
+            // Research streaming reads `cerebras_base_url` directly; the
+            // provider is only used by the simple/writeup path, so a dummy
+            // suffices here.
+            provider: std::sync::Arc::new(crate::llm::OpenAiCompatibleProvider::new(
+                "cerebras",
+                "http://127.0.0.1:65535/v1",
+                "test-key",
+                reqwest::Client::new(),
+            )),
             cerebras_api_key: "test-key".to_string(),
             cerebras_base_url: base_url,
             openai_api_key: String::new(),

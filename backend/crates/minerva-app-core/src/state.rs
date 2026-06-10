@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::llm::LlmRegistry;
 use crate::lti::LtiKeyPair;
 use crate::model_capabilities::CapabilityCache;
 use crate::relink_scheduler::RelinkScheduler;
@@ -120,6 +121,11 @@ pub struct AppState {
     /// short-circuit before issuing requests the model can't
     /// satisfy. See `crate::model_capabilities`.
     pub model_capabilities: CapabilityCache,
+    /// Provider-agnostic LLM registry, built once from env/secret. Holds
+    /// an `Arc<dyn ChatProvider>` per configured provider id
+    /// (`cerebras`, `openai`, ...); a chat model resolves its provider
+    /// via `chat_models.provider` and this registry. See `crate::llm`.
+    pub llm: Arc<LlmRegistry>,
     /// Live progress of the admin classification backfill task.
     /// `None` when no backfill has run since the last server restart;
     /// `Some(_)` while one is running and for the cycle after it
@@ -199,6 +205,11 @@ impl AppState {
             config.cerebras_api_key.clone(),
             http_client.clone(),
         );
+
+        // Provider-agnostic LLM registry. Built from env/secret keys;
+        // only providers with a present key are registered.
+        let llm = Arc::new(LlmRegistry::from_config(http_client.clone(), config));
+
         Ok(Self {
             db: db.clone(),
             qdrant: Arc::new(qdrant),
@@ -209,6 +220,7 @@ impl AppState {
             reranker,
             rules,
             model_capabilities,
+            llm,
             relink_scheduler: Arc::new(RelinkScheduler::new(db)),
             backfill_tracker: Arc::new(BackfillTracker::default()),
         })

@@ -164,12 +164,12 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let messages = common::build_chat_messages(&system, &ctx.history);
 
     let mut full_text = String::new();
-    let (prompt_tokens, completion_tokens) = match common::stream_cerebras_to_client(
-        &http_client,
-        &ctx.cerebras_api_key,
+    let (prompt_tokens, completion_tokens) = match common::stream_chat_to_client(
+        &ctx.provider,
         &ctx.model,
         ctx.temperature,
         &messages,
+        false,
         &tx,
         &mut full_text,
     )

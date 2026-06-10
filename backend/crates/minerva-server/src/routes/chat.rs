@@ -1815,6 +1815,20 @@ pub(super) async fn run_chat_message(
         }
     }
 
+    // Resolve the chat provider for this course's model. Today every
+    // course model is the Cerebras default; step 2 derives the provider
+    // id from `chat_models.provider`. The bespoke FLARE / research loops
+    // read the raw OpenAI-compatible `(url, key)`, sourced from the same
+    // provider so they stay in lockstep with the registry.
+    let provider = state
+        .llm
+        .get(crate::llm::provider::PROVIDER_CEREBRAS)
+        .expect("cerebras provider must be configured (CEREBRAS_API_KEY)");
+    let (cerebras_base_url, cerebras_api_key) = provider
+        .openai_endpoint()
+        .map(|(url, key)| (url.to_string(), key.to_string()))
+        .unwrap_or_default();
+
     let ctx = strategy::GenerationContext {
         course_name: course.name,
         custom_prompt: course.system_prompt,
@@ -1825,8 +1839,9 @@ pub(super) async fn run_chat_message(
         course_id,
         conversation_id: conv_id,
         user_id: conv.user_id,
-        cerebras_api_key: state.config.cerebras_api_key.clone(),
-        cerebras_base_url: strategy::common::CEREBRAS_CHAT_COMPLETIONS_URL.to_string(),
+        provider,
+        cerebras_api_key,
+        cerebras_base_url,
         openai_api_key: state.config.openai_api_key.clone(),
         embedding_provider: course.embedding_provider,
         embedding_model: course.embedding_model,

@@ -1,5 +1,4 @@
 use axum::response::sse::Event;
-use futures::StreamExt;
 use minerva_core::rpc::{EmbedderClient, RerankerClient};
 use qdrant_client::qdrant::{ScoredPoint, SearchPointsBuilder};
 use std::collections::HashSet;
@@ -29,11 +28,6 @@ pub use crate::llm::{
 /// topic mentions score 0.5-0.65. 0.65 is the threshold where we
 /// stop trusting the signal as evidence of an actual assignment paste.
 pub const ASSIGNMENT_SIGNAL_MIN_SCORE: f32 = 0.65;
-
-/// Idle timeout between consecutive SSE frames from Cerebras. Protects every
-/// streaming strategy against a silently-stalled TCP connection that never
-/// delivers [DONE]. Applied per `stream.next().await`, not a total deadline.
-const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Stable identity hash over `(document_id, text)`. Used by the agentic
 /// research loop (and historically FLARE) to dedupe chunks pulled from
@@ -959,109 +953,64 @@ pub async fn keyword_lookup(
     Ok(filter_orphaned(chunks, orphaned_doc_ids))
 }
 
-/// Stream a Cerebras completion to the client via tx, appending tokens to full_text.
-/// Returns (prompt_tokens, completion_tokens).
-pub async fn stream_cerebras_to_client(
-    client: &reqwest::Client,
-    api_key: &str,
+/// Stream a chat completion to the client via `tx`, appending tokens to
+/// `full_text`. Returns `(prompt_tokens, completion_tokens)`.
+///
+/// Provider-agnostic: resolves the wire protocol from `provider`
+/// (`ChatProvider::stream` normalizes any provider's deltas to
+/// `ChatDelta`). The provider pushes deltas onto an internal channel
+/// which this fn drains and forwards as SSE `token` events; on the
+/// client disconnecting we stop and surface an error. The SSE parsing,
+/// UTF-8 frame-carry, and idle timeout live in the provider impl.
+pub async fn stream_chat_to_client(
+    provider: &Arc<dyn crate::llm::ChatProvider>,
     model: &str,
     temperature: f64,
     messages: &[serde_json::Value],
+    logprobs: bool,
     tx: &mpsc::Sender<Result<Event, AppError>>,
     full_text: &mut String,
 ) -> Result<(i32, i32), String> {
-    let body = serde_json::json!({
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "stream": true,
-        "stream_options": { "include_usage": true },
-    });
+    use crate::llm::{ChatDelta, ChatRequest};
 
-    let response = cerebras_request_with_retry(client, api_key, &body).await?;
+    let (delta_tx, mut delta_rx) = mpsc::channel::<ChatDelta>(64);
+    let req = ChatRequest {
+        model,
+        messages,
+        temperature,
+        max_tokens: None,
+        stream: true,
+        logprobs,
+    };
 
-    let mut stream = response.bytes_stream();
-    // Raw TCP frames may split multi-byte UTF-8 codepoints across chunks;
-    // accumulate bytes and promote only validated prefixes to the line buffer.
-    let mut byte_carry: Vec<u8> = Vec::new();
-    let mut buffer = String::new();
-    let mut prompt_tokens = 0i32;
-    let mut completion_tokens = 0i32;
-
-    'outer: loop {
-        let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
-            Ok(n) => n,
-            Err(_) => {
-                return Err(format!(
-                    "Cerebras stream idle timeout ({}s)",
-                    STREAM_IDLE_TIMEOUT.as_secs()
-                ));
-            }
-        };
-        let chunk = match next {
-            Some(Ok(c)) => c,
-            Some(Err(e)) => {
-                tracing::error!("cerebras stream error: {}", e);
-                return Err(format!("Stream interrupted: {}", e));
-            }
-            None => break, // stream closed without [DONE]
-        };
-        byte_carry.extend_from_slice(&chunk);
-        let valid_up_to = match std::str::from_utf8(&byte_carry) {
-            Ok(_) => byte_carry.len(),
-            Err(e) => e.valid_up_to(),
-        };
-        if valid_up_to > 0 {
-            let valid_str = std::str::from_utf8(&byte_carry[..valid_up_to])
-                .expect("prefix was UTF-8 validated");
-            buffer.push_str(valid_str);
-            byte_carry.drain(..valid_up_to);
-        }
-
-        while let Some(line_end) = buffer.find('\n') {
-            let line = buffer[..line_end].trim().to_string();
-            buffer.drain(..=line_end);
-
-            if line == "data: [DONE]" {
-                break 'outer;
-            }
-
-            if let Some(data) = line.strip_prefix("data: ") {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                    if let Some(err) = parsed.get("error") {
-                        let msg = err["message"]
-                            .as_str()
-                            .unwrap_or("unknown error")
-                            .to_string();
-                        return Err(msg);
-                    }
-
-                    if let Some(delta) = parsed["choices"][0]["delta"]["content"].as_str() {
-                        full_text.push_str(delta);
-                        if tx
-                            .send(Ok(Event::default().data(
-                                serde_json::json!({"type": "token", "token": delta}).to_string(),
-                            )))
-                            .await
-                            .is_err()
-                        {
-                            return Err("client disconnected".to_string());
-                        }
-                    }
-
-                    if let Some(usage) = parsed.get("usage") {
-                        if !usage.is_null() {
-                            prompt_tokens = usage["prompt_tokens"].as_i64().unwrap_or(0) as i32;
-                            completion_tokens =
-                                usage["completion_tokens"].as_i64().unwrap_or(0) as i32;
-                        }
-                    }
+    // Drive the provider stream and the SSE forwarder concurrently: the
+    // provider sends deltas as they arrive (backpressured by the bounded
+    // channel), the forwarder relays each to the client. When the
+    // provider finishes it drops `delta_tx`, closing the channel and
+    // ending the forwarder.
+    let stream_fut = provider.stream(req, delta_tx);
+    let forward = async {
+        while let Some(delta) = delta_rx.recv().await {
+            if let Some(text) = delta.text {
+                full_text.push_str(&text);
+                if tx
+                    .send(Ok(Event::default().data(
+                        serde_json::json!({"type": "token", "token": text}).to_string(),
+                    )))
+                    .await
+                    .is_err()
+                {
+                    return Err("client disconnected".to_string());
                 }
             }
         }
-    }
+        Ok::<(), String>(())
+    };
 
-    Ok((prompt_tokens, completion_tokens))
+    let (stream_res, forward_res) = tokio::join!(stream_fut, forward);
+    forward_res?;
+    let usage = stream_res?;
+    Ok((usage.prompt_tokens as i32, usage.completion_tokens as i32))
 }
 
 /// Finalize: save message, set title, record usage, send done event.

@@ -13,6 +13,13 @@ use std::collections::HashMap;
 use qdrant_client::qdrant::value::Kind;
 use reqwest::Response;
 
+pub mod provider;
+
+pub use provider::{
+    ChatDelta, ChatProvider, ChatRequest, ChatUsage, LlmRegistry, OpenAiCompatibleProvider,
+    ProviderKind,
+};
+
 /// Production Cerebras chat-completions endpoint.
 pub const CEREBRAS_CHAT_COMPLETIONS_URL: &str = "https://api.cerebras.ai/v1/chat/completions";
 

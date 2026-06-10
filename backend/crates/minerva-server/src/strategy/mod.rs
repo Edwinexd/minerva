@@ -27,10 +27,18 @@ pub struct GenerationContext {
     pub course_id: Uuid,
     pub conversation_id: Uuid,
     pub user_id: Uuid,
+    /// Resolved chat provider for `model`, drawn from the `AppState`
+    /// `LlmRegistry` at the route handler (provider derived from
+    /// `chat_models.provider`). Streaming strategies call
+    /// `common::stream_chat_to_client(&ctx.provider, ...)`.
+    pub provider: std::sync::Arc<dyn crate::llm::ChatProvider>,
+    /// OpenAI-compatible `(api_key, base_url)` for the bespoke FLARE /
+    /// research-phase streaming loops, which parse tool-calls + logprobs
+    /// inline against the raw transport. Both are sourced from
+    /// `provider.openai_endpoint()` at the route handler so they stay in
+    /// lockstep with the registry. Integration tests override the URL to
+    /// point at a wiremock server.
     pub cerebras_api_key: String,
-    /// Base URL for the Cerebras chat-completions endpoint. Production
-    /// routes default this to `common::CEREBRAS_CHAT_COMPLETIONS_URL`;
-    /// integration tests override it to point at a wiremock server.
     pub cerebras_base_url: String,
     pub openai_api_key: String,
     pub embedding_provider: String,

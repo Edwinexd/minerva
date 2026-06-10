@@ -111,6 +111,21 @@ pub struct ChatModelSeed {
     pub supports_tool_use: bool,
 }
 
+/// Public pricing page for a provider, used by the best-effort
+/// "scrape price" admin helper. `None` for a provider with no known
+/// public page (the admin then enters rates manually). These pages are
+/// often JS-rendered, so a server-side fetch is best-effort and the
+/// admin always confirms the extracted numbers.
+pub fn provider_pricing_url(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("https://openai.com/api/pricing"),
+        "anthropic" => Some("https://www.anthropic.com/pricing"),
+        "cerebras" => Some("https://www.cerebras.ai/pricing"),
+        "groq" => Some("https://groq.com/pricing"),
+        _ => None,
+    }
+}
+
 /// Compile-time catalog of chat-model ids the runtime can route to.
 /// Seeded into `chat_models` at startup (`seed_if_missing`); new entries
 /// land `enabled = FALSE` with price NULL so they never auto-appear or

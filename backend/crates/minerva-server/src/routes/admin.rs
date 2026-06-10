@@ -80,6 +80,11 @@ pub fn router() -> Router<AppState> {
             "/chat-models/utility-default",
             put(set_utility_default_chat_model),
         )
+        .route("/chat-models/price", put(set_chat_model_price))
+        .route(
+            "/chat-models/{model}/scrape-price",
+            post(scrape_chat_model_price),
+        )
         .route(
             "/system-defaults",
             get(list_system_defaults).put(update_system_default),
@@ -1986,6 +1991,90 @@ fn map_set_default(
         )),
         Err(SetDefaultError::Db(e)) => Err(AppError::from(e)),
     }
+}
+
+#[derive(Deserialize)]
+struct SetChatModelPriceRequest {
+    model: String,
+    /// USD per 1M tokens. `0` is valid (free / on-prem). Negative is
+    /// rejected. Both are required (no way to set an unknown price back
+    /// to NULL through this route once a real number is entered).
+    input_usd_per_mtok: rust_decimal::Decimal,
+    output_usd_per_mtok: rust_decimal::Decimal,
+}
+
+/// Set a chat model's USD rates and stamp `price_updated_at`. This is
+/// what makes an unpriced model usable (enabling separately requires
+/// both rates known). `0` is accepted (genuinely free); negative is not.
+async fn set_chat_model_price(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<SetChatModelPriceRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+    if body.input_usd_per_mtok < rust_decimal::Decimal::ZERO
+        || body.output_usd_per_mtok < rust_decimal::Decimal::ZERO
+    {
+        return Err(AppError::bad_request("chat_model.price_negative"));
+    }
+    let row = minerva_db::queries::chat_models::set_price(
+        &state.db,
+        &body.model,
+        body.input_usd_per_mtok,
+        body.output_usd_per_mtok,
+        None,
+    )
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    tracing::info!(
+        "admin {} set chat model {} price in={} out={}",
+        user.id,
+        row.model,
+        body.input_usd_per_mtok,
+        body.output_usd_per_mtok,
+    );
+
+    Ok(Json(serde_json::json!({
+        "model": row.model,
+        "input_usd_per_mtok": rate_to_f64(row.input_usd_per_mtok),
+        "output_usd_per_mtok": rate_to_f64(row.output_usd_per_mtok),
+        "price_updated_at": row.price_updated_at,
+    })))
+}
+
+/// Best-effort "scrape price" helper: fetch the model's provider public
+/// pricing page and ask the utility model to extract the rates. Returns
+/// a suggestion only; nothing is persisted (the admin reviews + saves
+/// via the price PUT above).
+async fn scrape_chat_model_price(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(model): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+    let row = minerva_db::queries::chat_models::find(&state.db, &model)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let Some(pricing_url) = minerva_catalog::provider_pricing_url(&row.provider) else {
+        return Err(AppError::bad_request_with(
+            "chat_model.no_pricing_source",
+            [("provider", row.provider.clone())],
+        ));
+    };
+    let suggestion = crate::classification::pricing_scrape::scrape_price(
+        &state.llm,
+        &state.db,
+        &state.http_client,
+        &model,
+        pricing_url,
+    )
+    .await
+    .map_err(AppError::Internal)?;
+
+    serde_json::to_value(suggestion)
+        .map(Json)
+        .map_err(|e| AppError::Internal(e.to_string()))
 }
 
 // ── Re-ranker model catalog (admin) ────────────────────────────────

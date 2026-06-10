@@ -1082,6 +1082,10 @@ pub async fn finalize(
         &ctx.db,
         ctx.user_id,
         ctx.course_id,
+        // Record the billing model + provider so the daily cost is
+        // derived on read from the model's current rate.
+        &ctx.model,
+        ctx.provider.id(),
         prompt_tokens as i64,
         completion_tokens as i64,
         0,

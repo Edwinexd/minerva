@@ -13,8 +13,10 @@ use std::collections::HashMap;
 use qdrant_client::qdrant::value::Kind;
 use reqwest::Response;
 
+pub mod cost;
 pub mod provider;
 
+pub use cost::cost_usd;
 pub use provider::{
     AnthropicProvider, ChatDelta, ChatProvider, ChatRequest, ChatUsage, LlmRegistry,
     OpenAiCompatibleProvider, ProviderKind,
@@ -179,6 +181,9 @@ pub async fn record_cerebras_usage(
         );
         return;
     };
+    // The row records model + tokens; USD cost is derived on read by
+    // joining the model's current rate (see usage cost queries), so a
+    // later re-price never rewrites historical spend.
     if let Err(e) = minerva_db::queries::course_token_usage::record(
         db,
         course_id,

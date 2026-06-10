@@ -6,6 +6,13 @@ pub struct UsageDailyRow {
     pub user_id: Uuid,
     pub course_id: Uuid,
     pub date: chrono::NaiveDate,
+    /// The chat model these tokens were billed against. The daily
+    /// aggregate is per-model so on-read cost (tokens x the model's
+    /// current rate) stays correct even when a course switches model.
+    pub model: String,
+    /// Provider id for `model` (denormalized for per-provider reporting;
+    /// the rate still comes from `chat_models` keyed by `model`).
+    pub provider: String,
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
     pub embedding_tokens: i64,
@@ -27,6 +34,8 @@ pub async fn record_usage(
     db: &PgPool,
     user_id: Uuid,
     course_id: Uuid,
+    model: &str,
+    provider: &str,
     prompt_tokens: i64,
     completion_tokens: i64,
     embedding_tokens: i64,
@@ -34,18 +43,20 @@ pub async fn record_usage(
     research_completion_tokens: i64,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
-        r#"INSERT INTO usage_daily (user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, research_prompt_tokens, research_completion_tokens, request_count)
-        VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, 1)
-        ON CONFLICT (user_id, course_id, date)
+        r#"INSERT INTO usage_daily (user_id, course_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, research_prompt_tokens, research_completion_tokens, request_count)
+        VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, 1)
+        ON CONFLICT (user_id, course_id, date, model)
         DO UPDATE SET
-            prompt_tokens = usage_daily.prompt_tokens + $3,
-            completion_tokens = usage_daily.completion_tokens + $4,
-            embedding_tokens = usage_daily.embedding_tokens + $5,
-            research_prompt_tokens = usage_daily.research_prompt_tokens + $6,
-            research_completion_tokens = usage_daily.research_completion_tokens + $7,
+            prompt_tokens = usage_daily.prompt_tokens + $5,
+            completion_tokens = usage_daily.completion_tokens + $6,
+            embedding_tokens = usage_daily.embedding_tokens + $7,
+            research_prompt_tokens = usage_daily.research_prompt_tokens + $8,
+            research_completion_tokens = usage_daily.research_completion_tokens + $9,
             request_count = usage_daily.request_count + 1"#,
         user_id,
         course_id,
+        model,
+        provider,
         prompt_tokens,
         completion_tokens,
         embedding_tokens,
@@ -63,7 +74,7 @@ pub async fn get_course_usage(
 ) -> Result<Vec<UsageDailyRow>, sqlx::Error> {
     sqlx::query_as!(
         UsageDailyRow,
-        "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
+        "SELECT user_id, course_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
         course_id,
     )
     .fetch_all(db)
@@ -73,7 +84,7 @@ pub async fn get_course_usage(
 pub async fn get_all_usage(db: &PgPool) -> Result<Vec<UsageDailyRow>, sqlx::Error> {
     sqlx::query_as!(
         UsageDailyRow,
-        "SELECT user_id, course_id, date, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily ORDER BY date DESC",
+        "SELECT user_id, course_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily ORDER BY date DESC",
     )
     .fetch_all(db)
     .await
@@ -84,14 +95,18 @@ pub async fn get_user_daily_tokens(
     user_id: Uuid,
     course_id: Uuid,
 ) -> Result<i64, sqlx::Error> {
+    // SUM across the per-model rows for the day (a course can switch
+    // model mid-day, splitting the aggregate into multiple rows).
     let row = sqlx::query_scalar!(
-        r#"SELECT COALESCE(prompt_tokens + completion_tokens, 0) AS "total!" FROM usage_daily WHERE user_id = $1 AND course_id = $2 AND date = CURRENT_DATE"#,
+        r#"SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint AS "total!"
+           FROM usage_daily
+           WHERE user_id = $1 AND course_id = $2 AND date = CURRENT_DATE"#,
         user_id,
         course_id,
     )
-    .fetch_optional(db)
+    .fetch_one(db)
     .await?;
-    Ok(row.unwrap_or(0))
+    Ok(row)
 }
 
 /// Deletes today's `usage_daily` rows for a user across every course,

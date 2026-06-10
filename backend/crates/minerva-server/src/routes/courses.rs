@@ -409,6 +409,13 @@ async fn get_course(
     )))
 }
 
+/// Sanity ceiling for the per-course, per-student daily USD spend cap.
+/// Matches the `course.daily_cost_limit_usd` system-default knob's max
+/// (`system_defaults::registry`) so a per-course override can't exceed
+/// the range its own default is drawn from. A footgun guard far above any
+/// realistic per-student daily spend; 0 still means unlimited.
+const MAX_COURSE_DAILY_COST_LIMIT_USD: i64 = 1000;
+
 /// The mutable subset of a course, with every field optional so a
 /// partial update only touches what's present. Shared between the
 /// owner/admin `PUT /courses/{id}` route and the admin bulk-edit
@@ -455,6 +462,23 @@ pub(crate) async fn apply_course_update(
     if let Some(score) = body.min_score {
         if !(0.0..=1.0).contains(&score) || score.is_nan() {
             return Err(AppError::bad_request("course.min_score_out_of_range"));
+        }
+    }
+
+    // The per-course daily spend cap is a budget in USD. A negative value
+    // would silently disable the cap (enforcement treats only `> 0` as a
+    // live limit), so reject it, and guard a fat-finger ceiling. Mirrors
+    // the owner-cap route's ergonomics; 0 stays "unlimited".
+    if let Some(limit) = body.daily_cost_limit_usd {
+        if limit < Decimal::ZERO {
+            return Err(AppError::bad_request("course.daily_cost_limit_negative"));
+        }
+        let max = Decimal::from(MAX_COURSE_DAILY_COST_LIMIT_USD);
+        if limit > max {
+            return Err(AppError::bad_request_with(
+                "course.daily_cost_limit_too_large",
+                [("max", max.to_string())],
+            ));
         }
     }
 

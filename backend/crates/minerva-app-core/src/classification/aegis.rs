@@ -496,20 +496,12 @@ pub async fn analyze_prompt(
         AEGIS_OUTPUT_FOOTER,
     );
 
-    // Pick the model. Cold-start drafts (no live-iteration history
-    // on the current entry) used to fall on a cheaper llama path
-    // and escalate to gpt-oss-120b once the student had seen at
-    // least one verdict. Cerebras deprecated the cheap model, so
-    // both paths now resolve to gpt-oss-120b ; the constants stay
-    // split (and the gating below stays) so a future cheaper option
-    // can land as a one-line change to `AEGIS_MODEL` without
-    // resurrecting the if/else. Reading the current draft entry's
-    // prior_suggestions is the cleanest signal that we're past the
-    // first round of THIS draft (cross-message context alone doesn't
-    // trigger the swap; the user explicitly wanted "after first
-    // round" to mean per-draft).
-    // Both cold-start and follow-up now run on the admin-selected utility
-    // model; `prompt_analyses.model_used` records which one actually ran.
+    // Pick the model. Aegis used to switch between a cheap cold-start
+    // model and a stronger follow-up one based on `has_prior_context`;
+    // that escalation is gone. Cold-start and follow-up now both run on
+    // the single admin-selected utility model (the per-draft signal above
+    // still gates only the already-addressed prompt check, not the model).
+    // `prompt_analyses.model_used` records which one actually ran.
     let model_used = util.model.clone();
 
     let mut body = serde_json::json!({

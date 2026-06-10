@@ -99,6 +99,8 @@
   },
   "course": {
     "min_score_out_of_range": "min_score must be between 0.0 and 1.0.",
+    "daily_cost_limit_negative": "Daily spend cap must be 0 or greater.",
+    "daily_cost_limit_too_large": "Daily spend cap must be {{max}} USD or less.",
     "embedding_provider_invalid": "Invalid embedding provider: {{provider}}",
     "local_embedding_model_invalid": "Invalid local embedding model: {{model}}",
     "local_embedding_model_disabled": "The embedding model \"{{model}}\" has been disabled by an administrator. Pick a different model or ask the admin to re-enable it.",

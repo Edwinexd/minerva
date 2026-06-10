@@ -1832,11 +1832,19 @@ pub(super) async fn run_chat_message(
         .map(|(url, key)| (url.to_string(), key.to_string()))
         .unwrap_or_default();
 
+    // Resolve the model's billing rates once for this chat turn. Used here
+    // to derive the per-response token fail-safe and threaded into the
+    // strategy context so `common::finalize` reuses it for the cost metric
+    // rather than doing a second `rates_of` round-trip. `None` = unknown
+    // price (NULL rate) or model absent from the catalog.
+    let billing_rates =
+        minerva_db::queries::chat_models::rates_of(&state.db, &course.model).await?;
+
     // Convert the course's daily USD cap to a token budget for the
     // tool-use / FLARE per-response fail-safe, at the model's blended
     // (50/50) rate. 0 (no cap) or a free model -> 0 (no token cap).
     let daily_token_budget: i64 = if course.daily_cost_limit_usd > rust_decimal::Decimal::ZERO {
-        match minerva_db::queries::chat_models::rates_of(&state.db, &course.model).await? {
+        match billing_rates {
             Some((in_rate, out_rate)) => {
                 let blended = (in_rate + out_rate) / rust_decimal::Decimal::from(2);
                 if blended > rust_decimal::Decimal::ZERO {
@@ -1849,7 +1857,21 @@ pub(super) async fn run_chat_message(
                     0
                 }
             }
-            None => 0,
+            None => {
+                // The course has a USD cap but its selected model is
+                // unpriced (NULL rate or absent from the catalog), so spend
+                // bills at $0 and the per-response token fail-safe is
+                // disabled. The enable-gate + price CHECK make this
+                // unreachable in steady state; it only happens when an admin
+                // has force-migrated the course onto a disabled, un-priced
+                // model. Surface it rather than running silently uncapped.
+                tracing::warn!(
+                    "course {} has a daily USD cap but model '{}' is unpriced; spend bills at $0 and the per-response token cap is disabled",
+                    course_id,
+                    course.model,
+                );
+                0
+            }
         }
     } else {
         0
@@ -1877,6 +1899,7 @@ pub(super) async fn run_chat_message(
         user_content,
         is_first_message,
         daily_token_budget,
+        billing_rates,
         db: state.db.clone(),
         qdrant: Arc::clone(&state.qdrant),
         fastembed: Arc::clone(&state.fastembed),

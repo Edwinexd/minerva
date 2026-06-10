@@ -1123,11 +1123,13 @@ pub async fn finalize(
     // rate (NOT stored in the ledger; the ledger keeps tokens + model and
     // derives $ on read). Encoded as micro-USD so it fits the `metrics`
     // u64 counter; dashboards divide by 1e6. Labels (provider, model,
-    // kind) are bounded by the catalog, so cardinality is safe. An
+    // kind) are bounded by the catalog, so cardinality is safe. The rates
+    // were resolved once at the chat-route handler and threaded in via
+    // `ctx.billing_rates` (no second `rates_of` round-trip here). An
     // unknown price bumps `chat_unpriced_calls_total` instead, which in
     // steady state never fires (unpriced models can't be enabled).
-    match minerva_db::queries::chat_models::rates_of(&ctx.db, &ctx.model).await {
-        Ok(Some((in_rate, out_rate))) => {
+    match ctx.billing_rates {
+        Some((in_rate, out_rate)) => {
             let to_micro = |d: rust_decimal::Decimal| -> u64 {
                 use rust_decimal::prelude::ToPrimitive;
                 (d * rust_decimal::Decimal::from(1_000_000))
@@ -1147,16 +1149,9 @@ pub async fn finalize(
                 "provider" => provider, "model" => ctx.model.clone(), "kind" => "completion")
             .increment(to_micro(completion_cost));
         }
-        Ok(None) => {
+        None => {
             metrics::counter!("chat_unpriced_calls_total", "model" => ctx.model.clone())
                 .increment(1);
-        }
-        Err(e) => {
-            tracing::warn!(
-                "chat_cost metric: rate lookup failed for {}: {}",
-                ctx.model,
-                e
-            );
         }
     }
 

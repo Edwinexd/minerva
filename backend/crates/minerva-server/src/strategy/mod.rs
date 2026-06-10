@@ -63,6 +63,14 @@ pub struct GenerationContext {
     /// unlimited (no cap, or a free model). One answer cannot burn more
     /// than 2x this; see `tool_use::per_response_token_cap`.
     pub daily_token_budget: i64,
+    /// The model's `(input, output)` USD-per-Mtok rates, resolved once at
+    /// the route handler via `chat_models::rates_of`. Reused here so a chat
+    /// turn does a single rate lookup: the route uses it to derive
+    /// `daily_token_budget`, and `common::finalize` reuses it for the
+    /// fleet-wide `chat_cost_microusd_total` metric instead of querying
+    /// again. `None` = unknown price (NULL rate) or model absent from the
+    /// catalog; `finalize` then bumps `chat_unpriced_calls_total`.
+    pub billing_rates: Option<(rust_decimal::Decimal, rust_decimal::Decimal)>,
     pub db: sqlx::PgPool,
     pub qdrant: std::sync::Arc<qdrant_client::Qdrant>,
     pub fastembed: std::sync::Arc<dyn minerva_core::rpc::EmbedderClient>,

@@ -290,7 +290,16 @@ fn parse_models_envelope(payload: &Value) -> Vec<ProviderModel> {
 /// Filter out obvious non-chat models (embeddings, audio, image,
 /// moderation) from a provider listing so the chat catalog stays sane.
 /// Conservative substring match; the admin still curates by enabling.
-fn is_probably_chat_model(id: &str) -> bool {
+///
+/// `provider_id` scopes one exclusion: `instruct` is dropped only for the
+/// OpenAI provider, whose legacy `gpt-3.5-turbo-instruct` is a
+/// text-completion model rather than chat. Every other OpenAI-compatible
+/// provider (Cerebras, Groq, Together, Gemini, self-hosted) names plenty
+/// of genuine chat models `*-instruct` (e.g. `qwen-3-235b-a22b-instruct`,
+/// `Llama-3.x-*-instruct`); excluding that substring there would filter
+/// them at seed time and, since the catalog only grows from provider
+/// listings, leave them permanently unreachable.
+fn is_probably_chat_model(id: &str, provider_id: &str) -> bool {
     let lower = id.to_ascii_lowercase();
     const EXCLUDE: &[&str] = &[
         "embed",
@@ -304,11 +313,19 @@ fn is_probably_chat_model(id: &str) -> bool {
         "audio",
         "image",
         "guard",
-        "instruct",
         "davinci",
         "babbage",
     ];
-    !EXCLUDE.iter().any(|frag| lower.contains(frag))
+    if EXCLUDE.iter().any(|frag| lower.contains(frag)) {
+        return false;
+    }
+    // OpenAI-only: the legacy `*-instruct` ids are completion models, not
+    // chat. Other providers serve real `*-instruct` chat models, so the
+    // exclusion would wrongly hide them.
+    if provider_id == PROVIDER_OPENAI && lower.contains("instruct") {
+        return false;
+    }
+    true
 }
 
 /// Fetch each configured provider's model list and `seed_if_missing`
@@ -327,7 +344,7 @@ pub async fn sync_chat_models(registry: &LlmRegistry, db: &sqlx::PgPool) -> usiz
             Ok(models) => {
                 let logprobs = provider.supports_logprobs();
                 for m in models {
-                    if !is_probably_chat_model(&m.id) {
+                    if !is_probably_chat_model(&m.id, &id) {
                         continue;
                     }
                     let display = m.display_name.unwrap_or_else(|| m.id.clone());
@@ -1023,6 +1040,34 @@ fn base_url_override(id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instruct_excluded_only_for_openai() {
+        // Universal non-chat substrings are dropped regardless of provider.
+        assert!(!is_probably_chat_model(
+            "text-embedding-3-large",
+            PROVIDER_OPENAI
+        ));
+        assert!(!is_probably_chat_model("whisper-large-v3", PROVIDER_GROQ));
+
+        // OpenAI: the legacy `*-instruct` completion model is filtered out,
+        // while its real chat models survive.
+        assert!(!is_probably_chat_model(
+            "gpt-3.5-turbo-instruct",
+            PROVIDER_OPENAI
+        ));
+        assert!(is_probably_chat_model("gpt-4o", PROVIDER_OPENAI));
+
+        // Every other provider keeps its `*-instruct` chat models.
+        assert!(is_probably_chat_model(
+            "qwen-3-235b-a22b-instruct-2507",
+            PROVIDER_CEREBRAS
+        ));
+        assert!(is_probably_chat_model(
+            "meta-llama/Llama-3.3-70B-Instruct",
+            PROVIDER_GROQ
+        ));
+    }
 
     #[test]
     fn openai_provider_appends_chat_completions_path() {

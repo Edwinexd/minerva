@@ -1,4 +1,5 @@
-//! Cerebras gpt-oss-120b-backed document classifier.
+//! Provider-agnostic LLM-backed document classifier. Calls whichever
+//! utility model the admin selected, through the `ChatProvider` layer.
 
 use async_trait::async_trait;
 use minerva_pipeline::classifier::{ClassifiedKind, Classifier};
@@ -29,18 +30,17 @@ use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
 const MAX_EXCERPT_CHARS: usize = 10_000;
 const HEAD_FRACTION: f64 = 0.85;
 
-pub struct CerebrasClassifier {
+pub struct LlmClassifier {
     http: reqwest::Client,
     /// Admin-selected utility model (resolved at construction): the model
-    /// id with its OpenAI-compatible endpoint and key. The struct name is
-    /// retained for continuity; it is no longer Cerebras-specific.
+    /// id plus a handle to its provider, whatever that provider is.
     util: crate::llm::UtilityModel,
     /// DB handle so each call can record its token spend to
     /// `course_token_usage`. Cloned cheaply per ingest call.
     db: PgPool,
 }
 
-impl CerebrasClassifier {
+impl LlmClassifier {
     pub fn new(http: reqwest::Client, util: crate::llm::UtilityModel, db: PgPool) -> Self {
         Self { http, util, db }
     }
@@ -121,7 +121,7 @@ impl CerebrasClassifier {
 }
 
 #[async_trait]
-impl Classifier for CerebrasClassifier {
+impl Classifier for LlmClassifier {
     async fn classify(
         &self,
         course_id: Uuid,

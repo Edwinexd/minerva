@@ -19,7 +19,7 @@ use tokio::sync::Semaphore;
 use async_trait::async_trait;
 use minerva_pipeline::classifier::{ClassifiedKind, Classifier};
 
-use crate::classification::CerebrasClassifier;
+use crate::classification::LlmClassifier;
 use crate::feature_flags;
 use crate::relink_scheduler;
 use crate::state::AppState;
@@ -161,7 +161,7 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
         // We hold both a real classifier and a no-op so we can pick
         // per-doc based on the KG feature flag without re-allocating
         // anything in the hot loop.
-        let kg_classifier: Arc<dyn Classifier> = Arc::new(CerebrasClassifier::new(
+        let kg_classifier: Arc<dyn Classifier> = Arc::new(LlmClassifier::new(
             reqwest::Client::new(),
             state.utility_model().await,
             state.db.clone(),

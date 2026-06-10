@@ -901,7 +901,7 @@ pub(crate) async fn run_classify_one(
     let text = minerva_pipeline::pipeline::extract_document_text(path)
         .map_err(|e| AppError::Internal(format!("text extraction failed: {}", e)))?;
 
-    let classifier = crate::classification::CerebrasClassifier::new(
+    let classifier = crate::classification::LlmClassifier::new(
         reqwest::Client::new(),
         state.utility_model().await,
         state.db.clone(),

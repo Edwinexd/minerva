@@ -1827,7 +1827,7 @@ pub(super) async fn run_chat_message(
             provider_id, course.model
         ))
     })?;
-    let (cerebras_base_url, cerebras_api_key) = provider
+    let (chat_base_url, chat_api_key) = provider
         .openai_endpoint()
         .map(|(url, key)| (url.to_string(), key.to_string()))
         .unwrap_or_default();
@@ -1866,8 +1866,8 @@ pub(super) async fn run_chat_message(
         conversation_id: conv_id,
         user_id: conv.user_id,
         provider,
-        cerebras_api_key,
-        cerebras_base_url,
+        chat_api_key,
+        chat_base_url,
         utility: state.utility_model().await,
         openai_api_key: state.config.openai_api_key.clone(),
         embedding_provider: course.embedding_provider,

@@ -219,11 +219,18 @@ impl AppState {
         // unpriced (an admin enables + prices them); existing rows keep
         // their admin toggles + prices. The migration-seeded
         // `gpt-oss-120b` row (enabled + priced + default) is preserved.
-        // Best-effort: an unreachable provider is logged and skipped, so
-        // boot never blocks on a provider outage.
-        let seeded = crate::llm::provider::sync_chat_models(&llm, &db).await;
-        if seeded > 0 {
-            tracing::info!("chat_models: seeded {seeded} model(s) from providers");
+        // Spawned in the background so boot / readiness never blocks on
+        // third-party API reachability (matters on the single OOM-prone
+        // node); an admin can also re-sync via POST /admin/chat-models/refresh.
+        {
+            let llm = llm.clone();
+            let db = db.clone();
+            tokio::spawn(async move {
+                let seeded = crate::llm::provider::sync_chat_models(&llm, &db).await;
+                if seeded > 0 {
+                    tracing::info!("chat_models: seeded {seeded} model(s) from providers");
+                }
+            });
         }
 
         Ok(Self {

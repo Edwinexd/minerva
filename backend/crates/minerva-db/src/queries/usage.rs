@@ -155,13 +155,16 @@ pub async fn get_user_daily_cost(
     user_id: Uuid,
     course_id: Uuid,
 ) -> Result<Decimal, sqlx::Error> {
+    // LEFT JOIN + COALESCE so a usage row whose model is no longer in the
+    // catalog stays in the sum (priced at $0) rather than silently
+    // dropping the whole row and under-counting the cap.
     let cost = sqlx::query_scalar!(
         r#"SELECT COALESCE(SUM(
-               (u.prompt_tokens * cm.input_usd_per_mtok
-                + u.completion_tokens * cm.output_usd_per_mtok) / 1000000
+               (u.prompt_tokens * COALESCE(cm.input_usd_per_mtok, 0)
+                + u.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000
            ), 0)::numeric AS "cost!"
            FROM usage_daily u
-           JOIN chat_models cm ON cm.model = u.model
+           LEFT JOIN chat_models cm ON cm.model = u.model
            WHERE u.user_id = $1 AND u.course_id = $2 AND u.date = CURRENT_DATE"#,
         user_id,
         course_id,
@@ -180,22 +183,22 @@ pub async fn get_owner_daily_cost(db: &PgPool, owner_id: Uuid) -> Result<Decimal
         r#"
         WITH chat AS (
             SELECT COALESCE(SUM(
-                (u.prompt_tokens * cm.input_usd_per_mtok
-                 + u.completion_tokens * cm.output_usd_per_mtok) / 1000000
+                (u.prompt_tokens * COALESCE(cm.input_usd_per_mtok, 0)
+                 + u.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000
             ), 0) AS c
             FROM usage_daily u
             JOIN courses co ON co.id = u.course_id
-            JOIN chat_models cm ON cm.model = u.model
+            LEFT JOIN chat_models cm ON cm.model = u.model
             WHERE co.owner_id = $1 AND u.date = CURRENT_DATE
         ),
         pipeline AS (
             SELECT COALESCE(SUM(
-                (ctu.prompt_tokens * cm.input_usd_per_mtok
-                 + ctu.completion_tokens * cm.output_usd_per_mtok) / 1000000
+                (ctu.prompt_tokens * COALESCE(cm.input_usd_per_mtok, 0)
+                 + ctu.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000
             ), 0) AS c
             FROM course_token_usage ctu
             JOIN courses co ON co.id = ctu.course_id
-            JOIN chat_models cm ON cm.model = ctu.model
+            LEFT JOIN chat_models cm ON cm.model = ctu.model
             WHERE co.owner_id = $1 AND ctu.created_at >= CURRENT_DATE
         )
         SELECT (chat.c + pipeline.c)::numeric AS "cost!"

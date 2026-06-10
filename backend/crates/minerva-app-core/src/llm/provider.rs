@@ -163,6 +163,9 @@ fn is_probably_chat_model(id: &str) -> bool {
         "audio",
         "image",
         "guard",
+        "instruct",
+        "davinci",
+        "babbage",
     ];
     !EXCLUDE.iter().any(|frag| lower.contains(frag))
 }
@@ -775,7 +778,7 @@ impl LlmRegistry {
             (
                 PROVIDER_GROQ,
                 "https://api.groq.com/openai/v1",
-                std::env::var("GROQ_API_KEY").unwrap_or_default(),
+                config.groq_api_key.clone(),
             ),
         ];
 
@@ -796,9 +799,8 @@ impl LlmRegistry {
             tracing::info!("llm registry: provider '{id}' configured");
         }
 
-        // Anthropic (Messages API). Key from env, like the optional
-        // OpenAI-compatible providers; base URL overridable for proxies.
-        let anthropic_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
+        // Anthropic (Messages API). Base URL overridable for proxies.
+        let anthropic_key = config.anthropic_api_key.clone();
         if !anthropic_key.trim().is_empty() {
             let base = base_url_override(PROVIDER_ANTHROPIC)
                 .unwrap_or_else(|| "https://api.anthropic.com".to_string());

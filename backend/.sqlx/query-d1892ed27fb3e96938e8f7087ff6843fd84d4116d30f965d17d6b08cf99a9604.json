@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH chat AS (\n            SELECT COALESCE(SUM(\n                (u.prompt_tokens * COALESCE(cm.input_usd_per_mtok, 0)\n                 + u.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000\n            ), 0) AS c\n            FROM usage_daily u\n            JOIN courses co ON co.id = u.course_id\n            LEFT JOIN chat_models cm ON cm.model = u.model\n            WHERE co.owner_id = $1 AND u.date = CURRENT_DATE\n        ),\n        pipeline AS (\n            SELECT COALESCE(SUM(\n                (ctu.prompt_tokens * COALESCE(cm.input_usd_per_mtok, 0)\n                 + ctu.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000\n            ), 0) AS c\n            FROM course_token_usage ctu\n            JOIN courses co ON co.id = ctu.course_id\n            LEFT JOIN chat_models cm ON cm.model = ctu.model\n            WHERE co.owner_id = $1 AND ctu.created_at >= CURRENT_DATE\n        )\n        SELECT (chat.c + pipeline.c)::numeric AS \"cost!\"\n        FROM chat, pipeline\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cost!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d1892ed27fb3e96938e8f7087ff6843fd84d4116d30f965d17d6b08cf99a9604"
+}

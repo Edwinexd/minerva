@@ -24,7 +24,6 @@ pub mod aegis;
 pub mod document;
 pub mod extraction_guard;
 pub mod linker;
-pub mod pricing_scrape;
 pub mod prompts;
 pub mod types;
 

@@ -517,10 +517,7 @@
       "outputPriceLabel": "Utdatapris per miljon tokens för {{model}}",
       "unpriced": "ej prissatt",
       "providerUnavailable": "ingen leverantörsnyckel",
-      "savePrice": "Spara",
-      "scrape": "Hämta",
-      "scraping": "Hämtar...",
-      "scrapeDone": "Förslag från {{url}} - granska och spara."
+      "savePrice": "Spara"
     },
     "unavailableTitle": "Systemmätvärden ej tillgängliga",
     "storage": {

@@ -22,21 +22,10 @@ import { Input } from "@/components/ui/input"
 const ADMIN_KEY = ["admin", "chat-models"] as const
 const PICKER_KEY = ["chat-models"] as const
 
-/// Price suggestion returned by the scrape endpoint. Never persisted by
-/// the server; the admin reviews and saves via the price PUT.
-interface PriceSuggestion {
-  input_usd_per_mtok: number | null
-  output_usd_per_mtok: number | null
-  confidence: number | null
-  note: string | null
-  source_url: string
-  page_fetched: boolean
-}
-
 /// Admin catalog of chat / utility models: enable, set the course-chat
-/// default + the utility default, edit per-model USD prices, and a
-/// best-effort "scrape price" helper. Enabling is gated on a known price
-/// (both rates entered; 0 is allowed) and a configured provider key.
+/// default + the utility default, and edit per-model USD prices. Enabling
+/// is gated on a known price (both rates entered; 0 is allowed) and a
+/// configured provider key.
 export function ChatModelsCard() {
   const { t } = useTranslation("admin")
   const queryClient = useQueryClient()
@@ -130,7 +119,6 @@ function ChatModelRow({ model }: { model: AdminChatModel }) {
   const [outputDraft, setOutputDraft] = useState(
     model.output_usd_per_mtok === null ? "" : String(model.output_usd_per_mtok),
   )
-  const [scrapeNote, setScrapeNote] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
   const invalidate = () => {
@@ -164,26 +152,7 @@ function ChatModelRow({ model }: { model: AdminChatModel }) {
         input_usd_per_mtok: rates.input,
         output_usd_per_mtok: rates.output,
       }),
-    onSuccess: () => {
-      setScrapeNote(null)
-      invalidate()
-    },
-    onError,
-  })
-  const scrapeMut = useMutation({
-    mutationFn: () =>
-      api.post<PriceSuggestion>(
-        `/admin/chat-models/${encodeURIComponent(model.model)}/scrape-price`,
-        {},
-      ),
-    onSuccess: (s) => {
-      if (s.input_usd_per_mtok !== null) setInputDraft(String(s.input_usd_per_mtok))
-      if (s.output_usd_per_mtok !== null)
-        setOutputDraft(String(s.output_usd_per_mtok))
-      setScrapeNote(
-        s.note ?? t("system.chatModels.scrapeDone", { url: s.source_url }),
-      )
-    },
+    onSuccess: invalidate,
     onError,
   })
 
@@ -224,9 +193,6 @@ function ChatModelRow({ model }: { model: AdminChatModel }) {
             </Badge>
           )}
         </div>
-        {scrapeNote && (
-          <p className="mt-1 text-xs text-muted-foreground">{scrapeNote}</p>
-        )}
         {actionError && (
           <p className="mt-1 text-xs text-destructive">{actionError}</p>
         )}
@@ -299,20 +265,6 @@ function ChatModelRow({ model }: { model: AdminChatModel }) {
               {t("system.chatModels.savePrice")}
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 text-xs"
-            disabled={scrapeMut.isPending}
-            onClick={() => {
-              setActionError(null)
-              scrapeMut.mutate()
-            }}
-          >
-            {scrapeMut.isPending
-              ? t("system.chatModels.scraping")
-              : t("system.chatModels.scrape")}
-          </Button>
         </div>
       </td>
       <td className="py-2 pr-3 text-muted-foreground">{model.courses_using}</td>

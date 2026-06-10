@@ -83,10 +83,6 @@ pub fn router() -> Router<AppState> {
         .route("/chat-models/price", put(set_chat_model_price))
         .route("/chat-models/refresh", post(refresh_chat_models))
         .route(
-            "/chat-models/{model}/scrape-price",
-            post(scrape_chat_model_price),
-        )
-        .route(
             "/system-defaults",
             get(list_system_defaults).put(update_system_default),
         )
@@ -2042,40 +2038,6 @@ async fn set_chat_model_price(
         "output_usd_per_mtok": rate_to_f64(row.output_usd_per_mtok),
         "price_updated_at": row.price_updated_at,
     })))
-}
-
-/// Best-effort "scrape price" helper: fetch the model's provider public
-/// pricing page and ask the utility model to extract the rates. Returns
-/// a suggestion only; nothing is persisted (the admin reviews + saves
-/// via the price PUT above).
-async fn scrape_chat_model_price(
-    State(state): State<AppState>,
-    Extension(user): Extension<User>,
-    Path(model): Path<String>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    require_admin(&user)?;
-    let row = minerva_db::queries::chat_models::find(&state.db, &model)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    let Some(pricing_url) = minerva_catalog::provider_pricing_url(&row.provider) else {
-        return Err(AppError::bad_request_with(
-            "chat_model.no_pricing_source",
-            [("provider", row.provider.clone())],
-        ));
-    };
-    let suggestion = crate::classification::pricing_scrape::scrape_price(
-        &state.llm,
-        &state.db,
-        &state.http_client,
-        &model,
-        pricing_url,
-    )
-    .await
-    .map_err(AppError::Internal)?;
-
-    serde_json::to_value(suggestion)
-        .map(Json)
-        .map_err(|e| AppError::Internal(e.to_string()))
 }
 
 /// Re-fetch each configured provider's `/models` listing and seed any

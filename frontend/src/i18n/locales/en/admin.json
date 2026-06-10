@@ -517,10 +517,7 @@
       "outputPriceLabel": "Output price per million tokens for {{model}}",
       "unpriced": "unpriced",
       "providerUnavailable": "no provider key",
-      "savePrice": "Save",
-      "scrape": "Scrape",
-      "scraping": "Scraping...",
-      "scrapeDone": "Suggested from {{url}} - review and save."
+      "savePrice": "Save"
     },
     "unavailableTitle": "System metrics unavailable",
     "storage": {

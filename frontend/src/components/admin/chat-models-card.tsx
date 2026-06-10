@@ -39,12 +39,33 @@ interface PriceSuggestion {
 /// (both rates entered; 0 is allowed) and a configured provider key.
 export function ChatModelsCard() {
   const { t } = useTranslation("admin")
+  const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery(adminChatModelsQuery)
+
+  const refreshMut = useMutation({
+    mutationFn: () => api.post("/admin/chat-models/refresh", {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ADMIN_KEY })
+      queryClient.invalidateQueries({ queryKey: PICKER_KEY })
+    },
+  })
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t("system.chatModels.title")}</CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle>{t("system.chatModels.title")}</CardTitle>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={refreshMut.isPending}
+            onClick={() => refreshMut.mutate()}
+          >
+            {refreshMut.isPending
+              ? t("system.chatModels.refreshing")
+              : t("system.chatModels.refresh")}
+          </Button>
+        </div>
         <CardDescription>{t("system.chatModels.description")}</CardDescription>
       </CardHeader>
       <CardContent>

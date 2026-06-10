@@ -186,29 +186,9 @@ impl AppState {
             }
         }
 
-        // Sync the chat-model catalog. New entries land disabled with
-        // price NULL (unusable until an admin enables + prices them);
-        // existing rows keep their admin toggles + prices across
-        // restarts. The seeded `gpt-oss-120b` row (enabled + default +
-        // utility-default + priced) comes from the migration, not here.
-        // See `20260610000001_chat_models.sql`.
-        for seed in minerva_catalog::VALID_CHAT_MODELS {
-            let inserted = minerva_db::queries::chat_models::seed_if_missing(
-                &db,
-                seed.model,
-                seed.provider,
-                seed.display_name,
-                seed.supports_logprobs,
-                seed.supports_tool_use,
-            )
-            .await?;
-            if inserted {
-                tracing::info!(
-                    "chat_models: seeded new catalog entry {} (enabled=false)",
-                    seed.model
-                );
-            }
-        }
+        // (The chat-model catalog is populated by fetching each
+        // configured provider's `/models` listing once the LLM registry
+        // is built below, rather than from a hardcoded list.)
 
         // Seed `system_defaults` for every knob in the registry that
         // isn't already in the DB. Existing rows are left alone (so
@@ -233,6 +213,18 @@ impl AppState {
         // Provider-agnostic LLM registry. Built from env/secret keys;
         // only providers with a present key are registered.
         let llm = Arc::new(LlmRegistry::from_config(http_client.clone(), config));
+
+        // Populate the chat-model catalog by fetching each configured
+        // provider's `/models` listing. New entries land disabled +
+        // unpriced (an admin enables + prices them); existing rows keep
+        // their admin toggles + prices. The migration-seeded
+        // `gpt-oss-120b` row (enabled + priced + default) is preserved.
+        // Best-effort: an unreachable provider is logged and skipped, so
+        // boot never blocks on a provider outage.
+        let seeded = crate::llm::provider::sync_chat_models(&llm, &db).await;
+        if seeded > 0 {
+            tracing::info!("chat_models: seeded {seeded} model(s) from providers");
+        }
 
         Ok(Self {
             db: db.clone(),

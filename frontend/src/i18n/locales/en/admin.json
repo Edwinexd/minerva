@@ -499,6 +499,8 @@
       "title": "Chat models",
       "description": "Catalog of chat / utility LLM models. A model can only be enabled once its provider key is configured and both USD prices are entered (0 is allowed for on-prem / free models). The 'Default' radio is the model new courses are created with; the 'Utility' radio is the model used for classification, knowledge-graph linking, and the price-scrape helper. Prices are USD per 1,000,000 tokens; spend is computed from token usage at these rates. 'Scrape' fetches the provider's public pricing page and asks the utility model to suggest rates for review; nothing is saved until you click Save.",
       "loadError": "Could not load chat models.",
+      "refresh": "Refresh from providers",
+      "refreshing": "Refreshing...",
       "col": {
         "enabled": "Enabled",
         "model": "Model",

@@ -81,6 +81,7 @@ pub fn router() -> Router<AppState> {
             put(set_utility_default_chat_model),
         )
         .route("/chat-models/price", put(set_chat_model_price))
+        .route("/chat-models/refresh", post(refresh_chat_models))
         .route(
             "/chat-models/{model}/scrape-price",
             post(scrape_chat_model_price),
@@ -2075,6 +2076,19 @@ async fn scrape_chat_model_price(
     serde_json::to_value(suggestion)
         .map(Json)
         .map_err(|e| AppError::Internal(e.to_string()))
+}
+
+/// Re-fetch each configured provider's `/models` listing and seed any
+/// new chat models (disabled + unpriced). Existing rows keep their admin
+/// toggles + prices. Returns how many new rows were seeded.
+async fn refresh_chat_models(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+    let seeded = crate::llm::provider::sync_chat_models(&state.llm, &state.db).await;
+    tracing::info!("admin {} refreshed chat models ({seeded} new)", user.id);
+    Ok(Json(serde_json::json!({ "seeded": seeded })))
 }
 
 // ── Re-ranker model catalog (admin) ────────────────────────────────

@@ -499,6 +499,8 @@
       "title": "Chattmodeller",
       "description": "Katalog över chatt- och hjälpmodeller (LLM). En modell kan aktiveras först när leverantörsnyckeln är konfigurerad och bägge USD-priserna är angivna (0 tillåts för lokala/gratis modeller). Radioknappen 'Standard' är modellen nya kurser skapas med; 'Hjälp' är modellen som används för klassificering, kunskapsgraf och prishämtning. Priser anges i USD per 1 000 000 tokens; kostnaden beräknas från tokenanvändning till dessa priser. 'Hämta' laddar leverantörens publika prissida och låter hjälpmodellen föreslå priser för granskning; inget sparas förrän du klickar Spara.",
       "loadError": "Kunde inte ladda chattmodeller.",
+      "refresh": "Hämta från leverantörer",
+      "refreshing": "Hämtar...",
       "col": {
         "enabled": "Aktiv",
         "model": "Modell",

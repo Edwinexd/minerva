@@ -291,10 +291,11 @@ async fn set_one_default(
     Ok(row)
 }
 
-/// Idempotent insert used by the startup catalog sync. New `VALID_CHAT_MODELS`
-/// entries land disabled with price NULL (unusable until an admin enables
-/// and prices them) only on first sight; existing rows (admin toggles +
-/// prices) are left untouched. Returns `true` if a row was inserted.
+/// Idempotent insert used by the provider-fetch catalog sync. A model id
+/// newly returned by a provider's `/models` listing lands disabled with
+/// price NULL (unusable until an admin enables and prices it) only on
+/// first sight; existing rows (admin toggles + prices) are left
+/// untouched. Returns `true` if a row was inserted.
 pub async fn seed_if_missing(
     db: &PgPool,
     model: &str,

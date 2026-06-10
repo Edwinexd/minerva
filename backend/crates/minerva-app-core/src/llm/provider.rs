@@ -50,6 +50,19 @@ pub struct ChatUsage {
     pub completion_tokens: i64,
 }
 
+/// One model id (+ optional friendly name) as reported by a provider's
+/// `/models` listing endpoint. The catalog is populated by fetching
+/// these, never by a hardcoded list.
+#[derive(Debug, Clone)]
+pub struct ProviderModel {
+    pub id: String,
+    pub display_name: Option<String>,
+}
+
+/// Timeout for the provider `/models` fetch so a slow/unreachable
+/// provider can't stall startup.
+const MODELS_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
+
 /// Wire shape a provider speaks. Drives request/response normalization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderKind {
@@ -101,6 +114,107 @@ pub trait ChatProvider: Send + Sync {
 
     /// Non-streaming chat (classification / KG / aegis): full text + usage.
     async fn complete(&self, req: ChatRequest<'_>) -> Result<(String, ChatUsage), String>;
+
+    /// List the models this provider currently offers (its `/models`
+    /// endpoint). Used to populate the `chat_models` catalog at startup
+    /// instead of a hardcoded list, so the catalog tracks what the
+    /// provider actually serves.
+    async fn list_models(&self) -> Result<Vec<ProviderModel>, String>;
+}
+
+/// Parse the `data: [{id, display_name?}, ...]` envelope shared by the
+/// OpenAI `/v1/models` and Anthropic `/v1/models` listings.
+fn parse_models_envelope(payload: &Value) -> Vec<ProviderModel> {
+    payload
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    let id = m.get("id").and_then(|i| i.as_str())?;
+                    let display_name = m
+                        .get("display_name")
+                        .and_then(|n| n.as_str())
+                        .map(String::from);
+                    Some(ProviderModel {
+                        id: id.to_string(),
+                        display_name,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Filter out obvious non-chat models (embeddings, audio, image,
+/// moderation) from a provider listing so the chat catalog stays sane.
+/// Conservative substring match; the admin still curates by enabling.
+fn is_probably_chat_model(id: &str) -> bool {
+    let lower = id.to_ascii_lowercase();
+    const EXCLUDE: &[&str] = &[
+        "embed",
+        "whisper",
+        "tts",
+        "dall-e",
+        "dalle",
+        "moderation",
+        "rerank",
+        "transcribe",
+        "audio",
+        "image",
+        "guard",
+    ];
+    !EXCLUDE.iter().any(|frag| lower.contains(frag))
+}
+
+/// Fetch each configured provider's model list and `seed_if_missing`
+/// every chat model into the catalog (disabled + unpriced until an admin
+/// enables and prices it). Best-effort: a provider that can't be reached
+/// is logged and skipped. Returns the number of newly-seeded rows.
+/// Capability flags default by provider kind (logprobs from the provider,
+/// tool-use assumed available for chat models).
+pub async fn sync_chat_models(registry: &LlmRegistry, db: &sqlx::PgPool) -> usize {
+    let mut seeded = 0usize;
+    for id in registry.configured_ids() {
+        let Some(provider) = registry.get(&id) else {
+            continue;
+        };
+        match provider.list_models().await {
+            Ok(models) => {
+                let logprobs = provider.supports_logprobs();
+                for m in models {
+                    if !is_probably_chat_model(&m.id) {
+                        continue;
+                    }
+                    let display = m.display_name.unwrap_or_else(|| m.id.clone());
+                    match minerva_db::queries::chat_models::seed_if_missing(
+                        db, &m.id, &id, &display, logprobs, true,
+                    )
+                    .await
+                    {
+                        Ok(true) => {
+                            seeded += 1;
+                            tracing::info!(
+                                "chat_models: seeded {} from provider {} (enabled=false)",
+                                m.id,
+                                id
+                            );
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            tracing::warn!("chat_models: seed failed for {}: {}", m.id, e)
+                        }
+                    }
+                }
+            }
+            Err(e) => tracing::warn!(
+                "chat_models: could not fetch models from provider {}: {}",
+                id,
+                e
+            ),
+        }
+    }
+    seeded
 }
 
 /// Covers Cerebras, OpenAI, Groq, Together, and any other endpoint that
@@ -205,6 +319,27 @@ impl ChatProvider for OpenAiCompatibleProvider {
                 completion_tokens: completion as i64,
             },
         ))
+    }
+
+    async fn list_models(&self) -> Result<Vec<ProviderModel>, String> {
+        let models_url = self
+            .chat_url
+            .strip_suffix("/chat/completions")
+            .map(|base| format!("{base}/models"))
+            .unwrap_or_else(|| self.chat_url.clone());
+        let resp = self
+            .client
+            .get(&models_url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .timeout(MODELS_FETCH_TIMEOUT)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("status {}", resp.status()));
+        }
+        let payload: Value = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(parse_models_envelope(&payload))
     }
 
     async fn stream(
@@ -472,6 +607,28 @@ impl ChatProvider for AnthropicProvider {
             completion_tokens: payload["usage"]["output_tokens"].as_i64().unwrap_or(0),
         };
         Ok((text, usage))
+    }
+
+    async fn list_models(&self) -> Result<Vec<ProviderModel>, String> {
+        let models_url = self
+            .messages_url
+            .strip_suffix("/v1/messages")
+            .map(|base| format!("{base}/v1/models"))
+            .unwrap_or_else(|| self.messages_url.clone());
+        let resp = self
+            .client
+            .get(&models_url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", &self.version)
+            .timeout(MODELS_FETCH_TIMEOUT)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("status {}", resp.status()));
+        }
+        let payload: Value = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(parse_models_envelope(&payload))
     }
 
     async fn stream(

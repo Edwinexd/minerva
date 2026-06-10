@@ -13,6 +13,7 @@ import {
 } from "@/lib/queries"
 import { RERANKER_MODEL_DISPLAY } from "@/lib/reranker-models"
 import { ModelCatalogCard } from "./model-catalog-card"
+import { ChatModelsCard } from "./chat-models-card"
 import { RelativeTime } from "@/components/relative-time"
 import {
   Card,
@@ -137,6 +138,7 @@ export function AdminDefaultsPanel() {
       {/* Model catalogs: which embedding / re-ranker models teachers can
           pick, and which one new courses default to. Live here (not the
           System tab) because they govern new-course defaults. */}
+      <ChatModelsCard />
       <EmbeddingModelsCard />
       <RerankerModelsCard />
     </div>

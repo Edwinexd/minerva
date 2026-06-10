@@ -981,6 +981,8 @@ pub async fn stream_chat_to_client(
         max_tokens: None,
         stream: true,
         logprobs,
+        response_format: None,
+        extra: None,
     };
 
     // Drive the provider stream and the SSE forwarder concurrently: the

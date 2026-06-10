@@ -18,8 +18,8 @@ pub mod provider;
 
 pub use cost::cost_usd;
 pub use provider::{
-    resolve_utility_model, AnthropicProvider, ChatDelta, ChatProvider, ChatRequest, ChatUsage,
-    LlmRegistry, OpenAiCompatibleProvider, ProviderKind, UtilityModel,
+    resolve_utility_model, util_request, AnthropicProvider, ChatDelta, ChatProvider, ChatRequest,
+    ChatUsage, LlmRegistry, OpenAiCompatibleProvider, ProviderKind, UtilityModel,
 };
 
 /// Production Cerebras chat-completions endpoint.

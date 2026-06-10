@@ -37,6 +37,10 @@ pub const PROVIDER_ANTHROPIC: &str = "anthropic";
 pub const PROVIDER_GROQ: &str = "groq";
 pub const PROVIDER_GEMINI: &str = "gemini";
 
+/// Name of the single forced tool the Anthropic provider uses to emulate
+/// OpenAI `response_format` structured output.
+const ANTHROPIC_STRUCTURED_TOOL: &str = "structured_output";
+
 /// One normalized streaming delta from any provider.
 #[derive(Debug, Clone, Default)]
 pub struct ChatDelta {
@@ -64,70 +68,129 @@ pub struct ProviderModel {
 /// provider can't stall startup.
 const MODELS_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
-/// A resolved utility-model target for the classification / KG / aegis /
-/// suggested-questions calls: the admin-chosen utility model id plus the
-/// OpenAI-compatible `(endpoint, api_key)` to reach it. Resolved from
-/// `chat_models.is_utility_default` + the registry, so the admin's choice
-/// actually drives those calls.
-///
-/// `endpoint` / `api_key` come from the resolved provider's
-/// `openai_endpoint()`. Classification bodies are OpenAI-shaped
-/// (`response_format` json_schema, `reasoning_effort`, ...), so the
-/// utility model should be on an OpenAI-compatible provider. When it
-/// can't be resolved (provider key absent, or a non-OpenAI-compatible
-/// provider), `api_key` comes back empty and every classification call
-/// fails soft and skips - never silently substituting a different
-/// provider.
-#[derive(Debug, Clone)]
+/// The admin-chosen utility model for classification / KG / aegis /
+/// suggested-questions calls: the model id plus a handle to its resolved
+/// provider. Resolved from `chat_models.is_utility_default` + the
+/// registry, so the admin's choice actually drives those calls. Provider-
+/// agnostic: classification builds an OpenAI-shaped body and calls
+/// [`UtilityModel::complete`], which dispatches through the provider
+/// (`response_format` is translated to a forced tool for Anthropic).
+/// `provider` is `None` when unresolvable (provider key absent) and every
+/// call fails soft / skips - never silently substituting a provider.
+#[derive(Clone)]
 pub struct UtilityModel {
+    pub provider: Option<Arc<dyn ChatProvider>>,
     pub model: String,
-    pub endpoint: String,
-    pub api_key: String,
 }
 
-/// Resolve the admin-selected utility model to a concrete
-/// `(model, endpoint, key)` from its OWN provider. No provider is ever
-/// hardcoded: if the selected model's provider is absent or not
-/// OpenAI-compatible, the returned target has an empty key so callers
-/// skip (fail soft), the same as a missing key today.
+impl std::fmt::Debug for UtilityModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UtilityModel")
+            .field("model", &self.model)
+            .field("provider", &self.provider.as_ref().map(|p| p.id()))
+            .finish()
+    }
+}
+
+/// Run an OpenAI-shaped chat-completions `body` against the utility
+/// model's resolved provider, provider-agnostically. Returns `None` when
+/// no utility provider is configured (the caller fails soft / skips);
+/// otherwise the provider's `(content, usage)`.
+///
+/// OpenAI-compatible providers post the body verbatim (`http` reuses the
+/// caller's client). A non-OpenAI provider (Anthropic) goes through
+/// `provider.complete`, which translates the body's `response_format`
+/// into a forced tool and returns the tool's JSON `input` as `content`,
+/// so structured callers parse it identically.
+pub async fn util_request(
+    http: &reqwest::Client,
+    util: &UtilityModel,
+    body: &Value,
+) -> Option<Result<(String, ChatUsage), String>> {
+    let provider = util.provider.as_ref()?;
+    if let Some((url, key)) = provider.openai_endpoint() {
+        let result = async {
+            let resp = super::openai_chat_request(http, url, key, body).await?;
+            let payload: Value = resp.json().await.map_err(|e| e.to_string())?;
+            if let Some(err) = payload.get("error") {
+                return Err(err
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("unknown error")
+                    .to_string());
+            }
+            let content = payload["choices"][0]["message"]["content"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let (p, c) = super::extract_openai_usage(&payload).unwrap_or((0, 0));
+            Ok((
+                content,
+                ChatUsage {
+                    prompt_tokens: p as i64,
+                    completion_tokens: c as i64,
+                },
+            ))
+        }
+        .await;
+        return Some(result);
+    }
+    // Non-OpenAI-compatible (Anthropic): translate the OpenAI body into a
+    // ChatRequest and dispatch through `complete`.
+    let messages: Vec<Value> = body
+        .get("messages")
+        .and_then(|m| m.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let temperature = body
+        .get("temperature")
+        .and_then(|t| t.as_f64())
+        .unwrap_or(0.0);
+    let max_tokens = body
+        .get("max_tokens")
+        .and_then(|m| m.as_u64())
+        .map(|n| n as u32);
+    let response_format = body.get("response_format").cloned();
+    let req = ChatRequest {
+        model: &util.model,
+        messages: &messages,
+        temperature,
+        max_tokens,
+        stream: false,
+        logprobs: false,
+        response_format: response_format.as_ref(),
+        extra: None,
+    };
+    Some(provider.complete(req).await)
+}
+
+/// Resolve the admin-selected utility model to its model id + provider
+/// handle. No provider is ever hardcoded: if the selected model's
+/// provider isn't configured, `provider` is `None` and callers fail soft.
 pub async fn resolve_utility_model(registry: &LlmRegistry, db: &sqlx::PgPool) -> UtilityModel {
     let model = minerva_db::queries::chat_models::current_utility_default(db)
         .await
         .ok()
         .flatten()
         .unwrap_or_default();
-    if !model.is_empty() {
-        if let Ok(Some(provider_id)) =
-            minerva_db::queries::chat_models::provider_of(db, &model).await
-        {
-            match registry.get(&provider_id) {
-                Some(provider) => {
-                    if let Some((url, key)) = provider.openai_endpoint() {
-                        return UtilityModel {
-                            model,
-                            endpoint: url.to_string(),
-                            api_key: key.to_string(),
-                        };
-                    }
+    let provider = if model.is_empty() {
+        None
+    } else {
+        match minerva_db::queries::chat_models::provider_of(db, &model).await {
+            Ok(Some(provider_id)) => {
+                let p = registry.get(&provider_id);
+                if p.is_none() {
                     tracing::warn!(
-                        "utility model {model} is on provider {provider_id}, which is not \
-                         OpenAI-compatible; structured classification will be skipped"
+                        "utility model {model} provider {provider_id} is not configured; \
+                         classification will be skipped"
                     );
                 }
-                None => tracing::warn!(
-                    "utility model {model} provider {provider_id} is not configured; \
-                     classification will be skipped"
-                ),
+                p
             }
+            _ => None,
         }
-    }
-    // Unresolvable: empty target -> callers fail soft and skip. No
-    // hardcoded fallback provider.
-    UtilityModel {
-        model,
-        endpoint: String::new(),
-        api_key: String::new(),
-    }
+    };
+    UtilityModel { provider, model }
 }
 
 /// Wire shape a provider speaks. Drives request/response normalization.
@@ -149,6 +212,17 @@ pub struct ChatRequest<'a> {
     pub max_tokens: Option<u32>,
     pub stream: bool,
     pub logprobs: bool,
+    /// Structured-output request, in OpenAI `response_format` shape
+    /// (`{"type":"json_schema","json_schema":{...}}`). Each provider maps
+    /// it to its native mechanism: OpenAI-compatible providers pass it
+    /// through; Anthropic translates the schema into a forced tool so the
+    /// model returns the JSON object. `None` for free-text replies.
+    pub response_format: Option<&'a Value>,
+    /// Extra OpenAI-compatible body fields (`reasoning_effort`,
+    /// `max_completion_tokens`, ...) merged verbatim into the request for
+    /// OpenAI-compatible providers; ignored by providers that don't
+    /// understand them (Anthropic). Must be a JSON object.
+    pub extra: Option<&'a Value>,
 }
 
 /// A chat-completion backend. One instance per configured provider id.
@@ -332,6 +406,14 @@ impl OpenAiCompatibleProvider {
         if req.logprobs {
             body["logprobs"] = Value::Bool(true);
             body["top_logprobs"] = serde_json::json!(1);
+        }
+        if let Some(rf) = req.response_format {
+            body["response_format"] = rf.clone();
+        }
+        if let Some(extra) = req.extra.and_then(|e| e.as_object()) {
+            for (k, v) in extra {
+                body[k.as_str()] = v.clone();
+            }
         }
         body
     }
@@ -573,6 +655,25 @@ impl AnthropicProvider {
         if !system_parts.is_empty() {
             body["system"] = serde_json::json!(system_parts.join("\n\n"));
         }
+        // Structured output: Anthropic has no OpenAI-style
+        // `response_format`, so translate the json_schema into a single
+        // forced tool whose `input_schema` is the schema. `complete` then
+        // returns that tool call's `input` (the JSON object) as the reply
+        // text, so structured callers parse it exactly like an OpenAI
+        // json_schema response.
+        if let Some(schema) = req
+            .response_format
+            .and_then(|rf| rf.get("json_schema"))
+            .and_then(|js| js.get("schema"))
+        {
+            body["tools"] = serde_json::json!([{
+                "name": ANTHROPIC_STRUCTURED_TOOL,
+                "description": "Return the result as a structured JSON object matching the input schema.",
+                "input_schema": schema,
+            }]);
+            body["tool_choice"] =
+                serde_json::json!({ "type": "tool", "name": ANTHROPIC_STRUCTURED_TOOL });
+        }
         body
     }
 
@@ -654,6 +755,17 @@ impl ChatProvider for AnthropicProvider {
         let text = payload["content"]
             .as_array()
             .map(|blocks| {
+                // A forced structured-output tool call: return its `input`
+                // (the JSON object) serialized, so callers parse it like an
+                // OpenAI json_schema reply.
+                if let Some(input) = blocks
+                    .iter()
+                    .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+                    .and_then(|b| b.get("input"))
+                {
+                    return serde_json::to_string(input).unwrap_or_default();
+                }
+                // Otherwise concatenate the plain text blocks.
                 blocks
                     .iter()
                     .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
@@ -961,6 +1073,8 @@ mod tests {
             stream: true,
             // logprobs is ignored by Anthropic (no per-token logprobs).
             logprobs: true,
+            response_format: None,
+            extra: None,
         };
         let body = p.build_body(&req);
         assert_eq!(body["system"], "sys A");
@@ -986,6 +1100,8 @@ mod tests {
             max_tokens: None,
             stream: true,
             logprobs: false,
+            response_format: None,
+            extra: None,
         };
         let body = p.build_body(&req);
         assert!(body.get("logprobs").is_none());
@@ -997,5 +1113,57 @@ mod tests {
         };
         let body2 = p.build_body(&req2);
         assert_eq!(body2["logprobs"], Value::Bool(true));
+    }
+
+    #[test]
+    fn anthropic_translates_response_format_to_forced_tool() {
+        let p = AnthropicProvider::new(
+            "anthropic",
+            "https://api.anthropic.com",
+            "k",
+            reqwest::Client::new(),
+        );
+        let messages = vec![serde_json::json!({"role": "user", "content": "hi"})];
+        let schema = serde_json::json!({
+            "type": "json_schema",
+            "json_schema": { "name": "verdict", "schema": {"type": "object"} }
+        });
+        let req = ChatRequest {
+            model: "m",
+            messages: &messages,
+            temperature: 0.0,
+            max_tokens: None,
+            stream: false,
+            logprobs: false,
+            response_format: Some(&schema),
+            extra: None,
+        };
+        let body = p.build_body(&req);
+        assert_eq!(body["tools"][0]["name"], "structured_output");
+        assert_eq!(body["tools"][0]["input_schema"]["type"], "object");
+        assert_eq!(body["tool_choice"]["type"], "tool");
+        assert_eq!(body["tool_choice"]["name"], "structured_output");
+    }
+
+    #[test]
+    fn openai_merges_response_format_and_extra() {
+        let p = OpenAiCompatibleProvider::new("x", "http://h/v1", "k", reqwest::Client::new());
+        let messages = vec![serde_json::json!({"role": "user", "content": "hi"})];
+        let rf = serde_json::json!({"type": "json_schema", "json_schema": {"name": "v"}});
+        let extra = serde_json::json!({"reasoning_effort": "low", "max_completion_tokens": 64});
+        let req = ChatRequest {
+            model: "m",
+            messages: &messages,
+            temperature: 0.0,
+            max_tokens: None,
+            stream: false,
+            logprobs: false,
+            response_format: Some(&rf),
+            extra: Some(&extra),
+        };
+        let body = p.build_body(&req);
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        assert_eq!(body["reasoning_effort"], "low");
+        assert_eq!(body["max_completion_tokens"], 64);
     }
 }

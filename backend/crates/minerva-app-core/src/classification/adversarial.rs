@@ -32,7 +32,7 @@ use futures::future::join_all;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{openai_chat_request, record_pipeline_usage, RagChunk};
+use crate::llm::{util_request, RagChunk};
 use minerva_db::queries::course_token_usage::CATEGORY_ADVERSARIAL_FILTER;
 
 /// Atomic counters bumped by every filter invocation. Surfaced via a
@@ -118,36 +118,27 @@ async fn is_solution_chunk(
         ],
     });
 
-    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             CHUNKS_PER_CHECK_FAILED.fetch_add(1, Ordering::Relaxed);
             tracing::warn!("adversarial: request failed, failing open: {e}");
             return false;
         }
+        None => return false,
     };
 
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            CHUNKS_PER_CHECK_FAILED.fetch_add(1, Ordering::Relaxed);
-            tracing::warn!("adversarial: response not JSON, failing open: {e}");
-            return false;
-        }
-    };
-
-    record_pipeline_usage(
+    let _ = minerva_db::queries::course_token_usage::record(
         db,
         course_id,
         CATEGORY_ADVERSARIAL_FILTER,
         &util.model,
-        &payload,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await;
 
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("")
+    let raw = content
         .trim()
         .trim_matches(|c: char| !c.is_alphabetic())
         .to_lowercase();
@@ -170,9 +161,9 @@ pub async fn filter_solution_chunks(
         return chunks;
     }
 
-    // Empty key (e.g. tests / dev without a provider key): skip the
-    // filter rather than make a guaranteed-401 call per chunk.
-    if util.api_key.is_empty() {
+    // No utility provider configured: skip the filter rather than make a
+    // guaranteed-failing call per chunk.
+    if util.provider.is_none() {
         return chunks;
     }
 
@@ -254,11 +245,12 @@ mod tests {
         PgPool::connect_lazy("postgres://test:test@127.0.0.1:1/test").unwrap()
     }
 
-    fn util(api_key: &str) -> crate::llm::UtilityModel {
+    fn util(_api_key: &str) -> crate::llm::UtilityModel {
+        // No provider -> every call skips (fail soft), which is the path
+        // these tests exercise (no network).
         crate::llm::UtilityModel {
+            provider: None,
             model: "gpt-oss-120b".to_string(),
-            endpoint: "http://127.0.0.1:1/v1/chat/completions".to_string(),
-            api_key: api_key.to_string(),
         }
     }
 

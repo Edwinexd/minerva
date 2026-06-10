@@ -35,7 +35,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{openai_chat_request, record_pipeline_usage};
+use crate::llm::util_request;
 use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
 
 // ── Cerebras model selection ───────────────────────────────────────
@@ -124,7 +124,7 @@ pub async fn classify_intent(
     course_id: Uuid,
     recent_user_messages: &[String],
 ) -> IntentVerdict {
-    if util.api_key.is_empty() {
+    if util.provider.is_none() {
         // Dev / test path without CEREBRAS_API_KEY. Fail open.
         return IntentVerdict {
             is_extraction: false,
@@ -176,37 +176,32 @@ pub async fn classify_intent(
         }
     });
 
-    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!("extraction_guard: intent request failed (fail-open): {}", e);
             return IntentVerdict {
                 is_extraction: false,
                 rationale: format!("intent classifier failed: {e}"),
             };
         }
-    };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("extraction_guard: intent JSON failed (fail-open): {}", e);
+        None => {
             return IntentVerdict {
                 is_extraction: false,
-                rationale: format!("intent response not JSON: {e}"),
+                rationale: "no utility model configured".to_string(),
             };
         }
     };
-    record_pipeline_usage(
+    let _ = minerva_db::queries::course_token_usage::record(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
-        &payload,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await;
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let raw = content.as_str();
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
         Ok(v) => v,
         Err(e) => {
@@ -268,7 +263,7 @@ pub async fn check_output_for_solution(
     assistant_reply: &str,
     assignment_excerpts: &[String],
 ) -> OutputVerdict {
-    if util.api_key.is_empty() || assistant_reply.is_empty() {
+    if util.provider.is_none() || assistant_reply.is_empty() {
         return OutputVerdict {
             is_complete_solution: false,
             rationale: "output check skipped".to_string(),
@@ -305,37 +300,32 @@ pub async fn check_output_for_solution(
         }
     });
 
-    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!("extraction_guard: output check failed (fail-open): {}", e);
             return OutputVerdict {
                 is_complete_solution: false,
                 rationale: format!("output check failed: {e}"),
             };
         }
-    };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("extraction_guard: output JSON failed (fail-open): {}", e);
+        None => {
             return OutputVerdict {
                 is_complete_solution: false,
-                rationale: format!("output verdict not JSON: {e}"),
+                rationale: "no utility model configured".to_string(),
             };
         }
     };
-    record_pipeline_usage(
+    let _ = minerva_db::queries::course_token_usage::record(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
-        &payload,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await;
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let raw = content.as_str();
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
         Ok(v) => v,
         Err(_) => {
@@ -381,7 +371,7 @@ pub async fn generate_socratic_rewrite(
         "{}What's the first concrete step you'd take to solve this on your own? Walk me through it and I'll help you think it through.",
         REWRITE_PREFIX
     );
-    if util.api_key.is_empty() {
+    if util.provider.is_none() {
         return fallback;
     }
     let user_payload = serde_json::json!({
@@ -398,28 +388,24 @@ pub async fn generate_socratic_rewrite(
             { "role": "user", "content": user_payload.to_string() },
         ],
     });
-    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!("extraction_guard: rewrite request failed: {}", e);
             return fallback;
         }
+        None => return fallback,
     };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(_) => return fallback,
-    };
-    record_pipeline_usage(
+    let _ = minerva_db::queries::course_token_usage::record(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
-        &payload,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await;
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let raw = content.as_str();
     if raw.trim().is_empty() {
         return fallback;
     }
@@ -490,7 +476,7 @@ pub async fn classify_engagement(
             rationale: "student included a code block".to_string(),
         };
     }
-    if util.api_key.is_empty() {
+    if util.provider.is_none() {
         // Dev / test path. Per the "default engaged" policy, lift.
         return EngagementVerdict {
             engaged: true,
@@ -534,9 +520,9 @@ pub async fn classify_engagement(
         }
     });
 
-    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!(
                 "extraction_guard: engagement request failed (defaulting to engaged): {}",
                 e
@@ -546,31 +532,23 @@ pub async fn classify_engagement(
                 rationale: format!("engagement classifier failed: {e}"),
             };
         }
-    };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "extraction_guard: engagement JSON failed (defaulting to engaged): {}",
-                e
-            );
+        None => {
             return EngagementVerdict {
                 engaged: true,
-                rationale: format!("engagement response not JSON: {e}"),
+                rationale: "no utility model configured".to_string(),
             };
         }
     };
-    record_pipeline_usage(
+    let _ = minerva_db::queries::course_token_usage::record(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
-        &payload,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await;
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let raw = content.as_str();
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
         Ok(v) => v,
         Err(_) => {
@@ -606,10 +584,26 @@ mod tests {
     // never actually open a connection.
 
     fn util(api_key: &str) -> crate::llm::UtilityModel {
+        // Empty key -> no provider (the "no utility model" path). A
+        // non-empty key wires a real provider pointed at an unreachable
+        // endpoint: tests that pass one only exercise the early input
+        // guards (empty history / empty message / code block), which
+        // return before any network call is made.
+        let provider: Option<std::sync::Arc<dyn crate::llm::ChatProvider>> = if api_key.is_empty() {
+            None
+        } else {
+            Some(std::sync::Arc::new(
+                crate::llm::OpenAiCompatibleProvider::new(
+                    "test",
+                    "http://127.0.0.1:1/v1",
+                    api_key,
+                    reqwest::Client::new(),
+                ),
+            ))
+        };
         crate::llm::UtilityModel {
+            provider,
             model: "gpt-oss-120b".to_string(),
-            endpoint: "http://127.0.0.1:1/v1/chat/completions".to_string(),
-            api_key: api_key.to_string(),
         }
     }
 

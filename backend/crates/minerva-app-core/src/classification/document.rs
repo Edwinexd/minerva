@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::prompts::{CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_TEMPLATE};
 use super::types::{DocumentKind, ALL_KINDS};
-use crate::llm::{openai_chat_request, record_pipeline_usage};
+use crate::llm::util_request;
 use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
 
 /// Soft cap on excerpt length sent to the model. Head/tail split so
@@ -95,37 +95,28 @@ impl CerebrasClassifier {
             }
         });
 
-        let response =
-            openai_chat_request(&self.http, &self.util.endpoint, &self.util.api_key, &body).await?;
-        let payload: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("classifier: response not JSON: {e}"))?;
+        let (content, usage) = match util_request(&self.http, &self.util, &body).await {
+            Some(Ok(v)) => v,
+            Some(Err(e)) => return Err(e),
+            None => return Err("classifier: no utility model configured".to_string()),
+        };
 
         // Best-effort token-spend bookkeeping. The dashboard buckets
         // by (category, model); a future migration to a multi-model
         // classifier (e.g. a smaller-model fallback for routine cases
         // or a high-effort retry for low-confidence ones) would
         // automatically split into separate rows.
-        record_pipeline_usage(
+        let _ = minerva_db::queries::course_token_usage::record(
             &self.db,
             course_id,
             CATEGORY_DOCUMENT_CLASSIFIER,
             &self.util.model,
-            &payload,
+            usage.prompt_tokens as i32,
+            usage.completion_tokens as i32,
         )
         .await;
 
-        let raw = payload["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| {
-                format!(
-                    "classifier: missing choices[0].message.content; got: {}",
-                    payload
-                )
-            })?;
-
-        parse_classifier_response(raw)
+        parse_classifier_response(content.as_str())
     }
 }
 

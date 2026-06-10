@@ -51,7 +51,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{openai_chat_request, record_pipeline_usage};
+use crate::llm::util_request;
 use minerva_db::queries::course_token_usage::CATEGORY_AEGIS;
 
 // Both analyzer fires (cold-start and follow-up) run on the
@@ -390,8 +390,8 @@ pub async fn analyze_prompt(
     trail: &[AegisTrailEntry],
     mode: AegisMode,
 ) -> Result<Option<AegisVerdict>, String> {
-    if util.api_key.is_empty() {
-        // Dev / test path without CEREBRAS_API_KEY.
+    if util.provider.is_none() {
+        // Dev / test path with no utility provider configured.
         return Ok(None);
     }
     let Some(current) = trail.last() else {
@@ -603,25 +603,25 @@ pub async fn analyze_prompt(
     // range; matches the rewrite path's setting.
     body["reasoning_effort"] = serde_json::Value::String("low".to_string());
 
-    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!("aegis: request failed: {}", e);
-            return Err(format!("cerebras request failed: {e}"));
+            return Err(format!("aegis request failed: {e}"));
         }
+        None => return Err("no utility model configured".to_string()),
     };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("aegis: response not JSON: {}", e);
-            return Err(format!("cerebras response not JSON: {e}"));
-        }
-    };
-    record_pipeline_usage(db, course_id, CATEGORY_AEGIS, &model_used, &payload).await;
+    let _ = minerva_db::queries::course_token_usage::record(
+        db,
+        course_id,
+        CATEGORY_AEGIS,
+        &model_used,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
+    )
+    .await;
 
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let raw = content.as_str();
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
         Ok(v) => v,
         Err(e) => {
@@ -728,8 +728,8 @@ pub async fn rewrite_prompt(
     suggestions: &[AegisSuggestion],
     mode: AegisMode,
 ) -> Result<String, String> {
-    if util.api_key.is_empty() {
-        return Err("CEREBRAS_API_KEY missing".to_string());
+    if util.provider.is_none() {
+        return Err("no utility model configured".to_string());
     }
     if original.trim().is_empty() {
         return Err("empty draft".to_string());
@@ -780,26 +780,25 @@ pub async fn rewrite_prompt(
         ],
     });
 
-    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!("aegis rewrite: request failed: {}", e);
-            return Err(format!("cerebras request failed: {e}"));
+            return Err(format!("aegis request failed: {e}"));
         }
+        None => return Err("no utility model configured".to_string()),
     };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("aegis rewrite: response not JSON: {}", e);
-            return Err(format!("cerebras response not JSON: {e}"));
-        }
-    };
-    record_pipeline_usage(db, course_id, CATEGORY_AEGIS, &util.model, &payload).await;
+    let _ = minerva_db::queries::course_token_usage::record(
+        db,
+        course_id,
+        CATEGORY_AEGIS,
+        &util.model,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
+    )
+    .await;
 
-    let rewritten = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .map(str::trim)
-        .unwrap_or("");
+    let rewritten = content.trim();
     if rewritten.is_empty() {
         return Err("empty rewrite from model".to_string());
     }

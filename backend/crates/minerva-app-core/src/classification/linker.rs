@@ -46,7 +46,7 @@ use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{openai_chat_request, payload_int, payload_string, record_pipeline_usage};
+use crate::llm::{payload_int, payload_string, util_request};
 use minerva_db::queries::course_token_usage::CATEGORY_LINKER;
 
 // The per-pair link decision runs on the admin-selected utility model
@@ -297,9 +297,9 @@ pub async fn link_course(
         });
     }
 
-    if ctx.util.api_key.is_empty() {
-        // Dev / test env without CEREBRAS_API_KEY. Skip rather than
-        // burn time on a guaranteed-401 call.
+    if ctx.util.provider.is_none() {
+        // Dev / test env with no utility provider configured. Skip
+        // rather than burn time on a guaranteed-failing call.
         return Ok(LinkerOutput {
             considered: classified.len(),
             cached_hits: 0,
@@ -1257,9 +1257,9 @@ async fn classify_one_pair(
         }
     });
 
-    let response = match openai_chat_request(http, &util.endpoint, &util.api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!(
                 "linker: per-pair request failed for {}<->{}: {}",
                 p.a_id,
@@ -1268,47 +1268,30 @@ async fn classify_one_pair(
             );
             return None;
         }
-    };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "linker: per-pair response not JSON for {}<->{}: {}",
-                p.a_id,
-                p.b_id,
-                e
-            );
-            return None;
-        }
+        None => return None,
     };
     // Best-effort token-spend bookkeeping. Records every per-pair
     // call against `course_id` in the `linker` category, regardless
     // of whether the call ultimately produced an edge; the cost
     // was paid either way.
-    record_pipeline_usage(db, course_id, CATEGORY_LINKER, &util.model, &payload).await;
-    // Guard against finish_reason=length producing an empty content
-    // field; caller would otherwise see this as "no edge" without
-    // knowing the model was cut off mid-token.
-    let finish = payload["choices"][0]["finish_reason"]
-        .as_str()
-        .unwrap_or("");
-    if finish == "length" {
-        tracing::warn!(
-            "linker: per-pair {}<->{} hit completion-token cap; raising max_completion_tokens may help",
-            p.a_id,
-            p.b_id,
-        );
-        return None;
-    }
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let _ = minerva_db::queries::course_token_usage::record(
+        db,
+        course_id,
+        CATEGORY_LINKER,
+        &util.model,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
+    )
+    .await;
+    // An empty body means the model produced nothing usable (e.g. it
+    // hit the completion-token cap mid-token); a truncated-but-nonempty
+    // body falls through to the JSON parse below and is rejected there.
+    let raw = content.as_str();
     if raw.is_empty() {
         tracing::warn!(
-            "linker: per-pair {}<->{} returned empty content (finish={})",
+            "linker: per-pair {}<->{} returned empty content",
             p.a_id,
             p.b_id,
-            finish
         );
         return None;
     }

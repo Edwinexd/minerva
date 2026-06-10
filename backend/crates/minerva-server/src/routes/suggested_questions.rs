@@ -29,7 +29,8 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::strategy::common::{openai_chat_request, record_pipeline_usage, scroll_doc_chunks};
+use crate::strategy::common::scroll_doc_chunks;
+use minerva_app_core::llm::util_request;
 
 // Runs on the admin-selected utility model (resolved per call); a
 // JSON-schema-constrained output keeps the shape correct and
@@ -192,30 +193,27 @@ async fn regenerate(
         }
     });
 
-    let response = openai_chat_request(&state.http_client, &util.endpoint, &util.api_key, &body)
-        .await
-        .map_err(AppError::Internal)?;
-    let payload: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| AppError::Internal(format!("suggested-questions: response not JSON: {e}")))?;
+    let (content, usage) = match util_request(&state.http_client, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => return Err(AppError::Internal(e)),
+        None => {
+            return Err(AppError::Internal(
+                "suggested-questions: no utility model configured".to_string(),
+            ))
+        }
+    };
 
-    record_pipeline_usage(
+    let _ = minerva_db::queries::course_token_usage::record(
         &state.db,
         course_id,
         CATEGORY_SUGGESTED_QUESTIONS,
         &util.model,
-        &payload,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await;
 
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .ok_or_else(|| {
-            AppError::Internal(format!(
-                "suggested-questions: missing choices[0].message.content; got: {payload}"
-            ))
-        })?;
+    let raw = content.as_str();
 
     #[derive(serde::Deserialize)]
     struct ModelReply {

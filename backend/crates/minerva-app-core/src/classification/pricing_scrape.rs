@@ -113,6 +113,8 @@ pub async fn scrape_price(
         max_tokens: Some(300),
         stream: false,
         logprobs: false,
+        response_format: None,
+        extra: None,
     };
 
     let (reply, _usage) = provider

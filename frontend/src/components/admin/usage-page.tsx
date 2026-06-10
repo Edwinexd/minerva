@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { adminUsersQuery, adminUsageQuery, coursesQuery } from "@/lib/queries"
+import { formatUsd } from "@/lib/currency"
 import {
   Card,
   CardContent,
@@ -193,9 +194,9 @@ export function PlatformUsagePanel() {
                             {stats.requests.toLocaleString()}
                           </td>
                           <td className="py-2 text-right font-mono">
-                            {course?.daily_token_limit
+                            {course?.daily_cost_limit_usd
                               ? t("usage.limit.perDay", {
-                                  value: course.daily_token_limit.toLocaleString(),
+                                  value: formatUsd(course.daily_cost_limit_usd),
                                 })
                               : t("usage.limit.unlimited")}
                           </td>

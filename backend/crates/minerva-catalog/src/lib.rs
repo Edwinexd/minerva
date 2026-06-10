@@ -89,6 +89,29 @@ pub const STARTUP_BENCHMARK_MODELS: &[(&str, u64)] = &[
 /// OpenAI embedding model used when a course's provider is `"openai"`.
 pub const OPENAI_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 
+// Chat / utility LLM models are NOT hardcoded here: the catalog is
+// populated at startup by fetching each configured provider's `/models`
+// listing (see `minerva_app_core::llm::provider::sync_chat_models`).
+// Admin policy (enable / default / per-model price) lives in the
+// `chat_models` DB table; prices are admin-entered (and scrape-assisted)
+// per deployment, never in code.
+
+/// Public pricing page for a provider, used by the best-effort
+/// "scrape price" admin helper. `None` for a provider with no known
+/// public page (the admin then enters rates manually). These pages are
+/// often JS-rendered, so a server-side fetch is best-effort and the
+/// admin always confirms the extracted numbers.
+pub fn provider_pricing_url(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("https://openai.com/api/pricing"),
+        "anthropic" => Some("https://www.anthropic.com/pricing"),
+        "cerebras" => Some("https://www.cerebras.ai/pricing"),
+        "groq" => Some("https://groq.com/pricing"),
+        "gemini" => Some("https://ai.google.dev/gemini-api/docs/pricing"),
+        _ => None,
+    }
+}
+
 /// Default cross-encoder. Multilingual (Swedish + English), the lightest
 /// multilingual model in fastembed's reranker catalog. Mirrored by the
 /// `courses.reranker_model` column DEFAULT and the `reranker_models`

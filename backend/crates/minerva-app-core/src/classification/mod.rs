@@ -2,11 +2,11 @@
 //!
 //! Pipeline:
 //! 1. After text extraction, the worker calls
-//!    [`document::CerebrasClassifier`] (which implements
+//!    [`document::LlmClassifier`] (which implements
 //!    `minerva_pipeline::classifier::Classifier`).
-//! 2. The classifier asks gpt-oss-120b on Cerebras to label the doc as one
-//!    of [`types::DocumentKind`], returning JSON via Cerebras structured
-//!    outputs.
+//! 2. The classifier asks the admin-selected utility model to label the
+//!    doc as one of [`types::DocumentKind`], returning JSON via the
+//!    provider's structured-output rails.
 //! 3. Low-confidence and suspicious-flag results flow through to the
 //!    teacher dashboard; we previously did a high-effort retry on
 //!    gpt-oss-120b but a temperature-0 re-call would just return the
@@ -24,9 +24,10 @@ pub mod aegis;
 pub mod document;
 pub mod extraction_guard;
 pub mod linker;
+pub mod pricing_scrape;
 pub mod prompts;
 pub mod types;
 
-pub use document::CerebrasClassifier;
+pub use document::LlmClassifier;
 // Other exports (DocumentKind, ALL_KINDS, is_signal_only_kind) are reached
 // via the `types` submodule directly from callers.

@@ -92,15 +92,16 @@ async fn emit_server_retrieval(
         .await;
 }
 
-/// Per-response token cap mirroring `flare.rs`. Same multiplier
-/// applied to `courses.daily_token_limit` so a tool-use answer
-/// can't burn more than 2x a student's daily budget in one turn.
+/// Per-response token cap mirroring `flare.rs`. Same multiplier applied
+/// to the per-response token budget (the course's daily USD cap
+/// converted to tokens at the model's rate) so a tool-use answer can't
+/// burn more than 2x a student's daily budget in one turn.
 const UNLIMITED_COURSE_RESPONSE_CAP: i64 = 200_000;
 const DAILY_LIMIT_RESPONSE_MULTIPLIER: i64 = 2;
 
-fn per_response_token_cap(daily_token_limit: i64) -> i64 {
-    if daily_token_limit > 0 {
-        daily_token_limit.saturating_mul(DAILY_LIMIT_RESPONSE_MULTIPLIER)
+fn per_response_token_cap(daily_token_budget: i64) -> i64 {
+    if daily_token_budget > 0 {
+        daily_token_budget.saturating_mul(DAILY_LIMIT_RESPONSE_MULTIPLIER)
     } else {
         UNLIMITED_COURSE_RESPONSE_CAP
     }
@@ -156,7 +157,7 @@ pub async fn run(
     if ctx.kg_enabled {
         rag.context = crate::classification::adversarial::filter_solution_chunks(
             &http_client,
-            &ctx.cerebras_api_key,
+            &ctx.utility,
             &ctx.db,
             ctx.course_id,
             rag.context,
@@ -229,7 +230,7 @@ pub async fn run(
     let guard_decision = super::extraction_guard::evaluate_for_turn(
         &ctx.db,
         &http_client,
-        &ctx.cerebras_api_key,
+        &ctx.utility,
         ctx.course_id,
         ctx.conversation_id,
         &ctx.history,
@@ -278,7 +279,7 @@ pub async fn run(
     //    initial partition's `context` (signals are excluded from
     //    LLM context by definition; tool calls can still surface
     //    relevant content if needed).
-    let cap = per_response_token_cap(ctx.daily_token_limit);
+    let cap = per_response_token_cap(ctx.daily_token_budget);
     let catalog_flags = ToolCatalogFlags {
         kg_enabled: ctx.kg_enabled,
     };
@@ -371,7 +372,7 @@ pub async fn run(
     let final_text = super::extraction_guard::intercept_reply(
         &ctx.db,
         &http_client,
-        &ctx.cerebras_api_key,
+        &ctx.utility,
         ctx.course_id,
         ctx.conversation_id,
         &guard_decision,

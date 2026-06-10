@@ -26,7 +26,7 @@ pub(crate) fn user_from_row(row: minerva_db::queries::users::UserRow) -> User {
         role: UserRole::parse(&row.role),
         suspended: row.suspended,
         role_manually_set: row.role_manually_set,
-        owner_daily_token_limit: row.owner_daily_token_limit,
+        owner_daily_cost_limit_usd: row.owner_daily_cost_limit_usd,
         privacy_acknowledged_at: row.privacy_acknowledged_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -276,7 +276,7 @@ async fn upsert_user(
         eppn,
         display_name,
         role.as_str(),
-        crate::system_defaults::owner_daily_token_limit(&state.db).await,
+        crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
     )
     .await?;
 

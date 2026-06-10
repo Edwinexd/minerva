@@ -1,0 +1,170 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO courses (\n            id, name, description, owner_id, daily_cost_limit_usd,\n            model, temperature, context_ratio, max_chunks, min_score,\n            strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt,\n            semester_label, reranker_model\n        ) VALUES (\n            $1, $2, $3, $4, $5,\n            COALESCE($6, 'gpt-oss-120b'),\n            COALESCE($7::DOUBLE PRECISION, 0.3),\n            COALESCE($8::DOUBLE PRECISION, 0.7),\n            COALESCE($9::INTEGER, 10),\n            COALESCE($10::REAL, 0.0),\n            COALESCE($11, 'simple'),\n            COALESCE($12::BOOLEAN, FALSE),\n            COALESCE($13, 'local'),\n            COALESCE($14, 'sentence-transformers/all-MiniLM-L6-v2'),\n            $15,\n            $16,\n            COALESCE($17, 'jinaai/jina-reranker-v2-base-multilingual')\n        )\n        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "context_ratio",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "temperature",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "system_prompt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "max_chunks",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "min_score",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 10,
+        "name": "strategy",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "tool_use_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "embedding_provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "embedding_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "embedding_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "reranker_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "daily_cost_limit_usd",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 17,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "semester_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "auto_managed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 22,
+        "name": "course_code",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Numeric",
+        "Text",
+        "Float8",
+        "Float8",
+        "Int4",
+        "Float4",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "93f8bcb3905226d5d0d885a3688713e74412d4efd68995f84121d5a3d86b3da6"
+}

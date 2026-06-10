@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO chat_models\n               (model, provider, display_name, supports_logprobs, supports_tool_use)\n           VALUES ($1, $2, $3, $4, $5)\n           ON CONFLICT (model) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28f04217e2de6a6d509e54219b26b131cab6538931caed9d80a0da522fc31272"
+}

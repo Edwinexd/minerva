@@ -382,7 +382,7 @@ async fn handle_launch(
         &eppn,
         display_name,
         "student",
-        crate::system_defaults::owner_daily_token_limit(&state.db).await,
+        crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
     )
     .await?;
 

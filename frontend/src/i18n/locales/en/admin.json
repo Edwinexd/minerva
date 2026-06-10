@@ -306,7 +306,7 @@
       "active": "active",
       "archived": "archived"
     },
-    "tokenLimitUnlimited": "unlimited",
+    "costLimitUnlimited": "unlimited",
     "settingsLink": "Settings",
     "empty": "No courses match the filter.",
     "featuresButton": "Features ({{enabled}}/{{total}})",
@@ -405,8 +405,8 @@
         "contextRatio": "Context ratio ({{percent}}%)",
         "maxChunks": "Max chunks",
         "minScore": "Minimum similarity ({{value}})",
-        "dailyTokenLimit": "Daily token limit / student",
-        "dailyTokenLimitHelp": "0 means unlimited.",
+        "dailyCostLimitUsd": "Daily spend cap / student (USD)",
+        "dailyCostLimitUsdHelp": "0 means unlimited.",
         "semesterLabel": "Semester label",
         "semesterLabelHelp": "Stamp a semester on every selected course, e.g. VT2026. Daisy-managed courses are overwritten on the next sync.",
         "reranker": "Re-ranker model",
@@ -495,6 +495,33 @@
     "revoke": "Revoke"
   },
   "system": {
+    "chatModels": {
+      "title": "Chat models",
+      "description": "Catalog of chat / utility LLM models. A model can only be enabled once its provider key is configured and both USD prices are entered (0 is allowed for on-prem / free models). The 'Default' radio is the model new courses are created with; the 'Utility' radio is the model used for classification, knowledge-graph linking, and the price-scrape helper. Prices are USD per 1,000,000 tokens; spend is computed from token usage at these rates. 'Scrape' fetches the provider's public pricing page and asks the utility model to suggest rates for review; nothing is saved until you click Save.",
+      "loadError": "Could not load chat models.",
+      "refresh": "Refresh from providers",
+      "refreshing": "Refreshing...",
+      "col": {
+        "enabled": "Enabled",
+        "model": "Model",
+        "default": "Default",
+        "utility": "Utility",
+        "inputPrice": "Input $/Mtok",
+        "outputPrice": "Output $/Mtok",
+        "courses": "Courses"
+      },
+      "enableLabel": "Enable {{model}}",
+      "defaultLabel": "Make {{model}} the default course model",
+      "utilityLabel": "Make {{model}} the utility model",
+      "inputPriceLabel": "Input price per million tokens for {{model}}",
+      "outputPriceLabel": "Output price per million tokens for {{model}}",
+      "unpriced": "unpriced",
+      "providerUnavailable": "no provider key",
+      "savePrice": "Save",
+      "scrape": "Scrape",
+      "scraping": "Scraping...",
+      "scrapeDone": "Suggested from {{url}} - review and save."
+    },
     "unavailableTitle": "System metrics unavailable",
     "storage": {
       "title": "Storage",
@@ -679,15 +706,15 @@
         "label": "Default system prompt",
         "description": "Prepended to every chat in a new course. Leave blank to use the built-in default prompt."
       },
-      "dailyTokenLimit": {
-        "label": "Default per-student daily token cap",
+      "dailyCostLimitUsd": {
+        "label": "Default per-student daily spend cap (USD)",
         "description": "Applied per new course. 0 = unlimited (the per-owner cap is then the only spend backstop)."
       }
     },
     "platform": {
-      "ownerDailyTokenLimit": {
-        "label": "Default per-owner daily token cap",
-        "description": "Applied at first login. Sums tokens across every course the user owns. 0 = unlimited. Existing users keep their current cap; edit per-user under Users."
+      "ownerDailyCostLimitUsd": {
+        "label": "Default per-owner daily spend cap (USD)",
+        "description": "Applied at first login. Sums spend across every course the user owns. 0 = unlimited. Existing users keep their current cap; edit per-user under Users."
       },
       "maxUploadBytes": {
         "label": "Max upload size (single doc, bytes)",

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT input_usd_per_mtok, output_usd_per_mtok FROM chat_models WHERE model = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "input_usd_per_mtok",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 1,
+        "name": "output_usd_per_mtok",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "ee650fe31783c4e99b1f942154ffe22642951bafc71a7ca0b561784123650f55"
+}

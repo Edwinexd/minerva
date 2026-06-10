@@ -51,33 +51,13 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{cerebras_request_with_retry, record_cerebras_usage};
+use crate::llm::util_request;
 use minerva_db::queries::course_token_usage::CATEGORY_AEGIS;
 
-/// First-fire analyzer model. Runs on the very first debounced fire
-/// of a fresh draft (no live-iteration history yet); the
-/// schema-constrained output keeps the model on rails for the JSON
-/// shape we want. Historically this was llama3.1-8b for latency, but
-/// Cerebras deprecated that model so we collapsed both analyzer
-/// paths onto gpt-oss-120b. Latency is kept in range by
-/// `reasoning_effort: "low"` on the call body.
-pub const AEGIS_MODEL: &str = "gpt-oss-120b";
-
-/// Follow-up analyzer model. Used the moment the trail's current
-/// draft carries any prior_suggestions ; i.e. the second debounced
-/// fire onward, once the student has actually started iterating.
-/// Same model as `AEGIS_MODEL` today (Cerebras' deprecation of
-/// llama3.1-8b collapsed the previous cheap/big split), but kept
-/// as a separate constant so the two paths can diverge again
-/// without a structural change to the analyzer body.
-pub const AEGIS_FOLLOWUP_MODEL: &str = "gpt-oss-120b";
-
-/// Larger model for the rewrite path. Runs rarely (only when the
-/// student opens the Review tray, picks answers, and clicks
-/// Preview) and produces text the student reads, so quality
-/// matters. Same string as `AEGIS_FOLLOWUP_MODEL` today; kept as a
-/// separate constant so the rewrite path can move independently.
-pub const AEGIS_REWRITE_MODEL: &str = "gpt-oss-120b";
+// Both analyzer fires (cold-start and follow-up) run on the
+// admin-selected utility model; the schema-constrained output keeps the
+// model on rails for the JSON shape, and `reasoning_effort: "low"` on
+// the call body keeps latency bounded.
 
 /// Cap on the analyzer's reply. Two suggestions @ ~25 words each
 /// for `text` + ~50 words each for `explanation` + 3-4 short
@@ -328,13 +308,11 @@ pub struct AegisSuggestion {
 #[derive(Debug, Clone)]
 pub struct AegisVerdict {
     pub suggestions: Vec<AegisSuggestion>,
-    /// Which Cerebras model actually produced this verdict. Either
-    /// `AEGIS_MODEL` (first-fire, cheap) or `AEGIS_FOLLOWUP_MODEL`
-    /// (post-first-iteration, higher-quality). The route layer
-    /// stamps it on the persisted `prompt_analyses.model_used` so
-    /// the History row reflects what actually ran rather than a
-    /// hard-coded constant.
-    pub model_used: &'static str,
+    /// Which model actually produced this verdict (the admin-selected
+    /// utility model). The route layer stamps it on the persisted
+    /// `prompt_analyses.model_used` so the History row reflects what
+    /// actually ran.
+    pub model_used: String,
 }
 
 /// One entry in the trail handed to the analyzer. The LAST entry is
@@ -406,14 +384,14 @@ pub struct AegisTrailEntry {
 ///     for the log line.
 pub async fn analyze_prompt(
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     db: &PgPool,
     course_id: Uuid,
     trail: &[AegisTrailEntry],
     mode: AegisMode,
 ) -> Result<Option<AegisVerdict>, String> {
-    if api_key.is_empty() {
-        // Dev / test path without CEREBRAS_API_KEY.
+    if util.provider.is_none() {
+        // Dev / test path with no utility provider configured.
         return Ok(None);
     }
     let Some(current) = trail.last() else {
@@ -518,24 +496,13 @@ pub async fn analyze_prompt(
         AEGIS_OUTPUT_FOOTER,
     );
 
-    // Pick the model. Cold-start drafts (no live-iteration history
-    // on the current entry) used to fall on a cheaper llama path
-    // and escalate to gpt-oss-120b once the student had seen at
-    // least one verdict. Cerebras deprecated the cheap model, so
-    // both paths now resolve to gpt-oss-120b ; the constants stay
-    // split (and the gating below stays) so a future cheaper option
-    // can land as a one-line change to `AEGIS_MODEL` without
-    // resurrecting the if/else. Reading the current draft entry's
-    // prior_suggestions is the cleanest signal that we're past the
-    // first round of THIS draft (cross-message context alone doesn't
-    // trigger the swap; the user explicitly wanted "after first
-    // round" to mean per-draft).
-    let use_followup = !current.prior_suggestions.is_empty();
-    let model_used = if use_followup {
-        AEGIS_FOLLOWUP_MODEL
-    } else {
-        AEGIS_MODEL
-    };
+    // Pick the model. Aegis used to switch between a cheap cold-start
+    // model and a stronger follow-up one based on `has_prior_context`;
+    // that escalation is gone. Cold-start and follow-up now both run on
+    // the single admin-selected utility model (the per-draft signal above
+    // still gates only the already-addressed prompt check, not the model).
+    // `prompt_analyses.model_used` records which one actually ran.
+    let model_used = util.model.clone();
 
     let mut body = serde_json::json!({
         "model": model_used,
@@ -628,25 +595,25 @@ pub async fn analyze_prompt(
     // range; matches the rewrite path's setting.
     body["reasoning_effort"] = serde_json::Value::String("low".to_string());
 
-    let response = match cerebras_request_with_retry(http, api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!("aegis: request failed: {}", e);
-            return Err(format!("cerebras request failed: {e}"));
+            return Err(format!("aegis request failed: {e}"));
         }
+        None => return Err("no utility model configured".to_string()),
     };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("aegis: response not JSON: {}", e);
-            return Err(format!("cerebras response not JSON: {e}"));
-        }
-    };
-    record_cerebras_usage(db, course_id, CATEGORY_AEGIS, model_used, &payload).await;
+    let _ = minerva_db::queries::course_token_usage::record(
+        db,
+        course_id,
+        CATEGORY_AEGIS,
+        &model_used,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
+    )
+    .await;
 
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let raw = content.as_str();
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
         Ok(v) => v,
         Err(e) => {
@@ -746,15 +713,15 @@ const AEGIS_REWRITE_MAX_TOKENS: usize = 512;
 
 pub async fn rewrite_prompt(
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     db: &PgPool,
     course_id: Uuid,
     original: &str,
     suggestions: &[AegisSuggestion],
     mode: AegisMode,
 ) -> Result<String, String> {
-    if api_key.is_empty() {
-        return Err("CEREBRAS_API_KEY missing".to_string());
+    if util.provider.is_none() {
+        return Err("no utility model configured".to_string());
     }
     if original.trim().is_empty() {
         return Err("empty draft".to_string());
@@ -795,7 +762,7 @@ pub async fn rewrite_prompt(
     // extraction_guard's rewrite path and keeps latency in the ~1s
     // range we want for the Preview round-trip.
     let body = serde_json::json!({
-        "model": AEGIS_REWRITE_MODEL,
+        "model": util.model,
         "temperature": 0.2,
         "reasoning_effort": "low",
         "max_completion_tokens": AEGIS_REWRITE_MAX_TOKENS,
@@ -805,26 +772,25 @@ pub async fn rewrite_prompt(
         ],
     });
 
-    let response = match cerebras_request_with_retry(http, api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!("aegis rewrite: request failed: {}", e);
-            return Err(format!("cerebras request failed: {e}"));
+            return Err(format!("aegis request failed: {e}"));
         }
+        None => return Err("no utility model configured".to_string()),
     };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("aegis rewrite: response not JSON: {}", e);
-            return Err(format!("cerebras response not JSON: {e}"));
-        }
-    };
-    record_cerebras_usage(db, course_id, CATEGORY_AEGIS, AEGIS_REWRITE_MODEL, &payload).await;
+    let _ = minerva_db::queries::course_token_usage::record(
+        db,
+        course_id,
+        CATEGORY_AEGIS,
+        &util.model,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
+    )
+    .await;
 
-    let rewritten = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .map(str::trim)
-        .unwrap_or("");
+    let rewritten = content.trim();
     if rewritten.is_empty() {
         return Err("empty rewrite from model".to_string());
     }

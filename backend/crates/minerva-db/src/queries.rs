@@ -1,5 +1,6 @@
 pub mod api_keys;
 pub mod canvas;
+pub mod chat_models;
 pub mod conversation_flags;
 pub mod conversations;
 pub mod course_daisy_offerings;

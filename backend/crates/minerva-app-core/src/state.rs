@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::llm::LlmRegistry;
 use crate::lti::LtiKeyPair;
 use crate::model_capabilities::CapabilityCache;
 use crate::relink_scheduler::RelinkScheduler;
@@ -120,6 +121,11 @@ pub struct AppState {
     /// short-circuit before issuing requests the model can't
     /// satisfy. See `crate::model_capabilities`.
     pub model_capabilities: CapabilityCache,
+    /// Provider-agnostic LLM registry, built once from env/secret. Holds
+    /// an `Arc<dyn ChatProvider>` per configured provider id
+    /// (`cerebras`, `openai`, ...); a chat model resolves its provider
+    /// via `chat_models.provider` and this registry. See `crate::llm`.
+    pub llm: Arc<LlmRegistry>,
     /// Live progress of the admin classification backfill task.
     /// `None` when no backfill has run since the last server restart;
     /// `Some(_)` while one is running and for the cycle after it
@@ -180,6 +186,10 @@ impl AppState {
             }
         }
 
+        // (The chat-model catalog is populated by fetching each
+        // configured provider's `/models` listing once the LLM registry
+        // is built below, rather than from a hardcoded list.)
+
         // Seed `system_defaults` for every knob in the registry that
         // isn't already in the DB. Existing rows are left alone (so
         // an admin's edit in the UI persists across restarts);
@@ -199,6 +209,30 @@ impl AppState {
             config.cerebras_api_key.clone(),
             http_client.clone(),
         );
+
+        // Provider-agnostic LLM registry. Built from env/secret keys;
+        // only providers with a present key are registered.
+        let llm = Arc::new(LlmRegistry::from_config(http_client.clone(), config));
+
+        // Populate the chat-model catalog by fetching each configured
+        // provider's `/models` listing. New entries land disabled +
+        // unpriced (an admin enables + prices them); existing rows keep
+        // their admin toggles + prices. The migration-seeded
+        // `gpt-oss-120b` row (enabled + priced + default) is preserved.
+        // Spawned in the background so boot / readiness never blocks on
+        // third-party API reachability (matters on the single OOM-prone
+        // node); an admin can also re-sync via POST /admin/chat-models/refresh.
+        {
+            let llm = llm.clone();
+            let db = db.clone();
+            tokio::spawn(async move {
+                let seeded = crate::llm::provider::sync_chat_models(&llm, &db).await;
+                if seeded > 0 {
+                    tracing::info!("chat_models: seeded {seeded} model(s) from providers");
+                }
+            });
+        }
+
         Ok(Self {
             db: db.clone(),
             qdrant: Arc::new(qdrant),
@@ -209,9 +243,18 @@ impl AppState {
             reranker,
             rules,
             model_capabilities,
+            llm,
             relink_scheduler: Arc::new(RelinkScheduler::new(db)),
             backfill_tracker: Arc::new(BackfillTracker::default()),
         })
+    }
+
+    /// Resolve the admin-selected utility model (classification / KG /
+    /// aegis / suggested-questions) to a concrete `(provider, model)` via
+    /// `chat_models.is_utility_default` + the registry. Cheap; call per
+    /// request that needs a utility call.
+    pub async fn utility_model(&self) -> crate::llm::UtilityModel {
+        crate::llm::resolve_utility_model(&self.llm, &self.db).await
     }
 }
 

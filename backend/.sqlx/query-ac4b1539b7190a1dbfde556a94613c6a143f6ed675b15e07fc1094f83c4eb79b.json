@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, eppn, display_name, role, suspended, role_manually_set, owner_daily_cost_limit_usd, privacy_acknowledged_at, created_at, updated_at FROM users WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "eppn",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "suspended",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "role_manually_set",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "owner_daily_cost_limit_usd",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "privacy_acknowledged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "ac4b1539b7190a1dbfde556a94613c6a143f6ed675b15e07fc1094f83c4eb79b"
+}

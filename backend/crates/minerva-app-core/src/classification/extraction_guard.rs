@@ -35,7 +35,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{cerebras_request_with_retry, record_cerebras_usage};
+use crate::llm::util_request;
 use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
 
 // ── Cerebras model selection ───────────────────────────────────────
@@ -59,17 +59,10 @@ use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
 // to a larger model, to a smaller one, ...) independently from
 // the classifiers.
 
-/// Model for the always-on / conditional binary classifiers.
-/// JSON-schema-constrained outputs + temperature 0 +
-/// `reasoning_effort: "low"` (set per call body) keep it on rails
-/// and bounded for latency.
-const GUARD_CLASSIFIER_MODEL: &str = "gpt-oss-120b";
-
-/// Model for the rewrite path; runs rarely (only when the output
-/// check trips) and produces text the student reads, so quality
-/// matters. Same string as `GUARD_CLASSIFIER_MODEL` today; kept
-/// separate so the rewrite path can diverge independently.
-const GUARD_REWRITE_MODEL: &str = "gpt-oss-120b";
+// All four guard calls run on the admin-selected utility model
+// (resolved per call via `AppState::utility_model`), at temperature 0 +
+// `reasoning_effort: "low"` (set per call body) to keep the always-on
+// intent classifier bounded.
 
 /// How many recent user messages the intent classifier sees. Five
 /// turns is enough to catch "drift" cases where the student didn't
@@ -126,12 +119,12 @@ No prose."#;
 /// the student trying to extract".
 pub async fn classify_intent(
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     db: &PgPool,
     course_id: Uuid,
     recent_user_messages: &[String],
 ) -> IntentVerdict {
-    if api_key.is_empty() {
+    if util.provider.is_none() {
         // Dev / test path without CEREBRAS_API_KEY. Fail open.
         return IntentVerdict {
             is_extraction: false,
@@ -157,7 +150,7 @@ pub async fn classify_intent(
     });
 
     let body = serde_json::json!({
-        "model": GUARD_CLASSIFIER_MODEL,
+        "model": util.model,
         "temperature": 0.0,
         "reasoning_effort": "low",
         "max_completion_tokens": INTENT_MAX_TOKENS,
@@ -183,37 +176,32 @@ pub async fn classify_intent(
         }
     });
 
-    let response = match cerebras_request_with_retry(http, api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!("extraction_guard: intent request failed (fail-open): {}", e);
             return IntentVerdict {
                 is_extraction: false,
                 rationale: format!("intent classifier failed: {e}"),
             };
         }
-    };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("extraction_guard: intent JSON failed (fail-open): {}", e);
+        None => {
             return IntentVerdict {
                 is_extraction: false,
-                rationale: format!("intent response not JSON: {e}"),
+                rationale: "no utility model configured".to_string(),
             };
         }
     };
-    record_cerebras_usage(
+    let _ = minerva_db::queries::course_token_usage::record(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
-        GUARD_CLASSIFIER_MODEL,
-        &payload,
+        &util.model,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await;
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let raw = content.as_str();
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
         Ok(v) => v,
         Err(e) => {
@@ -269,13 +257,13 @@ No prose."#;
 /// transport or parsing errors.
 pub async fn check_output_for_solution(
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     db: &PgPool,
     course_id: Uuid,
     assistant_reply: &str,
     assignment_excerpts: &[String],
 ) -> OutputVerdict {
-    if api_key.is_empty() || assistant_reply.is_empty() {
+    if util.provider.is_none() || assistant_reply.is_empty() {
         return OutputVerdict {
             is_complete_solution: false,
             rationale: "output check skipped".to_string(),
@@ -286,7 +274,7 @@ pub async fn check_output_for_solution(
         "assistant_reply": assistant_reply,
     });
     let body = serde_json::json!({
-        "model": GUARD_CLASSIFIER_MODEL,
+        "model": util.model,
         "temperature": 0.0,
         "reasoning_effort": "low",
         "max_completion_tokens": OUTPUT_CHECK_MAX_TOKENS,
@@ -312,37 +300,32 @@ pub async fn check_output_for_solution(
         }
     });
 
-    let response = match cerebras_request_with_retry(http, api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!("extraction_guard: output check failed (fail-open): {}", e);
             return OutputVerdict {
                 is_complete_solution: false,
                 rationale: format!("output check failed: {e}"),
             };
         }
-    };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("extraction_guard: output JSON failed (fail-open): {}", e);
+        None => {
             return OutputVerdict {
                 is_complete_solution: false,
-                rationale: format!("output verdict not JSON: {e}"),
+                rationale: "no utility model configured".to_string(),
             };
         }
     };
-    record_cerebras_usage(
+    let _ = minerva_db::queries::course_token_usage::record(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
-        GUARD_CLASSIFIER_MODEL,
-        &payload,
+        &util.model,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await;
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let raw = content.as_str();
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
         Ok(v) => v,
         Err(_) => {
@@ -378,7 +361,7 @@ Output ONLY the message text. No JSON, no markdown headers, no explanation of wh
 /// a stock fallback so the chat path always has something to show.
 pub async fn generate_socratic_rewrite(
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     db: &PgPool,
     course_id: Uuid,
     student_message: &str,
@@ -388,7 +371,7 @@ pub async fn generate_socratic_rewrite(
         "{}What's the first concrete step you'd take to solve this on your own? Walk me through it and I'll help you think it through.",
         REWRITE_PREFIX
     );
-    if api_key.is_empty() {
+    if util.provider.is_none() {
         return fallback;
     }
     let user_payload = serde_json::json!({
@@ -396,7 +379,7 @@ pub async fn generate_socratic_rewrite(
         "original_reply_we_blocked": original_reply,
     });
     let body = serde_json::json!({
-        "model": GUARD_REWRITE_MODEL,
+        "model": util.model,
         "temperature": 0.3,
         "reasoning_effort": "low",
         "max_completion_tokens": REWRITE_MAX_TOKENS,
@@ -405,28 +388,24 @@ pub async fn generate_socratic_rewrite(
             { "role": "user", "content": user_payload.to_string() },
         ],
     });
-    let response = match cerebras_request_with_retry(http, api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!("extraction_guard: rewrite request failed: {}", e);
             return fallback;
         }
+        None => return fallback,
     };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(_) => return fallback,
-    };
-    record_cerebras_usage(
+    let _ = minerva_db::queries::course_token_usage::record(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
-        GUARD_REWRITE_MODEL,
-        &payload,
+        &util.model,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await;
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let raw = content.as_str();
     if raw.trim().is_empty() {
         return fallback;
     }
@@ -482,7 +461,7 @@ No prose."#;
 /// constraint, which is the harm we want to avoid.
 pub async fn classify_engagement(
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     db: &PgPool,
     course_id: Uuid,
     prior_assistant_reply: &str,
@@ -497,7 +476,7 @@ pub async fn classify_engagement(
             rationale: "student included a code block".to_string(),
         };
     }
-    if api_key.is_empty() {
+    if util.provider.is_none() {
         // Dev / test path. Per the "default engaged" policy, lift.
         return EngagementVerdict {
             engaged: true,
@@ -515,7 +494,7 @@ pub async fn classify_engagement(
         "new_student_message": new_student_message,
     });
     let body = serde_json::json!({
-        "model": GUARD_CLASSIFIER_MODEL,
+        "model": util.model,
         "temperature": 0.0,
         "reasoning_effort": "low",
         "max_completion_tokens": OUTPUT_CHECK_MAX_TOKENS,
@@ -541,9 +520,9 @@ pub async fn classify_engagement(
         }
     });
 
-    let response = match cerebras_request_with_retry(http, api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!(
                 "extraction_guard: engagement request failed (defaulting to engaged): {}",
                 e
@@ -553,31 +532,23 @@ pub async fn classify_engagement(
                 rationale: format!("engagement classifier failed: {e}"),
             };
         }
-    };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "extraction_guard: engagement JSON failed (defaulting to engaged): {}",
-                e
-            );
+        None => {
             return EngagementVerdict {
                 engaged: true,
-                rationale: format!("engagement response not JSON: {e}"),
+                rationale: "no utility model configured".to_string(),
             };
         }
     };
-    record_cerebras_usage(
+    let _ = minerva_db::queries::course_token_usage::record(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
-        GUARD_CLASSIFIER_MODEL,
-        &payload,
+        &util.model,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await;
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let raw = content.as_str();
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
         Ok(v) => v,
         Err(_) => {
@@ -612,6 +583,30 @@ mod tests {
     // requires it). All tests still take early-return paths that
     // never actually open a connection.
 
+    fn util(api_key: &str) -> crate::llm::UtilityModel {
+        // Empty key -> no provider (the "no utility model" path). A
+        // non-empty key wires a real provider pointed at an unreachable
+        // endpoint: tests that pass one only exercise the early input
+        // guards (empty history / empty message / code block), which
+        // return before any network call is made.
+        let provider: Option<std::sync::Arc<dyn crate::llm::ChatProvider>> = if api_key.is_empty() {
+            None
+        } else {
+            Some(std::sync::Arc::new(
+                crate::llm::OpenAiCompatibleProvider::new(
+                    "test",
+                    "http://127.0.0.1:1/v1",
+                    api_key,
+                    reqwest::Client::new(),
+                ),
+            ))
+        };
+        crate::llm::UtilityModel {
+            provider,
+            model: "gpt-oss-120b".to_string(),
+        }
+    }
+
     #[tokio::test]
     async fn classify_intent_fails_open_without_api_key() {
         // Sanity: no API key + dummy http client -> deterministic
@@ -620,7 +615,7 @@ mod tests {
         let db = lazy_pool();
         let v = classify_intent(
             &http,
-            "",
+            &util(""),
             &db,
             Uuid::nil(),
             &["implement my homework".to_string()],
@@ -634,7 +629,7 @@ mod tests {
     async fn classify_intent_handles_empty_history() {
         let http = reqwest::Client::new();
         let db = lazy_pool();
-        let v = classify_intent(&http, "fake-key", &db, Uuid::nil(), &[]).await;
+        let v = classify_intent(&http, &util("fake-key"), &db, Uuid::nil(), &[]).await;
         assert!(!v.is_extraction);
         assert!(v.rationale.contains("no user messages"));
     }
@@ -643,7 +638,7 @@ mod tests {
     async fn rewrite_returns_fallback_without_api_key() {
         let http = reqwest::Client::new();
         let db = lazy_pool();
-        let s = generate_socratic_rewrite(&http, "", &db, Uuid::nil(), "Q", "A").await;
+        let s = generate_socratic_rewrite(&http, &util(""), &db, Uuid::nil(), "Q", "A").await;
         assert!(s.starts_with(REWRITE_PREFIX));
         assert!(s.len() > REWRITE_PREFIX.len());
     }
@@ -657,7 +652,7 @@ mod tests {
         let db = lazy_pool();
         let v = classify_engagement(
             &http,
-            "",
+            &util(""),
             &db,
             Uuid::nil(),
             "What's your first step?",
@@ -676,7 +671,7 @@ mod tests {
         let db = lazy_pool();
         let v = classify_engagement(
             &http,
-            "",
+            &util(""),
             &db,
             Uuid::nil(),
             "ask",
@@ -691,7 +686,7 @@ mod tests {
     async fn engagement_returns_not_engaged_for_empty_message() {
         let http = reqwest::Client::new();
         let db = lazy_pool();
-        let v = classify_engagement(&http, "fake-key", &db, Uuid::nil(), "ask", "   ").await;
+        let v = classify_engagement(&http, &util("fake-key"), &db, Uuid::nil(), "ask", "   ").await;
         assert!(!v.engaged);
     }
 }

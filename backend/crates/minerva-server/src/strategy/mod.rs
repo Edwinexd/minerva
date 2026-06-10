@@ -27,11 +27,25 @@ pub struct GenerationContext {
     pub course_id: Uuid,
     pub conversation_id: Uuid,
     pub user_id: Uuid,
-    pub cerebras_api_key: String,
-    /// Base URL for the Cerebras chat-completions endpoint. Production
-    /// routes default this to `common::CEREBRAS_CHAT_COMPLETIONS_URL`;
-    /// integration tests override it to point at a wiremock server.
-    pub cerebras_base_url: String,
+    /// Resolved chat provider for `model`, drawn from the `AppState`
+    /// `LlmRegistry` at the route handler (provider derived from
+    /// `chat_models.provider`). Streaming strategies call
+    /// `common::stream_chat_to_client(&ctx.provider, ...)`.
+    pub provider: std::sync::Arc<dyn crate::llm::ChatProvider>,
+    /// OpenAI-compatible `(api_key, base_url)` for the bespoke FLARE /
+    /// research-phase streaming loops, which parse tool-calls + logprobs
+    /// inline against the raw transport. Both are sourced from
+    /// `provider.openai_endpoint()` at the route handler so they stay in
+    /// lockstep with the registry. Provider-agnostic in name; they hold
+    /// whichever OpenAI-compatible chat provider `model` resolved to.
+    /// Integration tests override the URL to point at a wiremock server.
+    pub chat_api_key: String,
+    pub chat_base_url: String,
+    /// Resolved utility model (admin-selected via
+    /// `chat_models.is_utility_default`) for the adversarial filter and
+    /// extraction guard run inside the strategy. Carries the model id +
+    /// a handle to its provider. Resolved once at the route handler.
+    pub utility: crate::llm::UtilityModel,
     pub openai_api_key: String,
     pub embedding_provider: String,
     pub embedding_model: String,
@@ -43,11 +57,20 @@ pub struct GenerationContext {
     pub history: Vec<minerva_db::queries::conversations::MessageRow>,
     pub user_content: String,
     pub is_first_message: bool,
-    /// Per-student-per-course daily token limit copied from `courses.daily_token_limit`.
-    /// 0 = unlimited (no per-course cap configured). Used by FLARE as an input to
-    /// the single-response fail-safe so one answer cannot burn more than 2x a
-    /// student's daily allowance.
-    pub daily_token_limit: i64,
+    /// Per-response token budget for the tool-use / FLARE fail-safe: the
+    /// course's daily USD cap converted to a token count at the chosen
+    /// model's blended rate (the route handler does the conversion). 0 =
+    /// unlimited (no cap, or a free model). One answer cannot burn more
+    /// than 2x this; see `tool_use::per_response_token_cap`.
+    pub daily_token_budget: i64,
+    /// The model's `(input, output)` USD-per-Mtok rates, resolved once at
+    /// the route handler via `chat_models::rates_of`. Reused here so a chat
+    /// turn does a single rate lookup: the route uses it to derive
+    /// `daily_token_budget`, and `common::finalize` reuses it for the
+    /// fleet-wide `chat_cost_microusd_total` metric instead of querying
+    /// again. `None` = unknown price (NULL rate) or model absent from the
+    /// catalog; `finalize` then bumps `chat_unpriced_calls_total`.
+    pub billing_rates: Option<(rust_decimal::Decimal, rust_decimal::Decimal)>,
     pub db: sqlx::PgPool,
     pub qdrant: std::sync::Arc<qdrant_client::Qdrant>,
     pub fastembed: std::sync::Arc<dyn minerva_core::rpc::EmbedderClient>,

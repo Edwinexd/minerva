@@ -181,9 +181,10 @@ pub async fn relink_course(
         .map_err(|e| e.to_string())?;
 
     let http = reqwest::Client::new();
+    let util = state.utility_model().await;
     let ctx = crate::classification::linker::LinkContext {
         http: &http,
-        api_key: &state.config.cerebras_api_key,
+        util: &util,
         db: &state.db,
         qdrant: &state.qdrant,
     };

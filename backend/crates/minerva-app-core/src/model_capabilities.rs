@@ -218,6 +218,27 @@ impl CapabilityCache {
     }
 }
 
+/// Validate a `(capabilities, strategy, tool_use_enabled)` triple,
+/// provider-agnostically. The capabilities come from the authoritative
+/// per-model declaration in the `chat_models` catalog
+/// (`supports_logprobs` / `supports_tool_use`), so this works across
+/// providers (an Anthropic model declares `supports_logprobs = false`
+/// and is therefore rejected for the FLARE strategy). Pure + sync; the
+/// caller fetches the capabilities.
+pub fn validate_caps(
+    caps: Capabilities,
+    strategy: &str,
+    tool_use_enabled: bool,
+) -> Result<(), CapabilityMismatch> {
+    if tool_use_enabled && !caps.supports_tools {
+        return Err(CapabilityMismatch::ToolsUnsupported);
+    }
+    if strategy == "flare" && !caps.supports_logprobs {
+        return Err(CapabilityMismatch::LogprobsUnsupported);
+    }
+    Ok(())
+}
+
 /// Validate a `(model, strategy, tool_use_enabled)` triple before
 /// persisting a course config. Refuses combinations the model
 /// can't satisfy at runtime, surfacing the mismatch loudly to the

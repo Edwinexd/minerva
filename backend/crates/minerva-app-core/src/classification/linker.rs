@@ -46,18 +46,13 @@ use qdrant_client::Qdrant;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{cerebras_request_with_retry, payload_int, payload_string, record_cerebras_usage};
+use crate::llm::{payload_int, payload_string, util_request};
 use minerva_db::queries::course_token_usage::CATEGORY_LINKER;
 
-/// Cerebras model for the per-pair link decision. Briefly ran on
-/// llama3.1-8b for cost; that model has been deprecated by Cerebras
-/// so the dispatch is back on gpt-oss-120b. A structured output
-/// (single enum + confidence + rationale) with `temperature: 0` and
-/// `reasoning_effort: "low"` (set in the body) is well within
-/// gpt-oss's competence and keeps per-pair cost / latency bounded;
-/// the same shape that worked on the small model continues to work
-/// here.
-const LINKER_MODEL: &str = "gpt-oss-120b";
+// The per-pair link decision runs on the admin-selected utility model
+// (resolved per relink). A structured output (single enum + confidence +
+// rationale) with `temperature: 0` + `reasoning_effort: "low"` (set in
+// the body) keeps per-pair cost / latency bounded.
 
 /// Drop edges the model emits below this confidence.
 ///
@@ -234,7 +229,7 @@ pub struct LinkerOutput {
 /// and persisted it to the doc row + Qdrant.
 pub struct LinkContext<'a> {
     pub http: &'a reqwest::Client,
-    pub api_key: &'a str,
+    pub util: &'a crate::llm::UtilityModel,
     pub db: &'a PgPool,
     pub qdrant: &'a Arc<Qdrant>,
 }
@@ -302,9 +297,9 @@ pub async fn link_course(
         });
     }
 
-    if ctx.api_key.is_empty() {
-        // Dev / test env without CEREBRAS_API_KEY. Skip rather than
-        // burn time on a guaranteed-401 call.
+    if ctx.util.provider.is_none() {
+        // Dev / test env with no utility provider configured. Skip
+        // rather than burn time on a guaranteed-failing call.
         return Ok(LinkerOutput {
             considered: classified.len(),
             cached_hits: 0,
@@ -583,7 +578,7 @@ pub async fn link_course(
     // Step 5: LLM labels FRESH candidates only.
     let edges = call_linker_llm(
         ctx.http,
-        ctx.api_key,
+        ctx.util,
         ctx.db,
         course_id,
         truncated,
@@ -1104,7 +1099,7 @@ const PAIR_CALL_CONCURRENCY: usize = 12;
 #[allow(clippy::too_many_arguments)]
 async fn call_linker_llm(
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     db: &sqlx::PgPool,
     course_id: Uuid,
     docs: &[&DocumentRow],
@@ -1158,7 +1153,7 @@ async fn call_linker_llm(
     // (which are logged inside `classify_one_pair`) so the final
     // collected Vec only contains real edges.
     let edges: Vec<ProposedEdge> = stream::iter(pair_inputs)
-        .map(|pair| async move { classify_one_pair(http, api_key, db, course_id, pair).await })
+        .map(|pair| async move { classify_one_pair(http, util, db, course_id, pair).await })
         .buffer_unordered(PAIR_CALL_CONCURRENCY)
         .filter_map(|r| async move { r })
         .collect()
@@ -1195,7 +1190,7 @@ struct PairInput {
 /// edge stream.
 async fn classify_one_pair(
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     db: &sqlx::PgPool,
     course_id: Uuid,
     p: PairInput,
@@ -1215,7 +1210,7 @@ async fn classify_one_pair(
     });
 
     let body = serde_json::json!({
-        "model": LINKER_MODEL,
+        "model": util.model,
         "temperature": 0.0,
         // `reasoning_effort: "low"` keeps per-pair latency bounded;
         // the decision is a single enum + confidence + rationale and
@@ -1262,9 +1257,9 @@ async fn classify_one_pair(
         }
     });
 
-    let response = match cerebras_request_with_retry(http, api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
+    let (content, usage) = match util_request(http, util, &body).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
             tracing::warn!(
                 "linker: per-pair request failed for {}<->{}: {}",
                 p.a_id,
@@ -1273,47 +1268,30 @@ async fn classify_one_pair(
             );
             return None;
         }
-    };
-    let payload: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "linker: per-pair response not JSON for {}<->{}: {}",
-                p.a_id,
-                p.b_id,
-                e
-            );
-            return None;
-        }
+        None => return None,
     };
     // Best-effort token-spend bookkeeping. Records every per-pair
     // call against `course_id` in the `linker` category, regardless
     // of whether the call ultimately produced an edge; the cost
     // was paid either way.
-    record_cerebras_usage(db, course_id, CATEGORY_LINKER, LINKER_MODEL, &payload).await;
-    // Guard against finish_reason=length producing an empty content
-    // field; caller would otherwise see this as "no edge" without
-    // knowing the model was cut off mid-token.
-    let finish = payload["choices"][0]["finish_reason"]
-        .as_str()
-        .unwrap_or("");
-    if finish == "length" {
-        tracing::warn!(
-            "linker: per-pair {}<->{} hit completion-token cap; raising max_completion_tokens may help",
-            p.a_id,
-            p.b_id,
-        );
-        return None;
-    }
-    let raw = payload["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
+    let _ = minerva_db::queries::course_token_usage::record(
+        db,
+        course_id,
+        CATEGORY_LINKER,
+        &util.model,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
+    )
+    .await;
+    // An empty body means the model produced nothing usable (e.g. it
+    // hit the completion-token cap mid-token); a truncated-but-nonempty
+    // body falls through to the JSON parse below and is rejected there.
+    let raw = content.as_str();
     if raw.is_empty() {
         tracing::warn!(
-            "linker: per-pair {}<->{} returned empty content (finish={})",
+            "linker: per-pair {}<->{} returned empty content",
             p.a_id,
             p.b_id,
-            finish
         );
         return None;
     }

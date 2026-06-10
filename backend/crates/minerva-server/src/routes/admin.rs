@@ -16,8 +16,8 @@ pub fn router() -> Router<AppState> {
         .route("/users/{id}/role-lock", delete(clear_role_lock))
         .route("/users/{id}/suspended", put(update_user_suspended))
         .route(
-            "/users/{id}/owner-daily-token-limit",
-            put(update_owner_daily_token_limit),
+            "/users/{id}/owner-daily-cost-limit-usd",
+            put(update_owner_daily_cost_limit_usd),
         )
         .route("/users/{id}/daily-usage", delete(reset_user_daily_usage))
         .route("/role-rules", get(list_role_rules).post(create_role_rule))
@@ -71,6 +71,21 @@ pub fn router() -> Router<AppState> {
         )
         .route("/reranker-models/default", put(set_default_reranker_model))
         .route("/reranker-benchmark", post(run_reranker_benchmark))
+        .route(
+            "/chat-models",
+            get(list_chat_models).put(update_chat_model_enabled),
+        )
+        .route("/chat-models/default", put(set_default_chat_model))
+        .route(
+            "/chat-models/utility-default",
+            put(set_utility_default_chat_model),
+        )
+        .route("/chat-models/price", put(set_chat_model_price))
+        .route("/chat-models/refresh", post(refresh_chat_models))
+        .route(
+            "/chat-models/{model}/scrape-price",
+            post(scrape_chat_model_price),
+        )
         .route(
             "/system-defaults",
             get(list_system_defaults).put(update_system_default),
@@ -465,7 +480,7 @@ struct UserResponse {
     role: String,
     suspended: bool,
     role_manually_set: bool,
-    owner_daily_token_limit: i64,
+    owner_daily_cost_limit_usd: rust_decimal::Decimal,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -486,7 +501,7 @@ async fn list_users(
                 role: r.role,
                 suspended: r.suspended,
                 role_manually_set: r.role_manually_set,
-                owner_daily_token_limit: r.owner_daily_token_limit,
+                owner_daily_cost_limit_usd: r.owner_daily_cost_limit_usd,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             })
@@ -564,34 +579,31 @@ async fn update_user_suspended(
 
 #[derive(Deserialize)]
 struct UpdateOwnerLimitRequest {
-    limit: i64,
+    /// Per-owner daily spending cap in USD. 0 = unlimited.
+    limit: rust_decimal::Decimal,
 }
 
-/// Sanity ceiling on the per-owner daily cap. Picked to leave 6+ orders of
-/// magnitude of headroom before a sum across all owned courses overflows
-/// BIGINT (i64::MAX is ~9.2e18). 1 trillion tokens/day is also wildly
-/// beyond any realistic spend, so this is purely a footgun guard against
-/// admin typos / fat-finger.
-const OWNER_LIMIT_MAX: i64 = 1_000_000_000_000;
-
-async fn update_owner_daily_token_limit(
+async fn update_owner_daily_cost_limit_usd(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateOwnerLimitRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_admin(&user)?;
-    if body.limit < 0 {
+    // Sanity ceiling on the per-owner daily USD cap: a footgun guard
+    // against admin typos, far above any realistic spend.
+    let owner_limit_max = rust_decimal::Decimal::from(1_000_000);
+    if body.limit < rust_decimal::Decimal::ZERO {
         return Err(AppError::bad_request("admin.limit_negative"));
     }
-    if body.limit > OWNER_LIMIT_MAX {
+    if body.limit > owner_limit_max {
         return Err(AppError::bad_request_with(
             "admin.limit_too_large",
-            [("max", OWNER_LIMIT_MAX.to_string())],
+            [("max", owner_limit_max.to_string())],
         ));
     }
     let updated =
-        minerva_db::queries::users::update_owner_daily_token_limit(&state.db, id, body.limit)
+        minerva_db::queries::users::update_owner_daily_cost_limit_usd(&state.db, id, body.limit)
             .await?;
     if !updated {
         return Err(AppError::NotFound);
@@ -1249,7 +1261,7 @@ struct BulkCoursePatch {
     embedding_provider: Option<String>,
     embedding_model: Option<String>,
     reranker_model: Option<String>,
-    daily_token_limit: Option<i64>,
+    daily_cost_limit_usd: Option<rust_decimal::Decimal>,
     semester_label: Option<String>,
 }
 
@@ -1270,7 +1282,7 @@ impl BulkCoursePatch {
             && self.embedding_provider.is_none()
             && self.embedding_model.is_none()
             && self.reranker_model.is_none()
-            && self.daily_token_limit.is_none()
+            && self.daily_cost_limit_usd.is_none()
             && self.semester_label.is_none()
     }
 }
@@ -1354,7 +1366,7 @@ async fn apply_bulk_one(
             embedding_provider: patch.embedding_provider.clone(),
             embedding_model: patch.embedding_model.clone(),
             reranker_model: patch.reranker_model.clone(),
-            daily_token_limit: patch.daily_token_limit,
+            daily_cost_limit_usd: patch.daily_cost_limit_usd,
             semester_label: patch.semester_label.clone(),
         };
         crate::routes::courses::apply_course_update(state, &existing, fields, true).await?;
@@ -1767,6 +1779,316 @@ async fn set_default_embedding_model(
         model: row.model,
         is_default: row.is_default,
     }))
+}
+
+// ── Chat / utility model catalog (admin) ───────────────────────────
+
+/// Convert a stored `NUMERIC` rate to `f64` for the JSON wire. Storage
+/// and cost computation stay `Decimal`; only the API boundary to the
+/// JS frontend (whose numbers are f64 anyway) downcasts. `None` (unknown
+/// price) passes through as JSON null so the UI can render an "unpriced"
+/// badge distinct from a typed `0` (free).
+fn rate_to_f64(d: Option<rust_decimal::Decimal>) -> Option<f64> {
+    use rust_decimal::prelude::ToPrimitive;
+    d.and_then(|v| v.to_f64())
+}
+
+#[derive(Serialize)]
+struct ChatModelEntry {
+    model: String,
+    provider: String,
+    display_name: String,
+    enabled: bool,
+    is_default: bool,
+    is_utility_default: bool,
+    /// USD per 1M tokens. `null` = unknown (unusable; cannot be enabled);
+    /// `0.0` = genuinely free (on-prem, usable).
+    input_usd_per_mtok: Option<f64>,
+    output_usd_per_mtok: Option<f64>,
+    supports_logprobs: bool,
+    supports_tool_use: bool,
+    /// Whether the provider this model belongs to has a configured key
+    /// in the runtime registry. A model whose provider key is absent
+    /// cannot be enabled (the UI greys out the toggle).
+    provider_available: bool,
+    /// How many active courses currently select this chat model.
+    courses_using: i64,
+    price_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Serialize)]
+struct ChatModelsResponse {
+    models: Vec<ChatModelEntry>,
+}
+
+/// List the chat-model catalog with admin policy, prices, provider
+/// availability, and per-model course usage. Mirrors
+/// `list_embedding_models`; adds provider + price columns.
+async fn list_chat_models(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<ChatModelsResponse>, AppError> {
+    require_admin(&user)?;
+
+    // Per-model usage counts across active courses. The `courses.model`
+    // column holds the chat model id.
+    let usage_rows = sqlx::query!(
+        r#"SELECT model, COUNT(*)::BIGINT AS "count!"
+           FROM courses
+           WHERE active = true
+           GROUP BY model"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let usage: std::collections::HashMap<String, i64> =
+        usage_rows.into_iter().map(|r| (r.model, r.count)).collect();
+
+    let rows = minerva_db::queries::chat_models::list_all(&state.db).await?;
+    let models = rows
+        .into_iter()
+        .map(|r| ChatModelEntry {
+            provider_available: state.llm.has(&r.provider),
+            courses_using: usage.get(&r.model).copied().unwrap_or(0),
+            input_usd_per_mtok: rate_to_f64(r.input_usd_per_mtok),
+            output_usd_per_mtok: rate_to_f64(r.output_usd_per_mtok),
+            model: r.model,
+            provider: r.provider,
+            display_name: r.display_name,
+            enabled: r.enabled,
+            is_default: r.is_default,
+            is_utility_default: r.is_utility_default,
+            supports_logprobs: r.supports_logprobs,
+            supports_tool_use: r.supports_tool_use,
+            price_updated_at: r.price_updated_at,
+        })
+        .collect();
+
+    Ok(Json(ChatModelsResponse { models }))
+}
+
+#[derive(Deserialize)]
+struct UpdateChatModelRequest {
+    model: String,
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+struct UpdateChatModelResponse {
+    model: String,
+    enabled: bool,
+}
+
+/// Toggle the admin-managed `enabled` flag for one chat model. Enabling
+/// is guarded twice: the model's provider must have a configured key
+/// (`chat_model.provider_unavailable`), and both USD rates must be known
+/// (`chat_model.price_required`; `0` is allowed, NULL is not). Disabling
+/// is always allowed.
+async fn update_chat_model_enabled(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<UpdateChatModelRequest>,
+) -> Result<Json<UpdateChatModelResponse>, AppError> {
+    require_admin(&user)?;
+
+    let row = minerva_db::queries::chat_models::find(&state.db, &body.model)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if body.enabled {
+        if !state.llm.has(&row.provider) {
+            return Err(AppError::bad_request_with(
+                "chat_model.provider_unavailable",
+                [("provider", row.provider.clone())],
+            ));
+        }
+        if row.input_usd_per_mtok.is_none() || row.output_usd_per_mtok.is_none() {
+            return Err(AppError::bad_request_with(
+                "chat_model.price_required",
+                [("model", row.model.clone())],
+            ));
+        }
+    }
+
+    let updated =
+        minerva_db::queries::chat_models::set_enabled(&state.db, &body.model, body.enabled)
+            .await?
+            .ok_or(AppError::NotFound)?;
+
+    tracing::info!(
+        "admin {} set chat model {} enabled={}",
+        user.id,
+        updated.model,
+        updated.enabled,
+    );
+
+    Ok(Json(UpdateChatModelResponse {
+        model: updated.model,
+        enabled: updated.enabled,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SetChatModelDefaultRequest {
+    model: String,
+}
+
+#[derive(Serialize)]
+struct SetChatModelDefaultResponse {
+    model: String,
+}
+
+/// Promote one chat model to the course-chat default for new courses.
+/// The target must be enabled. Atomic in `set_default`.
+async fn set_default_chat_model(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<SetChatModelDefaultRequest>,
+) -> Result<Json<SetChatModelDefaultResponse>, AppError> {
+    require_admin(&user)?;
+    let row = map_set_default(
+        minerva_db::queries::chat_models::set_default(&state.db, &body.model).await,
+        &body.model,
+    )?;
+    tracing::info!("admin {} set chat model {} as course default", user.id, row);
+    Ok(Json(SetChatModelDefaultResponse { model: row }))
+}
+
+/// Promote one chat model to the utility default (classification / KG /
+/// aegis / suggested-questions). The target must be enabled.
+async fn set_utility_default_chat_model(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<SetChatModelDefaultRequest>,
+) -> Result<Json<SetChatModelDefaultResponse>, AppError> {
+    require_admin(&user)?;
+    let row = map_set_default(
+        minerva_db::queries::chat_models::set_utility_default(&state.db, &body.model).await,
+        &body.model,
+    )?;
+    tracing::info!(
+        "admin {} set chat model {} as utility default",
+        user.id,
+        row
+    );
+    Ok(Json(SetChatModelDefaultResponse { model: row }))
+}
+
+/// Map a `chat_models::set_default` / `set_utility_default` result to the
+/// model id or an `AppError`, sharing the NotFound / Disabled / Db arms.
+fn map_set_default(
+    result: Result<
+        minerva_db::queries::chat_models::ChatModelRow,
+        minerva_db::queries::chat_models::SetDefaultError,
+    >,
+    model: &str,
+) -> Result<String, AppError> {
+    use minerva_db::queries::chat_models::SetDefaultError;
+    match result {
+        Ok(row) => Ok(row.model),
+        Err(SetDefaultError::NotFound) => Err(AppError::NotFound),
+        Err(SetDefaultError::Disabled) => Err(AppError::bad_request_with(
+            "chat_model.default_disabled",
+            [("model", model.to_string())],
+        )),
+        Err(SetDefaultError::Db(e)) => Err(AppError::from(e)),
+    }
+}
+
+#[derive(Deserialize)]
+struct SetChatModelPriceRequest {
+    model: String,
+    /// USD per 1M tokens. `0` is valid (free / on-prem). Negative is
+    /// rejected. Both are required (no way to set an unknown price back
+    /// to NULL through this route once a real number is entered).
+    input_usd_per_mtok: rust_decimal::Decimal,
+    output_usd_per_mtok: rust_decimal::Decimal,
+}
+
+/// Set a chat model's USD rates and stamp `price_updated_at`. This is
+/// what makes an unpriced model usable (enabling separately requires
+/// both rates known). `0` is accepted (genuinely free); negative is not.
+async fn set_chat_model_price(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<SetChatModelPriceRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+    if body.input_usd_per_mtok < rust_decimal::Decimal::ZERO
+        || body.output_usd_per_mtok < rust_decimal::Decimal::ZERO
+    {
+        return Err(AppError::bad_request("chat_model.price_negative"));
+    }
+    let row = minerva_db::queries::chat_models::set_price(
+        &state.db,
+        &body.model,
+        body.input_usd_per_mtok,
+        body.output_usd_per_mtok,
+        None,
+    )
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    tracing::info!(
+        "admin {} set chat model {} price in={} out={}",
+        user.id,
+        row.model,
+        body.input_usd_per_mtok,
+        body.output_usd_per_mtok,
+    );
+
+    Ok(Json(serde_json::json!({
+        "model": row.model,
+        "input_usd_per_mtok": rate_to_f64(row.input_usd_per_mtok),
+        "output_usd_per_mtok": rate_to_f64(row.output_usd_per_mtok),
+        "price_updated_at": row.price_updated_at,
+    })))
+}
+
+/// Best-effort "scrape price" helper: fetch the model's provider public
+/// pricing page and ask the utility model to extract the rates. Returns
+/// a suggestion only; nothing is persisted (the admin reviews + saves
+/// via the price PUT above).
+async fn scrape_chat_model_price(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(model): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+    let row = minerva_db::queries::chat_models::find(&state.db, &model)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let Some(pricing_url) = minerva_catalog::provider_pricing_url(&row.provider) else {
+        return Err(AppError::bad_request_with(
+            "chat_model.no_pricing_source",
+            [("provider", row.provider.clone())],
+        ));
+    };
+    let suggestion = crate::classification::pricing_scrape::scrape_price(
+        &state.llm,
+        &state.db,
+        &state.http_client,
+        &model,
+        pricing_url,
+    )
+    .await
+    .map_err(AppError::Internal)?;
+
+    serde_json::to_value(suggestion)
+        .map(Json)
+        .map_err(|e| AppError::Internal(e.to_string()))
+}
+
+/// Re-fetch each configured provider's `/models` listing and seed any
+/// new chat models (disabled + unpriced). Existing rows keep their admin
+/// toggles + prices. Returns how many new rows were seeded.
+async fn refresh_chat_models(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_admin(&user)?;
+    let seeded = crate::llm::provider::sync_chat_models(&state.llm, &state.db).await;
+    tracing::info!("admin {} refreshed chat models ({seeded} new)", user.id);
+    Ok(Json(serde_json::json!({ "seeded": seeded })))
 }
 
 // ── Re-ranker model catalog (admin) ────────────────────────────────

@@ -1,0 +1,92 @@
+{
+  "uid": "minerva-cost",
+  "title": "Minerva - AI Spend",
+  "tags": ["minerva", "cost", "llm"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Spend rate (USD/hour, fleet)",
+      "description": "chat_cost_microusd_total is the per-turn cost computed on emit from the billing model's current rate (NOT stored in the ledger), encoded as micro-USD so it fits a u64 counter. Divide by 1e6 for dollars; x3600 for an hourly rate.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(chat_cost_microusd_total{namespace=\"minerva\"}[5m])) * 3600 / 1000000",
+          "legendFormat": "USD/hour"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Spend rate by provider (USD/hour)",
+      "description": "Per-provider split of the same cost counter. Surfaces which provider (cerebras / openai / anthropic / ...) is driving spend.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never", "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last", "mean"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (provider) (rate(chat_cost_microusd_total{namespace=\"minerva\"}[5m])) * 3600 / 1000000",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Spend rate by model (USD/hour)",
+      "description": "Per-model split. The kind label (prompt/completion) is summed away here; drop it into the query to separate input vs output spend.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never", "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last", "mean"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (model) (rate(chat_cost_microusd_total{namespace=\"minerva\"}[5m])) * 3600 / 1000000",
+          "legendFormat": "{{model}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Quota rejections & unpriced calls (per second)",
+      "description": "chat_quota_exceeded_total{scope} counts 429s when a student or owner hits their USD cap. chat_unpriced_calls_total should stay flat at zero in steady state (an unpriced model can't be enabled); any rise points at a logic bug.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (scope) (rate(chat_quota_exceeded_total{namespace=\"minerva\"}[5m]))",
+          "legendFormat": "quota:{{scope}}"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(chat_unpriced_calls_total{namespace=\"minerva\"}[5m]))",
+          "legendFormat": "unpriced"
+        }
+      ]
+    }
+  ]
+}

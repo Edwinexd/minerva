@@ -241,25 +241,26 @@ function OwnerLimitInput({ user }: { user: AdminUser }) {
   const { t } = useTranslation("admin")
   const { t: tCommon } = useTranslation("common")
   const queryClient = useQueryClient()
-  const [draft, setDraft] = useState(String(user.owner_daily_token_limit))
+  const [draft, setDraft] = useState(String(user.owner_daily_cost_limit_usd))
 
   const mutation = useMutation({
     mutationFn: (limit: number) =>
-      api.put(`/admin/users/${user.id}/owner-daily-token-limit`, { limit }),
+      api.put(`/admin/users/${user.id}/owner-daily-cost-limit-usd`, { limit }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
   })
 
-  const dirty = draft !== String(user.owner_daily_token_limit)
+  const dirty = draft !== String(user.owner_daily_cost_limit_usd)
 
   return (
     <div className="flex items-center gap-2">
+      <span className="text-xs text-muted-foreground">$</span>
       <input
         className="h-7 w-28 rounded border bg-background px-2 text-xs font-mono"
         value={draft}
-        onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
-        placeholder="0"
-        inputMode="numeric"
+        onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ""))}
+        placeholder="0.00"
+        inputMode="decimal"
         aria-label={t("users.ownerLimit.inputLabel", {
           name: user.display_name || user.eppn,
         })}
@@ -278,7 +279,7 @@ function OwnerLimitInput({ user }: { user: AdminUser }) {
           {tCommon("actions.save")}
         </Button>
       )}
-      {user.owner_daily_token_limit === 0 && !dirty && (
+      {user.owner_daily_cost_limit_usd === 0 && !dirty && (
         <span className="text-xs text-muted-foreground">{t("users.ownerLimit.unlimited")}</span>
       )}
     </div>

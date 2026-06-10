@@ -271,20 +271,13 @@ pub(crate) struct AegisAnalysisPayload {
     /// rubric.
     #[serde(default)]
     pub mode: AegisModeWire,
-    /// Cerebras model that produced this verdict. Either
-    /// `AEGIS_MODEL` (first-fire on a fresh draft) or
-    /// `AEGIS_FOLLOWUP_MODEL` (follow-up fires once the analyzer
-    /// has produced at least one verdict for the current draft).
-    /// Round-trips through the frontend on Send so the persisted
-    /// `prompt_analyses.model_used` stamps the actual runtime model
-    /// rather than a hard-coded constant. Defaults to `AEGIS_MODEL`
-    /// for older clients that don't ship the field.
-    #[serde(default = "default_model_used")]
+    /// Model that produced this verdict (the admin-selected utility
+    /// model). Round-trips through the frontend on Send so the persisted
+    /// `prompt_analyses.model_used` stamps the actual runtime model.
+    /// Empty for older clients that don't ship the field; the real model
+    /// is taken from the live verdict regardless.
+    #[serde(default)]
     pub model_used: String,
-}
-
-fn default_model_used() -> String {
-    crate::classification::aegis::AEGIS_MODEL.to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1430,7 +1423,7 @@ pub(crate) async fn analyze_prompt_for_user(
 
     let verdict = match crate::classification::aegis::analyze_prompt(
         &state.http_client,
-        &state.config.cerebras_api_key,
+        &state.utility_model().await,
         &state.db,
         course_id,
         &trail,
@@ -1546,7 +1539,7 @@ pub(crate) async fn rewrite_prompt_for_user(
 
     match crate::classification::aegis::rewrite_prompt(
         &state.http_client,
-        &state.config.cerebras_api_key,
+        &state.utility_model().await,
         &state.db,
         course_id,
         &content,
@@ -1677,10 +1670,10 @@ pub(super) async fn run_chat_message(
         return Err(AppError::PrivacyNotAcknowledged);
     }
 
-    if course.daily_token_limit > 0 {
-        let used = minerva_db::queries::usage::get_user_daily_tokens(&state.db, user_id, course_id)
-            .await?;
-        if used >= course.daily_token_limit {
+    if course.daily_cost_limit_usd > rust_decimal::Decimal::ZERO {
+        let used =
+            minerva_db::queries::usage::get_user_daily_cost(&state.db, user_id, course_id).await?;
+        if used >= course.daily_cost_limit_usd {
             metrics::counter!("chat_quota_exceeded_total", "scope" => "course").increment(1);
             return Err(AppError::QuotaExceeded);
         }
@@ -1815,6 +1808,75 @@ pub(super) async fn run_chat_message(
         }
     }
 
+    // Resolve the chat provider for this course's model from the
+    // `chat_models.provider` mapping (falling back to Cerebras for a
+    // model not in the catalog, e.g. a legacy row). The simple / writeup
+    // strategies are fully provider-agnostic (they call
+    // `provider.stream`). The bespoke FLARE / research loops are
+    // OpenAI-shaped and read the raw `(url, key)` from
+    // `openai_endpoint()`; for a non-OpenAI-compatible provider that is
+    // empty, but the config-save capability gate keeps FLARE off such
+    // models, and the catalog ships no tool-use Anthropic model, so those
+    // loops only ever run against OpenAI-compatible providers.
+    let provider_id = minerva_db::queries::chat_models::provider_of(&state.db, &course.model)
+        .await?
+        .unwrap_or_else(|| crate::llm::provider::PROVIDER_CEREBRAS.to_string());
+    let provider = state.llm.get(&provider_id).ok_or_else(|| {
+        AppError::Internal(format!(
+            "chat provider '{}' for model '{}' is not configured",
+            provider_id, course.model
+        ))
+    })?;
+    let (chat_base_url, chat_api_key) = provider
+        .openai_endpoint()
+        .map(|(url, key)| (url.to_string(), key.to_string()))
+        .unwrap_or_default();
+
+    // Resolve the model's billing rates once for this chat turn. Used here
+    // to derive the per-response token fail-safe and threaded into the
+    // strategy context so `common::finalize` reuses it for the cost metric
+    // rather than doing a second `rates_of` round-trip. `None` = unknown
+    // price (NULL rate) or model absent from the catalog.
+    let billing_rates =
+        minerva_db::queries::chat_models::rates_of(&state.db, &course.model).await?;
+
+    // Convert the course's daily USD cap to a token budget for the
+    // tool-use / FLARE per-response fail-safe, at the model's blended
+    // (50/50) rate. 0 (no cap) or a free model -> 0 (no token cap).
+    let daily_token_budget: i64 = if course.daily_cost_limit_usd > rust_decimal::Decimal::ZERO {
+        match billing_rates {
+            Some((in_rate, out_rate)) => {
+                let blended = (in_rate + out_rate) / rust_decimal::Decimal::from(2);
+                if blended > rust_decimal::Decimal::ZERO {
+                    use rust_decimal::prelude::ToPrimitive;
+                    ((course.daily_cost_limit_usd * rust_decimal::Decimal::from(1_000_000))
+                        / blended)
+                        .to_i64()
+                        .unwrap_or(i64::MAX)
+                } else {
+                    0
+                }
+            }
+            None => {
+                // The course has a USD cap but its selected model is
+                // unpriced (NULL rate or absent from the catalog), so spend
+                // bills at $0 and the per-response token fail-safe is
+                // disabled. The enable-gate + price CHECK make this
+                // unreachable in steady state; it only happens when an admin
+                // has force-migrated the course onto a disabled, un-priced
+                // model. Surface it rather than running silently uncapped.
+                tracing::warn!(
+                    "course {} has a daily USD cap but model '{}' is unpriced; spend bills at $0 and the per-response token cap is disabled",
+                    course_id,
+                    course.model,
+                );
+                0
+            }
+        }
+    } else {
+        0
+    };
+
     let ctx = strategy::GenerationContext {
         course_name: course.name,
         custom_prompt: course.system_prompt,
@@ -1825,8 +1887,10 @@ pub(super) async fn run_chat_message(
         course_id,
         conversation_id: conv_id,
         user_id: conv.user_id,
-        cerebras_api_key: state.config.cerebras_api_key.clone(),
-        cerebras_base_url: strategy::common::CEREBRAS_CHAT_COMPLETIONS_URL.to_string(),
+        provider,
+        chat_api_key,
+        chat_base_url,
+        utility: state.utility_model().await,
         openai_api_key: state.config.openai_api_key.clone(),
         embedding_provider: course.embedding_provider,
         embedding_model: course.embedding_model,
@@ -1834,7 +1898,8 @@ pub(super) async fn run_chat_message(
         history,
         user_content,
         is_first_message,
-        daily_token_limit: course.daily_token_limit,
+        daily_token_budget,
+        billing_rates,
         db: state.db.clone(),
         qdrant: Arc::clone(&state.qdrant),
         fastembed: Arc::clone(&state.fastembed),

@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -34,7 +35,9 @@ pub struct CourseRow {
     /// embedding model (changing it needs no re-embed). See
     /// `minerva_embed_engine::reranker`.
     pub reranker_model: String,
-    pub daily_token_limit: i64,
+    /// Per-student-per-course daily AI spending cap in USD. 0 = unlimited.
+    /// Spend is derived on read from token usage x each model's rate.
+    pub daily_cost_limit_usd: Decimal,
     pub active: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -66,7 +69,7 @@ pub struct CreateCourse {
     pub name: String,
     pub description: Option<String>,
     pub owner_id: Uuid,
-    pub daily_token_limit: i64,
+    pub daily_cost_limit_usd: Decimal,
     pub model: Option<String>,
     pub temperature: Option<f64>,
     pub context_ratio: Option<f64>,
@@ -104,7 +107,7 @@ pub struct UpdateCourse {
     /// no-op). No re-embed side effect, so unlike embedding rotation this
     /// just lands in the row.
     pub reranker_model: Option<String>,
-    pub daily_token_limit: Option<i64>,
+    pub daily_cost_limit_usd: Option<Decimal>,
     /// Admin / owner backfill of the per-semester grouping label.
     /// Outer `Option` distinguishes "no change" (None) from "set
     /// to value" (Some). We don't expose a way to clear the label
@@ -127,7 +130,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
     sqlx::query_as!(
         CourseRow,
         r#"INSERT INTO courses (
-            id, name, description, owner_id, daily_token_limit,
+            id, name, description, owner_id, daily_cost_limit_usd,
             model, temperature, context_ratio, max_chunks, min_score,
             strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt,
             semester_label, reranker_model
@@ -146,12 +149,12 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             $16,
             COALESCE($17, 'jinaai/jina-reranker-v2-base-multilingual')
         )
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
         id,
         input.name,
         input.description,
         input.owner_id,
-        input.daily_token_limit,
+        input.daily_cost_limit_usd,
         input.model.as_deref(),
         input.temperature,
         input.context_ratio,
@@ -172,7 +175,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE id = $1 AND active = true",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE id = $1 AND active = true",
         id,
     )
     .fetch_optional(db)
@@ -182,7 +185,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx
 pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
         owner_id,
     )
     .fetch_all(db)
@@ -192,7 +195,7 @@ pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
+        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
         FROM courses c
         JOIN course_members cm ON cm.course_id = c.id
         WHERE cm.user_id = $1 AND c.active = true
@@ -209,7 +212,7 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_for_teacher(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -231,7 +234,7 @@ pub async fn list_for_teacher_strict(
 ) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -246,7 +249,7 @@ pub async fn list_for_teacher_strict(
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE active = true ORDER BY updated_at DESC",
     )
     .fetch_all(db)
     .await
@@ -269,7 +272,7 @@ pub async fn update(
             max_chunks = COALESCE($8, max_chunks),
             strategy = COALESCE($9, strategy),
             tool_use_enabled = COALESCE($10, tool_use_enabled),
-            daily_token_limit = COALESCE($11, daily_token_limit),
+            daily_cost_limit_usd = COALESCE($11, daily_cost_limit_usd),
             embedding_provider = COALESCE($12, embedding_provider),
             embedding_model = COALESCE($13, embedding_model),
             min_score = COALESCE($14, min_score),
@@ -277,7 +280,7 @@ pub async fn update(
             reranker_model = COALESCE($16, reranker_model),
             updated_at = NOW()
         WHERE id = $1 AND active = true
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
         id,
         input.name,
         input.description,
@@ -288,7 +291,7 @@ pub async fn update(
         input.max_chunks,
         input.strategy,
         input.tool_use_enabled,
-        input.daily_token_limit,
+        input.daily_cost_limit_usd,
         input.embedding_provider,
         input.embedding_model,
         input.min_score,
@@ -548,9 +551,9 @@ pub struct DaisyCourseInput<'a> {
     /// surfaced, so it's always a real human, never a placeholder.
     pub owner_id: Uuid,
     /// Per-student daily token cap, sourced from
-    /// `system_defaults::course_daily_token_limit` by the route layer.
+    /// `system_defaults::course_daily_cost_limit_usd` by the route layer.
     /// Applied on INSERT only.
-    pub daily_token_limit: i64,
+    pub daily_cost_limit_usd: Decimal,
     /// Admin-default chat model (`system_defaults::course_model`).
     pub model: Option<&'a str>,
     pub temperature: Option<f64>,
@@ -629,7 +632,7 @@ pub async fn upsert_from_daisy(
             let new_id = Uuid::new_v4();
             sqlx::query!(
                 r#"INSERT INTO courses (
-                    id, name, owner_id, daily_token_limit,
+                    id, name, owner_id, daily_cost_limit_usd,
                     model, temperature, context_ratio, max_chunks, min_score,
                     strategy, tool_use_enabled, embedding_provider, embedding_model,
                     system_prompt, semester_label, auto_managed, course_code, reranker_model
@@ -650,7 +653,7 @@ pub async fn upsert_from_daisy(
                 new_id,
                 input.name,
                 input.owner_id,
-                input.daily_token_limit,
+                input.daily_cost_limit_usd,
                 input.model,
                 input.temperature,
                 input.context_ratio,
@@ -707,7 +710,7 @@ pub async fn find_by_daisy_momenttillf_id(
         r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature,
                c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy,
                c.tool_use_enabled, c.embedding_provider, c.embedding_model,
-               c.embedding_version, c.reranker_model, c.daily_token_limit, c.active, c.created_at,
+               c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.active, c.created_at,
                c.updated_at, c.semester_label, c.auto_managed, c.course_code
             FROM courses c
             JOIN course_daisy_offerings o ON o.course_id = c.id
@@ -724,7 +727,7 @@ pub async fn find_by_daisy_momenttillf_id(
 pub async fn list_all_including_archived(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses ORDER BY active DESC, updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses ORDER BY active DESC, updated_at DESC",
     )
     .fetch_all(db)
     .await

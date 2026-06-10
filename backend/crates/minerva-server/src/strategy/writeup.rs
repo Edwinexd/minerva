@@ -137,7 +137,6 @@ pub async fn run(
     tool_log: &str,
     tx: &mpsc::Sender<Result<Event, AppError>>,
 ) -> Result<WriteupOutput, AppError> {
-    let http_client = reqwest::Client::new();
     let system = build_writeup_system_prompt(
         &ctx.course_name,
         &ctx.custom_prompt,
@@ -148,12 +147,12 @@ pub async fn run(
     let messages = compose_messages(&system, ctx);
 
     let mut full_text = String::new();
-    let (prompt_tokens, completion_tokens) = common::stream_cerebras_to_client(
-        &http_client,
-        &ctx.cerebras_api_key,
+    let (prompt_tokens, completion_tokens) = common::stream_chat_to_client(
+        &ctx.provider,
         &ctx.model,
         ctx.temperature,
         &messages,
+        false,
         tx,
         &mut full_text,
     )

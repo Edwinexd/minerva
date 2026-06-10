@@ -1,0 +1,154 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code\n        FROM courses c\n        LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1 OR cm.role IN ('teacher', 'ta'))\n        ORDER BY c.updated_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "context_ratio",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "temperature",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "system_prompt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "max_chunks",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "min_score",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 10,
+        "name": "strategy",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "tool_use_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "embedding_provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "embedding_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "embedding_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "reranker_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "daily_cost_limit_usd",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 17,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "semester_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "auto_managed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 22,
+        "name": "course_code",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "d03257af933cb4fb64df3c8ebdc767d76ca5726b03d30f9ec951785cc8f8a442"
+}

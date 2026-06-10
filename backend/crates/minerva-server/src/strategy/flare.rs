@@ -132,7 +132,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let mut initial_chunks = if ctx.kg_enabled {
         crate::classification::adversarial::filter_solution_chunks(
             &http_client,
-            &ctx.cerebras_api_key,
+            &ctx.utility,
             &ctx.db,
             ctx.course_id,
             initial_chunks_raw,
@@ -199,7 +199,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let guard_decision = super::extraction_guard::evaluate_for_turn(
         &ctx.db,
         &http_client,
-        &ctx.cerebras_api_key,
+        &ctx.utility,
         ctx.course_id,
         ctx.conversation_id,
         &ctx.history,
@@ -227,10 +227,10 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         model: &ctx.model,
         temperature: ctx.temperature,
         history: &ctx.history,
-        cerebras_base_url: &ctx.cerebras_base_url,
-        cerebras_api_key: &ctx.cerebras_api_key,
+        chat_base_url: &ctx.chat_base_url,
+        chat_api_key: &ctx.chat_api_key,
         max_chunks: ctx.max_chunks,
-        daily_token_limit: ctx.daily_token_limit,
+        daily_token_limit: ctx.daily_token_budget,
         unclassified_doc_ids,
         kg_enabled: ctx.kg_enabled,
     };
@@ -243,7 +243,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let output = run_loop(&http_client, &loop_cfg, initial_chunks, &tx, |sentence| {
         let http_client = http_client.clone();
         let openai_key = ctx.openai_api_key.clone();
-        let cerebras_key = ctx.cerebras_api_key.clone();
+        let utility = ctx.utility.clone();
         let fastembed = ctx.fastembed.clone();
         let reranker = ctx.reranker.clone();
         let reranker_model = ctx.reranker_model.clone();
@@ -277,7 +277,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             let mut filtered = if kg_enabled {
                 crate::classification::adversarial::filter_solution_chunks(
                     &http_client,
-                    &cerebras_key,
+                    &utility,
                     &db,
                     course_id,
                     raw,
@@ -341,7 +341,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let final_text = super::extraction_guard::intercept_reply(
         &ctx.db,
         &http_client,
-        &ctx.cerebras_api_key,
+        &ctx.utility,
         ctx.course_id,
         ctx.conversation_id,
         &guard_decision,
@@ -391,8 +391,8 @@ struct RunLoopConfig<'a> {
     model: &'a str,
     temperature: f64,
     history: &'a [minerva_db::queries::conversations::MessageRow],
-    cerebras_base_url: &'a str,
-    cerebras_api_key: &'a str,
+    chat_base_url: &'a str,
+    chat_api_key: &'a str,
     max_chunks: i32,
     daily_token_limit: i64,
     /// Doc IDs whose classifier hasn't run yet. Their chunks are held
@@ -604,8 +604,8 @@ where
         // Stream with logprobs, checking confidence per sentence
         let result = stream_with_logprobs(
             http_client,
-            cfg.cerebras_base_url,
-            cfg.cerebras_api_key,
+            cfg.chat_base_url,
+            cfg.chat_api_key,
             cfg.model,
             cfg.temperature,
             &messages,
@@ -763,7 +763,7 @@ enum StreamOutcome {
 /// (if any) for use as a retrieval query by the caller.
 ///
 /// `base_url` is the Cerebras chat-completions endpoint; production code
-/// passes `common::CEREBRAS_CHAT_COMPLETIONS_URL` via `ctx.cerebras_base_url`,
+/// passes `common::CEREBRAS_CHAT_COMPLETIONS_URL` via `ctx.chat_base_url`,
 /// integration tests pass a wiremock server URL.
 #[allow(clippy::too_many_arguments)]
 async fn stream_with_logprobs(
@@ -787,7 +787,7 @@ async fn stream_with_logprobs(
         "stream_options": { "include_usage": true },
     });
 
-    let response = common::cerebras_request_with_retry_to(client, base_url, api_key, &body).await?;
+    let response = common::openai_chat_request(client, base_url, api_key, &body).await?;
 
     let mut stream = response.bytes_stream();
     // Raw TCP frames may split multi-byte UTF-8 codepoints; accumulate bytes
@@ -2170,8 +2170,8 @@ mod loop_regression_tests {
         Option<String>,                                      // custom_prompt
         String,                                              // model
         Vec<minerva_db::queries::conversations::MessageRow>, // history
-        String,                                              // cerebras_base_url
-        String,                                              // cerebras_api_key
+        String,                                              // chat_base_url
+        String,                                              // chat_api_key
     ) {
         (
             "Test Course".to_string(),
@@ -2273,7 +2273,7 @@ mod loop_regression_tests {
         mount_sequenced(&server, bodies).await;
 
         let url = format!("{}/chat/completions", server.uri());
-        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+        let (course_name, custom_prompt, model, history, chat_base_url, chat_api_key) =
             base_cfg(&url);
         let cfg = RunLoopConfig {
             course_name: &course_name,
@@ -2281,8 +2281,8 @@ mod loop_regression_tests {
             model: &model,
             temperature: 0.7,
             history: &history,
-            cerebras_base_url: &cerebras_base_url,
-            cerebras_api_key: &cerebras_api_key,
+            chat_base_url: &chat_base_url,
+            chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0, // unlimited, so we don't short-circuit on token cap
             unclassified_doc_ids: std::collections::HashSet::new(),
@@ -2335,7 +2335,7 @@ mod loop_regression_tests {
         mount_sequenced(&server, bodies).await;
 
         let url = format!("{}/chat/completions", server.uri());
-        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+        let (course_name, custom_prompt, model, history, chat_base_url, chat_api_key) =
             base_cfg(&url);
         // daily_limit = 500; 2x cap = 1000 tokens; first iteration will
         // already exceed it (1536 completion tokens), so we must stop after
@@ -2346,8 +2346,8 @@ mod loop_regression_tests {
             model: &model,
             temperature: 0.7,
             history: &history,
-            cerebras_base_url: &cerebras_base_url,
-            cerebras_api_key: &cerebras_api_key,
+            chat_base_url: &chat_base_url,
+            chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 500,
             unclassified_doc_ids: std::collections::HashSet::new(),
@@ -2403,7 +2403,7 @@ mod loop_regression_tests {
             .await;
 
         let url = format!("{}/chat/completions", server.uri());
-        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+        let (course_name, custom_prompt, model, history, chat_base_url, chat_api_key) =
             base_cfg(&url);
         let cfg = RunLoopConfig {
             course_name: &course_name,
@@ -2411,8 +2411,8 @@ mod loop_regression_tests {
             model: &model,
             temperature: 0.7,
             history: &history,
-            cerebras_base_url: &cerebras_base_url,
-            cerebras_api_key: &cerebras_api_key,
+            chat_base_url: &chat_base_url,
+            chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
@@ -2485,7 +2485,7 @@ mod loop_regression_tests {
             .await;
 
         let url = format!("{}/chat/completions", server.uri());
-        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+        let (course_name, custom_prompt, model, history, chat_base_url, chat_api_key) =
             base_cfg(&url);
         let cfg = RunLoopConfig {
             course_name: &course_name,
@@ -2493,8 +2493,8 @@ mod loop_regression_tests {
             model: &model,
             temperature: 0.7,
             history: &history,
-            cerebras_base_url: &cerebras_base_url,
-            cerebras_api_key: &cerebras_api_key,
+            chat_base_url: &chat_base_url,
+            chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
@@ -2563,7 +2563,7 @@ mod loop_regression_tests {
         mount_sequenced(&server, bodies).await;
 
         let url = format!("{}/chat/completions", server.uri());
-        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+        let (course_name, custom_prompt, model, history, chat_base_url, chat_api_key) =
             base_cfg(&url);
         let cfg = RunLoopConfig {
             course_name: &course_name,
@@ -2571,8 +2571,8 @@ mod loop_regression_tests {
             model: &model,
             temperature: 0.7,
             history: &history,
-            cerebras_base_url: &cerebras_base_url,
-            cerebras_api_key: &cerebras_api_key,
+            chat_base_url: &chat_base_url,
+            chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
@@ -2636,7 +2636,7 @@ mod loop_regression_tests {
         mount_sequenced(&server, bodies).await;
 
         let url = format!("{}/chat/completions", server.uri());
-        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+        let (course_name, custom_prompt, model, history, chat_base_url, chat_api_key) =
             base_cfg(&url);
         let cfg = RunLoopConfig {
             course_name: &course_name,
@@ -2644,8 +2644,8 @@ mod loop_regression_tests {
             model: &model,
             temperature: 0.7,
             history: &history,
-            cerebras_base_url: &cerebras_base_url,
-            cerebras_api_key: &cerebras_api_key,
+            chat_base_url: &chat_base_url,
+            chat_api_key: &chat_api_key,
             max_chunks: 100, // plenty of room
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
@@ -2765,7 +2765,7 @@ mod loop_regression_tests {
             .await;
 
         let url = format!("{}/chat/completions", server.uri());
-        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+        let (course_name, custom_prompt, model, history, chat_base_url, chat_api_key) =
             base_cfg(&url);
         let cfg = RunLoopConfig {
             course_name: &course_name,
@@ -2773,8 +2773,8 @@ mod loop_regression_tests {
             model: &model,
             temperature: 0.7,
             history: &history,
-            cerebras_base_url: &cerebras_base_url,
-            cerebras_api_key: &cerebras_api_key,
+            chat_base_url: &chat_base_url,
+            chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
@@ -2852,7 +2852,7 @@ mod loop_regression_tests {
             .await;
 
         let url = format!("{}/chat/completions", server.uri());
-        let (course_name, custom_prompt, model, history, cerebras_base_url, cerebras_api_key) =
+        let (course_name, custom_prompt, model, history, chat_base_url, chat_api_key) =
             base_cfg(&url);
         let cfg = RunLoopConfig {
             course_name: &course_name,
@@ -2860,8 +2860,8 @@ mod loop_regression_tests {
             model: &model,
             temperature: 0.7,
             history: &history,
-            cerebras_base_url: &cerebras_base_url,
-            cerebras_api_key: &cerebras_api_key,
+            chat_base_url: &chat_base_url,
+            chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),

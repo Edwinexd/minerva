@@ -76,7 +76,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     if ctx.kg_enabled {
         rag.context = crate::classification::adversarial::filter_solution_chunks(
             &http_client,
-            &ctx.cerebras_api_key,
+            &ctx.utility,
             &ctx.db,
             ctx.course_id,
             rag.context,
@@ -118,7 +118,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let guard_decision = super::extraction_guard::evaluate_for_turn(
         &ctx.db,
         &http_client,
-        &ctx.cerebras_api_key,
+        &ctx.utility,
         ctx.course_id,
         ctx.conversation_id,
         &ctx.history,
@@ -164,12 +164,12 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let messages = common::build_chat_messages(&system, &ctx.history);
 
     let mut full_text = String::new();
-    let (prompt_tokens, completion_tokens) = match common::stream_cerebras_to_client(
-        &http_client,
-        &ctx.cerebras_api_key,
+    let (prompt_tokens, completion_tokens) = match common::stream_chat_to_client(
+        &ctx.provider,
         &ctx.model,
         ctx.temperature,
         &messages,
+        false,
         &tx,
         &mut full_text,
     )
@@ -195,7 +195,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let final_text = super::extraction_guard::intercept_reply(
         &ctx.db,
         &http_client,
-        &ctx.cerebras_api_key,
+        &ctx.utility,
         ctx.course_id,
         ctx.conversation_id,
         &guard_decision,

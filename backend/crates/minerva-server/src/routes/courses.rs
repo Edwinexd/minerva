@@ -2,6 +2,7 @@ use axum::extract::{Extension, Path, State};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use minerva_core::models::User;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -85,7 +86,7 @@ struct UpdateCourseRequest {
     /// `reranker_models` catalog (enabled unless admin / unchanged).
     /// No re-embed: applies on the next chat turn.
     reranker_model: Option<String>,
-    daily_token_limit: Option<i64>,
+    daily_cost_limit_usd: Option<Decimal>,
     /// Admin / owner backfill: stamp or rewrite the per-semester
     /// label on an existing course. Format-validated identically to
     /// `CreateCourseRequest::semester_label`.
@@ -140,7 +141,7 @@ pub(crate) struct CourseResponse {
     /// admin-managed `reranker_models` catalog; changing it has no
     /// re-embed cost. Frontend renders a dropdown on the config page.
     reranker_model: String,
-    daily_token_limit: i64,
+    daily_cost_limit_usd: Decimal,
     active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
@@ -244,7 +245,7 @@ impl CourseResponse {
             embedding_model: row.embedding_model,
             embedding_version: row.embedding_version,
             reranker_model: row.reranker_model,
-            daily_token_limit: row.daily_token_limit,
+            daily_cost_limit_usd: row.daily_cost_limit_usd,
             active: row.active,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -356,7 +357,7 @@ async fn create_course(
         description: body.description,
         owner_id: user.id,
         semester_label,
-        daily_token_limit: crate::system_defaults::course_daily_token_limit(&state.db).await,
+        daily_cost_limit_usd: crate::system_defaults::course_daily_cost_limit_usd(&state.db).await,
         model: Some(crate::system_defaults::course_model(&state.db).await),
         temperature: Some(crate::system_defaults::course_temperature(&state.db).await),
         context_ratio: Some(crate::system_defaults::course_context_ratio(&state.db).await),
@@ -408,6 +409,13 @@ async fn get_course(
     )))
 }
 
+/// Sanity ceiling for the per-course, per-student daily USD spend cap.
+/// Matches the `course.daily_cost_limit_usd` system-default knob's max
+/// (`system_defaults::registry`) so a per-course override can't exceed
+/// the range its own default is drawn from. A footgun guard far above any
+/// realistic per-student daily spend; 0 still means unlimited.
+const MAX_COURSE_DAILY_COST_LIMIT_USD: i64 = 1000;
+
 /// The mutable subset of a course, with every field optional so a
 /// partial update only touches what's present. Shared between the
 /// owner/admin `PUT /courses/{id}` route and the admin bulk-edit
@@ -428,7 +436,7 @@ pub(crate) struct CourseUpdateFields {
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
     pub reranker_model: Option<String>,
-    pub daily_token_limit: Option<i64>,
+    pub daily_cost_limit_usd: Option<Decimal>,
     pub semester_label: Option<String>,
 }
 
@@ -457,6 +465,23 @@ pub(crate) async fn apply_course_update(
         }
     }
 
+    // The per-course daily spend cap is a budget in USD. A negative value
+    // would silently disable the cap (enforcement treats only `> 0` as a
+    // live limit), so reject it, and guard a fat-finger ceiling. Mirrors
+    // the owner-cap route's ergonomics; 0 stays "unlimited".
+    if let Some(limit) = body.daily_cost_limit_usd {
+        if limit < Decimal::ZERO {
+            return Err(AppError::bad_request("course.daily_cost_limit_negative"));
+        }
+        let max = Decimal::from(MAX_COURSE_DAILY_COST_LIMIT_USD);
+        if limit > max {
+            return Err(AppError::bad_request_with(
+                "course.daily_cost_limit_too_large",
+                [("max", max.to_string())],
+            ));
+        }
+    }
+
     // Capability check: reject mismatches between the chosen
     // (model, strategy, tool_use) triple before persisting. The
     // registry lives in `model_capabilities`; unknown models are
@@ -472,18 +497,45 @@ pub(crate) async fn apply_course_update(
         .as_deref()
         .unwrap_or(existing.strategy.as_str());
     let effective_tool_use = body.tool_use_enabled.unwrap_or(existing.tool_use_enabled);
-    if let Err(mismatch) = crate::model_capabilities::validate_config(
-        &state.model_capabilities,
-        effective_model,
-        effective_strategy,
-        effective_tool_use,
-    )
-    .await
+    // Capabilities are read from the chat_models catalog
+    // (provider-agnostic), not a Cerebras probe: an Anthropic model
+    // declares supports_logprobs=false and is therefore rejected for the
+    // FLARE strategy. A model not in the catalog default-denies both
+    // capabilities, same conservative posture as an unprobeable model.
+    let caps = match minerva_db::queries::chat_models::find(&state.db, effective_model).await? {
+        Some(row) => crate::model_capabilities::Capabilities {
+            supports_tools: row.supports_tool_use,
+            supports_logprobs: row.supports_logprobs,
+        },
+        None => crate::model_capabilities::Capabilities::none(),
+    };
+    if let Err(mismatch) =
+        crate::model_capabilities::validate_caps(caps, effective_strategy, effective_tool_use)
     {
         return Err(AppError::bad_request_with(
             mismatch.translation_key(),
             [("model", effective_model.to_string())],
         ));
+    }
+
+    // Validate the chat model against the admin-managed `chat_models`
+    // catalog: a teacher may only switch to an enabled model. Same
+    // two-layer ergonomics as the embedding / reranker gates, bypassed
+    // when the value is unchanged or the caller is an admin (admins
+    // force-migrate courses onto any model, including disabled ones).
+    // The model's provider is resolved from `chat_models.provider` at
+    // chat time via the registry.
+    if let Some(ref model) = body.model {
+        let unchanged = model.as_str() == existing.model.as_str();
+        if !unchanged && !is_admin {
+            let enabled = minerva_db::queries::chat_models::is_enabled(&state.db, model).await?;
+            if !enabled {
+                return Err(AppError::bad_request_with(
+                    "course.chat_model_disabled",
+                    [("model", model.clone())],
+                ));
+            }
+        }
     }
 
     // Validate embedding_provider
@@ -658,7 +710,7 @@ pub(crate) async fn apply_course_update(
         embedding_provider: None,
         embedding_model: None,
         reranker_model: body.reranker_model,
-        daily_token_limit: body.daily_token_limit,
+        daily_cost_limit_usd: body.daily_cost_limit_usd,
         semester_label: validated_semester_label,
     };
 
@@ -695,7 +747,7 @@ async fn update_course(
         embedding_provider: body.embedding_provider,
         embedding_model: body.embedding_model,
         reranker_model: body.reranker_model,
-        daily_token_limit: body.daily_token_limit,
+        daily_cost_limit_usd: body.daily_cost_limit_usd,
         semester_label: body.semester_label,
     };
 
@@ -805,7 +857,7 @@ async fn add_member(
         &eppn,
         None,
         "student",
-        crate::system_defaults::owner_daily_token_limit(&state.db).await,
+        crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
     )
     .await?;
     let target_id = target.id;

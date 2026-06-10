@@ -819,13 +819,9 @@ async fn stream_research_turn(
         body["top_logprobs"] = serde_json::Value::Number(1.into());
     }
 
-    let response = common::cerebras_request_with_retry_to(
-        http_client,
-        &ctx.cerebras_base_url,
-        &ctx.cerebras_api_key,
-        &body,
-    )
-    .await?;
+    let response =
+        common::openai_chat_request(http_client, &ctx.chat_base_url, &ctx.chat_api_key, &body)
+            .await?;
 
     let mut stream = response.bytes_stream();
     let mut byte_carry: Vec<u8> = Vec::new();
@@ -1183,8 +1179,21 @@ mod stream_integration_tests {
             course_id: uuid::Uuid::nil(),
             conversation_id: uuid::Uuid::nil(),
             user_id: uuid::Uuid::nil(),
-            cerebras_api_key: "test-key".to_string(),
-            cerebras_base_url: base_url,
+            // Research streaming reads `chat_base_url` directly; the
+            // provider is only used by the simple/writeup path, so a dummy
+            // suffices here.
+            provider: std::sync::Arc::new(crate::llm::OpenAiCompatibleProvider::new(
+                "cerebras",
+                "http://127.0.0.1:65535/v1",
+                "test-key",
+                reqwest::Client::new(),
+            )),
+            chat_api_key: "test-key".to_string(),
+            chat_base_url: base_url,
+            utility: minerva_app_core::llm::UtilityModel {
+                provider: None,
+                model: "gpt-oss-120b".to_string(),
+            },
             openai_api_key: String::new(),
             embedding_provider: "local".to_string(),
             embedding_model: "test".to_string(),
@@ -1192,7 +1201,8 @@ mod stream_integration_tests {
             history: Vec::<MessageRow>::new(),
             user_content: "Hello".to_string(),
             is_first_message: true,
-            daily_token_limit: 0,
+            daily_token_budget: 0,
+            billing_rates: None,
             db: sqlx::postgres::PgPoolOptions::new()
                 .max_connections(1)
                 .connect_lazy("postgres://nobody:nobody@127.0.0.1:65535/none")

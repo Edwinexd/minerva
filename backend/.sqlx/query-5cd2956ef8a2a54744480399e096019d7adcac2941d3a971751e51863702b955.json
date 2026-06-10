@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id, course_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 3,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "prompt_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "completion_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "embedding_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "request_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "research_prompt_tokens",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "research_completion_tokens",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5cd2956ef8a2a54744480399e096019d7adcac2941d3a971751e51863702b955"
+}

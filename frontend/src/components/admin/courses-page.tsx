@@ -13,6 +13,7 @@ import {
 import type { Course, MergeSuggestionGroup } from "@/lib/types"
 import { modelDisplayName } from "@/lib/embedding-models"
 import { RERANKER_MODEL_DISPLAY } from "@/lib/reranker-models"
+import { formatUsd } from "@/lib/currency"
 import { api } from "@/lib/api"
 import {
   Card,
@@ -240,9 +241,9 @@ export function CourseManagementPanel() {
                       )}
                     </td>
                     <td className="py-2 pr-4 font-mono">
-                      {course.daily_token_limit === 0
-                        ? t("courses.tokenLimitUnlimited")
-                        : course.daily_token_limit.toLocaleString()}
+                      {course.daily_cost_limit_usd === 0
+                        ? t("courses.costLimitUnlimited")
+                        : formatUsd(course.daily_cost_limit_usd)}
                     </td>
                     <td className="py-2 pr-4 text-muted-foreground">
                       <RelativeTime date={course.created_at} />
@@ -1277,7 +1278,7 @@ type ScalarField =
   | "context_ratio"
   | "max_chunks"
   | "min_score"
-  | "daily_token_limit"
+  | "daily_cost_limit_usd"
   | "system_prompt"
   | "semester_label"
   | "embedding"
@@ -1311,7 +1312,7 @@ function BulkEditDialog({
   const [contextRatio, setContextRatio] = useState(0.7)
   const [maxChunks, setMaxChunks] = useState(10)
   const [minScore, setMinScore] = useState(0)
-  const [dailyTokenLimit, setDailyTokenLimit] = useState(0)
+  const [dailyCostLimitUsd, setDailyCostLimitUsd] = useState(0)
   const [systemPrompt, setSystemPrompt] = useState("")
   const [semesterLabel, setSemesterLabel] = useState("")
   const [embeddingProvider, setEmbeddingProvider] = useState("local")
@@ -1370,8 +1371,8 @@ function BulkEditDialog({
     if (included.has("context_ratio")) patch.context_ratio = contextRatio
     if (included.has("max_chunks")) patch.max_chunks = maxChunks
     if (included.has("min_score")) patch.min_score = minScore
-    if (included.has("daily_token_limit"))
-      patch.daily_token_limit = dailyTokenLimit
+    if (included.has("daily_cost_limit_usd"))
+      patch.daily_cost_limit_usd = dailyCostLimitUsd
     if (included.has("system_prompt")) patch.system_prompt = systemPrompt
     if (included.has("semester_label"))
       patch.semester_label = semesterLabel.trim().toUpperCase()
@@ -1581,16 +1582,17 @@ function BulkEditDialog({
           </FieldRow>
 
           <FieldRow
-            label={t("courses.bulk.fields.dailyTokenLimit")}
-            help={t("courses.bulk.fields.dailyTokenLimitHelp")}
-            enabled={included.has("daily_token_limit")}
-            onToggle={(v) => toggleField("daily_token_limit", v)}
+            label={t("courses.bulk.fields.dailyCostLimitUsd")}
+            help={t("courses.bulk.fields.dailyCostLimitUsdHelp")}
+            enabled={included.has("daily_cost_limit_usd")}
+            onToggle={(v) => toggleField("daily_cost_limit_usd", v)}
           >
             <Input
               type="number"
-              value={dailyTokenLimit}
+              step="0.01"
+              value={dailyCostLimitUsd}
               onChange={(e) =>
-                setDailyTokenLimit(parseInt(e.target.value) || 0)
+                setDailyCostLimitUsd(parseFloat(e.target.value) || 0)
               }
               min={0}
             />

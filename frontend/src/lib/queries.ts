@@ -201,6 +201,54 @@ export const rerankerModelsQuery = queryOptions({
   staleTime: 60_000,
 })
 
+/// Admin view of the chat / utility model catalog. Carries provider +
+/// pricing + capability + provider-availability so the admin card can
+/// gate enabling on a known price and a configured provider key.
+export interface AdminChatModel {
+  model: string
+  provider: string
+  display_name: string
+  enabled: boolean
+  is_default: boolean
+  is_utility_default: boolean
+  /// USD per 1M tokens. `null` = unknown (model is unusable until
+  /// priced); `0` = genuinely free (on-prem).
+  input_usd_per_mtok: number | null
+  output_usd_per_mtok: number | null
+  supports_logprobs: boolean
+  supports_tool_use: boolean
+  /// Whether the provider's API key is configured in the runtime.
+  provider_available: boolean
+  courses_using: number
+  price_updated_at: string | null
+}
+
+export interface AdminChatModelsResponse {
+  models: AdminChatModel[]
+}
+
+export const adminChatModelsQuery = queryOptions({
+  queryKey: ["admin", "chat-models"],
+  queryFn: () => api.get<AdminChatModelsResponse>("/admin/chat-models"),
+})
+
+/// Public picker feed for the per-course teacher chat-model dropdown.
+/// Enabled models only; carries est. price so the picker can show
+/// `$`/Mtok alongside each option.
+export interface PublicChatModel {
+  model: string
+  display_name: string
+  provider: string
+  input_usd_per_mtok: number | null
+  output_usd_per_mtok: number | null
+}
+
+export const chatModelsQuery = queryOptions({
+  queryKey: ["chat-models"],
+  queryFn: () => api.get<{ models: PublicChatModel[] }>("/chat-models-catalog"),
+  staleTime: 60_000,
+})
+
 export const conversationsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations"],

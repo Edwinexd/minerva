@@ -1,4 +1,5 @@
-//! Cerebras gpt-oss-120b-backed document classifier.
+//! Provider-agnostic LLM-backed document classifier. Calls whichever
+//! utility model the admin selected, through the `ChatProvider` layer.
 
 use async_trait::async_trait;
 use minerva_pipeline::classifier::{ClassifiedKind, Classifier};
@@ -7,19 +8,8 @@ use uuid::Uuid;
 
 use super::prompts::{CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_TEMPLATE};
 use super::types::{DocumentKind, ALL_KINDS};
-use crate::llm::{cerebras_request_with_retry, record_cerebras_usage};
+use crate::llm::util_request;
 use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
-
-/// Cerebras model name for ingest-time classification work. Cerebras
-/// deprecated llama3.1-8b (the previous small-model classifier here)
-/// and qwen-3-235b-a22b-instruct-2507; gpt-oss-120b is the surviving
-/// hosted option and what every classifier path in this crate now
-/// targets. A JSON-schema-constrained 9-way label is well within
-/// gpt-oss-120b's range, structured outputs + `temperature: 0` are
-/// the rails that keep the JSON shape correct, and `reasoning_effort:
-/// "low"` (set in the body) keeps latency in the same ballpark as the
-/// old llama call.
-const CLASSIFIER_MODEL: &str = "gpt-oss-120b";
 
 /// Soft cap on excerpt length sent to the model. Head/tail split so
 /// the model sees both the introductory framing and any "submit /
@@ -40,17 +30,19 @@ const CLASSIFIER_MODEL: &str = "gpt-oss-120b";
 const MAX_EXCERPT_CHARS: usize = 10_000;
 const HEAD_FRACTION: f64 = 0.85;
 
-pub struct CerebrasClassifier {
+pub struct LlmClassifier {
     http: reqwest::Client,
-    api_key: String,
-    /// DB handle so each Cerebras call can record its token spend
-    /// to `course_token_usage`. Cloned cheaply per ingest call.
+    /// Admin-selected utility model (resolved at construction): the model
+    /// id plus a handle to its provider, whatever that provider is.
+    util: crate::llm::UtilityModel,
+    /// DB handle so each call can record its token spend to
+    /// `course_token_usage`. Cloned cheaply per ingest call.
     db: PgPool,
 }
 
-impl CerebrasClassifier {
-    pub fn new(http: reqwest::Client, api_key: String, db: PgPool) -> Self {
-        Self { http, api_key, db }
+impl LlmClassifier {
+    pub fn new(http: reqwest::Client, util: crate::llm::UtilityModel, db: PgPool) -> Self {
+        Self { http, util, db }
     }
 
     async fn call(
@@ -73,7 +65,7 @@ impl CerebrasClassifier {
         // the heavy lifting on shape. Schema mirrors prompts.rs's
         // contract.
         let body = serde_json::json!({
-            "model": CLASSIFIER_MODEL,
+            "model": self.util.model,
             "temperature": 0.0,
             "reasoning_effort": "low",
             "messages": [
@@ -103,41 +95,33 @@ impl CerebrasClassifier {
             }
         });
 
-        let response = cerebras_request_with_retry(&self.http, &self.api_key, &body).await?;
-        let payload: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("classifier: response not JSON: {e}"))?;
+        let (content, usage) = match util_request(&self.http, &self.util, &body).await {
+            Some(Ok(v)) => v,
+            Some(Err(e)) => return Err(e),
+            None => return Err("classifier: no utility model configured".to_string()),
+        };
 
         // Best-effort token-spend bookkeeping. The dashboard buckets
         // by (category, model); a future migration to a multi-model
         // classifier (e.g. a smaller-model fallback for routine cases
         // or a high-effort retry for low-confidence ones) would
         // automatically split into separate rows.
-        record_cerebras_usage(
+        let _ = minerva_db::queries::course_token_usage::record(
             &self.db,
             course_id,
             CATEGORY_DOCUMENT_CLASSIFIER,
-            CLASSIFIER_MODEL,
-            &payload,
+            &self.util.model,
+            usage.prompt_tokens as i32,
+            usage.completion_tokens as i32,
         )
         .await;
 
-        let raw = payload["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| {
-                format!(
-                    "classifier: missing choices[0].message.content; got: {}",
-                    payload
-                )
-            })?;
-
-        parse_classifier_response(raw)
+        parse_classifier_response(content.as_str())
     }
 }
 
 #[async_trait]
-impl Classifier for CerebrasClassifier {
+impl Classifier for LlmClassifier {
     async fn classify(
         &self,
         course_id: Uuid,

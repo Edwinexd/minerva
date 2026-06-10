@@ -30,16 +30,12 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::strategy::common::{
-    cerebras_request_with_retry, record_cerebras_usage, scroll_doc_chunks,
+    cerebras_request_with_retry_to, record_cerebras_usage, scroll_doc_chunks,
 };
 
-/// Same gpt-oss-120b the document classifier uses; JSON-schema
-/// constrained output is well within its range and the prompt cost
-/// is dominated by the per-doc excerpts. (Previously llama3.1-8b for
-/// cost; that model was deprecated by Cerebras so the path collapsed
-/// onto gpt-oss alongside every other classifier in this crate.
-/// `reasoning_effort: "low"` on the call body keeps latency bounded.)
-const SUGGEST_MODEL: &str = "gpt-oss-120b";
+// Runs on the admin-selected utility model (resolved per call); a
+// JSON-schema-constrained output keeps the shape correct and
+// `reasoning_effort: "low"` on the call body keeps latency bounded.
 
 const SOURCE_DOC_LIMIT: i64 = 3;
 const CHUNKS_PER_DOC: usize = 3;
@@ -106,13 +102,14 @@ pub async fn get_or_refresh(state: &AppState, course_id: Uuid) -> Result<Vec<Str
         }
     }
 
-    let questions = regenerate(state, course_id, &docs).await?;
+    let util = state.utility_model().await;
+    let questions = regenerate(state, &util, course_id, &docs).await?;
     minerva_db::queries::course_suggested_questions::upsert(
         &state.db,
         course_id,
         &questions,
         &current_ids,
-        SUGGEST_MODEL,
+        &util.model,
     )
     .await?;
     Ok(questions)
@@ -120,6 +117,7 @@ pub async fn get_or_refresh(state: &AppState, course_id: Uuid) -> Result<Vec<Str
 
 async fn regenerate(
     state: &AppState,
+    util: &crate::llm::UtilityModel,
     course_id: Uuid,
     docs: &[ReadyDocSummary],
 ) -> Result<Vec<String>, AppError> {
@@ -159,7 +157,7 @@ async fn regenerate(
     }
 
     let body = serde_json::json!({
-        "model": SUGGEST_MODEL,
+        "model": util.model,
         "temperature": 0.3,
         "reasoning_effort": "low",
         "messages": [
@@ -197,7 +195,7 @@ async fn regenerate(
     });
 
     let response =
-        cerebras_request_with_retry(&state.http_client, &state.config.cerebras_api_key, &body)
+        cerebras_request_with_retry_to(&state.http_client, &util.endpoint, &util.api_key, &body)
             .await
             .map_err(AppError::Internal)?;
     let payload: serde_json::Value = response
@@ -209,7 +207,7 @@ async fn regenerate(
         &state.db,
         course_id,
         CATEGORY_SUGGESTED_QUESTIONS,
-        SUGGEST_MODEL,
+        &util.model,
         &payload,
     )
     .await;

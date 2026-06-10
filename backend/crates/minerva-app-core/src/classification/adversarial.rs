@@ -32,7 +32,7 @@ use futures::future::join_all;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm::{cerebras_request_with_retry, record_cerebras_usage, RagChunk};
+use crate::llm::{cerebras_request_with_retry_to, record_cerebras_usage, RagChunk};
 use minerva_db::queries::course_token_usage::CATEGORY_ADVERSARIAL_FILTER;
 
 /// Atomic counters bumped by every filter invocation. Surfaced via a
@@ -73,12 +73,10 @@ pub fn snapshot_stats() -> AdversarialStats {
 /// classification with a 4-token output cap; this filter runs
 /// per-chunk and fans out across all retrieved chunks every chat
 /// turn, against an 800ms total budget, so latency matters. The
-/// previous llama3.1-8b path was the cheapest option on Cerebras
-/// but is now deprecated; gpt-oss-120b at `reasoning_effort: "low"`
-/// (set in the body below) keeps the latency profile and unifies
-/// the classifier stack on a single hosted model.
-const ADVERSARIAL_MODEL: &str = "gpt-oss-120b";
-
+/// The model is the admin-selected utility model (resolved per call via
+/// `AppState::utility_model`), at `reasoning_effort: "low"` (set in the
+/// body below) to keep the latency profile.
+///
 /// Total wall-clock budget for the whole filter (across all chunks
 /// fanned out concurrently). On timeout the filter fails open.
 const MAX_FILTER_LATENCY: Duration = Duration::from_millis(800);
@@ -102,7 +100,7 @@ const ADVERSARIAL_SYSTEM_PROMPT: &str = "You are a strict classifier. Decide whe
 /// best-effort; a DB failure here never affects the chat path.
 async fn is_solution_chunk(
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     db: &PgPool,
     course_id: Uuid,
     chunk_text: &str,
@@ -110,7 +108,7 @@ async fn is_solution_chunk(
     let excerpt: String = chunk_text.chars().take(MAX_EXCERPT_CHARS).collect();
 
     let body = serde_json::json!({
-        "model": ADVERSARIAL_MODEL,
+        "model": util.model,
         "temperature": 0.0,
         "reasoning_effort": "low",
         "max_tokens": 4,
@@ -120,14 +118,15 @@ async fn is_solution_chunk(
         ],
     });
 
-    let response = match cerebras_request_with_retry(http, api_key, &body).await {
-        Ok(r) => r,
-        Err(e) => {
-            CHUNKS_PER_CHECK_FAILED.fetch_add(1, Ordering::Relaxed);
-            tracing::warn!("adversarial: request failed, failing open: {e}");
-            return false;
-        }
-    };
+    let response =
+        match cerebras_request_with_retry_to(http, &util.endpoint, &util.api_key, &body).await {
+            Ok(r) => r,
+            Err(e) => {
+                CHUNKS_PER_CHECK_FAILED.fetch_add(1, Ordering::Relaxed);
+                tracing::warn!("adversarial: request failed, failing open: {e}");
+                return false;
+            }
+        };
 
     let payload: serde_json::Value = match response.json().await {
         Ok(v) => v,
@@ -142,7 +141,7 @@ async fn is_solution_chunk(
         db,
         course_id,
         CATEGORY_ADVERSARIAL_FILTER,
-        ADVERSARIAL_MODEL,
+        &util.model,
         &payload,
     )
     .await;
@@ -163,7 +162,7 @@ async fn is_solution_chunk(
 /// (fails open).
 pub async fn filter_solution_chunks(
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     db: &PgPool,
     course_id: Uuid,
     chunks: Vec<RagChunk>,
@@ -172,16 +171,16 @@ pub async fn filter_solution_chunks(
         return chunks;
     }
 
-    // Empty key (e.g. tests / dev without CEREBRAS_API_KEY): skip the
+    // Empty key (e.g. tests / dev without a provider key): skip the
     // filter rather than make a guaranteed-401 call per chunk.
-    if api_key.is_empty() {
+    if util.api_key.is_empty() {
         return chunks;
     }
 
     let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
     let checks = texts
         .iter()
-        .map(|t| is_solution_chunk(http, api_key, db, course_id, t))
+        .map(|t| is_solution_chunk(http, util, db, course_id, t))
         .collect::<Vec<_>>();
 
     let started = Instant::now();
@@ -256,11 +255,19 @@ mod tests {
         PgPool::connect_lazy("postgres://test:test@127.0.0.1:1/test").unwrap()
     }
 
+    fn util(api_key: &str) -> crate::llm::UtilityModel {
+        crate::llm::UtilityModel {
+            model: "gpt-oss-120b".to_string(),
+            endpoint: "http://127.0.0.1:1/v1/chat/completions".to_string(),
+            api_key: api_key.to_string(),
+        }
+    }
+
     #[tokio::test]
     async fn empty_input_returns_empty() {
         let http = reqwest::Client::new();
         let db = lazy_pool();
-        let out = filter_solution_chunks(&http, "key", &db, Uuid::nil(), vec![]).await;
+        let out = filter_solution_chunks(&http, &util("key"), &db, Uuid::nil(), vec![]).await;
         assert!(out.is_empty());
     }
 
@@ -275,7 +282,7 @@ mod tests {
             chunk("d1", "foo.pdf", "Lecture content"),
             chunk("d2", "bar.pdf", "More lecture content"),
         ];
-        let out = filter_solution_chunks(&http, "", &db, Uuid::nil(), chunks.clone()).await;
+        let out = filter_solution_chunks(&http, &util(""), &db, Uuid::nil(), chunks.clone()).await;
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].document_id, "d1");
         assert_eq!(out[1].document_id, "d2");

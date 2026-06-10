@@ -63,6 +63,72 @@ pub struct ProviderModel {
 /// provider can't stall startup.
 const MODELS_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
+/// A resolved utility-model target for the classification / KG / aegis /
+/// suggested-questions calls: the admin-chosen utility model id plus the
+/// OpenAI-compatible `(endpoint, api_key)` to reach it. Resolved from
+/// `chat_models.is_utility_default` + the registry, so the admin's choice
+/// actually drives those calls.
+///
+/// `endpoint` / `api_key` come from the resolved provider's
+/// `openai_endpoint()`. Classification bodies are OpenAI-shaped
+/// (`response_format` json_schema, `reasoning_effort`, ...), so the
+/// utility model should be on an OpenAI-compatible provider. When it
+/// can't be resolved (provider key absent, or a non-OpenAI-compatible
+/// provider), `api_key` comes back empty and every classification call
+/// fails soft and skips - never silently substituting a different
+/// provider.
+#[derive(Debug, Clone)]
+pub struct UtilityModel {
+    pub model: String,
+    pub endpoint: String,
+    pub api_key: String,
+}
+
+/// Resolve the admin-selected utility model to a concrete
+/// `(model, endpoint, key)` from its OWN provider. No provider is ever
+/// hardcoded: if the selected model's provider is absent or not
+/// OpenAI-compatible, the returned target has an empty key so callers
+/// skip (fail soft), the same as a missing key today.
+pub async fn resolve_utility_model(registry: &LlmRegistry, db: &sqlx::PgPool) -> UtilityModel {
+    let model = minerva_db::queries::chat_models::current_utility_default(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if !model.is_empty() {
+        if let Ok(Some(provider_id)) =
+            minerva_db::queries::chat_models::provider_of(db, &model).await
+        {
+            match registry.get(&provider_id) {
+                Some(provider) => {
+                    if let Some((url, key)) = provider.openai_endpoint() {
+                        return UtilityModel {
+                            model,
+                            endpoint: url.to_string(),
+                            api_key: key.to_string(),
+                        };
+                    }
+                    tracing::warn!(
+                        "utility model {model} is on provider {provider_id}, which is not \
+                         OpenAI-compatible; structured classification will be skipped"
+                    );
+                }
+                None => tracing::warn!(
+                    "utility model {model} provider {provider_id} is not configured; \
+                     classification will be skipped"
+                ),
+            }
+        }
+    }
+    // Unresolvable: empty target -> callers fail soft and skip. No
+    // hardcoded fallback provider.
+    UtilityModel {
+        model,
+        endpoint: String::new(),
+        api_key: String::new(),
+    }
+}
+
 /// Wire shape a provider speaks. Drives request/response normalization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderKind {

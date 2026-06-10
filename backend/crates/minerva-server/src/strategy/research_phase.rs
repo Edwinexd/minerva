@@ -1194,6 +1194,11 @@ mod stream_integration_tests {
             )),
             cerebras_api_key: "test-key".to_string(),
             cerebras_base_url: base_url,
+            utility: minerva_app_core::llm::UtilityModel {
+                model: "gpt-oss-120b".to_string(),
+                endpoint: "http://127.0.0.1:65535/v1/chat/completions".to_string(),
+                api_key: "test-key".to_string(),
+            },
             openai_api_key: String::new(),
             embedding_provider: "local".to_string(),
             embedding_model: "test".to_string(),

@@ -903,7 +903,7 @@ pub(crate) async fn run_classify_one(
 
     let classifier = crate::classification::CerebrasClassifier::new(
         reqwest::Client::new(),
-        state.config.cerebras_api_key.clone(),
+        state.utility_model().await,
         state.db.clone(),
     );
     use minerva_pipeline::classifier::Classifier;

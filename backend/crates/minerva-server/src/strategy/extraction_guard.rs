@@ -196,7 +196,7 @@ pub struct GuardDecision {
 pub async fn evaluate_for_turn(
     db: &PgPool,
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     course_id: Uuid,
     conversation_id: Uuid,
     history: &[minerva_db::queries::conversations::MessageRow],
@@ -224,8 +224,7 @@ pub async fn evaluate_for_turn(
     // pairing against the prior assistant message.
     let recent_user_messages = recent_user_messages(history, INTENT_HISTORY_TURNS);
     let intent =
-        extraction_guard::classify_intent(http, api_key, db, course_id, &recent_user_messages)
-            .await;
+        extraction_guard::classify_intent(http, util, db, course_id, &recent_user_messages).await;
     tracing::info!(
         "extraction_guard: turn={} conversation={} intent.is_extraction={} intent.rationale={:?}",
         turn_index,
@@ -331,7 +330,7 @@ pub async fn evaluate_for_turn(
             .unwrap_or("");
         let v = extraction_guard::classify_engagement(
             http,
-            api_key,
+            util,
             db,
             course_id,
             prior_assistant,
@@ -548,7 +547,7 @@ pub async fn evaluate_for_turn(
 pub async fn intercept_reply(
     db: &PgPool,
     http: &reqwest::Client,
-    api_key: &str,
+    util: &crate::llm::UtilityModel,
     course_id: Uuid,
     conversation_id: Uuid,
     decision: &Option<GuardDecision>,
@@ -568,7 +567,7 @@ pub async fn intercept_reply(
 
     let verdict: OutputVerdict = extraction_guard::check_output_for_solution(
         http,
-        api_key,
+        util,
         db,
         course_id,
         assistant_reply,
@@ -592,7 +591,7 @@ pub async fn intercept_reply(
     // signal the frontend to swap.
     let rewrite = extraction_guard::generate_socratic_rewrite(
         http,
-        api_key,
+        util,
         db,
         course_id,
         student_message,

@@ -248,6 +248,14 @@ impl AppState {
             backfill_tracker: Arc::new(BackfillTracker::default()),
         })
     }
+
+    /// Resolve the admin-selected utility model (classification / KG /
+    /// aegis / suggested-questions) to a concrete `(model, endpoint, key)`
+    /// via `chat_models.is_utility_default` + the registry. Cheap; call
+    /// per request that needs a utility call.
+    pub async fn utility_model(&self) -> crate::llm::UtilityModel {
+        crate::llm::resolve_utility_model(&self.llm, &self.db).await
+    }
 }
 
 /// Build the embedder client.

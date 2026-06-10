@@ -7,19 +7,8 @@ use uuid::Uuid;
 
 use super::prompts::{CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_TEMPLATE};
 use super::types::{DocumentKind, ALL_KINDS};
-use crate::llm::{cerebras_request_with_retry, record_cerebras_usage};
+use crate::llm::{cerebras_request_with_retry_to, record_cerebras_usage};
 use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
-
-/// Cerebras model name for ingest-time classification work. Cerebras
-/// deprecated llama3.1-8b (the previous small-model classifier here)
-/// and qwen-3-235b-a22b-instruct-2507; gpt-oss-120b is the surviving
-/// hosted option and what every classifier path in this crate now
-/// targets. A JSON-schema-constrained 9-way label is well within
-/// gpt-oss-120b's range, structured outputs + `temperature: 0` are
-/// the rails that keep the JSON shape correct, and `reasoning_effort:
-/// "low"` (set in the body) keeps latency in the same ballpark as the
-/// old llama call.
-const CLASSIFIER_MODEL: &str = "gpt-oss-120b";
 
 /// Soft cap on excerpt length sent to the model. Head/tail split so
 /// the model sees both the introductory framing and any "submit /
@@ -42,15 +31,18 @@ const HEAD_FRACTION: f64 = 0.85;
 
 pub struct CerebrasClassifier {
     http: reqwest::Client,
-    api_key: String,
-    /// DB handle so each Cerebras call can record its token spend
-    /// to `course_token_usage`. Cloned cheaply per ingest call.
+    /// Admin-selected utility model (resolved at construction): the model
+    /// id with its OpenAI-compatible endpoint and key. The struct name is
+    /// retained for continuity; it is no longer Cerebras-specific.
+    util: crate::llm::UtilityModel,
+    /// DB handle so each call can record its token spend to
+    /// `course_token_usage`. Cloned cheaply per ingest call.
     db: PgPool,
 }
 
 impl CerebrasClassifier {
-    pub fn new(http: reqwest::Client, api_key: String, db: PgPool) -> Self {
-        Self { http, api_key, db }
+    pub fn new(http: reqwest::Client, util: crate::llm::UtilityModel, db: PgPool) -> Self {
+        Self { http, util, db }
     }
 
     async fn call(
@@ -73,7 +65,7 @@ impl CerebrasClassifier {
         // the heavy lifting on shape. Schema mirrors prompts.rs's
         // contract.
         let body = serde_json::json!({
-            "model": CLASSIFIER_MODEL,
+            "model": self.util.model,
             "temperature": 0.0,
             "reasoning_effort": "low",
             "messages": [
@@ -103,7 +95,13 @@ impl CerebrasClassifier {
             }
         });
 
-        let response = cerebras_request_with_retry(&self.http, &self.api_key, &body).await?;
+        let response = cerebras_request_with_retry_to(
+            &self.http,
+            &self.util.endpoint,
+            &self.util.api_key,
+            &body,
+        )
+        .await?;
         let payload: serde_json::Value = response
             .json()
             .await
@@ -118,7 +116,7 @@ impl CerebrasClassifier {
             &self.db,
             course_id,
             CATEGORY_DOCUMENT_CLASSIFIER,
-            CLASSIFIER_MODEL,
+            &self.util.model,
             &payload,
         )
         .await;

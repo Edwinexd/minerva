@@ -132,7 +132,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let mut initial_chunks = if ctx.kg_enabled {
         crate::classification::adversarial::filter_solution_chunks(
             &http_client,
-            &ctx.cerebras_api_key,
+            &ctx.utility,
             &ctx.db,
             ctx.course_id,
             initial_chunks_raw,
@@ -199,7 +199,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let guard_decision = super::extraction_guard::evaluate_for_turn(
         &ctx.db,
         &http_client,
-        &ctx.cerebras_api_key,
+        &ctx.utility,
         ctx.course_id,
         ctx.conversation_id,
         &ctx.history,
@@ -243,7 +243,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let output = run_loop(&http_client, &loop_cfg, initial_chunks, &tx, |sentence| {
         let http_client = http_client.clone();
         let openai_key = ctx.openai_api_key.clone();
-        let cerebras_key = ctx.cerebras_api_key.clone();
+        let utility = ctx.utility.clone();
         let fastembed = ctx.fastembed.clone();
         let reranker = ctx.reranker.clone();
         let reranker_model = ctx.reranker_model.clone();
@@ -277,7 +277,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             let mut filtered = if kg_enabled {
                 crate::classification::adversarial::filter_solution_chunks(
                     &http_client,
-                    &cerebras_key,
+                    &utility,
                     &db,
                     course_id,
                     raw,
@@ -341,7 +341,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let final_text = super::extraction_guard::intercept_reply(
         &ctx.db,
         &http_client,
-        &ctx.cerebras_api_key,
+        &ctx.utility,
         ctx.course_id,
         ctx.conversation_id,
         &guard_decision,

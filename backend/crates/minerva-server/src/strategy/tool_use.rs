@@ -157,7 +157,7 @@ pub async fn run(
     if ctx.kg_enabled {
         rag.context = crate::classification::adversarial::filter_solution_chunks(
             &http_client,
-            &ctx.cerebras_api_key,
+            &ctx.utility,
             &ctx.db,
             ctx.course_id,
             rag.context,
@@ -230,7 +230,7 @@ pub async fn run(
     let guard_decision = super::extraction_guard::evaluate_for_turn(
         &ctx.db,
         &http_client,
-        &ctx.cerebras_api_key,
+        &ctx.utility,
         ctx.course_id,
         ctx.conversation_id,
         &ctx.history,
@@ -372,7 +372,7 @@ pub async fn run(
     let final_text = super::extraction_guard::intercept_reply(
         &ctx.db,
         &http_client,
-        &ctx.cerebras_api_key,
+        &ctx.utility,
         ctx.course_id,
         ctx.conversation_id,
         &guard_decision,

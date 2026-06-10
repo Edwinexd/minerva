@@ -40,6 +40,11 @@ pub struct GenerationContext {
     /// point at a wiremock server.
     pub cerebras_api_key: String,
     pub cerebras_base_url: String,
+    /// Resolved utility model (admin-selected via
+    /// `chat_models.is_utility_default`) for the adversarial filter and
+    /// extraction guard run inside the strategy. Carries the model id +
+    /// OpenAI-compatible endpoint/key. Resolved once at the route handler.
+    pub utility: crate::llm::UtilityModel,
     pub openai_api_key: String,
     pub embedding_provider: String,
     pub embedding_model: String,

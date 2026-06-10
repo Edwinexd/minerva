@@ -271,20 +271,13 @@ pub(crate) struct AegisAnalysisPayload {
     /// rubric.
     #[serde(default)]
     pub mode: AegisModeWire,
-    /// Cerebras model that produced this verdict. Either
-    /// `AEGIS_MODEL` (first-fire on a fresh draft) or
-    /// `AEGIS_FOLLOWUP_MODEL` (follow-up fires once the analyzer
-    /// has produced at least one verdict for the current draft).
-    /// Round-trips through the frontend on Send so the persisted
-    /// `prompt_analyses.model_used` stamps the actual runtime model
-    /// rather than a hard-coded constant. Defaults to `AEGIS_MODEL`
-    /// for older clients that don't ship the field.
-    #[serde(default = "default_model_used")]
+    /// Model that produced this verdict (the admin-selected utility
+    /// model). Round-trips through the frontend on Send so the persisted
+    /// `prompt_analyses.model_used` stamps the actual runtime model.
+    /// Empty for older clients that don't ship the field; the real model
+    /// is taken from the live verdict regardless.
+    #[serde(default)]
     pub model_used: String,
-}
-
-fn default_model_used() -> String {
-    crate::classification::aegis::AEGIS_MODEL.to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1430,7 +1423,7 @@ pub(crate) async fn analyze_prompt_for_user(
 
     let verdict = match crate::classification::aegis::analyze_prompt(
         &state.http_client,
-        &state.config.cerebras_api_key,
+        &state.utility_model().await,
         &state.db,
         course_id,
         &trail,
@@ -1546,7 +1539,7 @@ pub(crate) async fn rewrite_prompt_for_user(
 
     match crate::classification::aegis::rewrite_prompt(
         &state.http_client,
-        &state.config.cerebras_api_key,
+        &state.utility_model().await,
         &state.db,
         course_id,
         &content,
@@ -1875,6 +1868,7 @@ pub(super) async fn run_chat_message(
         provider,
         cerebras_api_key,
         cerebras_base_url,
+        utility: state.utility_model().await,
         openai_api_key: state.config.openai_api_key.clone(),
         embedding_provider: course.embedding_provider,
         embedding_model: course.embedding_model,

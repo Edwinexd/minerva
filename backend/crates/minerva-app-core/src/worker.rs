@@ -163,7 +163,7 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
         // anything in the hot loop.
         let kg_classifier: Arc<dyn Classifier> = Arc::new(CerebrasClassifier::new(
             reqwest::Client::new(),
-            state.config.cerebras_api_key.clone(),
+            state.utility_model().await,
             state.db.clone(),
         ));
         let noop_classifier: Arc<dyn Classifier> = Arc::new(NoopClassifier);

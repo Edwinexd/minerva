@@ -177,6 +177,13 @@ export function PlatformUsagePanel() {
                       const course = courseMap.get(courseId)
                       const total = stats.prompt + stats.completion
                       const research = stats.researchPrompt + stats.researchCompletion
+                      // The cap is per student per day. Surface it as
+                      // such and, when we know the enrolment, the
+                      // course-wide theoretical daily max (students x
+                      // cap) so the figure stops reading like a single
+                      // course-wide budget.
+                      const limitUsd = course?.daily_cost_limit_usd ?? 0
+                      const students = course?.student_count ?? 0
                       return (
                         <tr key={courseId} className="border-b align-top">
                           <td className="py-2 pr-4">
@@ -194,11 +201,23 @@ export function PlatformUsagePanel() {
                             {stats.requests.toLocaleString()}
                           </td>
                           <td className="py-2 text-right font-mono">
-                            {course?.daily_cost_limit_usd
-                              ? t("usage.limit.perDay", {
-                                  value: formatUsd(course.daily_cost_limit_usd),
-                                })
-                              : t("usage.limit.unlimited")}
+                            {limitUsd > 0 ? (
+                              <>
+                                {t("usage.limit.perStudentPerDay", {
+                                  value: formatUsd(limitUsd),
+                                })}
+                                {students > 0 && (
+                                  <span className="block text-[10px] font-normal text-muted-foreground/80">
+                                    {t("usage.limit.courseTotal", {
+                                      value: formatUsd(limitUsd * students),
+                                      count: students,
+                                    })}
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              t("usage.limit.unlimited")
+                            )}
                           </td>
                         </tr>
                       )

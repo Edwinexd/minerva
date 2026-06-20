@@ -171,6 +171,13 @@ pub(crate) struct CourseResponse {
     /// uses it as a chip on the My Courses tile so the term-stable
     /// identifier is visible alongside the rename-friendly `name`.
     course_code: Option<String>,
+    /// Number of `student`-role members. The per-student daily spend
+    /// cap (`daily_cost_limit_usd`) applies to each of these, so the
+    /// admin usage table and the teacher config page multiply the two
+    /// to show the course-wide theoretical daily max ("N students x
+    /// cap") instead of leaving the bare per-student figure looking
+    /// like a course-wide budget.
+    student_count: i64,
 }
 
 #[derive(Serialize)]
@@ -227,6 +234,7 @@ impl CourseResponse {
         my_role: Option<String>,
         feature_flags: CourseFeatureFlagsView,
         daisy_offerings: Vec<DaisyOfferingView>,
+        student_count: i64,
     ) -> Self {
         Self {
             id: row.id,
@@ -255,6 +263,7 @@ impl CourseResponse {
             daisy_offerings,
             auto_managed: row.auto_managed,
             course_code: row.course_code,
+            student_count,
         }
     }
 }
@@ -293,10 +302,11 @@ async fn resolve_course_offerings(db: &sqlx::PgPool, course_id: Uuid) -> Vec<Dai
 pub(crate) async fn admin_course_response(
     db: &sqlx::PgPool,
     row: minerva_db::queries::courses::CourseRow,
+    student_count: i64,
 ) -> CourseResponse {
     let flags = resolve_course_flags(db, row.id).await;
     let offerings = resolve_course_offerings(db, row.id).await;
-    CourseResponse::from_row(row, None, flags, offerings)
+    CourseResponse::from_row(row, None, flags, offerings, student_count)
 }
 
 async fn list_courses(
@@ -313,13 +323,23 @@ async fn list_courses(
         minerva_db::queries::courses::list_by_member(&state.db, user.id).await?
     };
 
+    // One grouped query for every course's student count, rather than a
+    // per-course COUNT inside the loop below.
+    let student_counts = minerva_db::queries::courses::count_students_by_course(&state.db).await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let my_role =
             minerva_db::queries::courses::get_member_role(&state.db, row.id, user.id).await?;
         let flags = resolve_course_flags(&state.db, row.id).await;
         let offerings = resolve_course_offerings(&state.db, row.id).await;
-        out.push(CourseResponse::from_row(row, my_role, flags, offerings));
+        let student_count = student_counts.get(&row.id).copied().unwrap_or(0);
+        out.push(CourseResponse::from_row(
+            row,
+            my_role,
+            flags,
+            offerings,
+            student_count,
+        ));
     }
     Ok(Json(out))
 }
@@ -379,11 +399,14 @@ async fn create_course(
     minerva_db::queries::courses::add_member(&state.db, id, user.id, "teacher").await?;
 
     let flags = resolve_course_flags(&state.db, row.id).await;
+    // A just-created course has only its owner (added as a teacher
+    // above), so there are no student members yet.
     Ok(Json(CourseResponse::from_row(
         row,
         Some("teacher".into()),
         flags,
         Vec::new(),
+        0,
     )))
 }
 
@@ -404,8 +427,13 @@ async fn get_course(
 
     let flags = resolve_course_flags(&state.db, row.id).await;
     let offerings = resolve_course_offerings(&state.db, row.id).await;
+    let student_count = minerva_db::queries::courses::count_students(&state.db, row.id).await?;
     Ok(Json(CourseResponse::from_row(
-        row, my_role, flags, offerings,
+        row,
+        my_role,
+        flags,
+        offerings,
+        student_count,
     )))
 }
 
@@ -756,8 +784,13 @@ async fn update_course(
     let my_role = minerva_db::queries::courses::get_member_role(&state.db, id, user.id).await?;
     let flags = resolve_course_flags(&state.db, row.id).await;
     let offerings = resolve_course_offerings(&state.db, row.id).await;
+    let student_count = minerva_db::queries::courses::count_students(&state.db, row.id).await?;
     Ok(Json(CourseResponse::from_row(
-        row, my_role, flags, offerings,
+        row,
+        my_role,
+        flags,
+        offerings,
+        student_count,
     )))
 }
 

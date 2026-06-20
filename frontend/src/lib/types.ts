@@ -88,6 +88,16 @@ export interface Course {
    * a chip on the My Courses tile when present.
    */
   course_code: string | null
+  /**
+   * Number of `student`-role members. The per-student daily spend cap
+   * (`daily_cost_limit_usd`) applies to each of them, so the admin
+   * usage table and the teacher config page multiply the two to show
+   * the course-wide theoretical daily max ("N students x cap") rather
+   * than letting the bare per-student figure read like a course-wide
+   * budget. Teachers / TAs are excluded (they aren't the budgeted
+   * population).
+   */
+  student_count: number
 }
 
 export interface MergeSuggestionCourse {

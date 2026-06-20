@@ -131,6 +131,7 @@ const course: Course = {
   daisy_offerings: [],
   auto_managed: false,
   course_code: null,
+  student_count: 30,
 }
 
 const adminUsers: AdminUser[] = [

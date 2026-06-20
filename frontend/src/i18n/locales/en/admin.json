@@ -237,7 +237,9 @@
       "user": "User"
     },
     "limit": {
-      "perDay": "{{value}}/day",
+      "perStudentPerDay": "{{value}}/student/day",
+      "courseTotal_one": "up to {{value}}/day for {{count}} student",
+      "courseTotal_other": "up to {{value}}/day for {{count}} students",
       "unlimited": "unlimited"
     }
   },

@@ -89,6 +89,8 @@
     "minScoreHelp": "Chunks scoring below this threshold are dropped before being sent to the model. 0 disables the filter (top-K only). Use the RAG tab to preview which chunks pass for a sample question.",
     "dailyCostLimitUsdLabel": "Daily Spend Cap per Student (USD)",
     "dailyCostLimitUsdHelp": "Maximum USD a student can spend per day in this course (computed from token usage at each model's rate). Set to 0 for unlimited.",
+    "dailyCostLimitUsdTotal_one": "With {{count}} enrolled student, that is up to {{value}}/day for the whole course if everyone hits the cap.",
+    "dailyCostLimitUsdTotal_other": "With {{count}} enrolled students, that is up to {{value}}/day for the whole course if everyone hits the cap.",
     "systemPromptLabel": "Custom System Prompt",
     "systemPromptPlaceholder": "Optional custom instructions for the AI assistant",
     "savingButton": "Saving...",

@@ -521,6 +521,44 @@ pub async fn get_member_role(
     .await
 }
 
+/// Count the `student`-role members of a course. This is the population
+/// the per-student daily spend cap (`courses.daily_cost_limit_usd`)
+/// applies to, so the admin / teacher UIs multiply it by the cap to show
+/// the course-wide theoretical daily max ("N students x cap"). Teachers
+/// and TAs are excluded: the cap is framed per *student*, and they're not
+/// the budgeted population. Students reliably land in `course_members`
+/// (LTI launch auto-enrols them, and chat requires membership), so this
+/// is an accurate denominator.
+pub async fn count_students(db: &PgPool, course_id: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM course_members WHERE course_id = $1 AND role = 'student'",
+        course_id,
+    )
+    .fetch_one(db)
+    .await
+    .map(|n| n.unwrap_or(0))
+}
+
+/// Batched variant of [`count_students`] for the multi-course list
+/// endpoints (teacher/admin course listings). One grouped aggregate over
+/// `course_members` instead of one COUNT per course, so listing N courses
+/// stays a single query rather than adding an Nth round-trip to the
+/// already-per-course flag/offering resolution. Courses with zero student
+/// members are simply absent from the map; callers default to 0.
+pub async fn count_students_by_course(
+    db: &PgPool,
+) -> Result<std::collections::HashMap<Uuid, i64>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT course_id, COUNT(*) AS "n!"
+           FROM course_members
+           WHERE role = 'student'
+           GROUP BY course_id"#,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.course_id, r.n)).collect())
+}
+
 /// Input bag for `upsert_from_daisy`. Mirrors the subset of
 /// `dsv_wrapper.DaisyCourse` fields the Minerva backend cares about;
 /// the python sync script flattens the dsv-wrapper model into this

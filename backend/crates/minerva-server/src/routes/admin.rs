@@ -106,9 +106,15 @@ async fn list_all_courses(
 ) -> Result<Json<Vec<crate::routes::courses::CourseResponse>>, AppError> {
     require_admin(&user)?;
     let rows = minerva_db::queries::courses::list_all_including_archived(&state.db).await?;
+    // One grouped query for every course's student count instead of a
+    // per-course COUNT in the loop.
+    let student_counts = minerva_db::queries::courses::count_students_by_course(&state.db).await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        out.push(crate::routes::courses::admin_course_response(&state.db, row).await);
+        let student_count = student_counts.get(&row.id).copied().unwrap_or(0);
+        out.push(
+            crate::routes::courses::admin_course_response(&state.db, row, student_count).await,
+        );
     }
     Ok(Json(out))
 }

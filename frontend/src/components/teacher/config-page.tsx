@@ -748,6 +748,14 @@ function CourseConfigForm({ course }: { course: Course }) {
             <p className="text-xs text-muted-foreground">
               {t("config.dailyCostLimitUsdHelp")}
             </p>
+            {dailyCostLimitUsd > 0 && course.student_count > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t("config.dailyCostLimitUsdTotal", {
+                  value: formatUsd(dailyCostLimitUsd * course.student_count),
+                  count: course.student_count,
+                })}
+              </p>
+            )}
           </div>
 
           <Separator />

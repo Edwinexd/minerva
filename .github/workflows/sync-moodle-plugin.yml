@@ -31,7 +31,7 @@ jobs:
             ssh_host: gitea.dsv.su.se
             remote: git@gitea.dsv.su.se:edsu8469/moodle-local_minerva.git
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Full history required so `git subtree split` can rewrite
           # the per-commit history of moodle-plugin/local/minerva

@@ -23,7 +23,7 @@ resolver = "2"
 axum = { version = "0.8", features = ["multipart", "macros"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["fs", "cors", "trace", "limit"] }
+tower-http = { version = "0.7", features = ["fs", "cors", "trace", "limit"] }
 tokio = { version = "1", features = ["full"] }
 
 # Serialization
@@ -31,7 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "migrate", "chrono", "uuid", "rust_decimal"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "migrate", "chrono", "uuid", "rust_decimal"] }
 
 # Money. NUMERIC <-> Decimal end-to-end; never f64 for currency.
 # `serde-float` serializes Decimal as a JSON number so API limits/prices
@@ -47,7 +47,7 @@ qdrant-client = "1"
 # separate `Qwen3TextEmbedding` API. See
 # `crates/minerva-embed-engine/src/fastembed_embedder.rs`.
 fastembed = { version = "5", features = ["qwen3"] }
-candle-core = "0.10"
+candle-core = "0.11"
 # Direct hf-hub dep so the custom-ONNX loader (e.g. snowflake-arctic-embed-m-v2.0
 # via fastembed's `UserDefinedEmbeddingModel` API) can fetch model files from
 # the Hub. Pinned to the same major as fastembed's transitive copy so cargo
@@ -65,7 +65,7 @@ hex = "0.4"
 rand = "0.10"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 rsa = "0.9"
-rand_chacha = "0.3"
+rand_chacha = "0.9"
 urlencoding = "2"
 
 # Utilities
@@ -80,15 +80,15 @@ dotenvy = "0.15"
 # Archive and XML parsing (Moodle .mbz import)
 tar = "0.4"
 flate2 = "1"
-quick-xml = { version = "0.40", features = ["serialize"] }
+quick-xml = { version = "0.41", features = ["serialize"] }
 tempfile = "3"
 
 # gRPC for the internal embedder + reranker model services. Pinned to
 # matching minors so the generated client/server types from `prost-build`
 # at build time stay ABI-compatible with the `tonic` runtime crate.
-tonic = "0.12"
-tonic-build = "0.12"
-prost = "0.13"
+tonic = "0.14"
+tonic-build = "0.14"
+prost = "0.14"
 
 # Observability. `metrics` is the lightweight facade any crate emits
 # through; `metrics-exporter-prometheus` is installed only by the binaries
@@ -96,4 +96,4 @@ prost = "0.13"
 # client (we only ever pull-scrape via Alloy); `http-listener` keeps the
 # built-in hyper `/metrics` server so worker / scheduler need no axum.
 metrics = "0.24"
-metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
+metrics-exporter-prometheus = { version = "0.18", default-features = false, features = ["http-listener"] }

@@ -23,7 +23,7 @@ qdrant-client.workspace = true
 # upload routes and the Canvas sync engine.
 sha2.workspace = true
 hex.workspace = true
-pdf-extract = "0.10"
+pdf-extract = "0.12"
 scraper = "0.27"
 
 async-trait = "0.1"

@@ -26,6 +26,10 @@
  */
 
 require_once(__DIR__ . '/../../config.php');
+// The lib.php file holds local_minerva_parse_external_ids(); Moodle only
+// loads it lazily (via nav callbacks), too late for the action handlers
+// below, so require it explicitly.
+require_once(__DIR__ . '/lib.php');
 
 $courseid = required_param('id', PARAM_INT);
 $action = optional_param('action', '', PARAM_ALPHA);
@@ -57,6 +61,15 @@ if ($action === 'unlink') {
     // Drop the per-course sync log too, so re-linking doesn't silently
     // assume content already lives in Minerva.
     $DB->delete_records('local_minerva_sync_log', ['courseid' => $courseid]);
+    // Treat an explicit unlink as opting out of external-id auto-linking, so
+    // the sweep doesn't re-link a still-matched course behind the teacher's
+    // back. Re-linking (manually or via auto-connect) clears this.
+    if (!$DB->record_exists('local_minerva_autolink_optout', ['courseid' => $courseid])) {
+        $DB->insert_record(
+            'local_minerva_autolink_optout',
+            (object) ['courseid' => $courseid, 'timecreated' => time()]
+        );
+    }
     redirect(
         $pageurl,
         get_string('link_removed', 'local_minerva'),
@@ -95,6 +108,112 @@ if ($action === 'syncforums') {
     redirect($pageurl, $msg, null, \core\output\notification::NOTIFY_SUCCESS);
 }
 
+// Auto-connect: resolve the Moodle course external id (Daisy offering ids)
+// to a Minerva course and provision a per-course key in one step. Only
+// available in site-integration mode; mirrors what the picker + provision
+// flow does, keyed off the external id instead of a manual selection.
+if ($action === 'autoconnect') {
+    if (!\local_minerva\api_client::site_integration_available()) {
+        throw new \moodle_exception('site_integration_not_configured', 'local_minerva');
+    }
+    // Never clobber an existing link.
+    if ($DB->record_exists('local_minerva_links', ['courseid' => $courseid])) {
+        redirect($pageurl);
+    }
+    $ids = local_minerva_parse_external_ids($course->idnumber);
+    if (empty($ids)) {
+        redirect(
+            $pageurl,
+            get_string('autoconnect_no_external_id', 'local_minerva'),
+            null,
+            \core\output\notification::NOTIFY_ERROR
+        );
+    }
+    $idlist = implode(', ', $ids);
+    try {
+        $client = \local_minerva\api_client::from_site_config();
+        $res = $client->site_resolve_offerings($USER->username, $ids);
+    } catch (\Exception $e) {
+        redirect(
+            $pageurl,
+            get_string('connection_failed', 'local_minerva', s($e->getMessage())),
+            null,
+            \core\output\notification::NOTIFY_ERROR
+        );
+    }
+    $status = $res->status ?? 'none';
+    if ($status !== 'matched' || empty($res->course)) {
+        // A missing Minerva account looks like "no match" but needs the
+        // opposite advice (log in first), so split the two cases.
+        $msg = empty($res->user_exists)
+            ? get_string('site_user_not_found', 'local_minerva')
+            : get_string('autoconnect_none', 'local_minerva', s($idlist));
+        redirect($pageurl, $msg, null, \core\output\notification::NOTIFY_ERROR);
+    }
+    if (empty($res->authorized)) {
+        redirect(
+            $pageurl,
+            get_string('autoconnect_not_authorized', 'local_minerva'),
+            null,
+            \core\output\notification::NOTIFY_ERROR
+        );
+    }
+    $mc = $res->course;
+    // Provision the per-course key. The server re-checks authorization, so an
+    // ACL race surfaces here rather than leaving a half-baked link row.
+    try {
+        $minted = $client->site_provision_course_key(
+            $USER->username,
+            format_string($course->fullname),
+            $mc->id
+        );
+    } catch (\Exception $e) {
+        redirect(
+            $pageurl,
+            get_string('connection_failed', 'local_minerva', s($e->getMessage())),
+            null,
+            \core\output\notification::NOTIFY_ERROR
+        );
+    }
+    if (empty($minted->key)) {
+        redirect(
+            $pageurl,
+            get_string('site_provision_empty_key', 'local_minerva'),
+            null,
+            \core\output\notification::NOTIFY_ERROR
+        );
+    }
+
+    $record = new stdClass();
+    $record->courseid = $courseid;
+    $record->minerva_course_id = $mc->id;
+    $record->minerva_course_name = $mc->name;
+    $record->minerva_api_url = rtrim(get_config('local_minerva', 'minerva_url'), '/');
+    $record->minerva_api_key = $minted->key;
+    $record->timecreated = time();
+    $record->timemodified = time();
+    // A concurrent double-submit could have inserted the link between our
+    // record_exists check and here (courseid is unique). Treat the collision
+    // as success rather than surfacing a raw DB error page.
+    try {
+        $DB->insert_record('local_minerva_links', $record);
+    } catch (\dml_write_exception $e) {
+        if ($DB->record_exists('local_minerva_links', ['courseid' => $courseid])) {
+            redirect($pageurl);
+        }
+        throw $e;
+    }
+    // Linking by hand is an explicit opt-in; clear any prior unlink opt-out.
+    $DB->delete_records('local_minerva_autolink_optout', ['courseid' => $courseid]);
+
+    redirect(
+        $pageurl,
+        get_string('autoconnect_done', 'local_minerva', s($mc->name)),
+        null,
+        \core\output\notification::NOTIFY_SUCCESS
+    );
+}
+
 echo $OUTPUT->header();
 
 // Data-handling disclosure shown on every view so teachers re-see it on
@@ -130,6 +249,15 @@ if ($link) {
             ),
         ['class' => 'alert alert-info']
     );
+
+    // Note when the link was created by the external-id auto-linker, and
+    // explain that unlinking is a durable opt-out.
+    if (!empty($link->auto_linked)) {
+        echo html_writer::div(
+            get_string('linked_auto_note', 'local_minerva'),
+            'alert alert-secondary'
+        );
+    }
 
     // Unlink (destructive: confirm + red).
     $unlinkbtn = new \core\output\single_button(
@@ -202,6 +330,93 @@ if ($link) {
         }
     }
 } else {
+    // Auto-connect offer: in site-integration mode, if this Moodle course
+    // carries an external id (Daisy offering ids), resolve it to a Minerva
+    // course so the teacher can link in one click. Falls through to the
+    // manual picker/form below in every non-matched case.
+    $extids = local_minerva_parse_external_ids($course->idnumber);
+    if (\local_minerva\api_client::site_integration_available() && !empty($extids)) {
+        $idlist = implode(', ', $extids);
+        $autolinkon = (bool) get_config('local_minerva', 'autolink_by_external_id');
+        $optedout = $DB->record_exists('local_minerva_autolink_optout', ['courseid' => $courseid]);
+        try {
+            $client = \local_minerva\api_client::from_site_config();
+            $res = $client->site_resolve_offerings($USER->username, $extids);
+            $status = $res->status ?? 'none';
+            if ($status === 'matched' && !empty($res->course)) {
+                $mc = $res->course;
+                $authorized = !empty($res->authorized);
+                // Will the unattended sweep link this course on its own?
+                $willauto = $autolinkon && !$optedout;
+
+                echo html_writer::tag(
+                    'div',
+                    html_writer::tag('strong', get_string('autoconnect_section_title', 'local_minerva')) .
+                        html_writer::empty_tag('br') .
+                        get_string('autoconnect_matched', 'local_minerva', (object)[
+                            'ids' => s($idlist),
+                            'name' => s($mc->name),
+                        ]),
+                    ['class' => 'alert alert-success']
+                );
+
+                if (!empty($res->multiple_matches)) {
+                    echo html_writer::div(
+                        get_string('autoconnect_multiple_matches', 'local_minerva', s($mc->name)),
+                        'alert alert-info'
+                    );
+                }
+
+                if ($willauto) {
+                    echo html_writer::div(
+                        get_string('autoconnect_will_autolink', 'local_minerva'),
+                        'alert alert-info'
+                    );
+                } else if ($autolinkon && $optedout) {
+                    echo html_writer::div(
+                        get_string('autoconnect_optedout', 'local_minerva'),
+                        'alert alert-warning'
+                    );
+                }
+
+                if ($authorized) {
+                    $connectbtn = new \core\output\single_button(
+                        new moodle_url($pageurl, ['action' => 'autoconnect']),
+                        // The single_button helper escapes its label; pass raw name.
+                        get_string('autoconnect_btn', 'local_minerva', $mc->name),
+                        'post'
+                    );
+                    $connectbtn->add_confirm_action(get_string('autoconnect_confirm', 'local_minerva'));
+                    echo $OUTPUT->render($connectbtn);
+                } else if (!$willauto) {
+                    // Can't self-provision and nothing automatic will happen.
+                    echo html_writer::div(
+                        get_string('autoconnect_not_authorized', 'local_minerva'),
+                        'alert alert-warning'
+                    );
+                }
+            } else if (empty($res->user_exists)) {
+                // Maps to nothing only because the teacher has no Minerva
+                // account yet; point them at logging in rather than the import.
+                echo html_writer::div(
+                    get_string('site_user_not_found', 'local_minerva'),
+                    'alert alert-warning'
+                );
+            } else {
+                echo html_writer::div(
+                    get_string('autoconnect_none', 'local_minerva', s($idlist)),
+                    'alert alert-info'
+                );
+            }
+        } catch (\Exception $e) {
+            // Non-fatal: surface it but let the manual form still render.
+            echo html_writer::div(
+                get_string('connection_failed', 'local_minerva', s($e->getMessage())),
+                'alert alert-warning'
+            );
+        }
+    }
+
     // Link form: just URL (if not locked) + API key.
     // The key is scoped to a single course, so we resolve it automatically.
     $form = new \local_minerva\form\link_course_form($pageurl);
@@ -245,6 +460,8 @@ if ($link) {
         $record->timecreated = time();
         $record->timemodified = time();
         $DB->insert_record('local_minerva_links', $record);
+        // Manual link is an explicit opt-in; clear any prior unlink opt-out.
+        $DB->delete_records('local_minerva_autolink_optout', ['courseid' => $courseid]);
 
         redirect(
             $pageurl,

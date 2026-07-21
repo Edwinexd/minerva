@@ -34,4 +34,16 @@ $tasks = [
         'month' => '*',
         'dayofweek' => '*',
     ],
+    [
+        // Auto-link matched courses. Runs at :05, ahead of the :15/:45
+        // material sync so a freshly auto-linked course gets its content
+        // pushed in the same hour.
+        'classname' => '\local_minerva\task\autolink_courses',
+        'blocking' => 0,
+        'minute' => '5',
+        'hour' => '*',
+        'day' => '*',
+        'month' => '*',
+        'dayofweek' => '*',
+    ],
 ];

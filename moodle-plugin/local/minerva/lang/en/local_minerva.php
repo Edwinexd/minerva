@@ -41,6 +41,25 @@ $string['site_no_teachable_courses'] = 'You are not listed as owner or teacher o
 $string['site_course_not_selectable'] = 'Please pick one of the available Minerva courses.';
 $string['site_provision_empty_key'] = 'Minerva returned an empty API key. Please try again or contact an admin.';
 
+// Auto-connect via course external id (Daisy momenttillf id).
+$string['autoconnect_section_title'] = 'Auto-connect via external ID';
+$string['autoconnect_matched'] = 'This course\'s external ID ({$a->ids}) matches the Minerva course "{$a->name}". Connect them in one click.';
+$string['autoconnect_btn'] = 'Auto-connect to {$a}';
+$string['autoconnect_confirm'] = 'Link this course to the matched Minerva course and mint an API key for it. Continue?';
+$string['autoconnect_not_authorized'] = 'This course\'s external ID matches a Minerva course, but you are not listed as its owner or a teacher on it. Ask a course owner to add you as a teacher in Minerva, then try again.';
+$string['autoconnect_none'] = 'No Minerva course matches this course\'s external ID ({$a}). Link manually below, or ask an admin to check the Daisy import.';
+$string['autoconnect_multiple_matches'] = 'This course\'s external ID lists offerings that currently map to more than one Minerva course; it will be linked to "{$a}" (the first). If that is wrong, merge the offerings in Minerva.';
+$string['autoconnect_no_external_id'] = 'This course has no external ID set, so there is nothing to auto-connect. Set the course "Course ID number" to the Daisy offering id(s), or link manually below.';
+$string['autoconnect_done'] = 'Auto-connected to Minerva course "{$a}".';
+$string['autoconnect_will_autolink'] = 'This course will be linked to Minerva automatically, usually within the hour.';
+$string['autoconnect_optedout'] = 'Automatic linking was turned off for this course when it was unlinked. Link it again to re-enable it.';
+
+// External-id auto-linking (site setting + scheduled task).
+$string['settings_autolink'] = 'Auto-link courses by external ID';
+$string['settings_autolink_desc'] = 'When ON (default), a course whose "Course ID number" holds a Daisy offering id is linked to the matching Minerva course automatically, so teachers do not have to link it by hand. A manual link always wins, and unlinking a course opts it out of auto-linking. Requires the site integration key.';
+$string['task_autolink_courses'] = 'Auto-link courses to Minerva by external ID';
+$string['linked_auto_note'] = 'This course was linked automatically by its external ID. Unlinking it will keep it unlinked; it will not be auto-linked again.';
+
 // Capabilities.
 $string['minerva:manage'] = 'Manage Minerva course link';
 $string['minerva:syncmaterials'] = 'Sync materials to Minerva';

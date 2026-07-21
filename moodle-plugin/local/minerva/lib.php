@@ -46,3 +46,28 @@ function local_minerva_extend_navigation_course(
         );
     }
 }
+
+/**
+ * Parse a Moodle course external id (`idnumber`) into Daisy offering ids.
+ *
+ * At DSV the course external id holds one or more Daisy `momenttillf_id`s
+ * used to match the course to Daisy; it may be a single id or several
+ * comma-separated (no spaces by convention, but we trim defensively).
+ * Blank entries are dropped and duplicates collapsed, first-seen order kept.
+ *
+ * @param string|null $idnumber The course `idnumber` field.
+ * @return string[] Normalised offering ids (possibly empty).
+ */
+function local_minerva_parse_external_ids(?string $idnumber): array {
+    if ($idnumber === null || trim($idnumber) === '') {
+        return [];
+    }
+    $ids = [];
+    foreach (explode(',', $idnumber) as $part) {
+        $id = trim($part);
+        if ($id !== '' && !in_array($id, $ids, true)) {
+            $ids[] = $id;
+        }
+    }
+    return $ids;
+}

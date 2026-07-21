@@ -54,6 +54,17 @@ if ($hassiteconfig) {
         ''
     ));
 
+    // Auto-link courses to Minerva by external id (Daisy offering id in the
+    // course "Course ID number"). Default ON: teachers don't have to link
+    // matched courses by hand. A manual link always wins, and an explicit
+    // unlink opts the course out; admins can flip this off site-wide.
+    $settings->add(new admin_setting_configcheckbox(
+        'local_minerva/autolink_by_external_id',
+        get_string('settings_autolink', 'local_minerva'),
+        get_string('settings_autolink_desc', 'local_minerva'),
+        1
+    ));
+
     // Auto-sync materials on schedule.
     $settings->add(new admin_setting_configcheckbox(
         'local_minerva/autosync_materials',

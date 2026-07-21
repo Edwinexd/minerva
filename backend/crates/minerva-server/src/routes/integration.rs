@@ -57,6 +57,17 @@ pub fn router() -> Router<AppState> {
         // without the teacher having to visit Minerva first.
         .route("/site/courses-for-user", post(site_courses_for_user))
         .route("/site/provision", post(site_provision_course_key))
+        // Resolve a Moodle course's external id (one or more Daisy
+        // momenttillf ids) to the Minerva course it maps to, so the plugin
+        // can auto-connect without a manual course picker.
+        .route("/site/resolve-offerings", post(site_resolve_offerings))
+        // Unattended auto-link: mint a key from the external-id match alone
+        // (site key + Daisy offering), no acting teacher. Backs the plugin's
+        // scheduled auto-linker.
+        .route(
+            "/site/provision-by-offering",
+            post(site_provision_by_offering),
+        )
 }
 
 /// Extract and validate the API key from the Authorization header.
@@ -834,8 +845,105 @@ async fn site_provision_course_key(
         return Err(AppError::Forbidden);
     }
 
-    // Mint the key exactly like the course UI does (same prefix, same
-    // random bytes, same hash).
+    let (raw_key, row) = mint_course_key(&state, course.id, user.id, name).await?;
+
+    Ok(Json(SiteProvisionResponse {
+        key: raw_key,
+        key_id: row.id,
+        key_prefix: row.key_prefix,
+        course: SiteCourseInfo {
+            id: course.id,
+            name: course.name,
+            description: course.description,
+        },
+    }))
+}
+
+/// Outcome of resolving a set of Daisy offering ids to a Minerva course.
+enum OfferingResolution {
+    /// No supplied id resolved to an active course.
+    NoMatch,
+    /// At least one id resolved. A Moodle course may carry several Daisy
+    /// offering ids (different formal offerings, same taught course); they
+    /// should all link to one Minerva course, so we pick the first id (in
+    /// external-id order) that resolves and link there. `CourseRow` is large;
+    /// box it so the enum isn't sized to the biggest variant.
+    Matched {
+        course: Box<minerva_db::queries::courses::CourseRow>,
+        /// Ids that resolved to the chosen course.
+        matched_ids: Vec<String>,
+        /// True when the ids actually resolved to more than one distinct
+        /// Minerva course (we linked the first). Surfaced for logging so a
+        /// split mapping is visible without blocking the link.
+        multiple_matches: bool,
+    },
+}
+
+/// Trim, drop blanks, and de-duplicate offering ids, preserving first-seen
+/// order.
+fn normalize_offering_ids(raw: &[String]) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for entry in raw {
+        let id = entry.trim();
+        if !id.is_empty() && !ids.iter().any(|existing| existing == id) {
+            ids.push(id.to_string());
+        }
+    }
+    ids
+}
+
+/// Resolve normalized offering ids to a single active Minerva course. Shared
+/// by the read-only resolve endpoint and the auto-link provisioning endpoint
+/// so both agree on match/ambiguity semantics.
+async fn resolve_offerings(
+    state: &AppState,
+    ids: &[String],
+) -> Result<OfferingResolution, AppError> {
+    // First id (in order) that resolves wins the link. We keep scanning the
+    // rest only to record ids pointing at the same course and to detect a
+    // split mapping (ids resolving to different courses) for logging.
+    let mut chosen: Option<minerva_db::queries::courses::CourseRow> = None;
+    let mut matched_ids: Vec<String> = Vec::new();
+    let mut distinct: Vec<Uuid> = Vec::new();
+    for id in ids {
+        let Some(course) =
+            minerva_db::queries::courses::find_by_daisy_momenttillf_id(&state.db, id).await?
+        else {
+            continue;
+        };
+        if !distinct.contains(&course.id) {
+            distinct.push(course.id);
+        }
+        match &chosen {
+            None => {
+                matched_ids.push(id.clone());
+                chosen = Some(course);
+            }
+            Some(existing) if existing.id == course.id => {
+                matched_ids.push(id.clone());
+            }
+            // Resolves to a different course; first one already won.
+            Some(_) => {}
+        }
+    }
+    match chosen {
+        Some(course) => Ok(OfferingResolution::Matched {
+            course: Box::new(course),
+            matched_ids,
+            multiple_matches: distinct.len() > 1,
+        }),
+        None => Ok(OfferingResolution::NoMatch),
+    }
+}
+
+/// Mint a fresh course-scoped api_key (same shape as the course UI and
+/// `/site/provision`), attributed to `user_id`.
+async fn mint_course_key(
+    state: &AppState,
+    course_id: Uuid,
+    user_id: Uuid,
+    name: &str,
+) -> Result<(String, minerva_db::queries::api_keys::ApiKeyRow), AppError> {
     let id = Uuid::new_v4();
     let random_bytes: [u8; 16] = rand::random();
     let raw_key = format!("mnrv_{}", hex::encode(random_bytes));
@@ -848,22 +956,197 @@ async fn site_provision_course_key(
     let row = minerva_db::queries::api_keys::insert(
         &state.db,
         id,
-        course.id,
-        user.id,
+        course_id,
+        user_id,
         name,
         &key_hash,
         &key_prefix,
     )
     .await?;
+    Ok((raw_key, row))
+}
 
-    Ok(Json(SiteProvisionResponse {
-        key: raw_key,
-        key_id: row.id,
-        key_prefix: row.key_prefix,
-        course: SiteCourseInfo {
+#[derive(Deserialize)]
+struct SiteResolveOfferingsRequest {
+    /// Acting user's eppn. Used to report whether they may provision the
+    /// matched course; the actual provision re-checks anyway.
+    eppn: String,
+    /// The Daisy offering ids parsed from the Moodle course's external id
+    /// (`idnumber`). At SU this is one or more `momenttillf_id`s, entered
+    /// comma-separated. Order/duplicates don't matter.
+    #[serde(default)]
+    momenttillf_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct SiteResolveOfferingsResponse {
+    /// Whether the eppn resolves to an existing Minerva user.
+    user_exists: bool,
+    /// `matched` (linked to one Minerva course) or `none` (no offering id
+    /// resolved). Several ids resolving to one course is a normal match;
+    /// ids resolving to different courses still match (first wins) but set
+    /// `multiple_matches`.
+    status: String,
+    /// The matched course, present only when `status == "matched"`.
+    course: Option<SiteCourseInfo>,
+    /// Whether `eppn` may mint a key for the matched course (admin / owner /
+    /// strict-teacher). False when unmatched. UX hint only; provision
+    /// enforces it server-side.
+    authorized: bool,
+    /// Which of the supplied ids actually resolved to the matched course.
+    matched_offering_ids: Vec<String>,
+    /// True when the ids resolved to more than one distinct Minerva course;
+    /// we linked the first. A hint that the Daisy offerings may need merging.
+    multiple_matches: bool,
+}
+
+/// Resolve one or more Daisy offering ids to the single Minerva course they
+/// map to, so the Moodle plugin can offer a one-click auto-connect using the
+/// course's external id instead of a manual picker. Read-only; provisioning
+/// still happens via `/site/provision`.
+async fn site_resolve_offerings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<SiteResolveOfferingsRequest>,
+) -> Result<Json<SiteResolveOfferingsResponse>, AppError> {
+    let key = authenticate_site(&state, &headers).await?;
+
+    let eppn = body.eppn.trim().to_lowercase();
+    enforce_eppn_domain(&key, &eppn)?;
+
+    let unmatched = |user_exists: bool, status: &str| {
+        Ok(Json(SiteResolveOfferingsResponse {
+            user_exists,
+            status: status.to_string(),
+            course: None,
+            authorized: false,
+            matched_offering_ids: Vec::new(),
+            multiple_matches: false,
+        }))
+    };
+
+    let user = match minerva_db::queries::users::find_by_eppn(&state.db, &eppn).await? {
+        Some(u) => u,
+        None => return unmatched(false, "none"),
+    };
+
+    let ids = normalize_offering_ids(&body.momenttillf_ids);
+    if ids.is_empty() {
+        return unmatched(true, "none");
+    }
+
+    let (course, matched_ids, multiple_matches) = match resolve_offerings(&state, &ids).await? {
+        OfferingResolution::Matched {
+            course,
+            matched_ids,
+            multiple_matches,
+        } => (course, matched_ids, multiple_matches),
+        OfferingResolution::NoMatch => return unmatched(true, "none"),
+    };
+
+    let is_admin = user.role == "admin";
+    let is_owner = course.owner_id == user.id;
+    let authorized = is_admin
+        || is_owner
+        || minerva_db::queries::courses::is_course_teacher_strict(&state.db, course.id, user.id)
+            .await?;
+
+    Ok(Json(SiteResolveOfferingsResponse {
+        user_exists: true,
+        status: "matched".to_string(),
+        course: Some(SiteCourseInfo {
             id: course.id,
             name: course.name,
             description: course.description,
-        },
+        }),
+        authorized,
+        matched_offering_ids: matched_ids,
+        multiple_matches,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SiteProvisionByOfferingRequest {
+    /// Human-readable key name (typically the Moodle course fullname).
+    name: String,
+    /// Daisy offering ids parsed from the Moodle course external id.
+    #[serde(default)]
+    momenttillf_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct SiteProvisionByOfferingResponse {
+    /// `matched` (key minted) or `none` (no offering id resolved).
+    status: String,
+    /// Present only on `matched`.
+    course: Option<SiteCourseInfo>,
+    /// Raw key, returned once. Present only on `matched`.
+    key: Option<String>,
+    key_id: Option<Uuid>,
+    key_prefix: Option<String>,
+    /// True when the ids resolved to more than one distinct Minerva course
+    /// (we linked the first). Lets the plugin log a split mapping.
+    multiple_matches: bool,
+}
+
+/// Mint a course-scoped api_key for the Minerva course a Moodle course maps
+/// to via its external id, authorized purely by the site key plus the Daisy
+/// offering match (no per-teacher eppn). This backs the plugin's unattended
+/// auto-linker: a cron sweep has no acting teacher, and setting a course's
+/// external id in Moodle is a manager-only capability, so the match itself is
+/// the trust anchor. The key is attributed to the Minerva course owner.
+/// Several ids resolving to one course (the deduped/merged case) is a normal
+/// match; ids resolving to different courses still link to the first and set
+/// `multiple_matches`. Only when nothing resolves is no key minted.
+async fn site_provision_by_offering(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<SiteProvisionByOfferingRequest>,
+) -> Result<Json<SiteProvisionByOfferingResponse>, AppError> {
+    authenticate_site(&state, &headers).await?;
+
+    let name = body.name.trim();
+    if name.is_empty() || name.len() > 100 {
+        return Err(AppError::bad_request("api_keys.name_invalid_length"));
+    }
+
+    let empty = |status: &str| {
+        Ok(Json(SiteProvisionByOfferingResponse {
+            status: status.to_string(),
+            course: None,
+            key: None,
+            key_id: None,
+            key_prefix: None,
+            multiple_matches: false,
+        }))
+    };
+
+    let ids = normalize_offering_ids(&body.momenttillf_ids);
+    if ids.is_empty() {
+        return empty("none");
+    }
+
+    let (course, multiple_matches) = match resolve_offerings(&state, &ids).await? {
+        OfferingResolution::Matched {
+            course,
+            multiple_matches,
+            ..
+        } => (course, multiple_matches),
+        OfferingResolution::NoMatch => return empty("none"),
+    };
+
+    let (raw_key, row) = mint_course_key(&state, course.id, course.owner_id, name).await?;
+
+    Ok(Json(SiteProvisionByOfferingResponse {
+        status: "matched".to_string(),
+        course: Some(SiteCourseInfo {
+            id: course.id,
+            name: course.name,
+            description: course.description,
+        }),
+        key: Some(raw_key),
+        key_id: Some(row.id),
+        key_prefix: Some(row.key_prefix),
+        multiple_matches,
     }))
 }

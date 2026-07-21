@@ -152,6 +152,49 @@ class api_client {
     }
 
     /**
+     * Resolve a Moodle course's external id to the Minerva course it maps to.
+     *
+     * `$momenttillfids` is the list of Daisy offering ids parsed from the
+     * Moodle course `idnumber` (comma-separated at SU). The server returns
+     * `status` = matched|none|ambiguous, the matched `course` when exactly
+     * one resolved, and whether `$eppn` is authorised to provision it.
+     * Requires a site-level API key (build via `from_site_config()`).
+     *
+     * @param string $eppn
+     * @param string[] $momenttillfids
+     * @return object
+     */
+    public function site_resolve_offerings(string $eppn, array $momenttillfids): object {
+        $resp = $this->request('POST', '/integration/site/resolve-offerings', [
+            'eppn' => $eppn,
+            'momenttillf_ids' => array_values($momenttillfids),
+        ]);
+        return is_object($resp) ? $resp : (object) $resp;
+    }
+
+    /**
+     * Mint a per-course key from an external-id match alone, with no acting
+     * teacher. Backs the unattended auto-linker (a cron has no `$USER`).
+     * Authorised purely by the site key + the Daisy offering match; the
+     * server attributes the key to the Minerva course owner. Requires a
+     * site-level API key (build via `from_site_config()`).
+     *
+     * Returns `{status, course?, key?, key_id?, key_prefix?}` where status is
+     * matched|none|ambiguous; only `matched` carries a key.
+     *
+     * @param string[] $momenttillfids
+     * @param string $name Human-readable key name (the Moodle course fullname).
+     * @return object
+     */
+    public function site_provision_by_offering(array $momenttillfids, string $name): object {
+        $resp = $this->request('POST', '/integration/site/provision-by-offering', [
+            'momenttillf_ids' => array_values($momenttillfids),
+            'name' => $name,
+        ]);
+        return is_object($resp) ? $resp : (object) $resp;
+    }
+
+    /**
      * List all active Minerva courses.
      *
      * @return array List of course objects with id, name, description.

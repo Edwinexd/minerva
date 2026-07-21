@@ -65,5 +65,27 @@ function xmldb_local_minerva_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026052402, 'local', 'minerva');
     }
 
+    // External-id auto-linker: `auto_linked` flag on links + an opt-out table
+    // so an explicit unlink stops the sweep re-linking a still-matched course.
+    if ($oldversion < 2026072101) {
+        $table = new xmldb_table('local_minerva_links');
+        $field = new xmldb_field('auto_linked', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'sync_forums');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $optout = new xmldb_table('local_minerva_autolink_optout');
+        $optout->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $optout->add_field('courseid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $optout->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $optout->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $optout->add_key('courseid_unique', XMLDB_KEY_UNIQUE, ['courseid']);
+        if (!$dbman->table_exists($optout)) {
+            $dbman->create_table($optout);
+        }
+
+        upgrade_plugin_savepoint(true, 2026072101, 'local', 'minerva');
+    }
+
     return true;
 }

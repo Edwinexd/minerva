@@ -222,12 +222,13 @@
     "shortcomingsHeading": "Innehåll som inte är tillgängligt",
     "shortcomingsIntro": "Följande innehåll är ännu inte fullt tillgängligt:",
     "shortcomings": {
-      "contrast": "Färgkontrasten i hela temat (ljust och mörkt läge) har ännu inte kontrollerats mot samtliga WCAG-gränsvärden. Viss sekundär text eller vissa gränssnittskanter kan på sina ställen ha för låg kontrast.",
+      "contrast": "Färgkontrasten är uppmätt för temats grundpalett i både ljust och mörkt läge, och för de enskilda färger som används för varningar och statustext. Ett fåtal enstaka färger utanför grundpaletten kontrolleras manuellt när de införs, vilket gör att en nyligen tillagd färg kan ha för låg kontrast fram till nästa granskning.",
+      "screenReader": "Minerva har ännu inte gåtts igenom från början till slut med en skärmläsare som NVDA eller VoiceOver. De automatiska testerna fångar programmatiska fel, men hur väl och i vilken ordning innehållet läses upp i chatt-, lärar- och adminflödena har inte kontrollerats av en person som använder skärmläsare.",
       "knowledgeGraph": "Lärarvyn med kunskapsgrafen är en interaktiv visualisering på en canvas. En textsammanfattning och en lista över relationer finns som alternativ, men själva den visuella grafen går inte att utforska fullt ut med tangentbord eller skärmläsare.",
       "thirdParty": "Innehåll som bäddas in från eller startas via tredje part (till exempel LTI-start från Moodle eller Canvas och videotranskript från play.dsv.su.se) ligger utanför vår kontroll och uppfyller kanske inte tillgänglighetskraven."
     },
     "testingHeading": "Hur vi testat Minerva",
-    "testingBody": "Vi använder automatiska tillgänglighetstester (eslint-plugin-jsx-a11y, axe-core och pa11y) i vår utvecklings- och CI-process, kompletterat med manuell granskning mot WCAG 2.1 AA. Minerva bedömdes senast den 22 maj 2026.",
+    "testingBody": "Vi använder automatiska tillgänglighetstester i vår utvecklings- och CI-process: eslint-plugin-jsx-a11y för statiska kontroller, axe-core mot renderade sidor och pa11y i en riktig webbläsare. De renderade kontrollerna är konfigurerade för framgångskriterierna i WCAG 2.2 nivå AA. Detta kompletteras med manuell granskning av källkoden mot samma kriterier, inklusive uppmätta kontroller av färgkontrast. Minerva bedömdes senast den 3 augusti 2026.",
     "feedbackHeading": "Återkoppling och kontaktuppgifter",
     "feedbackBody": "Om du upptäcker problem som inte beskrivs på den här sidan, eller om du anser att vi inte uppfyller kraven, vill vi gärna veta det så att vi kan åtgärda det. Kontakta oss på <email>{{email}}</email>.",
     "enforcementHeading": "Tillsyn",

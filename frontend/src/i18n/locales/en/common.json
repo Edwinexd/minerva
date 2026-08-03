@@ -222,12 +222,13 @@
     "shortcomingsHeading": "Content that is not accessible",
     "shortcomingsIntro": "The following content is not yet fully accessible:",
     "shortcomings": {
-      "contrast": "Colour contrast across the full theme palette (light and dark) has not yet been verified against all WCAG contrast thresholds; some secondary text or interface borders may fall short in places.",
+      "contrast": "Colour contrast has been measured for the theme's core palette in both light and dark mode, and for the individual colours used for warnings and status text. A small number of one-off colours outside the core palette are checked by hand when they are introduced, so a newly added one can fall short until the next review.",
+      "screenReader": "Minerva has not yet been walked through end to end with a screen reader such as NVDA or VoiceOver. Automated testing catches programmatic errors, but the quality and order of what is announced in the chat, teacher and admin flows has not been verified by a person using one.",
       "knowledgeGraph": "The teacher knowledge-graph view is an interactive canvas visualisation. A text summary and a list of relationships are provided as an alternative, but the visual graph itself cannot be fully explored with a keyboard or screen reader.",
       "thirdParty": "Content embedded from or launched via third parties (for example LTI launches from Moodle or Canvas, and video transcripts from play.dsv.su.se) is outside our control and may not meet the accessibility requirements."
     },
     "testingHeading": "How we tested Minerva",
-    "testingBody": "We use automated accessibility testing (eslint-plugin-jsx-a11y, axe-core, and pa11y) in our development and continuous-integration pipeline, complemented by manual review against WCAG 2.1 AA. Minerva was most recently assessed on 22 May 2026.",
+    "testingBody": "We use automated accessibility testing in our development and continuous-integration pipeline: eslint-plugin-jsx-a11y for static checks, axe-core against rendered pages, and pa11y in a real browser. The rendered checks are configured for the WCAG 2.2 level AA success criteria. These are complemented by manual review of the source against the same criteria, including measured colour-contrast checks. Minerva was most recently assessed on 3 August 2026.",
     "feedbackHeading": "Feedback and contact details",
     "feedbackBody": "If you find problems that are not described on this page, or believe we are not meeting the requirements, let us know so we can fix it. Contact us at <email>{{email}}</email>.",
     "enforcementHeading": "Enforcement procedure",

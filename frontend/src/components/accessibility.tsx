@@ -14,7 +14,12 @@ import { useDocumentTitle } from "@/lib/use-document-title"
 const FEEDBACK_EMAIL = "lambda@dsv.su.se"
 const DIGG_REPORT_URL = "https://www.digg.se/tdosanmalan"
 
-const SHORTCOMING_KEYS = ["contrast", "knowledgeGraph", "thirdParty"] as const
+const SHORTCOMING_KEYS = [
+  "contrast",
+  "screenReader",
+  "knowledgeGraph",
+  "thirdParty",
+] as const
 
 export function AccessibilityPage() {
   const { t } = useTranslation("common")

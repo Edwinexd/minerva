@@ -338,12 +338,14 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
           </div>
 
           {syncResult && (
-            <div className="rounded-md border p-3 text-sm space-y-1">
+            // <output> (implicit role="status") so the sync outcome is
+            // announced; `block` because <output> is inline by default.
+            <output className="block rounded-md border p-3 text-sm space-y-1">
               <p>
                 <strong>{t("canvas.syncComplete")}</strong> {t("canvas.syncCounts", { synced: syncResult.synced, resynced: syncResult.resynced, skipped: syncResult.skipped })}
               </p>
               {syncResult.warnings.length > 0 && (
-                <div className="text-amber-600 dark:text-amber-400">
+                <div className="text-amber-700 dark:text-amber-400">
                   <p>{t("canvas.warningsLabel")}</p>
                   <ul className="list-disc list-inside">
                     {syncResult.warnings.map((w, i) => <li key={i}>{fmtMsg(w)}</li>)}
@@ -358,11 +360,11 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
                   </ul>
                 </div>
               )}
-            </div>
+            </output>
           )}
 
           {syncMutation.isError && (
-            <p className="text-sm text-destructive">{formatError(syncMutation.error)}</p>
+            <p role="alert" className="text-sm text-destructive">{formatError(syncMutation.error)}</p>
           )}
         </CardContent>
       </Card>

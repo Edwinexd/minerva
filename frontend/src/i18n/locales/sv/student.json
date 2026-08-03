@@ -22,7 +22,10 @@
     "suggestionsLabel": "Prova någon av dessa"
   },
   "chat": {
+    "heading": "Kurschatt: {{course}}",
+    "headingFallback": "Kurschatt",
     "inputPlaceholder": "Fråga om kursmaterialet…",
+    "inputLabel": "Din fråga",
     "send": "Skicka",
     "disclaimerBefore": "Meddelanden och relevanta utdrag ur kursmaterialet skickas till Cerebras för AI-inferens. Svaren kan vara felaktiga; verifiera mot kursmaterialet. Läs ",
     "dataHandlingLink": "hur Minerva hanterar dina uppgifter",
@@ -79,6 +82,7 @@
     "modeExpert": "Expert",
     "modeToggleHint": "Hur väl kan du ämnet? Nybörjare: Aegis är generös med jargong och kontext. Expert: Aegis förväntar sig precisa termer, uttalade ramar och vad du har provat. Klicka för att växla.",
     "checking": "Kontrollerar…",
+    "panelLabel": "Aegis-panelen",
     "hidePanel": "Dölj Aegis-panelen",
     "showPanel": "Visa Aegis-panelen",
     "showPanelButton": "Aegis",

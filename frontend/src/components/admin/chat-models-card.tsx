@@ -64,7 +64,7 @@ export function ChatModelsCard() {
             <Skeleton className="h-8 w-full" />
           </div>
         ) : error ? (
-          <p className="text-sm text-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {t("system.chatModels.loadError")}
           </p>
         ) : (
@@ -194,7 +194,7 @@ function ChatModelRow({ model }: { model: AdminChatModel }) {
           )}
         </div>
         {actionError && (
-          <p className="mt-1 text-xs text-destructive">{actionError}</p>
+          <p role="alert" className="mt-1 text-xs text-destructive">{actionError}</p>
         )}
       </td>
       <td className="py-2 pr-3">

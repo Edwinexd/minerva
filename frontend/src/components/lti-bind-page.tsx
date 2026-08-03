@@ -64,7 +64,7 @@ export function LtiBindPage() {
     return (
       <Card className="max-w-xl mx-auto">
         <CardHeader>
-          <CardTitle>{t("ltiBind.errorTitle")}</CardTitle>
+          <CardTitle as="h1">{t("ltiBind.errorTitle")}</CardTitle>
           <CardDescription>{t("ltiBind.missingToken")}</CardDescription>
         </CardHeader>
       </Card>
@@ -84,7 +84,7 @@ export function LtiBindPage() {
     return (
       <Card className="max-w-xl mx-auto">
         <CardHeader>
-          <CardTitle>{t("ltiBind.errorTitle")}</CardTitle>
+          <CardTitle as="h1">{t("ltiBind.errorTitle")}</CardTitle>
           <CardDescription>
             {error ? formatError(error) : t("ltiBind.loadFailed")}
           </CardDescription>
@@ -102,7 +102,7 @@ export function LtiBindPage() {
     return (
       <Card className="max-w-xl mx-auto">
         <CardHeader>
-          <CardTitle>{t("ltiBind.notTeacherTitle")}</CardTitle>
+          <CardTitle as="h1">{t("ltiBind.notTeacherTitle")}</CardTitle>
           <CardDescription>
             {t("ltiBind.notTeacherBody", {
               platform: data.platform_name,
@@ -117,7 +117,7 @@ export function LtiBindPage() {
   return (
     <Card className="max-w-xl mx-auto">
       <CardHeader>
-        <CardTitle>{t("ltiBind.title")}</CardTitle>
+        <CardTitle as="h1">{t("ltiBind.title")}</CardTitle>
         <CardDescription>
           {t("ltiBind.description", {
             platform: data.platform_name,

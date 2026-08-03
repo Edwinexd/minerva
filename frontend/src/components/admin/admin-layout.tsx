@@ -131,8 +131,13 @@ export function AdminLayout() {
       ? (lastSegment as TabValue)
       : (visibleTabs[0] ?? "usage"))
 
+  // The deep sub-flows matched by `pathOverrideTab` set their own, more
+  // specific title (e.g. the LTI approve page). Passing `undefined` keeps
+  // this layout's effect from overwriting it.
   useDocumentTitle(
-    `${tCommon("pageTitles.admin")} – ${tCommon(TAB_TITLE_KEYS[activeTab])}`,
+    pathOverrideTab
+      ? undefined
+      : `${tCommon("pageTitles.admin")} – ${tCommon(TAB_TITLE_KEYS[activeTab])}`,
   )
 
   return (

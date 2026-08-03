@@ -488,7 +488,7 @@ function PlatformRow({
               {t("ltiPlatforms.scopeLabel")}:
             </span>
             {platform.allowed_eppn_domains.length === 0 ? (
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-amber-700 dark:text-amber-400">
                 {t("ltiPlatforms.scopeAny")}
               </span>
             ) : (
@@ -603,28 +603,30 @@ function PlatformRow({
             <p className="text-sm text-muted-foreground">{t("ltiPlatforms.noBindings")}</p>
           )}
           {bindings && bindings.length > 0 && (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left">
-                  <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.bindingColumns.context")}</th>
-                  <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.bindingColumns.course")}</th>
-                  <th className="py-1 font-medium">{t("ltiPlatforms.bindingColumns.created")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bindings.map((b) => (
-                  <tr key={b.id} className="border-b last:border-0">
-                    <td className="py-1 pr-3 font-mono text-xs">
-                      {b.context_title || b.context_label || b.context_id}
-                    </td>
-                    <td className="py-1 pr-3">{b.course_name ?? b.course_id}</td>
-                    <td className="py-1 text-xs">
-                      <RelativeTime date={b.created_at} />
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.bindingColumns.context")}</th>
+                    <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.bindingColumns.course")}</th>
+                    <th className="py-1 font-medium">{t("ltiPlatforms.bindingColumns.created")}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {bindings.map((b) => (
+                    <tr key={b.id} className="border-b last:border-0">
+                      <td className="py-1 pr-3 font-mono text-xs break-all">
+                        {b.context_title || b.context_label || b.context_id}
+                      </td>
+                      <td className="py-1 pr-3">{b.course_name ?? b.course_id}</td>
+                      <td className="py-1 text-xs">
+                        <RelativeTime date={b.created_at} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {nrps && nrps.length > 0 && (
@@ -632,67 +634,69 @@ function PlatformRow({
               <p className="mb-2 text-xs text-muted-foreground">
                 {t("ltiPlatforms.nrpsHint")}
               </p>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.nrpsColumns.context")}</th>
-                    <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.nrpsColumns.status")}</th>
-                    <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.nrpsColumns.changes")}</th>
-                    <th className="py-1 font-medium">{t("ltiPlatforms.nrpsColumns.lastSync")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {nrps.map((ctx) => (
-                    <tr key={ctx.id} className="border-b last:border-0 align-top">
-                      <td className="py-1 pr-3 font-mono text-xs">{ctx.context_id || "-"}</td>
-                      <td className="py-1 pr-3">
-                        <div className="flex flex-wrap items-center gap-1">
-                          {ctx.last_sync_status === "error" ? (
-                            <Badge variant="destructive">{t("ltiPlatforms.nrpsStatusError")}</Badge>
-                          ) : ctx.last_sync_status === "ok" ? (
-                            <Badge variant="secondary">{t("ltiPlatforms.nrpsStatusOk")}</Badge>
-                          ) : (
-                            <Badge variant="outline">{t("ltiPlatforms.nrpsStatusPending")}</Badge>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.nrpsColumns.context")}</th>
+                      <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.nrpsColumns.status")}</th>
+                      <th className="py-1 pr-3 font-medium">{t("ltiPlatforms.nrpsColumns.changes")}</th>
+                      <th className="py-1 font-medium">{t("ltiPlatforms.nrpsColumns.lastSync")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {nrps.map((ctx) => (
+                      <tr key={ctx.id} className="border-b last:border-0 align-top">
+                        <td className="py-1 pr-3 font-mono text-xs break-all">{ctx.context_id || "-"}</td>
+                        <td className="py-1 pr-3">
+                          <div className="flex flex-wrap items-center gap-1">
+                            {ctx.last_sync_status === "error" ? (
+                              <Badge variant="destructive">{t("ltiPlatforms.nrpsStatusError")}</Badge>
+                            ) : ctx.last_sync_status === "ok" ? (
+                              <Badge variant="secondary">{t("ltiPlatforms.nrpsStatusOk")}</Badge>
+                            ) : (
+                              <Badge variant="outline">{t("ltiPlatforms.nrpsStatusPending")}</Badge>
+                            )}
+                            {ctx.last_sync_warning && (
+                              <Badge
+                                variant="outline"
+                                className="border-amber-500 text-amber-700 dark:text-amber-400"
+                              >
+                                {t("ltiPlatforms.nrpsStatusWarning")}
+                              </Badge>
+                            )}
+                          </div>
+                          {ctx.last_sync_status === "error" && ctx.last_sync_error && (
+                            <div className="mt-1 text-xs text-destructive break-all">
+                              {ctx.last_sync_error}
+                            </div>
                           )}
                           {ctx.last_sync_warning && (
-                            <Badge
-                              variant="outline"
-                              className="border-amber-500 text-amber-700 dark:text-amber-400"
-                            >
-                              {t("ltiPlatforms.nrpsStatusWarning")}
-                            </Badge>
+                            <div className="mt-1 text-xs text-amber-700 dark:text-amber-400 break-words">
+                              {ctx.last_sync_warning}
+                            </div>
                           )}
-                        </div>
-                        {ctx.last_sync_status === "error" && ctx.last_sync_error && (
-                          <div className="mt-1 text-xs text-destructive break-all">
-                            {ctx.last_sync_error}
-                          </div>
-                        )}
-                        {ctx.last_sync_warning && (
-                          <div className="mt-1 text-xs text-amber-700 dark:text-amber-400 break-words">
-                            {ctx.last_sync_warning}
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-1 pr-3 text-xs">
-                        {ctx.last_sync_status === "ok"
-                          ? t("ltiPlatforms.nrpsCounts", {
-                              added: ctx.last_sync_added ?? 0,
-                              removed: ctx.last_sync_removed ?? 0,
-                            })
-                          : "-"}
-                      </td>
-                      <td className="py-1 text-xs">
-                        {ctx.last_sync_at ? (
-                          <RelativeTime date={ctx.last_sync_at} />
-                        ) : (
-                          t("ltiPlatforms.nrpsNeverSynced")
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        </td>
+                        <td className="py-1 pr-3 text-xs">
+                          {ctx.last_sync_status === "ok"
+                            ? t("ltiPlatforms.nrpsCounts", {
+                                added: ctx.last_sync_added ?? 0,
+                                removed: ctx.last_sync_removed ?? 0,
+                              })
+                            : "-"}
+                        </td>
+                        <td className="py-1 text-xs">
+                          {ctx.last_sync_at ? (
+                            <RelativeTime date={ctx.last_sync_at} />
+                          ) : (
+                            t("ltiPlatforms.nrpsNeverSynced")
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

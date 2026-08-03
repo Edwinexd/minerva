@@ -286,7 +286,7 @@ function KeyRow({ k }: { k: SiteIntegrationKey }) {
             aria-label={t("integrationKeys.editScope.label")}
           />
         ) : k.allowed_eppn_domains.length === 0 ? (
-          <span className="text-amber-600 dark:text-amber-400">
+          <span className="text-amber-700 dark:text-amber-400">
             {t("integrationKeys.scope.any")}
           </span>
         ) : (

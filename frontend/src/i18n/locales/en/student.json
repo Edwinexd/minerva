@@ -22,7 +22,10 @@
     "suggestionsLabel": "Try one of these"
   },
   "chat": {
+    "heading": "Course chat: {{course}}",
+    "headingFallback": "Course chat",
     "inputPlaceholder": "Ask about the course materials…",
+    "inputLabel": "Your question",
     "send": "Send",
     "disclaimerBefore": "Messages and relevant course-material excerpts are sent to Cerebras for AI inference. Responses may be inaccurate; verify with course materials. See ",
     "dataHandlingLink": "how Minerva handles your data",
@@ -79,6 +82,7 @@
     "modeExpert": "Expert",
     "modeToggleHint": "How well do you know this subject? Beginner: Aegis goes lenient on jargon and context. Expert: Aegis expects precise terms, named constraints, and what you've already tried. Click to toggle.",
     "checking": "Checking…",
+    "panelLabel": "Aegis panel",
     "hidePanel": "Hide Aegis panel",
     "showPanel": "Show Aegis panel",
     "showPanelButton": "Aegis",

@@ -98,7 +98,7 @@ function AutoApplyCard({ data }: { data: DaisyPendingListResponse }) {
           </Label>
         </div>
         {mutation.isError && (
-          <p className="mt-2 text-sm text-destructive">
+          <p role="alert" className="mt-2 text-sm text-destructive">
             {formatError(mutation.error)}
           </p>
         )}
@@ -203,7 +203,7 @@ function PendingTableCard({ data }: { data: DaisyPendingListResponse }) {
           </div>
         </div>
         {applyMutation.isError && (
-          <p className="text-sm text-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {formatError(applyMutation.error)}
           </p>
         )}
@@ -455,7 +455,9 @@ function ApplyResultSummary({
 }) {
   const { t } = useTranslation("admin")
   return (
-    <div className="mt-2 rounded border border-border bg-muted/30 p-3 text-sm">
+    // <output> (implicit role="status") so the apply outcome is
+    // announced; `block` because <output> is inline by default.
+    <output className="mt-2 block rounded border border-border bg-muted/30 p-3 text-sm">
       <div>
         {t("daisyImports.applyResult", {
           created: result.courses_created,
@@ -478,7 +480,7 @@ function ApplyResultSummary({
           </ul>
         </details>
       )}
-    </div>
+    </output>
   )
 }
 

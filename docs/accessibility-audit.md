@@ -1,5 +1,8 @@
 # Accessibility Audit - Minerva frontend
 
+Two passes so far. The 2026-08-03 re-audit is at the bottom; the
+2026-05-22 baseline below is kept as-is for reference.
+
 **Date:** 2026-05-22
 **Scope:** `frontend/` React SPA
 **Standard:** DIGG webbriktlinjer -> *Lagen om tillgänglighet till digital
@@ -174,3 +177,183 @@ Skip link -> focus-managed `<main>`; semantic landmarks; tables wrapped in
 language switcher, chat controls, feedback thumbs with `aria-pressed`);
 `@base-ui/react` dialogs (focus trap / Escape / ARIA); favicon `alt=""`;
 jsx-a11y strict + axe passing.
+
+---
+---
+
+# Re-audit - 2026-08-03
+
+**Scope:** the 44 commits that touched `frontend/` since the audit above
+(`6c235810..HEAD`), 124 -> 139 `src` files. New surfaces: admin courses
+(bulk edit / archive / merge), Daisy imports, system Defaults, dev tools,
+LTI platforms / approve / dynreg scope, model catalogs, the extracted
+`ChatSurface`, and the teacher guide.
+**Standard:** unchanged (WCAG 2.2 AA).
+
+## Method
+
+Same three layers, all green before the manual pass started:
+
+| Layer | Result |
+|---|---|
+| `eslint` (jsx-a11y strict) | clean |
+| `tsc -b`, `tsc -p tsconfig.test.json` | clean |
+| `vitest` + axe (WCAG 2.2 AA tags) | 17/17 pass |
+| `pa11y-ci` (htmlcs + axe, built preview) | 4/4 URLs, 0 errors |
+
+Then a manual review of the changed surfaces, plus a numeric contrast
+re-check (OKLCH -> linear sRGB) of every raw Tailwind palette class the
+new code introduced.
+
+## Summary
+
+Nothing regressed in what the first audit fixed. What the new code did
+was reintroduce the same *classes* of defect on surfaces the first audit
+never saw: async status messages that are not announced (H2 last time),
+and controls named only by their placeholder (H1 last time). One genuinely
+new class showed up: 119 raw Tailwind palette colours across 16 files that
+bypass the audited design tokens, three of which fail 1.4.3.
+
+Status legend: [ ] open · [x] fixed on branch `a11y-audit-2026-08`.
+
+---
+
+## High
+
+### R1 - Status messages not announced · WCAG 4.1.3 (AA) [x]
+Every admin surface added since the last audit renders mutation results
+and errors as plain `<p>`/`<span>`, so nothing reaches a screen reader:
+
+- `admin/courses-page.tsx` bulk error + result summary, and 7 further
+  mutation/query error sites (feature flags, migrate, merge, archive
+  toggle, bulk edit)
+- `admin/defaults-page.tsx` "Saved" flash and the save/reset/load errors
+  (16 knobs)
+- `admin/daisy-imports-page.tsx` auto-apply error, apply error, apply
+  result summary
+- `admin/chat-models-card.tsx`, `admin/model-catalog-card.tsx` per-row
+  action errors and load failures
+- `teacher/canvas-page.tsx` sync result and sync error
+- `join/join-page.tsx` join failure
+
+**Fix:** repo idiom applied throughout: `<output>` (implicit
+`role="status"`) for success/result, `<p role="alert">` for errors.
+`<output>` needs `block`; it is inline by default.
+
+### R2 - Bulk archive/restore drops focus and destroys its own confirmation · WCAG 2.4.3 (A) + 4.1.3 (AA) [x]
+`BulkActionBar` cleared the selection on full success, which unmounts the
+bar via the `selectedCourses.length > 0` gate. The result summary lived
+inside the bar and died in the same commit, and the confirm dialog was
+destroyed rather than closed, so its focus restore never ran and focus
+fell to `<body>`. Full success, the common case, produced no confirmation
+at all. `AlertDialog`'s `finalFocus` cannot fix this for the same reason
+the restore fails: nothing survives to run it.
+
+**Fix:** the result is panel state now and renders outside the bar; the
+summary is an `<output tabIndex={-1}>` that claims focus on mount. Pinned
+by `src/test/bulk-actions.test.tsx`.
+
+### R3 - Chat composer has no accessible name · WCAG 4.1.2 / 3.3.2 (A) [x]
+`chat/chat-surface.tsx` composer was placeholder-only, so its name
+disappears as soon as the student types. Affects the course chat and the
+LTI embed, the two highest-traffic surfaces in the app. This predates the
+first audit (it was `chat-page.tsx` then) and was missed, rather than
+being a regression; it is the same defect H1 fixed for `members-page`.
+
+**Fix:** `inputLabel` added to `ChatSurfaceLabels`, wired from both
+routes, rendered as `aria-label` alongside the placeholder.
+
+### R4 - Colour contrast below 4.5:1 in light theme · WCAG 1.4.3 (AA) [x]
+Measured OKLCH -> linear sRGB, same method as the first audit:
+
+| Class | Before | After | Site |
+|---|---|---|---|
+| `text-emerald-600` | 3.67:1 | 5.37:1 (`emerald-700`) | `defaults-page` saved flash |
+| `text-amber-600` | 3.19:1 | 5.05:1 (`amber-700`) | `integration-keys-page`, `lti-platforms-page` |
+
+The emerald flash also had no `dark:` variant. Root cause is wider: 119
+raw palette `text-*` classes across 16 files now sit outside the token
+set the first audit measured. The other 15 pairs checked pass in both
+themes, so this was 3 sites plus a standing risk. Anything new that
+reaches for a raw palette colour on `bg-background`/`bg-card` needs the
+same check; the `-600` step is the one that lands just under threshold.
+
+---
+
+## Medium
+
+### R5 - Two tables with no scroll container · WCAG 1.4.10 (AA) [x]
+`admin/lti-platforms-page.tsx` bindings and NRPS tables carried
+`font-mono` LTI context ids with no `overflow-x-auto` wrapper, so at 320
+px the page itself scrolls horizontally. Every other table in the app
+already wraps. **Fix:** wrapper on both, plus `break-all` on the context
+id cells.
+
+### R6 - Teacher course tab nav has no landmark · WCAG 1.3.1 (A) [x]
+M3 fixed this for `admin-layout.tsx` only; `teacher/course-edit-page.tsx`
+kept its bare mobile select + `Tabs`. **Fix:** `<nav aria-label>` around
+both, matching the admin layout.
+
+### R7 - No `<h1>` on authenticated pages · WCAG 1.3.1 / 2.4.6 (A/AA) [x]
+Only 6 files in `src` had one. The teacher course page opened at `<h2>`;
+the chat, embed and LTI routes had no heading element at all (`CardTitle`
+renders a `<div>`).
+
+**Fix:** `course-edit-page` heading promoted to `<h1>`; a visually-hidden
+`<h1>` (course name) in `ChatSurface`, which covers chat and embed and
+sits above the greeting's `<h2>`; `CardTitle` gained an `as` prop
+(defaults to `div`) so the single-card LTI bind / setup / approve pages
+can mark their title as the page heading.
+
+### R8 - Aegis panel has no focus management · WCAG 2.4.3 (A) [x]
+Below `aegisDrawerBreakpoint` the panel is a fixed drawer over the chat
+with a dismiss backdrop, but focus never moved into it, never returned to
+the "bring it back" pill, and Escape did nothing. **Fix:** the `<aside>`
+is a named landmark and takes focus when the pill opens it; closing
+returns focus to the pill; Escape closes it while focus is inside.
+
+Deliberately *not* a focus trap: the same element is an in-flow rail at
+and above the breakpoint, where trapping would be wrong. Both moves are
+armed by an explicit click, never by the value: `panelVisible` is
+storage-backed and defaults to true, so keying off the value alone would
+grab focus on every chat page load. Pinned by
+`src/test/aegis-panel.test.tsx`, including the page-load case.
+
+---
+
+## Low
+
+### R9 - Admin layout overwrote a sub-route's page title · WCAG 2.4.2 (A) [x]
+`/admin/lti-approve/:id` sets a specific title, but React runs child
+effects before parent ones, so `admin-layout.tsx` overwrote it with the
+generic "Admin - LTI". **Fix:** `useDocumentTitle(undefined)` now means
+"leave the title alone", and the layout passes it for the deep sub-flows
+it does not own.
+
+---
+
+## Test coverage added
+
+`src/test/pages.a11y.test.tsx` covered 6 pages; roughly 10 admin surfaces
+added since had no rendered-axe coverage, and pa11y still only reaches the
+4 public URLs (the rest are behind Shibboleth). Added:
+
+- axe passes for admin course management (loaded, and with rows selected
+  so the bulk bar is in the tree), Daisy imports, system Defaults (one
+  knob per widget kind), and role rules.
+- `src/test/bulk-actions.test.tsx`: drives select -> Archive -> Confirm
+  and asserts the summary outlives the bar and holds focus (R2).
+- `src/test/aegis-panel.test.tsx`: no focus theft on first render, focus
+  round-trip on close/reopen, Escape-to-close (R8).
+
+26 tests across 4 files, all passing.
+
+## Still open
+
+- **Screen-reader walkthroughs** (NVDA + VoiceOver) of the chat, teacher
+  and admin flows. Carried over from the first audit and still the one
+  thing none of these layers substitutes for.
+- **Raw palette drift.** 119 `text-<palette>-<step>` classes across 16
+  files sit outside the audited tokens. Nothing enforces a contrast check
+  on new ones; the three that failed were found by measuring, not by a
+  test.

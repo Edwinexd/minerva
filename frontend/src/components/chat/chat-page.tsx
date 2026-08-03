@@ -400,6 +400,10 @@ export function ChatWindow({
     unknownError: t("chat.unknownError"),
     send: t("chat.send"),
     inputPlaceholder: t("chat.inputPlaceholder"),
+    inputLabel: t("chat.inputLabel"),
+    heading: course?.name
+      ? t("chat.heading", { course: course.name })
+      : t("chat.headingFallback"),
     aegisChecking: t("aegis.checking"),
     aegisSendAsIs: t("aegis.sendAsIs"),
     aegisPendingTitle: t("aegis.pendingTitle"),
@@ -407,6 +411,7 @@ export function ChatWindow({
     aegisEmptyTitle: t("aegis.emptyTitle"),
     aegisShowPanel: t("aegis.showPanel"),
     aegisShowPanelButton: t("aegis.showPanelButton"),
+    aegisPanelLabel: t("aegis.panelLabel"),
     disclaimerBefore: t("chat.disclaimerBefore"),
     disclaimerLink: t("chat.dataHandlingLink"),
     disclaimerAfter: t("chat.disclaimerAfter"),

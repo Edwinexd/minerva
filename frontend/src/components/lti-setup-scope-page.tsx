@@ -183,7 +183,7 @@ export function LtiSetupScopePage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{t("ltiSetupScope.doneTitle")}</CardTitle>
+          <CardTitle as="h1">{t("ltiSetupScope.doneTitle")}</CardTitle>
           <CardDescription>{t("ltiSetupScope.doneBody")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -211,7 +211,7 @@ export function LtiSetupScopePage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>
+        <CardTitle as="h1">
           {platformName
             ? t("ltiSetupScope.titleWithName", { name: platformName })
             : t("ltiSetupScope.titleFallback")}

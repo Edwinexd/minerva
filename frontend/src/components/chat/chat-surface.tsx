@@ -37,7 +37,7 @@
  * `641031e`/`a780033` lived through several months precisely because
  * the embed copy never got the same `pl-* -> pt-*` flip.
  */
-import React, { useCallback, useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -68,12 +68,17 @@ import type {
 export interface ChatSurfaceLabels {
   bubble: ChatBubbleLabels
   thinking: ThinkingBlockLabels
+  // Visually-hidden page heading (the surface has no visible one)
+  heading: string
   assistantResponse: string
   // useChatStream's fallback when an SSE error has no message
   unknownError: string
   // Composer
   send: string
   inputPlaceholder: string
+  // Accessible name for the composer. Separate from the placeholder,
+  // which stops being announced the moment the student types.
+  inputLabel: string
   // Aegis intercept + status
   aegisChecking: string
   aegisSendAsIs: string
@@ -82,6 +87,8 @@ export interface ChatSurfaceLabels {
   aegisEmptyTitle: string
   aegisShowPanel: string
   aegisShowPanelButton: string
+  // Accessible name for the Aegis panel landmark
+  aegisPanelLabel: string
   // Privacy disclaimer (rendered as: before + link + after)
   disclaimerBefore: string
   disclaimerLink: string
@@ -300,6 +307,55 @@ export function ChatSurface<M extends ChatBubbleMessage>({
   // brings it back. Default true so an aegis-on course shows the
   // panel by default.
   const [panelVisible, setPanelVisible] = useAegisPanelVisible()
+
+  // Focus follows the panel. Below `aegisDrawerBreakpoint` it renders
+  // as a fixed drawer over the chat, so opening it without moving
+  // focus strands keyboard and screen-reader users behind the
+  // backdrop; above the breakpoint it is in flow and the same move
+  // still matches the disclosure the student just triggered.
+  //
+  // Both directions are armed by an explicit click rather than by the
+  // value itself: `panelVisible` is storage-backed and defaults to
+  // true, so keying off the value alone would grab focus out of the
+  // page every time a student opens the chat.
+  const panelRef = useRef<HTMLElement>(null)
+  const pillRef = useRef<HTMLButtonElement>(null)
+  const focusPanelOnOpen = useRef(false)
+  const restorePillFocus = useRef(false)
+
+  const openPanel = useCallback(() => {
+    focusPanelOnOpen.current = true
+    setPanelVisible(true)
+  }, [setPanelVisible])
+
+  const closePanel = useCallback(() => {
+    restorePillFocus.current = true
+    setPanelVisible(false)
+  }, [setPanelVisible])
+
+  useEffect(() => {
+    if (panelVisible && focusPanelOnOpen.current) {
+      focusPanelOnOpen.current = false
+      panelRef.current?.focus()
+    } else if (!panelVisible && restorePillFocus.current) {
+      restorePillFocus.current = false
+      pillRef.current?.focus()
+    }
+  }, [panelVisible])
+
+  // Escape closes the panel, but only while focus is inside it: the
+  // composer sits outside and Escape there should not dismiss a rail
+  // the student is reading.
+  useEffect(() => {
+    if (!panelVisible) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      if (!panelRef.current?.contains(document.activeElement)) return
+      closePanel()
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [panelVisible, closePanel])
 
   // Live analyzer. Wraps `fetchLiveAnalysis` via the hook so we
   // get debounce + race + accumulator semantics for free. We wrap
@@ -538,6 +594,11 @@ export function ChatSurface<M extends ChatBubbleMessage>({
 
   return (
     <div className={`relative flex flex-1 min-h-0 ${layout.outerGap}`}>
+      {/* The chat surface fills the viewport and has no visible page
+          heading; without this the route has no h1 at all and the
+          greeting's h2 (which only renders on an empty conversation)
+          would be the first heading a screen reader hits. */}
+      <h1 className="sr-only">{labels.heading}</h1>
       <div className="flex-1 flex flex-col min-w-0">
         <div className={`flex-1 overflow-y-auto ${layout.transcriptScroll}`}>
           {showGreeting ? (
@@ -657,6 +718,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={labels.inputPlaceholder}
+                aria-label={labels.inputLabel}
                 disabled={stream.streaming || needsPrivacyAck}
                 className="flex-1"
               />
@@ -696,20 +758,26 @@ export function ChatSurface<M extends ChatBubbleMessage>({
           */}
           <div
             className={`${hideAtBpClass} fixed inset-0 z-30 bg-background/60`}
-            onClick={() => setPanelVisible(false)}
+            onClick={closePanel}
             aria-hidden="true"
           />
           {/*
             Right-rail Aegis panel. Two layouts driven off the same
             element so visible/dismissed state stays consistent
             across breakpoints. The panel's own X closes both forms.
+            `tabIndex={-1}` makes it a focus target for the open
+            transition; Escape closes it, which is what the drawer
+            form reads as to anyone who cannot see the backdrop.
           */}
           <aside
-            className={`fixed inset-y-0 right-0 z-40 ${panelWidthClass} max-w-[90vw] bg-background border-l flex flex-col py-3 pr-3 ${stickyAtBpClass}`}
+            ref={panelRef}
+            tabIndex={-1}
+            aria-label={labels.aegisPanelLabel}
+            className={`fixed inset-y-0 right-0 z-40 ${panelWidthClass} max-w-[90vw] bg-background border-l flex flex-col py-3 pr-3 outline-none ${stickyAtBpClass}`}
           >
             <AegisFeedbackPanel
               analyses={promptAnalyses}
-              onHide={() => setPanelVisible(false)}
+              onHide={closePanel}
             />
           </aside>
         </>
@@ -720,8 +788,9 @@ export function ChatSurface<M extends ChatBubbleMessage>({
         // in-flow rail at and above); a phone-width iframe student
         // has the same affordance as a desktop one.
         <button
+          ref={pillRef}
           type="button"
-          onClick={() => setPanelVisible(true)}
+          onClick={openPanel}
           className="absolute top-2 right-2 z-20 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           title={labels.aegisShowPanel}
           aria-label={labels.aegisShowPanel}

@@ -109,51 +109,53 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">{course.name}</h2>
+        <h1 className="text-2xl font-bold tracking-tight">{course.name}</h1>
         <Link to="/course/$courseId" params={{ courseId }}>
           <Button variant="outline">{t("layout.tryChat")}</Button>
         </Link>
       </div>
 
-      <div className="md:hidden">
-        <Select
+      <nav aria-label={t("layout.sectionNavLabel")}>
+        <div className="md:hidden">
+          <Select
+            value={activeTab}
+            onValueChange={(value) => {
+              if (typeof value === "string" && Object.hasOwn(TAB_ROUTES, value)) navigate({ to: TAB_ROUTES[value as TabValue], params: { courseId } })
+            }}
+          >
+            <SelectTrigger className="w-full" aria-label={t("layout.sectionNavLabel")}>
+              <SelectValue>
+                {visibleTabValues.includes(activeTab as (typeof TAB_VALUES)[number])
+                  ? t(TAB_LABEL_KEYS[activeTab as (typeof TAB_VALUES)[number]])
+                  : null}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {visibleTabValues.map((tab) => (
+                <SelectItem key={tab} value={tab}>
+                  {t(TAB_LABEL_KEYS[tab])}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Tabs
           value={activeTab}
-          onValueChange={(value) => {
+          onValueChange={(value: unknown) => {
             if (typeof value === "string" && Object.hasOwn(TAB_ROUTES, value)) navigate({ to: TAB_ROUTES[value as TabValue], params: { courseId } })
           }}
+          className="hidden md:flex"
         >
-          <SelectTrigger className="w-full" aria-label={t("layout.sectionNavLabel")}>
-            <SelectValue>
-              {visibleTabValues.includes(activeTab as (typeof TAB_VALUES)[number])
-                ? t(TAB_LABEL_KEYS[activeTab as (typeof TAB_VALUES)[number]])
-                : null}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
+          <TabsList>
             {visibleTabValues.map((tab) => (
-              <SelectItem key={tab} value={tab}>
+              <TabsTrigger key={tab} value={tab}>
                 {t(TAB_LABEL_KEYS[tab])}
-              </SelectItem>
+              </TabsTrigger>
             ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <Tabs
-        value={activeTab}
-        onValueChange={(value: unknown) => {
-          if (typeof value === "string" && Object.hasOwn(TAB_ROUTES, value)) navigate({ to: TAB_ROUTES[value as TabValue], params: { courseId } })
-        }}
-        className="hidden md:flex"
-      >
-        <TabsList>
-          {visibleTabValues.map((tab) => (
-            <TabsTrigger key={tab} value={tab}>
-              {t(TAB_LABEL_KEYS[tab])}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+          </TabsList>
+        </Tabs>
+      </nav>
 
       <Outlet />
     </div>

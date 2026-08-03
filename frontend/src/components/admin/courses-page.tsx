@@ -47,7 +47,7 @@ import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { useApiErrorMessage, useLocalizedMessage } from "@/lib/use-api-error"
 
@@ -76,6 +76,10 @@ export function CourseManagementPanel() {
   // widening the visible set; the header checkbox only ever toggles the
   // currently-filtered rows.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // The outcome of the last bulk action lives here, not in BulkActionBar:
+  // a fully-successful run clears the selection, which unmounts the bar,
+  // and a summary owned by the bar would be destroyed in the same commit.
+  const [bulkResult, setBulkResult] = useState<BulkResponse | null>(null)
 
   if (coursesLoading) {
     return (
@@ -143,6 +147,14 @@ export function CourseManagementPanel() {
           selected={selectedCourses}
           courses={courses}
           onClearSelection={() => setSelectedIds(new Set())}
+          onResult={setBulkResult}
+        />
+      )}
+      {bulkResult && (
+        <BulkResultSummary
+          result={bulkResult}
+          courses={courses}
+          onDismiss={() => setBulkResult(null)}
         />
       )}
       <Card>
@@ -395,7 +407,7 @@ function CourseFeatureFlagsCell({
             {flagsQuery.isLoading ? (
               <Skeleton className="h-20 w-full" />
             ) : flagsQuery.error ? (
-              <p className="text-sm text-destructive">
+              <p role="alert" className="text-sm text-destructive">
                 {formatError(flagsQuery.error)}
               </p>
             ) : (
@@ -455,7 +467,7 @@ function CourseFeatureFlagsCell({
               })
             )}
             {setFlagMutation.isError && (
-              <p className="text-sm text-destructive">
+              <p role="alert" className="text-sm text-destructive">
                 {formatError(setFlagMutation.error)}
               </p>
             )}
@@ -631,7 +643,7 @@ function CourseMigrateDialog({
             </div>
           )}
           {mutation.isError && (
-            <p className="text-sm text-destructive">
+            <p role="alert" className="text-sm text-destructive">
               {formatError(mutation.error)}
             </p>
           )}
@@ -711,7 +723,7 @@ function CourseActionsCell({
           : t("courses.restoreButton")}
       </Button>
       {toggleArchiveMutation.isError && (
-        <span className="text-xs text-destructive">
+        <span role="alert" className="text-xs text-destructive">
           {formatError(toggleArchiveMutation.error)}
         </span>
       )}
@@ -822,7 +834,7 @@ function MergeCourseDialog({
             </div>
           )}
           {mutation.isError && (
-            <p className="text-sm text-destructive">
+            <p role="alert" className="text-sm text-destructive">
               {formatError(mutation.error)}
             </p>
           )}
@@ -973,7 +985,7 @@ function SuggestedMergeGroup({ group }: { group: MergeSuggestionGroup }) {
         </Button>
       </div>
       {mergeMutation.isError && (
-        <p className="text-sm text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {formatError(mergeMutation.error)}
         </p>
       )}
@@ -1045,8 +1057,28 @@ function BulkResultSummary({
   const nameOf = (id: string) =>
     courses.find((c) => c.id === id)?.name ?? id.slice(0, 8)
   const failures = result.results.filter((r) => !r.ok)
+
+  // This summary is the only thing left after a fully-successful run:
+  // clearing the selection unmounts the action bar, and with it the
+  // confirm dialog, so the dialog never gets to restore focus (it is
+  // destroyed rather than closed) and focus lands on <body>. Claiming
+  // focus on mount is what keeps the keyboard position meaningful.
+  // `AlertDialog`'s own `finalFocus` cannot cover this for the same
+  // reason. Mount only ever happens as the direct result of the
+  // admin's action, so this never yanks focus unprompted.
+  const ref = useRef<HTMLOutputElement>(null)
+  useEffect(() => {
+    ref.current?.focus()
+  }, [])
+
   return (
-    <div className="w-full rounded border bg-muted/30 p-2 text-xs">
+    // <output> is an implicit role="status", so the summary also
+    // announces itself. `block` because <output> is inline by default.
+    <output
+      ref={ref}
+      tabIndex={-1}
+      className="block w-full rounded border bg-muted/30 p-2 text-xs outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+    >
       <div className="flex items-center justify-between gap-2">
         <span>
           {t("courses.bulk.resultSummary", {
@@ -1073,7 +1105,7 @@ function BulkResultSummary({
           ))}
         </ul>
       )}
-    </div>
+    </output>
   )
 }
 
@@ -1081,17 +1113,18 @@ function BulkActionBar({
   selected,
   courses,
   onClearSelection,
+  onResult,
 }: {
   selected: Course[]
   courses: Course[]
   onClearSelection: () => void
+  onResult: (result: BulkResponse | null) => void
 }) {
   const { t } = useTranslation("admin")
   const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [editOpen, setEditOpen] = useState(false)
   const [confirm, setConfirm] = useState<null | "archive" | "restore">(null)
-  const [result, setResult] = useState<BulkResponse | null>(null)
 
   const activeSelected = selected.filter((c) => c.active)
   const archivedSelected = selected.filter((c) => !c.active)
@@ -1114,7 +1147,7 @@ function BulkActionBar({
       queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
       queryClient.invalidateQueries({ queryKey: ["courses"] })
       setConfirm(null)
-      setResult(data)
+      onResult(data)
       if (data.failed === 0) onClearSelection()
     },
   })
@@ -1129,7 +1162,7 @@ function BulkActionBar({
           <Button
             size="sm"
             onClick={() => {
-              setResult(null)
+              onResult(null)
               setEditOpen(true)
             }}
           >
@@ -1140,7 +1173,7 @@ function BulkActionBar({
             variant="outline"
             disabled={activeSelected.length === 0 || lifecycleMutation.isPending}
             onClick={() => {
-              setResult(null)
+              onResult(null)
               setConfirm("archive")
             }}
           >
@@ -1153,7 +1186,7 @@ function BulkActionBar({
               archivedSelected.length === 0 || lifecycleMutation.isPending
             }
             onClick={() => {
-              setResult(null)
+              onResult(null)
               setConfirm("restore")
             }}
           >
@@ -1164,16 +1197,9 @@ function BulkActionBar({
           </Button>
         </div>
         {lifecycleMutation.isError && (
-          <span className="text-xs text-destructive">
+          <span role="alert" className="text-xs text-destructive">
             {formatError(lifecycleMutation.error)}
           </span>
-        )}
-        {result && (
-          <BulkResultSummary
-            result={result}
-            courses={courses}
-            onDismiss={() => setResult(null)}
-          />
         )}
       </CardContent>
 
@@ -1229,6 +1255,7 @@ function BulkActionBar({
           open={editOpen}
           onOpenChange={setEditOpen}
           onClearSelection={onClearSelection}
+          onResult={onResult}
         />
       )}
     </Card>
@@ -1253,6 +1280,12 @@ function FieldRow({
   onToggle: (v: boolean) => void
   children: ReactNode
 }) {
+  // The row's <label> belongs to the include-this-field checkbox, so the
+  // control it reveals is outside it and would otherwise be nameless.
+  // Naming the wrapper as a group carries the field name onto whatever
+  // control the row renders without threading an id through all 12
+  // call sites.
+  const labelId = useId()
   return (
     <div className="space-y-1.5 rounded border p-3">
       <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
@@ -1260,10 +1293,14 @@ function FieldRow({
           checked={enabled}
           onCheckedChange={(v) => onToggle(v === true)}
         />
-        <span>{label}</span>
+        <span id={labelId}>{label}</span>
       </label>
       {help && <p className="text-xs text-muted-foreground">{help}</p>}
-      {enabled && <div className="pt-1">{children}</div>}
+      {enabled && (
+        <fieldset aria-labelledby={labelId} className="min-w-0 pt-1">
+          {children}
+        </fieldset>
+      )}
     </div>
   )
 }
@@ -1290,12 +1327,14 @@ function BulkEditDialog({
   open,
   onOpenChange,
   onClearSelection,
+  onResult,
 }: {
   selected: Course[]
   courses: Course[]
   open: boolean
   onOpenChange: (o: boolean) => void
   onClearSelection: () => void
+  onResult: (result: BulkResponse | null) => void
 }) {
   const { t } = useTranslation("admin")
   const formatError = useApiErrorMessage()
@@ -1327,6 +1366,7 @@ function BulkEditDialog({
       ) as Record<FeatureFlagName, FlagChoice>,
   )
   const [result, setResult] = useState<BulkResponse | null>(null)
+  const semesterErrorId = useId()
 
   const toggleField = (field: ScalarField, enable: boolean) => {
     setIncluded((prev) => {
@@ -1421,10 +1461,16 @@ function BulkEditDialog({
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
       queryClient.invalidateQueries({ queryKey: ["courses"] })
-      setResult(data)
       if (data.failed === 0) {
+        // Dialog is about to close, so the summary has to survive
+        // outside it.
+        onResult(data)
         onClearSelection()
         onOpenChange(false)
+      } else {
+        // Partial failure keeps the dialog open so the per-course
+        // errors stay readable; summarise in place instead.
+        setResult(data)
       }
     },
   })
@@ -1609,9 +1655,17 @@ function BulkEditDialog({
               onChange={(e) => setSemesterLabel(e.target.value)}
               placeholder="VT2026"
               pattern="(?:VT|HT|vt|ht)\d{4}"
+              aria-invalid={semesterInvalid || undefined}
+              aria-describedby={
+                semesterInvalid ? semesterErrorId : undefined
+              }
             />
             {semesterInvalid && (
-              <p className="mt-1 text-xs text-destructive">
+              <p
+                id={semesterErrorId}
+                role="alert"
+                className="mt-1 text-xs text-destructive"
+              >
                 {t("courses.bulk.semesterInvalid")}
               </p>
             )}

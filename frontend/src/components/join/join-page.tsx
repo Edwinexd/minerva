@@ -33,7 +33,7 @@ export function JoinPage({ useParams }: { useParams: () => { token: string } }) 
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-4">
-        <p className="text-destructive text-lg">{formatError(error) || t("join.failedToJoin")}</p>
+        <p role="alert" className="text-destructive text-lg">{formatError(error) || t("join.failedToJoin")}</p>
       </div>
     )
   }

@@ -86,6 +86,10 @@ import { DocumentsPage } from "@/components/teacher/documents-page"
 import { MembersPage } from "@/components/teacher/members-page"
 import { NewChatRouteComponent } from "@/components/chat/chat-page"
 import { TeacherHelpPage } from "@/components/teacher-help-page"
+import { CourseManagementPanel } from "@/components/admin/courses-page"
+import { DaisyImportsPanel } from "@/components/admin/daisy-imports-page"
+import { AdminDefaultsPanel } from "@/components/admin/defaults-page"
+import { RoleRulesPanel } from "@/components/admin/rules-page"
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -194,6 +198,113 @@ const documents: Document[] = [
   },
 ]
 
+const archivedCourse: Course = {
+  ...course,
+  id: "course-2",
+  name: "Programming 2",
+  active: false,
+  course_code: "PROG2",
+  semester_label: "VT2026",
+}
+
+const daisyPending = {
+  auto_apply: false,
+  auto_apply_updated_at: "2026-01-04T00:00:00Z",
+  auto_apply_updated_by: "teacher@su.se",
+  pending: [
+    {
+      id: "daisy-1",
+      momenttillf_id: "12345",
+      course_code: "PROG1",
+      name: "Programming 1 VT2026",
+      semester_label: "VT2026",
+      daisy_info_url: null,
+      daisy_syllabus_url: null,
+      daisy_unit: "DSV",
+      participant_count: 1,
+      participants: [
+        {
+          display_name: "Student Two",
+          eppns: ["student@su.se"],
+          daisy_roles: ["student"],
+          kind: "student",
+        },
+      ],
+      existing_course_id: null,
+      diff: {
+        is_new_course: true,
+        metadata_changes: [],
+        member_changes: [],
+      },
+      first_seen_at: "2026-01-04T00:00:00Z",
+      last_seen_at: "2026-01-05T00:00:00Z",
+    },
+  ],
+}
+
+// One knob per widget kind, so the axe pass covers every control the
+// Defaults tab can render rather than just the first one.
+const systemDefaults = {
+  defaults: [
+    {
+      key: "course.temperature",
+      category: "course_ai" as const,
+      label_key: "defaults.course.temperature.label",
+      description_key: "defaults.course.temperature.description",
+      kind: { type: "float" as const, min: 0, max: 1 },
+      env_var: null,
+      fallback: 0.3,
+      value: 0.7,
+      has_row: true,
+      updated_at: "2026-01-06T00:00:00Z",
+    },
+    {
+      key: "course.maxChunks",
+      category: "course_ai" as const,
+      label_key: "defaults.course.maxChunks.label",
+      description_key: "defaults.course.maxChunks.description",
+      kind: { type: "int" as const, min: 1, max: 50 },
+      env_var: null,
+      fallback: 10,
+      value: 10,
+      has_row: false,
+      updated_at: null,
+    },
+    {
+      key: "platform.ownerDailyCostLimitUsd",
+      category: "platform" as const,
+      label_key: "defaults.platform.ownerDailyCostLimitUsd.label",
+      description_key: "defaults.platform.ownerDailyCostLimitUsd.description",
+      kind: { type: "float" as const, min: 0, max: 1000 },
+      env_var: "MINERVA_DEFAULT_OWNER_DAILY_COST_LIMIT_USD",
+      fallback: 5,
+      value: 5,
+      has_row: false,
+      updated_at: null,
+    },
+  ],
+}
+
+const roleRules = [
+  {
+    id: "rule-1",
+    name: "DSV staff to teacher",
+    target_role: "teacher" as const,
+    enabled: true,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    conditions: [
+      {
+        id: "cond-1",
+        rule_id: "rule-1",
+        attribute: "affiliation",
+        operator: "contains",
+        value: "employee@su.se",
+      },
+    ],
+  },
+]
+
 // ── Harness ─────────────────────────────────────────────────────────────
 
 type Seed = [readonly unknown[], unknown]
@@ -285,6 +396,61 @@ describe("Authenticated pages a11y", () => {
   it("teacher help page has no axe violations", async () => {
     const { container, getByText } = renderPage(<TeacherHelpPage />, [])
     expect(getByText("Set up Minerva for your course")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("admin course management has no axe violations", async () => {
+    const { container, getByText } = renderPage(<CourseManagementPanel />, [
+      [queries.adminCoursesQuery.queryKey, [course, archivedCourse]],
+      [queries.adminUsersQuery.queryKey, adminUsers],
+      [queries.adminMergeSuggestionsQuery.queryKey, []],
+    ])
+    expect(getByText("Programming 2")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("admin course management has no axe violations with rows selected", async () => {
+    // The bulk action bar only mounts once something is ticked, so the
+    // default render never sees it.
+    const { container, getByText, getAllByRole } = renderPage(
+      <CourseManagementPanel />,
+      [
+        [queries.adminCoursesQuery.queryKey, [course, archivedCourse]],
+        [queries.adminUsersQuery.queryKey, adminUsers],
+        [queries.adminMergeSuggestionsQuery.queryKey, []],
+      ],
+    )
+    // First checkbox is the header select-all.
+    getAllByRole("checkbox")[0].click()
+    expect(getByText("Edit settings")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("admin Daisy imports has no axe violations", async () => {
+    const { container, getByText } = renderPage(<DaisyImportsPanel />, [
+      [queries.daisyPendingQuery.queryKey, daisyPending],
+    ])
+    expect(getByText("Programming 1 VT2026")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("admin defaults has no axe violations", async () => {
+    const { container, getByText } = renderPage(<AdminDefaultsPanel />, [
+      [["admin", "system-defaults"], systemDefaults],
+    ])
+    expect(getByText("Default temperature")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("admin role rules has no axe violations", async () => {
+    const { container, getByText } = renderPage(<RoleRulesPanel />, [
+      [queries.adminRoleRulesQuery.queryKey, roleRules],
+      [
+        queries.adminRoleRuleAttributeValuesQuery.queryKey,
+        { by_attribute: {}, min_users: 2 },
+      ],
+    ])
+    expect(getByText("DSV staff to teacher")).toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
   })
 })

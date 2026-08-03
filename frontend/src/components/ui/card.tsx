@@ -33,9 +33,19 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
+// `as` exists for the pages whose entire content is one card: there the
+// card title IS the page heading, and a <div> leaves the route with no
+// heading at all. Defaults to <div> so cards nested in a page that has
+// its own heading structure stay unaffected.
+function CardTitle({
+  className,
+  as: Tag = "div",
+  ...props
+}: React.ComponentProps<"div"> & {
+  as?: "div" | "h1" | "h2" | "h3"
+}) {
   return (
-    <div
+    <Tag
       data-slot="card-title"
       className={cn(
         "font-heading text-base leading-snug font-medium group-data-[size=sm]/card:text-sm",

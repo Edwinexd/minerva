@@ -116,7 +116,7 @@ export function LtiApprovePlatformPage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{t("ltiApprovePlatform.notFoundTitle")}</CardTitle>
+          <CardTitle as="h1">{t("ltiApprovePlatform.notFoundTitle")}</CardTitle>
           <CardDescription>
             {t("ltiApprovePlatform.notFoundBody")}
           </CardDescription>
@@ -135,7 +135,7 @@ export function LtiApprovePlatformPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>
+        <CardTitle as="h1">
           {alreadyActive
             ? t("ltiApprovePlatform.alreadyActiveTitle")
             : t("ltiApprovePlatform.title")}

@@ -622,6 +622,10 @@ function EmbedChatWindow({
     unknownError: t("embed.unknownError"),
     send: t("embed.send"),
     inputPlaceholder: t("embed.inputPlaceholder"),
+    inputLabel: t("embed.inputLabel"),
+    heading: courseName
+      ? t("embed.heading", { course: courseName })
+      : t("embed.headingFallback"),
     aegisChecking: tStudent("aegis.checking"),
     aegisSendAsIs: tStudent("aegis.sendAsIs"),
     aegisPendingTitle: tStudent("aegis.pendingTitle"),
@@ -629,6 +633,7 @@ function EmbedChatWindow({
     aegisEmptyTitle: tStudent("aegis.emptyTitle"),
     aegisShowPanel: tStudent("aegis.showPanel"),
     aegisShowPanelButton: tStudent("aegis.showPanelButton"),
+    aegisPanelLabel: tStudent("aegis.panelLabel"),
     disclaimerBefore: t("embed.disclosurePrefix"),
     disclaimerLink: t("embed.disclosureLink"),
     disclaimerAfter: t("embed.disclosureSuffix"),

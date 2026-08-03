@@ -104,7 +104,7 @@ export function AdminDefaultsPanel() {
           <CardTitle>{t("defaults.title")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {error ? formatError(error) : t("defaults.errors.loadFailed")}
           </p>
         </CardContent>
@@ -271,9 +271,9 @@ function DefaultRow({
         </div>
         <div className="flex items-center gap-2">
           {savedFlash && (
-            <span className="text-xs text-emerald-600">
+            <output className="text-xs text-emerald-700 dark:text-emerald-400">
               {t("defaults.savedFlash")}
-            </span>
+            </output>
           )}
           {entry.has_row && (
             <Button
@@ -303,14 +303,14 @@ function DefaultRow({
       </div>
 
       {saveMutation.error && (
-        <p className="text-xs text-destructive">
+        <p role="alert" className="text-xs text-destructive">
           {t("defaults.errors.saveFailed", {
             detail: formatError(saveMutation.error),
           })}
         </p>
       )}
       {resetMutation.error && (
-        <p className="text-xs text-destructive">
+        <p role="alert" className="text-xs text-destructive">
           {t("defaults.errors.resetFailed", {
             detail: formatError(resetMutation.error),
           })}

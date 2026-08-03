@@ -147,7 +147,7 @@ export function ModelCatalogCard<Row extends BaseModelRow>({
         {isLoading ? (
           <Skeleton className="h-40 w-full" />
         ) : error || !data ? (
-          <p className="text-sm text-destructive">{formatError(error)}</p>
+          <p role="alert" className="text-sm text-destructive">{formatError(error)}</p>
         ) : (
           <div className="space-y-3">
             {data.running && (
@@ -295,7 +295,7 @@ export function ModelCatalogCard<Row extends BaseModelRow>({
             {(enabledMutation.isError ||
               defaultMutation.isError ||
               benchmarkMutation.isError) && (
-              <p className="text-sm text-destructive">
+              <p role="alert" className="text-sm text-destructive">
                 {formatError(
                   enabledMutation.error ??
                     defaultMutation.error ??

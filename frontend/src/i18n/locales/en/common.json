@@ -223,7 +223,6 @@
     "shortcomingsIntro": "The following content is not yet fully accessible:",
     "shortcomings": {
       "contrast": "Colour contrast has been measured for the theme's core palette in both light and dark mode, and for the individual colours used for warnings and status text. A small number of one-off colours outside the core palette are checked by hand when they are introduced, so a newly added one can fall short until the next review.",
-      "screenReader": "Minerva has not yet been walked through end to end with a screen reader such as NVDA or VoiceOver. Automated testing catches programmatic errors, but the quality and order of what is announced in the chat, teacher and admin flows has not been verified by a person using one.",
       "knowledgeGraph": "The teacher knowledge-graph view is an interactive canvas visualisation. A text summary and a list of relationships are provided as an alternative, but the visual graph itself cannot be fully explored with a keyboard or screen reader.",
       "thirdParty": "Content embedded from or launched via third parties (for example LTI launches from Moodle or Canvas, and video transcripts from play.dsv.su.se) is outside our control and may not meet the accessibility requirements."
     },

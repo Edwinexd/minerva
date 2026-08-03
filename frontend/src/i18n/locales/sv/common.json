@@ -223,7 +223,6 @@
     "shortcomingsIntro": "Följande innehåll är ännu inte fullt tillgängligt:",
     "shortcomings": {
       "contrast": "Färgkontrasten är uppmätt för temats grundpalett i både ljust och mörkt läge, och för de enskilda färger som används för varningar och statustext. Ett fåtal enstaka färger utanför grundpaletten kontrolleras manuellt när de införs, vilket gör att en nyligen tillagd färg kan ha för låg kontrast fram till nästa granskning.",
-      "screenReader": "Minerva har ännu inte gåtts igenom från början till slut med en skärmläsare som NVDA eller VoiceOver. De automatiska testerna fångar programmatiska fel, men hur väl och i vilken ordning innehållet läses upp i chatt-, lärar- och adminflödena har inte kontrollerats av en person som använder skärmläsare.",
       "knowledgeGraph": "Lärarvyn med kunskapsgrafen är en interaktiv visualisering på en canvas. En textsammanfattning och en lista över relationer finns som alternativ, men själva den visuella grafen går inte att utforska fullt ut med tangentbord eller skärmläsare.",
       "thirdParty": "Innehåll som bäddas in från eller startas via tredje part (till exempel LTI-start från Moodle eller Canvas och videotranskript från play.dsv.su.se) ligger utanför vår kontroll och uppfyller kanske inte tillgänglighetskraven."
     },

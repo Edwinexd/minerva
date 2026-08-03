@@ -900,8 +900,25 @@ const BENCHMARK_CORPUS: &[&str] = &[
 mod tests {
     use super::*;
 
+    /// The environment is process-global but cargo runs these tests on
+    /// threads of one process, so the two budget tests raced: the
+    /// fallback test's `remove_var` could land between the override
+    /// test's `set_var` and its assert, dropping it through to the
+    /// cgroup value (2 GiB in CI vs the expected 12345). Roughly a
+    /// 1-in-10 failure. Every test that touches
+    /// `MINERVA_FASTEMBED_CACHE_BUDGET_BYTES` takes this first.
+    static BUDGET_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A poisoned lock here means some other test panicked while
+    /// holding it; the env var it was guarding is still ours to set, so
+    /// recover rather than cascading a second failure.
+    fn lock_budget_env() -> std::sync::MutexGuard<'static, ()> {
+        BUDGET_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn budget_env_override_parses() {
+        let _guard = lock_budget_env();
         std::env::set_var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES", "12345");
         assert_eq!(compute_budget_bytes(), 12345);
         std::env::remove_var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES");
@@ -909,6 +926,7 @@ mod tests {
 
     #[test]
     fn budget_falls_back_to_static_default_when_no_cgroup() {
+        let _guard = lock_budget_env();
         std::env::remove_var("MINERVA_FASTEMBED_CACHE_BUDGET_BYTES");
         // Either we're in a cgroup (CI or prod) and read_cgroup returns
         // a real number, or we're on macOS dev where it returns None and

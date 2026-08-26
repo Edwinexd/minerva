@@ -83,15 +83,16 @@ spec:
             # + tokio + ORT runtime + glibc + tonic connections) + ~1 GiB
             # of slack.
             #
-            # This was briefly raised to 6 GiB while the pod was
-            # OOM-crashlooping, which treated a symptom. The cause was
-            # the cache recording a model's cost as +0 MiB when an
-            # eviction's pages had not left RSS, so the budget believed
-            # it was empty and admitted a second model on top of a
-            # resident one. Fixed in `model_cache`; the limit goes back
-            # down because more memory never fixed it.
+            # History, because the number looks arbitrary otherwise.
+            # This started at 5 GiB and OOM-crashlooped. Raising it was
+            # treating a symptom: the real causes were the cache
+            # recording a model's cost as +0 MiB when an eviction's pages
+            # had not left RSS, and two concurrent callers each loading
+            # the same model. Both are fixed in `model_cache`, and both
+            # had to be fixed regardless of the limit.
             #
-            # 5 GiB was tried after the accounting fixes and put back:
+            # 5 GiB was then tried again on top of those fixes, and put
+            # back:
             # a memory-capped container survived boot plus concurrent
             # churn at 5 GiB (peak 3855 MiB), but that harness was
             # missing what prod does at the same time. Live chat, 4-way

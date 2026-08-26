@@ -70,6 +70,18 @@ pub fn chunk_text(text: &str, config: &ChunkerConfig) -> Vec<Chunk> {
         // If a single paragraph exceeds chunk_size, split it by sentences
         while current.len() > config.chunk_size {
             let split_point = find_split_point(&current, config.chunk_size);
+            let next_start =
+                snap_to_char_boundary(&current, split_point.saturating_sub(config.overlap));
+            if next_start == 0 {
+                // The window would not advance, so emitting here would
+                // repeat the same piece for as long as the process lives.
+                // `find_split_point`'s floors keep this unreachable for a
+                // config with `overlap < chunk_size / 2`; bail out rather
+                // than trust that, and let the trailing push below emit
+                // what is left as one oversized chunk.
+                break;
+            }
+
             let piece = current[..split_point].trim().to_string();
             if !piece.is_empty() {
                 chunks.push(Chunk {
@@ -80,9 +92,7 @@ pub fn chunk_text(text: &str, config: &ChunkerConfig) -> Vec<Chunk> {
                 chunk_index += 1;
             }
 
-            let overlap_start =
-                snap_to_char_boundary(&current, split_point.saturating_sub(config.overlap));
-            current = current[overlap_start..].to_string();
+            current = current[next_start..].to_string();
         }
     }
 
@@ -156,9 +166,18 @@ fn find_split_point(text: &str, target: usize) -> usize {
         }
     }
 
-    // Look for word boundary
+    // Look for word boundary. Same `target / 2` floor as the two
+    // branches above. Without it a lone space near the start of the
+    // window (text like "Heading. " followed by a long space-free run of
+    // URLs, table cells or ligature-mangled PDF glyphs) is accepted as
+    // the split, and since the caller rewinds the next window by
+    // `overlap`, any split point at or below `overlap` rewinds to 0 and
+    // leaves the window byte-identical. `chunk_text`'s loop then re-emits
+    // the same piece forever; that OOM-killed the ingest worker.
     if let Some(pos) = text[..target].rfind(' ') {
-        return pos + 1;
+        if pos > target / 2 {
+            return pos + 1;
+        }
     }
 
     target
@@ -195,6 +214,60 @@ mod tests {
         let chunks = chunk_text("Hello world.", &ChunkerConfig::default());
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].text, "Hello world.");
+    }
+
+    /// Regression: a paragraph whose only spaces sit within `overlap` of
+    /// the start, followed by a long space-free run. `find_split_point`
+    /// used to accept that leading space, the overlap rewind then landed
+    /// back on 0, and the inner loop re-emitted the same piece until the
+    /// worker was OOM-killed. Verified against the prod document that
+    /// crash-looped `minerva-worker`.
+    #[test]
+    fn test_leading_space_then_long_unbroken_run_terminates() {
+        let mut text = String::from("Intro text here. ");
+        text.push_str(&"A".repeat(5000));
+
+        let chunks = chunk_text(&text, &ChunkerConfig::default());
+
+        assert!(!chunks.is_empty());
+        // ~5k chars at a 2000-char window with 250 overlap. The point is
+        // that this is bounded at all; the bug produced millions.
+        assert!(chunks.len() < 20, "runaway chunking: {}", chunks.len());
+        for chunk in &chunks {
+            assert!(!chunk.text.is_empty());
+        }
+    }
+
+    /// A window with no whitespace at all falls through every branch to
+    /// the hard `target`, which always advances.
+    #[test]
+    fn test_no_whitespace_at_all_terminates() {
+        let text = "B".repeat(10_000);
+        let chunks = chunk_text(&text, &ChunkerConfig::default());
+        assert!(!chunks.is_empty());
+        assert!(chunks.len() < 20, "runaway chunking: {}", chunks.len());
+    }
+
+    /// `overlap` >= `chunk_size / 2` can still rewind the window to 0.
+    /// The loop's progress guard has to catch that on its own, since
+    /// `find_split_point`'s floors no longer suffice.
+    #[test]
+    fn test_overlap_wider_than_half_the_window_terminates() {
+        let mut text = String::from("Hi there. ");
+        text.push_str(&"C".repeat(3000));
+
+        let chunks = chunk_text(
+            &text,
+            &ChunkerConfig {
+                chunk_size: 100,
+                overlap: 90,
+            },
+        );
+
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert!(!chunk.text.is_empty());
+        }
     }
 
     #[test]

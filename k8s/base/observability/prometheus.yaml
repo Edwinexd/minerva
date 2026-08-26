@@ -85,8 +85,52 @@ data:
             regex: ([^:]+)(?::\d+)?;(\d+)
             replacement: $1:$2
             target_label: __address__
+          # kube-state-metrics is scraped by its own job below. It has to
+          # be excluded here or the namespace / pod / container relabels
+          # underneath would clobber the ones it reports about OTHER
+          # objects. See that job for the full story.
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: drop
+            regex: kube-state-metrics
           - action: labelmap
             regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
+
+      # kube-state-metrics needs its own job because it is the one
+      # exporter here that reports ON other objects: every `kube_pod_*`
+      # series carries the namespace / pod / container of the object it
+      # describes. The generic job above overwrites exactly those three
+      # with the scrape target's own identity, so every series arrived as
+      # container="kube-state-metrics", namespace="minerva" (ksm's own
+      # namespace, matching even for kube-system objects), with the real
+      # values demoted to exported_*. That silently emptied every
+      # dashboard panel filtering by $workload, including the OOMKilled
+      # table, which is why a multi-week worker crashloop showed up
+      # nowhere. `honor_labels: true` makes the reported labels win on
+      # conflict; the relabels below still name the target so ksm's own
+      # `kube_state_metrics_*` self-metrics keep an identity.
+      - job_name: kube-state-metrics
+        honor_labels: true
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: kube-state-metrics
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels:
+              [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
           - source_labels: [__meta_kubernetes_namespace]
             target_label: namespace
           - source_labels: [__meta_kubernetes_pod_name]

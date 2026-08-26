@@ -54,7 +54,7 @@ spec:
             # 2560 MiB budget was BELOW that, so arctic churned on the
             # hot path. 4 GiB (4 * 2^30 = 4294967296) keeps arctic
             # comfortably resident with ~800 MiB of cache headroom;
-            # baseline (~1 GiB) + arctic (3.3 GiB) sits under the 5 GiB
+            # baseline (~1 GiB) + arctic (3.3 GiB) sits under the 6 GiB
             # pod limit. nomic (the 1 remaining course) still cold-
             # loads on demand and evicts arctic, but that's one course,
             # not the fleet.
@@ -79,28 +79,35 @@ spec:
             # to a noisy neighbour, and put us at the top of the
             # eviction order during real node pressure.
             #
-            # 5 GiB = 3.8 GiB cache + ~1.2 GiB baseline (gRPC server +
-            # tokio + ORT runtime + glibc + tonic connections). Way
-            # tighter than the auto-fraction sizing would land on,
-            # because the monolith's 45% non-cache baseline was eaten
-            # by code that no longer runs in this pod.
+            # 6 GiB = 4 GiB cache budget + ~1 GiB baseline (gRPC server
+            # + tokio + ORT runtime + glibc + tonic connections) + ~1
+            # GiB of slack for eviction lag. Was 5 GiB, which left the
+            # cache budget and the baseline summing to exactly the
+            # limit, so any transient over-residency was an instant
+            # OOM. Two things make that transient routine rather than
+            # theoretical: `wait_for_rss_drop` gives up after 5s and
+            # loads the next model anyway (the "eviction did not free
+            # expected memory within 5s" WARN), and the boot benchmark
+            # runs in a background task while the gRPC listener is
+            # already accepting, so a live embed can pull a second
+            # model resident mid-benchmark. That is what OOM-killed
+            # this pod once the ingest worker started driving load.
             # Memory req == lim for Guaranteed QoS; CPU is ranged
             # because ONNX inference is heavily compute-bound when a
             # batch arrives but idle between. Low req keeps the
             # scheduler happy on a 2-CPU node; 2 CPU limit gives the
             # dispatcher real cores for the bursty embed call.
             requests:
-              # 5 GiB so the sequential boot benchmark fits. Each
-              # model loads, gets benchmarked, the previous gets
-              # evicted (with proper dispatcher-task await + glibc
-              # trim before the next allocation, see
-              # fastembed_embedder), so peak RSS during nomic load
-              # is baseline ~1 GiB + nomic warmed ~2.7 GiB = ~3.7
-              # GiB, comfortably under 5 GiB.
-              memory: "5Gi"
+              # 6 GiB so the sequential boot benchmark fits even when
+              # an evicted model's pages have not left RSS yet. The
+              # happy path is baseline ~1 GiB + nomic warmed ~2.7 GiB
+              # = ~3.7 GiB, but when the previous model is still
+              # resident the peak is that plus the outgoing model,
+              # which is what crossed 5 GiB in practice.
+              memory: "6Gi"
               cpu: "200m"
             limits:
-              memory: "5Gi"
+              memory: "6Gi"
               cpu: "2000m"
           # No HTTP endpoint; rely on the gRPC port being open as a
           # liveness signal. Tonic accepts TCP before model load

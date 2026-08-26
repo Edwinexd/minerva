@@ -79,35 +79,41 @@ spec:
             # to a noisy neighbour, and put us at the top of the
             # eviction order during real node pressure.
             #
-            # 6 GiB = 4 GiB cache budget + ~1 GiB baseline (gRPC server
-            # + tokio + ORT runtime + glibc + tonic connections) + ~1
-            # GiB of slack for eviction lag. Was 5 GiB, which left the
-            # cache budget and the baseline summing to exactly the
-            # limit, so any transient over-residency was an instant
-            # OOM. Two things make that transient routine rather than
-            # theoretical: `wait_for_rss_drop` gives up after 5s and
-            # loads the next model anyway (the "eviction did not free
-            # expected memory within 5s" WARN), and the boot benchmark
-            # runs in a background task while the gRPC listener is
-            # already accepting, so a live embed can pull a second
-            # model resident mid-benchmark. That is what OOM-killed
-            # this pod once the ingest worker started driving load.
+            # 5 GiB = 4 GiB cache budget + ~1 GiB baseline (gRPC server
+            # + tokio + ORT runtime + glibc + tonic connections).
+            #
+            # This was briefly raised to 6 GiB while the pod was
+            # OOM-crashlooping, which treated a symptom. The cause was
+            # the cache recording a model's cost as +0 MiB when an
+            # eviction's pages had not left RSS, so the budget believed
+            # it was empty and admitted a second model on top of a
+            # resident one. Fixed in `model_cache`; the limit goes back
+            # down because more memory never fixed it.
+            #
+            # Verified in a memory-capped container against the real
+            # models, driving concurrent embeds that force a model swap
+            # while callers still hold the outgoing dispatcher:
+            #   pre-fix  @ 5Gi: OOMKilled
+            #   post-fix @ 5Gi: survives, peak RSS 3855 MiB
+            # and on the production model mix (sustained arctic ingest
+            # with an occasional nomic document) 29 of 32 embeds served,
+            # 3 refused during the swap, peak RSS 3683 MiB. A refusal is
+            # a retryable failure of one request; an OOM kill fails every
+            # in-flight request and then costs a cold start.
             # Memory req == lim for Guaranteed QoS; CPU is ranged
             # because ONNX inference is heavily compute-bound when a
             # batch arrives but idle between. Low req keeps the
             # scheduler happy on a 2-CPU node; 2 CPU limit gives the
             # dispatcher real cores for the bursty embed call.
             requests:
-              # 6 GiB so the sequential boot benchmark fits even when
-              # an evicted model's pages have not left RSS yet. The
-              # happy path is baseline ~1 GiB + nomic warmed ~2.7 GiB
-              # = ~3.7 GiB, but when the previous model is still
-              # resident the peak is that plus the outgoing model,
-              # which is what crossed 5 GiB in practice.
-              memory: "6Gi"
+              # Peak RSS measured across boot benchmark plus concurrent
+              # model churn is ~3.9 GiB, so 5 GiB leaves real headroom
+              # rather than the exactly-zero slack it had before the
+              # cost-accounting fix.
+              memory: "5Gi"
               cpu: "200m"
             limits:
-              memory: "6Gi"
+              memory: "5Gi"
               cpu: "2000m"
           # No HTTP endpoint; rely on the gRPC port being open as a
           # liveness signal. Tonic accepts TCP before model load

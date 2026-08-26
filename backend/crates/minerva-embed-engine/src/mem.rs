@@ -25,6 +25,99 @@ pub(crate) const MIB: u64 = 1024 * 1024;
 /// measurement. (Was `ESTIMATED_MODEL_COST_BYTES` in `fastembed_embedder`.)
 pub(crate) const DEFAULT_ESTIMATE_BYTES: u64 = 800 * MIB;
 
+/// Floor for a model's recorded RSS cost when the static table has no
+/// entry for it. Nothing we load, ONNX embedder or cross-encoder, warms
+/// to less than this, so a measurement below it is a failed measurement
+/// rather than a cheap model. See `ModelCache::acquire` for why a bogus
+/// low reading is worse than no reading at all.
+pub(crate) const MIN_PLAUSIBLE_MODEL_BYTES: u64 = 256 * MIB;
+
+/// Fraction of the cgroup limit that live RSS plus an incoming model's
+/// estimated cost may reach before a load is refused.
+pub(crate) const RSS_ADMISSION_FRACTION: f64 = 0.85;
+
+/// Guard a model load against the *actual* cgroup limit rather than the
+/// cache's own accounting.
+///
+/// The LRU budget is bookkeeping, and bookkeeping drifts: a cost
+/// measurement can come back wrong, an evicted model's pages can outlive
+/// the wait, a model outside the static table gets a guessed cost. Live
+/// RSS against `memory.max` cannot drift. Refusing one request is
+/// strictly better than an OOM kill, which fails every in-flight request
+/// in the pod and then costs a cold start on top.
+///
+/// `Ok(())` when there is room, or when either number is unavailable (no
+/// cgroup, no `/proc`), so non-Linux dev hosts are unaffected.
+/// Block until the process actually has room for `needed` bytes, or give
+/// up after `HEADROOM_WAIT_BUDGET`. Returns true when there is room.
+///
+/// This replaces "wait 5s for RSS to halve, then load anyway and hope".
+/// Two things were wrong with that. It asked the wrong question, since
+/// what matters is whether the *incoming* model fits, not whether the
+/// outgoing one shrank by an arbitrary fraction. And giving up meant
+/// proceeding into the allocation regardless, which is precisely the
+/// OOM: "next load may be tight" was the last line before the kill.
+///
+/// Tying the wait to the real question makes it self-scaling: a load
+/// that already fits does not wait at all, and one that does not fit
+/// keeps waiting and keeps trimming rather than gambling. The budget is
+/// generous because glibc routinely takes longer than the old 5s to
+/// return ORT arenas: prod logged "released 7 of 2816 MiB" at 5s, and
+/// the next memprobe 5s later showed the pages had in fact gone. Those
+/// few extra seconds are the difference between serving the request and
+/// refusing it.
+pub(crate) async fn wait_for_headroom(needed: u64, label: &str) -> bool {
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+    const HEADROOM_WAIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+
+    if check_rss_headroom(needed).is_ok() {
+        return true;
+    }
+
+    let started = std::time::Instant::now();
+    while started.elapsed() < HEADROOM_WAIT_BUDGET {
+        trim_glibc_heap().await;
+        tokio::time::sleep(POLL_INTERVAL).await;
+        if check_rss_headroom(needed).is_ok() {
+            tracing::debug!(
+                "{} cache: headroom for {} MiB arrived after {:.1}s",
+                label,
+                needed / MIB,
+                started.elapsed().as_secs_f64(),
+            );
+            return true;
+        }
+    }
+
+    tracing::warn!(
+        "{} cache: waited {}s and still no room for {} MiB ({}); refusing the load rather than \
+         allocating into an OOM",
+        HEADROOM_WAIT_BUDGET.as_secs(),
+        label,
+        needed / MIB,
+        check_rss_headroom(needed).err().unwrap_or_default(),
+    );
+    false
+}
+
+pub(crate) fn check_rss_headroom(estimate: u64) -> Result<(), String> {
+    let (Some(limit), Some(rss)) = (read_cgroup_memory_limit(), read_rss_bytes()) else {
+        return Ok(());
+    };
+    let ceiling = (limit as f64 * RSS_ADMISSION_FRACTION) as u64;
+    if rss.saturating_add(estimate) > ceiling {
+        return Err(format!(
+            "live RSS {} MiB + estimated {} MiB would exceed {} MiB ({}% of the {} MiB cgroup limit)",
+            rss / MIB,
+            estimate / MIB,
+            ceiling / MIB,
+            (RSS_ADMISSION_FRACTION * 100.0).round() as u32,
+            limit / MIB,
+        ));
+    }
+    Ok(())
+}
+
 /// Conservative a-priori warmed-RSS estimate for a model, in bytes.
 ///
 /// This is the number the admission gate uses *before* a model is ever
@@ -49,7 +142,10 @@ pub(crate) fn estimated_model_rss_bytes(model: &str) -> Option<u64> {
         "sentence-transformers/all-MiniLM-L6-v2" => 1024,
         "BAAI/bge-small-en-v1.5" => 1024,
         "BAAI/bge-base-en-v1.5" => 1280,
-        "nomic-ai/nomic-embed-text-v1.5" => 2816,
+        // Warmed to 2846 MiB in a 6 GiB container, over the old 2816
+        // entry. The table has to stay an upper bound or the floor below
+        // stops being one.
+        "nomic-ai/nomic-embed-text-v1.5" => 3072,
         "intfloat/multilingual-e5-small" => 1024,
         "intfloat/multilingual-e5-base" => 1408,
         "intfloat/multilingual-e5-large" => 2304,

@@ -229,11 +229,30 @@ impl<L: ModelLoader> ModelCache<L> {
             // before the next load allocates on top.
             drop(state);
             self.loader.teardown(evicted.handle, evicted.teardown).await;
-            mem::wait_for_rss_drop(evicted_cost, label).await;
+            // Wait for room for the model we are about to load, not for
+            // an arbitrary fraction of the one we just dropped. Returning
+            // false here is not fatal on its own: there may be another
+            // entry to evict on the next pass, and the gate below is what
+            // finally refuses.
+            let _ = mem::wait_for_headroom(estimate, label).await;
             state = self.state.lock().await;
         }
 
         self.loader.metric_miss(model_id);
+
+        // Last line of defence before we allocate. Everything above this
+        // point reasons about the cache's own footprint accounting; this
+        // checks live RSS against the real cgroup limit, so a load is
+        // refused even when the accounting has drifted (a failed cost
+        // measurement, an eviction whose pages outlived the wait, a model
+        // with no table entry).
+        if let Err(reason) = mem::check_rss_headroom(estimate) {
+            tracing::error!("{} cache: refusing to load {}: {}", label, model_id, reason,);
+            return Err(format!(
+                "{label} cache refused to load {model_id}: {reason}"
+            ));
+        }
+
         let load_start = Instant::now();
         let rss_before = mem::read_rss_bytes();
         let raw = self.loader.load(model_id).await?;
@@ -244,9 +263,55 @@ impl<L: ModelLoader> ModelCache<L> {
         self.loader.warmup(&raw).await;
         let rss_after = mem::read_rss_bytes();
 
-        let cost = match (rss_before, rss_after) {
-            (Some(b), Some(a)) => a.saturating_sub(b),
-            _ => confident.unwrap_or(mem::DEFAULT_ESTIMATE_BYTES),
+        // `rss_after - rss_before` only means anything if RSS was
+        // quiescent across the load, and often it is not: when an evicted
+        // model's pages have not left RSS yet (the `wait_for_rss_drop`
+        // timeout warning), the allocator hands those same pages straight
+        // to the incoming model and the delta reads near zero.
+        //
+        // Recording that is worse than never measuring. The value lands in
+        // `measured`, which is preferred over the static table for the
+        // rest of the pod's life, so the budget concludes a multi-GiB
+        // model is free and admits the next one on top of it. That is how
+        // the embedder died in prod: arctic recorded at +0 MiB, then nomic
+        // was admitted against an apparently empty cache and the two
+        // together crossed the limit.
+        //
+        // `estimated_model_rss_bytes` is a conservative upper bound on
+        // warmed RSS, so a healthy measurement lands just under it. Take
+        // the larger of the two: far below the floor means the measurement
+        // failed, above it means the table has gone stale.
+        let measured = match (rss_before, rss_after) {
+            (Some(b), Some(a)) => Some(a.saturating_sub(b)),
+            _ => None,
+        };
+        let table = self.loader.estimate_bytes(model_id);
+        let floor = table.unwrap_or(mem::MIN_PLAUSIBLE_MODEL_BYTES);
+        let cost = match measured {
+            Some(m) if m > floor => {
+                if table.is_some() {
+                    tracing::warn!(
+                        "{} cache: {} warmed to {} MiB, above its {} MiB table entry; \
+                         update estimated_model_rss_bytes",
+                        label,
+                        model_id,
+                        m / mem::MIB,
+                        floor / mem::MIB,
+                    );
+                }
+                m
+            }
+            Some(m) => {
+                tracing::debug!(
+                    "{} cache: {} measured {} MiB, budgeting the {} MiB floor instead",
+                    label,
+                    model_id,
+                    m / mem::MIB,
+                    floor / mem::MIB,
+                );
+                floor
+            }
+            None => floor,
         };
 
         let (handle, teardown) = self.loader.finalize(raw);
@@ -426,5 +491,54 @@ mod tests {
         assert_eq!(loads.load(Ordering::SeqCst), 2);
         // `a` was evicted to make room for `b`.
         assert_eq!(teardowns.load(Ordering::SeqCst), 1);
+    }
+
+    /// Regression for the prod embedder OOM. `alloc: 0` reproduces a load
+    /// whose measured RSS delta comes back at ~0, which is what happens
+    /// when an evicted model's pages have not left RSS and the allocator
+    /// hands them straight to the incoming model.
+    ///
+    /// The old code recorded that 0 as the model's cost, so the budget
+    /// believed the cache was empty and admitted the next model on top of
+    /// a model that was really resident. Here `a` must still be budgeted
+    /// at its 300 MiB table entry, so loading `b` has to evict it.
+    #[tokio::test]
+    async fn zero_measurement_falls_back_to_table_estimate() {
+        let (l, loads, teardowns) = loader(&[
+            ("a", 300 * mem::MIB, 0), // estimate 300 MiB, measures ~0
+            ("b", 300 * mem::MIB, 0),
+        ]);
+        let cache = ModelCache::new(l, 400 * mem::MIB);
+        let _ = cache.acquire("a").await.unwrap();
+        let _ = cache.acquire("b").await.unwrap();
+        assert_eq!(loads.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            teardowns.load(Ordering::SeqCst),
+            1,
+            "a measured-as-free model must still be budgeted at its table \
+             estimate, otherwise the budget admits b on top of a"
+        );
+    }
+
+    /// Same failure one step later: the bogus 0 also lands in `measured`,
+    /// which is preferred over the table on every subsequent acquire. So a
+    /// re-acquire after eviction must not resurrect the model as free.
+    #[tokio::test]
+    async fn zero_measurement_is_not_cached_as_the_models_cost() {
+        let (l, _, teardowns) = loader(&[
+            ("a", 300 * mem::MIB, 0),
+            ("b", 300 * mem::MIB, 0),
+            ("c", 300 * mem::MIB, 0),
+        ]);
+        let cache = ModelCache::new(l, 400 * mem::MIB);
+        let _ = cache.acquire("a").await.unwrap();
+        let _ = cache.acquire("b").await.unwrap(); // evicts a
+        let _ = cache.acquire("c").await.unwrap(); // must evict b
+        assert_eq!(
+            teardowns.load(Ordering::SeqCst),
+            2,
+            "each admission must still evict; a cached 0 cost would make \
+             the cache look empty forever"
+        );
     }
 }

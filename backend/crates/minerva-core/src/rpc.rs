@@ -26,8 +26,15 @@ use serde::Serialize;
 pub const DEFER_PREFIX: &str = "deferred";
 
 /// True if `err` is a model-server deferral rather than a real failure.
+///
+/// Substring, not prefix: the marker is generated inside the model
+/// server and then wrapped on its way out, so by the time the worker
+/// sees it the text reads
+/// `embed RPC failed: status: Internal, message: "deferred: ..."`.
+/// A `starts_with` check silently missed every one of those and let 152
+/// documents be failed terminally when they should have been requeued.
 pub fn is_deferral(err: &str) -> bool {
-    err.starts_with(DEFER_PREFIX)
+    err.contains(DEFER_PREFIX)
 }
 
 /// Result of benchmarking one embedding model on the fixed benchmark
@@ -156,4 +163,23 @@ pub trait RerankerClient: Send + Sync {
 
     /// True if an admin-triggered benchmark is currently in flight.
     async fn is_benchmark_running(&self) -> bool;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deferral_is_detected_through_the_grpc_wrapping() {
+        // Exactly what the worker sees in prod: the marker is nested
+        // inside tonic's status text, not at the start.
+        assert!(is_deferral(
+            r#"embed RPC failed: status: Internal, message: "deferred: fastembed cache is full serving interactive traffic""#
+        ));
+        // Bare form, straight from the cache.
+        assert!(is_deferral("deferred: fastembed cache is full"));
+        // A real failure must not be mistaken for one.
+        assert!(!is_deferral("text extraction failed: empty text"));
+        assert!(!is_deferral("processing task panicked"));
+    }
 }

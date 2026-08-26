@@ -661,7 +661,38 @@ fn derive_pdf_filename(stored: &str, url_basename: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::derive_pdf_filename;
+    use super::{derive_pdf_filename, is_transient_ingest_error};
+
+    /// The classification that decides requeue-vs-terminal. Every string
+    /// here was copied from a real `documents.error_msg` in prod, because
+    /// the first version of this matcher used `starts_with` on the
+    /// deferral marker and missed all 152 wrapped deferrals.
+    #[test]
+    fn transient_ingest_errors_are_requeued_not_failed() {
+        for e in [
+            r#"embed RPC failed: status: Internal, message: "deferred: fastembed cache is full serving interactive traffic""#,
+            r#"embed RPC failed: status: Unavailable, message: "tcp connect error""#,
+            r#"embed RPC failed: status: Unknown, message: "transport error""#,
+            "fastembed cache refused to load Snowflake/snowflake-arctic-embed-m-v2.0: live RSS too high",
+            "embed RPC timed out after 120s",
+        ] {
+            assert!(is_transient_ingest_error(e), "should be transient: {e}");
+        }
+    }
+
+    /// A broken document must stay failed; retrying it forever would
+    /// cycle the queue and never converge.
+    #[test]
+    fn real_ingest_failures_stay_terminal() {
+        for e in [
+            "text extraction failed: both pdf-extract and pdftotext returned empty text",
+            "processing task panicked",
+            "failed to read text file: stream did not contain valid UTF-8",
+            "could not extract presentation ID from URL: https://play.dsv.su.se/",
+        ] {
+            assert!(!is_transient_ingest_error(e), "should be terminal: {e}");
+        }
+    }
 
     #[test]
     fn keeps_stored_filename_when_already_pdf() {

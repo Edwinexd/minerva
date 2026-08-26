@@ -108,6 +108,36 @@ pub(crate) trait ModelLoader: Send + Sync + 'static {
     fn metric_totals(&self, _count: usize, _footprint_bytes: u64, _budget_bytes: u64) {}
 }
 
+/// Trims glibc's heap when a model load does not reach the cache.
+///
+/// `acquire_with` runs the load inside the caller's future, and that
+/// future gets dropped: an admin benchmark whose client goes away (the
+/// app pod rolling mid-load, a closed tab) cancels the RPC while the
+/// download / session build is still running. The half-built model is
+/// dropped correctly, but glibc keeps its pages on the freelist, so the
+/// pod is left with multi-GiB live RSS and an empty cache - a state
+/// nothing else in here can clear, because every trim path hangs off an
+/// eviction and there is nothing to evict. Trimming on the way out is
+/// what stops one cancelled benchmark from refusing every later load
+/// until the pod restarts.
+///
+/// Field is `true` once the model is resident and accounted for.
+struct TrimOnCancel(bool);
+
+impl Drop for TrimOnCancel {
+    fn drop(&mut self) {
+        if self.0 {
+            return;
+        }
+        // Drop runs on the task being cancelled, so the trim itself has
+        // to outlive it. No runtime (shutdown, or a non-tokio drop) just
+        // means no trim; the gate above still recovers on the next load.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(mem::trim_glibc_heap());
+        }
+    }
+}
+
 struct Entry<H, T> {
     name: String,
     handle: H,
@@ -303,7 +333,21 @@ impl<L: ModelLoader> ModelCache<L> {
         // refused even when the accounting has drifted (a failed cost
         // measurement, an eviction whose pages outlived the wait, a model
         // with no table entry).
-        if let Err(reason) = mem::check_rss_headroom(estimate) {
+        //
+        // Trim + poll rather than reading RSS once and refusing: with an
+        // empty cache there was no eviction above, so nothing has asked
+        // glibc to give its freelist back and the one reading can be all
+        // stale pages. That is not hypothetical - a benchmark RPC
+        // cancelled mid-load (see `TrimOnCancel`) left the reranker pod
+        // at 1718 MiB RSS with zero models cached, and every later
+        // benchmark of the 2816 MiB model was refused against it for the
+        // rest of the pod's life. `wait_for_headroom` returns
+        // immediately when there is already room, so a healthy load pays
+        // nothing for this.
+        if !mem::wait_for_headroom(estimate, label).await {
+            let reason = mem::check_rss_headroom(estimate)
+                .err()
+                .unwrap_or_else(|| "no headroom".to_string());
             tracing::error!("{} cache: refusing to load {}: {}", label, model_id, reason,);
             return Err(format!(
                 "{label} cache refused to load {model_id}: {reason}"
@@ -312,6 +356,11 @@ impl<L: ModelLoader> ModelCache<L> {
 
         let load_start = Instant::now();
         let rss_before = mem::read_rss_bytes();
+        // Armed across the load: if this future is cancelled (or the load
+        // fails) the pages the aborted load touched go back to the
+        // kernel instead of sitting in glibc's freelist inflating live
+        // RSS against every future admission check.
+        let mut trim_on_cancel = TrimOnCancel(false);
         let raw = self.loader.load(model_id).await?;
         self.loader
             .metric_load_seconds(model_id, load_start.elapsed().as_secs_f64());
@@ -381,6 +430,9 @@ impl<L: ModelLoader> ModelCache<L> {
         });
         state.measured.insert(model_id.to_string(), cost);
         self.loader.metric_resident(model_id, cost);
+        // Resident and accounted for: its RSS is the budget's problem
+        // now, not something to trim on the way out.
+        trim_on_cancel.0 = true;
 
         // Post-load sweep: the pre-load estimate can undershoot a
         // first-of-its-kind larger model, leaving us over budget once the
@@ -465,6 +517,9 @@ mod tests {
         /// lock across teardown, so this is the knob that holds the race
         /// window open long enough for a test to be deterministic.
         teardown_delay_ms: u64,
+        /// Artificial load duration, so a test can cancel an acquire
+        /// while the load is still in flight.
+        load_delay_ms: u64,
     }
 
     #[async_trait]
@@ -481,6 +536,9 @@ mod tests {
         }
         async fn load(&self, model_id: &str) -> Result<Arc<Vec<u8>>, String> {
             self.loads.fetch_add(1, Ordering::SeqCst);
+            if self.load_delay_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(self.load_delay_ms)).await;
+            }
             let bytes = self.alloc.get(model_id).copied().unwrap_or(0);
             let mut v = vec![0u8; bytes];
             // Touch each page so the pages are actually resident (RSS),
@@ -514,6 +572,7 @@ mod tests {
                 loads: loads.clone(),
                 teardowns: teardowns.clone(),
                 teardown_delay_ms: 0,
+                load_delay_ms: 0,
             },
             loads,
             teardowns,
@@ -527,6 +586,42 @@ mod tests {
         let (mut l, loads, teardowns) = loader(models);
         l.teardown_delay_ms = delay_ms;
         (l, loads, teardowns)
+    }
+
+    fn slow_load_loader(
+        models: &[(&str, u64, usize)],
+        delay_ms: u64,
+    ) -> (FakeLoader, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let (mut l, loads, teardowns) = loader(models);
+        l.load_delay_ms = delay_ms;
+        (l, loads, teardowns)
+    }
+
+    /// Regression for the reranker pod that refused every benchmark
+    /// until it was restarted.
+    ///
+    /// `acquire` loads inside the caller's future, and an admin
+    /// benchmark's future does get dropped mid-load (the app pod rolled
+    /// while the RPC was in flight). The cancelled load must not leave a
+    /// half-built entry behind or hold the admission lock; the next
+    /// caller has to be able to load the same model normally.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_load_leaves_no_entry_and_the_next_acquire_loads() {
+        let mib = mem::MIB as usize;
+        let (l, loads, teardowns) = slow_load_loader(&[("m", 100 * mem::MIB, 100 * mib)], 200);
+        let cache = Arc::new(ModelCache::new(l, 3000 * mem::MIB));
+
+        let c = Arc::clone(&cache);
+        let cancelled = tokio::spawn(async move { c.acquire("m").await });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        cancelled.abort();
+        let _ = cancelled.await;
+
+        assert!(cache.acquire("m").await.is_ok());
+        // Loaded twice (the cancelled one cached nothing), and nothing
+        // was evicted: the cancelled load never became an entry.
+        assert_eq!(loads.load(Ordering::SeqCst), 2);
+        assert_eq!(teardowns.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

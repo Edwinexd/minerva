@@ -36,18 +36,6 @@ pub(crate) const MIN_PLAUSIBLE_MODEL_BYTES: u64 = 256 * MIB;
 /// estimated cost may reach before a load is refused.
 pub(crate) const RSS_ADMISSION_FRACTION: f64 = 0.85;
 
-/// Guard a model load against the *actual* cgroup limit rather than the
-/// cache's own accounting.
-///
-/// The LRU budget is bookkeeping, and bookkeeping drifts: a cost
-/// measurement can come back wrong, an evicted model's pages can outlive
-/// the wait, a model outside the static table gets a guessed cost. Live
-/// RSS against `memory.max` cannot drift. Refusing one request is
-/// strictly better than an OOM kill, which fails every in-flight request
-/// in the pod and then costs a cold start on top.
-///
-/// `Ok(())` when there is room, or when either number is unavailable (no
-/// cgroup, no `/proc`), so non-Linux dev hosts are unaffected.
 /// Block until the process actually has room for `needed` bytes, or give
 /// up after `HEADROOM_WAIT_BUDGET`. Returns true when there is room.
 ///
@@ -100,6 +88,18 @@ pub(crate) async fn wait_for_headroom(needed: u64, label: &str) -> bool {
     false
 }
 
+/// Guard a model load against the *actual* cgroup limit rather than the
+/// cache's own accounting.
+///
+/// The LRU budget is bookkeeping, and bookkeeping drifts: a cost
+/// measurement can come back wrong, an evicted model's pages can outlive
+/// the wait, a model outside the static table gets a guessed cost. Live
+/// RSS against `memory.max` cannot drift. Refusing one request is
+/// strictly better than an OOM kill, which fails every in-flight request
+/// in the pod and then costs a cold start on top.
+///
+/// `Ok(())` when there is room, or when either number is unavailable (no
+/// cgroup, no `/proc`), so non-Linux dev hosts are unaffected.
 pub(crate) fn check_rss_headroom(estimate: u64) -> Result<(), String> {
     let (Some(limit), Some(rss)) = (read_cgroup_memory_limit(), read_rss_bytes()) else {
         return Ok(());
@@ -158,7 +158,9 @@ pub(crate) fn estimated_model_rss_bytes(model: &str) -> Option<u64> {
         "Qwen/Qwen3-Embedding-0.6B" => 2560,
 
         // --- Cross-encoder rerankers ---
-        "jinaai/jina-reranker-v2-base-multilingual" => 1856,
+        // Warmed to 2145 MiB in the 4 GiB reranker pod, over the old
+        // 1856 entry; the table has to stay an upper bound.
+        "jinaai/jina-reranker-v2-base-multilingual" => 2304,
         // fp32, ~568M params + external data file; the heavy one that
         // OOM-killed the 3Gi reranker pod when stacked on top of jina.
         "rozgo/bge-reranker-v2-m3" => 2816,

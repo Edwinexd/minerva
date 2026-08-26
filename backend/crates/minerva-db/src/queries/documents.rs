@@ -491,6 +491,11 @@ pub async fn list_children(db: &PgPool, parent_id: Uuid) -> Result<Vec<DocumentR
 
 /// Atomically claim up to `limit` pending documents for processing.
 /// Uses `FOR UPDATE SKIP LOCKED` so multiple workers won't grab the same row.
+///
+/// Skips rows still inside their retry backoff. A document requeued after
+/// a transient failure (see `requeue_for_retry`) would otherwise be
+/// re-claimed on the very next tick, since the ordering is by
+/// `created_at` and a requeue does not change that, and spin.
 pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
@@ -499,6 +504,7 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
         WHERE id IN (
             SELECT id FROM documents
             WHERE status = 'pending'
+              AND (retry_after IS NULL OR retry_after <= NOW())
             ORDER BY created_at ASC
             LIMIT $1
             FOR UPDATE SKIP LOCKED
@@ -508,6 +514,35 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
     )
     .fetch_all(db)
     .await
+}
+
+/// Put a document back on the queue after a transient failure, with an
+/// exponential backoff and an attempt counter.
+///
+/// Returns the new attempt count so the caller can give up and fail the
+/// document terminally once retrying is clearly pointless. Backoff is
+/// `2^attempts` minutes, capped, which is long enough that a pod
+/// restarting in a crash loop does not have the whole queue hammering it.
+pub async fn requeue_for_retry(
+    db: &PgPool,
+    doc_id: uuid::Uuid,
+    msg: &str,
+) -> Result<i32, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"UPDATE documents
+           SET status = 'pending',
+               ingest_attempts = ingest_attempts + 1,
+               retry_after = NOW() + (LEAST(POWER(2, ingest_attempts), 60) * INTERVAL '1 minute'),
+               error_msg = $1,
+               processing_started_at = NULL
+         WHERE id = $2
+         RETURNING ingest_attempts"#,
+        msg,
+        doc_id,
+    )
+    .fetch_one(db)
+    .await?;
+    Ok(row.ingest_attempts)
 }
 
 /// Count documents grouped by `status`, for the worker's

@@ -11,7 +11,7 @@ use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::mem;
-use crate::model_cache::{ModelCache, ModelLoader};
+use crate::model_cache::{Admission, ModelCache, ModelLoader};
 
 /// Result of benchmarking a single embedding model.
 #[derive(Clone, Debug, Serialize)]
@@ -469,7 +469,15 @@ impl FastEmbedder {
             return Ok(Vec::new());
         }
 
-        let dispatcher = self.acquire(model_name).await?;
+        // The priority lane the caller asked for governs residency too,
+        // not just queue order: a Low (ingest) embed may use a model that
+        // is already loaded, or load one into spare budget, but it never
+        // evicts the model interactive traffic is on.
+        let admission = match priority {
+            Priority::High => Admission::MayEvict,
+            Priority::Low => Admission::LoadOnly,
+        };
+        let dispatcher = self.acquire_with(model_name, admission).await?;
 
         let mut all_embeddings: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
         for batch in texts.chunks(EMBED_BATCH_SIZE) {
@@ -620,6 +628,16 @@ impl FastEmbedder {
     /// priority queue rather than running inference inline.
     async fn acquire(&self, model_name: &str) -> Result<Arc<ModelDispatcher>, String> {
         self.cache.acquire(model_name).await
+    }
+
+    /// `acquire` with an explicit admission policy; see
+    /// [`crate::model_cache::Admission`].
+    async fn acquire_with(
+        &self,
+        model_name: &str,
+        admission: Admission,
+    ) -> Result<Arc<ModelDispatcher>, String> {
+        self.cache.acquire_with(model_name, admission).await
     }
 }
 

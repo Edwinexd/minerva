@@ -38,6 +38,17 @@ use std::time::Instant;
 use async_trait::async_trait;
 
 use crate::mem;
+use minerva_core::rpc::DEFER_PREFIX;
+
+/// Whether a cache miss is allowed to evict a resident model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Admission {
+    /// Interactive work. May evict under budget pressure.
+    MayEvict,
+    /// Background work. May load into spare budget, never evicts; a miss
+    /// that would need an eviction returns a [`DEFER_PREFIX`] error.
+    LoadOnly,
+}
 
 /// How a concrete cache loads, warms, finalizes and tears down its model
 /// type. `ModelCache` owns the LRU/budget algorithm and calls into this
@@ -142,6 +153,24 @@ impl<L: ModelLoader> ModelCache<L> {
     /// clear error (and logs ERROR) if a confident estimate says the
     /// model can't fit the budget, instead of OOM-loading it.
     pub(crate) async fn acquire(&self, model_id: &str) -> Result<L::Handle, String> {
+        self.acquire_with(model_id, Admission::MayEvict).await
+    }
+
+    /// `acquire` with an explicit admission policy.
+    ///
+    /// [`Admission::LoadOnly`] keeps background work out of interactive
+    /// work's way at the *residency* level. The dispatcher's priority
+    /// lanes already stop an ingest batch from delaying a chat embed on
+    /// an already-loaded model, but they say nothing about *which* model
+    /// is resident: an ingest document for a different model would
+    /// happily evict the one chat is serving from, and live traffic then
+    /// eats a multi-second cold load. A `LoadOnly` caller may fill spare
+    /// budget but never takes a resident model from anyone.
+    pub(crate) async fn acquire_with(
+        &self,
+        model_id: &str,
+        admission: Admission,
+    ) -> Result<L::Handle, String> {
         let label = self.loader.label();
         let mut state = self.state.lock().await;
 
@@ -202,6 +231,20 @@ impl<L: ModelLoader> ModelCache<L> {
             let used: u64 = state.entries.iter().map(|e| e.rss_cost_bytes).sum();
             if used + estimate <= self.budget_bytes {
                 break;
+            }
+            if admission == Admission::LoadOnly {
+                tracing::info!(
+                    "{} cache: deferring background load of {} ({} MiB) rather than evicting a \
+                     resident model (footprint {} MiB / budget {} MiB)",
+                    label,
+                    model_id,
+                    estimate / mem::MIB,
+                    used / mem::MIB,
+                    self.budget_bytes / mem::MIB,
+                );
+                return Err(format!(
+                    "{DEFER_PREFIX}: {label} cache is full serving interactive traffic"
+                ));
             }
             let lru_idx = state
                 .entries

@@ -12,6 +12,24 @@
 use async_trait::async_trait;
 use serde::Serialize;
 
+/// Prefix every "come back later" error from a model server carries.
+///
+/// Model-server errors cross the gRPC boundary as strings, so the marker
+/// lives here, in the crate both the server side (`minerva-embed-engine`)
+/// and the calling side (`minerva-app-core`'s worker) already depend on,
+/// rather than as two literals that can drift apart.
+///
+/// It encodes the difference between "this document is broken" and "the
+/// pod was busy". Ingest used to collapse both into `status = 'failed'`,
+/// which is terminal, so one embedder restart burned 5032 perfectly good
+/// documents and recovering them took a hand-written UPDATE against prod.
+pub const DEFER_PREFIX: &str = "deferred";
+
+/// True if `err` is a model-server deferral rather than a real failure.
+pub fn is_deferral(err: &str) -> bool {
+    err.starts_with(DEFER_PREFIX)
+}
+
 /// Result of benchmarking one embedding model on the fixed benchmark
 /// corpus. Field-for-field mirror of
 /// `minerva_embed_engine::fastembed_embedder::BenchmarkResult` so the local

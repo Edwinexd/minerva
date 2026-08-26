@@ -3037,6 +3037,7 @@ dependencies = [
  "libc",
  "metrics",
  "minerva-catalog",
+ "minerva-core",
  "serde",
  "tokio",
  "tracing",

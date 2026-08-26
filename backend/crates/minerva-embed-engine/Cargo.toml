@@ -12,6 +12,9 @@ edition = "2021"
 
 [dependencies]
 minerva-catalog = { path = "../minerva-catalog" }
+# For `rpc::DEFER_PREFIX`, the shared marker telling the worker a model
+# server said "come back later" rather than "this document is broken".
+minerva-core = { path = "../minerva-core" }
 
 async-trait = "0.1"
 candle-core.workspace = true

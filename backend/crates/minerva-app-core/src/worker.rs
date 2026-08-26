@@ -402,12 +402,29 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
                             }
                         }
                         Err(e) => {
-                            metrics::histogram!("worker_document_ingest_seconds", "outcome" => "failed")
-                                .record(ingest_start.elapsed().as_secs_f64());
-                            metrics::counter!("worker_ingest_total", "outcome" => "failed")
-                                .increment(1);
-                            tracing::error!("worker: document {} processing failed: {}", doc.id, e);
-                            set_failed(&db, doc.id, &e).await;
+                            // Transient? Put it back on the queue instead of
+                            // burning it. Terminally failing on a model-server
+                            // hiccup is what turned one embedder restart into
+                            // 5032 dead documents that needed hand-written SQL
+                            // to recover.
+                            if is_transient_ingest_error(&e) {
+                                metrics::histogram!("worker_document_ingest_seconds", "outcome" => "deferred")
+                                    .record(ingest_start.elapsed().as_secs_f64());
+                                metrics::counter!("worker_ingest_total", "outcome" => "deferred")
+                                    .increment(1);
+                                requeue_or_fail(&db, doc.id, &e).await;
+                            } else {
+                                metrics::histogram!("worker_document_ingest_seconds", "outcome" => "failed")
+                                    .record(ingest_start.elapsed().as_secs_f64());
+                                metrics::counter!("worker_ingest_total", "outcome" => "failed")
+                                    .increment(1);
+                                tracing::error!(
+                                    "worker: document {} processing failed: {}",
+                                    doc.id,
+                                    e
+                                );
+                                set_failed(&db, doc.id, &e).await;
+                            }
                         }
                     }
                 });
@@ -434,6 +451,53 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
             }
         }
     });
+}
+
+/// Ceiling on ingest retries. Past this the document is failed for real,
+/// so a genuinely unprocessable file can't cycle the queue forever.
+const MAX_INGEST_ATTEMPTS: i32 = 8;
+
+/// Is this error about the pod rather than the document?
+///
+/// Deferrals are marked explicitly by the model servers. The transport
+/// cases are matched on text because errors cross the gRPC boundary as
+/// strings: a restarting embedder surfaces as "tcp connect error" or
+/// "transport error", which says nothing about the document and should
+/// never be terminal.
+fn is_transient_ingest_error(err: &str) -> bool {
+    minerva_core::rpc::is_deferral(err)
+        || err.contains("tcp connect error")
+        || err.contains("transport error")
+        || err.contains("Unavailable")
+        || err.contains("timed out")
+        || err.contains("cache refused to load")
+}
+
+/// Requeue with backoff, or fail terminally once the attempt ceiling is
+/// hit so a permanently-stuck document can't cycle forever.
+async fn requeue_or_fail(db: &sqlx::PgPool, doc_id: uuid::Uuid, msg: &str) {
+    match minerva_db::queries::documents::requeue_for_retry(db, doc_id, msg).await {
+        Ok(attempts) if attempts >= MAX_INGEST_ATTEMPTS => {
+            tracing::error!(
+                "worker: document {} still failing after {} attempts, failing it: {}",
+                doc_id,
+                attempts,
+                msg,
+            );
+            set_failed(db, doc_id, msg).await;
+        }
+        Ok(attempts) => tracing::warn!(
+            "worker: document {} deferred (attempt {}/{}): {}",
+            doc_id,
+            attempts,
+            MAX_INGEST_ATTEMPTS,
+            msg,
+        ),
+        Err(e) => {
+            tracing::error!("worker: requeue of document {} failed: {}", doc_id, e);
+            set_failed(db, doc_id, msg).await;
+        }
+    }
 }
 
 async fn set_failed(db: &sqlx::PgPool, doc_id: uuid::Uuid, msg: &str) {

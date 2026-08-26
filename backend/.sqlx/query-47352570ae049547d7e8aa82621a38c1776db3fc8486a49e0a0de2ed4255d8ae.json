@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents\n           SET status = 'pending',\n               ingest_attempts = ingest_attempts + 1,\n               retry_after = NOW() + (LEAST(POWER(2, ingest_attempts), 60) * INTERVAL '1 minute'),\n               error_msg = $1,\n               processing_started_at = NULL\n         WHERE id = $2\n         RETURNING ingest_attempts",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ingest_attempts",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "47352570ae049547d7e8aa82621a38c1776db3fc8486a49e0a0de2ed4255d8ae"
+}

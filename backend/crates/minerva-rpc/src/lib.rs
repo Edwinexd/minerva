@@ -30,6 +30,13 @@ pub use minerva_core::rpc::{
 /// tonic-generated client + server types. One module per `.proto` file
 /// to match the package paths declared inside them. Consumers
 /// (binaries / clients) import only the half they need.
+///
+/// `result_large_err` is allowed module-wide: every generated method
+/// returns `Result<_, tonic::Status>`, and `Status` is 176 bytes against
+/// clippy's 128-byte threshold (the lint started firing on this code in
+/// clippy 1.98). The signature comes from tonic's codegen, so boxing the
+/// error is not ours to do.
+#[allow(clippy::result_large_err)]
 pub mod proto {
     pub mod embedder {
         // Mirrors `package minerva.embedder.v1;` in embedder.proto.

@@ -30,6 +30,12 @@ impl EmbedderService {
 
     /// Common shape for the two embed RPCs. Only difference is which
     /// priority lane we land in; both go through the same dispatcher.
+    ///
+    /// Returns tonic's own `Result<Response<_>, Status>` because the two
+    /// callers are trait methods that must; `Status` is 176 bytes against
+    /// clippy's 128-byte `result_large_err` threshold, and boxing it here
+    /// would just have to be unboxed again at the call sites.
+    #[allow(clippy::result_large_err)]
     async fn do_embed(
         &self,
         req: EmbedRequest,

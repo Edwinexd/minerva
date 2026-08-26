@@ -401,10 +401,20 @@ pub async fn rerank_chunks(
     }
     let documents: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
     let candidate_count = documents.len();
-    match reranker
+    // The cross-encoder is the one unavoidably synchronous step between
+    // "student pressed Send" and the first streamed token, and its cost
+    // scales with the candidate pool (see `rerank_candidate_count`), not
+    // with anything the client can see. Time it separately from the
+    // enclosing request so a TTFT regression can be attributed without
+    // guessing. Labelled by model because the per-course
+    // `reranker_model` knob changes the cost by an order of magnitude.
+    let rerank_started = std::time::Instant::now();
+    let outcome = reranker
         .rerank(reranker_model, query.to_string(), documents)
-        .await
-    {
+        .await;
+    metrics::histogram!("rerank_seconds", "model" => reranker_model.to_string())
+        .record(rerank_started.elapsed().as_secs_f64());
+    match outcome {
         Ok(order) => {
             if tracing::enabled!(tracing::Level::DEBUG) {
                 let preview: Vec<String> = order

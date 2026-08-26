@@ -175,6 +175,35 @@ const RERANK_BENCHMARK_DOCS: &[&str] = &[
     "Regularization trades a little training accuracy for better test accuracy.",
 ];
 
+/// Characters per benchmark / warmup passage. Matches the chunker's
+/// default `chunk_size`, which is the length the chat path actually feeds
+/// the cross-encoder.
+const RERANK_PASSAGE_CHARS: usize = 2000;
+
+/// [`RERANK_BENCHMARK_DOCS`] padded to `RERANK_PASSAGE_CHARS`.
+///
+/// Both the warmup and the admin benchmark need the operational shape.
+/// The raw entries are one-liners of ~70 chars, about 20 tokens, while a
+/// real candidate chunk runs to the `RERANK_MAX_LENGTH` cap of 512.
+/// Scoring the bare sentences understates per-pair cost by more than an
+/// order of magnitude, and cross-encoder attention is quadratic in
+/// sequence length, so the benchmark reported healthy throughput while
+/// the chat path paid seconds per turn.
+fn rerank_sample_docs() -> Vec<String> {
+    RERANK_BENCHMARK_DOCS
+        .iter()
+        .map(|s| {
+            let mut t = String::with_capacity(RERANK_PASSAGE_CHARS + s.len());
+            while t.len() < RERANK_PASSAGE_CHARS {
+                t.push_str(s);
+                t.push(' ');
+            }
+            t.truncate(RERANK_PASSAGE_CHARS);
+            t
+        })
+        .collect()
+}
+
 /// Lazily-loaded, memory-budgeted cross-encoder re-ranker cache.
 ///
 /// Cheap to construct (empty cache); each model is loaded + warmed on
@@ -237,10 +266,7 @@ impl FastReranker {
             .map_err(|_| BenchmarkError::Busy)?;
 
         let query = RERANK_BENCHMARK_QUERY.to_string();
-        let docs: Vec<String> = RERANK_BENCHMARK_DOCS
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let docs = rerank_sample_docs();
         let pairs = docs.len();
 
         // Warmup (also loads/downloads the model on first use). Errors
@@ -382,24 +408,11 @@ impl ModelLoader for RerankerLoader {
     async fn warmup(&self, raw: &Arc<Mutex<TextRerank>>) {
         // Warm at operational shape (~RERANK_MAX_LENGTH tokens/pair, batch
         // RERANK_BATCH_SIZE) before the cache measures RSS, same ORT-arena
-        // reasoning as the embedder: pad each passage to ~2000 chars so the
-        // arena sizes to real chunk length, not the short benchmark
-        // sentences. Errors ignored; the next real rerank surfaces them.
-        const WARMUP_CHARS: usize = 2000;
+        // reasoning as the embedder. Errors ignored; the next real rerank
+        // surfaces them.
         let model = raw.clone();
         let query = RERANK_BENCHMARK_QUERY.to_string();
-        let docs: Vec<String> = RERANK_BENCHMARK_DOCS
-            .iter()
-            .map(|s| {
-                let mut t = String::with_capacity(WARMUP_CHARS + s.len());
-                while t.len() < WARMUP_CHARS {
-                    t.push_str(s);
-                    t.push(' ');
-                }
-                t.truncate(WARMUP_CHARS);
-                t
-            })
-            .collect();
+        let docs = rerank_sample_docs();
         let _ = tokio::task::spawn_blocking(move || {
             let _ = run_rerank(&model, query, docs);
         })

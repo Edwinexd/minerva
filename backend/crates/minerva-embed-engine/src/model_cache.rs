@@ -236,6 +236,20 @@ impl<L: ModelLoader> ModelCache<L> {
             // finally refuses.
             let _ = mem::wait_for_headroom(estimate, label).await;
             state = self.state.lock().await;
+
+            // Re-check for a hit. The lock was dropped across the
+            // teardown above, and a concurrent caller that missed on the
+            // same model can have loaded it in that window. Without this
+            // we evict *their* fresh copy (the budget looks full because
+            // it is, of exactly the model we want) and load a second one.
+            // Two 3.4 GiB copies of arctic resident at once is what
+            // OOM-killed the embedder; the giveaway in the logs was
+            // "evicting arctic to make room for arctic".
+            if let Some(idx) = state.entries.iter().position(|e| e.name == model_id) {
+                state.entries[idx].last_used = Instant::now();
+                self.loader.metric_hit(model_id);
+                return Ok(state.entries[idx].handle.clone());
+            }
         }
 
         self.loader.metric_miss(model_id);
@@ -404,6 +418,10 @@ mod tests {
         alloc: HashMap<String, usize>,
         loads: Arc<AtomicUsize>,
         teardowns: Arc<AtomicUsize>,
+        /// Artificial teardown duration. `acquire` releases the admission
+        /// lock across teardown, so this is the knob that holds the race
+        /// window open long enough for a test to be deterministic.
+        teardown_delay_ms: u64,
     }
 
     #[async_trait]
@@ -437,6 +455,9 @@ mod tests {
         }
         async fn teardown(&self, _handle: Arc<Vec<u8>>, _teardown: ()) {
             self.teardowns.fetch_add(1, Ordering::SeqCst);
+            if self.teardown_delay_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(self.teardown_delay_ms)).await;
+            }
         }
     }
 
@@ -449,10 +470,20 @@ mod tests {
                 alloc: models.iter().map(|(k, _, a)| (k.to_string(), *a)).collect(),
                 loads: loads.clone(),
                 teardowns: teardowns.clone(),
+                teardown_delay_ms: 0,
             },
             loads,
             teardowns,
         )
+    }
+
+    fn slow_teardown_loader(
+        models: &[(&str, u64, usize)],
+        delay_ms: u64,
+    ) -> (FakeLoader, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let (mut l, loads, teardowns) = loader(models);
+        l.teardown_delay_ms = delay_ms;
+        (l, loads, teardowns)
     }
 
     #[tokio::test]
@@ -491,6 +522,49 @@ mod tests {
         assert_eq!(loads.load(Ordering::SeqCst), 2);
         // `a` was evicted to make room for `b`.
         assert_eq!(teardowns.load(Ordering::SeqCst), 1);
+    }
+
+    /// Regression for the second prod embedder OOM: two callers loading
+    /// the *same* model concurrently.
+    ///
+    /// `acquire` releases the admission lock while awaiting an eviction's
+    /// teardown. A second caller that already missed slips into that
+    /// window and loads the model. When the first re-acquires the lock it
+    /// finds the budget full, of exactly the model it wants, evicts that
+    /// fresh copy and loads a second one. In prod that put two 3.4 GiB
+    /// copies of arctic resident at once and OOM-killed the pod, logging
+    /// "evicting arctic to make room for arctic".
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_miss_on_same_model_loads_once() {
+        let mib = mem::MIB as usize;
+        // Budget holds one model, so `b` must evict `a` and the eviction
+        // path (the one that drops the lock) is exercised.
+        let (l, loads, _) = slow_teardown_loader(
+            &[
+                ("a", 300 * mem::MIB, 300 * mib),
+                ("b", 300 * mem::MIB, 300 * mib),
+            ],
+            150,
+        );
+        let cache = Arc::new(ModelCache::new(l, 400 * mem::MIB));
+        let _ = cache.acquire("a").await.unwrap();
+
+        let c1 = Arc::clone(&cache);
+        let c2 = Arc::clone(&cache);
+        let first = tokio::spawn(async move { c1.acquire("b").await });
+        // Let the first caller reach its teardown await before the second
+        // one takes the freed lock.
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        let second = tokio::spawn(async move { c2.acquire("b").await });
+        assert!(first.await.unwrap().is_ok());
+        assert!(second.await.unwrap().is_ok());
+
+        // 1 for `a`, 1 for `b`. Three means `b` was loaded twice.
+        assert_eq!(
+            loads.load(Ordering::SeqCst),
+            2,
+            "concurrent misses on one model must share a single load"
+        );
     }
 
     /// Regression for the prod embedder OOM. `alloc: 0` reproduces a load

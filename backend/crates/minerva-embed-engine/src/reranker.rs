@@ -58,7 +58,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fastembed::{RerankInitOptions, RerankerModel, TextRerank};
+use fastembed::{
+    RerankInitOptions, RerankInitOptionsUserDefined, RerankerModel, TextRerank, TokenizerFiles,
+    UserDefinedRerankingModel,
+};
+use hf_hub::api::sync::ApiBuilder;
 use serde::Serialize;
 
 use crate::mem;
@@ -174,6 +178,87 @@ const RERANK_BENCHMARK_DOCS: &[&str] = &[
     "Gradient descent iteratively steps parameters down the loss surface.",
     "Regularization trades a little training accuracy for better test accuracy.",
 ];
+
+/// A cross-encoder we load from an explicitly chosen ONNX file rather
+/// than through fastembed's built-in model list.
+///
+/// fastembed's entry for every reranker points at `onnx/model.onnx`,
+/// the **fp32** graph. For a 278M-parameter cross-encoder scoring 40
+/// candidates at `RERANK_MAX_LENGTH` tokens on a CPU-only pod that is
+/// brutally slow: measured at 0.8 pairs/sec, so 43 to 50 seconds of
+/// dead time before the first streamed token of a chat answer. The
+/// embedder side already avoids this trap by loading arctic from
+/// `onnx/model_int8.onnx` through
+/// `TextEmbedding::try_new_from_user_defined`; this is the same move
+/// for the reranker.
+///
+/// int8 shifts scores slightly, so ordering can differ at the margins.
+/// That is the trade already accepted for the embedding model, and a
+/// re-rank only reorders a pool the bi-encoder already judged relevant.
+struct CustomRerankerSpec {
+    repo_id: &'static str,
+    onnx_path: &'static str,
+}
+
+fn custom_reranker_spec(model_code: &str) -> Option<CustomRerankerSpec> {
+    match model_code {
+        "jinaai/jina-reranker-v2-base-multilingual" => Some(CustomRerankerSpec {
+            repo_id: "jinaai/jina-reranker-v2-base-multilingual",
+            onnx_path: "onnx/model_int8.onnx",
+        }),
+        "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1" => Some(CustomRerankerSpec {
+            repo_id: "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+            onnx_path: "onnx/model_qint8_avx512_vnni.onnx",
+        }),
+        _ => None,
+    }
+}
+
+/// Download a custom cross-encoder's files from the Hub and build it.
+/// Runs inside `spawn_blocking`; hf-hub's sync API blocks and the ONNX
+/// session build is CPU-heavy. Mirrors `load_custom_model` on the
+/// embedder side.
+fn load_custom_reranker(spec: &CustomRerankerSpec) -> Result<TextRerank, String> {
+    let api = ApiBuilder::new()
+        .with_progress(true)
+        .build()
+        .map_err(|e| format!("hf-hub init failed: {}", e))?;
+    let repo = api.model(spec.repo_id.to_string());
+
+    let fetch = |relative: &str| -> Result<std::path::PathBuf, String> {
+        repo.get(relative)
+            .map_err(|e| format!("hf-hub fetch {}/{} failed: {}", spec.repo_id, relative, e))
+    };
+    let read = |p: std::path::PathBuf| -> Result<Vec<u8>, String> {
+        std::fs::read(&p).map_err(|e| format!("read {}: {}", p.display(), e))
+    };
+
+    let onnx_path = fetch(spec.onnx_path)?;
+    let tokenizer_files = TokenizerFiles {
+        tokenizer_file: read(fetch("tokenizer.json")?)?,
+        config_file: read(fetch("config.json")?)?,
+        special_tokens_map_file: read(fetch("special_tokens_map.json")?)?,
+        tokenizer_config_file: read(fetch("tokenizer_config.json")?)?,
+    };
+
+    // `RerankInitOptionsUserDefined` is `#[non_exhaustive]` with no
+    // builder, so the max-length cap has to be assigned rather than
+    // chained. It still has to be set: the default is fastembed's, not
+    // ours, and the warmed ORT arena is sized from this.
+    let mut init = RerankInitOptionsUserDefined::default();
+    init.max_length = RERANK_MAX_LENGTH;
+
+    TextRerank::try_new_from_user_defined(
+        UserDefinedRerankingModel::new(read(onnx_path)?, tokenizer_files),
+        init,
+    )
+    .map_err(|e| {
+        format!(
+            "user-defined reranker init failed for {}: {}",
+            spec.repo_id, e
+        )
+    })
+}
 
 /// Characters per benchmark / warmup passage. Matches the chunker's
 /// default `chunk_size`, which is the length the chat path actually feeds
@@ -389,16 +474,26 @@ impl ModelLoader for RerankerLoader {
     async fn load(&self, model_id: &str) -> Result<Arc<Mutex<TextRerank>>, String> {
         let code = model_id.to_string();
         tokio::task::spawn_blocking(move || -> Result<Arc<Mutex<TextRerank>>, String> {
-            let model: RerankerModel = code
-                .parse()
-                .map_err(|e| format!("unknown reranker model {code}: {e}"))?;
-            let rerank = TextRerank::try_new(
-                RerankInitOptions::new(model)
-                    .with_max_length(RERANK_MAX_LENGTH)
-                    .with_show_download_progress(true),
-            )
-            .map_err(|e| format!("reranker init failed for {code}: {e}"))?;
-            tracing::info!("reranker: loaded model {code}");
+            let rerank = match custom_reranker_spec(&code) {
+                Some(spec) => {
+                    let m = load_custom_reranker(&spec)?;
+                    tracing::info!("reranker: loaded model {code} from {}", spec.onnx_path);
+                    m
+                }
+                None => {
+                    let model: RerankerModel = code
+                        .parse()
+                        .map_err(|e| format!("unknown reranker model {code}: {e}"))?;
+                    let m = TextRerank::try_new(
+                        RerankInitOptions::new(model)
+                            .with_max_length(RERANK_MAX_LENGTH)
+                            .with_show_download_progress(true),
+                    )
+                    .map_err(|e| format!("reranker init failed for {code}: {e}"))?;
+                    tracing::info!("reranker: loaded model {code} (fastembed default graph)");
+                    m
+                }
+            };
             Ok(Arc::new(Mutex::new(rerank)))
         })
         .await
@@ -481,12 +576,17 @@ mod tests {
     #[test]
     fn every_catalog_id_is_a_known_reranker() {
         // Guard against a typo'd catalog id that would only blow up on the
-        // first live rerank. `RerankerModel: FromStr` matches on
-        // fastembed's model_code list, so a parse failure here means the
-        // catalog drifted from what fastembed can actually load.
+        // first live rerank. An id is loadable one of two ways: fastembed
+        // knows it (`RerankerModel: FromStr` matches its model_code list),
+        // or we carry a `custom_reranker_spec` naming the exact ONNX file
+        // to pull. Anything in neither bucket drifted from what the
+        // runtime can load.
         for id in VALID_RERANKER_MODELS {
             let parsed: Result<RerankerModel, _> = id.parse();
-            assert!(parsed.is_ok(), "catalog reranker id not recognized: {id}");
+            assert!(
+                parsed.is_ok() || custom_reranker_spec(id).is_some(),
+                "catalog reranker id not recognized: {id}",
+            );
         }
     }
 

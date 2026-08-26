@@ -164,6 +164,8 @@ pub(crate) fn estimated_model_rss_bytes(model: &str) -> Option<u64> {
         "rozgo/bge-reranker-v2-m3" => 2816,
         "BAAI/bge-reranker-base" => 1280,
         "jinaai/jina-reranker-v1-turbo-en" => 768,
+        // Measured 1023 MiB warmed on the int8/VNNI graph.
+        "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1" => 1280,
 
         _ => return None,
     };

@@ -326,12 +326,20 @@ pub async fn embedding_search(
 /// before re-ranking. The bi-encoder (embedding) recall set is wider
 /// than the final context, so over-fetching gives the cross-encoder
 /// room to promote a chunk the cosine ranking buried.
-const RERANK_CANDIDATE_FACTOR: i64 = 4;
+/// Was 4. Halved once the cross-encoder's real cost was measured: at
+/// int8 on the prod pod's 1.5 CPU the model scores ~4.2 pairs/sec, so
+/// the pool size is the difference between a 9.3s and a 4.7s stall
+/// before the first streamed token. Recall loss is bounded because the
+/// bi-encoder already ranked these; the re-rank only reorders them.
+const RERANK_CANDIDATE_FACTOR: i64 = 2;
 
 /// Lower bound on the candidate pool: even a 1-chunk request fetches at
 /// least this many so the re-ranker has something to choose from. (A
 /// `max_chunks` of 1 with no over-fetch would make re-ranking a no-op.)
-const RERANK_CANDIDATE_FLOOR: i64 = 30;
+/// Was 30, which silently overrode the factor above: a `max_chunks` of
+/// 10 gave `(10 * 2).clamp(30, 80)` = 30 candidates, so halving the
+/// factor alone would have changed nothing.
+const RERANK_CANDIDATE_FLOOR: i64 = 20;
 
 /// Upper bound on the candidate pool. Caps the number of cross-encoder
 /// forward passes per turn (each candidate is one pass) so the
@@ -1354,19 +1362,21 @@ mod tests {
 
     #[test]
     fn rerank_candidate_count_over_fetches_within_bounds() {
-        // Default course (k=10) over-fetches 4x = 40, inside [30, 80].
-        assert_eq!(rerank_candidate_count(10), 40);
+        // Default course (k=10) over-fetches 2x = 20, inside [20, 80].
+        // This is the pool size that sets pre-token latency: the
+        // cross-encoder runs one forward pass per candidate.
+        assert_eq!(rerank_candidate_count(10), 20);
         // Small k still hits the floor so the reranker has candidates
         // to choose from (a no-over-fetch k=1 would make rerank a no-op).
-        assert_eq!(rerank_candidate_count(1), 30);
-        assert_eq!(rerank_candidate_count(5), 30);
-        // 4x crosses the ceiling at k=20 (80) and stays capped...
-        assert_eq!(rerank_candidate_count(20), 80);
+        assert_eq!(rerank_candidate_count(1), 20);
+        assert_eq!(rerank_candidate_count(5), 20);
+        // 2x crosses the ceiling at k=40 (80) and stays capped...
+        assert_eq!(rerank_candidate_count(40), 80);
         // ...but the pool is never smaller than k itself.
         assert_eq!(rerank_candidate_count(100), 100);
         // Defensive: non-positive k behaves like k=1.
-        assert_eq!(rerank_candidate_count(0), 30);
-        assert_eq!(rerank_candidate_count(-5), 30);
+        assert_eq!(rerank_candidate_count(0), 20);
+        assert_eq!(rerank_candidate_count(-5), 20);
     }
 
     #[test]

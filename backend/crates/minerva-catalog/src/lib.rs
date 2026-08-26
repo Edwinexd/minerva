@@ -120,6 +120,9 @@ pub const VALID_RERANKER_MODELS: &[&str] = &[
     "BAAI/bge-reranker-base",
     // English, very small / fast.
     "jinaai/jina-reranker-v1-turbo-en",
+    // Multilingual, distilled: 12 layers at hidden 384 vs XLM-R base's
+    // 768, so roughly a quarter of the per-pair compute.
+    "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
 ];
 
 /// Per-model query-side prefix for asymmetric retrieval models.

@@ -79,12 +79,23 @@ pub const VALID_LOCAL_MODELS: &[(&str, u64)] = &[
 /// only and overlapping with bge-small-en (also warmed). Existing
 /// courses on bge-base still work; teachers who want a benchmark can
 /// trigger one from the admin page.
-pub const STARTUP_BENCHMARK_MODELS: &[(&str, u64)] = &[
-    ("sentence-transformers/all-MiniLM-L6-v2", 384),
-    ("BAAI/bge-small-en-v1.5", 384),
-    ("nomic-ai/nomic-embed-text-v1.5", 768),
-    ("Snowflake/snowflake-arctic-embed-m-v2.0", 768),
-];
+///
+/// Only the model the fleet actually uses is warmed. Loading four at
+/// boot was the single largest source of embedder OOM kills, and the
+/// cgroup accounting shows why the pod limit never fixed it: reading
+/// four ONNX files charges the container ~1 GiB of page cache on top of
+/// anonymous memory, while the loads themselves churn anon between 1 and
+/// 4 GiB as each model evicts the last. `memory.current` reached 5.0 GiB
+/// against a 6 GiB limit with the process itself at only 3.9 GiB, so a
+/// burst allocation outran page-cache reclaim and the kernel killed it.
+///
+/// The boot set exists to (a) publish benchmark numbers and (b) leave
+/// the default model warm so the first chat query does not pay a cold
+/// load. Only (b) has to happen at boot; (a) is what the admin
+/// "Run benchmark" button is for, which is exactly what the note above
+/// about benchmarking on demand "without OOMing the box" already said.
+pub const STARTUP_BENCHMARK_MODELS: &[(&str, u64)] =
+    &[("Snowflake/snowflake-arctic-embed-m-v2.0", 768)];
 
 /// OpenAI embedding model used when a course's provider is `"openai"`.
 pub const OPENAI_EMBEDDING_MODEL: &str = "text-embedding-3-small";

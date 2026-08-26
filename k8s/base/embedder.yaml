@@ -79,8 +79,9 @@ spec:
             # to a noisy neighbour, and put us at the top of the
             # eviction order during real node pressure.
             #
-            # 5 GiB = 4 GiB cache budget + ~1 GiB baseline (gRPC server
-            # + tokio + ORT runtime + glibc + tonic connections).
+            # 6 GiB = 4 GiB cache budget + ~1 GiB baseline (gRPC server
+            # + tokio + ORT runtime + glibc + tonic connections) + ~1 GiB
+            # of slack.
             #
             # This was briefly raised to 6 GiB while the pod was
             # OOM-crashlooping, which treated a symptom. The cause was
@@ -90,30 +91,30 @@ spec:
             # resident one. Fixed in `model_cache`; the limit goes back
             # down because more memory never fixed it.
             #
-            # Verified in a memory-capped container against the real
-            # models, driving concurrent embeds that force a model swap
-            # while callers still hold the outgoing dispatcher:
-            #   pre-fix  @ 5Gi: OOMKilled
-            #   post-fix @ 5Gi: survives, peak RSS 3855 MiB
-            # and on the production model mix (sustained arctic ingest
-            # with an occasional nomic document) 29 of 32 embeds served,
-            # 3 refused during the swap, peak RSS 3683 MiB. A refusal is
-            # a retryable failure of one request; an OOM kill fails every
-            # in-flight request and then costs a cold start.
+            # 5 GiB was tried after the accounting fixes and put back:
+            # a memory-capped container survived boot plus concurrent
+            # churn at 5 GiB (peak 3855 MiB), but that harness was
+            # missing what prod does at the same time. Live chat, 4-way
+            # concurrent ingest, admin benchmarks, and arctic/nomic
+            # swapping all land together, and with arctic at 3456 MiB
+            # against nomic at 3072 MiB only one fits the 4 GiB budget,
+            # so a swap under load leaves the outgoing model's pages
+            # resident while the incoming one allocates. That crossed
+            # 5 GiB repeatedly. The extra GiB is for that overlap, not
+            # for the steady state, which sits near 3.7 GiB.
             # Memory req == lim for Guaranteed QoS; CPU is ranged
             # because ONNX inference is heavily compute-bound when a
             # batch arrives but idle between. Low req keeps the
             # scheduler happy on a 2-CPU node; 2 CPU limit gives the
             # dispatcher real cores for the bursty embed call.
             requests:
-              # Peak RSS measured across boot benchmark plus concurrent
-              # model churn is ~3.9 GiB, so 5 GiB leaves real headroom
-              # rather than the exactly-zero slack it had before the
-              # cost-accounting fix.
-              memory: "5Gi"
+              # Steady state is ~3.7 GiB; the headroom is for the window
+              # where an outgoing model's pages have not left RSS yet and
+              # the incoming one is already allocating.
+              memory: "6Gi"
               cpu: "200m"
             limits:
-              memory: "5Gi"
+              memory: "6Gi"
               cpu: "2000m"
           # No HTTP endpoint; rely on the gRPC port being open as a
           # liveness signal. Tonic accepts TCP before model load

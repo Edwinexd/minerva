@@ -1748,6 +1748,7 @@ pub(super) async fn run_chat_message(
     // partition call and guarantees a stable view across the run --
     // an admin flipping the flag mid-conversation won't half-apply.
     let kg_enabled = crate::feature_flags::course_kg_enabled(&state.db, course_id).await;
+    let reranking_enabled = crate::system_defaults::reranking_enabled(&state.db).await;
 
     // Aegis: persist the verdict the student had on screen when
     // they pressed Send so it appears in the History panel for
@@ -1905,6 +1906,7 @@ pub(super) async fn run_chat_message(
         fastembed: Arc::clone(&state.fastembed),
         reranker: Arc::clone(&state.reranker),
         reranker_model: course.reranker_model,
+        reranking_enabled,
         kg_enabled,
         tool_use_enabled: course.tool_use_enabled,
     };

@@ -55,6 +55,8 @@ pub mod keys {
     pub const CANVAS_AUTO_SYNC_INTERVAL_HOURS: &str = "platform.canvas_auto_sync_interval_hours";
     pub const LTI_NRPS_SYNC_INTERVAL_HOURS: &str = "platform.lti_nrps_sync_interval_hours";
     pub const OBSERVATION_TTL_DAYS: &str = "platform.observation_ttl_days";
+    pub const RERANKING_ENABLED: &str = "platform.reranking_enabled";
+    pub const RERANKING_UNAVAILABLE_REASON: &str = "platform.reranking_unavailable_reason";
 }
 
 /// Per-knob discipline. The admin route uses this to reject malformed
@@ -295,6 +297,28 @@ pub fn registry() -> Vec<KnobDef> {
             env_var: None,
             fallback: json!(7),
         },
+        KnobDef {
+            key: keys::RERANKING_ENABLED,
+            category: Platform,
+            label_key: "defaults.platform.rerankingEnabled.label",
+            description_key: "defaults.platform.rerankingEnabled.description",
+            kind: KnobKind::Bool,
+            env_var: None,
+            fallback: json!(true),
+        },
+        KnobDef {
+            key: keys::RERANKING_UNAVAILABLE_REASON,
+            category: Platform,
+            label_key: "defaults.platform.rerankingUnavailableReason.label",
+            description_key: "defaults.platform.rerankingUnavailableReason.description",
+            kind: KnobKind::Text {
+                multiline: true,
+                max_len: 1_000,
+                nullable: true,
+            },
+            env_var: None,
+            fallback: Value::Null,
+        },
     ]
 }
 
@@ -505,4 +529,12 @@ pub async fn lti_nrps_sync_interval_hours(db: &PgPool) -> i32 {
 
 pub async fn observation_ttl_days(db: &PgPool) -> i64 {
     fetch(db, keys::OBSERVATION_TTL_DAYS).await
+}
+
+pub async fn reranking_enabled(db: &PgPool) -> bool {
+    fetch(db, keys::RERANKING_ENABLED).await
+}
+
+pub async fn reranking_unavailable_reason(db: &PgPool) -> Option<String> {
+    fetch(db, keys::RERANKING_UNAVAILABLE_REASON).await
 }

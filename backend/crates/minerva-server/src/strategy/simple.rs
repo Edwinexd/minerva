@@ -43,6 +43,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.openai_api_key,
         &ctx.fastembed,
         &ctx.reranker,
+        ctx.reranking_enabled,
         &ctx.reranker_model,
         &ctx.qdrant,
         &collection_name,

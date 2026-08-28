@@ -397,11 +397,17 @@ fn apply_rerank_order(
 /// chat turn. Trivial inputs (0 or 1 chunk) skip the model entirely.
 pub async fn rerank_chunks(
     reranker: &Arc<dyn RerankerClient>,
+    reranking_enabled: bool,
     reranker_model: &str,
     query: &str,
     chunks: Vec<RagChunk>,
     top_k: usize,
 ) -> Vec<RagChunk> {
+    if !reranking_enabled {
+        let mut chunks = chunks;
+        chunks.truncate(top_k);
+        return chunks;
+    }
     if chunks.len() <= 1 || top_k == 0 {
         let mut chunks = chunks;
         chunks.truncate(top_k);
@@ -825,6 +831,7 @@ pub async fn rag_lookup(
     openai_key: &str,
     fastembed: &Arc<dyn EmbedderClient>,
     reranker: &Arc<dyn RerankerClient>,
+    reranking_enabled: bool,
     reranker_model: &str,
     qdrant: &qdrant_client::Qdrant,
     collection_name: &str,
@@ -843,7 +850,11 @@ pub async fn rag_lookup(
     // Over-fetch a candidate pool wider than the final context so the
     // cross-encoder has room to reorder; we truncate back to
     // `max_chunks` after re-ranking.
-    let candidate_limit = rerank_candidate_count(max_chunks);
+    let candidate_limit = if reranking_enabled {
+        rerank_candidate_count(max_chunks)
+    } else {
+        max_chunks.max(0) as u64
+    };
     // Orphan exclusion is enforced *inside* Qdrant via `excluded_doc_ids`
     // on the search call below: this keeps the "top-N" contract intact
     // (the next-best active chunks are returned in place of orphaned
@@ -874,6 +885,7 @@ pub async fn rag_lookup(
             let chunks = filter_orphaned(chunks, orphaned_doc_ids);
             rerank_chunks(
                 reranker,
+                reranking_enabled,
                 reranker_model,
                 query,
                 chunks,
@@ -1426,12 +1438,12 @@ mod tests {
         let reranker: std::sync::Arc<dyn minerva_core::rpc::RerankerClient> =
             std::sync::Arc::new(crate::strategy::test_support::NoopRerankerClient);
         let model = minerva_catalog::DEFAULT_RERANK_MODEL;
-        assert!(rerank_chunks(&reranker, model, "q", Vec::new(), 5)
+        assert!(rerank_chunks(&reranker, true, model, "q", Vec::new(), 5)
             .await
             .is_empty());
 
         let one = vec![chunk("d0", "a.pdf", "alpha", None)];
-        let out = rerank_chunks(&reranker, model, "q", one, 5).await;
+        let out = rerank_chunks(&reranker, true, model, "q", one, 5).await;
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].filename, "a.pdf");
 
@@ -1439,7 +1451,7 @@ mod tests {
             chunk("d0", "a.pdf", "alpha", None),
             chunk("d1", "b.pdf", "bravo", None),
         ];
-        assert!(rerank_chunks(&reranker, model, "q", many, 0)
+        assert!(rerank_chunks(&reranker, true, model, "q", many, 0)
             .await
             .is_empty());
     }

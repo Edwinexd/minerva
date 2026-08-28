@@ -84,6 +84,7 @@ pub struct GenerationContext {
     /// `reranker` on every RAG lookup; independent of the embedding
     /// model (no re-embed on change).
     pub reranker_model: String,
+    pub reranking_enabled: bool,
     /// Resolved per-request from the `course_kg` feature flag. When
     /// FALSE, RAG behaviour reverts to the pre-KG baseline:
     ///

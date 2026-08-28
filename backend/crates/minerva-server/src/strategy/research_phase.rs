@@ -293,6 +293,7 @@ pub async fn run(
         fastembed: &ctx.fastembed,
         reranker: &ctx.reranker,
         reranker_model: &ctx.reranker_model,
+        reranking_enabled: ctx.reranking_enabled,
         qdrant: &ctx.qdrant,
         db: &ctx.db,
         collection_name: &collection_name,
@@ -547,6 +548,7 @@ pub async fn run(
                     &ctx.openai_api_key,
                     &ctx.fastembed,
                     &ctx.reranker,
+                    ctx.reranking_enabled,
                     &ctx.reranker_model,
                     &ctx.qdrant,
                     &collection_name,
@@ -1215,6 +1217,7 @@ mod stream_integration_tests {
             fastembed: std::sync::Arc::new(crate::strategy::test_support::NoopEmbedderClient),
             reranker: std::sync::Arc::new(crate::strategy::test_support::NoopRerankerClient),
             reranker_model: minerva_catalog::DEFAULT_RERANK_MODEL.to_string(),
+            reranking_enabled: true,
             kg_enabled: false,
             tool_use_enabled: true,
         }

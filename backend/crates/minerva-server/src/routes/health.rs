@@ -131,6 +131,9 @@ pub async fn embedding_models(
 pub async fn reranker_models(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, crate::error::AppError> {
+    let reranking_enabled = crate::system_defaults::reranking_enabled(&state.db).await;
+    let reranking_unavailable_reason =
+        crate::system_defaults::reranking_unavailable_reason(&state.db).await;
     let policy: std::collections::HashMap<String, bool> =
         minerva_db::queries::reranker_models::list_all(&state.db)
             .await?
@@ -140,11 +143,16 @@ pub async fn reranker_models(
 
     let models: Vec<Value> = minerva_catalog::VALID_RERANKER_MODELS
         .iter()
+        .filter(|_| reranking_enabled)
         .filter(|name| policy.get(**name).copied().unwrap_or(false))
         .map(|name| json!({ "model": name }))
         .collect();
 
-    Ok(Json(json!({ "models": models })))
+    Ok(Json(json!({
+        "models": models,
+        "reranking_enabled": reranking_enabled,
+        "reranking_unavailable_reason": reranking_unavailable_reason,
+    })))
 }
 
 /// Auth-gated catalog feed for the teacher chat-model dropdown. Returns

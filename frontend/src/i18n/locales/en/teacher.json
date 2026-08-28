@@ -78,6 +78,8 @@
     "rerankerModelHelp": "Every retrieval is re-ranked by a cross-encoder before the top chunks reach the model. This picks which re-ranker to use. Multilingual models cover Swedish course content. Changing it has no re-embedding cost; it applies on the next question.",
     "rerankerModelMultilingualSuffix": "[multilingual]",
     "rerankerModelDisabledSuffix": "(no longer offered)",
+    "rerankerUnavailable": "Re-ranking is currently unavailable: {{reason}}",
+    "rerankerUnavailableDefaultReason": "It has been temporarily disabled by an administrator.",
     "rerankerModels": {
       "jinaV2MultilingualDesc": "multilingual incl. Swedish, light",
       "bgeV2M3Desc": "multilingual, higher quality, heavy",

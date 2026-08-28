@@ -194,10 +194,16 @@ export interface PublicRerankerModel {
   model: string
 }
 
+export interface PublicRerankerModelsResponse {
+  models: PublicRerankerModel[]
+  reranking_enabled: boolean
+  reranking_unavailable_reason: string | null
+}
+
 export const rerankerModelsQuery = queryOptions({
   queryKey: ["reranker-models"],
   queryFn: () =>
-    api.get<{ models: PublicRerankerModel[] }>("/reranker-catalog"),
+    api.get<PublicRerankerModelsResponse>("/reranker-catalog"),
   staleTime: 60_000,
 })
 

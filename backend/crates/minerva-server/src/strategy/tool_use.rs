@@ -133,6 +133,7 @@ pub async fn run(
         &ctx.openai_api_key,
         &ctx.fastembed,
         &ctx.reranker,
+        ctx.reranking_enabled,
         &ctx.reranker_model,
         &ctx.qdrant,
         &collection_name,

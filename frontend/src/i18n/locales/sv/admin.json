@@ -732,6 +732,14 @@
       "observationTtlDays": {
         "label": "TTL för regelattributobservationer (dagar)",
         "description": "GDPR-retentionsgolv för (attribut, värde)-förslagen som matar rollregel-redigeraren."
+      },
+      "rerankingEnabled": {
+        "label": "Aktivera omrangordning",
+        "description": "Huvudbrytare för cross-encoder-omrangordning. När den stängs av används embeddingsökningens ordning direkt och lärarnas modellväljare inaktiveras."
+      },
+      "rerankingUnavailableReason": {
+        "label": "Meddelande om otillgänglig omrangordning",
+        "description": "Meddelande som visas för lärare när omrangordning är inaktiverad. Lämna tomt för standardförklaringen."
       }
     }
   },

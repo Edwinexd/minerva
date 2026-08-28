@@ -78,6 +78,8 @@
     "rerankerModelHelp": "Varje hämtning omrankas av en cross-encoder innan de bästa styckena når modellen. Här väljer du vilken omrankare som används. Flerspråkiga modeller täcker svenskt kursmaterial. Att byta har ingen kostnad för omberäkning av embeddings; det börjar gälla vid nästa fråga.",
     "rerankerModelMultilingualSuffix": "[flerspråkig]",
     "rerankerModelDisabledSuffix": "(erbjuds inte längre)",
+    "rerankerUnavailable": "Omrangordning är för närvarande otillgänglig: {{reason}}",
+    "rerankerUnavailableDefaultReason": "Den har tillfälligt inaktiverats av en administratör.",
     "rerankerModels": {
       "jinaV2MultilingualDesc": "flerspråkig inkl. svenska, lätt",
       "bgeV2M3Desc": "flerspråkig, högre kvalitet, tung",

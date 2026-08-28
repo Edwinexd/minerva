@@ -662,7 +662,11 @@ function CourseConfigForm({ course }: { course: Course }) {
 
           <div className="space-y-2">
             <Label>{t("config.rerankerModelLabel")}</Label>
-            <Select value={rerankerModel} onValueChange={(v) => v && setRerankerModel(v)}>
+            <Select
+              value={rerankerModel}
+              disabled={rerankerModelsData?.reranking_enabled === false}
+              onValueChange={(v) => v && setRerankerModel(v)}
+            >
               <SelectTrigger className="w-full truncate" aria-label={t("config.rerankerModelLabel")}>
                 <SelectValue />
               </SelectTrigger>
@@ -701,7 +705,13 @@ function CourseConfigForm({ course }: { course: Course }) {
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              {t("config.rerankerModelHelp")}
+              {rerankerModelsData?.reranking_enabled === false
+                ? t("config.rerankerUnavailable", {
+                    reason:
+                      rerankerModelsData.reranking_unavailable_reason ||
+                      t("config.rerankerUnavailableDefaultReason"),
+                  })
+                : t("config.rerankerModelHelp")}
             </p>
           </div>
 

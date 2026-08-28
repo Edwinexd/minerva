@@ -734,6 +734,14 @@
       "observationTtlDays": {
         "label": "Rule attribute observation TTL (days)",
         "description": "GDPR retention floor for the (attribute, value) suggestions that feed the role-rule editor. Values not re-seen within this window are pruned."
+      },
+      "rerankingEnabled": {
+        "label": "Enable re-ranking",
+        "description": "Master switch for cross-encoder re-ranking. Turning it off immediately uses embedding search order for all retrievals and disables the teacher model picker."
+      },
+      "rerankingUnavailableReason": {
+        "label": "Re-ranking unavailability message",
+        "description": "Message shown to teachers while re-ranking is disabled. Leave blank to use the default explanation."
       }
     }
   },

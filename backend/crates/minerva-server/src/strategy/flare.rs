@@ -116,6 +116,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.openai_api_key,
         &ctx.fastembed,
         &ctx.reranker,
+        ctx.reranking_enabled,
         &ctx.reranker_model,
         &ctx.qdrant,
         &collection_name,
@@ -246,6 +247,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         let utility = ctx.utility.clone();
         let fastembed = ctx.fastembed.clone();
         let reranker = ctx.reranker.clone();
+        let reranking_enabled = ctx.reranking_enabled;
         let reranker_model = ctx.reranker_model.clone();
         let qdrant = ctx.qdrant.clone();
         let db = ctx.db.clone();
@@ -261,6 +263,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 &openai_key,
                 &fastembed,
                 &reranker,
+                reranking_enabled,
                 &reranker_model,
                 &qdrant,
                 &collection_name,
@@ -1043,6 +1046,7 @@ async fn flare_retrieve(
     openai_key: &str,
     fastembed: &Arc<dyn minerva_core::rpc::EmbedderClient>,
     reranker: &Arc<dyn minerva_core::rpc::RerankerClient>,
+    reranking_enabled: bool,
     reranker_model: &str,
     qdrant: &Arc<qdrant_client::Qdrant>,
     collection_name: &str,
@@ -1053,7 +1057,11 @@ async fn flare_retrieve(
     embedding_model: &str,
     orphaned_doc_ids: &std::collections::HashSet<String>,
 ) -> Vec<RagChunk> {
-    let candidate_limit = common::rerank_candidate_count(max_chunks);
+    let candidate_limit = if reranking_enabled {
+        common::rerank_candidate_count(max_chunks)
+    } else {
+        max_chunks.max(0) as u64
+    };
     let chunks = match common::embedding_search(
         client,
         openai_key,
@@ -1089,6 +1097,7 @@ async fn flare_retrieve(
     let chunks = common::filter_orphaned(chunks, orphaned_doc_ids);
     common::rerank_chunks(
         reranker,
+        reranking_enabled,
         reranker_model,
         query,
         chunks,

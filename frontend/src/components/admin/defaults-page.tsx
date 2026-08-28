@@ -65,6 +65,11 @@ interface SystemDefaultsResponse {
   defaults: SystemDefaultEntry[]
 }
 
+const RERANKING_DEFAULT_KEYS = new Set([
+  "platform.reranking_enabled",
+  "platform.reranking_unavailable_reason",
+])
+
 const systemDefaultsQuery = queryOptions({
   queryKey: ["admin", "system-defaults"],
   queryFn: () => api.get<SystemDefaultsResponse>("/admin/system-defaults"),
@@ -113,7 +118,9 @@ export function AdminDefaultsPanel() {
   }
 
   const courseAi = data.defaults.filter((d) => d.category === "course_ai")
-  const platform = data.defaults.filter((d) => d.category === "platform")
+  const platform = data.defaults.filter(
+    (d) => d.category === "platform" && !RERANKING_DEFAULT_KEYS.has(d.key),
+  )
 
   return (
     <div className="space-y-6">
@@ -525,31 +532,141 @@ function RerankerModelsCard() {
   const { t } = useTranslation("admin")
   const { data, isLoading, error } = useQuery(adminRerankerModelsQuery)
   return (
-    <ModelCatalogCard<AdminRerankerModel>
-      i18nPrefix="system.rerankerModels"
-      data={data}
-      isLoading={isLoading}
-      error={error}
-      adminQueryKey={["admin", "reranker-models"]}
-      pickerQueryKey={["reranker-models"]}
-      enabledPath="/admin/reranker-models"
-      defaultPath="/admin/reranker-models/default"
-      benchmarkPath="/admin/reranker-benchmark"
-      defaultRadioName="default-reranker-model"
-      speedOf={(m) => (m.benchmark ? m.benchmark.pairs_per_second : null)}
-      renderModelName={(m) => {
-        const meta = RERANKER_MODEL_DISPLAY[m.model]
-        return (
-          <>
-            {meta?.name ?? m.model}
-            {meta?.multilingual && (
-              <Badge variant="secondary" className="ml-2">
-                {t("system.rerankerModels.multilingualBadge")}
-              </Badge>
-            )}
-          </>
-        )
-      }}
-    />
+    <>
+      <RerankingAvailabilityCard />
+      <ModelCatalogCard<AdminRerankerModel>
+        i18nPrefix="system.rerankerModels"
+        data={data}
+        isLoading={isLoading}
+        error={error}
+        adminQueryKey={["admin", "reranker-models"]}
+        pickerQueryKey={["reranker-models"]}
+        enabledPath="/admin/reranker-models"
+        defaultPath="/admin/reranker-models/default"
+        benchmarkPath="/admin/reranker-benchmark"
+        defaultRadioName="default-reranker-model"
+        speedOf={(m) => (m.benchmark ? m.benchmark.pairs_per_second : null)}
+        renderModelName={(m) => {
+          const meta = RERANKER_MODEL_DISPLAY[m.model]
+          return (
+            <>
+              {meta?.name ?? m.model}
+              {meta?.multilingual && (
+                <Badge variant="secondary" className="ml-2">
+                  {t("system.rerankerModels.multilingualBadge")}
+                </Badge>
+              )}
+            </>
+          )
+        }}
+      />
+    </>
+  )
+}
+
+function RerankingAvailabilityCard() {
+  const { t } = useTranslation("admin")
+  const { t: tCommon } = useTranslation("common")
+  const formatError = useApiErrorMessage()
+  const queryClient = useQueryClient()
+  const { data, isLoading, error } = useQuery(systemDefaultsQuery)
+  const enabled = data?.defaults.find((d) => d.key === "platform.reranking_enabled")
+  const reason = data?.defaults.find(
+    (d) => d.key === "platform.reranking_unavailable_reason",
+  )
+
+  const saveMutation = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: unknown }) =>
+      api.put("/admin/system-defaults", { key, value }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "system-defaults"] })
+      queryClient.invalidateQueries({ queryKey: ["reranker-models"] })
+    },
+  })
+
+  if (isLoading) return <Skeleton className="h-44 w-full" />
+  if (error || !enabled || !reason) return null
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("system.rerankerModels.globalAvailabilityTitle")}</CardTitle>
+        <CardDescription>
+          {t("system.rerankerModels.globalAvailabilityDescription")}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="reranking-enabled"
+            checked={enabled.value === true}
+            disabled={saveMutation.isPending}
+            onCheckedChange={(checked) =>
+              saveMutation.mutate({ key: enabled.key, value: checked === true })
+            }
+          />
+          <Label htmlFor="reranking-enabled">
+            {t("system.rerankerModels.globalEnabledLabel")}
+          </Label>
+        </div>
+        {enabled.value !== true && (
+          <RerankingReasonEditor
+            key={`${reason.updated_at ?? "fallback"}:${String(reason.value ?? "")}`}
+            entry={reason}
+            pending={saveMutation.isPending}
+            onSave={(value) => saveMutation.mutate({ key: reason.key, value })}
+          />
+        )}
+        {saveMutation.error && (
+          <p role="alert" className="text-xs text-destructive">
+            {t("defaults.errors.saveFailed", {
+              detail: formatError(saveMutation.error),
+            })}
+          </p>
+        )}
+        {saveMutation.isPending && (
+          <p className="text-xs text-muted-foreground">{tCommon("actions.saving")}</p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function RerankingReasonEditor({
+  entry,
+  pending,
+  onSave,
+}: {
+  entry: SystemDefaultEntry
+  pending: boolean
+  onSave: (value: string | null) => void
+}) {
+  const { t } = useTranslation("admin")
+  const [reason, setReason] = React.useState(
+    typeof entry.value === "string" ? entry.value : "",
+  )
+  const savedReason = typeof entry.value === "string" ? entry.value : ""
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="reranking-unavailable-reason">
+        {t("system.rerankerModels.globalReasonLabel")}
+      </Label>
+      <Textarea
+        id="reranking-unavailable-reason"
+        value={reason}
+        maxLength={1000}
+        onChange={(event) => setReason(event.target.value)}
+      />
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          disabled={pending || reason === savedReason}
+          onClick={() => onSave(reason || null)}
+        >
+          {t("defaults.saveButton")}
+        </Button>
+      </div>
+    </div>
   )
 }

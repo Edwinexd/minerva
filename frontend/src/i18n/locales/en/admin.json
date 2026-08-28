@@ -617,6 +617,10 @@
     "rerankerModels": {
       "title": "Re-ranker models",
       "description": "Catalog of cross-encoder re-rankers the runtime can load. Every RAG retrieval re-ranks its embedding candidate pool before the top chunks reach the model; this controls which re-rankers teachers may pick per course and which one new courses default to. Multilingual models cover Swedish course content. Unlike embeddings, switching a course's re-ranker has no re-embedding cost (the cross-encoder reads chunk text, not vectors), so disabling a model here is cheap to recover from. Only enabled models can be the default, and the default itself can't be disabled (clear it from another row first).",
+      "globalAvailabilityTitle": "Global re-ranking availability",
+      "globalAvailabilityDescription": "Turn re-ranking off everywhere to immediately skip cross-encoder inference. Teachers keep their saved model but cannot change it while this is off.",
+      "globalEnabledLabel": "Enable re-ranking globally",
+      "globalReasonLabel": "Teacher-facing unavailability message",
       "columns": {
         "enabled": "Enabled",
         "default": "Default",

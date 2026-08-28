@@ -615,6 +615,10 @@
     "rerankerModels": {
       "title": "Omrankningsmodeller",
       "description": "Katalog över cross-encoder-omrankare som körtiden kan ladda. Varje RAG-hämtning omrankar sin kandidatmängd innan de bästa styckena når modellen; här styr du vilka omrankare lärare får välja per kurs och vilken nya kurser får som standard. Flerspråkiga modeller täcker svenskt kursmaterial. Till skillnad från embeddings har ett byte av en kurs omrankare ingen kostnad för omberäkning (cross-encodern läser styckenas text, inte vektorer), så att inaktivera en modell här är lätt att återhämta sig från. Endast aktiverade modeller kan vara standard, och standarden själv kan inte inaktiveras (rensa den från en annan rad först).",
+      "globalAvailabilityTitle": "Global tillgänglighet för omrangordning",
+      "globalAvailabilityDescription": "Stäng av omrangordning överallt för att omedelbart hoppa över cross-encoder-inferens. Lärare behåller sin sparade modell men kan inte byta den medan detta är avstängt.",
+      "globalEnabledLabel": "Aktivera omrangordning globalt",
+      "globalReasonLabel": "Meddelande om otillgänglighet för lärare",
       "columns": {
         "enabled": "Aktiverad",
         "default": "Standard",

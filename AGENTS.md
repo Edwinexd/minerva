@@ -376,15 +376,20 @@ The daily Daisy workflow also calls
 `DaisyClient.get_course_schedule_ical(momenttillf_id)` for every offering
 after its course batch has been applied. `scripts/sync_daisy_courses.py`
 serializes each VEVENT without flattening RFC 5545 values (so
-`TZID=Europe/Stockholm`, recurrence, UID, and LAST-MODIFIED survive) and PUTs
-the snapshot to `/api/service/daisy-course-schedules/{momenttillf_id}`.
+`TZID=Europe/Stockholm`, recurrence, UID, and LAST-MODIFIED survive), derives
+a short natural-language rendering, and PUTs the snapshot to
+`/api/service/daisy-course-schedules/{momenttillf_id}`.
 
 `course_schedule_events` is keyed by `(momenttillf_id, uid)`. Each snapshot is
 reconciled atomically: current UIDs are upserted and stored UIDs absent from
-the snapshot are deleted. Course merges need no event rewrite because the
-read path joins through `course_daisy_offerings`; moving an offering moves its
-schedule with it. Authorized course members can read the current event set at
-`GET /api/courses/{course_id}/schedule`.
+the snapshot are deleted. The table is internal snapshot state, not a
+course-platform API. Each current UID also materializes as its own embeddable
+`text/plain` document containing course, term, title, start/end, duration,
+location, and details. Its source identity is scoped to the Daisy offering;
+changed events replace the prior document and removed UIDs are soft-orphaned
+from retrieval. Generated event docs are locked to `syllabus` kind so they are
+available to chat RAG without an LLM classification call. There is deliberately
+no public `/courses/{id}/schedule` endpoint.
 
 ## External-Auth Invites (non-Shibboleth users)
 

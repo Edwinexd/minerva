@@ -1,14 +1,4 @@
-use sqlx::{PgPool, Postgres, QueryBuilder, Row};
-use uuid::Uuid;
-
-#[derive(Debug, serde::Serialize)]
-pub struct CourseScheduleEventRow {
-    pub momenttillf_id: String,
-    pub uid: String,
-    pub event_ical: String,
-    pub last_modified: Option<String>,
-    pub synced_at: chrono::DateTime<chrono::Utc>,
-}
+use sqlx::{PgPool, Postgres, QueryBuilder};
 
 pub struct ScheduleEvent<'a> {
     pub uid: &'a str,
@@ -65,26 +55,4 @@ pub async fn reconcile(
     .rows_affected();
     tx.commit().await?;
     Ok((upserted, deleted))
-}
-
-pub async fn list_by_course(
-    db: &PgPool,
-    course_id: Uuid,
-) -> Result<Vec<CourseScheduleEventRow>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT e.momenttillf_id, e.uid, e.event_ical, e.last_modified, e.synced_at FROM course_schedule_events e JOIN course_daisy_offerings o USING (momenttillf_id) WHERE o.course_id = $1 ORDER BY e.momenttillf_id, e.uid",
-    )
-    .bind(course_id)
-    .fetch_all(db)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|r| CourseScheduleEventRow {
-            momenttillf_id: r.get("momenttillf_id"),
-            uid: r.get("uid"),
-            event_ical: r.get("event_ical"),
-            last_modified: r.get("last_modified"),
-            synced_at: r.get("synced_at"),
-        })
-        .collect())
 }

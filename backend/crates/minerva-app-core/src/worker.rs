@@ -363,6 +363,9 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
                         path,
                         &doc.filename,
                         &doc.mime_type,
+                        doc.kind_locked_by_teacher
+                            .then_some(doc.kind.as_deref())
+                            .flatten(),
                         &course.embedding_provider,
                         &course.embedding_model,
                         course.embedding_version,

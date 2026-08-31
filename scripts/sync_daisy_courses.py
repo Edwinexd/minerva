@@ -20,7 +20,7 @@ the failure is visible; the next day's cron starts fresh.
 
 import os
 import sys
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 import requests
@@ -263,8 +263,49 @@ def serialize_schedule(calendar: Any) -> list[dict[str, str | None]]:
         if uid_value is None or not str(uid_value).strip():
             raise ValueError("Daisy schedule contains a VEVENT without UID")
         modified = component.get("LAST-MODIFIED")
+        summary = (
+            str(component.get("SUMMARY", "Untitled schedule event")).strip()
+            or "Untitled schedule event"
+        )
+        location = str(component.get("LOCATION", "")).strip()
+        description = str(component.get("DESCRIPTION", "")).strip()
+        start = component.decoded("DTSTART")
+        end = component.decoded("DTEND") if component.get("DTEND") else None
+
+        def format_when(value: Any) -> str:
+            if isinstance(value, datetime):
+                return value.isoformat(timespec="minutes")
+            return value.isoformat()
+
+        lines = [f"Event: {summary}", f"Starts: {format_when(start)}"]
+        if end is not None:
+            lines.append(f"Ends: {format_when(end)}")
+            duration = end - start
+            minutes = int(duration.total_seconds() // 60)
+            if minutes > 0:
+                if minutes % (24 * 60) == 0:
+                    days = minutes // (24 * 60)
+                    duration_text = f"{days} day" if days == 1 else f"{days} days"
+                else:
+                    hours, remainder = divmod(minutes, 60)
+                    hour_text = f"{hours} hour" if hours == 1 else f"{hours} hours"
+                    duration_text = (
+                        hour_text
+                        if remainder == 0
+                        else f"{hour_text} {remainder} minutes"
+                    )
+                if minutes < 60:
+                    remainder = minutes
+                    duration_text = f"{remainder} minutes"
+                lines.append(f"Duration: {duration_text}")
+        if location:
+            lines.append(f"Location: {location}")
+        if description:
+            lines.append(f"Details: {description}")
         events.append({
             "uid": str(uid_value).strip(),
+            "summary": summary,
+            "embedding_text": "\n".join(lines),
             "last_modified": modified.to_ical().decode("utf-8") if modified else None,
             "event_ical": component.to_ical().decode("utf-8"),
         })
@@ -382,15 +423,21 @@ def main() -> None:
         schedule_upserted = 0
         schedule_deleted = 0
         schedule_skipped = 0
+        schedule_documents = 0
+        schedule_documents_orphaned = 0
         for offering_id in offering_ids:
             events = serialize_schedule(daisy.get_course_schedule_ical(offering_id))
             result = post_schedule(api_url, headers, offering_id, events)
             schedule_upserted += result.get("upserted", 0)
             schedule_deleted += result.get("deleted", 0)
             schedule_skipped += int(result.get("skipped", False))
+            schedule_documents += result.get("documents", 0)
+            schedule_documents_orphaned += result.get("documents_orphaned", 0)
         total["schedule_events_upserted"] = schedule_upserted
         total["schedule_events_deleted"] = schedule_deleted
         total["schedules_skipped_staged"] = schedule_skipped
+        total["schedule_documents"] = schedule_documents
+        total["schedule_documents_orphaned"] = schedule_documents_orphaned
 
     if batches_sent == 0:
         print("Nothing to push.")

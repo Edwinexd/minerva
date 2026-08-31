@@ -196,6 +196,10 @@ fn local_model_dimensions(model: &str) -> Option<u64> {
 ///    Qdrant point's payload so the filter is a payload check rather
 ///    than a DB roundtrip per retrieved chunk).
 /// 5. Update document status in Postgres.
+///
+/// `locked_kind` is the already-persisted kind for teacher-locked or
+/// system-generated documents. Supplying it bypasses classification while
+/// preserving the same chunk payload and kind-based indexing behavior.
 #[allow(clippy::too_many_arguments)]
 pub async fn process_document(
     db: &PgPool,
@@ -209,6 +213,7 @@ pub async fn process_document(
     file_path: &Path,
     filename: &str,
     mime_type: &str,
+    locked_kind: Option<&str>,
     embedding_provider: &str,
     embedding_model: &str,
     embedding_version: i32,
@@ -249,18 +254,20 @@ pub async fn process_document(
             "no usable text extracted from {}; persisting as unknown/no-content",
             filename
         );
-        if let Ok(c) = classifier
-            .classify(course_id, filename, mime_type, &text)
-            .await
-        {
-            let _ = minerva_db::queries::documents::set_classification(
-                db,
-                document_id,
-                &c.kind,
-                c.confidence,
-                c.rationale.as_deref(),
-            )
-            .await;
+        if locked_kind.is_none() {
+            if let Ok(c) = classifier
+                .classify(course_id, filename, mime_type, &text)
+                .await
+            {
+                let _ = minerva_db::queries::documents::set_classification(
+                    db,
+                    document_id,
+                    &c.kind,
+                    c.confidence,
+                    c.rationale.as_deref(),
+                )
+                .await;
+            }
         }
         set_status_ready(db, document_id, 0).await;
         return Ok(ProcessResult {
@@ -273,36 +280,41 @@ pub async fn process_document(
     // unclassified. The chat-time filter excludes unclassified docs from
     // prompt context, so leaking is bounded; teacher can also re-trigger
     // classification from the UI.
-    let kind_str: String = match classifier
-        .classify(course_id, filename, mime_type, &text)
-        .await
-    {
-        Ok(c) => {
-            tracing::info!(
-                "classifier: {} -> {} (confidence {:.2}, flags {:?})",
-                filename,
-                c.kind,
-                c.confidence,
-                c.suspicious_flags,
-            );
-            // Persist; the query is a no-op if the row is locked by a teacher.
-            let _ = minerva_db::queries::documents::set_classification(
-                db,
-                document_id,
-                &c.kind,
-                c.confidence,
-                c.rationale.as_deref(),
-            )
-            .await;
-            c.kind
-        }
-        Err(e) => {
-            tracing::warn!(
-                "classifier failed for {} ({}); ingesting as unclassified",
-                filename,
-                e
-            );
-            String::new()
+    let kind_str: String = if let Some(kind) = locked_kind {
+        tracing::debug!(document_id = %document_id, kind, "classifier: using locked document kind");
+        kind.to_owned()
+    } else {
+        match classifier
+            .classify(course_id, filename, mime_type, &text)
+            .await
+        {
+            Ok(c) => {
+                tracing::info!(
+                    "classifier: {} -> {} (confidence {:.2}, flags {:?})",
+                    filename,
+                    c.kind,
+                    c.confidence,
+                    c.suspicious_flags,
+                );
+                // Persist; the query is a no-op if the row is locked by a teacher.
+                let _ = minerva_db::queries::documents::set_classification(
+                    db,
+                    document_id,
+                    &c.kind,
+                    c.confidence,
+                    c.rationale.as_deref(),
+                )
+                .await;
+                c.kind
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "classifier failed for {} ({}); ingesting as unclassified",
+                    filename,
+                    e
+                );
+                String::new()
+            }
         }
     };
 

@@ -56,6 +56,8 @@ pub fn router() -> Router<AppState> {
 #[derive(Deserialize)]
 struct DaisyScheduleEventInput {
     uid: String,
+    summary: String,
+    embedding_text: String,
     event_ical: String,
     last_modified: Option<String>,
 }
@@ -72,7 +74,7 @@ async fn reconcile_daisy_schedule(
     Json(input): Json<DaisyScheduleInput>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     authenticate_service(&state, &headers)?;
-    let Some(_offering) = minerva_db::queries::course_daisy_offerings::find_by_momenttillf_id(
+    let Some(offering) = minerva_db::queries::course_daisy_offerings::find_by_momenttillf_id(
         &state.db,
         momenttillf_id.trim(),
     )
@@ -88,7 +90,11 @@ async fn reconcile_daisy_schedule(
 
     let mut seen = std::collections::HashSet::new();
     for event in &input.events {
-        if event.uid.trim().is_empty() || event.event_ical.trim().is_empty() {
+        if event.uid.trim().is_empty()
+            || event.summary.trim().is_empty()
+            || event.embedding_text.trim().is_empty()
+            || event.event_ical.trim().is_empty()
+        {
             return Err(AppError::BadRequest {
                 code: "daisy.schedule_invalid_event",
                 params: Default::default(),
@@ -118,9 +124,117 @@ async fn reconcile_daisy_schedule(
         &events,
     )
     .await?;
-    Ok(Json(
-        serde_json::json!({"upserted": upserted, "deleted": deleted}),
-    ))
+
+    let course = minerva_db::queries::courses::find_by_id(&state.db, offering.course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let source_system = format!("daisy_schedule:{}", momenttillf_id.trim());
+    let course_label = offering.course_code.as_deref().unwrap_or(&course.name);
+    let semester = offering
+        .semester_label
+        .as_deref()
+        .unwrap_or("unspecified term");
+    let mut keep_source_refs = Vec::with_capacity(input.events.len());
+    let mut document_ids = Vec::with_capacity(input.events.len());
+    for event in &input.events {
+        let source_ref = event.uid.trim().to_owned();
+        let text = schedule_event_text(
+            course_label,
+            semester,
+            momenttillf_id.trim(),
+            &source_ref,
+            &event.embedding_text,
+        );
+        let filename = schedule_event_filename(course_label, &event.summary);
+        let doc = super::documents::upload_or_dedup(
+            &state,
+            offering.course_id,
+            &filename,
+            "text/plain",
+            text.as_bytes(),
+            course.owner_id,
+            None,
+            Some(&source_system),
+            Some(&source_ref),
+        )
+        .await?;
+        // Schedule events are logistics material and must participate in
+        // RAG without spending a classifier call or risking `unknown`.
+        minerva_db::queries::documents::set_kind_locked(&state.db, doc.id, "syllabus").await?;
+        keep_source_refs.push(source_ref);
+        document_ids.push(doc.id);
+    }
+    let orphaned_ids = minerva_db::queries::documents::reconcile_active_source_refs(
+        &state.db,
+        offering.course_id,
+        &source_system,
+        &keep_source_refs,
+    )
+    .await?;
+    Ok(Json(serde_json::json!({
+        "upserted": upserted,
+        "deleted": deleted,
+        "documents": document_ids.len(),
+        "documents_orphaned": orphaned_ids.len()
+    })))
+}
+
+fn schedule_event_text(
+    course: &str,
+    semester: &str,
+    offering_id: &str,
+    uid: &str,
+    event_text: &str,
+) -> String {
+    // Including the source UID keeps two otherwise-identical VEVENTs as two
+    // first-class documents despite course-level content-hash deduplication.
+    format!(
+        "Course: {course}\nTerm: {semester}\nDaisy offering: {offering_id}\nEvent source ID: {uid}\n{}\n",
+        event_text.trim(),
+    )
+}
+
+fn schedule_event_filename(course: &str, summary: &str) -> String {
+    let clean = |value: &str| {
+        value
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let course: String = clean(course).chars().take(60).collect();
+    let summary: String = clean(summary).chars().take(100).collect();
+    format!("Schedule - {course} - {summary}.txt")
+}
+
+#[cfg(test)]
+mod schedule_document_tests {
+    use super::{schedule_event_filename, schedule_event_text};
+
+    #[test]
+    fn filename_is_plain_text_safe_and_bounded() {
+        let filename = schedule_event_filename("PROG/1", &"Lecture: intro?".repeat(20));
+        assert!(filename.starts_with("Schedule - PROG_1 - Lecture_ intro_"));
+        assert!(filename.ends_with(".txt"));
+        assert!(!filename.contains('/'));
+        assert!(filename.chars().count() <= 124);
+    }
+
+    #[test]
+    fn source_uid_keeps_identical_events_as_distinct_documents() {
+        let first = schedule_event_text("PROG1", "HT26", "7620", "uid-1", "Event: Lecture");
+        let second = schedule_event_text("PROG1", "HT26", "7620", "uid-2", "Event: Lecture");
+        assert_ne!(first, second);
+        assert!(first.contains("Event source ID: uid-1"));
+    }
 }
 
 /// Authenticate using the global service API key (MINERVA_SERVICE_API_KEY).

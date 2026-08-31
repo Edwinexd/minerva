@@ -14,6 +14,14 @@ on:
         required: false
         default: "latest"
 
+# Production deploys share a single WireGuard/SSH tunnel path to the cluster.
+# Never let workflow_run/manual/dispatch deployments use it concurrently. Keep
+# the active rollout running; GitHub queues the newest run and supersedes an
+# older pending run in this group when pushes arrive quickly.
+concurrency:
+  group: minerva-production-deploy
+  cancel-in-progress: false
+
 jobs:
   build-plugin:
     name: Build Moodle plugin

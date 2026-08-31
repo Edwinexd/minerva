@@ -1045,6 +1045,7 @@ async fn stream_one_chat_to_client(
     Ok((usage.prompt_tokens as i32, usage.completion_tokens as i32))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn stream_chat_to_client(
     provider: &Arc<dyn crate::llm::ChatProvider>,
     model: &str,

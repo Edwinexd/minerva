@@ -24,6 +24,7 @@ from datetime import date
 from typing import Any
 
 import requests
+from icalendar import Calendar
 from dsv_wrapper import (
     AmbiguousMatchError,
     DaisyClient,
@@ -245,6 +246,42 @@ def post_batch(
     return resp.json()
 
 
+def serialize_schedule(calendar: Any) -> list[dict[str, str | None]]:
+    """Turn dsv-wrapper's calendar into lossless per-VEVENT payloads.
+
+    Current dsv-wrapper returns an ``icalendar.Calendar``. Accepting raw
+    bytes/text too keeps this caller compatible with older prereleases and
+    makes the wire boundary explicit. Dates are deliberately not converted:
+    RFC 5545 parameters such as TZID=Europe/Stockholm, VALUE=DATE, recurrence,
+    UID and LAST-MODIFIED remain exactly in the component payload.
+    """
+    if isinstance(calendar, (str, bytes)):
+        calendar = Calendar.from_ical(calendar)
+    events: list[dict[str, str | None]] = []
+    for component in calendar.walk("VEVENT"):
+        uid_value = component.get("UID")
+        if uid_value is None or not str(uid_value).strip():
+            raise ValueError("Daisy schedule contains a VEVENT without UID")
+        modified = component.get("LAST-MODIFIED")
+        events.append({
+            "uid": str(uid_value).strip(),
+            "last_modified": modified.to_ical().decode("utf-8") if modified else None,
+            "event_ical": component.to_ical().decode("utf-8"),
+        })
+    return events
+
+
+def post_schedule(api_url: str, headers: dict, momenttillf_id: str, events: list[dict]) -> dict:
+    resp = requests.put(
+        f"{api_url}/api/service/daisy-course-schedules/{momenttillf_id}",
+        headers=headers,
+        json={"events": events},
+        timeout=300,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def merge_summary(into: dict, batch_summary: dict) -> None:
     """Sum counters across batches; concat per-course error strings.
     Mirrors `DaisyImportSummary` on the backend so the printed total
@@ -301,6 +338,10 @@ def main() -> None:
             # 7 GB; if scope explodes the streaming path below applies.
             all_payloads = list(iter_payloads(daisy, semesters, participant_cache))
             _emit_dry_run_summary(all_payloads)
+            if all_payloads:
+                sample_id = all_payloads[0]["momenttillf_id"]
+                sample_events = serialize_schedule(daisy.get_course_schedule_ical(sample_id))
+                print(f"  sample schedule: {sample_id}, {len(sample_events)} events")
             return
 
         # Streaming path. We POST each batch as it fills and drop it
@@ -310,7 +351,9 @@ def main() -> None:
         total = {"errors": []}
         batch: list[dict] = []
         batches_sent = 0
+        offering_ids: list[str] = []
         for payload in iter_payloads(daisy, semesters, participant_cache):
+            offering_ids.append(payload["momenttillf_id"])
             batch.append(payload)
             if len(batch) >= CHUNK_SIZE:
                 batch_summary = post_batch(api_url, headers, batch)
@@ -335,6 +378,19 @@ def main() -> None:
                 f"updated={batch_summary.get('courses_updated', 0)}, "
                 f"members+={batch_summary.get('members_added', 0)}"
             )
+
+        schedule_upserted = 0
+        schedule_deleted = 0
+        schedule_skipped = 0
+        for offering_id in offering_ids:
+            events = serialize_schedule(daisy.get_course_schedule_ical(offering_id))
+            result = post_schedule(api_url, headers, offering_id, events)
+            schedule_upserted += result.get("upserted", 0)
+            schedule_deleted += result.get("deleted", 0)
+            schedule_skipped += int(result.get("skipped", False))
+        total["schedule_events_upserted"] = schedule_upserted
+        total["schedule_events_deleted"] = schedule_deleted
+        total["schedules_skipped_staged"] = schedule_skipped
 
     if batches_sent == 0:
         print("Nothing to push.")

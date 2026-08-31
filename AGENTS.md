@@ -370,6 +370,22 @@ Indexes video transcripts from DSV Play into Minerva as searchable documents.
 
 dsv-wrapper methods used: `get_courses_by_tag(tag)`, `get_presentations(designation)`, `get_transcript_text(uuid)`.
 
+## Daisy Course Schedules
+
+The daily Daisy workflow also calls
+`DaisyClient.get_course_schedule_ical(momenttillf_id)` for every offering
+after its course batch has been applied. `scripts/sync_daisy_courses.py`
+serializes each VEVENT without flattening RFC 5545 values (so
+`TZID=Europe/Stockholm`, recurrence, UID, and LAST-MODIFIED survive) and PUTs
+the snapshot to `/api/service/daisy-course-schedules/{momenttillf_id}`.
+
+`course_schedule_events` is keyed by `(momenttillf_id, uid)`. Each snapshot is
+reconciled atomically: current UIDs are upserted and stored UIDs absent from
+the snapshot are deleted. Course merges need no event rewrite because the
+read path joins through `course_daisy_offerings`; moving an offering moves its
+schedule with it. Authorized course members can read the current event set at
+`GET /api/courses/{course_id}/schedule`.
+
 ## External-Auth Invites (non-Shibboleth users)
 
 Lets admins grant time-limited access to people without SU/DSV Shibboleth

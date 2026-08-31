@@ -47,6 +47,80 @@ pub fn router() -> Router<AppState> {
             post(import_daisy_courses)
                 .layer(axum::extract::DefaultBodyLimit::max(DAISY_IMPORT_MAX_BYTES)),
         )
+        .route(
+            "/daisy-course-schedules/{momenttillf_id}",
+            put(reconcile_daisy_schedule),
+        )
+}
+
+#[derive(Deserialize)]
+struct DaisyScheduleEventInput {
+    uid: String,
+    event_ical: String,
+    last_modified: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DaisyScheduleInput {
+    events: Vec<DaisyScheduleEventInput>,
+}
+
+async fn reconcile_daisy_schedule(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(momenttillf_id): Path<String>,
+    Json(input): Json<DaisyScheduleInput>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    authenticate_service(&state, &headers)?;
+    let Some(_offering) = minerva_db::queries::course_daisy_offerings::find_by_momenttillf_id(
+        &state.db,
+        momenttillf_id.trim(),
+    )
+    .await?
+    else {
+        // Auto-apply may be disabled, in which case the course metadata is
+        // waiting in Daisy staging. A later nightly run imports its schedule
+        // after an admin accepts it.
+        return Ok(Json(
+            serde_json::json!({"upserted": 0, "deleted": 0, "skipped": true}),
+        ));
+    };
+
+    let mut seen = std::collections::HashSet::new();
+    for event in &input.events {
+        if event.uid.trim().is_empty() || event.event_ical.trim().is_empty() {
+            return Err(AppError::BadRequest {
+                code: "daisy.schedule_invalid_event",
+                params: Default::default(),
+            });
+        }
+        if !seen.insert(event.uid.trim()) {
+            return Err(AppError::BadRequest {
+                code: "daisy.schedule_duplicate_uid",
+                params: [("uid", event.uid.trim().to_owned())].into(),
+            });
+        }
+    }
+    let events: Vec<_> = input
+        .events
+        .iter()
+        .map(
+            |e| minerva_db::queries::course_schedule_events::ScheduleEvent {
+                uid: e.uid.trim(),
+                event_ical: &e.event_ical,
+                last_modified: e.last_modified.as_deref(),
+            },
+        )
+        .collect();
+    let (upserted, deleted) = minerva_db::queries::course_schedule_events::reconcile(
+        &state.db,
+        momenttillf_id.trim(),
+        &events,
+    )
+    .await?;
+    Ok(Json(
+        serde_json::json!({"upserted": upserted, "deleted": deleted}),
+    ))
 }
 
 /// Authenticate using the global service API key (MINERVA_SERVICE_API_KEY).

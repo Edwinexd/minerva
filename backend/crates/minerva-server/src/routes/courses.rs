@@ -28,6 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/{id}/members", get(list_members).post(add_member))
         .route("/{id}/members/{user_id}", delete(remove_member))
         .route("/{id}/role-suggestions", get(list_role_suggestions))
+        .route("/{id}/schedule", get(list_schedule))
         .route(
             "/{id}/role-suggestions/{suggestion_id}/approve",
             post(approve_role_suggestion),
@@ -36,6 +37,24 @@ pub fn router() -> Router<AppState> {
             "/{id}/role-suggestions/{suggestion_id}/decline",
             post(decline_role_suggestion),
         )
+}
+
+async fn list_schedule(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<minerva_db::queries::course_schedule_events::CourseScheduleEventRow>>, AppError>
+{
+    let course = minerva_db::queries::courses::find_by_id(&state.db, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let role = minerva_db::queries::courses::get_member_role(&state.db, id, user.id).await?;
+    if course.owner_id != user.id && !user.role.is_admin() && role.is_none() {
+        return Err(AppError::Forbidden);
+    }
+    Ok(Json(
+        minerva_db::queries::course_schedule_events::list_by_course(&state.db, id).await?,
+    ))
 }
 
 /// Per-course unread-conversation counts for the calling user.

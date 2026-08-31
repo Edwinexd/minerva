@@ -34,7 +34,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install requests git+https://github.com/Edwinexd/dsv-wrapper.git
+        run: pip install requests icalendar git+https://github.com/Edwinexd/dsv-wrapper.git
 
       - name: Sync Daisy -> Minerva
         env:

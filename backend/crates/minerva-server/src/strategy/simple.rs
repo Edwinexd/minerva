@@ -165,7 +165,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let messages = common::build_chat_messages(&system, &ctx.history);
 
     let mut full_text = String::new();
-    let (prompt_tokens, completion_tokens) = match common::stream_chat_to_client(
+    let (prompt_tokens, completion_tokens, _used_route) = match common::stream_chat_to_client(
         &ctx.provider,
         &ctx.model,
         ctx.temperature,
@@ -173,6 +173,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         false,
         &tx,
         &mut full_text,
+        &ctx.fallback_routes,
     )
     .await
     {

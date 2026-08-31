@@ -16,6 +16,12 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 
+#[derive(Clone)]
+pub struct ChatRoute {
+    pub model: String,
+    pub provider: std::sync::Arc<dyn crate::llm::ChatProvider>,
+}
+
 /// Context passed to every generation strategy.
 pub struct GenerationContext {
     pub course_name: String,
@@ -32,6 +38,8 @@ pub struct GenerationContext {
     /// `chat_models.provider`). Streaming strategies call
     /// `common::stream_chat_to_client(&ctx.provider, ...)`.
     pub provider: std::sync::Arc<dyn crate::llm::ChatProvider>,
+    /// Enabled, configured alternatives, ordered with the admin default first.
+    pub fallback_routes: Vec<ChatRoute>,
     /// OpenAI-compatible `(api_key, base_url)` for the bespoke FLARE /
     /// research-phase streaming loops, which parse tool-calls + logprobs
     /// inline against the raw transport. Both are sourced from

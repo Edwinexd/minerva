@@ -1833,6 +1833,43 @@ pub(super) async fn run_chat_message(
         .map(|(url, key)| (url.to_string(), key.to_string()))
         .unwrap_or_default();
 
+    // Build failover routes from models the admin has explicitly enabled.
+    // Capability filtering prevents a tool-use/FLARE turn from landing on
+    // a model that cannot execute the same strategy.
+    let default_model = minerva_db::queries::chat_models::current_default(&state.db)
+        .await?
+        .unwrap_or_default();
+    let mut fallback_routes = Vec::new();
+    for row in minerva_db::queries::chat_models::list_all(&state.db).await? {
+        if !row.enabled || row.model == course.model {
+            continue;
+        }
+        if course.tool_use_enabled && !row.supports_tool_use {
+            continue;
+        }
+        if course.strategy == "flare" && !row.supports_logprobs {
+            continue;
+        }
+        let Some(fallback_provider) = state.llm.get(&row.provider) else {
+            continue;
+        };
+        if course.tool_use_enabled && fallback_provider.openai_endpoint().is_none() {
+            continue;
+        }
+        fallback_routes.push(strategy::ChatRoute {
+            model: row.model,
+            provider: fallback_provider,
+        });
+    }
+    fallback_routes.sort_by_key(|route| {
+        let is_default = route.model != default_model;
+        (
+            is_default,
+            route.provider.id() == provider_id,
+            route.model.clone(),
+        )
+    });
+
     // Resolve the model's billing rates once for this chat turn. Used here
     // to derive the per-response token fail-safe and threaded into the
     // strategy context so `common::finalize` reuses it for the cost metric
@@ -1889,6 +1926,7 @@ pub(super) async fn run_chat_message(
         conversation_id: conv_id,
         user_id: conv.user_id,
         provider,
+        fallback_routes,
         chat_api_key,
         chat_base_url,
         utility: state.utility_model().await,

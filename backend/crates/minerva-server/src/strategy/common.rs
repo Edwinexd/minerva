@@ -992,7 +992,7 @@ pub async fn keyword_lookup(
 /// which this fn drains and forwards as SSE `token` events; on the
 /// client disconnecting we stop and surface an error. The SSE parsing,
 /// UTF-8 frame-carry, and idle timeout live in the provider impl.
-pub async fn stream_chat_to_client(
+async fn stream_one_chat_to_client(
     provider: &Arc<dyn crate::llm::ChatProvider>,
     model: &str,
     temperature: f64,
@@ -1043,6 +1043,65 @@ pub async fn stream_chat_to_client(
     forward_res?;
     let usage = stream_res?;
     Ok((usage.prompt_tokens as i32, usage.completion_tokens as i32))
+}
+
+pub async fn stream_chat_to_client(
+    provider: &Arc<dyn crate::llm::ChatProvider>,
+    model: &str,
+    temperature: f64,
+    messages: &[serde_json::Value],
+    logprobs: bool,
+    tx: &mpsc::Sender<Result<Event, AppError>>,
+    full_text: &mut String,
+    fallback_routes: &[super::ChatRoute],
+) -> Result<(i32, i32, Option<super::ChatRoute>), String> {
+    match stream_one_chat_to_client(
+        provider,
+        model,
+        temperature,
+        messages,
+        logprobs,
+        tx,
+        full_text,
+    )
+    .await
+    {
+        Ok((prompt, completion)) => Ok((prompt, completion, None)),
+        Err(primary_error) if full_text.is_empty() => {
+            let mut errors = vec![format!("{}/{}: {primary_error}", provider.id(), model)];
+            for route in fallback_routes {
+                tracing::warn!(
+                    primary_provider = provider.id(),
+                    primary_model = model,
+                    fallback_provider = route.provider.id(),
+                    fallback_model = %route.model,
+                    error = %primary_error,
+                    "chat stream failed before first token; trying fallback route"
+                );
+                match stream_one_chat_to_client(
+                    &route.provider,
+                    &route.model,
+                    temperature,
+                    messages,
+                    logprobs,
+                    tx,
+                    full_text,
+                )
+                .await
+                {
+                    Ok((prompt, completion)) => {
+                        return Ok((prompt, completion, Some(route.clone())))
+                    }
+                    Err(error) if full_text.is_empty() => {
+                        errors.push(format!("{}/{}: {error}", route.provider.id(), route.model))
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(format!("all chat routes failed: {}", errors.join("; ")))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Finalize: save message, set title, record usage, send done event.

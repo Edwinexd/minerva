@@ -821,9 +821,48 @@ async fn stream_research_turn(
         body["top_logprobs"] = serde_json::Value::Number(1.into());
     }
 
-    let response =
-        common::openai_chat_request(http_client, &ctx.chat_base_url, &ctx.chat_api_key, &body)
-            .await?;
+    let response = match common::openai_chat_request(
+        http_client,
+        &ctx.chat_base_url,
+        &ctx.chat_api_key,
+        &body,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(primary_error) => {
+            let mut errors = vec![format!(
+                "{}/{}: {primary_error}",
+                ctx.provider.id(),
+                ctx.model
+            )];
+            let mut selected = None;
+            for route in &ctx.fallback_routes {
+                let Some((url, key)) = route.provider.openai_endpoint() else {
+                    continue;
+                };
+                body["model"] = serde_json::Value::String(route.model.clone());
+                tracing::warn!(
+                    primary_provider = ctx.provider.id(),
+                    primary_model = %ctx.model,
+                    fallback_provider = route.provider.id(),
+                    fallback_model = %route.model,
+                    error = %primary_error,
+                    "research request failed; trying fallback route"
+                );
+                match common::openai_chat_request(http_client, url, key, &body).await {
+                    Ok(response) => {
+                        selected = Some(response);
+                        break;
+                    }
+                    Err(error) => {
+                        errors.push(format!("{}/{}: {error}", route.provider.id(), route.model))
+                    }
+                }
+            }
+            selected.ok_or_else(|| format!("all research routes failed: {}", errors.join("; ")))?
+        }
+    };
 
     let mut stream = response.bytes_stream();
     let mut byte_carry: Vec<u8> = Vec::new();
@@ -1190,6 +1229,7 @@ mod stream_integration_tests {
                 "test-key",
                 reqwest::Client::new(),
             )),
+            fallback_routes: Vec::new(),
             chat_api_key: "test-key".to_string(),
             chat_base_url: base_url,
             utility: minerva_app_core::llm::UtilityModel {
@@ -1324,6 +1364,64 @@ mod stream_integration_tests {
         // We should have emitted at least one thinking_token event
         // (the long content delta).
         assert!(events >= 1, "expected at least one SSE thinking_token");
+    }
+
+    #[tokio::test]
+    async fn research_429_falls_back_to_an_enabled_route() {
+        let primary = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(429).set_body_json(serde_json::json!({
+                "message": "We're experiencing high traffic right now!",
+                "code": "queue_exceeded"
+            })))
+            .mount(&primary)
+            .await;
+
+        let fallback = MockServer::start().await;
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"fallback worked\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],",
+            "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&fallback)
+            .await;
+
+        let mut ctx = fake_ctx_with_url(format!("{}/chat/completions", primary.uri()));
+        ctx.fallback_routes.push(crate::strategy::ChatRoute {
+            model: "fallback-model".to_string(),
+            provider: std::sync::Arc::new(crate::llm::OpenAiCompatibleProvider::new(
+                "openai",
+                &fallback.uri(),
+                "fallback-key",
+                reqwest::Client::new(),
+            )),
+        });
+        let (tx, _rx) = mpsc::channel::<Result<Event, AppError>>(16);
+        let outcome = stream_research_turn(
+            &reqwest::Client::new(),
+            &ctx,
+            &ResearchConfig::defaults(false),
+            &[serde_json::json!({"role": "user", "content": "?"})],
+            &[],
+            &tx,
+            &mut String::new(),
+            false,
+        )
+        .await
+        .expect("fallback should succeed");
+
+        assert_eq!(outcome.content, "fallback worked");
+        assert_eq!(outcome.prompt_tokens, 7);
+        assert_eq!(outcome.completion_tokens, 2);
     }
 
     #[tokio::test]

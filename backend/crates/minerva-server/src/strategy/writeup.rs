@@ -147,7 +147,7 @@ pub async fn run(
     let messages = compose_messages(&system, ctx);
 
     let mut full_text = String::new();
-    let (prompt_tokens, completion_tokens) = common::stream_chat_to_client(
+    let (prompt_tokens, completion_tokens, _used_route) = common::stream_chat_to_client(
         &ctx.provider,
         &ctx.model,
         ctx.temperature,
@@ -155,6 +155,7 @@ pub async fn run(
         false,
         tx,
         &mut full_text,
+        &ctx.fallback_routes,
     )
     .await
     .map_err(AppError::Internal)?;

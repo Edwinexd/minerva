@@ -2,7 +2,7 @@ use rust_decimal::Decimal;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct UserRow {
     pub id: Uuid,
     pub eppn: String,
@@ -67,12 +67,13 @@ pub async fn find_by_eppn_or_alias(
     Ok(Some((row, true)))
 }
 
-/// Find a user by eppn, or create one with the given defaults if none exists.
+/// Resolve a user by primary or alias eppn, or create one with the given
+/// defaults if the identity is entirely unknown.
 /// Returns `(user, created)` where `created` is true iff this call inserted
-/// the row. Race-safe via `ON CONFLICT (eppn) DO NOTHING RETURNING`: if a
-/// concurrent request wins the insert, we fall through to a follow-up
-/// `find_by_eppn`. The owner cap is applied only on insert, never on the
-/// follow-up fetch, mirroring `upsert`'s grandfathering semantics.
+/// the row. The cross-table EPPN registry serializes a concurrent primary or
+/// alias reservation; if another request wins, its canonical user is returned.
+/// The owner cap is applied only on insert, never on the follow-up fetch,
+/// mirroring `upsert`'s grandfathering semantics.
 pub async fn find_or_create_by_eppn(
     db: &PgPool,
     eppn: &str,
@@ -80,6 +81,13 @@ pub async fn find_or_create_by_eppn(
     role: &str,
     default_owner_daily_cost_limit_usd: Decimal,
 ) -> Result<(UserRow, bool), sqlx::Error> {
+    // An alias is every bit as much an identity as a primary EPPN.  The old
+    // implementation skipped this lookup and could deterministically create
+    // a second user for an existing alias.
+    if let Some((row, _via_alias)) = find_by_eppn_or_alias(db, eppn).await? {
+        return Ok((row, false));
+    }
+
     let inserted = sqlx::query_as!(
         UserRow,
         "INSERT INTO users (id, eppn, display_name, role, owner_daily_cost_limit_usd)
@@ -93,50 +101,67 @@ pub async fn find_or_create_by_eppn(
         default_owner_daily_cost_limit_usd,
     )
     .fetch_optional(db)
-    .await?;
+    .await;
+
+    let inserted = match inserted {
+        Ok(row) => row,
+        Err(error) if is_eppn_registry_conflict(&error) => {
+            // A primary/alias reservation committed after the lookup above.
+            // The registry's unique index made the competing statement wait,
+            // so READ COMMITTED sees its owner in this follow-up query.
+            let (row, _via_alias) = find_by_eppn_or_alias(db, eppn)
+                .await?
+                .ok_or(sqlx::Error::RowNotFound)?;
+            return Ok((row, false));
+        }
+        Err(error) => return Err(error),
+    };
 
     if let Some(row) = inserted {
         return Ok((row, true));
     }
 
-    let existing = find_by_eppn(db, eppn)
+    let existing = find_by_eppn_or_alias(db, eppn)
         .await?
+        .map(|(row, _via_alias)| row)
         .ok_or(sqlx::Error::RowNotFound)?;
     Ok((existing, false))
 }
 
-/// Upsert called on every authenticated request. The role argument is the
-/// caller-computed role (admin allowlist + rule evaluation result). For
-/// existing users with `role_manually_set = TRUE` the stored role is
-/// preserved; the admin's manual choice wins over rule-based promotion.
-/// `display_name` is always refreshed from the IdP via COALESCE (not gated
-/// by the role lock); the lock applies only to `role`. The
-/// `default_owner_daily_cost_limit_usd` is applied only on INSERT, never on
-/// update, so admin overrides via `update_owner_daily_cost_limit_usd` are
-/// sticky.
-pub async fn upsert(
+fn is_eppn_registry_conflict(error: &sqlx::Error) -> bool {
+    matches!(
+        error,
+        sqlx::Error::Database(db_error)
+            if db_error.code().as_deref() == Some("23505")
+                && db_error.constraint() == Some("user_eppn_registry_pkey")
+    )
+}
+
+/// Refresh an authenticated user by resolved identity rather than by EPPN.
+///
+/// Alias promotion may be followed immediately by another login that swaps a
+/// different alias to primary.  Updating by stable user id avoids turning that
+/// harmless race into another INSERT attempt.  Manual role locks retain their
+/// existing precedence.
+pub async fn update_authenticated(
     db: &PgPool,
-    id: Uuid,
-    eppn: &str,
+    user_id: Uuid,
     display_name: Option<&str>,
     role: &str,
-    default_owner_daily_cost_limit_usd: Decimal,
 ) -> Result<UserRow, sqlx::Error> {
-    sqlx::query_as!(
-        UserRow,
-        "INSERT INTO users (id, eppn, display_name, role, owner_daily_cost_limit_usd)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (eppn) DO UPDATE SET
-            display_name = COALESCE($3, users.display_name),
-            role = CASE WHEN users.role_manually_set THEN users.role ELSE $4 END,
+    sqlx::query_as::<_, UserRow>(
+        r#"UPDATE users SET
+            display_name = COALESCE($2, display_name),
+            role = CASE WHEN role_manually_set THEN role ELSE $3 END,
             updated_at = NOW()
-         RETURNING id, eppn, display_name, role, suspended, role_manually_set, owner_daily_cost_limit_usd, privacy_acknowledged_at, created_at, updated_at",
-        id,
-        eppn,
-        display_name,
-        role,
-        default_owner_daily_cost_limit_usd,
+        WHERE id = $1
+        RETURNING id, eppn, display_name, role, suspended, role_manually_set,
+                  owner_daily_cost_limit_usd, privacy_acknowledged_at,
+                  created_at, updated_at"#,
     )
+    .bind(user_id)
+    .bind(display_name)
+    .bind(role)
     .fetch_one(db)
     .await
 }

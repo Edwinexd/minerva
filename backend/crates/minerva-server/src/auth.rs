@@ -225,13 +225,10 @@ async fn upsert_user(
     // MINERVA_ADMINS (see decide_role docs).
     //
     // If the inbound eppn matched via the alias table (not the primary
-    // `users.eppn`), promote it to primary BEFORE the upsert below.
-    // Otherwise the `ON CONFLICT (eppn)` clause in `users::upsert`
-    // wouldn't match (the inbound eppn isn't a primary yet) and we'd
-    // INSERT a duplicate user row instead of refreshing the existing
-    // one. Daisy staff profiles list every login a person has held;
-    // this swap keeps the user-visible "current SU login" in sync with
-    // whatever SAML hands us most recently.
+    // `users.eppn`), promote it before refreshing the user by stable id.
+    // Daisy staff profiles list every login a person has held; this swap
+    // keeps the user-visible "current SU login" in sync with whatever SAML
+    // hands us most recently.
     let existing = match minerva_db::queries::users::find_by_eppn_or_alias(&state.db, eppn).await? {
         Some((row, true)) => {
             minerva_db::queries::user_eppn_aliases::swap_primary_with_alias(
@@ -270,15 +267,61 @@ async fn upsert_user(
 
     let role = decide_role(is_admin, dev_teacher, role_locked, existing_role, rule_role);
 
-    let row = minerva_db::queries::users::upsert(
-        &state.db,
-        Uuid::new_v4(),
-        eppn,
-        display_name,
-        role.as_str(),
-        crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
-    )
-    .await?;
+    let row = if let Some(existing) = existing {
+        // The identity has already been resolved (and, for an alias hit,
+        // promoted).  Refresh by stable user id: another concurrent login is
+        // allowed to change which of this user's EPPNs is primary without
+        // making this request attempt an INSERT for its now-alias EPPN.
+        minerva_db::queries::users::update_authenticated(
+            &state.db,
+            existing.id,
+            display_name,
+            role.as_str(),
+        )
+        .await?
+    } else {
+        let (created_or_raced, created) = minerva_db::queries::users::find_or_create_by_eppn(
+            &state.db,
+            eppn,
+            display_name,
+            role.as_str(),
+            crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
+        )
+        .await?;
+        // If a concurrent alias registration won after our initial lookup,
+        // find-or-create correctly returned its established owner.  This is
+        // still an authenticated alias hit, so preserve the user-facing
+        // "latest login is primary" rule before refreshing the row.
+        if created_or_raced.eppn != eppn {
+            minerva_db::queries::user_eppn_aliases::swap_primary_with_alias(
+                &state.db,
+                created_or_raced.id,
+                eppn,
+            )
+            .await?;
+        }
+        let effective_role = if created {
+            role
+        } else {
+            // A concurrent resolver supplied an established user after the
+            // initial miss. Re-run the precedence decision with that row so
+            // an unlocked teacher/integrator is not treated as a new student.
+            decide_role(
+                is_admin,
+                dev_teacher,
+                created_or_raced.role_manually_set,
+                Some(UserRole::parse(&created_or_raced.role)),
+                rule_role,
+            )
+        };
+        minerva_db::queries::users::update_authenticated(
+            &state.db,
+            created_or_raced.id,
+            display_name,
+            effective_role.as_str(),
+        )
+        .await?
+    };
 
     Ok(user_from_row(row))
 }

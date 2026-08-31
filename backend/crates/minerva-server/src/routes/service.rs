@@ -1345,12 +1345,15 @@ pub(super) async fn apply_one(
             {
                 Ok(true) => summary.aliases_registered += 1,
                 Ok(false) => {}
-                Err(e) => tracing::warn!(
-                    user = %user_id,
-                    eppn = %alias_eppn,
-                    error = %e,
-                    "daisy import: alias register failed (continuing)",
-                ),
+                Err(e) => {
+                    tracing::error!(
+                        user = %user_id,
+                        eppn = %alias_eppn,
+                        error = %e,
+                        "daisy import: alias belongs to a conflicting identity",
+                    );
+                    return Err(e.into());
+                }
             }
         }
 

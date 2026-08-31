@@ -64,7 +64,9 @@ pub async fn touch(db: &PgPool, eppn: &str) -> Result<(), sqlx::Error> {
 }
 
 /// Register a secondary login for a user. No-op if the eppn is already
-/// the user's primary or already registered (by them or someone else).
+/// the user's primary or already registered as their alias. An identity
+/// owned by another user is a hard database conflict; silently touching it
+/// would hide an upstream disagreement about who the EPPN belongs to.
 /// The caller is responsible for verifying ownership before invoking;
 /// the Daisy import path does that via Daisy's per-person staff page,
 /// which is an authoritative join of (Daisy person_id, usernames).
@@ -94,9 +96,36 @@ pub async fn register(db: &PgPool, user_id: Uuid, eppn: &str) -> Result<bool, sq
         eppn,
     )
     .fetch_one(db)
-    .await?;
+    .await;
+
+    let result = match result {
+        Ok(result) => result,
+        Err(error) if is_eppn_registry_conflict(&error) => {
+            // A concurrent auth swap can move this same identity between the
+            // primary and alias tables after the primary check above.  Treat
+            // that as the intended idempotent no-op, but never swallow a
+            // reservation owned by a different user.
+            if crate::queries::users::find_by_eppn_or_alias(db, eppn)
+                .await?
+                .is_some_and(|(owner, _via_alias)| owner.id == user_id)
+            {
+                return Ok(false);
+            }
+            return Err(error);
+        }
+        Err(error) => return Err(error),
+    };
 
     Ok(result.inserted)
+}
+
+fn is_eppn_registry_conflict(error: &sqlx::Error) -> bool {
+    matches!(
+        error,
+        sqlx::Error::Database(db_error)
+            if db_error.code().as_deref() == Some("23505")
+                && db_error.constraint() == Some("user_eppn_registry_pkey")
+    )
 }
 
 /// Swap the primary `users.eppn` with one of its aliases.
@@ -121,23 +150,30 @@ pub async fn swap_primary_with_alias(
 ) -> Result<(), sqlx::Error> {
     let mut tx = db.begin().await?;
 
-    let old_primary = sqlx::query!("SELECT eppn FROM users WHERE id = $1", user_id)
-        .fetch_one(&mut *tx)
-        .await?
-        .eppn;
+    // Serialize every primary swap for this user.  A second login that was
+    // resolved through a now-stale alias view waits here, then observes the
+    // first swap's committed primary/alias state.
+    let old_primary =
+        sqlx::query_scalar::<_, String>("SELECT eppn FROM users WHERE id = $1 FOR UPDATE")
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await?;
 
     if old_primary == new_primary_eppn {
-        tx.rollback().await?;
+        tx.commit().await?;
         return Ok(());
     }
 
-    sqlx::query!(
+    let removed = sqlx::query!(
         "DELETE FROM user_eppn_aliases WHERE user_id = $1 AND eppn = $2",
         user_id,
         new_primary_eppn,
     )
     .execute(&mut *tx)
     .await?;
+    if removed.rows_affected() != 1 {
+        return Err(sqlx::Error::RowNotFound);
+    }
 
     sqlx::query!(
         "UPDATE users SET eppn = $1, updated_at = NOW() WHERE id = $2",

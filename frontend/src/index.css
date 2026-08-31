@@ -154,3 +154,22 @@
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * Moodle can give an LTI activity a very shallow iframe. Below this height
+ * the chat controls overlap and are not meaningfully usable, so framed
+ * launches offer the full-height tab instead. Standalone pages are exempt.
+ */
+.embed-shallow-fallback {
+  display: none;
+}
+
+@media (max-height: 420px) {
+  .embed-shallow-fallback {
+    display: flex;
+  }
+
+  .embed-full-app.is-framed {
+    display: none;
+  }
+}

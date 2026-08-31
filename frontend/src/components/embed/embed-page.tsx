@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Button } from "@/components/ui/button"
-import { Menu, X } from "lucide-react"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { ExternalLink, Menu, X } from "lucide-react"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
 import { ConversationList } from "@/components/chat/conversation-list"
@@ -149,6 +149,11 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   const { t: tCommon } = useTranslation("common")
   const { courseId } = useParams()
   const token = useToken()
+  // A shallow LMS iframe cannot fit the transcript, composer, disclosure,
+  // and conversation navigation without them overlapping. Keep this scoped
+  // to framed launches so opening the same URL in a short standalone window
+  // does not produce another new-tab prompt.
+  const isFramed = window.self !== window.top
   const [course, setCourse] = useState<EmbedCourse | null>(null)
   const [conversations, setConversations] = useState<EmbedConversation[]>([])
   // Pinned-by-teacher chats. Loaded alongside the user's own
@@ -304,7 +309,24 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
     pinned.some((p) => p.id === activeConvId)
 
   return (
-    <div className="relative flex h-full bg-background text-foreground">
+    <>
+      {isFramed && (
+        <div className="embed-shallow-fallback h-full items-center justify-center bg-background p-4 text-foreground">
+          <a
+            href={window.location.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={buttonVariants()}
+          >
+            {t("embed.openInNewTab")}
+            <ExternalLink className="size-4" aria-hidden="true" />
+          </a>
+        </div>
+      )}
+      <div
+        className={`embed-full-app relative h-full bg-background text-foreground ${isFramed ? "is-framed" : ""}`}
+      >
+        <div className="relative flex h-full">
       <Button
         variant="outline"
         size="sm"
@@ -392,7 +414,9 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
           suggestedQuestions={suggestedQuestions}
         />
       </div>
-    </div>
+        </div>
+      </div>
+    </>
   )
 }
 

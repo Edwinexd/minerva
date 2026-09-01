@@ -98,6 +98,10 @@ RUN mkdir -p \
 
 # Phase 2: build actual code (deps cached). `touch` defeats cargo's
 # mtime-based incremental check for the stub-replaced sources.
+# minerva-server's build script resolves global knowledge from the English
+# frontend locale. Service images skip frontend-builder, so provide that source
+# directly to backend-builder as well.
+COPY frontend/src/i18n/locales/en/common.json /app/frontend/src/i18n/locales/en/common.json
 COPY backend/ .
 ENV SQLX_OFFLINE=true
 RUN find crates -name '*.rs' -exec touch {} + && \

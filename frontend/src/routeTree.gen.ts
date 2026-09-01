@@ -9,66 +9,51 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root"
-import { Route as TeacherHelpRouteImport } from "./routes/teacher-help"
-import { Route as DataHandlingRouteImport } from "./routes/data-handling"
-import { Route as AdminRouteImport } from "./routes/admin"
-import { Route as AcknowledgementsRouteImport } from "./routes/acknowledgements"
-import { Route as AccessibilityRouteImport } from "./routes/accessibility"
 import { Route as IndexRouteImport } from "./routes/index"
-import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
+import { Route as AccessibilityRouteImport } from "./routes/accessibility"
+import { Route as AcknowledgementsRouteImport } from "./routes/acknowledgements"
+import { Route as AdminRouteImport } from "./routes/admin"
+import { Route as DataHandlingRouteImport } from "./routes/data-handling"
+import { Route as TeacherHelpRouteImport } from "./routes/teacher-help"
 import { Route as AdminIndexRouteImport } from "./routes/admin/index"
-import { Route as LtiBindRouteImport } from "./routes/lti/bind"
-import { Route as JoinTokenRouteImport } from "./routes/join/$token"
-import { Route as EmbedCourseIdRouteImport } from "./routes/embed/$courseId"
-import { Route as AdminUsersRouteImport } from "./routes/admin/users"
-import { Route as AdminUsageRouteImport } from "./routes/admin/usage"
-import { Route as AdminSystemRouteImport } from "./routes/admin/system"
-import { Route as AdminRulesRouteImport } from "./routes/admin/rules"
-import { Route as AdminLtiRouteImport } from "./routes/admin/lti"
-import { Route as AdminIntegrationsRouteImport } from "./routes/admin/integrations"
-import { Route as AdminExternalInvitesRouteImport } from "./routes/admin/external-invites"
-import { Route as AdminDevToolsRouteImport } from "./routes/admin/dev-tools"
-import { Route as AdminDefaultsRouteImport } from "./routes/admin/defaults"
-import { Route as AdminDaisyRouteImport } from "./routes/admin/daisy"
 import { Route as AdminCoursesRouteImport } from "./routes/admin/courses"
-import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
-import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
-import { Route as LtiSetupPlatformIdRouteImport } from "./routes/lti/setup.$platformId"
-import { Route as CourseCourseIdNewRouteImport } from "./routes/course/$courseId/new"
-import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
+import { Route as AdminDaisyRouteImport } from "./routes/admin/daisy"
+import { Route as AdminDefaultsRouteImport } from "./routes/admin/defaults"
+import { Route as AdminDevToolsRouteImport } from "./routes/admin/dev-tools"
+import { Route as AdminExternalInvitesRouteImport } from "./routes/admin/external-invites"
+import { Route as AdminIntegrationsRouteImport } from "./routes/admin/integrations"
+import { Route as AdminLtiRouteImport } from "./routes/admin/lti"
+import { Route as AdminRulesRouteImport } from "./routes/admin/rules"
+import { Route as AdminSystemRouteImport } from "./routes/admin/system"
+import { Route as AdminUsageRouteImport } from "./routes/admin/usage"
+import { Route as AdminUsersRouteImport } from "./routes/admin/users"
+import { Route as EmbedCourseIdRouteImport } from "./routes/embed/$courseId"
+import { Route as JoinTokenRouteImport } from "./routes/join/$token"
+import { Route as LtiBindRouteImport } from "./routes/lti/bind"
+import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
 import { Route as AdminLtiApprovePlatformIdRouteImport } from "./routes/admin/lti-approve.$platformId"
+import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
+import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
+import { Route as CourseCourseIdNewRouteImport } from "./routes/course/$courseId/new"
+import { Route as LtiSetupPlatformIdRouteImport } from "./routes/lti/setup.$platformId"
+import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
 import { Route as TeacherCoursesCourseIdIndexRouteImport } from "./routes/teacher/courses.$courseId/index"
-import { Route as TeacherCoursesCourseIdUsageRouteImport } from "./routes/teacher/courses.$courseId/usage"
-import { Route as TeacherCoursesCourseIdRagRouteImport } from "./routes/teacher/courses.$courseId/rag"
-import { Route as TeacherCoursesCourseIdPlayDesignationsRouteImport } from "./routes/teacher/courses.$courseId/play-designations"
-import { Route as TeacherCoursesCourseIdMembersRouteImport } from "./routes/teacher/courses.$courseId/members"
-import { Route as TeacherCoursesCourseIdLtiRouteImport } from "./routes/teacher/courses.$courseId/lti"
-import { Route as TeacherCoursesCourseIdKnowledgeGraphRouteImport } from "./routes/teacher/courses.$courseId/knowledge-graph"
-import { Route as TeacherCoursesCourseIdInviteRouteImport } from "./routes/teacher/courses.$courseId/invite"
-import { Route as TeacherCoursesCourseIdDocumentsRouteImport } from "./routes/teacher/courses.$courseId/documents"
-import { Route as TeacherCoursesCourseIdConversationsRouteImport } from "./routes/teacher/courses.$courseId/conversations"
-import { Route as TeacherCoursesCourseIdConfigRouteImport } from "./routes/teacher/courses.$courseId/config"
-import { Route as TeacherCoursesCourseIdCanvasRouteImport } from "./routes/teacher/courses.$courseId/canvas"
 import { Route as TeacherCoursesCourseIdApiKeysRouteImport } from "./routes/teacher/courses.$courseId/api-keys"
+import { Route as TeacherCoursesCourseIdCanvasRouteImport } from "./routes/teacher/courses.$courseId/canvas"
+import { Route as TeacherCoursesCourseIdConfigRouteImport } from "./routes/teacher/courses.$courseId/config"
+import { Route as TeacherCoursesCourseIdConversationsRouteImport } from "./routes/teacher/courses.$courseId/conversations"
+import { Route as TeacherCoursesCourseIdDocumentsRouteImport } from "./routes/teacher/courses.$courseId/documents"
+import { Route as TeacherCoursesCourseIdInviteRouteImport } from "./routes/teacher/courses.$courseId/invite"
+import { Route as TeacherCoursesCourseIdKnowledgeGraphRouteImport } from "./routes/teacher/courses.$courseId/knowledge-graph"
+import { Route as TeacherCoursesCourseIdLtiRouteImport } from "./routes/teacher/courses.$courseId/lti"
+import { Route as TeacherCoursesCourseIdMembersRouteImport } from "./routes/teacher/courses.$courseId/members"
+import { Route as TeacherCoursesCourseIdPlayDesignationsRouteImport } from "./routes/teacher/courses.$courseId/play-designations"
+import { Route as TeacherCoursesCourseIdRagRouteImport } from "./routes/teacher/courses.$courseId/rag"
+import { Route as TeacherCoursesCourseIdUsageRouteImport } from "./routes/teacher/courses.$courseId/usage"
 
-const TeacherHelpRoute = TeacherHelpRouteImport.update({
-  id: "/teacher-help",
-  path: "/teacher-help",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DataHandlingRoute = DataHandlingRouteImport.update({
-  id: "/data-handling",
-  path: "/data-handling",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AdminRoute = AdminRouteImport.update({
-  id: "/admin",
-  path: "/admin",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AcknowledgementsRoute = AcknowledgementsRouteImport.update({
-  id: "/acknowledgements",
-  path: "/acknowledgements",
+const IndexRoute = IndexRouteImport.update({
+  id: "/",
+  path: "/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccessibilityRoute = AccessibilityRouteImport.update({
@@ -76,14 +61,24 @@ const AccessibilityRoute = AccessibilityRouteImport.update({
   path: "/accessibility",
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+const AcknowledgementsRoute = AcknowledgementsRouteImport.update({
+  id: "/acknowledgements",
+  path: "/acknowledgements",
   getParentRoute: () => rootRouteImport,
 } as any)
-const TeacherIndexRoute = TeacherIndexRouteImport.update({
-  id: "/teacher/",
-  path: "/teacher/",
+const AdminRoute = AdminRouteImport.update({
+  id: "/admin",
+  path: "/admin",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DataHandlingRoute = DataHandlingRouteImport.update({
+  id: "/data-handling",
+  path: "/data-handling",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeacherHelpRoute = TeacherHelpRouteImport.update({
+  id: "/teacher-help",
+  path: "/teacher-help",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
@@ -91,64 +86,9 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
   path: "/",
   getParentRoute: () => AdminRoute,
 } as any)
-const LtiBindRoute = LtiBindRouteImport.update({
-  id: "/lti/bind",
-  path: "/lti/bind",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const JoinTokenRoute = JoinTokenRouteImport.update({
-  id: "/join/$token",
-  path: "/join/$token",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const EmbedCourseIdRoute = EmbedCourseIdRouteImport.update({
-  id: "/embed/$courseId",
-  path: "/embed/$courseId",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AdminUsersRoute = AdminUsersRouteImport.update({
-  id: "/users",
-  path: "/users",
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminUsageRoute = AdminUsageRouteImport.update({
-  id: "/usage",
-  path: "/usage",
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminSystemRoute = AdminSystemRouteImport.update({
-  id: "/system",
-  path: "/system",
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminRulesRoute = AdminRulesRouteImport.update({
-  id: "/rules",
-  path: "/rules",
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminLtiRoute = AdminLtiRouteImport.update({
-  id: "/lti",
-  path: "/lti",
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminIntegrationsRoute = AdminIntegrationsRouteImport.update({
-  id: "/integrations",
-  path: "/integrations",
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminExternalInvitesRoute = AdminExternalInvitesRouteImport.update({
-  id: "/external-invites",
-  path: "/external-invites",
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminDevToolsRoute = AdminDevToolsRouteImport.update({
-  id: "/dev-tools",
-  path: "/dev-tools",
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminDefaultsRoute = AdminDefaultsRouteImport.update({
-  id: "/defaults",
-  path: "/defaults",
+const AdminCoursesRoute = AdminCoursesRouteImport.update({
+  id: "/courses",
+  path: "/courses",
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminDaisyRoute = AdminDaisyRouteImport.update({
@@ -156,29 +96,80 @@ const AdminDaisyRoute = AdminDaisyRouteImport.update({
   path: "/daisy",
   getParentRoute: () => AdminRoute,
 } as any)
-const AdminCoursesRoute = AdminCoursesRouteImport.update({
-  id: "/courses",
-  path: "/courses",
+const AdminDefaultsRoute = AdminDefaultsRouteImport.update({
+  id: "/defaults",
+  path: "/defaults",
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminDevToolsRoute = AdminDevToolsRouteImport.update({
+  id: "/dev-tools",
+  path: "/dev-tools",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminExternalInvitesRoute = AdminExternalInvitesRouteImport.update({
+  id: "/external-invites",
+  path: "/external-invites",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminIntegrationsRoute = AdminIntegrationsRouteImport.update({
+  id: "/integrations",
+  path: "/integrations",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminLtiRoute = AdminLtiRouteImport.update({
+  id: "/lti",
+  path: "/lti",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminRulesRoute = AdminRulesRouteImport.update({
+  id: "/rules",
+  path: "/rules",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSystemRoute = AdminSystemRouteImport.update({
+  id: "/system",
+  path: "/system",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminUsageRoute = AdminUsageRouteImport.update({
+  id: "/usage",
+  path: "/usage",
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: "/users",
+  path: "/users",
+  getParentRoute: () => AdminRoute,
+} as any)
+const EmbedCourseIdRoute = EmbedCourseIdRouteImport.update({
+  id: "/embed/$courseId",
+  path: "/embed/$courseId",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JoinTokenRoute = JoinTokenRouteImport.update({
+  id: "/join/$token",
+  path: "/join/$token",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LtiBindRoute = LtiBindRouteImport.update({
+  id: "/lti/bind",
+  path: "/lti/bind",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeacherIndexRoute = TeacherIndexRouteImport.update({
+  id: "/teacher/",
+  path: "/teacher/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminLtiApprovePlatformIdRoute =
+  AdminLtiApprovePlatformIdRouteImport.update({
+    id: "/lti-approve/$platformId",
+    path: "/lti-approve/$platformId",
+    getParentRoute: () => AdminRoute,
+  } as any)
 const CourseCourseIdIndexRoute = CourseCourseIdIndexRouteImport.update({
   id: "/course/$courseId/",
   path: "/course/$courseId/",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TeacherCoursesCourseIdRoute = TeacherCoursesCourseIdRouteImport.update({
-  id: "/teacher/courses/$courseId",
-  path: "/teacher/courses/$courseId",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LtiSetupPlatformIdRoute = LtiSetupPlatformIdRouteImport.update({
-  id: "/lti/setup/$platformId",
-  path: "/lti/setup/$platformId",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CourseCourseIdNewRoute = CourseCourseIdNewRouteImport.update({
-  id: "/course/$courseId/new",
-  path: "/course/$courseId/new",
   getParentRoute: () => rootRouteImport,
 } as any)
 const CourseCourseIdConversationIdRoute =
@@ -187,76 +178,31 @@ const CourseCourseIdConversationIdRoute =
     path: "/course/$courseId/$conversationId",
     getParentRoute: () => rootRouteImport,
   } as any)
-const AdminLtiApprovePlatformIdRoute =
-  AdminLtiApprovePlatformIdRouteImport.update({
-    id: "/lti-approve/$platformId",
-    path: "/lti-approve/$platformId",
-    getParentRoute: () => AdminRoute,
-  } as any)
+const CourseCourseIdNewRoute = CourseCourseIdNewRouteImport.update({
+  id: "/course/$courseId/new",
+  path: "/course/$courseId/new",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LtiSetupPlatformIdRoute = LtiSetupPlatformIdRouteImport.update({
+  id: "/lti/setup/$platformId",
+  path: "/lti/setup/$platformId",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeacherCoursesCourseIdRoute = TeacherCoursesCourseIdRouteImport.update({
+  id: "/teacher/courses/$courseId",
+  path: "/teacher/courses/$courseId",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TeacherCoursesCourseIdIndexRoute =
   TeacherCoursesCourseIdIndexRouteImport.update({
     id: "/",
     path: "/",
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdUsageRoute =
-  TeacherCoursesCourseIdUsageRouteImport.update({
-    id: "/usage",
-    path: "/usage",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
-  } as any)
-const TeacherCoursesCourseIdRagRoute =
-  TeacherCoursesCourseIdRagRouteImport.update({
-    id: "/rag",
-    path: "/rag",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
-  } as any)
-const TeacherCoursesCourseIdPlayDesignationsRoute =
-  TeacherCoursesCourseIdPlayDesignationsRouteImport.update({
-    id: "/play-designations",
-    path: "/play-designations",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
-  } as any)
-const TeacherCoursesCourseIdMembersRoute =
-  TeacherCoursesCourseIdMembersRouteImport.update({
-    id: "/members",
-    path: "/members",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
-  } as any)
-const TeacherCoursesCourseIdLtiRoute =
-  TeacherCoursesCourseIdLtiRouteImport.update({
-    id: "/lti",
-    path: "/lti",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
-  } as any)
-const TeacherCoursesCourseIdKnowledgeGraphRoute =
-  TeacherCoursesCourseIdKnowledgeGraphRouteImport.update({
-    id: "/knowledge-graph",
-    path: "/knowledge-graph",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
-  } as any)
-const TeacherCoursesCourseIdInviteRoute =
-  TeacherCoursesCourseIdInviteRouteImport.update({
-    id: "/invite",
-    path: "/invite",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
-  } as any)
-const TeacherCoursesCourseIdDocumentsRoute =
-  TeacherCoursesCourseIdDocumentsRouteImport.update({
-    id: "/documents",
-    path: "/documents",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
-  } as any)
-const TeacherCoursesCourseIdConversationsRoute =
-  TeacherCoursesCourseIdConversationsRouteImport.update({
-    id: "/conversations",
-    path: "/conversations",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
-  } as any)
-const TeacherCoursesCourseIdConfigRoute =
-  TeacherCoursesCourseIdConfigRouteImport.update({
-    id: "/config",
-    path: "/config",
+const TeacherCoursesCourseIdApiKeysRoute =
+  TeacherCoursesCourseIdApiKeysRouteImport.update({
+    id: "/api-keys",
+    path: "/api-keys",
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 const TeacherCoursesCourseIdCanvasRoute =
@@ -265,10 +211,64 @@ const TeacherCoursesCourseIdCanvasRoute =
     path: "/canvas",
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdApiKeysRoute =
-  TeacherCoursesCourseIdApiKeysRouteImport.update({
-    id: "/api-keys",
-    path: "/api-keys",
+const TeacherCoursesCourseIdConfigRoute =
+  TeacherCoursesCourseIdConfigRouteImport.update({
+    id: "/config",
+    path: "/config",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
+const TeacherCoursesCourseIdConversationsRoute =
+  TeacherCoursesCourseIdConversationsRouteImport.update({
+    id: "/conversations",
+    path: "/conversations",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
+const TeacherCoursesCourseIdDocumentsRoute =
+  TeacherCoursesCourseIdDocumentsRouteImport.update({
+    id: "/documents",
+    path: "/documents",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
+const TeacherCoursesCourseIdInviteRoute =
+  TeacherCoursesCourseIdInviteRouteImport.update({
+    id: "/invite",
+    path: "/invite",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
+const TeacherCoursesCourseIdKnowledgeGraphRoute =
+  TeacherCoursesCourseIdKnowledgeGraphRouteImport.update({
+    id: "/knowledge-graph",
+    path: "/knowledge-graph",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
+const TeacherCoursesCourseIdLtiRoute =
+  TeacherCoursesCourseIdLtiRouteImport.update({
+    id: "/lti",
+    path: "/lti",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
+const TeacherCoursesCourseIdMembersRoute =
+  TeacherCoursesCourseIdMembersRouteImport.update({
+    id: "/members",
+    path: "/members",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
+const TeacherCoursesCourseIdPlayDesignationsRoute =
+  TeacherCoursesCourseIdPlayDesignationsRouteImport.update({
+    id: "/play-designations",
+    path: "/play-designations",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
+const TeacherCoursesCourseIdRagRoute =
+  TeacherCoursesCourseIdRagRouteImport.update({
+    id: "/rag",
+    path: "/rag",
+    getParentRoute: () => TeacherCoursesCourseIdRoute,
+  } as any)
+const TeacherCoursesCourseIdUsageRoute =
+  TeacherCoursesCourseIdUsageRouteImport.update({
+    id: "/usage",
+    path: "/usage",
     getParentRoute: () => TeacherCoursesCourseIdRoute,
   } as any)
 
@@ -550,32 +550,11 @@ export interface RootRouteChildren {
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
-    "/teacher-help": {
-      id: "/teacher-help"
-      path: "/teacher-help"
-      fullPath: "/teacher-help"
-      preLoaderRoute: typeof TeacherHelpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/data-handling": {
-      id: "/data-handling"
-      path: "/data-handling"
-      fullPath: "/data-handling"
-      preLoaderRoute: typeof DataHandlingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/admin": {
-      id: "/admin"
-      path: "/admin"
-      fullPath: "/admin"
-      preLoaderRoute: typeof AdminRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/acknowledgements": {
-      id: "/acknowledgements"
-      path: "/acknowledgements"
-      fullPath: "/acknowledgements"
-      preLoaderRoute: typeof AcknowledgementsRouteImport
+    "/": {
+      id: "/"
+      path: "/"
+      fullPath: "/"
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/accessibility": {
@@ -585,18 +564,32 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AccessibilityRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/": {
-      id: "/"
-      path: "/"
-      fullPath: "/"
-      preLoaderRoute: typeof IndexRouteImport
+    "/acknowledgements": {
+      id: "/acknowledgements"
+      path: "/acknowledgements"
+      fullPath: "/acknowledgements"
+      preLoaderRoute: typeof AcknowledgementsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/teacher/": {
-      id: "/teacher/"
-      path: "/teacher"
-      fullPath: "/teacher/"
-      preLoaderRoute: typeof TeacherIndexRouteImport
+    "/admin": {
+      id: "/admin"
+      path: "/admin"
+      fullPath: "/admin"
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/data-handling": {
+      id: "/data-handling"
+      path: "/data-handling"
+      fullPath: "/data-handling"
+      preLoaderRoute: typeof DataHandlingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/teacher-help": {
+      id: "/teacher-help"
+      path: "/teacher-help"
+      fullPath: "/teacher-help"
+      preLoaderRoute: typeof TeacherHelpRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/admin/": {
@@ -606,88 +599,11 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/lti/bind": {
-      id: "/lti/bind"
-      path: "/lti/bind"
-      fullPath: "/lti/bind"
-      preLoaderRoute: typeof LtiBindRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/join/$token": {
-      id: "/join/$token"
-      path: "/join/$token"
-      fullPath: "/join/$token"
-      preLoaderRoute: typeof JoinTokenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/embed/$courseId": {
-      id: "/embed/$courseId"
-      path: "/embed/$courseId"
-      fullPath: "/embed/$courseId"
-      preLoaderRoute: typeof EmbedCourseIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/admin/users": {
-      id: "/admin/users"
-      path: "/users"
-      fullPath: "/admin/users"
-      preLoaderRoute: typeof AdminUsersRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    "/admin/usage": {
-      id: "/admin/usage"
-      path: "/usage"
-      fullPath: "/admin/usage"
-      preLoaderRoute: typeof AdminUsageRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    "/admin/system": {
-      id: "/admin/system"
-      path: "/system"
-      fullPath: "/admin/system"
-      preLoaderRoute: typeof AdminSystemRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    "/admin/rules": {
-      id: "/admin/rules"
-      path: "/rules"
-      fullPath: "/admin/rules"
-      preLoaderRoute: typeof AdminRulesRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    "/admin/lti": {
-      id: "/admin/lti"
-      path: "/lti"
-      fullPath: "/admin/lti"
-      preLoaderRoute: typeof AdminLtiRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    "/admin/integrations": {
-      id: "/admin/integrations"
-      path: "/integrations"
-      fullPath: "/admin/integrations"
-      preLoaderRoute: typeof AdminIntegrationsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    "/admin/external-invites": {
-      id: "/admin/external-invites"
-      path: "/external-invites"
-      fullPath: "/admin/external-invites"
-      preLoaderRoute: typeof AdminExternalInvitesRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    "/admin/dev-tools": {
-      id: "/admin/dev-tools"
-      path: "/dev-tools"
-      fullPath: "/admin/dev-tools"
-      preLoaderRoute: typeof AdminDevToolsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    "/admin/defaults": {
-      id: "/admin/defaults"
-      path: "/defaults"
-      fullPath: "/admin/defaults"
-      preLoaderRoute: typeof AdminDefaultsRouteImport
+    "/admin/courses": {
+      id: "/admin/courses"
+      path: "/courses"
+      fullPath: "/admin/courses"
+      preLoaderRoute: typeof AdminCoursesRouteImport
       parentRoute: typeof AdminRoute
     }
     "/admin/daisy": {
@@ -697,46 +613,95 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminDaisyRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/admin/courses": {
-      id: "/admin/courses"
-      path: "/courses"
-      fullPath: "/admin/courses"
-      preLoaderRoute: typeof AdminCoursesRouteImport
+    "/admin/defaults": {
+      id: "/admin/defaults"
+      path: "/defaults"
+      fullPath: "/admin/defaults"
+      preLoaderRoute: typeof AdminDefaultsRouteImport
       parentRoute: typeof AdminRoute
     }
-    "/course/$courseId/": {
-      id: "/course/$courseId/"
-      path: "/course/$courseId"
-      fullPath: "/course/$courseId/"
-      preLoaderRoute: typeof CourseCourseIdIndexRouteImport
+    "/admin/dev-tools": {
+      id: "/admin/dev-tools"
+      path: "/dev-tools"
+      fullPath: "/admin/dev-tools"
+      preLoaderRoute: typeof AdminDevToolsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/admin/external-invites": {
+      id: "/admin/external-invites"
+      path: "/external-invites"
+      fullPath: "/admin/external-invites"
+      preLoaderRoute: typeof AdminExternalInvitesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/admin/integrations": {
+      id: "/admin/integrations"
+      path: "/integrations"
+      fullPath: "/admin/integrations"
+      preLoaderRoute: typeof AdminIntegrationsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/admin/lti": {
+      id: "/admin/lti"
+      path: "/lti"
+      fullPath: "/admin/lti"
+      preLoaderRoute: typeof AdminLtiRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/admin/rules": {
+      id: "/admin/rules"
+      path: "/rules"
+      fullPath: "/admin/rules"
+      preLoaderRoute: typeof AdminRulesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/admin/system": {
+      id: "/admin/system"
+      path: "/system"
+      fullPath: "/admin/system"
+      preLoaderRoute: typeof AdminSystemRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/admin/usage": {
+      id: "/admin/usage"
+      path: "/usage"
+      fullPath: "/admin/usage"
+      preLoaderRoute: typeof AdminUsageRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/admin/users": {
+      id: "/admin/users"
+      path: "/users"
+      fullPath: "/admin/users"
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/embed/$courseId": {
+      id: "/embed/$courseId"
+      path: "/embed/$courseId"
+      fullPath: "/embed/$courseId"
+      preLoaderRoute: typeof EmbedCourseIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/teacher/courses/$courseId": {
-      id: "/teacher/courses/$courseId"
-      path: "/teacher/courses/$courseId"
-      fullPath: "/teacher/courses/$courseId"
-      preLoaderRoute: typeof TeacherCoursesCourseIdRouteImport
+    "/join/$token": {
+      id: "/join/$token"
+      path: "/join/$token"
+      fullPath: "/join/$token"
+      preLoaderRoute: typeof JoinTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/lti/setup/$platformId": {
-      id: "/lti/setup/$platformId"
-      path: "/lti/setup/$platformId"
-      fullPath: "/lti/setup/$platformId"
-      preLoaderRoute: typeof LtiSetupPlatformIdRouteImport
+    "/lti/bind": {
+      id: "/lti/bind"
+      path: "/lti/bind"
+      fullPath: "/lti/bind"
+      preLoaderRoute: typeof LtiBindRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/course/$courseId/new": {
-      id: "/course/$courseId/new"
-      path: "/course/$courseId/new"
-      fullPath: "/course/$courseId/new"
-      preLoaderRoute: typeof CourseCourseIdNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/course/$courseId/$conversationId": {
-      id: "/course/$courseId/$conversationId"
-      path: "/course/$courseId/$conversationId"
-      fullPath: "/course/$courseId/$conversationId"
-      preLoaderRoute: typeof CourseCourseIdConversationIdRouteImport
+    "/teacher/": {
+      id: "/teacher/"
+      path: "/teacher"
+      fullPath: "/teacher/"
+      preLoaderRoute: typeof TeacherIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/admin/lti-approve/$platformId": {
@@ -746,6 +711,41 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminLtiApprovePlatformIdRouteImport
       parentRoute: typeof AdminRoute
     }
+    "/course/$courseId/": {
+      id: "/course/$courseId/"
+      path: "/course/$courseId"
+      fullPath: "/course/$courseId/"
+      preLoaderRoute: typeof CourseCourseIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/course/$courseId/$conversationId": {
+      id: "/course/$courseId/$conversationId"
+      path: "/course/$courseId/$conversationId"
+      fullPath: "/course/$courseId/$conversationId"
+      preLoaderRoute: typeof CourseCourseIdConversationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/course/$courseId/new": {
+      id: "/course/$courseId/new"
+      path: "/course/$courseId/new"
+      fullPath: "/course/$courseId/new"
+      preLoaderRoute: typeof CourseCourseIdNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/lti/setup/$platformId": {
+      id: "/lti/setup/$platformId"
+      path: "/lti/setup/$platformId"
+      fullPath: "/lti/setup/$platformId"
+      preLoaderRoute: typeof LtiSetupPlatformIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/teacher/courses/$courseId": {
+      id: "/teacher/courses/$courseId"
+      path: "/teacher/courses/$courseId"
+      fullPath: "/teacher/courses/$courseId"
+      preLoaderRoute: typeof TeacherCoursesCourseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/teacher/courses/$courseId/": {
       id: "/teacher/courses/$courseId/"
       path: "/"
@@ -753,74 +753,11 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof TeacherCoursesCourseIdIndexRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/usage": {
-      id: "/teacher/courses/$courseId/usage"
-      path: "/usage"
-      fullPath: "/teacher/courses/$courseId/usage"
-      preLoaderRoute: typeof TeacherCoursesCourseIdUsageRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
-    }
-    "/teacher/courses/$courseId/rag": {
-      id: "/teacher/courses/$courseId/rag"
-      path: "/rag"
-      fullPath: "/teacher/courses/$courseId/rag"
-      preLoaderRoute: typeof TeacherCoursesCourseIdRagRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
-    }
-    "/teacher/courses/$courseId/play-designations": {
-      id: "/teacher/courses/$courseId/play-designations"
-      path: "/play-designations"
-      fullPath: "/teacher/courses/$courseId/play-designations"
-      preLoaderRoute: typeof TeacherCoursesCourseIdPlayDesignationsRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
-    }
-    "/teacher/courses/$courseId/members": {
-      id: "/teacher/courses/$courseId/members"
-      path: "/members"
-      fullPath: "/teacher/courses/$courseId/members"
-      preLoaderRoute: typeof TeacherCoursesCourseIdMembersRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
-    }
-    "/teacher/courses/$courseId/lti": {
-      id: "/teacher/courses/$courseId/lti"
-      path: "/lti"
-      fullPath: "/teacher/courses/$courseId/lti"
-      preLoaderRoute: typeof TeacherCoursesCourseIdLtiRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
-    }
-    "/teacher/courses/$courseId/knowledge-graph": {
-      id: "/teacher/courses/$courseId/knowledge-graph"
-      path: "/knowledge-graph"
-      fullPath: "/teacher/courses/$courseId/knowledge-graph"
-      preLoaderRoute: typeof TeacherCoursesCourseIdKnowledgeGraphRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
-    }
-    "/teacher/courses/$courseId/invite": {
-      id: "/teacher/courses/$courseId/invite"
-      path: "/invite"
-      fullPath: "/teacher/courses/$courseId/invite"
-      preLoaderRoute: typeof TeacherCoursesCourseIdInviteRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
-    }
-    "/teacher/courses/$courseId/documents": {
-      id: "/teacher/courses/$courseId/documents"
-      path: "/documents"
-      fullPath: "/teacher/courses/$courseId/documents"
-      preLoaderRoute: typeof TeacherCoursesCourseIdDocumentsRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
-    }
-    "/teacher/courses/$courseId/conversations": {
-      id: "/teacher/courses/$courseId/conversations"
-      path: "/conversations"
-      fullPath: "/teacher/courses/$courseId/conversations"
-      preLoaderRoute: typeof TeacherCoursesCourseIdConversationsRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
-    }
-    "/teacher/courses/$courseId/config": {
-      id: "/teacher/courses/$courseId/config"
-      path: "/config"
-      fullPath: "/teacher/courses/$courseId/config"
-      preLoaderRoute: typeof TeacherCoursesCourseIdConfigRouteImport
+    "/teacher/courses/$courseId/api-keys": {
+      id: "/teacher/courses/$courseId/api-keys"
+      path: "/api-keys"
+      fullPath: "/teacher/courses/$courseId/api-keys"
+      preLoaderRoute: typeof TeacherCoursesCourseIdApiKeysRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
     "/teacher/courses/$courseId/canvas": {
@@ -830,11 +767,74 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof TeacherCoursesCourseIdCanvasRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
-    "/teacher/courses/$courseId/api-keys": {
-      id: "/teacher/courses/$courseId/api-keys"
-      path: "/api-keys"
-      fullPath: "/teacher/courses/$courseId/api-keys"
-      preLoaderRoute: typeof TeacherCoursesCourseIdApiKeysRouteImport
+    "/teacher/courses/$courseId/config": {
+      id: "/teacher/courses/$courseId/config"
+      path: "/config"
+      fullPath: "/teacher/courses/$courseId/config"
+      preLoaderRoute: typeof TeacherCoursesCourseIdConfigRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
+    "/teacher/courses/$courseId/conversations": {
+      id: "/teacher/courses/$courseId/conversations"
+      path: "/conversations"
+      fullPath: "/teacher/courses/$courseId/conversations"
+      preLoaderRoute: typeof TeacherCoursesCourseIdConversationsRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
+    "/teacher/courses/$courseId/documents": {
+      id: "/teacher/courses/$courseId/documents"
+      path: "/documents"
+      fullPath: "/teacher/courses/$courseId/documents"
+      preLoaderRoute: typeof TeacherCoursesCourseIdDocumentsRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
+    "/teacher/courses/$courseId/invite": {
+      id: "/teacher/courses/$courseId/invite"
+      path: "/invite"
+      fullPath: "/teacher/courses/$courseId/invite"
+      preLoaderRoute: typeof TeacherCoursesCourseIdInviteRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
+    "/teacher/courses/$courseId/knowledge-graph": {
+      id: "/teacher/courses/$courseId/knowledge-graph"
+      path: "/knowledge-graph"
+      fullPath: "/teacher/courses/$courseId/knowledge-graph"
+      preLoaderRoute: typeof TeacherCoursesCourseIdKnowledgeGraphRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
+    "/teacher/courses/$courseId/lti": {
+      id: "/teacher/courses/$courseId/lti"
+      path: "/lti"
+      fullPath: "/teacher/courses/$courseId/lti"
+      preLoaderRoute: typeof TeacherCoursesCourseIdLtiRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
+    "/teacher/courses/$courseId/members": {
+      id: "/teacher/courses/$courseId/members"
+      path: "/members"
+      fullPath: "/teacher/courses/$courseId/members"
+      preLoaderRoute: typeof TeacherCoursesCourseIdMembersRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
+    "/teacher/courses/$courseId/play-designations": {
+      id: "/teacher/courses/$courseId/play-designations"
+      path: "/play-designations"
+      fullPath: "/teacher/courses/$courseId/play-designations"
+      preLoaderRoute: typeof TeacherCoursesCourseIdPlayDesignationsRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
+    "/teacher/courses/$courseId/rag": {
+      id: "/teacher/courses/$courseId/rag"
+      path: "/rag"
+      fullPath: "/teacher/courses/$courseId/rag"
+      preLoaderRoute: typeof TeacherCoursesCourseIdRagRouteImport
+      parentRoute: typeof TeacherCoursesCourseIdRoute
+    }
+    "/teacher/courses/$courseId/usage": {
+      id: "/teacher/courses/$courseId/usage"
+      path: "/usage"
+      fullPath: "/teacher/courses/$courseId/usage"
+      preLoaderRoute: typeof TeacherCoursesCourseIdUsageRouteImport
       parentRoute: typeof TeacherCoursesCourseIdRoute
     }
   }

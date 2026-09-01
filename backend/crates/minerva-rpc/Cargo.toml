@@ -16,6 +16,7 @@ serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tonic.workspace = true
+tonic-prost.workspace = true
 prost.workspace = true
 tracing.workspace = true
 
@@ -26,7 +27,7 @@ tracing.workspace = true
 minerva-core = { path = "../minerva-core" }
 
 [build-dependencies]
-tonic-build.workspace = true
+tonic-prost-build.workspace = true
 
 [dev-dependencies]
 # Random-port tcp listener bound straight into tonic's serve_with_incoming

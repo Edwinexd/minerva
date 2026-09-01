@@ -6,7 +6,7 @@ use fastembed::{
     EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, QuantizationMode,
     Qwen3TextEmbedding, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel,
 };
-use hf_hub::api::sync::ApiBuilder;
+use hf_hub::{split_id, HFClientSync};
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 
@@ -341,16 +341,16 @@ fn load_custom_model(spec: &CustomModelSpec) -> Result<TextEmbedding, String> {
     // Reuse fastembed's hf-hub cache layout when possible: the env var
     // `HF_HOME` (and the per-app `HF_CACHE_DIR`) point at the shared
     // cache, so a model downloaded here can be reused by anything else
-    // that consults the Hub. `ApiBuilder::default()` already honors
-    // those envs.
-    let api = ApiBuilder::new()
-        .with_progress(true)
-        .build()
-        .map_err(|e| format!("hf-hub init failed: {}", e))?;
-    let repo = api.model(spec.repo_id.to_string());
+    // that consults the Hub. `HFClientSync::new()` already honors those
+    // envs.
+    let api = HFClientSync::new().map_err(|e| format!("hf-hub init failed: {}", e))?;
+    let (owner, name) = split_id(spec.repo_id);
+    let repo = api.model(owner, name);
 
     let fetch = |relative: &str| -> Result<std::path::PathBuf, String> {
-        repo.get(relative)
+        repo.download_file()
+            .filename(relative)
+            .send()
             .map_err(|e| format!("hf-hub fetch {}/{} failed: {}", spec.repo_id, relative, e))
     };
 

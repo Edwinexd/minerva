@@ -62,7 +62,7 @@ use fastembed::{
     RerankInitOptions, RerankInitOptionsUserDefined, RerankerModel, TextRerank, TokenizerFiles,
     UserDefinedRerankingModel,
 };
-use hf_hub::api::sync::ApiBuilder;
+use hf_hub::{split_id, HFClientSync};
 use serde::Serialize;
 
 use crate::mem;
@@ -219,14 +219,14 @@ fn custom_reranker_spec(model_code: &str) -> Option<CustomRerankerSpec> {
 /// session build is CPU-heavy. Mirrors `load_custom_model` on the
 /// embedder side.
 fn load_custom_reranker(spec: &CustomRerankerSpec) -> Result<TextRerank, String> {
-    let api = ApiBuilder::new()
-        .with_progress(true)
-        .build()
-        .map_err(|e| format!("hf-hub init failed: {}", e))?;
-    let repo = api.model(spec.repo_id.to_string());
+    let api = HFClientSync::new().map_err(|e| format!("hf-hub init failed: {}", e))?;
+    let (owner, name) = split_id(spec.repo_id);
+    let repo = api.model(owner, name);
 
     let fetch = |relative: &str| -> Result<std::path::PathBuf, String> {
-        repo.get(relative)
+        repo.download_file()
+            .filename(relative)
+            .send()
             .map_err(|e| format!("hf-hub fetch {}/{} failed: {}", spec.repo_id, relative, e))
     };
     let read = |p: std::path::PathBuf| -> Result<Vec<u8>, String> {

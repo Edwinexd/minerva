@@ -78,7 +78,9 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   )
 
   // Seed `stickyUnreviewedIds` when entering the unreviewed tab,
-  // clear it when leaving. Adjust-state-on-prop-change during render
+  // clear it when leaving. Enabling the colleague-read option seeds
+  // the newly visible rows too, so opening one cannot make it vanish
+  // mid-read. Adjust-state-on-prop-change during render
   // is the React-docs-sanctioned alternative to setState-in-effect;
   // see https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
   //
@@ -101,6 +103,20 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
     } else if (stickyUnreviewedIds.size > 0) {
       setStickyUnreviewedIds(new Set())
     }
+  }
+
+  const handleIncludeReadByOthersChange = (checked: boolean | "indeterminate") => {
+    const nextIncludeReadByOthers = checked === true
+    if (nextIncludeReadByOthers && activeTab === "unreviewed") {
+      setStickyUnreviewedIds((current) => {
+        const next = new Set(current)
+        for (const conversation of conversations || []) {
+          if (conversation.teacher_unreviewed) next.add(conversation.id)
+        }
+        return next
+      })
+    }
+    setIncludeReadByOthers(nextIncludeReadByOthers)
   }
 
   // Mark a conversation as reviewed by the current teacher when
@@ -423,7 +439,7 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
               <Checkbox
                 id="include-read-by-others"
                 checked={includeReadByOthers}
-                onCheckedChange={(checked) => setIncludeReadByOthers(checked === true)}
+                onCheckedChange={handleIncludeReadByOthersChange}
               />
               <Label htmlFor="include-read-by-others" className="cursor-pointer font-normal">
                 {t("conversations.includeReadByOthers")}

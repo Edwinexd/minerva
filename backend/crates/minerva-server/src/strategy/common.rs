@@ -4,6 +4,7 @@ use qdrant_client::qdrant::{ScoredPoint, SearchPointsBuilder};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::classification::prompts::{ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE, PASTED_PROBLEM_RULE};
@@ -671,6 +672,7 @@ fn flatten_policy_text(value: &serde_json::Value, output: &mut String) {
 type GlobalKnowledgeEmbeddingCache =
     tokio::sync::Mutex<std::collections::HashMap<(String, String, String), Vec<f32>>>;
 static GLOBAL_KNOWLEDGE_EMBEDDING_CACHE: OnceLock<GlobalKnowledgeEmbeddingCache> = OnceLock::new();
+const GLOBAL_KNOWLEDGE_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn global_knowledge_embedding_cache() -> &'static GlobalKnowledgeEmbeddingCache {
     GLOBAL_KNOWLEDGE_EMBEDDING_CACHE.get_or_init(|| tokio::sync::Mutex::new(Default::default()))
@@ -681,6 +683,38 @@ fn global_knowledge_embedding_cache() -> &'static GlobalKnowledgeEmbeddingCache 
 /// the policy out of both the course's document list and Qdrant collection.
 #[allow(clippy::too_many_arguments)]
 pub async fn retrieve_global_knowledge(
+    client: &reqwest::Client,
+    openai_key: &str,
+    fastembed: &Arc<dyn EmbedderClient>,
+    query: &str,
+    embedding_provider: &str,
+    embedding_model: &str,
+) -> Vec<GlobalKnowledgeSource> {
+    match tokio::time::timeout(
+        GLOBAL_KNOWLEDGE_TIMEOUT,
+        retrieve_global_knowledge_inner(
+            client,
+            openai_key,
+            fastembed,
+            query,
+            embedding_provider,
+            embedding_model,
+        ),
+    )
+    .await
+    {
+        Ok(sources) => sources,
+        Err(_) => {
+            tracing::warn!(
+                timeout_seconds = GLOBAL_KNOWLEDGE_TIMEOUT.as_secs(),
+                "global knowledge retrieval timed out; continuing without it"
+            );
+            Vec::new()
+        }
+    }
+}
+
+async fn retrieve_global_knowledge_inner(
     client: &reqwest::Client,
     openai_key: &str,
     fastembed: &Arc<dyn EmbedderClient>,
@@ -719,12 +753,14 @@ pub async fn retrieve_global_knowledge(
             embedding_model.to_string(),
             source.id.clone(),
         );
-        let policy_embedding = if let Some(embedding) = global_knowledge_embedding_cache()
-            .lock()
-            .await
-            .get(&cache_key)
-            .cloned()
-        {
+        // Keep the guard in its own scope. An `if let` scrutinee temporary can
+        // otherwise retain the mutex guard through the `else` branch, where a
+        // cache miss needs to acquire the same mutex to insert the embedding.
+        let cached_embedding = {
+            let cache = global_knowledge_embedding_cache().lock().await;
+            cache.get(&cache_key).cloned()
+        };
+        let policy_embedding = if let Some(embedding) = cached_embedding {
             embedding
         } else {
             let embedded = if embedding_provider == "local" {
@@ -1474,6 +1510,51 @@ pub async fn finalize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use minerva_core::rpc::{BenchmarkError, EmbedBenchmarkResult};
+
+    struct SuccessfulEmbedderClient;
+
+    #[async_trait::async_trait]
+    impl EmbedderClient for SuccessfulEmbedderClient {
+        async fn embed(
+            &self,
+            _model_name: &str,
+            texts: Vec<String>,
+        ) -> Result<Vec<Vec<f32>>, String> {
+            Ok(texts.into_iter().map(|_| vec![1.0, 0.0]).collect())
+        }
+
+        async fn embed_query(
+            &self,
+            _model_name: &str,
+            texts: Vec<String>,
+        ) -> Result<Vec<Vec<f32>>, String> {
+            Ok(texts.into_iter().map(|_| vec![1.0, 0.0]).collect())
+        }
+
+        async fn run_benchmarks(
+            &self,
+            _models: &[(String, u64)],
+        ) -> Result<Vec<EmbedBenchmarkResult>, String> {
+            Ok(Vec::new())
+        }
+
+        async fn benchmark_one(
+            &self,
+            _model_name: &str,
+            _dimensions: u64,
+        ) -> Result<EmbedBenchmarkResult, BenchmarkError> {
+            Err(BenchmarkError::Failed("not implemented in test".into()))
+        }
+
+        async fn get_benchmarks(&self) -> Vec<EmbedBenchmarkResult> {
+            Vec::new()
+        }
+
+        async fn is_benchmark_running(&self) -> bool {
+            false
+        }
+    }
 
     fn chunk(doc: &str, name: &str, text: &str, kind: Option<&str>) -> RagChunk {
         RagChunk {
@@ -1583,6 +1664,27 @@ mod tests {
     fn cosine_similarity_handles_parallel_and_orthogonal_vectors() {
         assert_eq!(cosine_similarity(&[1.0, 0.0], &[2.0, 0.0]), 1.0);
         assert_eq!(cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]), 0.0);
+    }
+
+    #[tokio::test]
+    async fn global_knowledge_cache_miss_does_not_deadlock() {
+        let embedder: Arc<dyn EmbedderClient> = Arc::new(SuccessfulEmbedderClient);
+        let sources = tokio::time::timeout(
+            Duration::from_secs(1),
+            retrieve_global_knowledge(
+                &reqwest::Client::new(),
+                "",
+                &embedder,
+                "Where is my data stored?",
+                "local",
+                "global-knowledge-cache-miss-regression-test",
+            ),
+        )
+        .await
+        .expect("cache miss must not wait on its own mutex");
+
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].id, "data-handling");
     }
 
     #[test]

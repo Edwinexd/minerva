@@ -615,6 +615,7 @@ struct GlobalKnowledgeManifestEntry {
     id: String,
     route: String,
     min_similarity: f32,
+    retrieval_texts: Vec<String>,
     content: serde_json::Value,
 }
 #[derive(Clone, Debug)]
@@ -622,6 +623,7 @@ pub struct GlobalKnowledgeSource {
     pub id: String,
     pub route: String,
     pub content: String,
+    retrieval_texts: Vec<String>,
     min_similarity: f32,
 }
 
@@ -639,6 +641,7 @@ fn global_knowledge_sources() -> &'static [GlobalKnowledgeSource] {
                     id: entry.id,
                     route: entry.route,
                     content,
+                    retrieval_texts: entry.retrieval_texts,
                     min_similarity: entry.min_similarity,
                 }
             })
@@ -666,11 +669,11 @@ fn flatten_policy_text(value: &serde_json::Value, output: &mut String) {
     }
 }
 
-/// One immutable policy embedding per `(provider, model)` for the lifetime of
-/// the process. The user's query still embeds per turn; only the static
-/// reference text is cached.
+/// One immutable embedding per `(provider, model, source, retrieval intent)`
+/// for the lifetime of the process. The user's query still embeds per turn;
+/// only the focused static retrieval texts are cached.
 type GlobalKnowledgeEmbeddingCache =
-    tokio::sync::Mutex<std::collections::HashMap<(String, String, String), Vec<f32>>>;
+    tokio::sync::Mutex<std::collections::HashMap<(String, String, String, usize), Vec<f32>>>;
 static GLOBAL_KNOWLEDGE_EMBEDDING_CACHE: OnceLock<GlobalKnowledgeEmbeddingCache> = OnceLock::new();
 const GLOBAL_KNOWLEDGE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -748,46 +751,66 @@ async fn retrieve_global_knowledge_inner(
     };
     let mut matches = Vec::new();
     for source in global_knowledge_sources() {
-        let cache_key = (
-            embedding_provider.to_string(),
-            embedding_model.to_string(),
-            source.id.clone(),
-        );
-        // Keep the guard in its own scope. An `if let` scrutinee temporary can
-        // otherwise retain the mutex guard through the `else` branch, where a
-        // cache miss needs to acquire the same mutex to insert the embedding.
-        let cached_embedding = {
-            let cache = global_knowledge_embedding_cache().lock().await;
-            cache.get(&cache_key).cloned()
-        };
-        let policy_embedding = if let Some(embedding) = cached_embedding {
-            embedding
-        } else {
-            let embedded = if embedding_provider == "local" {
-                fastembed
-                    .embed(embedding_model, vec![source.content.clone()])
-                    .await
-            } else {
-                minerva_pipeline::embedder::embed_texts(
-                    client,
-                    openai_key,
-                    std::slice::from_ref(&source.content),
+        let cache_keys: Vec<_> = source
+            .retrieval_texts
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                (
+                    embedding_provider.to_string(),
+                    embedding_model.to_string(),
+                    source.id.clone(),
+                    index,
                 )
-                .await
-                .map(|result| result.embeddings)
-            };
-            let Some(embedding) = embedded.ok().and_then(|mut vectors| vectors.pop()) else {
-                tracing::warn!("data-handling policy embedding failed");
-                continue;
-            };
-            global_knowledge_embedding_cache()
-                .lock()
-                .await
-                .insert(cache_key, embedding.clone());
-            embedding
+            })
+            .collect();
+        let (mut policy_embeddings, missing) = {
+            let cache = global_knowledge_embedding_cache().lock().await;
+            let mut cached = Vec::new();
+            let mut missing = Vec::new();
+            for (cache_key, text) in cache_keys.iter().zip(&source.retrieval_texts) {
+                if let Some(embedding) = cache.get(cache_key).cloned() {
+                    cached.push(embedding);
+                } else {
+                    missing.push((cache_key.clone(), text.clone()));
+                }
+            }
+            (cached, missing)
         };
 
-        if cosine_similarity(query_embedding, &policy_embedding) >= source.min_similarity {
+        if !missing.is_empty() {
+            let texts: Vec<String> = missing.iter().map(|(_, text)| text.clone()).collect();
+            let embedded = if embedding_provider == "local" {
+                fastembed.embed(embedding_model, texts).await
+            } else {
+                minerva_pipeline::embedder::embed_texts(client, openai_key, &texts)
+                    .await
+                    .map(|result| result.embeddings)
+            };
+            let Ok(vectors) = embedded else {
+                tracing::warn!("global knowledge retrieval-text embedding failed");
+                continue;
+            };
+            if vectors.len() != missing.len() {
+                tracing::warn!(
+                    expected = missing.len(),
+                    actual = vectors.len(),
+                    "global knowledge embedder returned wrong vector count"
+                );
+                continue;
+            }
+            let mut cache = global_knowledge_embedding_cache().lock().await;
+            for ((cache_key, _), embedding) in missing.into_iter().zip(vectors) {
+                cache.insert(cache_key, embedding.clone());
+                policy_embeddings.push(embedding);
+            }
+        }
+
+        let best_similarity = policy_embeddings
+            .iter()
+            .map(|embedding| cosine_similarity(query_embedding, embedding))
+            .fold(f32::NEG_INFINITY, f32::max);
+        if best_similarity >= source.min_similarity {
             matches.push(source.clone());
         }
     }
@@ -1512,16 +1535,25 @@ mod tests {
     use super::*;
     use minerva_core::rpc::{BenchmarkError, EmbedBenchmarkResult};
 
-    struct SuccessfulEmbedderClient;
+    struct FocusedIntentEmbedderClient;
 
     #[async_trait::async_trait]
-    impl EmbedderClient for SuccessfulEmbedderClient {
+    impl EmbedderClient for FocusedIntentEmbedderClient {
         async fn embed(
             &self,
             _model_name: &str,
             texts: Vec<String>,
         ) -> Result<Vec<Vec<f32>>, String> {
-            Ok(texts.into_iter().map(|_| vec![1.0, 0.0]).collect())
+            Ok(texts
+                .into_iter()
+                .map(|text| {
+                    if text.contains("handle, manage, store") {
+                        vec![1.0, 0.0]
+                    } else {
+                        vec![0.0, 1.0]
+                    }
+                })
+                .collect())
         }
 
         async fn embed_query(
@@ -1668,7 +1700,7 @@ mod tests {
 
     #[tokio::test]
     async fn global_knowledge_cache_miss_does_not_deadlock() {
-        let embedder: Arc<dyn EmbedderClient> = Arc::new(SuccessfulEmbedderClient);
+        let embedder: Arc<dyn EmbedderClient> = Arc::new(FocusedIntentEmbedderClient);
         let sources = tokio::time::timeout(
             Duration::from_secs(1),
             retrieve_global_knowledge(

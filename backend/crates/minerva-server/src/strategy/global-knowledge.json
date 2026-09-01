@@ -3,7 +3,15 @@
     {
       "id": "data-handling",
       "route": "/data-handling",
-      "minSimilarity": 0.45,
+      "minSimilarity": 0.4,
+      "retrievalTexts": [
+        "How does Minerva handle, manage, store, process, protect, or retain my personal data and chat messages? Privacy and data handling.",
+        "Who can see or read my Minerva conversations? Are my chats private from teachers, course staff, teaching assistants, or other students?",
+        "Where are my messages and course excerpts sent? Cerebras, OpenAI, local embeddings, external AI providers, and data sharing.",
+        "How long does Minerva keep my conversations and messages? Data retention, deletion, and removal.",
+        "What information do Canvas, Moodle, Play, Daisy, and LTI integrations send to or store in Minerva?",
+        "Hur hanterar, lagrar och skyddar Minerva mina personuppgifter och chattmeddelanden? Integritet, åtkomst, delning och lagringstid."
+      ],
       "contentFile": "../../../../../frontend/src/i18n/locales/en/common.json",
       "contentKey": "dataHandling"
     }

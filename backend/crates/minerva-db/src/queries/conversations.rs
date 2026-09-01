@@ -187,14 +187,20 @@ pub struct ConversationWithFeedbackRow {
     /// note" shortcut working alongside the new explicit ack.
     pub unaddressed_down: i64,
     /// True iff the conversation has activity the teaching team
-    /// hasn't seen yet: either no `conversation_reviews` row
-    /// exists, or the latest user message arrived after the
-    /// stored `reviewed_at`. Re-derived per query rather than
+    /// current viewer hasn't seen yet: either their
+    /// `conversation_reviews` row does not exist, or the latest
+    /// user message arrived after their stored `reviewed_at`.
+    /// Re-derived per query rather than
     /// cached on the conversation row so a new student turn
     /// automatically flips this back on without explicit
     /// invalidation. Read by the teacher dashboard's
     /// "Unreviewed" filter.
     pub teacher_unreviewed: bool,
+    /// True if another member of the teaching team has reviewed
+    /// the current student activity. Lets the dashboard optionally
+    /// include or omit items that colleagues have already read,
+    /// without changing the current teacher's own read marker.
+    pub reviewed_by_others: bool,
     /// Most-recent teaching-team review timestamp, or NULL if no
     /// teacher has opened this conversation since the migration
     /// backfill ran. Surfaced for the "Reviewed by X · 2d ago"
@@ -228,8 +234,10 @@ pub async fn list_all_by_course(
 pub async fn list_all_by_course_with_feedback(
     db: &PgPool,
     course_id: Uuid,
+    reviewer_id: Uuid,
 ) -> Result<Vec<ConversationWithFeedbackRow>, sqlx::Error> {
-    // `teacher_unreviewed` joins the per-conversation review marker
+    // `teacher_unreviewed` joins the *current reviewer's* per-conversation
+    // marker
     // against the latest user-message timestamp. Two truth cases:
     //   1. No review row at all (LEFT JOIN miss) -> true.
     //   2. Latest student turn timestamp > reviewed_at -> true.
@@ -267,23 +275,42 @@ pub async fn list_all_by_course_with_feedback(
                   )
             ), 0) AS "unaddressed_down!: i64",
             (
-                cr.reviewed_at IS NULL
-                OR cr.reviewed_at < COALESCE(
+                own_review.reviewed_at IS NULL
+                OR own_review.reviewed_at < COALESCE(
                     (SELECT MAX(m.created_at) FROM messages m
                        WHERE m.conversation_id = c.id AND m.role = 'user'),
-                    cr.reviewed_at
+                    own_review.reviewed_at
                 )
             ) AS "teacher_unreviewed!: bool",
-            cr.reviewed_at AS "last_reviewed_at?",
-            cr.reviewed_by AS "last_reviewed_by?",
+            EXISTS (
+                SELECT 1 FROM conversation_reviews other_review
+                WHERE other_review.conversation_id = c.id
+                  AND other_review.reviewed_by <> $2
+                  AND other_review.reviewed_at >= COALESCE(
+                      (SELECT MAX(m.created_at) FROM messages m
+                         WHERE m.conversation_id = c.id AND m.role = 'user'),
+                      other_review.reviewed_at
+                  )
+            ) AS "reviewed_by_others!: bool",
+            latest_review.reviewed_at AS "last_reviewed_at?",
+            latest_review.reviewed_by AS "last_reviewed_by?",
             ru.display_name AS last_reviewer_display_name
         FROM conversations c
         JOIN users u ON u.id = c.user_id
-        LEFT JOIN conversation_reviews cr ON cr.conversation_id = c.id
-        LEFT JOIN users ru ON ru.id = cr.reviewed_by
+        LEFT JOIN conversation_reviews own_review
+            ON own_review.conversation_id = c.id AND own_review.reviewed_by = $2
+        LEFT JOIN LATERAL (
+            SELECT reviewed_at, reviewed_by
+            FROM conversation_reviews
+            WHERE conversation_id = c.id
+            ORDER BY reviewed_at DESC
+            LIMIT 1
+        ) latest_review ON TRUE
+        LEFT JOIN users ru ON ru.id = latest_review.reviewed_by
         WHERE c.course_id = $1
         ORDER BY c.updated_at DESC"#,
         course_id,
+        reviewer_id,
     )
     .fetch_all(db)
     .await
@@ -535,10 +562,8 @@ pub async fn mark_student_viewed(db: &PgPool, conversation_id: Uuid) -> Result<(
     Ok(())
 }
 
-/// Upsert the per-conversation review marker. Course-shared (any
-/// teacher / TA / owner / admin clears it for the whole team);
-/// `read == reviewed` per the product call, so this fires on every
-/// teacher dashboard expand.
+/// Upsert this reviewer's per-conversation review marker. `read == reviewed`
+/// per the product call, so this fires on every teacher dashboard expand.
 ///
 /// Route layer is responsible for verifying `reviewer_id` is in
 /// fact a teacher / TA / owner / admin on the course; bypassing
@@ -552,9 +577,8 @@ pub async fn mark_teacher_reviewed(
     sqlx::query!(
         r#"INSERT INTO conversation_reviews (conversation_id, reviewed_at, reviewed_by)
         VALUES ($1, NOW(), $2)
-        ON CONFLICT (conversation_id) DO UPDATE
-            SET reviewed_at = NOW(),
-                reviewed_by = EXCLUDED.reviewed_by"#,
+    ON CONFLICT (conversation_id, reviewed_by) DO UPDATE
+            SET reviewed_at = NOW()"#,
         conversation_id,
         reviewer_id,
     )

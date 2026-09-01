@@ -326,14 +326,19 @@ export interface ConversationWithUser extends Conversation {
   unaddressed_down?: number
   /**
    * True when there's student activity (a new user turn) the
-   * teaching team hasn't seen since the last review. Drives the
+   * current teacher hasn't seen since their last review. Drives the
    * dashboard's "Unreviewed" tab + per-row dot. Per the product
    * call, opening the conversation in the dashboard counts as a
    * review (read == reviewed) and clears this; explicit re-review
-   * is just re-opening. Course-shared (any teacher / TA / owner /
-   * admin clears it for the whole team).
+   * is just re-opening.
    */
   teacher_unreviewed?: boolean
+  /**
+   * Whether a colleague has reviewed the latest student activity.
+   * This does not change `teacher_unreviewed`; the teacher dashboard
+   * uses it only when its "include reads by others" option is off.
+   */
+  reviewed_by_others?: boolean
   /**
    * Timestamp of the most-recent teaching-team review, or null
    * when nobody on the team has opened this conversation since

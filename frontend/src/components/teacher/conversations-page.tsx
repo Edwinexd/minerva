@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -29,7 +30,7 @@ import {
   MarkdownContent,
 } from "@/components/chat/chat-bubble"
 import { ThinkingBlock, type ThinkingBlockLabels } from "@/components/chat/thinking-block"
-import React, { useMemo, useState } from "react"
+import React, { useCallback, useMemo, useState } from "react"
 import type { ConversationFlag, ConversationWithUser, MessageFeedback, TeacherNote } from "@/lib/types"
 import { FEEDBACK_CATEGORIES } from "@/lib/types"
 
@@ -55,6 +56,10 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<"all" | "flagged" | "unreviewed">("all")
+  // A colleague's review is useful for triage, but it must not erase the
+  // current teacher's own read state. Keep the former team-shared behaviour
+  // available as an opt-in filter rather than making it mandatory.
+  const [includeReadByOthers, setIncludeReadByOthers] = useState(false)
   const queryClient = useQueryClient()
   // Sticky membership for the "Unreviewed" tab. Snapshotted on tab
   // entry; rows here stay visible for the rest of the visit even
@@ -64,6 +69,12 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   // next visit reflects ground truth.
   const [stickyUnreviewedIds, setStickyUnreviewedIds] = useState<Set<string>>(
     new Set(),
+  )
+  const isUnreviewedForDisplay = useCallback(
+    (conversation: ConversationWithUser): boolean =>
+      conversation.teacher_unreviewed === true &&
+      (includeReadByOthers || conversation.reviewed_by_others !== true),
+    [includeReadByOthers],
   )
 
   // Seed `stickyUnreviewedIds` when entering the unreviewed tab,
@@ -83,7 +94,7 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
       if (stickyUnreviewedIds.size === 0) {
         const next = new Set<string>()
         for (const c of conversations || []) {
-          if (c.teacher_unreviewed) next.add(c.id)
+          if (isUnreviewedForDisplay(c)) next.add(c.id)
         }
         if (next.size > 0) setStickyUnreviewedIds(next)
       }
@@ -92,11 +103,11 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
     }
   }
 
-  // Mark a conversation as reviewed by the teaching team when the
-  // teacher expands the row. Per the product call "read ==
-  // reviewed"; opening the conversation IS the review. Course-shared
-  // (any teacher / TA / owner / admin's view counts) so the
-  // "Unreviewed" tab and per-row dot clear for the whole team.
+  // Mark a conversation as reviewed by the current teacher when
+  // they expand the row. Per the product call "read == reviewed";
+  // opening the conversation IS the review. Colleagues retain their
+  // own read markers, so the "Unreviewed" tab and per-row dot clear
+  // only for the person who opened it.
   // Extraction-guard flags + unaddressed downvotes are NOT auto-
   // cleared by viewing; they need explicit Acknowledge clicks.
   const markReviewedMutation = useMutation({
@@ -171,8 +182,10 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
           return (b.unaddressed_down ?? 0) - (a.unaddressed_down ?? 0)
         })
     } else if (activeTab === "unreviewed") {
-      // Conversations the teaching team hasn't looked at since
-      // the last student turn. Independent from "flagged"; a
+      // Conversations the current teacher hasn't looked at since
+      // the last student turn. Unless the optional teammate filter
+      // is enabled, omit conversations a colleague has already read.
+      // Independent from "flagged"; a
       // conversation can be unreviewed without being flagged
       // (just a fresh student message with no extraction trip or
       // downvote), and vice versa (an acked flag stays out of
@@ -184,12 +197,23 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
       // out from under the teacher. The sticky set is cleared on
       // leaving the tab; next visit shows ground truth.
       list = list.filter(
-        (c) => c.teacher_unreviewed === true || stickyUnreviewedIds.has(c.id),
+        (c) =>
+          isUnreviewedForDisplay(c) ||
+          (stickyUnreviewedIds.has(c.id) &&
+            (includeReadByOthers || c.reviewed_by_others !== true)),
       )
     }
     return list
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversations, topicConvIds, activeTab, flagKinds, stickyUnreviewedIds])
+  }, [
+    conversations,
+    topicConvIds,
+    activeTab,
+    flagKinds,
+    stickyUnreviewedIds,
+    includeReadByOthers,
+    isUnreviewedForDisplay,
+  ])
 
   const flaggedCount = useMemo(
     () =>
@@ -201,8 +225,8 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   )
 
   const unreviewedCount = useMemo(
-    () => (conversations || []).filter((c) => c.teacher_unreviewed === true).length,
-    [conversations],
+    () => (conversations || []).filter(isUnreviewedForDisplay).length,
+    [conversations, isUnreviewedForDisplay],
   )
 
   const grouped = new Map<string, { label: string; conversations: ConversationWithUser[] }>()
@@ -394,6 +418,19 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
             </Button>
           </div>
 
+          {activeTab === "unreviewed" && (
+            <div className="flex items-center gap-2 text-sm">
+              <Checkbox
+                id="include-read-by-others"
+                checked={includeReadByOthers}
+                onCheckedChange={(checked) => setIncludeReadByOthers(checked === true)}
+              />
+              <Label htmlFor="include-read-by-others" className="cursor-pointer font-normal">
+                {t("conversations.includeReadByOthers")}
+              </Label>
+            </div>
+          )}
+
           {isLoading && (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
@@ -434,9 +471,9 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
                               setExpandedId(next)
                               // Fire mark-reviewed when transitioning to
                               // expanded (not on collapse). Skip if the
-                              // row is already reviewed so we don't churn
-                              // the upsert + invalidate the list for no
-                              // change.
+                              // row is already reviewed by this teacher so
+                              // we don't churn the upsert + invalidate the
+                              // list for no change.
                               if (next !== null && conv.teacher_unreviewed) {
                                 markReviewedMutation.mutate(conv.id)
                               }

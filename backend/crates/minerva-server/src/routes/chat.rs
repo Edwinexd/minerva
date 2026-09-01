@@ -132,10 +132,14 @@ struct ConversationWithFeedbackResponse {
     feedback_down: i64,
     unaddressed_down: i64,
     /// True iff the conversation has activity (a new student
-    /// message) the teaching team hasn't seen since the last
-    /// review. Drives the "Unreviewed" tab + per-row dot on
-    /// the dashboard.
+    /// message) the current teacher hasn't seen since their last
+    /// review. Drives the "Unreviewed" tab + per-row dot on the
+    /// dashboard.
     teacher_unreviewed: bool,
+    /// Whether another teaching-team member has already reviewed
+    /// the current student activity. This is intentionally separate
+    /// from the caller's read status so the UI can make it optional.
+    reviewed_by_others: bool,
     /// Most-recent teaching-team review timestamp, or null when
     /// nobody on the team has opened this conversation. The
     /// migration backfilled existing rows to migration time so
@@ -515,9 +519,10 @@ async fn list_all_conversations(
 ) -> Result<Json<Vec<ConversationWithFeedbackResponse>>, AppError> {
     verify_course_teacher_access(&state, course_id, &user).await?;
 
-    let rows =
-        minerva_db::queries::conversations::list_all_by_course_with_feedback(&state.db, course_id)
-            .await?;
+    let rows = minerva_db::queries::conversations::list_all_by_course_with_feedback(
+        &state.db, course_id, user.id,
+    )
+    .await?;
     let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
 
     Ok(Json(
@@ -551,6 +556,7 @@ async fn list_all_conversations(
                     feedback_down: r.feedback_down,
                     unaddressed_down: r.unaddressed_down,
                     teacher_unreviewed: r.teacher_unreviewed,
+                    reviewed_by_others: r.reviewed_by_others,
                     last_reviewed_at: r.last_reviewed_at,
                     last_reviewed_by: r.last_reviewed_by,
                     last_reviewer_display_name,
@@ -1969,9 +1975,9 @@ async fn set_feedback(
 /// One endpoint, two semantics based on caller role:
 ///   * Conversation owner -> bumps `conversations.student_last_viewed_at`
 ///     so the chat sidebar's unread dot clears.
-///   * Teacher / TA / owner / admin -> upserts `conversation_reviews`
-///     so the dashboard's "Unreviewed" tab and per-row dot clear
-///     (course-shared; any team member's view counts).
+///   * Teacher / TA / owner / admin -> upserts their own
+///     `conversation_reviews` marker so the dashboard's
+///     "Unreviewed" tab and per-row dot clear for that teacher.
 ///   * If the caller happens to be BOTH the owner AND a teacher
 ///     (e.g. an admin opening a chat they themselves authored on
 ///     a course they teach), both markers are stamped; neither

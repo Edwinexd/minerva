@@ -52,7 +52,7 @@ candle-core = "0.11"
 # via fastembed's `UserDefinedEmbeddingModel` API) can fetch model files from
 # the Hub. Pinned to the same major as fastembed's transitive copy so cargo
 # doesn't compile two versions side-by-side.
-hf-hub = "1.0"
+hf-hub = { version = "1.0", features = ["blocking"] }
 
 # LLM / Embeddings (HTTP)
 reqwest = { version = "0.13", features = ["json", "stream"] }
@@ -65,7 +65,7 @@ hex = "0.4"
 rand = "0.10"
 jsonwebtoken = { version = "11", features = ["rust_crypto"] }
 rsa = "0.9"
-rand_chacha = "0.9"
+rand_chacha = "0.3"
 urlencoding = "2"
 
 # Utilities
@@ -87,7 +87,8 @@ tempfile = "3"
 # matching minors so the generated client/server types from `prost-build`
 # at build time stay ABI-compatible with the `tonic` runtime crate.
 tonic = "0.14"
-tonic-build = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
 prost = "0.14"
 
 # Observability. `metrics` is the lightweight facade any crate emits

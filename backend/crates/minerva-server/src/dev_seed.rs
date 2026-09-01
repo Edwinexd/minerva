@@ -709,8 +709,20 @@ async fn delete_by_uuid_pk(
         return Ok(0);
     }
     let uuid_vec: Vec<Uuid> = uuids.into_iter().collect();
-    let sql = format!("DELETE FROM {table} WHERE id = ANY($1)");
-    let result = sqlx::query(&sql).bind(&uuid_vec).execute(db).await?;
+    let sql: &'static str = match table {
+        "messages" => "DELETE FROM messages WHERE id = ANY($1)",
+        "conversations" => "DELETE FROM conversations WHERE id = ANY($1)",
+        "documents" => "DELETE FROM documents WHERE id = ANY($1)",
+        "external_auth_invites" => "DELETE FROM external_auth_invites WHERE id = ANY($1)",
+        "courses" => "DELETE FROM courses WHERE id = ANY($1)",
+        "users" => "DELETE FROM users WHERE id = ANY($1)",
+        other => {
+            return Err(sqlx::Error::InvalidArgument(format!(
+                "dev_seed: table {other} is not in the UUID-pk allow-list"
+            )));
+        }
+    };
+    let result = sqlx::query(sql).bind(&uuid_vec).execute(db).await?;
     Ok(result.rows_affected())
 }
 

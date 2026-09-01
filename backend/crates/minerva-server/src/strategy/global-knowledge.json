@@ -1,0 +1,11 @@
+{
+  "sources": [
+    {
+      "id": "data-handling",
+      "route": "/data-handling",
+      "minSimilarity": 0.45,
+      "contentFile": "../../../../../frontend/src/i18n/locales/en/common.json",
+      "contentKey": "dataHandling"
+    }
+  ]
+}

@@ -137,13 +137,23 @@ pub async fn run(
     tool_log: &str,
     tx: &mpsc::Sender<Result<Event, AppError>>,
 ) -> Result<WriteupOutput, AppError> {
-    let system = build_writeup_system_prompt(
+    let mut system = build_writeup_system_prompt(
         &ctx.course_name,
         &ctx.custom_prompt,
         chunks,
         research_transcript,
         tool_log,
     );
+    let global_knowledge = common::retrieve_global_knowledge(
+        &reqwest::Client::new(),
+        &ctx.openai_api_key,
+        &ctx.fastembed,
+        &ctx.user_content,
+        &ctx.embedding_provider,
+        &ctx.embedding_model,
+    )
+    .await;
+    common::append_global_knowledge(&mut system, &global_knowledge);
     let messages = compose_messages(&system, ctx);
 
     let mut full_text = String::new();

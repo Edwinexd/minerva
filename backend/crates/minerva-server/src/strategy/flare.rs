@@ -222,6 +222,15 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         .map(|g| g.flagged_this_turn)
         .unwrap_or(false);
 
+    let global_knowledge = common::retrieve_global_knowledge(
+        &http_client,
+        &ctx.openai_api_key,
+        &ctx.fastembed,
+        &ctx.user_content,
+        &ctx.embedding_provider,
+        &ctx.embedding_model,
+    )
+    .await;
     let loop_cfg = RunLoopConfig {
         course_name: &ctx.course_name,
         custom_prompt: &ctx.custom_prompt,
@@ -234,6 +243,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         daily_token_limit: ctx.daily_token_budget,
         unclassified_doc_ids,
         kg_enabled: ctx.kg_enabled,
+        global_knowledge,
     };
     let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
     // Shared with the inner-loop closure: every mid-stream FLARE
@@ -407,6 +417,8 @@ struct RunLoopConfig<'a> {
     /// inner loop's `partition_chunks` and adversarial-filter calls
     /// honour the gate without re-resolving the flag mid-stream.
     kg_enabled: bool,
+    /// Whether this turn needs the otherwise on-demand disclosure context.
+    global_knowledge: Vec<common::GlobalKnowledgeSource>,
 }
 
 /// Final state of a FLARE run. Returned by `run_loop` so the caller can
@@ -540,12 +552,13 @@ where
             &cfg.unclassified_doc_ids,
             cfg.kg_enabled,
         );
-        let system = common::build_system_prompt_with_signals(
+        let mut system = common::build_system_prompt_with_signals(
             cfg.course_name,
             cfg.custom_prompt,
             &rag.context,
             &rag.signals,
         );
+        common::append_global_knowledge(&mut system, &cfg.global_knowledge);
         let mut messages = common::build_chat_messages(&system, cfg.history);
 
         if !full_text.is_empty() {
@@ -2296,6 +2309,7 @@ mod loop_regression_tests {
             daily_token_limit: 0, // unlimited, so we don't short-circuit on token cap
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
+            global_knowledge: Vec::new(),
         };
 
         let http = reqwest::Client::new();
@@ -2361,6 +2375,7 @@ mod loop_regression_tests {
             daily_token_limit: 500,
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
+            global_knowledge: Vec::new(),
         };
 
         let http = reqwest::Client::new();
@@ -2426,6 +2441,7 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
+            global_knowledge: Vec::new(),
         };
 
         let http = reqwest::Client::new();
@@ -2508,6 +2524,7 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
+            global_knowledge: Vec::new(),
         };
 
         let retrieve_count = StdArc::new(AtomicUsize::new(0));
@@ -2586,6 +2603,7 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
+            global_knowledge: Vec::new(),
         };
 
         let retrieve_count = StdArc::new(AtomicUsize::new(0));
@@ -2659,6 +2677,7 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
+            global_knowledge: Vec::new(),
         };
 
         let call = StdArc::new(AtomicUsize::new(0));
@@ -2788,6 +2807,7 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
+            global_knowledge: Vec::new(),
         };
 
         let http = reqwest::Client::new();
@@ -2875,6 +2895,7 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
+            global_knowledge: Vec::new(),
         };
 
         let http = reqwest::Client::new();

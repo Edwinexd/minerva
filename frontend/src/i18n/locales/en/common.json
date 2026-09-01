@@ -184,7 +184,7 @@
     },
     "whereMessagesGo": {
       "heading": "Where your messages go",
-      "cerebras": "Chat messages and relevant course-material excerpts are sent to <strong>Cerebras</strong> for AI inference.",
+      "cerebras": "Chat messages and relevant course-material excerpts are sent to the configured AI-inference provider: <strong>Cerebras</strong> or <strong>OpenAI</strong>.",
       "openai": "If your course's teacher has enabled OpenAI embeddings, your questions are additionally sent to <strong>OpenAI</strong> to compute a search vector. Otherwise embeddings run locally on the Minerva server.",
       "nothingElse": "Nothing else leaves the Minerva server."
     },

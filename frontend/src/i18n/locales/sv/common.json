@@ -184,7 +184,7 @@
     },
     "whereMessagesGo": {
       "heading": "Vart dina meddelanden går",
-      "cerebras": "Chattmeddelanden och relevanta utdrag ur kursmaterialet skickas till <strong>Cerebras</strong> för AI-inferens.",
+      "cerebras": "Chattmeddelanden och relevanta utdrag ur kursmaterialet skickas till den konfigurerade leverantören för AI-inferens: <strong>Cerebras</strong> eller <strong>OpenAI</strong>.",
       "openai": "Om din kurs lärare har aktiverat OpenAI-embeddings skickas dina frågor dessutom till <strong>OpenAI</strong> för att beräkna en sökvektor. Annars körs embeddings lokalt på Minerva-servern.",
       "nothingElse": "Inget annat lämnar Minerva-servern."
     },

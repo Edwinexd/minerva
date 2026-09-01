@@ -3,6 +3,7 @@ use minerva_core::rpc::{EmbedderClient, RerankerClient};
 use qdrant_client::qdrant::{ScoredPoint, SearchPointsBuilder};
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tokio::sync::mpsc;
 
 use crate::classification::prompts::{ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE, PASTED_PROBLEM_RULE};
@@ -593,6 +594,199 @@ pub fn build_system_prompt_with_signals(
     }
 
     prompt
+}
+
+/// Global, non-course knowledge is declared here rather than in a chat
+/// strategy. Adding a source requires only a manifest entry and localized
+/// content; it never creates a course document.
+const GLOBAL_KNOWLEDGE_MANIFEST: &str =
+    include_str!(concat!(env!("OUT_DIR"), "/global-knowledge.resolved.json"));
+static GLOBAL_KNOWLEDGE_SOURCES: OnceLock<Vec<GlobalKnowledgeSource>> = OnceLock::new();
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GlobalKnowledgeManifest {
+    sources: Vec<GlobalKnowledgeManifestEntry>,
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GlobalKnowledgeManifestEntry {
+    id: String,
+    route: String,
+    min_similarity: f32,
+    content: serde_json::Value,
+}
+#[derive(Clone, Debug)]
+pub struct GlobalKnowledgeSource {
+    pub id: String,
+    pub route: String,
+    pub content: String,
+    min_similarity: f32,
+}
+
+fn global_knowledge_sources() -> &'static [GlobalKnowledgeSource] {
+    GLOBAL_KNOWLEDGE_SOURCES.get_or_init(|| {
+        let manifest: GlobalKnowledgeManifest = serde_json::from_str(GLOBAL_KNOWLEDGE_MANIFEST)
+            .expect("global knowledge manifest must be valid");
+        manifest
+            .sources
+            .into_iter()
+            .map(|entry| {
+                let mut content = String::new();
+                flatten_policy_text(&entry.content, &mut content);
+                GlobalKnowledgeSource {
+                    id: entry.id,
+                    route: entry.route,
+                    content,
+                    min_similarity: entry.min_similarity,
+                }
+            })
+            .collect()
+    })
+}
+
+fn flatten_policy_text(value: &serde_json::Value, output: &mut String) {
+    match value {
+        serde_json::Value::String(text) => {
+            output.push_str(text);
+            output.push('\n');
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                flatten_policy_text(value, output);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            for value in values.values() {
+                flatten_policy_text(value, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// One immutable policy embedding per `(provider, model)` for the lifetime of
+/// the process. The user's query still embeds per turn; only the static
+/// reference text is cached.
+type GlobalKnowledgeEmbeddingCache =
+    tokio::sync::Mutex<std::collections::HashMap<(String, String, String), Vec<f32>>>;
+static GLOBAL_KNOWLEDGE_EMBEDDING_CACHE: OnceLock<GlobalKnowledgeEmbeddingCache> = OnceLock::new();
+
+fn global_knowledge_embedding_cache() -> &'static GlobalKnowledgeEmbeddingCache {
+    GLOBAL_KNOWLEDGE_EMBEDDING_CACHE.get_or_init(|| tokio::sync::Mutex::new(Default::default()))
+}
+
+/// Retrieve the hidden policy semantically with the same embedding provider
+/// and model as the active course. This avoids a keyword classifier and keeps
+/// the policy out of both the course's document list and Qdrant collection.
+#[allow(clippy::too_many_arguments)]
+pub async fn retrieve_global_knowledge(
+    client: &reqwest::Client,
+    openai_key: &str,
+    fastembed: &Arc<dyn EmbedderClient>,
+    query: &str,
+    embedding_provider: &str,
+    embedding_model: &str,
+) -> Vec<GlobalKnowledgeSource> {
+    let query_embedding = if embedding_provider == "local" {
+        let query = minerva_catalog::format_query_for_model(embedding_model, query);
+        match fastembed.embed_query(embedding_model, vec![query]).await {
+            Ok(vectors) => vectors,
+            Err(error) => {
+                tracing::warn!(%error, "data-handling semantic retrieval failed");
+                return Vec::new();
+            }
+        }
+    } else {
+        match minerva_pipeline::embedder::embed_texts(client, openai_key, &[query.to_string()])
+            .await
+        {
+            Ok(result) => result.embeddings,
+            Err(error) => {
+                tracing::warn!(%error, "data-handling semantic retrieval failed");
+                return Vec::new();
+            }
+        }
+    };
+
+    let Some(query_embedding) = query_embedding.first() else {
+        return Vec::new();
+    };
+    let mut matches = Vec::new();
+    for source in global_knowledge_sources() {
+        let cache_key = (
+            embedding_provider.to_string(),
+            embedding_model.to_string(),
+            source.id.clone(),
+        );
+        let policy_embedding = if let Some(embedding) = global_knowledge_embedding_cache()
+            .lock()
+            .await
+            .get(&cache_key)
+            .cloned()
+        {
+            embedding
+        } else {
+            let embedded = if embedding_provider == "local" {
+                fastembed
+                    .embed(embedding_model, vec![source.content.clone()])
+                    .await
+            } else {
+                minerva_pipeline::embedder::embed_texts(
+                    client,
+                    openai_key,
+                    std::slice::from_ref(&source.content),
+                )
+                .await
+                .map(|result| result.embeddings)
+            };
+            let Some(embedding) = embedded.ok().and_then(|mut vectors| vectors.pop()) else {
+                tracing::warn!("data-handling policy embedding failed");
+                continue;
+            };
+            global_knowledge_embedding_cache()
+                .lock()
+                .await
+                .insert(cache_key, embedding.clone());
+            embedding
+        };
+
+        if cosine_similarity(query_embedding, &policy_embedding) >= source.min_similarity {
+            matches.push(source.clone());
+        }
+    }
+    matches
+}
+
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+    let (dot, left_norm, right_norm) = left.iter().zip(right).fold(
+        (0.0_f32, 0.0_f32, 0.0_f32),
+        |(dot, left_norm, right_norm), (left, right)| {
+            (
+                dot + left * right,
+                left_norm + left * left,
+                right_norm + right * right,
+            )
+        },
+    );
+    let denominator = left_norm.sqrt() * right_norm.sqrt();
+    if denominator == 0.0 {
+        0.0
+    } else {
+        dot / denominator
+    }
+}
+
+pub fn append_global_knowledge(prompt: &mut String, sources: &[GlobalKnowledgeSource]) {
+    for source in sources {
+        prompt.push_str("\n\n## Global Minerva information\n");
+        prompt.push_str(
+            "This is not course material: do not cite it as a course document. Refer the user to `",
+        );
+        prompt.push_str(&source.route);
+        prompt.push_str("` for the full, current information.\n\n");
+        prompt.push_str(&source.content);
+    }
 }
 
 /// Maximum number of source docs we expand via the KG. Picking the
@@ -1383,6 +1577,12 @@ mod tests {
     fn build_system_prompt_includes_pasted_problem_rule() {
         let prompt = build_system_prompt("Algorithms", &None, &[]);
         assert!(prompt.contains("pasted verbatim"));
+    }
+
+    #[test]
+    fn cosine_similarity_handles_parallel_and_orthogonal_vectors() {
+        assert_eq!(cosine_similarity(&[1.0, 0.0], &[2.0, 0.0]), 1.0);
+        assert_eq!(cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]), 0.0);
     }
 
     #[test]

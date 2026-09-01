@@ -156,12 +156,22 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let client_chunks = common::chunks_for_client(&displayed, &hidden);
     let chunks_json = serde_json::to_value(&client_chunks).ok();
 
-    let system = common::build_system_prompt_with_signals(
+    let mut system = common::build_system_prompt_with_signals(
         &ctx.course_name,
         &ctx.custom_prompt,
         &rag.context,
         &rag.signals,
     );
+    let global_knowledge = common::retrieve_global_knowledge(
+        &http_client,
+        &ctx.openai_api_key,
+        &ctx.fastembed,
+        &ctx.user_content,
+        &ctx.embedding_provider,
+        &ctx.embedding_model,
+    )
+    .await;
+    common::append_global_knowledge(&mut system, &global_knowledge);
     let messages = common::build_chat_messages(&system, &ctx.history);
 
     let mut full_text = String::new();

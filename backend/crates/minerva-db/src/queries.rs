@@ -3,6 +3,7 @@ pub mod canvas;
 pub mod chat_models;
 pub mod conversation_flags;
 pub mod conversations;
+pub mod course_conversation_topics;
 pub mod course_daisy_offerings;
 pub mod course_schedule_events;
 pub mod course_suggested_questions;

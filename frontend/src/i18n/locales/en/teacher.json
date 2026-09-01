@@ -162,9 +162,12 @@
     "helpful": "helpful",
     "flagged": "flagged",
     "popularTopicsTitle": "Popular Topics",
-    "popularTopicsDescription": "Common themes extracted from student messages across all conversations",
+    "popularTopicsDescription": "Common terms extracted from student messages across all conversations",
+    "semanticTopicsTitle": "Student question themes",
+    "semanticTopicsDescription": "Recurring needs identified from embedding clusters in recent student questions. Select a theme to inspect the conversations behind it.",
     "topicPlaceholder": "Filter by topic...",
     "topicOption": "{{topic}} ({{convos}} convos, {{users}} students)",
+    "topicReach": "{{convos}} conversations · {{users}} students",
     "clearFilter": "Clear filter",
     "topicStats": "{{convos}} conversations, {{users}} students, {{messages}} total messages",
     "studentConversations": "Student Conversations",
@@ -213,8 +216,8 @@
     }
   },
   "kgTokenUsage": {
-    "title": "Knowledge-graph token usage",
-    "subtitle": "Tokens spent on classifier / linker / guard since {{since}}. Embeddings excluded.",
+    "title": "Utility-model token usage",
+    "subtitle": "Tokens spent on classification, analysis, and guard tasks since {{since}}. Embeddings excluded.",
     "loading": "Loading...",
     "empty": "No token usage recorded in this window.",
     "colCategory": "Category",
@@ -227,7 +230,10 @@
       "document_classifier": "Document classifier",
       "linker": "Graph linker",
       "adversarial_filter": "Adversarial filter",
-      "extraction_guard": "Extraction guard"
+      "extraction_guard": "Extraction guard",
+      "aegis": "Prompt coach",
+      "suggested_questions": "Suggested questions",
+      "conversation_topics": "Student question themes"
     }
   },
   "documents": {

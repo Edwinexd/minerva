@@ -123,6 +123,7 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
     () => topics?.find((t) => t.topic === selectedTopic) ?? null,
     [topics, selectedTopic],
   )
+  const semanticTopics = topics?.some((topic) => topic.summary.trim().length > 0) === true
 
   const topicConvIds = useMemo(
     () => activeTopic ? new Set(activeTopic.conversation_ids) : null,
@@ -250,29 +251,76 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
       {!topicsLoading && topics && topics.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">{t("conversations.popularTopicsTitle")}</CardTitle>
+            <CardTitle className="text-base">
+              {t(semanticTopics
+                ? "conversations.semanticTopicsTitle"
+                : "conversations.popularTopicsTitle")}
+            </CardTitle>
             <CardDescription>
-              {t("conversations.popularTopicsDescription")}
+              {t(semanticTopics
+                ? "conversations.semanticTopicsDescription"
+                : "conversations.popularTopicsDescription")}
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap items-center gap-3">
+          <CardContent className="space-y-3">
+            {semanticTopics ? (
+              <div className="grid gap-2 md:grid-cols-2">
+                {topics.map((topic) => {
+                  const active = selectedTopic === topic.topic
+                  return (
+                    <Button
+                      key={topic.topic}
+                      type="button"
+                      variant={active ? "secondary" : "outline"}
+                      aria-pressed={active}
+                      className="h-auto min-h-20 w-full items-start justify-start whitespace-normal p-3 text-left"
+                      onClick={() => setSelectedTopic(active ? null : topic.topic)}
+                    >
+                      <span className="min-w-0 space-y-1">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{topic.topic}</span>
+                          <Badge variant="secondary" className="font-normal">
+                            {t("conversations.topicReach", {
+                              convos: topic.conversation_count,
+                              users: topic.unique_users,
+                            })}
+                          </Badge>
+                        </span>
+                        <span className="block text-sm font-normal text-muted-foreground">
+                          {topic.summary}
+                        </span>
+                      </span>
+                    </Button>
+                  )
+                })}
+              </div>
+            ) : (
               <Select
                 value={selectedTopic ?? ""}
-                onValueChange={(v) => setSelectedTopic(v || null)}
+                onValueChange={(value) => setSelectedTopic(value || null)}
               >
-                <SelectTrigger className="w-full sm:w-72" aria-label={t("conversations.topicPlaceholder")}>
+                <SelectTrigger
+                  className="w-full sm:w-72"
+                  aria-label={t("conversations.topicPlaceholder")}
+                >
                   <SelectValue placeholder={t("conversations.topicPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   {topics.map((topic) => (
                     <SelectItem key={topic.topic} value={topic.topic}>
-                      {t("conversations.topicOption", { topic: topic.topic, convos: topic.conversation_count, users: topic.unique_users })}
+                      {t("conversations.topicOption", {
+                        topic: topic.topic,
+                        convos: topic.conversation_count,
+                        users: topic.unique_users,
+                      })}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {selectedTopic && (
+            )}
+            {activeTopic && (
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>{t("conversations.topicStats", { convos: activeTopic.conversation_count, users: activeTopic.unique_users, messages: activeTopic.total_messages })}</span>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -280,11 +328,6 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
                 >
                   {t("conversations.clearFilter")}
                 </Button>
-              )}
-            </div>
-            {activeTopic && (
-              <div className="text-sm text-muted-foreground">
-                {t("conversations.topicStats", { convos: activeTopic.conversation_count, users: activeTopic.unique_users, messages: activeTopic.total_messages })}
               </div>
             )}
           </CardContent>
@@ -296,8 +339,9 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
             <Skeleton className="h-5 w-40" />
             <Skeleton className="h-4 w-64 mt-1" />
           </CardHeader>
-          <CardContent>
-            <Skeleton className="h-10 w-full sm:w-72" />
+          <CardContent className="grid gap-2 md:grid-cols-2">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
           </CardContent>
         </Card>
       )}

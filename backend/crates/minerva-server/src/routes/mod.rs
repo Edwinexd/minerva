@@ -2,6 +2,7 @@ mod admin;
 mod api_keys;
 pub(crate) mod canvas;
 mod chat;
+mod conversation_topics;
 mod courses;
 mod daisy_admin;
 mod dev;

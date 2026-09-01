@@ -60,6 +60,7 @@ const KNOWN_FEATURE_FLAGS = [
   "extraction_guard",
   "aegis",
   "concept_graph",
+  "semantic_topics",
 ] as const
 type FeatureFlagName = (typeof KNOWN_FEATURE_FLAGS)[number]
 
@@ -372,6 +373,9 @@ function CourseFeatureFlagsCell({
       // course-edit-page tab gate) pick up the change.
       queryClient.invalidateQueries({ queryKey: ["courses"] })
       queryClient.invalidateQueries({ queryKey: ["courses", courseId] })
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "conversations", "topics"],
+      })
     },
   })
 

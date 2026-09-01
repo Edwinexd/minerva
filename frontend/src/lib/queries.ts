@@ -313,6 +313,7 @@ export const popularTopicsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", "topics"],
     queryFn: () => api.get<TopicGroup[]>(`/courses/${courseId}/conversations/topics`),
+    staleTime: 5 * 60 * 1000,
   })
 
 export const courseFeedbackStatsQuery = (courseId: string) =>

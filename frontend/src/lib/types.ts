@@ -612,6 +612,7 @@ export interface Message {
 
 export interface TopicGroup {
   topic: string
+  summary: string
   conversation_count: number
   unique_users: number
   total_messages: number

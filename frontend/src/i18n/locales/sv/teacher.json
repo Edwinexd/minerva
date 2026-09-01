@@ -160,9 +160,12 @@
     "helpful": "hjälpsamma",
     "flagged": "flaggade",
     "popularTopicsTitle": "Populära ämnen",
-    "popularTopicsDescription": "Vanliga teman som extraherats från studentmeddelanden i alla konversationer",
+    "popularTopicsDescription": "Vanliga termer som extraherats från studentmeddelanden i alla konversationer",
+    "semanticTopicsTitle": "Teman i studentfrågor",
+    "semanticTopicsDescription": "Återkommande behov som identifierats från embeddingkluster i aktuella studentfrågor. Välj ett tema för att se konversationerna bakom det.",
     "topicPlaceholder": "Filtrera efter ämne...",
     "topicOption": "{{topic}} ({{convos}} konv., {{users}} studenter)",
+    "topicReach": "{{convos}} konversationer · {{users}} studenter",
     "clearFilter": "Rensa filter",
     "topicStats": "{{convos}} konversationer, {{users}} studenter, {{messages}} meddelanden totalt",
     "studentConversations": "Studentkonversationer",
@@ -211,8 +214,8 @@
     }
   },
   "kgTokenUsage": {
-    "title": "Tokenförbrukning för kunskapsgrafen",
-    "subtitle": "Tokens som klassificerare / länkare / skydd har förbrukat sedan {{since}}. Embeddings exkluderas.",
+    "title": "Tokenförbrukning för verktygsmodellen",
+    "subtitle": "Tokens som klassificering, analys och skydd har förbrukat sedan {{since}}. Embeddings exkluderas.",
     "loading": "Laddar...",
     "empty": "Ingen tokenförbrukning registrerad i detta intervall.",
     "colCategory": "Kategori",
@@ -225,7 +228,10 @@
       "document_classifier": "Dokumentklassificerare",
       "linker": "Graflänkare",
       "adversarial_filter": "Adversariellt filter",
-      "extraction_guard": "Extraktionsskydd"
+      "extraction_guard": "Extraktionsskydd",
+      "aegis": "Promptcoach",
+      "suggested_questions": "Föreslagna frågor",
+      "conversation_topics": "Teman i studentfrågor"
     }
   },
   "documents": {

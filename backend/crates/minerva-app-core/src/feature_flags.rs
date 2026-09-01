@@ -50,6 +50,13 @@ pub const FLAG_AEGIS: &str = "aegis";
 /// drop the persisted graph; it just hides the admin endpoints.
 pub const FLAG_CONCEPT_GRAPH: &str = "concept_graph";
 
+/// Embeddings-first semantic themes on the teacher conversation dashboard.
+/// When disabled, the endpoint retains the original zero-cost n-gram topics.
+/// When enabled, conversation embeddings form candidate clusters and the
+/// utility LLM only labels/summarizes those clusters. Opt-in while cost and
+/// cluster quality are evaluated on real courses.
+pub const FLAG_SEMANTIC_TOPICS: &str = "semantic_topics";
+
 /// All flags the application currently knows about. The admin UI
 /// uses this to enumerate available toggles per course; new flags
 /// must be added here AND have a `pub const` above.
@@ -58,6 +65,7 @@ pub const ALL_FLAGS: &[&str] = &[
     FLAG_EXTRACTION_GUARD,
     FLAG_AEGIS,
     FLAG_CONCEPT_GRAPH,
+    FLAG_SEMANTIC_TOPICS,
 ];
 
 /// True iff the KG bundle is enabled for this course. Resolution:
@@ -158,6 +166,30 @@ pub async fn concept_graph_enabled(db: &PgPool, course_id: Uuid) -> bool {
                 "feature_flags: concept_graph lookup for course {} failed ({}); treating as disabled",
                 course_id,
                 e,
+            );
+            false
+        }
+    }
+}
+
+/// True iff the embeddings + LLM conversation-theme pipeline is enabled.
+/// Defaults and fails closed so the original n-gram implementation remains
+/// the baseline and an unhealthy flag store can never trigger model spend.
+pub async fn semantic_topics_enabled(db: &PgPool, course_id: Uuid) -> bool {
+    match minerva_db::queries::feature_flags::is_enabled_for_course(
+        db,
+        FLAG_SEMANTIC_TOPICS,
+        course_id,
+        false,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(
+                "feature_flags: semantic_topics lookup for course {} failed ({}); treating as disabled",
+                course_id,
+                error,
             );
             false
         }

@@ -84,6 +84,7 @@ import { UserManagementPanel } from "@/components/admin/users-page"
 import { ConfigPage } from "@/components/teacher/config-page"
 import { DocumentsPage } from "@/components/teacher/documents-page"
 import { MembersPage } from "@/components/teacher/members-page"
+import { ConversationsPage } from "@/components/teacher/conversations-page"
 import { NewChatRouteComponent } from "@/components/chat/chat-page"
 import { TeacherHelpPage } from "@/components/teacher-help-page"
 import { CourseManagementPanel } from "@/components/admin/courses-page"
@@ -390,6 +391,35 @@ describe("Authenticated pages a11y", () => {
       ],
     )
     expect(getByText("What is recursion?")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("teacher conversation themes have no axe violations", async () => {
+    const { container, getByText } = renderPage(
+      <ConversationsPage useParams={useParams} />,
+      [
+        [queries.allConversationsQuery(COURSE_ID).queryKey, []],
+        [
+          queries.popularTopicsQuery(COURSE_ID).queryKey,
+          [
+            {
+              topic: "Data storage architecture",
+              summary: "Students need clarification on how course data is persisted.",
+              conversation_count: 3,
+              unique_users: 2,
+              total_messages: 8,
+              conversation_ids: ["conversation-1", "conversation-2", "conversation-3"],
+            },
+          ],
+        ],
+        [
+          queries.courseFeedbackStatsQuery(COURSE_ID).queryKey,
+          { total_up: 0, total_down: 0, categories: [] },
+        ],
+        [queries.conversationFlagKindsQuery(COURSE_ID).queryKey, {}],
+      ],
+    )
+    expect(getByText("Data storage architecture")).toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
   })
 

@@ -31,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Package Moodle plugin
         run: |
@@ -48,11 +50,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: prod
     env:
-      IMAGE_TAG: ${{ github.event.client_payload.tag || inputs.image_tag || 'latest' }}
+      # Automatic deploys use the immutable full-SHA tag published by the
+      # Docker workflow. This makes ReplicaSet history meaningful: rollout undo
+      # must not resolve an old pod template through today's mutable `latest`.
+      IMAGE_TAG: ${{ github.event_name == 'workflow_run' && format('sha-{0}', github.event.workflow_run.head_sha) || github.event.client_payload.tag || inputs.image_tag || 'latest' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # A workflow_run executes in the default branch context, which may
+          # have advanced since the image build. Deploy manifests from the same
+          # commit whose immutable image tag is selected above.
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set image tag in kustomization
         # Rewrites every `newTag:` line in the prod overlay so all five

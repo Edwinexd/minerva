@@ -91,7 +91,7 @@ Rules:
 
 Return JSON only."#;
 
-pub async fn popular_topics(
+pub async fn conversation_themes(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
@@ -115,12 +115,6 @@ pub async fn popular_topics(
             )
         })
         .collect();
-
-    // Default-off feature gate. This branch is the original implementation:
-    // no embeddings, no utility model, and no model-related spend.
-    if !crate::feature_flags::semantic_topics_enabled(&state.db, course_id).await {
-        return Ok(Json(legacy_topics(&messages, &conversations)));
-    }
 
     let (source, source_ids) = build_source(&messages, &conversations);
     if source_ids.len() < 2 {
@@ -149,11 +143,7 @@ pub async fn popular_topics(
     }
     if utility.provider.is_none() {
         tracing::warn!(%course_id, "semantic topics skipped: no utility model configured");
-        return Ok(Json(fallback_topics(
-            cached.as_ref(),
-            &messages,
-            &conversations,
-        )));
+        return Ok(Json(cached_topics(cached.as_ref())));
     }
 
     let texts: Vec<String> = source
@@ -169,19 +159,11 @@ pub async fn popular_topics(
                 actual = vectors.len(),
                 "semantic topics embedder returned wrong vector count"
             );
-            return Ok(Json(fallback_topics(
-                cached.as_ref(),
-                &messages,
-                &conversations,
-            )));
+            return Ok(Json(cached_topics(cached.as_ref())));
         }
         Err(error) => {
             tracing::warn!(%course_id, %error, "semantic topics embedding failed");
-            return Ok(Json(fallback_topics(
-                cached.as_ref(),
-                &messages,
-                &conversations,
-            )));
+            return Ok(Json(cached_topics(cached.as_ref())));
         }
     };
 
@@ -228,12 +210,7 @@ pub async fn popular_topics(
     }
 
     // Provider outages should not blank a previously useful dashboard card.
-    Ok(Json(
-        cached
-            .as_ref()
-            .and_then(|row| parse_cache(&row.topics))
-            .unwrap_or_else(|| legacy_topics(&messages, &conversations)),
-    ))
+    Ok(Json(cached_topics(cached.as_ref())))
 }
 
 fn request_body(model: &str, clusters_json: &str) -> serde_json::Value {
@@ -582,273 +559,14 @@ fn parse_cache(value: &serde_json::Value) -> Option<Vec<TopicResponse>> {
     serde_json::from_value(value.clone()).ok()
 }
 
-// Original zero-cost topic extraction, retained as the default path while the
-// embeddings + LLM version is piloted behind `semantic_topics`.
-const LEGACY_STOP_WORDS: &[&str] = &[
-    "a",
-    "an",
-    "the",
-    "and",
-    "or",
-    "but",
-    "in",
-    "on",
-    "at",
-    "to",
-    "for",
-    "of",
-    "with",
-    "by",
-    "from",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "do",
-    "does",
-    "did",
-    "will",
-    "would",
-    "could",
-    "should",
-    "may",
-    "might",
-    "shall",
-    "can",
-    "cannot",
-    "not",
-    "no",
-    "it",
-    "its",
-    "i",
-    "me",
-    "my",
-    "we",
-    "our",
-    "you",
-    "your",
-    "he",
-    "she",
-    "they",
-    "them",
-    "their",
-    "this",
-    "that",
-    "these",
-    "those",
-    "what",
-    "which",
-    "who",
-    "whom",
-    "how",
-    "when",
-    "where",
-    "why",
-    "if",
-    "then",
-    "than",
-    "so",
-    "as",
-    "about",
-    "up",
-    "out",
-    "just",
-    "also",
-    "some",
-    "any",
-    "all",
-    "each",
-    "every",
-    "more",
-    "much",
-    "many",
-    "very",
-    "too",
-    "other",
-    "into",
-    "over",
-    "after",
-    "before",
-    "between",
-    "through",
-    "during",
-    "there",
-    "here",
-    "help",
-    "question",
-    "explain",
-    "understand",
-    "need",
-    "want",
-    "know",
-    "tell",
-    "please",
-    "thanks",
-    "hi",
-    "hello",
-    "hey",
-    "like",
-    "get",
-    "make",
-    "use",
-    "using",
-    "used",
-    "way",
-    "don",
-    "doesn",
-    "didn",
-    "won",
-    "wouldn",
-    "couldn",
-    "shouldn",
-    "isn",
-    "aren",
-    "wasn",
-    "weren",
-    "hasn",
-    "haven",
-    "hadn",
-    "can",
-    "im",
-    "ive",
-    "youre",
-    "thing",
-    "things",
-    "something",
-    "anything",
-    "nothing",
-    "everything",
-    "really",
-    "actually",
-    "basically",
-    "think",
-    "going",
-    "try",
-    "trying",
-    "work",
-    "working",
-    "works",
-    "example",
-    "different",
-    "same",
-    "new",
-];
-
-fn legacy_tokenize(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .split(|character: char| !character.is_alphanumeric() && character != '\'')
-        .filter(|word| word.len() > 2)
-        .map(|word| word.trim_matches('\'').to_string())
-        .filter(|word| word.len() > 2)
-        .collect()
-}
-
-fn legacy_topics(
-    messages: &[minerva_db::queries::conversations::ConversationMessageTextRow],
-    conversations: &[minerva_db::queries::conversations::ConversationWithUserRow],
-) -> Vec<TopicResponse> {
-    let metadata: HashMap<Uuid, (Uuid, i64)> = conversations
-        .iter()
-        .map(|conversation| {
-            (
-                conversation.id,
-                (
-                    conversation.user_id,
-                    conversation.message_count.unwrap_or(0),
-                ),
-            )
-        })
-        .collect();
-    let stop_words: HashSet<&str> = LEGACY_STOP_WORDS.iter().copied().collect();
-    let mut conversation_tokens: HashMap<Uuid, HashSet<String>> = HashMap::new();
-    for message in messages {
-        let tokens = legacy_tokenize(&message.content);
-        let entry = conversation_tokens
-            .entry(message.conversation_id)
-            .or_default();
-        for token in &tokens {
-            if !stop_words.contains(token.as_str()) {
-                entry.insert(token.clone());
-            }
-        }
-        for pair in tokens.windows(2) {
-            if !stop_words.contains(pair[0].as_str()) && !stop_words.contains(pair[1].as_str()) {
-                entry.insert(format!("{} {}", pair[0], pair[1]));
-            }
-        }
-    }
-
-    let mut term_conversations: HashMap<String, HashSet<Uuid>> = HashMap::new();
-    for (conversation_id, tokens) in conversation_tokens {
-        for token in tokens {
-            term_conversations
-                .entry(token)
-                .or_default()
-                .insert(conversation_id);
-        }
-    }
-    let mut candidates: Vec<(String, HashSet<Uuid>)> = term_conversations
-        .into_iter()
-        .filter(|(_, conversation_ids)| conversation_ids.len() >= 2)
-        .collect();
-    candidates.sort_by(|left, right| {
-        right
-            .0
-            .contains(' ')
-            .cmp(&left.0.contains(' '))
-            .then(right.1.len().cmp(&left.1.len()))
-    });
-
-    let mut assigned = HashSet::new();
-    let mut topics = Vec::new();
-    for (term, conversation_ids) in candidates {
-        if conversation_ids
-            .iter()
-            .filter(|id| !assigned.contains(*id))
-            .count()
-            < 2
-        {
-            continue;
-        }
-        let mut users = HashSet::new();
-        let mut total_messages = 0usize;
-        let ids: Vec<Uuid> = conversation_ids.iter().copied().collect();
-        for conversation_id in &ids {
-            if let Some((user_id, message_count)) = metadata.get(conversation_id) {
-                users.insert(*user_id);
-                total_messages += (*message_count).max(0) as usize;
-            }
-            assigned.insert(*conversation_id);
-        }
-        topics.push(TopicResponse {
-            topic: term,
-            summary: String::new(),
-            conversation_count: ids.len(),
-            unique_users: users.len(),
-            total_messages,
-            conversation_ids: ids,
-        });
-        if topics.len() >= 15 {
-            break;
-        }
-    }
-    topics
-}
-
-fn fallback_topics(
+/// A run that cannot produce fresh themes keeps showing the last successful
+/// generation; an empty list means nothing has been generated yet.
+fn cached_topics(
     cached: Option<&minerva_db::queries::course_conversation_topics::ConversationTopicsCacheRow>,
-    messages: &[minerva_db::queries::conversations::ConversationMessageTextRow],
-    conversations: &[minerva_db::queries::conversations::ConversationWithUserRow],
 ) -> Vec<TopicResponse> {
     cached
         .and_then(|row| parse_cache(&row.topics))
-        .unwrap_or_else(|| legacy_topics(messages, conversations))
+        .unwrap_or_default()
 }
 
 async fn cache_and_return(
@@ -891,7 +609,6 @@ async fn verify_teacher_access(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
 
     #[test]
     fn materialize_rejects_invalid_and_single_conversation_themes() {
@@ -948,46 +665,5 @@ mod tests {
         }
         clusters.sort();
         assert_eq!(clusters, vec![vec![0, 1], vec![2, 3]]);
-    }
-
-    #[test]
-    fn legacy_topics_remain_the_zero_cost_default_shape() {
-        let first = Uuid::from_u128(1);
-        let second = Uuid::from_u128(2);
-        let now = Utc::now();
-        let messages = vec![
-            minerva_db::queries::conversations::ConversationMessageTextRow {
-                conversation_id: first,
-                content: "How does data storage work?".into(),
-            },
-            minerva_db::queries::conversations::ConversationMessageTextRow {
-                conversation_id: second,
-                content: "Explain data storage please".into(),
-            },
-        ];
-        let conversations = vec![first, second]
-            .into_iter()
-            .enumerate()
-            .map(
-                |(index, id)| minerva_db::queries::conversations::ConversationWithUserRow {
-                    id,
-                    course_id: Uuid::nil(),
-                    user_id: Uuid::from_u128(10 + index as u128),
-                    title: None,
-                    pinned: false,
-                    created_at: now,
-                    updated_at: now,
-                    user_eppn: None,
-                    user_display_name: None,
-                    message_count: Some(2),
-                },
-            )
-            .collect::<Vec<_>>();
-
-        let topics = legacy_topics(&messages, &conversations);
-        assert_eq!(topics[0].topic, "data storage");
-        assert!(topics[0].summary.is_empty());
-        assert_eq!(topics[0].conversation_count, 2);
-        assert_eq!(topics[0].unique_users, 2);
     }
 }

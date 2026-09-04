@@ -29,7 +29,7 @@ pub fn router() -> Router<AppState> {
         .route("/conversations/pinned", get(list_pinned_conversations))
         .route(
             "/conversations/topics",
-            get(crate::routes::conversation_topics::popular_topics),
+            get(crate::routes::conversation_topics::conversation_themes),
         )
         .route(
             "/conversations/feedback-stats",

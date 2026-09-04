@@ -309,7 +309,7 @@ export const suggestedQuestionsQuery = (courseId: string) =>
     staleTime: 60 * 60 * 1000,
   })
 
-export const popularTopicsQuery = (courseId: string) =>
+export const conversationTopicsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", "topics"],
     queryFn: () => api.get<TopicGroup[]>(`/courses/${courseId}/conversations/topics`),

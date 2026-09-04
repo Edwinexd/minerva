@@ -400,7 +400,7 @@ describe("Authenticated pages a11y", () => {
       [
         [queries.allConversationsQuery(COURSE_ID).queryKey, []],
         [
-          queries.popularTopicsQuery(COURSE_ID).queryKey,
+          queries.conversationTopicsQuery(COURSE_ID).queryKey,
           [
             {
               topic: "Data storage architecture",

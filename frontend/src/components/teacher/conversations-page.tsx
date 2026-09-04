@@ -1,7 +1,7 @@
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { allConversationsQuery, conversationDetailQuery, conversationFlagKindsQuery, courseFeedbackStatsQuery, popularTopicsQuery } from "@/lib/queries"
+import { allConversationsQuery, conversationDetailQuery, conversationFlagKindsQuery, courseFeedbackStatsQuery, conversationTopicsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,13 +17,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   ChatBubble,
   type ChatBubbleLabels,
@@ -47,7 +40,7 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   const { t } = useTranslation("teacher")
   const categoryLabel = useCategoryLabel()
   const { data: conversations, isLoading } = useQuery(allConversationsQuery(courseId))
-  const { data: topics, isLoading: topicsLoading } = useQuery(popularTopicsQuery(courseId))
+  const { data: topics, isLoading: topicsLoading } = useQuery(conversationTopicsQuery(courseId))
   const { data: feedbackStats } = useQuery(courseFeedbackStatsQuery(courseId))
   // Flag-kind map keyed by conversation id. Drives the per-row
   // "extraction guard tripped" badge in the conversation list. Same
@@ -150,7 +143,6 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
     () => topics?.find((t) => t.topic === selectedTopic) ?? null,
     [topics, selectedTopic],
   )
-  const semanticTopics = topics?.some((topic) => topic.summary.trim().length > 0) === true
 
   const topicConvIds = useMemo(
     () => activeTopic ? new Set(activeTopic.conversation_ids) : null,
@@ -291,73 +283,42 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
       {!topicsLoading && topics && topics.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">
-              {t(semanticTopics
-                ? "conversations.semanticTopicsTitle"
-                : "conversations.popularTopicsTitle")}
-            </CardTitle>
+            <CardTitle className="text-base">{t("conversations.semanticTopicsTitle")}</CardTitle>
             <CardDescription>
-              {t(semanticTopics
-                ? "conversations.semanticTopicsDescription"
-                : "conversations.popularTopicsDescription")}
+              {t("conversations.semanticTopicsDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {semanticTopics ? (
-              <div className="grid gap-2 md:grid-cols-2">
-                {topics.map((topic) => {
-                  const active = selectedTopic === topic.topic
-                  return (
-                    <Button
-                      key={topic.topic}
-                      type="button"
-                      variant={active ? "secondary" : "outline"}
-                      aria-pressed={active}
-                      className="h-auto min-h-20 w-full items-start justify-start whitespace-normal p-3 text-left"
-                      onClick={() => setSelectedTopic(active ? null : topic.topic)}
-                    >
-                      <span className="min-w-0 space-y-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{topic.topic}</span>
-                          <Badge variant="secondary" className="font-normal">
-                            {t("conversations.topicReach", {
-                              convos: topic.conversation_count,
-                              users: topic.unique_users,
-                            })}
-                          </Badge>
-                        </span>
-                        <span className="block text-sm font-normal text-muted-foreground">
-                          {topic.summary}
-                        </span>
+            <div className="grid gap-2 md:grid-cols-2">
+              {topics.map((topic) => {
+                const active = selectedTopic === topic.topic
+                return (
+                  <Button
+                    key={topic.topic}
+                    type="button"
+                    variant={active ? "secondary" : "outline"}
+                    aria-pressed={active}
+                    className="h-auto min-h-20 w-full items-start justify-start whitespace-normal p-3 text-left"
+                    onClick={() => setSelectedTopic(active ? null : topic.topic)}
+                  >
+                    <span className="min-w-0 space-y-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{topic.topic}</span>
+                        <Badge variant="secondary" className="font-normal">
+                          {t("conversations.topicReach", {
+                            convos: topic.conversation_count,
+                            users: topic.unique_users,
+                          })}
+                        </Badge>
                       </span>
-                    </Button>
-                  )
-                })}
-              </div>
-            ) : (
-              <Select
-                value={selectedTopic ?? ""}
-                onValueChange={(value) => setSelectedTopic(value || null)}
-              >
-                <SelectTrigger
-                  className="w-full sm:w-72"
-                  aria-label={t("conversations.topicPlaceholder")}
-                >
-                  <SelectValue placeholder={t("conversations.topicPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {topics.map((topic) => (
-                    <SelectItem key={topic.topic} value={topic.topic}>
-                      {t("conversations.topicOption", {
-                        topic: topic.topic,
-                        convos: topic.conversation_count,
-                        users: topic.unique_users,
-                      })}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+                      <span className="block text-sm font-normal text-muted-foreground">
+                        {topic.summary}
+                      </span>
+                    </span>
+                  </Button>
+                )
+              })}
+            </div>
             {activeTopic && (
               <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                 <span>{t("conversations.topicStats", { convos: activeTopic.conversation_count, users: activeTopic.unique_users, messages: activeTopic.total_messages })}</span>

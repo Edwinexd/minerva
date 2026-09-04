@@ -62,6 +62,8 @@ export function DataHandlingContent() {
               components={{ strong: <strong /> }}
             />
           </li>
+          <li>{t("dataHandling.whereMessagesGo.drafts")}</li>
+          <li>{t("dataHandling.whereMessagesGo.themes")}</li>
           <li>{t("dataHandling.whereMessagesGo.nothingElse")}</li>
         </ul>
       </section>
@@ -105,6 +107,13 @@ export function DataHandlingContent() {
             <Trans
               ns="common"
               i18nKey="dataHandling.integrations.play"
+              components={{ strong: <strong /> }}
+            />
+          </li>
+          <li>
+            <Trans
+              ns="common"
+              i18nKey="dataHandling.integrations.daisy"
               components={{ strong: <strong /> }}
             />
           </li>

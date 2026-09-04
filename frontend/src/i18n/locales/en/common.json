@@ -175,19 +175,21 @@
     "title": "How Minerva handles your data",
     "whatWeStore": {
       "heading": "What we store",
-      "identity": "Your identity from Shibboleth or LTI: your SU username (eppn) and display name. External-invite users see pseudonymized names of others in the course.",
+      "identity": "Your identity from Shibboleth or LTI: your SU username (eppn) and display name. At login Minerva also records the other attributes your login service sends (email address, name, affiliation, entitlement) so administrators can write role rules against them; these values refresh on each login and are removed 7 days after your last one. External-invite users see pseudonymized names of others in the course.",
       "conversations": "Your conversations, messages, and any feedback you submit on AI answers.",
       "materials": "Course materials uploaded by teachers or synced from Canvas / Moodle."
     },
     "staffAccess": {
-      "heading": "Course staff can read your conversations",
-      "body": "Teachers and TAs in your course can see every conversation you have there. Other students can't, unless a teacher explicitly shares one with the class."
+      "heading": "Course staff and administrators can read your conversations",
+      "body": "Teachers and TAs in your course can see every conversation you have there, and so can Minerva's system administrators. Other students can't, unless a teacher explicitly shares one with the class."
     },
     "whereMessagesGo": {
       "heading": "Where your messages go",
       "cerebras": "Chat messages and relevant course-material excerpts are sent to the configured AI-inference provider: <strong>Cerebras</strong> or <strong>OpenAI</strong>.",
       "openai": "If your course's teacher has enabled OpenAI embeddings, your questions are additionally sent to <strong>OpenAI</strong> to compute a search vector. Otherwise embeddings run locally on the Minerva server.",
-      "nothingElse": "Nothing else leaves the Minerva server."
+      "drafts": "If your course has Aegis, the prompt-coaching assistant, switched on, what you type in the message box is sent to the same provider as you type it, before you press send, so it can suggest improvements.",
+      "themes": "To show teachers which themes are common in a course, Minerva sends recent student messages from that course to the provider configured for this analysis, which may be a different one from your course's chat provider. Names and usernames are not included.",
+      "nothingElse": "No other part of your conversation leaves the Minerva server."
     },
     "retention": {
       "heading": "How long we keep it",
@@ -196,10 +198,10 @@
     "integrations": {
       "heading": "Canvas / Moodle / Play / Daisy integrations (teachers)",
       "canvas": "<strong>Canvas:</strong> Minerva pulls course files and page content only (no submissions, rosters, or grades). Your Canvas API token is stored in the Minerva database in plaintext; revoke it in Minerva or Canvas to disconnect.",
-      "moodle": "<strong>Moodle plugin:</strong> pushes course materials (files, page/book/label HTML, URLs) and a list of enrolled students (eppn + display name) to Minerva.",
-      "lti": "<strong>LTI launches:</strong> when Moodle or Canvas launches Minerva in an iframe, the platform passes the student's identifier and (if configured) display name to Minerva. A user row is created on first launch.",
-      "play": "<strong>Play (play.dsv.su.se):</strong> when a `.url` document points at Play, the VTT transcript is fetched and stored as searchable text inside the course.",
-      "daisy": "<strong>Daisy (daisy.dsv.su.se):</strong> a nightly job lists DSV course offerings for the current and next semester and creates the matching Minerva courses. For each course it pulls the public list of teaching staff (name and the SU/DSV usernames Daisy publishes for them), turns each username into a Minerva eppn, and adds those people as course teachers. Daisy lists multiple historical logins per person; secondary ones are stored as eppn aliases so a future login under any of them resolves to the same Minerva user. No student rosters or grades are read."
+      "moodle": "<strong>Moodle plugin:</strong> pushes course materials (files, page/book/label HTML, URLs) to Minerva. If forum sync is switched on both for the Moodle site and for the course, discussion threads that a teacher has replied to are pushed too, with student names removed from the post text on a best-effort basis. No enrolment list is sent.",
+      "lti": "<strong>LTI launches:</strong> when Moodle or Canvas launches Minerva in an iframe, the platform passes the student's identifier and, if configured, display name and email address. Minerva uses the email address as the account identifier when the platform sends no separate username. A user row is created on first launch. Where the platform allows it, Minerva also fetches the course roster to keep membership current, adding students who join and removing those who leave.",
+      "play": "<strong>Play (play.dsv.su.se):</strong> when a `.url` document points at Play, the VTT transcript is fetched and stored as searchable text inside the course. The fetch runs as a scheduled job on GitHub-hosted infrastructure, which then posts the transcript to Minerva.",
+      "daisy": "<strong>Daisy (daisy.dsv.su.se):</strong> a nightly job lists DSV course offerings for the current and next semester and creates the matching Minerva courses. For each course it pulls the public list of teaching staff (name and the SU/DSV logins Daisy publishes for them) and adds those people as course teachers, matched on the login they already sign in with; logins outside SU's own domains are skipped. Daisy lists multiple historical logins per person; secondary ones are stored as eppn aliases so a future login under any of them resolves to the same Minerva user. No student rosters or grades are read. The job also pulls each offering's public schedule and stores the individual sessions as searchable text in the course. It runs on GitHub-hosted infrastructure."
     },
     "contact": {
       "heading": "Contact",

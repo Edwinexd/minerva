@@ -193,6 +193,12 @@ struct MeResponse {
     role: String,
     privacy_acknowledged_at: Option<chrono::DateTime<chrono::Utc>>,
     lti_client_id: Option<String>,
+    /// True when this user may open the course's teacher view. Mirrors the
+    /// owner / admin / course-teacher predicate the Shibboleth teacher routes
+    /// enforce, so the embed header only offers that link when the real page
+    /// would actually load. Site role alone is not enough: a teacher of some
+    /// other course is a plain student here.
+    course_teacher: bool,
 }
 
 //; Handlers --
@@ -208,6 +214,13 @@ async fn get_me(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let course_teacher = course.owner_id == user.id
+        || minerva_core::models::UserRole::parse(&user.role).is_admin()
+        || minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?;
+
     // Check if this course has an LTI registration.
     let lti_regs =
         minerva_db::queries::lti::list_registrations_for_course(&state.db, course_id).await?;
@@ -220,6 +233,7 @@ async fn get_me(
         role: user.role,
         privacy_acknowledged_at: user.privacy_acknowledged_at,
         lti_client_id,
+        course_teacher,
     }))
 }
 

@@ -7,6 +7,7 @@ import { ExternalLink } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { LanguageSwitcher } from "@/components/language-switcher"
+import { useEmbedNav } from "@/lib/embed-nav"
 import { ThemeToggle } from "@/components/theme-toggle"
 
 interface DevConfig {
@@ -19,6 +20,13 @@ interface EmbedMe {
   eppn: string
   display_name: string | null
   lti_client_id: string | null
+  /**
+   * Whether this user may open the course's teacher view. Resolved
+   * server-side against owner / admin / course-teacher, so it is not the
+   * same as a site-wide teacher role: a teacher of another course sees no
+   * teacher link here.
+   */
+  course_teacher: boolean
 }
 
 export function RootLayout() {
@@ -62,6 +70,18 @@ export function RootLayout() {
     staleTime: Infinity,
   })
 
+  // The iframe is served from the same origin as the real app, so
+  // root-relative hrefs resolve to https://<minerva-host>/... in both prod
+  // and dev. Deep-link to the open chat when there is one; otherwise the
+  // course's new-chat route, which is where a fresh embed session starts.
+  const { conversationId: embedConversationId } = useEmbedNav()
+  const embedCourseHref = embedParams?.courseId
+    ? `/course/${embedParams.courseId}/${embedConversationId ?? "new"}`
+    : "/"
+  const embedTeacherHref = embedParams?.courseId
+    ? `/teacher/courses/${embedParams.courseId}`
+    : null
+
   return (
     <div className={`${isEmbed ? "h-dvh" : "min-h-screen"} bg-background text-foreground flex flex-col`}>
       {!isEmbed && (
@@ -75,7 +95,7 @@ export function RootLayout() {
       <header className="border-b px-4 sm:px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 max-w-7xl mx-auto min-w-0">
           {isEmbed ? (
-            <a href="/" target="_blank" rel="noopener noreferrer" className="text-xl font-bold tracking-tight hover:opacity-80 flex items-center gap-1.5">
+            <a href={embedCourseHref} target="_blank" rel="noopener noreferrer" className="text-xl font-bold tracking-tight hover:opacity-80 flex items-center gap-1.5">
               <img src="/favicon.svg" alt="" className="w-6 h-6" />
               Minerva <ExternalLink className="w-4 h-4" />
             </a>
@@ -109,6 +129,17 @@ export function RootLayout() {
                 {user.display_name || user.eppn}
               </span>
             ) : null}
+            {isEmbed && embedMe?.course_teacher && embedTeacherHref && (
+              <a
+                href={embedTeacherHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted-foreground hover:text-foreground flex items-center gap-1"
+              >
+                {t("nav.teacherView")}
+                <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+              </a>
+            )}
             {isEmbed && embedMe && (
               <span className="text-muted-foreground">
                 {embedMe.eppn}{embedMe.lti_client_id && ` via LTI (${embedMe.lti_client_id})`}

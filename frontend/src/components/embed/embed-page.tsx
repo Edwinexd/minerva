@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { ExternalLink, Menu, X } from "lucide-react"
 import { useDocumentTitle } from "@/lib/use-document-title"
+import { useEmbedNav } from "@/lib/embed-nav"
 import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
 import { ConversationList } from "@/components/chat/conversation-list"
 import {
@@ -178,6 +179,14 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
     setPrevActiveConvIdForSidebar(activeConvId)
     setSidebarOpen(false)
   }
+
+  // Publish the selection to the header, which renders in `RootLayout` and
+  // uses it to deep-link "open in Minerva" at the chat the user is reading.
+  const { setConversationId } = useEmbedNav()
+  useEffect(() => {
+    setConversationId(activeConvId)
+    return () => setConversationId(null)
+  }, [activeConvId, setConversationId])
 
   const refreshConversations = useCallback(async () => {
     if (!token) return

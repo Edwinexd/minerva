@@ -21,3 +21,18 @@ export function isTeacherOrAbove(role: SiteRole | undefined): boolean {
 export function canManageSiteIntegrations(role: SiteRole | undefined): boolean {
   return role === "integrator" || role === "admin"
 }
+
+/**
+ * Role within a single course, as returned by the embed `/me` route. Distinct
+ * from `SiteRole`: a site-wide teacher is a plain student in a course they do
+ * not teach.
+ */
+export type CourseRole = "student" | "ta" | "teacher"
+
+/**
+ * True for course roles with teacher-view access. Mirrors the backend's
+ * `is_course_teacher`, which counts TAs alongside teachers.
+ */
+export function isCourseTeacher(role: CourseRole | undefined): boolean {
+  return role === "teacher" || role === "ta"
+}

@@ -4,6 +4,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { ExternalLink, Menu, X } from "lucide-react"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import { useEmbedNav } from "@/lib/embed-nav"
+import type { CourseRole } from "@/lib/roles"
 import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
 import { ConversationList } from "@/components/chat/conversation-list"
 import {
@@ -103,7 +104,8 @@ interface EmbedMe {
   id: string
   eppn: string
   display_name: string | null
-  role: "student" | "teacher" | "admin"
+  /** Role in this course, not the site role. See the embed `/me` route. */
+  course_role: CourseRole
   privacy_acknowledged_at: string | null
   lti_client_id: string | null
 }

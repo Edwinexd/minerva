@@ -190,15 +190,15 @@ struct MeResponse {
     id: Uuid,
     eppn: String,
     display_name: Option<String>,
-    role: String,
+    /// Role in THIS course (`teacher` / `ta` / `student`). Named apart from
+    /// the site role it replaced so a stale consumer breaks loudly instead of
+    /// silently reading a course-scoped value as a site-wide one. Every embed
+    /// route is course-scoped, and a teacher of some other course is a plain
+    /// student here; course owners and site admins resolve to `teacher`
+    /// because that is the access they actually have.
+    course_role: String,
     privacy_acknowledged_at: Option<chrono::DateTime<chrono::Utc>>,
     lti_client_id: Option<String>,
-    /// True when this user may open the course's teacher view. Mirrors the
-    /// owner / admin / course-teacher predicate the Shibboleth teacher routes
-    /// enforce, so the embed header only offers that link when the real page
-    /// would actually load. Site role alone is not enough: a teacher of some
-    /// other course is a plain student here.
-    course_teacher: bool,
 }
 
 //; Handlers --
@@ -217,9 +217,15 @@ async fn get_me(
     let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    let course_teacher = course.owner_id == user.id
+    let course_role = if course.owner_id == user.id
         || minerva_core::models::UserRole::parse(&user.role).is_admin()
-        || minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?;
+    {
+        "teacher".to_string()
+    } else {
+        minerva_db::queries::courses::get_member_role(&state.db, course_id, user.id)
+            .await?
+            .unwrap_or_else(|| "student".to_string())
+    };
 
     // Check if this course has an LTI registration.
     let lti_regs =
@@ -230,10 +236,9 @@ async fn get_me(
         id: user.id,
         eppn: user.eppn,
         display_name: user.display_name,
-        role: user.role,
+        course_role,
         privacy_acknowledged_at: user.privacy_acknowledged_at,
         lti_client_id,
-        course_teacher,
     }))
 }
 

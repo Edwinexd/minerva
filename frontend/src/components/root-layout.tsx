@@ -2,7 +2,8 @@ import { Link, Outlet } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { userQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
-import { canManageSiteIntegrations, isTeacherOrAbove } from "@/lib/roles"
+import { canManageSiteIntegrations, isCourseTeacher, isTeacherOrAbove } from "@/lib/roles"
+import type { CourseRole } from "@/lib/roles"
 import { ExternalLink } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
@@ -21,12 +22,10 @@ interface EmbedMe {
   display_name: string | null
   lti_client_id: string | null
   /**
-   * Whether this user may open the course's teacher view. Resolved
-   * server-side against owner / admin / course-teacher, so it is not the
-   * same as a site-wide teacher role: a teacher of another course sees no
-   * teacher link here.
+   * Role in the embedded course, not the site role: a teacher of another
+   * course sees no teacher link here.
    */
-  course_teacher: boolean
+  course_role: CourseRole
 }
 
 export function RootLayout() {
@@ -129,7 +128,7 @@ export function RootLayout() {
                 {user.display_name || user.eppn}
               </span>
             ) : null}
-            {isEmbed && embedMe?.course_teacher && embedTeacherHref && (
+            {isEmbed && isCourseTeacher(embedMe?.course_role) && embedTeacherHref && (
               <a
                 href={embedTeacherHref}
                 target="_blank"

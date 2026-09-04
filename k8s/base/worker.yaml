@@ -115,6 +115,19 @@ spec:
               cpu: "1500m"
           # No HTTP server; rely on the process's tokio runtime
           # staying alive. K8s restartPolicy=Always handles a panic.
+      # On SIGTERM the worker stops claiming and waits for the documents
+      # already in flight (see `WorkerHandle::drain`).
+      #
+      # This deployment is Recreate, so unlike the api's grace period
+      # this one sits on the deploy's critical path twice over: the pod
+      # must fully terminate before the replacement starts, and
+      # deploy.yml waits on `rollout status --timeout=300s`. Hence 120
+      # rather than something closer to worker.rs's 600s wedged-doc
+      # threshold. An ingest still running at 120s is abandoned and
+      # reset to pending by `reset_stale_processing` on the next boot,
+      # which is the same recovery path as a crash: it costs repeated
+      # work, not data.
+      terminationGracePeriodSeconds: 120
       volumes:
         - name: app-data
           hostPath:

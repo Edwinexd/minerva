@@ -393,7 +393,16 @@ pub async fn api_main() -> anyhow::Result<()> {
     tracing::info!("minerva listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+    // Graceful shutdown is what makes the RollingUpdate in
+    // `k8s/base/app.yaml` actually zero-downtime. On SIGTERM axum stops
+    // accepting new connections but lets in-flight ones finish, which for
+    // this binary means the chat / embed SSE streams in `routes::chat` and
+    // `routes::embed` get to run to their last frame instead of being cut
+    // mid-answer. The pod's `terminationGracePeriodSeconds` bounds how
+    // long that drain may take.
+    axum::serve(listener, app)
+        .with_graceful_shutdown(minerva_metrics::shutdown_signal("minerva-app"))
+        .await?;
 
     Ok(())
 }

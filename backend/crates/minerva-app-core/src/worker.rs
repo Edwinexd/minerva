@@ -13,6 +13,7 @@
 //! * Periodic sweep: `reset_stale_processing_older_than(STALE_THRESHOLD_SECS)`
 //!   handles docs wedged by a silent task panic inside a still-running pod.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -103,7 +104,7 @@ const STALE_THRESHOLD_SECS: i64 = 600;
 ///
 /// The stale-doc sweeper is the recovery half of this binary's claim
 /// loop; it must restart with the worker, not the scheduler.
-pub fn start_worker_loops(state: AppState, max_concurrent: usize) {
+pub fn start_worker_loops(state: AppState, max_concurrent: usize) -> WorkerHandle {
     relink_scheduler::spawn_sweep(state.clone());
 
     // Periodic sweeper: rescue documents whose processing task died silently
@@ -132,14 +133,87 @@ pub fn start_worker_loops(state: AppState, max_concurrent: usize) {
         });
     }
 
-    spawn_main_claim_loop(state, max_concurrent);
+    // Owned out here rather than inside the claim loop so `WorkerHandle`
+    // can observe them at shutdown.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let semaphore = Arc::new(Semaphore::new(max_concurrent));
+
+    spawn_main_claim_loop(state, Arc::clone(&semaphore), Arc::clone(&shutdown));
+
+    WorkerHandle {
+        shutdown,
+        semaphore,
+        max_concurrent,
+    }
+}
+
+/// Shutdown handle for the claim loop, returned by
+/// [`start_worker_loops`].
+///
+/// Only the standalone `minerva-worker` binary uses it; the legacy
+/// in-process path in `crate::schedulers::start` drops it, which just
+/// means that (already deprecated) topology keeps the old
+/// kill-on-signal behaviour.
+pub struct WorkerHandle {
+    shutdown: Arc<AtomicBool>,
+    semaphore: Arc<Semaphore>,
+    max_concurrent: usize,
+}
+
+impl WorkerHandle {
+    /// Stop claiming new documents, then wait for the per-document tasks
+    /// already in flight to finish.
+    ///
+    /// Every in-flight task holds a semaphore permit for its whole life,
+    /// so holding all `max_concurrent` permits at once is exactly the
+    /// condition "no document is being processed". Documents claimed in
+    /// the loop iteration that raced the shutdown flag still run to
+    /// completion; that's the point, since abandoning them mid-flight is
+    /// what leaves rows wedged in `processing` for `SWEEP_INTERVAL`.
+    ///
+    /// This is bounded from the outside by the pod's
+    /// `terminationGracePeriodSeconds`: if a genuinely stuck ingest never
+    /// releases its permit, the kubelet SIGKILLs us and the startup
+    /// `reset_stale_processing` picks the row up on the next boot, which
+    /// is the same recovery path as any crash.
+    ///
+    /// Takes `self` by value: the permits acquired below are forgotten
+    /// rather than released, so a second call would wait forever for
+    /// permits that no longer exist. Consuming the handle makes that
+    /// unrepresentable instead of a latent hang.
+    pub async fn drain(self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        let in_flight = self
+            .max_concurrent
+            .saturating_sub(self.semaphore.available_permits());
+        if in_flight > 0 {
+            tracing::info!(
+                "worker: waiting for {} in-flight document(s) to finish",
+                in_flight
+            );
+        }
+        // Held permits are released as the tasks complete; acquiring the
+        // full count means all of them are done. The permits are
+        // forgotten rather than returned because nothing claims again
+        // after this point.
+        match self
+            .semaphore
+            .acquire_many(self.max_concurrent as u32)
+            .await
+        {
+            Ok(permits) => permits.forget(),
+            // Only returned once the semaphore is closed, which we never do.
+            Err(e) => tracing::warn!("worker: drain could not acquire permits: {}", e),
+        }
+        tracing::info!("worker: drained, no documents in flight");
+    }
 }
 
 /// The main `documents.status = 'pending'` claim loop. Factored out of
 /// `start_worker_loops` so the worker's three concerns (relink sweep,
 /// stale-doc sweep, claim loop) read as three sibling spawns rather
 /// than two helpers around one giant inline future.
-fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
+fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: Arc<AtomicBool>) {
     tokio::spawn(async move {
         // Crash recovery: any document left in 'processing' was interrupted.
         match minerva_db::queries::documents::reset_stale_processing(&state.db).await {
@@ -150,8 +224,6 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
             ),
             Err(e) => tracing::error!("worker: failed to reset stale documents: {}", e),
         }
-
-        let semaphore = Arc::new(Semaphore::new(max_concurrent));
 
         // Classifiers live for the lifetime of the worker and are
         // shared across spawned per-document tasks via Arc. One
@@ -173,6 +245,14 @@ fn spawn_main_claim_loop(state: AppState, max_concurrent: usize) {
         let mut last_depth_emit: Option<std::time::Instant> = None;
 
         loop {
+            // Checked before claiming, never mid-batch: documents already
+            // claimed this iteration are finished by their spawned tasks,
+            // and `WorkerHandle::drain` waits for exactly those.
+            if shutdown.load(Ordering::Relaxed) {
+                tracing::info!("worker: shutdown requested, no longer claiming documents");
+                return;
+            }
+
             if last_depth_emit.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(5)) {
                 emit_queue_depth(&state.db).await;
                 last_depth_emit = Some(std::time::Instant::now());

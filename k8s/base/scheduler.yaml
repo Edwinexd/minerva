@@ -104,6 +104,12 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "500m"
+      # Left at the k8s default, stated explicitly because it's an
+      # ops-facing knob. The scheduler has nothing to drain: every loop
+      # is "find what's due, do it, sleep", so a tick cut short is
+      # simply found due again on the next boot. Holding the pod open
+      # longer would only add deploy time.
+      terminationGracePeriodSeconds: 30
       volumes:
         - name: app-data
           hostPath:

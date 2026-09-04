@@ -5,9 +5,21 @@ metadata:
   namespace: minerva
 spec:
   replicas: 1
+  # Zero-downtime rollout. Unlike the embedder / reranker (which can't
+  # fit two model-cache pods on the node), the api is light enough at
+  # 1Gi to surge a second pod, so a deploy never leaves the service
+  # without an endpoint. maxUnavailable: 0 is the half that matters:
+  # the old pod is only sent SIGTERM once the new one passes its
+  # readiness probe.
   strategy:
-    # Recreate so we don't try to fit two api pods during the roll.
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  # A pod that goes Ready and then immediately dies (bad config, a
+  # migration that fails on second query) shouldn't count as a
+  # successful rollout step and let the old pod be torn down.
+  minReadySeconds: 10
   selector:
     matchLabels:
       app: minerva-app
@@ -110,18 +122,48 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "1000m"
+          lifecycle:
+            preStop:
+              exec:
+                # Endpoint removal and kube-proxy's iptables update are
+                # asynchronous, so for a moment after the pod is marked
+                # Terminating the node still DNATs new connections to
+                # it. Keep serving across that window; the SIGTERM that
+                # starts the real drain is only sent after this returns.
+                # (The runtime image is debian-slim, so /bin/sleep is
+                # present and this doesn't need the newer native
+                # `lifecycle.preStop.sleep` field.)
+                command: ["/bin/sleep", "5"]
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            # AppState::new runs migrations, seeds the embedding /
+            # reranker / chat-model catalogs and system_defaults, and
+            # only then binds the listener, so boot is genuinely slow.
+            # 3s x 60 gives it 3 minutes before the pod is declared
+            # failed, without making the liveness probe lenient after
+            # startup.
+            periodSeconds: 3
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /api/health
               port: 3000
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            # No initialDelaySeconds: the startupProbe already gates
+            # this, and a short period makes the rollout cut over to the
+            # new pod promptly.
+            periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /api/health
               port: 3000
-            initialDelaySeconds: 15
             periodSeconds: 30
+      # Bounds the whole termination: the 5s preStop above, then axum's
+      # graceful shutdown draining in-flight chat / embed SSE streams. A
+      # long streamed answer is why this is 120 and not the 30s default.
+      # Anything still open when it expires is SIGKILLed.
+      terminationGracePeriodSeconds: 120
       volumes:
         - name: app-data
           hostPath:

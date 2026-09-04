@@ -78,9 +78,13 @@ async fn main() -> anyhow::Result<()> {
     let service = service::EmbedderService::new(embedder);
 
     tracing::info!("minerva-embedder listening on {addr}");
+    // Graceful shutdown lets in-flight Embed / EmbedQuery RPCs return
+    // before the process exits. Without it a rollout surfaced as a
+    // transport error on the api and worker side mid-request, which for
+    // a chat query meant a failed retrieval rather than a slow one.
     Server::builder()
         .add_service(EmbedderServer::new(service))
-        .serve(addr)
+        .serve_with_shutdown(addr, minerva_metrics::shutdown_signal("minerva-embedder"))
         .await?;
 
     Ok(())

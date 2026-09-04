@@ -32,6 +32,7 @@
     "disclaimerAfter": ".",
     "unknownError": "Okänt fel",
     "assistantResponseLabel": "Assistentens svar",
+    "transcriptLabel": "Chattutskrift",
     "thinkingActive": "Tänker…",
     "thinkingDone": "Tankebana",
     "thinkingDoneWithDuration": "Tänkte i {{seconds}}s",

@@ -669,6 +669,7 @@ function EmbedChatWindow({
     aegisShowPanel: tStudent("aegis.showPanel"),
     aegisShowPanelButton: tStudent("aegis.showPanelButton"),
     aegisPanelLabel: tStudent("aegis.panelLabel"),
+    transcriptLabel: t("embed.transcriptLabel"),
     disclaimerBefore: t("embed.disclosurePrefix"),
     disclaimerLink: t("embed.disclosureLink"),
     disclaimerAfter: t("embed.disclosureSuffix"),

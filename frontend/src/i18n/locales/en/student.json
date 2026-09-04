@@ -32,6 +32,7 @@
     "disclaimerAfter": ".",
     "unknownError": "Unknown error",
     "assistantResponseLabel": "Assistant response",
+    "transcriptLabel": "Chat transcript",
     "thinkingActive": "Thinking…",
     "thinkingDone": "Thinking",
     "thinkingDoneWithDuration": "Thought for {{seconds}}s",

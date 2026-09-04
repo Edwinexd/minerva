@@ -9,6 +9,13 @@ import { cleanup } from "@testing-library/react"
 // no `exports` map, so the matcher entry is imported by its concrete dist path.
 expect.extend(axeMatchers as Parameters<typeof expect.extend>[0])
 
+// jsdom implements no layout, so it ships no `scrollIntoView`. The chat
+// transcript calls it on mount to pin the view to the newest message, which
+// would otherwise throw before axe ever sees the rendered transcript.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {}
+}
+
 // Unmount React trees between tests so the jsdom document starts clean and axe
 // only ever sees the component currently under test.
 afterEach(() => {

@@ -89,6 +89,8 @@ export interface ChatSurfaceLabels {
   aegisShowPanelButton: string
   // Accessible name for the Aegis panel landmark
   aegisPanelLabel: string
+  // Accessible name for the scrolling transcript landmark
+  transcriptLabel: string
   // Privacy disclaimer (rendered as: before + link + after)
   disclaimerBefore: string
   disclaimerLink: string
@@ -600,7 +602,27 @@ export function ChatSurface<M extends ChatBubbleMessage>({
           would be the first heading a screen reader hits. */}
       <h1 className="sr-only">{labels.heading}</h1>
       <div className="flex-1 flex flex-col min-w-0">
-        <div className={`flex-1 overflow-y-auto ${layout.transcriptScroll}`}>
+        {/* A long transcript scrolls, and its content is frequently plain
+            text with nothing tabbable inside, which leaves keyboard-only
+            users unable to reach the scrollbar at all (WCAG 2.1.1). Making
+            the region itself focusable fixes that; <section> + a name keep it
+            from being an unlabelled tab stop. jsdom has no layout, so nothing
+            is ever actually scrollable there and axe cannot catch a regression
+            here; the "transcript scroll region is keyboard reachable" test in
+            pages.a11y.test.tsx asserts the attributes directly instead. */}
+        <section
+          className={`flex-1 overflow-y-auto ${layout.transcriptScroll}`}
+          // jsx-a11y wants tabindex only on interactive elements, but axe's
+          // `scrollable-region-focusable` wants it exactly here; the two rules
+          // disagree for scrollable regions. axe wins: without this the
+          // transcript is unreachable by keyboard. The rule's `roles: ['region']`
+          // escape hatch does not apply, because it resolves implicit roles
+          // statically and cannot tell that this expression-valued aria-label
+          // names the section.
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+          tabIndex={0}
+          aria-label={labels.transcriptLabel}
+        >
           {showGreeting ? (
             <div className="h-full flex items-center justify-center">
               <EmptyChatGreeting
@@ -670,7 +692,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
               }
             />
           )}
-        </div>
+        </section>
 
         {!readOnly && (
           <div className={`${layout.inputBlock} border-t space-y-2`}>

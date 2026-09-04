@@ -78,6 +78,7 @@ import type {
   Course,
   CourseMember,
   Document,
+  Message,
   User,
 } from "@/lib/types"
 import { UserManagementPanel } from "@/components/admin/users-page"
@@ -85,7 +86,7 @@ import { ConfigPage } from "@/components/teacher/config-page"
 import { DocumentsPage } from "@/components/teacher/documents-page"
 import { MembersPage } from "@/components/teacher/members-page"
 import { ConversationsPage } from "@/components/teacher/conversations-page"
-import { NewChatRouteComponent } from "@/components/chat/chat-page"
+import { ChatRouteComponent, NewChatRouteComponent } from "@/components/chat/chat-page"
 import { TeacherHelpPage } from "@/components/teacher-help-page"
 import { CourseManagementPanel } from "@/components/admin/courses-page"
 import { DaisyImportsPanel } from "@/components/admin/daisy-imports-page"
@@ -96,6 +97,11 @@ import { RoleRulesPanel } from "@/components/admin/rules-page"
 
 const COURSE_ID = "course-1"
 const useParams = () => ({ courseId: COURSE_ID })
+const CONVERSATION_ID = "conversation-1"
+const useConversationParams = () => ({
+  courseId: COURSE_ID,
+  conversationId: CONVERSATION_ID,
+})
 
 const user: User = {
   id: "user-1",
@@ -306,6 +312,54 @@ const roleRules = [
   },
 ]
 
+const chatMessage = (
+  id: string,
+  role: "user" | "assistant",
+  content: string,
+): Message => ({
+  id,
+  role,
+  content,
+  chunks_used: null,
+  model_used: role === "assistant" ? "gpt-oss-120b" : null,
+  tokens_prompt: null,
+  tokens_completion: null,
+  generation_ms: null,
+  retrieval_count: null,
+  thinking_transcript: null,
+  tool_events: null,
+  thinking_ms: null,
+  research_prompt_tokens: null,
+  research_completion_tokens: null,
+  thinking_hidden: false,
+  created_at: "2026-01-01T00:00:00Z",
+})
+
+/** A conversation with real turns, so the transcript is a scrolling region. */
+const populatedConversationFixtures: Seed[] = [
+  [queries.courseQuery(COURSE_ID).queryKey, course],
+  [queries.conversationsQuery(COURSE_ID).queryKey, []],
+  [queries.pinnedConversationsQuery(COURSE_ID).queryKey, []],
+  [queries.userQuery.queryKey, user],
+  [
+    queries.conversationDetailQuery(COURSE_ID, CONVERSATION_ID).queryKey,
+    {
+      messages: [
+        chatMessage("message-1", "user", "What is recursion?"),
+        chatMessage(
+          "message-2",
+          "assistant",
+          "A function that calls itself on a smaller input until it hits a base case.",
+        ),
+      ],
+      notes: [],
+      feedback: [],
+      flags: [],
+      prompt_analyses: [],
+    },
+  ],
+]
+
 // ── Harness ─────────────────────────────────────────────────────────────
 
 type Seed = [readonly unknown[], unknown]
@@ -392,6 +446,40 @@ describe("Authenticated pages a11y", () => {
     )
     expect(getByText("What is recursion?")).toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
+  })
+
+  // The transcript only becomes a scrolling region once it has messages, so
+  // the empty new-chat case above never exercised it.
+  it("student chat page with a transcript has no axe violations", async () => {
+    const { container, getByText } = renderPage(
+      <ChatRouteComponent useParams={useConversationParams} />,
+      populatedConversationFixtures,
+    )
+    expect(getByText("What is recursion?")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  // Regression guard for the transcript scroll region (WCAG 2.1.1). axe's
+  // `scrollable-region-focusable` rule only fires on an element that actually
+  // overflows, which needs real layout; jsdom reports every height as 0, so
+  // the axe assertion above passes whether or not the fix is present. These
+  // attribute assertions are what would actually fail if someone dropped
+  // them, and they are the same three attributes the rule's remedy requires.
+  it("transcript scroll region is keyboard reachable", async () => {
+    const { container, getByText } = renderPage(
+      <ChatRouteComponent useParams={useConversationParams} />,
+      populatedConversationFixtures,
+    )
+    expect(getByText("What is recursion?")).toBeInTheDocument()
+
+    const transcript = container.querySelector<HTMLElement>("section.overflow-y-auto")
+    expect(transcript).not.toBeNull()
+    // Focusable, so a keyboard-only user can scroll the transcript at all.
+    expect(transcript).toHaveAttribute("tabindex", "0")
+    // Named, so the extra tab stop is announced as something rather than
+    // dropping the user onto an anonymous group (and so <section> resolves to
+    // a region landmark rather than a generic element).
+    expect(transcript).toHaveAccessibleName("Chat transcript")
   })
 
   it("teacher conversation themes have no axe violations", async () => {

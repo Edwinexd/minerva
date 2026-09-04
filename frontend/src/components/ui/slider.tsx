@@ -11,6 +11,7 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  "aria-label": ariaLabel,
   ...props
 }: SliderPrimitive.Root.Props) {
   const _values = React.useMemo(
@@ -48,6 +49,14 @@ function Slider({
           <SliderPrimitive.Thumb
             data-slot="slider-thumb"
             key={index}
+            // The thumb renders the real `<input type="range">`, and a visible
+            // <Label> next to the slider cannot reach it: Base UI generates the
+            // input's id internally, so there is nothing for `htmlFor` to
+            // target. Left alone the input has no accessible name at all.
+            // Taking `aria-label` off the root (where it would land on a
+            // presentational div) and feeding it through `getAriaLabel` puts it
+            // on the input the screen reader actually focuses.
+            getAriaLabel={ariaLabel ? () => ariaLabel : undefined}
             className="relative block size-3 shrink-0 rounded-full border border-ring bg-white ring-ring/50 transition-[color,box-shadow] select-none after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 disabled:pointer-events-none disabled:opacity-50"
           />
         ))}

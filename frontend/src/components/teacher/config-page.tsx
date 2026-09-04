@@ -474,6 +474,7 @@ function CourseConfigForm({ course }: { course: Course }) {
               {t("config.contextRatioLabel", { percent: Math.round(contextRatio * 100) })}
             </Label>
             <Slider
+              aria-label={t("config.contextRatioLabel", { percent: Math.round(contextRatio * 100) })}
               value={[contextRatio]}
               onValueChange={(v) => setContextRatio(Array.isArray(v) ? v[0] : v)}
               min={0.1}
@@ -488,6 +489,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           <div className="space-y-2">
             <Label>{t("config.temperatureLabel", { value: temperature.toFixed(2) })}</Label>
             <Slider
+              aria-label={t("config.temperatureLabel", { value: temperature.toFixed(2) })}
               value={[temperature]}
               onValueChange={(v) => setTemperature(Array.isArray(v) ? v[0] : v)}
               min={0}
@@ -730,6 +732,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           <div className="space-y-2">
             <Label>{t("config.minScoreLabel", { value: minScore.toFixed(2) })}</Label>
             <Slider
+              aria-label={t("config.minScoreLabel", { value: minScore.toFixed(2) })}
               value={[minScore]}
               onValueChange={(v) => setMinScore(Array.isArray(v) ? v[0] : v)}
               min={0}

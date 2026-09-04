@@ -126,6 +126,7 @@ function RagDebugPanel({
               )}
             </div>
             <Slider
+              aria-label={`${t("rag.thresholdLabel")} ${effectiveThreshold.toFixed(2)}`}
               value={[effectiveThreshold]}
               onValueChange={(v) =>
                 setPreviewThreshold(Array.isArray(v) ? v[0] : v)

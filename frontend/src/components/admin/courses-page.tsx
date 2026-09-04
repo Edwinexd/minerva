@@ -1527,6 +1527,9 @@ function BulkEditDialog({
             onToggle={(v) => toggleField("temperature", v)}
           >
             <Slider
+              aria-label={t("courses.bulk.fields.temperature", {
+                value: temperature.toFixed(2),
+              })}
               value={[temperature]}
               onValueChange={(v) =>
                 setTemperature(Array.isArray(v) ? v[0] : v)

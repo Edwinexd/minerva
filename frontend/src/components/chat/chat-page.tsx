@@ -412,6 +412,7 @@ export function ChatWindow({
     aegisShowPanel: t("aegis.showPanel"),
     aegisShowPanelButton: t("aegis.showPanelButton"),
     aegisPanelLabel: t("aegis.panelLabel"),
+    transcriptLabel: t("chat.transcriptLabel"),
     disclaimerBefore: t("chat.disclaimerBefore"),
     disclaimerLink: t("chat.dataHandlingLink"),
     disclaimerAfter: t("chat.disclaimerAfter"),

@@ -442,6 +442,7 @@
     "searchTitle": "RAG-sökning",
     "searchDescription": "Testa semantisk sökning mot dina kursdokument. Dra i tröskeln för att se vilka stycken som skulle skickas till modellen.",
     "queryPlaceholder": "Skriv en testfråga...",
+    "queryLabel": "Testfråga",
     "searching": "Söker...",
     "search": "Sök",
     "thresholdLabel": "Lägsta likhetströskel:",

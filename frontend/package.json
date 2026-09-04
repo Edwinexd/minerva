@@ -11,7 +11,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck:test": "tsc -p tsconfig.test.json",
-    "pa11y": "pa11y-ci --config .pa11yci.json"
+    "pa11y": "node scripts/pa11y-config.mjs && pa11y-ci --config .a11y/pa11yci.json"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

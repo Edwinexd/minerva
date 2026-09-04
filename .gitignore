@@ -29,3 +29,8 @@ terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.backup
 terraform/*.tfvars
+
+# pa11y-ci scratch: generated URL list (seeded ids differ per run) and the
+# throwaway document store the a11y backend writes to. Both rebuilt on demand
+# by `npm run pa11y:full`.
+frontend/.a11y/

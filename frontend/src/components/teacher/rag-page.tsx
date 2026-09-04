@@ -99,6 +99,9 @@ function RagDebugPanel({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            // Separate from the placeholder, which stops being announced the
+            // moment the teacher types; same split as the chat composer.
+            aria-label={t("rag.queryLabel")}
             placeholder={t("rag.queryPlaceholder")}
             className="flex-1"
           />

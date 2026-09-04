@@ -48,6 +48,15 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # Handed to `frontend-a11y`, which needs a real backend to render the
+      # authenticated pages. Reusing this build keeps that job on Node only.
+      - name: Upload server binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: minerva-server
+          path: backend/target/debug/minerva
+          retention-days: 1
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -84,9 +93,26 @@ jobs:
   frontend-a11y:
     name: Frontend accessibility (pa11y-ci)
     runs-on: ubuntu-latest
+    # Needs the server binary; a11y coverage of the authenticated pages is the
+    # point, and those only render against a real backend.
+    needs: backend
     defaults:
       run:
         working-directory: frontend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: minerva
+          POSTGRES_PASSWORD: minerva
+          POSTGRES_DB: minerva
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -104,27 +130,65 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Run pa11y-ci against the built app
-        # Serve the production build with `vite preview` (SPA history fallback
-        # included) and run pa11y-ci over the public routes. Color contrast and
-        # other render-time WCAG 2.2 AA checks run here in a real browser,
-        # complementing the jsdom/axe component tests in the `frontend` job.
-        # No backend runs, so only unauthenticated routes are listed in
-        # .pa11yci.json; their shells still render real, auditable markup.
+      - name: Download server binary
+        uses: actions/download-artifact@v5
+        with:
+          name: minerva-server
+          path: ${{ runner.temp }}/bin
+
+      - name: Start backend serving the built SPA
+        working-directory: ${{ github.workspace }}
+        env:
+          DATABASE_URL: postgres://minerva:minerva@localhost:5432/minerva
+          # Lazily-connected gRPC channels, so these never have to resolve:
+          # nothing in an a11y pass embeds or reranks. Pointing them at unused
+          # ports is what lets this reuse the plain `cargo build` artifact
+          # instead of needing a `--features local-engine` rebuild.
+          MINERVA_EMBEDDER_URL: http://127.0.0.1:59051
+          MINERVA_RERANKER_URL: http://127.0.0.1:59052
+          QDRANT_URL: http://127.0.0.1:56334
+          # The seeded documents would otherwise be claimed and pushed at the
+          # embedder that isn't there, filling the log with failures.
+          MINERVA_RUN_WORKER: "false"
+          MINERVA_DEV_MODE: "true"
+          # The header's dev user-switcher persists its first option
+          # (`student@su.se`) to localStorage on first load, after which
+          # `api.ts` sends that as X-Dev-User on every request, overriding the
+          # header pa11y sets. Whichever wins the race decides what renders, so
+          # rather than fight it, grant admin to exactly that identity: both
+          # paths then resolve to the same admin and every page renders its
+          # full authenticated state deterministically.
+          MINERVA_ADMINS: student
+          MINERVA_HMAC_SECRET: pa11y-ci-secret
+          MINERVA_DOCS_PATH: ${{ runner.temp }}/a11y-docs
+          MINERVA_STATIC_DIR: ${{ github.workspace }}/frontend/dist
+          MINERVA_PORT: "3000"
+          MINERVA_METRICS_PORT: "0"
         run: |
-          npm run preview -- --port 4173 --host 127.0.0.1 &
-          PREVIEW_PID=$!
-          for _ in $(seq 1 60); do
-            if curl -sf http://localhost:4173/ >/dev/null 2>&1; then
-              break
-            fi
-            sleep 1
-          done
-          set +e
-          npm run pa11y
-          STATUS=$?
-          kill "$PREVIEW_PID" 2>/dev/null || true
-          exit $STATUS
+          chmod +x "${{ runner.temp }}/bin/minerva"
+          mkdir -p "${{ runner.temp }}/a11y-docs"
+          # Migrations run on startup via the sqlx `migrate!()` macro. The
+          # pa11y step waits for /api/health, so no sleep here. Backgrounded
+          # for the life of the job; the runner tears it down.
+          "${{ runner.temp }}/bin/minerva" > "${{ runner.temp }}/backend.log" 2>&1 &
+
+      - name: Run pa11y-ci over public and authenticated pages
+        # Real-browser WCAG 2.2 AA pass. Complements the jsdom/axe component
+        # tests in the `frontend` job, which cannot evaluate any rule that
+        # depends on layout (contrast, scrollable regions) because jsdom
+        # reports every element as zero-sized.
+        env:
+          MINERVA_BASE_URL: http://127.0.0.1:3000
+          MINERVA_A11Y_ADMIN: student@su.se
+          MINERVA_HMAC_SECRET: pa11y-ci-secret
+        run: npm run pa11y
+
+      # Surfaced on failure: a pa11y run that audits a 500 page still
+      # "passes" its own rules, so the backend log is where a broken seed or
+      # migration actually shows up.
+      - name: Backend log
+        if: always()
+        run: tail -100 "${{ runner.temp }}/backend.log" || true
 
   moodle-plugin:
     name: Moodle plugin

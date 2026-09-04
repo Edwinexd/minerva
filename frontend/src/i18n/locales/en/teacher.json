@@ -444,6 +444,7 @@
     "searchTitle": "RAG Search",
     "searchDescription": "Test semantic search against your course documents. Drag the threshold to preview which chunks would be sent to the model.",
     "queryPlaceholder": "Enter a test query...",
+    "queryLabel": "Test query",
     "searching": "Searching...",
     "search": "Search",
     "thresholdLabel": "Min similarity threshold:",

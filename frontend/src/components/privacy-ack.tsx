@@ -76,7 +76,10 @@ export function PrivacyAckBanner({
 
       <dialog
         ref={dialogRef}
-        aria-labelledby={titleId}
+        // The <h2> this points at lives inside the `open &&` block below, so
+        // while the dialog is closed the reference dangles and axe flags it
+        // (`aria-valid-attr-value`). Only claim a label once it exists.
+        aria-labelledby={open ? titleId : undefined}
         onCancel={(e) => {
           // Block Escape-to-close while the acknowledgement is saving.
           if (submitting) e.preventDefault()

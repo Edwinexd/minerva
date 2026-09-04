@@ -41,7 +41,11 @@ async fn main() -> anyhow::Result<()> {
     );
     schedulers::start_scheduler_loops(state);
 
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("minerva-scheduler: ctrl_c received, shutting down");
+    minerva_metrics::shutdown_signal("minerva-scheduler").await;
+    // No drain here, unlike the worker. The periodic loops are all
+    // "find work that is due, do it, sleep"; a tick cut short by the
+    // runtime shutting down is simply re-found as due on the next boot,
+    // so there is no in-flight state worth holding the pod open for.
+    tracing::info!("minerva-scheduler: shutting down");
     Ok(())
 }

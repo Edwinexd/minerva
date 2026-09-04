@@ -31,9 +31,14 @@ async fn main() -> anyhow::Result<()> {
     minerva_metrics::spawn_memprobe("minerva-worker");
 
     tracing::info!("starting minerva-worker (doc claim + stale/relink sweepers)");
-    worker::start_worker_loops(state, config.max_concurrent_ingests);
+    let handle = worker::start_worker_loops(state, config.max_concurrent_ingests);
 
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("minerva-worker: ctrl_c received, shutting down");
+    minerva_metrics::shutdown_signal("minerva-worker").await;
+    // Returning from main drops the runtime, which would abort the
+    // per-document tasks wherever they happen to be and leave their rows
+    // in `processing` until the stale-doc sweeper reclaims them. Wait for
+    // them instead; the pod's grace period is the outer bound.
+    handle.drain().await;
+    tracing::info!("minerva-worker: shutting down");
     Ok(())
 }

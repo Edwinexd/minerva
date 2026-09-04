@@ -57,7 +57,11 @@ fn schedule_ticker() -> tokio::time::Interval {
 /// they own; see [`crate::worker::start_worker_loops`] and
 /// [`start_scheduler_loops`].
 pub fn start(state: AppState, max_concurrent: usize) {
-    crate::worker::start_worker_loops(state.clone(), max_concurrent);
+    // The returned `WorkerHandle` is dropped: this legacy path has no
+    // shutdown sequence to hang it off, so it keeps the old
+    // abort-on-signal behaviour for in-flight documents. The standalone
+    // `minerva-worker` binary is the one that drains.
+    let _ = crate::worker::start_worker_loops(state.clone(), max_concurrent);
     start_scheduler_loops(state);
 }
 

@@ -130,6 +130,13 @@ spec:
               port: 50051
             initialDelaySeconds: 30
             periodSeconds: 30
+      # Left at the k8s default, stated explicitly because it's an
+      # ops-facing knob. tonic's serve_with_shutdown only has to drain
+      # in-flight Embed / EmbedQuery RPCs, which are a batch of
+      # inference each, not minutes of work. This deployment is
+      # Recreate, so every extra second here is embed downtime during a
+      # deploy; there's nothing to buy by raising it.
+      terminationGracePeriodSeconds: 30
       volumes:
         - name: hf-cache
           hostPath:

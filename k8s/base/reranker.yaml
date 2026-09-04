@@ -98,6 +98,10 @@ spec:
               port: 50052
             initialDelaySeconds: 30
             periodSeconds: 30
+      # Same reasoning as minerva-embedder: only in-flight Rerank RPCs
+      # to drain, and Recreate means extra grace is pure rerank
+      # downtime.
+      terminationGracePeriodSeconds: 30
       volumes:
         - name: hf-cache
           hostPath:

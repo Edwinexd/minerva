@@ -106,6 +106,55 @@ kubectl get pods -n minerva    # Check status
 5. Rolling restart of minerva-app, waits for rollout (2-5 min timeout)
 6. Migrations run via SQLx `migrate!()` macro on app startup
 
+### Zero-downtime rollout (minerva-app only)
+
+`minerva-app` is the one deployment that does not drop traffic during a
+deploy. It is `RollingUpdate` with `maxSurge: 1` / `maxUnavailable: 0`,
+so the node briefly holds two 1Gi api pods and the old one keeps serving
+until the new one passes its readiness probe. The other four stay
+`Recreate`: the embedder and reranker can't fit two model-cache pods on
+the node, and the worker / scheduler have no inbound traffic to protect.
+
+Three pieces have to hold together, and removing any one of them
+silently reintroduces user-visible errors:
+
+- **Graceful shutdown.** Every binary awaits
+  `minerva_metrics::shutdown_signal`, which covers SIGTERM (Rust
+  installs no handler by default, so before this a rollout killed the
+  process instantly and cut in-flight chat SSE streams mid-answer). The
+  api passes it to `axum::serve(...).with_graceful_shutdown`, the
+  embedder / reranker to tonic's `serve_with_shutdown`, and the worker
+  additionally awaits `WorkerHandle::drain` so it finishes the documents
+  it has already claimed instead of leaving them wedged in `processing`.
+- **preStop sleep + grace period.** `app.yaml` sleeps 5s before SIGTERM
+  so kube-proxy's iptables update catches up with endpoint removal, then
+  allows 120s to drain. `deploy.yml`'s `rollout status` timeouts are
+  600s for the api and worker because they cover both the new pod's
+  startup and the old pod's drain.
+- **Apache `retry=0 ttl=30`.** Both 30090 workers in
+  `apache/minerva-app.conf`. Default `retry=60` turns a single failed
+  connection during switchover into a full minute of 503s; `ttl` stops
+  Apache reusing a pooled connection to a pod that is gone. Pod
+  selection stays the Service's job, so there is no balancer block.
+
+Two consequences worth knowing:
+
+- **Migrations must be expand/contract.** During the overlap the new
+  pod has migrated while the old pod still serves the old schema, so a
+  `DROP COLUMN` shipped with the code that stops reading it will 500 the
+  old pod until it exits. Land the additive half first, the destructive
+  half a deploy later. This was already true before the rolling change:
+  `minerva-worker` and `minerva-scheduler` also run `sqlx::migrate!()`
+  from `AppState::new`, and `deploy.yml` restarts them *before* the api,
+  so `Recreate` never actually protected the api from schema skew.
+- **SPA asset skew is accepted, not solved.** The app pod serves the
+  frontend, and during the overlap a browser can fetch `index.html` from
+  one pod and its content-hashed bundle from the other. `ServeDir` falls
+  back to `index.html`, so the miss arrives as HTML where a script was
+  expected and the page fails to boot. The window is a few tens of
+  seconds and the build is a single bundle, so the exposure is one page
+  load landing across the switchover; a reload fixes it.
+
 ## Kubernetes
 
 **Namespace:** `minerva`

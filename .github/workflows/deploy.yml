@@ -133,9 +133,14 @@ jobs:
           kubectl rollout status deployment/minerva-reranker -n minerva --timeout=300s
 
           # Restart + wait for the workers (they call the model servers).
+          # The worker's timeout is 600s, not 300s: it drains in-flight
+          # ingests on SIGTERM (terminationGracePeriodSeconds: 120) and
+          # `rollout status` waits for old replicas to finish
+          # terminating, so the drain plus the replacement's startup sits
+          # on this command's critical path.
           kubectl rollout restart deployment/minerva-worker -n minerva
           kubectl rollout restart deployment/minerva-scheduler -n minerva
-          kubectl rollout status deployment/minerva-worker -n minerva --timeout=300s
+          kubectl rollout status deployment/minerva-worker -n minerva --timeout=600s
           kubectl rollout status deployment/minerva-scheduler -n minerva --timeout=300s
 
           # Api last so user traffic never hits an under-warm
@@ -145,8 +150,16 @@ jobs:
           #   api -> reranker.rerank (gRPC)
           # so embedder + reranker must be up before the api accepts
           # the first chat request after a rollout.
+          #
+          # This is the one rollout that doesn't drop traffic: the api is
+          # RollingUpdate with maxUnavailable: 0, so the old pod keeps
+          # serving until the new one is Ready. 600s because
+          # `rollout status` covers both ends of that overlap: the new
+          # pod's startupProbe budget (up to ~180s for migrations +
+          # catalog seeding) and then the old pod draining its in-flight
+          # SSE streams (up to terminationGracePeriodSeconds: 120).
           kubectl rollout restart deployment/minerva-app -n minerva
-          kubectl rollout status deployment/minerva-app -n minerva --timeout=300s
+          kubectl rollout status deployment/minerva-app -n minerva --timeout=600s
 
       - name: Deploy Apache config + Lua
         # Apache vhost / Lua hook on the prod host, deployed via the same

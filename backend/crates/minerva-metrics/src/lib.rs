@@ -1,4 +1,11 @@
-//! Process-wide Prometheus metrics for every Minerva service binary.
+//! Process-wide runtime concerns shared by every Minerva service binary:
+//! Prometheus metrics, the `/proc` memprobe, and the shutdown signal.
+//!
+//! These belong together because they are all things a *binary* wires up
+//! once in `main` and a library crate must never reach for. This is also
+//! the only crate all five binaries depend on directly, which is why
+//! [`shutdown_signal`] lives here rather than in `minerva-core` (the
+//! worker and scheduler don't take a direct dependency on that).
 //!
 //! Each binary calls [`init`] once from `main`, passing its service name
 //! (e.g. `"minerva-app"`). That installs a global `metrics` recorder and
@@ -126,6 +133,43 @@ pub fn spawn_memprobe(service: &'static str) {
             tokio::time::sleep(interval).await;
         }
     });
+}
+
+/// Resolve when the process is asked to shut down: SIGTERM (what the
+/// kubelet sends to open a pod's termination grace period) or SIGINT
+/// (ctrl-c in local dev).
+///
+/// Every service binary awaits this rather than `tokio::signal::ctrl_c`,
+/// which only covers SIGINT. Rust installs no SIGTERM handler by default,
+/// so a rollout used to kill each process the instant the kubelet
+/// signalled it, cutting in-flight work mid-response: truncated chat SSE
+/// streams in `minerva-app`, and in the worker a doc abandoned in
+/// `processing` for the stale-doc sweeper to reclaim later.
+///
+/// Returning from this future only *starts* the drain. How long the
+/// process then has is `terminationGracePeriodSeconds` on its Deployment
+/// in `k8s/base/`; when that expires the kubelet sends SIGKILL.
+pub async fn shutdown_signal(service: &'static str) {
+    let mut sigterm = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    {
+        Ok(s) => s,
+        Err(e) => {
+            // Ctrl-c still works, but a rollout would hard-kill us,
+            // silently reintroducing the truncation this function
+            // exists to prevent. Worth an error, not a warn.
+            tracing::error!(
+                "{service}: could not install SIGTERM handler ({e}); shutdown will not be graceful"
+            );
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        }
+    };
+
+    let reason = tokio::select! {
+        _ = sigterm.recv() => "SIGTERM",
+        _ = tokio::signal::ctrl_c() => "SIGINT",
+    };
+    tracing::info!("{service}: {reason} received, draining in-flight work");
 }
 
 /// Selected fields from `/proc/self/status`, all in KiB / counts. Only

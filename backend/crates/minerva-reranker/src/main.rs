@@ -63,9 +63,12 @@ async fn main() -> anyhow::Result<()> {
     let service = service::RerankerService::new(reranker);
 
     tracing::info!("minerva-reranker listening on {addr}");
+    // Same reasoning as minerva-embedder: let in-flight Rerank RPCs
+    // finish so a rollout degrades chat latency rather than failing the
+    // rerank outright.
     Server::builder()
         .add_service(RerankerServer::new(service))
-        .serve(addr)
+        .serve_with_shutdown(addr, minerva_metrics::shutdown_signal("minerva-reranker"))
         .await?;
 
     Ok(())

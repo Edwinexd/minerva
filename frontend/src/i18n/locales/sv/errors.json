@@ -57,9 +57,9 @@
   },
   "conversation": {
     "pinned_frozen": "Den här chatten har fästs av en lärare och är nu skrivskyddad. Starta en ny chatt för att fortsätta.",
-    "token_cap_exceeded": "Den här chatten har nått sin längdgräns ({{total}} av {{limit}} tokens). Fortsätt i en ny chatt för att gå vidare.",
-    "split_not_available": "Den här kursen begränsar inte chattlängd, så det finns inget att fortsätta från. Använd Ny chatt i stället.",
-    "split_not_needed": "Den här chatten är fortfarande långt under sin längdgräns ({{threshold}} tokens). Använd Ny chatt i stället."
+    "token_cap_exceeded": "Den här chatten har hunnit med så mycket att svaren börjar bli vaga. Fortsätt i en ny chatt för att gå vidare.",
+    "split_not_available": "Det finns inget att fortsätta från här. Använd Ny chatt i stället.",
+    "split_not_needed": "Den här chatten behöver inte delas än. Använd Ny chatt i stället."
   },
   "signed_url": {
     "expired": "Den här inbjudningslänken har gått ut.",

@@ -57,9 +57,9 @@
   },
   "conversation": {
     "pinned_frozen": "This chat has been pinned by a teacher and is now read-only. Start a new chat to continue.",
-    "token_cap_exceeded": "This chat has reached its length limit ({{total}} of {{limit}} tokens). Continue in a new chat to keep going.",
-    "split_not_available": "This course doesn't limit chat length, so there's nothing to continue from. Use New chat instead.",
-    "split_not_needed": "This chat is still well under its length limit ({{threshold}} tokens). Use New chat instead."
+    "token_cap_exceeded": "This chat has covered enough ground that answers start getting vague. Continue in a new chat to keep going.",
+    "split_not_available": "There's nothing to continue from here. Use New chat instead.",
+    "split_not_needed": "This chat doesn't need splitting yet. Use New chat instead."
   },
   "signed_url": {
     "expired": "This invite link has expired.",

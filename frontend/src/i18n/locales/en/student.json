@@ -149,9 +149,9 @@
   },
   "limit": {
     "nudgeTitle": "This chat is getting long",
-    "nudgeBody": "Long chats get slower and more expensive with every message, because the whole conversation is re-read each time. Starting a fresh one for your next question keeps answers sharp. Your teacher also sees clearer topic summaries when chats stay on one subject.",
-    "blockedTitle": "This chat has reached its limit",
-    "blockedBody": "You can't add more messages here, but nothing is lost. Continue in a new chat and a short summary of what you've covered comes with you.",
+    "nudgeBody": "Minerva gives you sharper, more relevant answers when a chat stays on one topic. If you're moving on to a new question, start a fresh chat. This one stays in your list.",
+    "blockedTitle": "Time to start a fresh chat",
+    "blockedBody": "This chat has covered a lot of ground, and answers get vaguer the more topics one chat carries. Continue in a new chat and a short summary of what you've worked on comes with you.",
     "continueAction": "Continue in a new chat",
     "continueWorking": "Setting up...",
     "dismiss": "Dismiss",

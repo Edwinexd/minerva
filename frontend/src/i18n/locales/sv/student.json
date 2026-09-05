@@ -149,9 +149,9 @@
   },
   "limit": {
     "nudgeTitle": "Den här chatten börjar bli lång",
-    "nudgeBody": "Långa chattar blir långsammare och dyrare för varje meddelande, eftersom hela konversationen läses om varje gång. Att starta en ny inför nästa fråga håller svaren skarpa. Din lärare får också tydligare ämnessammanfattningar när chattar håller sig till ett ämne.",
-    "blockedTitle": "Den här chatten har nått sin gräns",
-    "blockedBody": "Du kan inte lägga till fler meddelanden här, men inget går förlorat. Fortsätt i en ny chatt så följer en kort sammanfattning av det ni gått igenom med.",
+    "nudgeBody": "Minerva ger dig skarpare och mer relevanta svar när en chatt håller sig till ett ämne. Om du går vidare till en ny fråga, starta en ny chatt. Den här ligger kvar i listan.",
+    "blockedTitle": "Dags att starta en ny chatt",
+    "blockedBody": "Den här chatten har hunnit med mycket, och svaren blir vagare ju fler ämnen en och samma chatt bär på. Fortsätt i en ny chatt så följer en kort sammanfattning av det du arbetat med.",
     "continueAction": "Fortsätt i en ny chatt",
     "continueWorking": "Förbereder...",
     "dismiss": "Stäng",

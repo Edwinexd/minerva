@@ -270,11 +270,15 @@ export function ChatWindow({
     data?.token_state,
     data?.topic_switch,
   )
+  // One hook, two endpoints. `/continue` summarises the thread for the
+  // length ceiling; `/branch` carries the just-answered off-topic
+  // exchange forward so the student can follow up without retyping.
+  const branchPath = rawLimitState === "topic" ? "branch" : "continue"
   const split = useConversationSplit({
     conversationId,
     doSplit: (cid) =>
       api.post<ConversationContinuation>(
-        `/courses/${courseId}/conversations/${cid}/continue`,
+        `/courses/${courseId}/conversations/${cid}/${branchPath}`,
         {},
       ),
     onSplit: (created) => {
@@ -515,9 +519,7 @@ export function ChatWindow({
           continuing={split.pending}
           error={split.error}
           onContinue={split.run}
-          onNewChat={() =>
-            navigate({ to: "/course/$courseId/new", params: { courseId } })
-          }
+          onNewChat={split.run}
           onDismiss={split.dismiss}
           labels={{
             topicTitle: t("limit.topicTitle"),

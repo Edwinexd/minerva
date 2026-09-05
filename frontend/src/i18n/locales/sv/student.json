@@ -157,9 +157,9 @@
     "continueAction": "Fortsätt i en ny chatt",
     "continueWorking": "Förbereder...",
     "dismiss": "Stäng",
-    "carryoverLabel": "Fortsättning från en tidigare chatt",
+    "carryoverLabel": "Överfört från en tidigare chatt",
     "topicTitle": "Det här ser ut som en ny fråga",
-    "topicBody": "Minerva ger dig skarpare svar när en chatt håller sig till ett ämne. Startar du en ny chatt för den här frågan ligger den tidigare tråden kvar och är lätt att hitta igen.",
-    "newChatAction": "Starta en ny chatt"
+    "topicBody": "Minerva ger dig skarpare svar när en chatt håller sig till ett ämne. Flytta den här frågan till en egen chatt och fortsätt där; den tidigare tråden ligger kvar.",
+    "newChatAction": "Flytta till en ny chatt"
   }
 }

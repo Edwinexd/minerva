@@ -1,4 +1,23 @@
-//! Splitting a conversation that reached its per-course token ceiling.
+//! Moving a student into a fresh conversation without losing their place.
+//!
+//! Two entry points, because two features need the same shape of
+//! hand-off for different reasons:
+//!
+//! * [`split`] ; the conversation hit its per-course token ceiling.
+//!   The student is forced out mid-task, so continuity is the whole
+//!   point: an LLM writes a recap of what they were working on.
+//! * [`branch`] ; the topic-switch check confirmed the student moved to
+//!   a new question. Here continuity of the *old* topic is the last
+//!   thing they want, but they have already asked (and been answered)
+//!   the new question in the old chat. Carrying that one exchange
+//!   verbatim means they can ask a follow-up immediately instead of
+//!   retyping. No LLM call: the text already exists.
+//!
+//! Both write `conversations.carryover_summary`, which
+//! `strategy::common::build_system_prompt_with_signals` renders into
+//! the new conversation's system prompt as inert context.
+//!
+//! Original notes on the ceiling case follow.
 //!
 //! `routes::chat::run_chat_message` refuses new messages once a
 //! conversation's cumulative billed tokens cross
@@ -156,6 +175,134 @@ pub(super) async fn split(
     })
 }
 
+/// Ceiling on the student's carried-over question. Generous: this is
+/// the message the new conversation is *about*, so clipping it defeats
+/// the purpose. Long pasted assignments still get cut.
+const BRANCH_QUESTION_CHARS: usize = 900;
+
+/// Ceiling on the carried-over answer. Tighter than the question: the
+/// student is going to follow up on it, so the model needs the gist and
+/// the conclusion, not the full worked example. Both bounds matter
+/// because unlike `split`'s recap this text is not model-summarised,
+/// and it rides in the system prompt for the life of the new chat.
+const BRANCH_ANSWER_CHARS: usize = 1200;
+
+/// `POST /courses/{course_id}/conversations/{cid}/branch`
+///
+/// Start a fresh conversation seeded with the exchange that triggered
+/// the topic-switch nudge.
+///
+/// Deliberately not [`split`]: that path spends a utility-model call
+/// summarising the *whole* conversation, which for a topic switch would
+/// carry the topic the student is trying to leave, and it gates on the
+/// conversation having reached its length ceiling, which a switch at
+/// turn four has not. Here the useful text already exists verbatim, so
+/// this costs nothing beyond two inserts.
+pub async fn branch_conversation(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+) -> Result<Json<ContinuationResponse>, AppError> {
+    let course = super::chat::verify_course_access_pub(&state, course_id, user.id).await?;
+    Ok(Json(branch(&state, &course, cid, user.id).await?))
+}
+
+/// The branch itself, with authentication already done by the caller.
+/// Shared with the embed surface, which authenticates by signed token.
+pub(super) async fn branch(
+    state: &AppState,
+    course: &minerva_db::queries::courses::CourseRow,
+    cid: Uuid,
+    user_id: Uuid,
+) -> Result<ContinuationResponse, AppError> {
+    let course_id = course.id;
+
+    let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if conv.course_id != course_id {
+        return Err(AppError::NotFound);
+    }
+    if conv.user_id != user_id {
+        return Err(AppError::Forbidden);
+    }
+
+    // Authorization for branching *is* the detection result: a client
+    // can only branch where both layers agreed the student changed
+    // topic. That keeps this from becoming a general "clone my chat"
+    // endpoint, and it re-checks the feature flag for free, since a
+    // disabled course never writes a `confirmed` verdict and the read
+    // below is gated on the flag too.
+    let confirmed = crate::feature_flags::topic_switch_nudge_enabled(&state.db, course_id).await
+        && minerva_db::queries::conversations::latest_topic_shift(&state.db, cid)
+            .await?
+            .and_then(|v| {
+                minerva_app_core::classification::topic_switch::TopicShift::from_stored(&v)
+            })
+            .is_some_and(|v| v.nudges());
+    if !confirmed {
+        return Err(AppError::bad_request("conversation.branch_not_available"));
+    }
+
+    let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
+    let carryover = branch_carryover(&messages);
+
+    let new_id = Uuid::new_v4();
+    minerva_db::queries::conversations::create_continuation(
+        &state.db,
+        new_id,
+        course_id,
+        user_id,
+        Some(cid),
+        carryover.as_deref(),
+    )
+    .await?;
+
+    metrics::counter!("chat_conversation_branches_total").increment(1);
+
+    Ok(ContinuationResponse {
+        id: new_id,
+        course_id,
+        continued_from_id: cid,
+        carryover_summary: carryover,
+    })
+}
+
+/// Build the carried-over text from the conversation's last user turn
+/// and the assistant reply to it.
+///
+/// The old conversation keeps both messages. Moving them would mutate
+/// history a teacher may already have reviewed, and would strand the
+/// feedback / analysis rows that reference those message ids; the
+/// duplication is a few hundred characters and is the safe trade.
+///
+/// `None` when there is no user turn to carry, which leaves the new
+/// conversation simply blank rather than failing the branch.
+fn branch_carryover(messages: &[minerva_db::queries::conversations::MessageRow]) -> Option<String> {
+    let last_user = messages.iter().rposition(|m| m.role == "user")?;
+    let question = messages[last_user].content.trim();
+    if question.is_empty() {
+        return None;
+    }
+    let answer = messages[last_user + 1..]
+        .iter()
+        .find(|m| m.role == "assistant")
+        .map(|m| m.content.trim())
+        .filter(|a| !a.is_empty());
+
+    let mut out = format!(
+        "The student asked this, which is what they are continuing here:\n{}",
+        truncate_chars(question, BRANCH_QUESTION_CHARS)
+    );
+    if let Some(answer) = answer {
+        out.push_str(&format!(
+            "\n\nThey have already been given this answer; build on it rather than repeating it:\n{}",
+            truncate_chars(answer, BRANCH_ANSWER_CHARS)
+        ));
+    }
+    Some(out)
+}
+
 /// Cumulative tokens a conversation must have burned before a split is
 /// offered. The soft limit is the point at which the student is first
 /// nudged, so it is the natural gate; when only the hard limit is set
@@ -285,6 +432,61 @@ mod tests {
             thinking_hidden: false,
             created_at: chrono::Utc::now(),
         }
+    }
+
+    fn user(content: &str) -> minerva_db::queries::conversations::MessageRow {
+        msg("user", content)
+    }
+
+    fn assistant(content: &str) -> minerva_db::queries::conversations::MessageRow {
+        msg("assistant", content)
+    }
+
+    #[test]
+    fn branch_carries_the_question_and_the_answer_it_already_got() {
+        // The student was answered in the old chat before the nudge
+        // appeared, so carrying only the question would make the new
+        // chat regenerate the same reply.
+        let carry = branch_carryover(&[
+            user("Hur fungerar tvakomplement?"),
+            assistant("Invertera bitarna och addera 1."),
+            user("Hur normaliserar man till 3NF?"),
+            assistant("Eliminera transitiva beroenden."),
+        ])
+        .unwrap();
+        assert!(carry.contains("Hur normaliserar man till 3NF?"));
+        assert!(carry.contains("Eliminera transitiva beroenden"));
+        // The topic being left behind must not come along.
+        assert!(!carry.contains("tvakomplement"));
+        assert!(carry.contains("build on it rather than repeating it"));
+    }
+
+    #[test]
+    fn branch_carries_the_question_alone_when_no_answer_landed() {
+        let carry = branch_carryover(&[
+            user("Hur fungerar tvakomplement?"),
+            assistant("Invertera bitarna."),
+            user("Hur normaliserar man till 3NF?"),
+        ])
+        .unwrap();
+        assert!(carry.contains("Hur normaliserar man till 3NF?"));
+        assert!(!carry.contains("build on it"));
+    }
+
+    #[test]
+    fn branch_bounds_both_halves() {
+        let long_q = "q".repeat(BRANCH_QUESTION_CHARS + 200);
+        let long_a = "a".repeat(BRANCH_ANSWER_CHARS + 200);
+        let carry = branch_carryover(&[user(&long_q), assistant(&long_a)]).unwrap();
+        assert!(!carry.contains(&"q".repeat(BRANCH_QUESTION_CHARS + 1)));
+        assert!(!carry.contains(&"a".repeat(BRANCH_ANSWER_CHARS + 1)));
+    }
+
+    #[test]
+    fn branch_is_absent_without_a_user_turn() {
+        assert_eq!(branch_carryover(&[]), None);
+        assert_eq!(branch_carryover(&[assistant("hello")]), None);
+        assert_eq!(branch_carryover(&[user("   ")]), None);
     }
 
     #[test]

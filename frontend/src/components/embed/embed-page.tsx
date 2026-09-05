@@ -437,7 +437,6 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
           token={token}
           onMessageSent={refreshConversations}
           onConversationCreated={setActiveConvId}
-          onStartNewConversation={startNewConversation}
           needsPrivacyAck={needsPrivacyAck}
           onAcknowledgePrivacy={acknowledgePrivacy}
           readOnly={isPinnedView}
@@ -468,7 +467,6 @@ function EmbedChatWindow({
   token,
   onMessageSent,
   onConversationCreated,
-  onStartNewConversation,
   needsPrivacyAck,
   onAcknowledgePrivacy,
   readOnly = false,
@@ -482,9 +480,6 @@ function EmbedChatWindow({
   token: string
   onMessageSent: () => void
   onConversationCreated: (id: string) => void
-  /** Opens a blank chat, same as the sidebar's New chat button. Used by
-   * the topic-switch nudge. */
-  onStartNewConversation: () => void
   needsPrivacyAck: boolean
   onAcknowledgePrivacy: () => Promise<void>
   /**
@@ -572,11 +567,14 @@ function EmbedChatWindow({
   // path shares with the Shibboleth one, so this surface needs the same
   // way out or an LTI student just gets a 409 and no next step.
   const rawLimitState = conversationLimitState(tokenState, topicSwitch)
+  // See the Shibboleth adapter: `/branch` for a topic switch,
+  // `/continue` for the length ceiling.
+  const branchPath = rawLimitState === "topic" ? "branch" : "continue"
   const split = useConversationSplit({
     conversationId,
     doSplit: (cid) =>
       embedPost<ConversationContinuation>(
-        `/course/${courseId}/conversations/${cid}/continue`,
+        `/course/${courseId}/conversations/${cid}/${branchPath}`,
         token,
       ),
     // No router here: the embed shell swaps conversations by state, the
@@ -777,7 +775,7 @@ function EmbedChatWindow({
           continuing={split.pending}
           error={split.error}
           onContinue={split.run}
-          onNewChat={onStartNewConversation}
+          onNewChat={split.run}
           onDismiss={split.dismiss}
           labels={{
             topicTitle: tStudent("limit.topicTitle"),

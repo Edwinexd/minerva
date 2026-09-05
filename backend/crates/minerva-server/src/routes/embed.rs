@@ -58,6 +58,10 @@ pub fn router() -> Router<AppState> {
             "/course/{course_id}/conversations/{cid}/continue",
             post(continue_conversation),
         )
+        .route(
+            "/course/{course_id}/conversations/{cid}/branch",
+            post(branch_conversation),
+        )
         // Mirrors the Shibboleth chat router's mark-read. The embed
         // surface is always a student opening their own conversation
         // (embed tokens are owner-scoped), so this purely bumps
@@ -507,6 +511,23 @@ async fn continue_conversation(
         .ok_or(AppError::NotFound)?;
     Ok(Json(
         crate::routes::conversation_continuation::split(&state, &course, cid, user_id).await?,
+    ))
+}
+
+/// `POST /embed/course/{course_id}/conversations/{cid}/branch`
+///
+/// Embed-token counterpart to the Shibboleth branch route.
+async fn branch_conversation(
+    State(state): State<AppState>,
+    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Query(query): Query<TokenQuery>,
+) -> Result<Json<crate::routes::conversation_continuation::ContinuationResponse>, AppError> {
+    let (_, user_id) = authenticate(&state, course_id, &query)?;
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(
+        crate::routes::conversation_continuation::branch(&state, &course, cid, user_id).await?,
     ))
 }
 

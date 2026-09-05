@@ -45,6 +45,14 @@ pub fn router() -> Router<AppState> {
             "/conversations/{cid}/continue",
             post(crate::routes::conversation_continuation::continue_conversation),
         )
+        // Start a fresh conversation seeded with the exchange that
+        // tripped the topic-switch nudge, so the student can follow up
+        // without retyping. Distinct from `/continue`, which summarises
+        // the whole thread for the length-ceiling case.
+        .route(
+            "/conversations/{cid}/branch",
+            post(crate::routes::conversation_continuation::branch_conversation),
+        )
         .route("/conversations/{cid}/pin", put(set_pin))
         .route(
             "/conversations/{cid}/notes",

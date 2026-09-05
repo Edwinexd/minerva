@@ -39,10 +39,10 @@ export function ConversationLimitNotice({
   labels: ConversationLimitLabels
   /** Split this conversation, carrying a recap across. Length states only. */
   onContinue: () => void
-  /** Open a blank chat. Used by the topic-switch variant: the student is
-   * deliberately starting a new subject, so carrying a recap of the old
-   * one across would work against them, and the split endpoint rejects
-   * conversations below the length threshold anyway. */
+  /** Branch into a fresh chat seeded with the exchange that tripped the
+   * nudge. Used by the topic-switch variant instead of `onContinue`:
+   * that one summarises the whole thread with an LLM call, which for a
+   * topic switch would carry across the very topic being left. */
   onNewChat: () => void
   continuing: boolean
   onDismiss?: () => void
@@ -80,8 +80,13 @@ export function ConversationLimitNotice({
       </div>
       <div className="flex items-center gap-1 shrink-0">
         {state === "topic" ? (
-          <Button size="sm" variant="outline" onClick={onNewChat}>
-            {labels.newChatAction}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onNewChat}
+            disabled={continuing}
+          >
+            {continuing ? labels.continueWorking : labels.newChatAction}
           </Button>
         ) : (
           <Button

@@ -37,10 +37,11 @@ export interface ThinkingBlockLabels {
   thinkingDone: string
   /**
    * Trigger text when the extraction guard suppressed the live
-   * thinking stream for this turn. Used when `hidden === true`.
-   * Renders both on the in-progress disclosure (during a guarded
-   * turn) and on the persisted disclosure (after refresh on a
-   * message with `thinking_hidden === true`).
+   * thinking stream for this turn AND this viewer got nothing to
+   * show for it (the student case). Renders both on the in-progress
+   * disclosure (during a guarded turn) and on the persisted
+   * disclosure (after refresh on a message with
+   * `thinking_hidden === true`).
    */
   thinkingHidden: string
   /**
@@ -49,6 +50,18 @@ export interface ThinkingBlockLabels {
    * read the empty body as a UI bug.
    */
   thinkingHiddenBody: string
+  /**
+   * Badge next to the normal trigger when the guard fired but this
+   * viewer teaches the course, so the server sent the trace anyway.
+   * Keeps "this was withheld from the student" visible instead of
+   * letting the turn read like any other.
+   */
+  thinkingHiddenRevealed: string
+  /**
+   * Note above the revealed trace explaining what the student got
+   * in its place.
+   */
+  thinkingHiddenRevealedBody: string
   /** aria-label for the toolbar listing tool calls. */
   toolCallsAriaLabel: string
 }
@@ -64,12 +77,14 @@ export interface ThinkingBlockProps {
    */
   durationMs: number | null
   /**
-   * Extraction guard suppressed the thinking stream for this turn
-   * (live, via a `thinking_hidden` SSE event ; or historical, via
-   * the `messages.thinking_hidden` column on a past message).
-   * When true, `thinkingTokens` and `toolEvents` are empty (server
-   * never sent them on this turn) and the disclosure renders a
-   * placeholder body explaining the policy gate.
+   * Extraction guard fired on this turn (live, via a
+   * `thinking_hidden` SSE event ; or historical, via the
+   * `messages.thinking_hidden` column on a past message). The flag
+   * means "the guard suppressed this turn's reasoning", not "there
+   * is nothing to render": for a student the server also withholds
+   * `thinkingTokens` / `toolEvents` and this renders a placeholder
+   * body explaining the policy gate, while a teacher gets the trace
+   * plus a badge saying it was withheld from the student.
    */
   hidden?: boolean
   /**
@@ -111,10 +126,21 @@ export function ThinkingBlock({
   // Trigger text: while streaming -> "Thinking...", once done and
   // we have a duration -> "Thought for {{seconds}}s", otherwise
   // fall back to "Thinking" (legacy messages without `thinking_ms`).
-  // When the extraction guard suppressed the stream, ignore active
+  // When the extraction guard withheld the stream, ignore active
   // and duration entirely and show the policy-gate label instead.
+  //
+  // `hidden` splits two ways. With no content the server withheld
+  // the trace from this viewer, so the disclosure is a placeholder.
+  // With content the viewer is a teacher and the guard verdict is
+  // rendered as a badge on the normal disclosure instead ; hiding it
+  // from them would only reproduce, one refetch later, the flip that
+  // made this confusing in the first place.
+  const hasContent = thinkingTokens.length > 0 || toolEvents.length > 0
+  const withheld = hidden && !hasContent
+  const revealed = hidden && hasContent
+
   let trigger: string
-  if (hidden) {
+  if (withheld) {
     trigger = labels.thinkingHidden
   } else if (active) {
     trigger = labels.thinkingActive
@@ -168,6 +194,11 @@ export function ThinkingBlock({
           />
         )}
         <span>{trigger}</span>
+        {revealed && (
+          <span className="rounded border border-muted-foreground/30 px-1 text-muted-foreground">
+            {labels.thinkingHiddenRevealed}
+          </span>
+        )}
         {toolEvents.length > 0 && (
           <span className="text-muted-foreground/60">
             ({toolEvents.length})
@@ -175,7 +206,7 @@ export function ThinkingBlock({
         )}
       </summary>
       <div className="mt-1.5 space-y-1.5">
-        {hidden && (
+        {withheld && (
           // Placeholder body for guarded turns. The transcript and
           // tool list are empty by construction (server didn't emit
           // them) ; the body text tells the student why they're
@@ -184,7 +215,14 @@ export function ThinkingBlock({
             {labels.thinkingHiddenBody}
           </p>
         )}
-        {!hidden && toolEvents.length > 0 && (
+        {revealed && (
+          // Teacher view of the same turn: the trace follows below,
+          // prefixed with what the student saw instead.
+          <p className="italic text-muted-foreground">
+            {labels.thinkingHiddenRevealedBody}
+          </p>
+        )}
+        {!withheld && toolEvents.length > 0 && (
           <ul
             aria-label={labels.toolCallsAriaLabel}
             className="space-y-1"
@@ -253,7 +291,7 @@ export function ThinkingBlock({
             ))}
           </ul>
         )}
-        {!hidden && thinkingTokens && (
+        {!withheld && thinkingTokens && (
           // Expanded thinking content reads at the regular message
           // body font size (no `text-xs`, no italics). Use the full
           // foreground colour for contrast against the muted card

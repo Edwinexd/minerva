@@ -203,12 +203,14 @@ struct MessageResponse {
     /// messages and on user messages.
     research_completion_tokens: Option<i32>,
     /// True iff the extraction guard's constraint was active for this
-    /// turn's research phase. Owner viewers get `thinking_transcript`
-    /// and `tool_events` blanked out above in addition; this flag is
-    /// the frontend's signal to render a `[Reasoning hidden under
-    /// integrity guard]` placeholder for the disclosure rather than
-    /// either showing the live transcript or omitting the disclosure
-    /// entirely (which is the legacy single-pass shape).
+    /// turn's research phase. Role-independent: it says the guard
+    /// fired, not that this response is empty. Student viewers
+    /// additionally get `thinking_transcript` / `tool_events` /
+    /// `chunks_used` blanked above, and the flag tells the frontend to
+    /// render a `[Reasoning hidden under integrity guard]` placeholder
+    /// rather than omitting the disclosure entirely (the legacy
+    /// single-pass shape). Teachers keep the content and the flag
+    /// labels the disclosure as hidden from the student.
     thinking_hidden: bool,
     created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -809,14 +811,19 @@ async fn get_conversation(
         Vec::new()
     };
 
-    // Read-time suppression of `thinking_transcript` / `tool_events`
-    // for the conversation owner on turns where the extraction guard
-    // was active. The persisted columns stay populated server-side
-    // (teacher dashboard needs the evidence to judge the guard), so
-    // without this gate a student re-opening the conversation can
-    // expand the "Thinking" disclosure and read the drafted solution
-    // the visible rewrite was supposed to hide. Teachers see
-    // everything, same path as the flag-rows fetch above.
+    // Turns on which the extraction guard was active. Resolved for
+    // every viewer, because the set has two jobs: it blanks
+    // `thinking_transcript` / `tool_events` / `chunks_used` for the
+    // student (below), and it drives the `thinking_hidden` flag the
+    // frontend uses to label the disclosure. A teacher keeps the
+    // content and gets the label; a student gets the label and a
+    // placeholder.
+    //
+    // The blanking is what stops a student re-opening the
+    // conversation, expanding "Thinking", and reading the drafted
+    // solution the visible rewrite was supposed to hide. The columns
+    // stay populated server-side because the teacher dashboard needs
+    // the evidence to judge the guard.
     //
     // Two signals combine (union, not intersection):
     //
@@ -835,9 +842,7 @@ async fn get_conversation(
     // "no historical suppression" rather than 500-ing the whole
     // detail view, since the column-based signal still works and
     // the visible rewrite is the primary defense.
-    let suppress_thinking_ids: HashSet<Uuid> = if is_teacher {
-        HashSet::new()
-    } else {
+    let guarded_ids: HashSet<Uuid> = {
         let mut ids: HashSet<Uuid> = messages
             .iter()
             .filter(|m| m.role == "assistant" && m.thinking_hidden)
@@ -855,6 +860,8 @@ async fn get_conversation(
         }
         ids
     };
+    // Only the student's copy of a guarded turn is emptied out.
+    let withhold = |id: &Uuid| !is_teacher && guarded_ids.contains(id);
 
     // Aegis prompt analyses. Visible to whoever can see the
     // conversation (owner + teacher); the shared loader handles
@@ -915,36 +922,30 @@ async fn get_conversation(
                 // disclosure: on a guarded turn the retrieved chunks
                 // can contain the very assignment text the student
                 // pasted or, worst case, a TA-uploaded solution PDF.
-                // The teacher branch keeps `suppress_thinking_ids`
-                // empty so audit on this column survives for them.
-                chunks_used: if suppress_thinking_ids.contains(&m.id) {
-                    None
-                } else {
-                    m.chunks_used
-                },
+                // Teachers are exempt so audit on this column
+                // survives for them.
+                chunks_used: if withhold(&m.id) { None } else { m.chunks_used },
                 model_used: m.model_used,
                 tokens_prompt: m.tokens_prompt,
                 tokens_completion: m.tokens_completion,
                 generation_ms: m.generation_ms,
                 retrieval_count: m.retrieval_count,
-                thinking_transcript: if suppress_thinking_ids.contains(&m.id) {
+                thinking_transcript: if withhold(&m.id) {
                     None
                 } else {
                     m.thinking_transcript
                 },
-                tool_events: if suppress_thinking_ids.contains(&m.id) {
-                    None
-                } else {
-                    m.tool_events
-                },
+                tool_events: if withhold(&m.id) { None } else { m.tool_events },
                 thinking_ms: m.thinking_ms,
                 research_prompt_tokens: m.research_prompt_tokens,
                 research_completion_tokens: m.research_completion_tokens,
-                // Frontend uses this to render the placeholder when
-                // suppression is in effect. True iff the message was
-                // captured in `suppress_thinking_ids` above: either
-                // the column flagged it or a REWROTE_FLAG matches.
-                thinking_hidden: suppress_thinking_ids.contains(&m.id),
+                // "The guard fired on this turn", not "your copy is
+                // empty". True for teachers too, where the fields
+                // above are still populated: the frontend then labels
+                // the disclosure as hidden from the student instead of
+                // rendering the placeholder, so the same turn reads
+                // the same way live and on refetch.
+                thinking_hidden: guarded_ids.contains(&m.id),
                 created_at: m.created_at,
             })
             .collect(),
@@ -1381,6 +1382,7 @@ async fn send_message(
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course = verify_course_access(&state, course_id, user.id).await?;
+    let viewer_is_teacher = is_teacher_of_loaded_course(&state, &course, &user).await?;
     run_chat_message(
         &state,
         course,
@@ -1389,6 +1391,7 @@ async fn send_message(
         Some(cid),
         body.content,
         body.prompt_analysis,
+        viewer_is_teacher,
     )
     .await
 }
@@ -1400,6 +1403,7 @@ async fn start_conversation(
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course = verify_course_access(&state, course_id, user.id).await?;
+    let viewer_is_teacher = is_teacher_of_loaded_course(&state, &course, &user).await?;
     run_chat_message(
         &state,
         course,
@@ -1408,6 +1412,7 @@ async fn start_conversation(
         None,
         body.content,
         body.prompt_analysis,
+        viewer_is_teacher,
     )
     .await
 }
@@ -1429,6 +1434,14 @@ async fn start_conversation(
 /// `/aegis/analyze` endpoint). None = no live analysis to persist;
 /// History row for this turn simply doesn't appear, which is correct
 /// behaviour for "user typed-and-sent inside the debounce window".
+///
+/// `viewer_is_teacher`: does the sender teach this course (or
+/// administer the instance)? Threaded into the strategy purely so a
+/// guarded turn's thinking stream is labelled rather than withheld for
+/// them, matching what `get_conversation` hands them on the refetch
+/// that follows the stream. The embed surface passes FALSE; its tokens
+/// are student-scoped by construction.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn run_chat_message(
     state: &AppState,
     course: minerva_db::queries::courses::CourseRow,
@@ -1437,6 +1450,7 @@ pub(super) async fn run_chat_message(
     cid: Option<Uuid>,
     user_content: String,
     prompt_analysis: Option<AegisAnalysisPayload>,
+    viewer_is_teacher: bool,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course_id = course.id;
 
@@ -1776,6 +1790,7 @@ pub(super) async fn run_chat_message(
         reranking_enabled,
         kg_enabled,
         tool_use_enabled: course.tool_use_enabled,
+        viewer_is_teacher,
     };
 
     tokio::spawn(async move {
@@ -2284,10 +2299,22 @@ async fn is_course_teacher_or_admin(
     let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if course.owner_id == user.id {
+    is_teacher_of_loaded_course(state, &course, user).await
+}
+
+/// Same check against a course row the caller already has in hand.
+/// The send path resolves the course before it can do anything else,
+/// so going through `is_course_teacher_or_admin` there would re-fetch
+/// it by primary key on every chat turn just to answer one bool.
+pub(crate) async fn is_teacher_of_loaded_course(
+    state: &AppState,
+    course: &minerva_db::queries::courses::CourseRow,
+    user: &User,
+) -> Result<bool, AppError> {
+    if user.role.is_admin() || course.owner_id == user.id {
         return Ok(true);
     }
-    Ok(minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?)
+    Ok(minerva_db::queries::courses::is_course_teacher(&state.db, course.id, user.id).await?)
 }
 
 async fn verify_course_teacher_access(

@@ -699,6 +699,8 @@ function EmbedChatWindow({
       thinkingDoneWithDuration: t("embed.thinkingDoneWithDuration"),
       thinkingHidden: t("embed.thinkingHidden"),
       thinkingHiddenBody: t("embed.thinkingHiddenBody"),
+      thinkingHiddenRevealed: t("embed.thinkingHiddenRevealed"),
+      thinkingHiddenRevealedBody: t("embed.thinkingHiddenRevealedBody"),
       toolCallsAriaLabel: t("embed.toolCallsAriaLabel"),
     },
     assistantResponse: t("embed.assistantResponseLabel"),

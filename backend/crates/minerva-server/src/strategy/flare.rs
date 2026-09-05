@@ -222,6 +222,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         .map(|g| g.flagged_this_turn)
         .unwrap_or(false);
 
+    // Student vs teacher view of a guarded turn. Only affects what
+    // reaches this viewer's client; the persisted `thinking_hidden`
+    // bit below is the guard verdict alone.
+    let disclosure = super::ThinkingDisclosure::resolve(suppress_thinking, ctx.viewer_is_teacher);
+
     let global_knowledge = common::retrieve_global_knowledge(
         &http_client,
         &ctx.openai_api_key,
@@ -385,13 +390,14 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         None,
         // No live thinking stream on this path, but the SSE `done`
         // event still ships `chunks_used` and the persisted column
-        // drives the read-time owner-suppression gate in chat.rs /
+        // drives the read-time student-suppression gate in chat.rs /
         // embed.rs. Persist thinking_hidden=true when the guard
         // fired per-turn so the seed-RAG chunks (potentially the
         // assignment_brief / TA-uploaded solution PDF) get blanked
-        // in both the SSE done event and on GET. Mirrors the same
-        // gate logic on the tool_use and simple paths.
-        suppress_thinking,
+        // for a student in both the SSE done event and on GET, while
+        // a teacher chatting keeps them. Mirrors the same gate logic
+        // on the tool_use and simple paths.
+        disclosure,
     )
     .await;
 }

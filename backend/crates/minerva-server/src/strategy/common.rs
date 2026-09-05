@@ -1410,7 +1410,7 @@ pub async fn finalize(
     thinking_ms: Option<i32>,
     research_prompt_tokens: Option<i32>,
     research_completion_tokens: Option<i32>,
-    thinking_hidden: bool,
+    disclosure: super::ThinkingDisclosure,
 ) {
     let assistant_msg_id = uuid::Uuid::new_v4();
     let _ = minerva_db::queries::conversations::insert_message(
@@ -1430,7 +1430,11 @@ pub async fn finalize(
         thinking_ms,
         research_prompt_tokens,
         research_completion_tokens,
-        thinking_hidden,
+        // Persisted audit bit: did the guard fire on this turn? Role
+        // of whoever happened to be watching does not enter into it,
+        // so a turn a teacher chatted through is still marked
+        // suppressed for every later reader.
+        disclosure.guarded(),
     )
     .await;
 
@@ -1521,20 +1525,25 @@ pub async fn finalize(
         }
     }
 
-    // On a guarded turn the `done` event omits `chunks_used` ; the
-    // seed RAG is keyed off the student's pasted assignment text, so
-    // the retrieved chunks may contain the assignment_brief itself
-    // or, on courses where a TA uploaded an answer key, the
-    // solutions PDF. Rendering those in the student's sources panel
-    // is the same leak shape we already plugged for the thinking
-    // trace. Persistence above is unchanged (teacher dashboard
-    // needs the audit trail of what the retriever pulled when the
-    // guard fired); read-time gates in chat.rs / embed.rs blank
-    // the field on GET for owner viewers, symmetrical with this
-    // SSE-time gate. `rag_injected` and `retrieval_count` stay so
-    // the frontend can render "1 source" counts without exposing
-    // chunk content.
-    let done_chunks = if thinking_hidden { None } else { chunks_json };
+    // On a guarded turn the `done` event omits `chunks_used` for a
+    // student viewer ; the seed RAG is keyed off the pasted
+    // assignment text, so the retrieved chunks may contain the
+    // assignment_brief itself or, on courses where a TA uploaded an
+    // answer key, the solutions PDF. Rendering those in the sources
+    // panel is the same leak shape we already plugged for the
+    // thinking trace. A teacher chatting on a guarded turn
+    // (`Revealed`) keeps them, matching what the read-time gate in
+    // chat.rs hands them on the refetch that lands a moment later.
+    // Persistence above is unchanged either way (the teacher
+    // dashboard needs the audit trail of what the retriever pulled
+    // when the guard fired). `rag_injected` and `retrieval_count`
+    // stay so the frontend can render "1 source" counts without
+    // exposing chunk content.
+    let done_chunks = if disclosure.withheld() {
+        None
+    } else {
+        chunks_json
+    };
     let _ = tx
         .send(Ok(Event::default().data(
             serde_json::json!({

@@ -22,6 +22,61 @@ pub struct ChatRoute {
     pub provider: std::sync::Arc<dyn crate::llm::ChatProvider>,
 }
 
+/// What the extraction guard does to this turn's *visible* research
+/// trace (thinking tokens, tool calls / results, sources panel).
+///
+/// Split from the guard's own verdict on purpose. Whether the guard
+/// fired is a property of the turn and drives generation-side
+/// behaviour (the writeup gets an empty research transcript) plus the
+/// persisted `messages.thinking_hidden` audit bit; both are identical
+/// no matter who is watching. What the *client* receives additionally
+/// depends on the viewer, because a teacher is the audience the
+/// evidence is being preserved for.
+///
+/// Before this existed the SSE layer suppressed for everyone while the
+/// read-time gate in `routes::chat` exempted teachers, so a teacher
+/// chatting in their own course saw the placeholder during generation
+/// and the full trace the instant the post-stream refetch landed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ThinkingDisclosure {
+    /// Guard did not fire on this turn. Everything streams as normal.
+    Open,
+    /// Guard fired and the viewer is the student: no thinking tokens,
+    /// tool events, or chunks reach the client, and a one-shot
+    /// `thinking_hidden` event stands in for the disclosure.
+    Withheld,
+    /// Guard fired but the viewer teaches this course (or is an
+    /// admin): the `thinking_hidden` marker is still emitted so the UI
+    /// can label the turn as suppressed, and the trace streams anyway.
+    Revealed,
+}
+
+impl ThinkingDisclosure {
+    /// Did the guard fire this turn? Drives the persisted
+    /// `messages.thinking_hidden` column and the client-side "this was
+    /// hidden from the student" label.
+    pub fn guarded(self) -> bool {
+        !matches!(self, ThinkingDisclosure::Open)
+    }
+
+    /// Must this viewer be kept from the trace? Gates every
+    /// `thinking_token` / `tool_call` / `tool_result` /
+    /// `server_retrieval` emission and `chunks_used` on the `done`
+    /// event.
+    pub fn withheld(self) -> bool {
+        matches!(self, ThinkingDisclosure::Withheld)
+    }
+
+    /// Build from the guard's per-turn verdict and the viewer's role.
+    pub fn resolve(guard_flagged: bool, viewer_is_teacher: bool) -> Self {
+        match (guard_flagged, viewer_is_teacher) {
+            (false, _) => ThinkingDisclosure::Open,
+            (true, false) => ThinkingDisclosure::Withheld,
+            (true, true) => ThinkingDisclosure::Revealed,
+        }
+    }
+}
+
 /// Context passed to every generation strategy.
 pub struct GenerationContext {
     pub course_name: String,
@@ -120,6 +175,15 @@ pub struct GenerationContext {
     /// unchanged. Validated against `model_capabilities::validate_config`
     /// at config-save time so a runtime mismatch is impossible.
     pub tool_use_enabled: bool,
+    /// Does the person on the other end of this stream teach the
+    /// course (or administer the instance)? Only consumed by
+    /// `ThinkingDisclosure::resolve` to decide whether a guarded
+    /// turn's research trace is withheld or merely labelled. Never
+    /// touches generation: the writeup still gets an empty research
+    /// transcript and `messages.thinking_hidden` is still persisted on
+    /// a guarded turn regardless of who asked. Always FALSE on the
+    /// embed surface, whose tokens are student-scoped by construction.
+    pub viewer_is_teacher: bool,
 }
 
 /// Run the appropriate strategy based on the strategy name.
@@ -138,5 +202,36 @@ pub async fn run_strategy(
     match strategy {
         "flare" => flare::run(ctx, tx).await,
         _ => simple::run(ctx, tx).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ThinkingDisclosure;
+
+    #[test]
+    fn disclosure_separates_the_guard_verdict_from_the_viewer() {
+        // Guard silent: nobody is gated, and nothing is persisted as
+        // suppressed.
+        for viewer_is_teacher in [false, true] {
+            let d = ThinkingDisclosure::resolve(false, viewer_is_teacher);
+            assert_eq!(d, ThinkingDisclosure::Open);
+            assert!(!d.guarded());
+            assert!(!d.withheld());
+        }
+
+        // Guard fired: the turn is marked suppressed for both, so the
+        // persisted `thinking_hidden` column and the frontend's label
+        // agree no matter who chatted. Only the student's trace is
+        // actually withheld.
+        let student = ThinkingDisclosure::resolve(true, false);
+        assert_eq!(student, ThinkingDisclosure::Withheld);
+        assert!(student.guarded());
+        assert!(student.withheld());
+
+        let teacher = ThinkingDisclosure::resolve(true, true);
+        assert_eq!(teacher, ThinkingDisclosure::Revealed);
+        assert!(teacher.guarded());
+        assert!(!teacher.withheld());
     }
 }

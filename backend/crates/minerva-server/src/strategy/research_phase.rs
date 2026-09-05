@@ -44,7 +44,7 @@ use tokio::sync::mpsc;
 use super::common;
 use super::common::{chunk_identity_hash, RagChunk};
 use super::tools::{self, ToolCatalogFlags, ToolDispatchCtx};
-use super::GenerationContext;
+use super::{GenerationContext, ThinkingDisclosure};
 use crate::error::AppError;
 
 /// Configuration knobs for one research-phase run. `simple+tools` and
@@ -223,14 +223,17 @@ async fn emit_thinking_done(tx: &mpsc::Sender<Result<Event, AppError>>, duration
         .await;
 }
 
-/// One-shot signal that the research phase ran but its user-visible
-/// stream was suppressed by the extraction guard. Emitted in place of
-/// the usual `thinking_token` / `tool_call` / `tool_result` events;
-/// the closing `thinking_done` still fires so the frontend's
+/// One-shot signal that the extraction guard fired on this turn, so
+/// the research trace is not the student's to read. Emitted on every
+/// guarded turn regardless of viewer; what follows it differs. For a
+/// student (`ThinkingDisclosure::Withheld`) it arrives *instead of*
+/// the usual `thinking_token` / `tool_call` / `tool_result` events and
+/// the frontend renders a placeholder disclosure. For a teacher
+/// (`Revealed`) those events still follow and the marker only tells
+/// the frontend to label the disclosure as hidden from the student.
+/// The closing `thinking_done` fires either way so the frontend's
 /// research-vs-writeup state machine stays consistent across guarded
-/// and non-guarded turns. Frontend handler renders a placeholder
-/// disclosure ("[Reasoning hidden under integrity guard for this
-/// turn]") instead of the live transcript.
+/// and non-guarded turns.
 pub(super) async fn emit_thinking_hidden(tx: &mpsc::Sender<Result<Event, AppError>>) {
     let _ = tx
         .send(Ok(Event::default().data(
@@ -252,16 +255,19 @@ pub(super) async fn emit_thinking_hidden(tx: &mpsc::Sender<Result<Event, AppErro
 /// it once via `documents::orphaned_doc_ids` and reuses it for the
 /// strategy's own seed retrieval too.
 ///
-/// `suppress_thinking_stream` is the extraction-guard gate: when true,
-/// the research loop runs server-side as normal (tools dispatch,
-/// chunks accumulate, transcript builds up for the teacher audit
-/// trail and the post-generation output check) but the user-visible
-/// SSE events (`thinking_token` / `tool_call` / `tool_result`) are
-/// dropped on the floor. A one-shot `{"type":"thinking_hidden"}`
-/// event is emitted at start instead so the frontend can render the
-/// placeholder; the closing `thinking_done` event still fires so the
-/// frontend's research/writeup state machine stays consistent across
-/// guarded and non-guarded turns.
+/// `disclosure` is the extraction-guard gate. On a guarded turn the
+/// research loop runs server-side as normal either way (tools
+/// dispatch, chunks accumulate, transcript builds up for the teacher
+/// audit trail and the post-generation output check), and a one-shot
+/// `{"type":"thinking_hidden"}` event is emitted at the start so the
+/// frontend knows the guard fired. What changes is the trace: when
+/// the viewer is the student (`Withheld`) the `thinking_token` /
+/// `tool_call` / `tool_result` events are dropped on the floor and
+/// the frontend renders a placeholder; when the viewer teaches the
+/// course (`Revealed`) they stream as usual and the frontend labels
+/// the disclosure as hidden-from-the-student. The closing
+/// `thinking_done` event fires in all three cases so the frontend's
+/// research/writeup state machine stays consistent.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     ctx: &GenerationContext,
@@ -270,7 +276,7 @@ pub async fn run(
     initial_chunks: Vec<RagChunk>,
     per_response_token_cap: i64,
     orphaned_doc_ids: &std::collections::HashSet<String>,
-    suppress_thinking_stream: bool,
+    disclosure: ThinkingDisclosure,
     tx: &mpsc::Sender<Result<Event, AppError>>,
 ) -> ResearchOutput {
     let started_at = std::time::Instant::now();
@@ -283,7 +289,7 @@ pub async fn run(
     // emit so the placeholder shows the instant research starts,
     // not after the first would-be `thinking_token` would have
     // landed.
-    if suppress_thinking_stream {
+    if disclosure.guarded() {
         emit_thinking_hidden(tx).await;
     }
 
@@ -393,7 +399,7 @@ pub async fn run(
             &catalog,
             tx,
             &mut transcript,
-            suppress_thinking_stream,
+            disclosure,
         )
         .await
         {
@@ -463,11 +469,11 @@ pub async fn run(
                         serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
                     // emit_* gated on the guard's suppression flag so
                     // we never leak the model's tool calls / results
-                    // to the client on a guarded turn. Dispatch and
+                    // to a student on a guarded turn. Dispatch and
                     // tool_events accumulation still happen so the
                     // teacher dashboard's audit trail is preserved
                     // and the writeup phase still sees the chunks.
-                    if !suppress_thinking_stream {
+                    if !disclosure.withheld() {
                         emit_tool_call(tx, &call.name, &args_value).await;
                     }
                     match tools::dispatch(&call.name, &call.arguments, &dispatch_ctx, catalog_flags)
@@ -489,7 +495,7 @@ pub async fn run(
                             let result_value: serde_json::Value =
                                 serde_json::from_str(&outcome.model_message)
                                     .unwrap_or(serde_json::Value::Null);
-                            if !suppress_thinking_stream {
+                            if !disclosure.withheld() {
                                 emit_tool_result(tx, &call.name, &summary, &result_value).await;
                             }
                             tool_events.push(ToolEventRecord {
@@ -506,7 +512,7 @@ pub async fn run(
                             let summary = summarise_for_event(&msg);
                             let result_value: serde_json::Value =
                                 serde_json::from_str(&msg).unwrap_or(serde_json::Value::Null);
-                            if !suppress_thinking_stream {
+                            if !disclosure.withheld() {
                                 emit_tool_result(tx, &call.name, &summary, &result_value).await;
                             }
                             tool_events.push(ToolEventRecord {
@@ -618,7 +624,7 @@ pub async fn run(
                         .collect();
                     let result_value = serde_json::Value::Array(result_chunks);
                     let summary = format!("{} chunks added", added);
-                    if !suppress_thinking_stream {
+                    if !disclosure.withheld() {
                         emit_tool_call(tx, "flare_auto_retrieve", &flare_args).await;
                         emit_tool_result(tx, "flare_auto_retrieve", &summary, &result_value).await;
                     }
@@ -809,7 +815,7 @@ async fn stream_research_turn(
     catalog: &[serde_json::Value],
     tx: &mpsc::Sender<Result<Event, AppError>>,
     transcript: &mut String,
-    suppress_thinking_stream: bool,
+    disclosure: ThinkingDisclosure,
 ) -> Result<TurnOutcome, String> {
     let mut body = serde_json::json!({
         "model": ctx.model,
@@ -964,7 +970,7 @@ async fn stream_research_turn(
                     // even if the student never sees the prose.
                     transcript.push_str(delta_content);
                     sentence_buffer.push_str(delta_content);
-                    if !suppress_thinking_stream {
+                    if !disclosure.withheld() {
                         emit_thinking_token(tx, delta_content).await;
                     }
 
@@ -1266,6 +1272,7 @@ mod stream_integration_tests {
             reranking_enabled: true,
             kg_enabled: false,
             tool_use_enabled: true,
+            viewer_is_teacher: false,
         }
     }
 
@@ -1347,7 +1354,7 @@ mod stream_integration_tests {
             &catalog,
             &tx,
             &mut transcript,
-            false,
+            ThinkingDisclosure::Open,
         )
         .await
         .expect("stream should succeed");
@@ -1370,6 +1377,80 @@ mod stream_integration_tests {
         // We should have emitted at least one thinking_token event
         // (the long content delta).
         assert!(events >= 1, "expected at least one SSE thinking_token");
+    }
+
+    /// The guard's per-turn verdict decides what the server does;
+    /// the viewer's role decides what leaves the process. A student
+    /// on a guarded turn gets no `thinking_token` at all, a teacher
+    /// on the same turn gets every one of them, and in both cases the
+    /// transcript accumulates server-side for the audit trail and the
+    /// post-generation output check.
+    async fn tokens_emitted_under(disclosure: ThinkingDisclosure) -> (usize, String) {
+        let server = MockServer::start().await;
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"drafting a solution\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],",
+            "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let ctx = fake_ctx_with_url(format!("{}/chat/completions", server.uri()));
+        let (tx, mut rx) = mpsc::channel::<Result<Event, AppError>>(64);
+        let mut transcript = String::new();
+        stream_research_turn(
+            &reqwest::Client::new(),
+            &ctx,
+            &ResearchConfig::defaults(false),
+            &[serde_json::json!({"role": "user", "content": "?"})],
+            &[],
+            &tx,
+            &mut transcript,
+            disclosure,
+        )
+        .await
+        .expect("stream should succeed");
+
+        drop(tx);
+        let mut emitted = 0;
+        while rx.recv().await.is_some() {
+            emitted += 1;
+        }
+        (emitted, transcript)
+    }
+
+    #[tokio::test]
+    async fn guarded_turn_withholds_tokens_from_a_student() {
+        let (emitted, transcript) = tokens_emitted_under(ThinkingDisclosure::Withheld).await;
+        assert_eq!(emitted, 0, "student must receive no thinking_token events");
+        assert!(
+            transcript.contains("drafting a solution"),
+            "transcript still accumulates for the audit trail: {transcript:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn guarded_turn_still_streams_to_a_teacher() {
+        let (emitted, transcript) = tokens_emitted_under(ThinkingDisclosure::Revealed).await;
+        assert!(
+            emitted >= 1,
+            "teacher keeps the live trace the read-time gate would hand them anyway"
+        );
+        assert!(transcript.contains("drafting a solution"));
+    }
+
+    #[tokio::test]
+    async fn unguarded_turn_streams_normally() {
+        let (emitted, _) = tokens_emitted_under(ThinkingDisclosure::Open).await;
+        assert!(emitted >= 1);
     }
 
     #[tokio::test]
@@ -1420,7 +1501,7 @@ mod stream_integration_tests {
             &[],
             &tx,
             &mut String::new(),
-            false,
+            ThinkingDisclosure::Open,
         )
         .await
         .expect("fallback should succeed");
@@ -1480,7 +1561,7 @@ mod stream_integration_tests {
             &catalog,
             &tx,
             &mut transcript,
-            false,
+            ThinkingDisclosure::Open,
         )
         .await
         .expect("stream should succeed");

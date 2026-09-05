@@ -791,6 +791,8 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
     // call site that does pass `hidden` still resolves correctly.
     thinkingHidden: tStudent("chat.thinkingHidden"),
     thinkingHiddenBody: tStudent("chat.thinkingHiddenBody"),
+    thinkingHiddenRevealed: tStudent("chat.thinkingHiddenRevealed"),
+    thinkingHiddenRevealedBody: tStudent("chat.thinkingHiddenRevealedBody"),
     toolCallsAriaLabel: tStudent("chat.toolCallsAriaLabel"),
   }
   const queryClient = useQueryClient()

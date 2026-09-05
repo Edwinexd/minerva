@@ -437,6 +437,8 @@ export function ChatWindow({
       thinkingDoneWithDuration: t("chat.thinkingDoneWithDuration"),
       thinkingHidden: t("chat.thinkingHidden"),
       thinkingHiddenBody: t("chat.thinkingHiddenBody"),
+      thinkingHiddenRevealed: t("chat.thinkingHiddenRevealed"),
+      thinkingHiddenRevealedBody: t("chat.thinkingHiddenRevealedBody"),
       toolCallsAriaLabel: t("chat.toolCallsAriaLabel"),
     },
     assistantResponse: t("chat.assistantResponseLabel"),

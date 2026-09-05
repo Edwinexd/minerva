@@ -146,6 +146,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         .map(|g| g.flagged_this_turn)
         .unwrap_or(false);
 
+    // Student vs teacher view of a guarded turn. Only affects what
+    // reaches this viewer's client; the persisted `thinking_hidden`
+    // bit below is the guard verdict alone.
+    let disclosure = super::ThinkingDisclosure::resolve(suppress_thinking, ctx.viewer_is_teacher);
+
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
         .await
         .unwrap_or_default();
@@ -239,15 +244,16 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         None,
         // No live thinking stream to gate on this path, but the
         // SSE `done` event still ships `chunks_used` and the
-        // persisted column drives the read-time owner-suppression
+        // persisted column drives the read-time student-suppression
         // gate in chat.rs / embed.rs. On a flagged turn the seed
         // RAG can include the assignment_brief or a TA-uploaded
         // solution PDF, so we mirror the tool_use path's gate:
         // persist thinking_hidden=true when the guard fired
-        // per-turn, blanking `chunks_used` in both the SSE done
-        // event (via common::finalize) and on GET (via the read-
-        // time gate).
-        suppress_thinking,
+        // per-turn, and blank `chunks_used` for a student viewer in
+        // both the SSE done event (via common::finalize) and on GET
+        // (via the read-time gate). A teacher chatting keeps the
+        // sources on both, same as the read-time gate gives them.
+        disclosure,
     )
     .await;
 }

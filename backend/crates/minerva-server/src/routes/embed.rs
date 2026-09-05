@@ -526,6 +526,9 @@ async fn send_message(
         Some(cid),
         body.content,
         body.prompt_analysis,
+        // Embed tokens are student-scoped; there is no teacher on
+        // this surface to reveal a guarded turn's thinking to.
+        false,
     )
     .await
 }
@@ -570,6 +573,7 @@ async fn start_conversation(
         None,
         body.content,
         body.prompt_analysis,
+        false,
     )
     .await
 }

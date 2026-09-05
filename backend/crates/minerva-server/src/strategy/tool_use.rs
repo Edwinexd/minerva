@@ -264,13 +264,28 @@ pub async fn run(
         .map(|g| g.flagged_this_turn)
         .unwrap_or(false);
 
+    // Whether *this viewer* is kept from the trace. A student gets
+    // `Withheld`; a teacher or admin chatting in their own course
+    // gets `Revealed`, which still emits the `thinking_hidden`
+    // marker (so the disclosure is labelled as suppressed) but lets
+    // the trace through. Without the split the live stream hid the
+    // trace from a teacher for the length of the generation and the
+    // post-stream refetch, which exempts teachers, handed it straight
+    // back ; the placeholder flipped to the full transcript the
+    // instant the stream closed.
+    //
+    // Generation is untouched by this: `suppress_thinking` alone
+    // still drives the writeup's empty research transcript and the
+    // persisted `thinking_hidden` column below.
+    let disclosure = super::ThinkingDisclosure::resolve(suppress_thinking, ctx.viewer_is_teacher);
+
     // 4. Emit the prelim retrieval records live (gated by the
     //    guard's per-turn signal). Done AFTER guard eval so we
     //    never leak chunks the retriever pulled on a guarded turn ;
     //    on a flagged turn the seed RAG is keyed off the student's
     //    pasted assignment text and the chunks may contain the
     //    assignment_brief itself or a TA-uploaded solution PDF.
-    if !suppress_thinking {
+    if !disclosure.withheld() {
         for record in &prelim_events {
             emit_server_retrieval(&tx, record).await;
         }
@@ -292,7 +307,7 @@ pub async fn run(
         rag.context.clone(),
         cap,
         &orphaned,
-        suppress_thinking,
+        disclosure,
         &tx,
     )
     .await;
@@ -457,12 +472,13 @@ pub async fn run(
         Some(research.duration_ms.clamp(0, i32::MAX as i64) as i32),
         Some(research_prompt_tokens),
         Some(research_completion_tokens),
-        // `thinking_hidden` is the persisted record of whether the
-        // guard was active for this turn; the read-time gate on
-        // `get_conversation` uses it to blank the disclosure for the
-        // owner even on refresh long after the SSE stream closed.
-        // True iff we suppressed the live thinking stream above.
-        suppress_thinking,
+        // Carries both halves: `guarded()` is the persisted record of
+        // whether the guard was active for this turn (the read-time
+        // gate on `get_conversation` uses it to blank the disclosure
+        // for the student even on refresh long after the SSE stream
+        // closed), `withheld()` decides whether this viewer's `done`
+        // event carries `chunks_used`.
+        disclosure,
     )
     .await;
 }

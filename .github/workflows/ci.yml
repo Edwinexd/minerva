@@ -160,6 +160,11 @@ jobs:
           # full authenticated state deterministically.
           MINERVA_ADMINS: student
           MINERVA_HMAC_SECRET: pa11y-ci-secret
+          # `Config::from_env` hard-requires this one, so the process exits
+          # before it binds without it. No a11y page completes a chat turn;
+          # the only reader is /api/models, which falls back to its static
+          # list when the key is rejected.
+          CEREBRAS_API_KEY: pa11y-ci-not-a-real-key
           MINERVA_DOCS_PATH: ${{ runner.temp }}/a11y-docs
           MINERVA_STATIC_DIR: ${{ github.workspace }}/frontend/dist
           MINERVA_PORT: "3000"

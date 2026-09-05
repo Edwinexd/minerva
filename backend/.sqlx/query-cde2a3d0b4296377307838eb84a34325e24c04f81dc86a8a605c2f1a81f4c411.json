@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE messages SET topic_embedding = $2, topic_embedding_model = NULL, topic_embedding_version = $3 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float4Array",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cde2a3d0b4296377307838eb84a34325e24c04f81dc86a8a605c2f1a81f4c411"
+}

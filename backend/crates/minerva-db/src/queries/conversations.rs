@@ -489,30 +489,31 @@ pub async fn find_note_by_id(db: &PgPool, id: Uuid) -> Result<Option<TeacherNote
 
 /// One earlier user turn plus its cached query embedding, for the
 /// topic-switch check. `embedding` is `None` when the turn predates the
-/// feature or was written under a different embedding model.
+/// feature or was written under a different embedding generation.
 #[derive(Debug)]
 pub struct TopicTurn {
+    pub id: Uuid,
     pub content: String,
     pub embedding: Option<Vec<f32>>,
 }
 
 /// The most recent user turns of a conversation *before* `before_id`,
-/// oldest-first, with their cached embeddings where the model matches.
+/// oldest-first, with their cached embeddings where the generation matches.
 ///
-/// `model` is compared in SQL rather than in Rust so a rotated course
+/// `embedding_version` is compared in SQL rather than in Rust so a rotated course
 /// simply yields `NULL` vectors instead of dragging incomparable ones
-/// over the wire. The caller then falls back to "not evaluated" rather
-/// than computing a similarity across two different vector spaces.
+/// over the wire. The caller re-embeds those bounded, missing rows in its
+/// spawned task before scoring them.
 pub async fn recent_user_turns_before(
     db: &PgPool,
     conversation_id: Uuid,
     before_id: Uuid,
-    model: &str,
+    embedding_version: i32,
     limit: i64,
 ) -> Result<Vec<TopicTurn>, sqlx::Error> {
     let rows = sqlx::query!(
-        r#"SELECT content,
-                  CASE WHEN topic_embedding_model = $3 THEN topic_embedding END
+        r#"SELECT id, content,
+                  CASE WHEN topic_embedding_version = $3 THEN topic_embedding END
                       AS "embedding: Vec<f32>"
              FROM messages
             WHERE conversation_id = $1
@@ -522,7 +523,7 @@ pub async fn recent_user_turns_before(
             LIMIT $4"#,
         conversation_id,
         before_id,
-        model,
+        embedding_version,
         limit,
     )
     .fetch_all(db)
@@ -531,30 +532,60 @@ pub async fn recent_user_turns_before(
         .into_iter()
         .rev()
         .map(|r| TopicTurn {
+            id: r.id,
             content: r.content,
             embedding: r.embedding,
         })
         .collect())
 }
 
-/// Cache a user turn's query embedding. Best-effort: the caller logs
-/// and continues, since a missing cache entry only costs the next turn
-/// a recomputation, never correctness.
+/// Cache a user turn's query embedding under one course embedding generation.
+///
+/// The generation check and write share a transaction with a `FOR SHARE`
+/// lock on the course row. That makes cache writes serialize with
+/// `courses::rotate_embedding`: a task that began before a rotation is either
+/// written then cleared by the rotation, or observes the new version and
+/// declines to write its now-stale vector. It can never resurrect a stale
+/// vector after the rotation commits.
+///
+/// `Ok(false)` means the expected generation was no longer current. Callers
+/// must abandon scoring, because their in-memory vector is stale too.
 pub async fn set_topic_embedding(
     db: &PgPool,
     message_id: Uuid,
     embedding: &[f32],
-    model: &str,
-) -> Result<(), sqlx::Error> {
+    course_id: Uuid,
+    embedding_version: i32,
+) -> Result<bool, sqlx::Error> {
+    let mut tx = db.begin().await?;
+    let current_version = sqlx::query_scalar!(
+        r#"SELECT course.embedding_version
+           FROM messages m
+           JOIN conversations c ON c.id = m.conversation_id
+           JOIN courses course ON course.id = c.course_id
+          WHERE m.id = $1 AND c.course_id = $2
+          FOR SHARE OF course"#,
+        message_id,
+        course_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if current_version != Some(embedding_version) {
+        tx.rollback().await?;
+        return Ok(false);
+    }
+
     sqlx::query!(
-        "UPDATE messages SET topic_embedding = $2, topic_embedding_model = $3 WHERE id = $1",
+        "UPDATE messages SET topic_embedding = $2, topic_embedding_model = NULL, topic_embedding_version = $3 WHERE id = $1",
         message_id,
         embedding,
-        model,
+        embedding_version,
     )
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
-    Ok(())
+    tx.commit().await?;
+    Ok(true)
 }
 
 /// Record the two-layer verdict for a user turn. Values are constrained

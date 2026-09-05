@@ -415,6 +415,28 @@ pub async fn rotate_embedding(
     .await?
     .unwrap_or(0);
 
+    // Topic-switch vectors live on user messages rather than in the document
+    // worker queue, but they share the course embedding space. Invalidate
+    // them in this same transaction as the generation bump so no committed
+    // state can claim a new course version while retaining usable-looking old
+    // vectors. The chat-side spawned task lazily repairs its bounded six-turn
+    // window on the next message.
+    sqlx::query!(
+        r#"UPDATE messages m
+           SET topic_embedding = NULL,
+               topic_embedding_model = NULL,
+               topic_embedding_version = NULL
+          FROM conversations c
+         WHERE m.conversation_id = c.id
+           AND c.course_id = $1
+           AND (m.topic_embedding IS NOT NULL
+                OR m.topic_embedding_model IS NOT NULL
+                OR m.topic_embedding_version IS NOT NULL)"#,
+        id,
+    )
+    .execute(&mut *tx)
+    .await?;
+
     tx.commit().await?;
 
     Ok(RotateEmbeddingOutcome {

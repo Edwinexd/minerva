@@ -2305,6 +2305,57 @@ pub(super) async fn verify_course_access_pub(
     verify_course_access(state, course_id, user_id).await
 }
 
+/// Embed topic-switch texts with the same query-side semantics as retrieval.
+///
+/// This is deliberately shared by the current turn and the bounded cache
+/// repair below: a local model such as Arctic needs its query prefix on every
+/// text, whether it was written just now or is a prior turn being repaired
+/// after a feature rollout / embedding rotation.
+async fn embed_topic_turns(
+    state: &AppState,
+    course_id: Uuid,
+    embedding_provider: &str,
+    embedding_model: &str,
+    texts: Vec<String>,
+) -> Option<Vec<Vec<f32>>> {
+    let expected = texts.len();
+    let result = if embedding_provider == "local" {
+        let formatted = texts
+            .into_iter()
+            .map(|text| minerva_catalog::format_query_for_model(embedding_model, &text))
+            .collect();
+        state
+            .fastembed
+            .embed_query(embedding_model, formatted)
+            .await
+    } else {
+        minerva_pipeline::embedder::embed_texts(
+            &state.http_client,
+            &state.config.openai_api_key,
+            &texts,
+        )
+        .await
+        .map(|result| result.embeddings)
+    };
+
+    match result {
+        Ok(embeddings) if embeddings.len() == expected => Some(embeddings),
+        Ok(embeddings) => {
+            tracing::warn!(
+                %course_id,
+                expected,
+                returned = embeddings.len(),
+                "topic_switch: embed returned the wrong vector count"
+            );
+            None
+        }
+        Err(e) => {
+            tracing::warn!(%course_id, "topic_switch: embed failed ({e})");
+            None
+        }
+    }
+}
+
 /// Fire-and-forget the two-layer topic-switch check for one user turn.
 ///
 /// Layer 1 is a cosine against the conversation's cached earlier user
@@ -2329,6 +2380,7 @@ fn spawn_topic_switch_detection(
     let course_id = course.id;
     let embedding_provider = course.embedding_provider.clone();
     let embedding_model = course.embedding_model.clone();
+    let embedding_version = course.embedding_version;
     let threshold = ts::similarity_threshold(course.min_score);
 
     tokio::spawn(async move {
@@ -2340,56 +2392,49 @@ fn spawn_topic_switch_detection(
         // (`strategy::common::embedding_search`), so a cached vector is
         // directly comparable with the ones retrieval produces and with
         // every other cached vector in the conversation.
-        let vector = if embedding_provider == "local" {
-            let formatted = minerva_catalog::format_query_for_model(&embedding_model, &content);
-            match state
-                .fastembed
-                .embed_query(&embedding_model, vec![formatted])
-                .await
-            {
-                Ok(v) => v.into_iter().next(),
-                Err(e) => {
-                    tracing::warn!(%course_id, "topic_switch: embed failed ({e})");
-                    None
-                }
-            }
-        } else {
-            match minerva_pipeline::embedder::embed_texts(
-                &state.http_client,
-                &state.config.openai_api_key,
-                std::slice::from_ref(&content),
-            )
-            .await
-            {
-                Ok(r) => r.embeddings.into_iter().next(),
-                Err(e) => {
-                    tracing::warn!(%course_id, "topic_switch: openai embed failed ({e})");
-                    None
-                }
-            }
+        let Some(mut vectors) = embed_topic_turns(
+            &state,
+            course_id,
+            &embedding_provider,
+            &embedding_model,
+            vec![content.clone()],
+        )
+        .await
+        else {
+            return;
         };
-        let Some(vector) = vector else { return };
+        let Some(vector) = vectors.pop() else { return };
 
         // Cache before scoring: even on a turn we cannot classify (too
         // little history), the vector is what spares the *next* turn a
         // recomputation. Skipping this is what makes the whole thing
         // quadratic in conversation length.
-        if let Err(e) = minerva_db::queries::conversations::set_topic_embedding(
+        match minerva_db::queries::conversations::set_topic_embedding(
             &state.db,
             message_id,
             &vector,
-            &embedding_model,
+            course_id,
+            embedding_version,
         )
         .await
         {
-            tracing::warn!(%course_id, "topic_switch: embedding cache write failed ({e})");
+            Ok(true) => {}
+            // A rotation won the race while the embed was in flight. The
+            // vector is from the old generation, so do not score with it.
+            Ok(false) => return,
+            Err(e) => {
+                // A failed cache write does not affect the freshly computed
+                // vector, so preserve today's best-effort behaviour for this
+                // turn. The next one will attempt the cache repair again.
+                tracing::warn!(%course_id, "topic_switch: embedding cache write failed ({e})");
+            }
         }
 
-        let earlier = match minerva_db::queries::conversations::recent_user_turns_before(
+        let mut earlier = match minerva_db::queries::conversations::recent_user_turns_before(
             &state.db,
             conversation_id,
             message_id,
-            &embedding_model,
+            embedding_version,
             ts::COMPARISON_TURNS as i64,
         )
         .await
@@ -2400,6 +2445,58 @@ fn spawn_topic_switch_detection(
                 return;
             }
         };
+
+        // Old conversations predate the feature, and a model rotation makes
+        // every earlier cache entry deliberately unreadable. Repair only the
+        // six turns this detector can inspect, in one batch, while already in
+        // its spawned task. This makes a flag enablement or rotation useful on
+        // the very next eligible turn without an unbounded history backfill.
+        let missing: Vec<(usize, Uuid)> = earlier
+            .iter()
+            .enumerate()
+            .filter_map(|(index, turn)| turn.embedding.is_none().then_some((index, turn.id)))
+            .collect();
+        if !missing.is_empty() {
+            let missing_texts = missing
+                .iter()
+                .map(|(index, _)| earlier[*index].content.clone())
+                .collect();
+            let Some(repaired) = embed_topic_turns(
+                &state,
+                course_id,
+                &embedding_provider,
+                &embedding_model,
+                missing_texts,
+            )
+            .await
+            else {
+                return;
+            };
+
+            for ((index, prior_message_id), embedding) in missing.into_iter().zip(repaired) {
+                match minerva_db::queries::conversations::set_topic_embedding(
+                    &state.db,
+                    prior_message_id,
+                    &embedding,
+                    course_id,
+                    embedding_version,
+                )
+                .await
+                {
+                    Ok(true) => earlier[index].embedding = Some(embedding),
+                    // Do not compare an old-generation in-memory batch if a
+                    // rotation committed while it was running.
+                    Ok(false) => return,
+                    Err(e) => {
+                        // Keep this freshly computed vector for this verdict;
+                        // an unavailable cache merely means it will be
+                        // repaired again on a later turn.
+                        tracing::warn!(%course_id, "topic_switch: repaired embedding cache write failed ({e})");
+                        earlier[index].embedding = Some(embedding);
+                    }
+                }
+            }
+        }
 
         // Two earlier turns minimum. On turn two there is a single
         // point of comparison and "unlike the one thing before it" is

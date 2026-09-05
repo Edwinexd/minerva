@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT course.embedding_version\n           FROM messages m\n           JOIN conversations c ON c.id = m.conversation_id\n           JOIN courses course ON course.id = c.course_id\n          WHERE m.id = $1 AND c.course_id = $2\n          FOR SHARE OF course",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "embedding_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "embedding_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d5a2b03f57319111d6d7e15eed4f7c5be0dffd4b13cb2e660467a6d6b848d81c"
+}

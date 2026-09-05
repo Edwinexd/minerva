@@ -92,7 +92,7 @@ function ChatPage({
   }
 
   return (
-    <div className="relative flex h-full min-h-0 gap-4">
+    <div className="relative flex flex-1 min-h-0 overflow-hidden gap-4">
       <Button
         variant="outline"
         size="sm"
@@ -113,8 +113,8 @@ function ChatPage({
       <div
         className={`${
           sidebarOpen
-            ? "fixed inset-y-0 left-0 z-40 w-72 bg-background border-r p-4 flex flex-col md:static md:inset-auto md:w-64 md:p-0 md:pr-4 md:bg-transparent"
-            : "hidden md:flex md:w-64 border-r pr-4 flex-col"
+            ? "fixed inset-y-0 left-0 z-40 w-72 bg-background border-r p-4 flex flex-col min-h-0 md:static md:inset-auto md:w-64 md:p-0 md:pr-4 md:bg-transparent"
+            : "hidden md:flex md:w-64 border-r pr-4 flex-col min-h-0"
         }`}
       >
         <div className="md:hidden flex justify-end mb-2">
@@ -168,7 +168,7 @@ function ChatPage({
         )}
       </div>
 
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 pt-10 md:pt-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden pt-10 md:pt-0">
         <ChatWindow
           courseId={courseId}
           conversationId={conversationId}

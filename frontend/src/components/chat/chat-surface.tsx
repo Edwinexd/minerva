@@ -623,13 +623,13 @@ export function ChatSurface<M extends ChatBubbleMessage>({
   const panelWidthClass = drawerBp === "lg" ? "w-80" : "w-72"
 
   return (
-    <div className={`relative flex flex-1 min-h-0 ${layout.outerGap}`}>
+    <div className={`relative flex flex-1 min-h-0 overflow-hidden ${layout.outerGap}`}>
       {/* The chat surface fills the viewport and has no visible page
           heading; without this the route has no h1 at all and the
           greeting's h2 (which only renders on an empty conversation)
           would be the first heading a screen reader hits. */}
       <h1 className="sr-only">{labels.heading}</h1>
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         {/* A long transcript scrolls, and its content is frequently plain
             text with nothing tabbable inside, which leaves keyboard-only
             users unable to reach the scrollbar at all (WCAG 2.1.1). Making

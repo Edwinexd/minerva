@@ -85,7 +85,7 @@ export function RootLayout() {
     : null
 
   return (
-    <div className={`${isEmbed || isChatRoute ? "h-dvh" : "min-h-screen"} bg-background text-foreground flex flex-col`}>
+    <div className={`${isEmbed || isChatRoute ? "h-dvh overflow-hidden" : "min-h-screen"} bg-background text-foreground flex flex-col`}>
       {!isEmbed && (
         <a
           href="#main-content"
@@ -152,7 +152,7 @@ export function RootLayout() {
           </nav>
         </div>
       </header>
-      <main id="main-content" tabIndex={-1} className={`${isEmbed ? "flex-1 min-h-0" : `max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full min-w-0${isChatRoute ? " min-h-0" : ""}`}`}>
+      <main id="main-content" tabIndex={-1} className={`${isEmbed ? "flex-1 min-h-0 overflow-hidden" : `max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full min-w-0${isChatRoute ? " flex flex-col min-h-0 overflow-hidden" : ""}`}`}>
         <Outlet />
       </main>
       <footer className="border-t px-4 sm:px-6 py-4 mt-auto">

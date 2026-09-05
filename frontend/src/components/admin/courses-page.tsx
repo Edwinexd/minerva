@@ -61,6 +61,7 @@ const KNOWN_FEATURE_FLAGS = [
   "aegis",
   "concept_graph",
   "conversation_limits",
+  "topic_switch_nudge",
 ] as const
 type FeatureFlagName = (typeof KNOWN_FEATURE_FLAGS)[number]
 

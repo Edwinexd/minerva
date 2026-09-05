@@ -66,6 +66,15 @@ pub const FLAG_CONCEPT_GRAPH: &str = "concept_graph";
 /// on restores whatever the teacher had configured.
 pub const FLAG_CONVERSATION_LIMITS: &str = "conversation_limits";
 
+/// Topic-switch nudge: a two-layer check on each user turn (cached
+/// query-embedding cosine against the conversation's earlier turns,
+/// then a small utility-model adjudication only on turns that trip it)
+/// that suggests starting a fresh chat when the student has moved to a
+/// new question. Flagged separately from `conversation_limits` because
+/// it evaluates every turn rather than firing on a cumulative ceiling,
+/// so it warrants its own rollout dial.
+pub const FLAG_TOPIC_SWITCH_NUDGE: &str = "topic_switch_nudge";
+
 /// All flags the application currently knows about. The admin UI
 /// uses this to enumerate available toggles per course; new flags
 /// must be added here AND have a `pub const` above.
@@ -75,6 +84,7 @@ pub const ALL_FLAGS: &[&str] = &[
     FLAG_AEGIS,
     FLAG_CONCEPT_GRAPH,
     FLAG_CONVERSATION_LIMITS,
+    FLAG_TOPIC_SWITCH_NUDGE,
 ];
 
 /// True iff the KG bundle is enabled for this course. Resolution:
@@ -200,6 +210,34 @@ pub async fn conversation_limits_enabled(db: &PgPool, course_id: Uuid) -> bool {
         Err(e) => {
             tracing::warn!(
                 "feature_flags: conversation_limits lookup for course {} failed ({}); treating as disabled",
+                course_id,
+                e,
+            );
+            false
+        }
+    }
+}
+
+/// True iff the topic-switch nudge runs for this course. Same
+/// resolution + fail-closed semantics as `course_kg_enabled`.
+///
+/// Failing closed means no detection and no model call, which is the
+/// right default: the check costs a classification call on roughly a
+/// third of turns, and a flaky DB should not be the reason a student
+/// gets told they changed subject.
+pub async fn topic_switch_nudge_enabled(db: &PgPool, course_id: Uuid) -> bool {
+    match minerva_db::queries::feature_flags::is_enabled_for_course(
+        db,
+        FLAG_TOPIC_SWITCH_NUDGE,
+        course_id,
+        false,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "feature_flags: topic_switch_nudge lookup for course {} failed ({}); treating as disabled",
                 course_id,
                 e,
             );

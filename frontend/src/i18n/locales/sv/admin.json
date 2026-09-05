@@ -323,14 +323,16 @@
       "extraction_guard": "Skydd mot uppgiftslösning",
       "aegis": "Aegis promptcoachning",
       "concept_graph": "Begreppsgraf",
-      "conversation_limits": "Tokengränser för konversationer"
+      "conversation_limits": "Tokengränser för konversationer",
+      "topic_switch_nudge": "Påminnelse vid ämnesbyte"
     },
     "featureFlagDescription": {
       "course_kg": "Klassificering per dokument, tvärdokumentlänkare, grafvisare, vägrasinstruktion vid uppgiftsmatch och per-chunk-skyddsfilter. Avstängd som standard medan vi kalibrerar.",
       "extraction_guard": "Avsiktsklassificerare före generering + lösningsdetektor på utdatasidan + sokratisk omformulerare, plus uppgiftsnärhetsspårning över flera turer. Fångar fallet \"studenten klistrar in uppgift och frågar efter kod\" och avbryter svaret med en sokratisk fråga. Oberoende av course_kg så att admins kan piloter separat.",
       "aegis": "Sidopanel med promptcoachning. Varje studentprompt poängsätts på fem dimensioner (tydlighet, kontext, ramar, resonemangskrav, kritiskt tänkande) plus tre korta kommentarer (strukturell tydlighet, terminologi, saknad ram). Icke-blockerande: analysen körs parallellt med assistentens svar och studenten kan ignorera återkopplingen fritt.",
       "concept_graph": "Eureka-2 begreppsgraf: LLM-extrahering per dokument av domänbegrepp och riktade relationer, sparat med dokumentnivå-spårning och cosin/strukturell/community-dedup. Skiljer sig från kursens kunskapsgraf (som är på dokumentnivå). När den är på kan admins köra extraktion och visa grafen; avstängning döljer admin-endpointsen men bevarar den sparade grafen.",
-      "conversation_limits": "Kostnadsgränser per konversation: en påminnelse om att starta en ny chatt, en hård gräns där konversationen slutar ta emot meddelanden, och en fortsättning med ett klick som tar med sig en LLM-skriven sammanfattning. Nivåerna sätts per kurs (Påminn / Sluta ta emot på kursens konfigurationssida); den här flaggan avgör om de gäller alls. Av som standard så att gränserna kan rullas ut kurs för kurs. Att stänga av den ignorerar nivåerna utan att radera dem."
+      "conversation_limits": "Kostnadsgränser per konversation: en påminnelse om att starta en ny chatt, en hård gräns där konversationen slutar ta emot meddelanden, och en fortsättning med ett klick som tar med sig en LLM-skriven sammanfattning. Nivåerna sätts per kurs (Påminn / Sluta ta emot på kursens konfigurationssida); den här flaggan avgör om de gäller alls. Av som standard så att gränserna kan rullas ut kurs för kurs. Att stänga av den ignorerar nivåerna utan att radera dem.",
+      "topic_switch_nudge": "Föreslår att studenten startar en ny chatt när hen går vidare till en ny fråga. Två lager: en cosinusjämförelse mot konversationens tidigare turer med cachade vektorer (gratis), sedan ett litet anrop till hjälpmodellen enbart för de turer som slår till. Enbart inbäddningen är inte tillräckligt träffsäker för att agera på, så modellen avgör; den körs på ungefär en tredjedel av turerna och kostar ett par hundra tokens per gång. Körs parallellt med svaret och fördröjer det aldrig. Oberoende av tokengränserna för konversationer, som utgår från ackumulerad förbrukning i stället för per tur."
     },
     "statusFilterLabel": "Filtrera efter status",
     "statusFilter": {

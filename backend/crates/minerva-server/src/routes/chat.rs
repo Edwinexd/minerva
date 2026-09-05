@@ -503,6 +503,12 @@ struct ConversationDetailResponse {
     /// the carried-over recap is visible state, not a hidden prompt.
     continued_from_id: Option<Uuid>,
     carryover_summary: Option<String>,
+    /// TRUE when the newest user turn was confirmed by both detection
+    /// layers to have started a new topic. Scoped to the newest turn on
+    /// purpose: a switch three turns ago is stale advice. Only a
+    /// `confirmed` verdict sets this; `rejected` and `undetermined` do
+    /// not, so an outage cannot produce an accusation.
+    topic_switch: bool,
 }
 
 /// A conversation's cumulative billed tokens alongside the ceilings it
@@ -793,6 +799,17 @@ async fn get_conversation(
     // the next load.
     let token_state = ConversationTokenState::resolve(&state, &course, cid).await?;
 
+    // The nudge is gated on the flag at read time as well as at write
+    // time, so switching the flag off silences existing verdicts
+    // immediately instead of leaving already-classified turns nudging.
+    let topic_switch = crate::feature_flags::topic_switch_nudge_enabled(&state.db, course_id).await
+        && minerva_db::queries::conversations::latest_topic_shift(&state.db, cid)
+            .await?
+            .and_then(|v| {
+                minerva_app_core::classification::topic_switch::TopicShift::from_stored(&v)
+            })
+            .is_some_and(|v| v.nudges());
+
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
     let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;
     let feedback_rows =
@@ -993,6 +1010,7 @@ async fn get_conversation(
         token_state,
         continued_from_id: conv.continued_from_id,
         carryover_summary: conv.carryover_summary,
+        topic_switch,
     }))
 }
 
@@ -1564,6 +1582,15 @@ pub(super) async fn run_chat_message(
         false,
     )
     .await?;
+
+    // Topic-switch detection for this turn. Spawned, never awaited: it
+    // must not sit between the student pressing Send and the first
+    // token. It finishes in about a second against a multi-second
+    // generation, so the verdict is persisted well before the client
+    // refetches the conversation once the stream closes, which is when
+    // the nudge surfaces. If it ever loses that race the nudge simply
+    // appears on the next fetch instead.
+    spawn_topic_switch_detection(state, &course, conv_id, user_msg_id, user_content.clone());
 
     let history = minerva_db::queries::conversations::list_messages(&state.db, conv_id).await?;
     let is_first_message = history.len() <= 1;
@@ -2268,6 +2295,142 @@ pub(super) async fn verify_course_access_pub(
     user_id: Uuid,
 ) -> Result<minerva_db::queries::courses::CourseRow, AppError> {
     verify_course_access(state, course_id, user_id).await
+}
+
+/// Fire-and-forget the two-layer topic-switch check for one user turn.
+///
+/// Layer 1 is a cosine against the conversation's cached earlier user
+/// embeddings; layer 2 is a small utility-model adjudication that only
+/// runs when layer 1 trips. See
+/// `minerva_app_core::classification::topic_switch` for why one layer
+/// is not enough.
+///
+/// Everything here is best-effort. Each bail-out leaves `topic_shift`
+/// NULL, which reads as "not evaluated" and shows the student nothing;
+/// a wrong nudge is worse than a missing one.
+fn spawn_topic_switch_detection(
+    state: &AppState,
+    course: &minerva_db::queries::courses::CourseRow,
+    conversation_id: Uuid,
+    message_id: Uuid,
+    content: String,
+) {
+    use minerva_app_core::classification::topic_switch as ts;
+
+    let state = state.clone();
+    let course_id = course.id;
+    let embedding_provider = course.embedding_provider.clone();
+    let embedding_model = course.embedding_model.clone();
+    let threshold = ts::similarity_threshold(course.min_score);
+
+    tokio::spawn(async move {
+        if !crate::feature_flags::topic_switch_nudge_enabled(&state.db, course_id).await {
+            return;
+        }
+
+        // Same dispatch and query-side prefix as retrieval
+        // (`strategy::common::embedding_search`), so a cached vector is
+        // directly comparable with the ones retrieval produces and with
+        // every other cached vector in the conversation.
+        let vector = if embedding_provider == "local" {
+            let formatted = minerva_catalog::format_query_for_model(&embedding_model, &content);
+            match state
+                .fastembed
+                .embed_query(&embedding_model, vec![formatted])
+                .await
+            {
+                Ok(v) => v.into_iter().next(),
+                Err(e) => {
+                    tracing::warn!(%course_id, "topic_switch: embed failed ({e})");
+                    None
+                }
+            }
+        } else {
+            match minerva_pipeline::embedder::embed_texts(
+                &state.http_client,
+                &state.config.openai_api_key,
+                std::slice::from_ref(&content),
+            )
+            .await
+            {
+                Ok(r) => r.embeddings.into_iter().next(),
+                Err(e) => {
+                    tracing::warn!(%course_id, "topic_switch: openai embed failed ({e})");
+                    None
+                }
+            }
+        };
+        let Some(vector) = vector else { return };
+
+        // Cache before scoring: even on a turn we cannot classify (too
+        // little history), the vector is what spares the *next* turn a
+        // recomputation. Skipping this is what makes the whole thing
+        // quadratic in conversation length.
+        if let Err(e) = minerva_db::queries::conversations::set_topic_embedding(
+            &state.db,
+            message_id,
+            &vector,
+            &embedding_model,
+        )
+        .await
+        {
+            tracing::warn!(%course_id, "topic_switch: embedding cache write failed ({e})");
+        }
+
+        let earlier = match minerva_db::queries::conversations::recent_user_turns_before(
+            &state.db,
+            conversation_id,
+            message_id,
+            &embedding_model,
+            ts::COMPARISON_TURNS as i64,
+        )
+        .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(%course_id, "topic_switch: history read failed ({e})");
+                return;
+            }
+        };
+
+        // Two earlier turns minimum. On turn two there is a single
+        // point of comparison and "unlike the one thing before it" is
+        // far too thin a basis to tell a student they changed subject.
+        let vectors: Vec<Vec<f32>> = earlier.iter().filter_map(|t| t.embedding.clone()).collect();
+        if vectors.len() < 2 {
+            return;
+        }
+        let Some(peak) = ts::peak_similarity(&vector, &vectors) else {
+            return;
+        };
+
+        let verdict = if peak >= threshold {
+            ts::TopicShift::OnTopic
+        } else {
+            let texts: Vec<String> = earlier.into_iter().map(|t| t.content).collect();
+            ts::adjudicate(
+                &state.http_client,
+                &state.utility_model().await,
+                &state.db,
+                course_id,
+                &texts,
+                &content,
+            )
+            .await
+        };
+
+        metrics::counter!("topic_switch_verdicts_total", "verdict" => verdict.as_str())
+            .increment(1);
+        if let Err(e) = minerva_db::queries::conversations::set_topic_shift(
+            &state.db,
+            message_id,
+            verdict.as_str(),
+        )
+        .await
+        {
+            tracing::warn!(%course_id, "topic_switch: verdict write failed ({e})");
+        }
+    });
 }
 
 async fn verify_course_access(

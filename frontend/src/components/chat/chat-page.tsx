@@ -266,7 +266,10 @@ export function ChatWindow({
   // `token_state` is server-computed (see `chat::ConversationTokenState`)
   // rather than summed from `messages` here, so the threshold the banner
   // renders on is the same one the send endpoint enforces.
-  const rawLimitState = conversationLimitState(data?.token_state)
+  const rawLimitState = conversationLimitState(
+    data?.token_state,
+    data?.topic_switch,
+  )
   const split = useConversationSplit({
     conversationId,
     doSplit: (cid) =>
@@ -290,8 +293,11 @@ export function ChatWindow({
   // A dismissed nudge collapses to `ok`; a block never does, because the
   // composer is hidden in that state and the notice is the only thing
   // explaining why.
+  // Both advisory states are dismissible; the block is not.
   const limitState =
-    rawLimitState === "nudge" && split.dismissed ? "ok" : rawLimitState
+    (rawLimitState === "nudge" || rawLimitState === "topic") && split.dismissed
+      ? "ok"
+      : rawLimitState
 
   // ---- ChatSurface adapter ----
 
@@ -509,8 +515,14 @@ export function ChatWindow({
           continuing={split.pending}
           error={split.error}
           onContinue={split.run}
+          onNewChat={() =>
+            navigate({ to: "/course/$courseId/new", params: { courseId } })
+          }
           onDismiss={split.dismiss}
           labels={{
+            topicTitle: t("limit.topicTitle"),
+            topicBody: t("limit.topicBody"),
+            newChatAction: t("limit.newChatAction"),
             nudgeTitle: t("limit.nudgeTitle"),
             nudgeBody: t("limit.nudgeBody"),
             blockedTitle: t("limit.blockedTitle"),

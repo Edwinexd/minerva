@@ -3,12 +3,17 @@ import { X } from "lucide-react"
 import type { ConversationLimitState } from "./conversation-limit-state"
 
 export interface ConversationLimitLabels {
+  topicTitle: string
+  topicBody: string
   nudgeTitle: string
   nudgeBody: string
   blockedTitle: string
   blockedBody: string
   continueAction: string
   continueWorking: string
+  /** Action label for the topic-switch variant, which starts a plain
+   * new chat rather than splitting with a carried-over recap. */
+  newChatAction: string
   dismiss: string
 }
 
@@ -25,18 +30,37 @@ export function ConversationLimitNotice({
   state,
   labels,
   onContinue,
+  onNewChat,
   continuing,
   onDismiss,
   error,
 }: {
   state: Exclude<ConversationLimitState, "ok">
   labels: ConversationLimitLabels
+  /** Split this conversation, carrying a recap across. Length states only. */
   onContinue: () => void
+  /** Open a blank chat. Used by the topic-switch variant: the student is
+   * deliberately starting a new subject, so carrying a recap of the old
+   * one across would work against them, and the split endpoint rejects
+   * conversations below the length threshold anyway. */
+  onNewChat: () => void
   continuing: boolean
   onDismiss?: () => void
   error?: string | null
 }) {
   const blocked = state === "blocked"
+  const title =
+    blocked
+      ? labels.blockedTitle
+      : state === "topic"
+        ? labels.topicTitle
+        : labels.nudgeTitle
+  const body =
+    blocked
+      ? labels.blockedBody
+      : state === "topic"
+        ? labels.topicBody
+        : labels.nudgeBody
   return (
     <div
       // `alert` for the block (the student is stopped and needs to know
@@ -50,21 +74,25 @@ export function ConversationLimitNotice({
       }`}
     >
       <div className="flex-1 min-w-0 space-y-1">
-        <p className="font-medium">
-          {blocked ? labels.blockedTitle : labels.nudgeTitle}
-        </p>
-        <p>{blocked ? labels.blockedBody : labels.nudgeBody}</p>
+        <p className="font-medium">{title}</p>
+        <p>{body}</p>
         {error && <p className="text-destructive">{error}</p>}
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <Button
-          size="sm"
-          variant={blocked ? "default" : "outline"}
-          onClick={onContinue}
-          disabled={continuing}
-        >
-          {continuing ? labels.continueWorking : labels.continueAction}
-        </Button>
+        {state === "topic" ? (
+          <Button size="sm" variant="outline" onClick={onNewChat}>
+            {labels.newChatAction}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant={blocked ? "default" : "outline"}
+            onClick={onContinue}
+            disabled={continuing}
+          >
+            {continuing ? labels.continueWorking : labels.continueAction}
+          </Button>
+        )}
         {!blocked && onDismiss && (
           <Button
             size="sm"

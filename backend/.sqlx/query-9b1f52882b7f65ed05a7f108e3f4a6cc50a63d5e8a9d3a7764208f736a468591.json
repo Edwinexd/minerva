@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT content,\n                  CASE WHEN topic_embedding_model = $3 THEN topic_embedding END\n                      AS \"embedding: Vec<f32>\"\n             FROM messages\n            WHERE conversation_id = $1\n              AND role = 'user'\n              AND created_at < (SELECT created_at FROM messages WHERE id = $2)\n         ORDER BY created_at DESC\n            LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "content",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "embedding: Vec<f32>",
+        "type_info": "Float4Array",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "9b1f52882b7f65ed05a7f108e3f4a6cc50a63d5e8a9d3a7764208f736a468591"
+}

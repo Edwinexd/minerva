@@ -8,7 +8,7 @@ import type { ConversationTokenState } from "@/lib/types"
  *   * `blocked` ; past the hard limit. The composer is gone and the only
  *                 way forward is a new conversation.
  */
-export type ConversationLimitState = "ok" | "nudge" | "blocked"
+export type ConversationLimitState = "ok" | "topic" | "nudge" | "blocked"
 
 /**
  * Resolve the display state from the server-computed token state.
@@ -20,9 +20,14 @@ export type ConversationLimitState = "ok" | "nudge" | "blocked"
  */
 export function conversationLimitState(
   token: ConversationTokenState | undefined,
+  topicSwitch = false,
 ): ConversationLimitState {
-  if (!token) return "ok"
+  if (!token) return topicSwitch ? "topic" : "ok"
   if (token.hard_limit > 0 && token.total >= token.hard_limit) return "blocked"
   if (token.soft_limit > 0 && token.total >= token.soft_limit) return "nudge"
-  return "ok"
+  // Ranked below the spend states on purpose. Both ask for the same
+  // action, so when a conversation is long AND has switched topic there
+  // is no value in saying so twice; the length framing is the one that
+  // also explains why the chat may stop accepting messages.
+  return topicSwitch ? "topic" : "ok"
 }

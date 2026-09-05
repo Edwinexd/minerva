@@ -325,14 +325,16 @@
       "extraction_guard": "Extraction guard",
       "aegis": "Aegis prompt coaching",
       "concept_graph": "Concept knowledge graph",
-      "conversation_limits": "Conversation token ceilings"
+      "conversation_limits": "Conversation token ceilings",
+      "topic_switch_nudge": "Topic-switch nudge"
     },
     "featureFlagDescription": {
       "course_kg": "Per-document kind classification, cross-document linker, knowledge-graph viewer, assignment-refusal addendum, and per-chunk adversarial filter. Off by default while we calibrate.",
       "extraction_guard": "Pre-generation intent classifier + output-side solution detector + Socratic rewriter, plus multi-turn assignment-proximity tracking. Catches the 'student pasted assignment, asks for code' case and intercepts the response with a Socratic question. Independent of course_kg so admins can pilot separately.",
       "aegis": "Right-side prompt-coaching panel. Every user turn is scored on five dimensions (clarity, context, constraints, reasoning demand, critical thinking) plus three short callouts (structural clarity, terminology, missing constraint). Non-blocking by design - the analyzer races the assistant reply and the student can ignore the feedback freely.",
       "concept_graph": "Eureka-2 concept graph: per-document LLM extraction of domain concepts and directed relations, persisted with document-level provenance and cosine/structural/community dedup. Distinct from the course knowledge graph (which is at document granularity). When on, admins can run extraction and view the graph; toggling off hides the admin endpoints but preserves the persisted graph.",
-      "conversation_limits": "Per-conversation spend ceilings: a dismissible nudge to start a fresh chat, a hard block once the conversation stops accepting messages, and a one-click continuation that carries an LLM-written recap across. Thresholds are per-course (Nudge / Stop accepting on the course config page); this flag decides whether they apply at all. Off by default so the ceilings roll out course by course. Turning it off ignores the thresholds without erasing them."
+      "conversation_limits": "Per-conversation spend ceilings: a dismissible nudge to start a fresh chat, a hard block once the conversation stops accepting messages, and a one-click continuation that carries an LLM-written recap across. Thresholds are per-course (Nudge / Stop accepting on the course config page); this flag decides whether they apply at all. Off by default so the ceilings roll out course by course. Turning it off ignores the thresholds without erasing them.",
+      "topic_switch_nudge": "Suggests starting a fresh chat when a student moves to a new question. Two layers: a cached-embedding cosine against the conversation's earlier turns (free), then a small utility-model call only on the turns that trip it. The embedding alone is not accurate enough to act on, so the model adjudicates; it runs on roughly a third of turns and costs a couple of hundred tokens each. Runs alongside generation and never delays a reply. Independent of the conversation token ceilings, which fire on cumulative spend rather than per turn."
     },
     "statusFilterLabel": "Filter by status",
     "statusFilter": {

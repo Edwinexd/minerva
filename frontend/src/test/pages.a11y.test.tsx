@@ -140,6 +140,7 @@ const course: Course = {
     aegis: false,
     concept_graph: false,
     conversation_limits: true,
+    topic_switch_nudge: false,
   },
   semester_label: null,
   daisy_offerings: [],

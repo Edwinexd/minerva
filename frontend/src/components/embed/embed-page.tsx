@@ -114,6 +114,7 @@ interface EmbedConversationDetail {
   token_state: ConversationTokenState
   continued_from_id: string | null
   carryover_summary: string | null
+  topic_switch: boolean
 }
 
 interface EmbedMe {
@@ -436,6 +437,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
           token={token}
           onMessageSent={refreshConversations}
           onConversationCreated={setActiveConvId}
+          onStartNewConversation={startNewConversation}
           needsPrivacyAck={needsPrivacyAck}
           onAcknowledgePrivacy={acknowledgePrivacy}
           readOnly={isPinnedView}
@@ -466,6 +468,7 @@ function EmbedChatWindow({
   token,
   onMessageSent,
   onConversationCreated,
+  onStartNewConversation,
   needsPrivacyAck,
   onAcknowledgePrivacy,
   readOnly = false,
@@ -479,6 +482,9 @@ function EmbedChatWindow({
   token: string
   onMessageSent: () => void
   onConversationCreated: (id: string) => void
+  /** Opens a blank chat, same as the sidebar's New chat button. Used by
+   * the topic-switch nudge. */
+  onStartNewConversation: () => void
   needsPrivacyAck: boolean
   onAcknowledgePrivacy: () => Promise<void>
   /**
@@ -510,6 +516,7 @@ function EmbedChatWindow({
   const [promptAnalyses, setPromptAnalyses] = useState<PromptAnalysis[]>([])
   const [tokenState, setTokenState] = useState<ConversationTokenState>()
   const [carryover, setCarryover] = useState<string | null>(null)
+  const [topicSwitch, setTopicSwitch] = useState(false)
   const [loading, setLoading] = useState(true)
 
   // Load messages when conversation changes. When conversationId is null,
@@ -529,6 +536,7 @@ function EmbedChatWindow({
       setPromptAnalyses([])
       setTokenState(undefined)
       setCarryover(null)
+      setTopicSwitch(false)
       setLoading(false)
     } else {
       setLoading(true)
@@ -545,6 +553,7 @@ function EmbedChatWindow({
           setPromptAnalyses(data.prompt_analyses ?? [])
           setTokenState(data.token_state)
           setCarryover(data.carryover_summary)
+          setTopicSwitch(data.topic_switch)
           setLoading(false)
         }
       })
@@ -562,7 +571,7 @@ function EmbedChatWindow({
   // The ceiling is enforced in `run_chat_message`, which the embed send
   // path shares with the Shibboleth one, so this surface needs the same
   // way out or an LTI student just gets a 409 and no next step.
-  const rawLimitState = conversationLimitState(tokenState)
+  const rawLimitState = conversationLimitState(tokenState, topicSwitch)
   const split = useConversationSplit({
     conversationId,
     doSplit: (cid) =>
@@ -575,7 +584,9 @@ function EmbedChatWindow({
     onSplit: (created) => onConversationCreated(created.id),
   })
   const limitState =
-    rawLimitState === "nudge" && split.dismissed ? "ok" : rawLimitState
+    (rawLimitState === "nudge" || rawLimitState === "topic") && split.dismissed
+      ? "ok"
+      : rawLimitState
 
   // ---- ChatSurface adapter ----
 
@@ -675,6 +686,7 @@ function EmbedChatWindow({
         setPromptAnalyses(data.prompt_analyses ?? [])
         setTokenState(data.token_state)
         setCarryover(data.carryover_summary)
+        setTopicSwitch(data.topic_switch)
       } catch {
         // Silent
       }
@@ -765,8 +777,12 @@ function EmbedChatWindow({
           continuing={split.pending}
           error={split.error}
           onContinue={split.run}
+          onNewChat={onStartNewConversation}
           onDismiss={split.dismiss}
           labels={{
+            topicTitle: tStudent("limit.topicTitle"),
+            topicBody: tStudent("limit.topicBody"),
+            newChatAction: tStudent("limit.newChatAction"),
             nudgeTitle: tStudent("limit.nudgeTitle"),
             nudgeBody: tStudent("limit.nudgeBody"),
             blockedTitle: tStudent("limit.blockedTitle"),

@@ -176,6 +176,14 @@ export interface CourseFeatureFlags {
    * their inputs.
    */
   conversation_limits: boolean
+  /**
+   * Topic-switch nudge: a cached-embedding cosine against the
+   * conversation's earlier turns, then a utility-model adjudication on
+   * the turns that trip it. Off by default and dialled independently of
+   * `conversation_limits`, since it evaluates every turn rather than
+   * firing on a cumulative ceiling.
+   */
+  topic_switch_nudge: boolean
 }
 
 export interface AdminUser {
@@ -424,6 +432,12 @@ export interface ConversationDetail {
   continued_from_id: string | null
   /** Recap carried over from `continued_from_id`, if one was generated. */
   carryover_summary: string | null
+  /**
+   * True when the newest user turn was confirmed by both detection
+   * layers to have started a new topic. Only an affirmative model
+   * verdict sets this, so a classifier outage never produces a nudge.
+   */
+  topic_switch: boolean
 }
 
 export interface ConversationTokenState {

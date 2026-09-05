@@ -25,6 +25,7 @@ pub mod document;
 pub mod extraction_guard;
 pub mod linker;
 pub mod prompts;
+pub mod topic_switch;
 pub mod types;
 
 pub use document::LlmClassifier;

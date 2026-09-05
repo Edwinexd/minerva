@@ -157,6 +157,9 @@
     "continueAction": "Continue in a new chat",
     "continueWorking": "Setting up...",
     "dismiss": "Dismiss",
-    "carryoverLabel": "Continued from an earlier chat"
+    "carryoverLabel": "Continued from an earlier chat",
+    "topicTitle": "Looks like a new question",
+    "topicBody": "Minerva gives you sharper answers when a chat stays on one topic. Starting a new chat for this one keeps the earlier thread intact and easy to find later.",
+    "newChatAction": "Start a new chat"
   }
 }

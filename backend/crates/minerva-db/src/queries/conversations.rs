@@ -487,6 +487,112 @@ pub async fn find_note_by_id(db: &PgPool, id: Uuid) -> Result<Option<TeacherNote
     .await
 }
 
+/// One earlier user turn plus its cached query embedding, for the
+/// topic-switch check. `embedding` is `None` when the turn predates the
+/// feature or was written under a different embedding model.
+#[derive(Debug)]
+pub struct TopicTurn {
+    pub content: String,
+    pub embedding: Option<Vec<f32>>,
+}
+
+/// The most recent user turns of a conversation *before* `before_id`,
+/// oldest-first, with their cached embeddings where the model matches.
+///
+/// `model` is compared in SQL rather than in Rust so a rotated course
+/// simply yields `NULL` vectors instead of dragging incomparable ones
+/// over the wire. The caller then falls back to "not evaluated" rather
+/// than computing a similarity across two different vector spaces.
+pub async fn recent_user_turns_before(
+    db: &PgPool,
+    conversation_id: Uuid,
+    before_id: Uuid,
+    model: &str,
+    limit: i64,
+) -> Result<Vec<TopicTurn>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT content,
+                  CASE WHEN topic_embedding_model = $3 THEN topic_embedding END
+                      AS "embedding: Vec<f32>"
+             FROM messages
+            WHERE conversation_id = $1
+              AND role = 'user'
+              AND created_at < (SELECT created_at FROM messages WHERE id = $2)
+         ORDER BY created_at DESC
+            LIMIT $4"#,
+        conversation_id,
+        before_id,
+        model,
+        limit,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .rev()
+        .map(|r| TopicTurn {
+            content: r.content,
+            embedding: r.embedding,
+        })
+        .collect())
+}
+
+/// Cache a user turn's query embedding. Best-effort: the caller logs
+/// and continues, since a missing cache entry only costs the next turn
+/// a recomputation, never correctness.
+pub async fn set_topic_embedding(
+    db: &PgPool,
+    message_id: Uuid,
+    embedding: &[f32],
+    model: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE messages SET topic_embedding = $2, topic_embedding_model = $3 WHERE id = $1",
+        message_id,
+        embedding,
+        model,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Record the two-layer verdict for a user turn. Values are constrained
+/// by the `messages_topic_shift_valid` CHECK; callers pass
+/// `TopicShift::as_str`.
+pub async fn set_topic_shift(
+    db: &PgPool,
+    message_id: Uuid,
+    shift: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE messages SET topic_shift = $2 WHERE id = $1",
+        message_id,
+        shift,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// The `topic_shift` verdict on the conversation's newest user turn, if
+/// any. Drives the student-facing nudge, which is deliberately scoped
+/// to the latest turn: a switch three turns ago is stale advice.
+pub async fn latest_topic_shift(
+    db: &PgPool,
+    conversation_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    let row = sqlx::query_scalar!(
+        r#"SELECT topic_shift FROM messages
+            WHERE conversation_id = $1 AND role = 'user'
+         ORDER BY created_at DESC LIMIT 1"#,
+        conversation_id,
+    )
+    .fetch_optional(db)
+    .await?;
+    Ok(row.flatten())
+}
+
 pub async fn list_messages(
     db: &PgPool,
     conversation_id: Uuid,

@@ -92,7 +92,7 @@ function ChatPage({
   }
 
   return (
-    <div className="relative flex h-[calc(100vh-120px)] gap-4">
+    <div className="relative flex h-full min-h-0 gap-4">
       <Button
         variant="outline"
         size="sm"
@@ -168,7 +168,7 @@ function ChatPage({
         )}
       </div>
 
-      <div className="flex-1 flex flex-col min-w-0 pt-10 md:pt-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 pt-10 md:pt-0">
         <ChatWindow
           courseId={courseId}
           conversationId={conversationId}

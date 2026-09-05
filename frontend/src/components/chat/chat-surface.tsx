@@ -349,6 +349,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
   // page every time a student opens the chat.
   const panelRef = useRef<HTMLElement>(null)
   const pillRef = useRef<HTMLButtonElement>(null)
+  const transcriptScrollRef = useRef<HTMLElement>(null)
   const focusPanelOnOpen = useRef(false)
   const restorePillFocus = useRef(false)
 
@@ -628,7 +629,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
           greeting's h2 (which only renders on an empty conversation)
           would be the first heading a screen reader hits. */}
       <h1 className="sr-only">{labels.heading}</h1>
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* A long transcript scrolls, and its content is frequently plain
             text with nothing tabbable inside, which leaves keyboard-only
             users unable to reach the scrollbar at all (WCAG 2.1.1). Making
@@ -638,6 +639,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
             here; the "transcript scroll region is keyboard reachable" test in
             pages.a11y.test.tsx asserts the attributes directly instead. */}
         <section
+          ref={transcriptScrollRef}
           className={`flex-1 overflow-y-auto ${layout.transcriptScroll}`}
           // jsx-a11y wants tabindex only on interactive elements, but axe's
           // `scrollable-region-focusable` wants it exactly here; the two rules
@@ -663,6 +665,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
             <>
               {renderCarryoverNote?.()}
               <ChatTranscript<M>
+                scrollContainerRef={transcriptScrollRef}
                 messages={messages}
                 isLoading={isLoading}
                 pendingUserMsg={stream.pendingUserMsg}

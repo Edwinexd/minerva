@@ -31,6 +31,9 @@ interface EmbedMe {
 export function RootLayout() {
   const { t } = useTranslation()
   const isEmbed = window.location.pathname.startsWith("/embed/")
+  // Chat is an app-like workspace: it needs the shell's remaining height so
+  // its transcript can scroll internally instead of extending the document.
+  const isChatRoute = window.location.pathname.startsWith("/course/")
   // The LTI bind picker runs outside Shib: users arrive from an LMS launch
   // carrying only an HMAC bind token. Fetching /auth/me here would 401 and
   // trigger the Shib redirect loop, so treat it like embed pages.
@@ -82,7 +85,7 @@ export function RootLayout() {
     : null
 
   return (
-    <div className={`${isEmbed ? "h-dvh" : "min-h-screen"} bg-background text-foreground flex flex-col`}>
+    <div className={`${isEmbed || isChatRoute ? "h-dvh" : "min-h-screen"} bg-background text-foreground flex flex-col`}>
       {!isEmbed && (
         <a
           href="#main-content"
@@ -149,7 +152,7 @@ export function RootLayout() {
           </nav>
         </div>
       </header>
-      <main id="main-content" tabIndex={-1} className={`${isEmbed ? "flex-1 min-h-0" : "max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full min-w-0"}`}>
+      <main id="main-content" tabIndex={-1} className={`${isEmbed ? "flex-1 min-h-0" : `max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full min-w-0${isChatRoute ? " min-h-0" : ""}`}`}>
         <Outlet />
       </main>
       <footer className="border-t px-4 sm:px-6 py-4 mt-auto">

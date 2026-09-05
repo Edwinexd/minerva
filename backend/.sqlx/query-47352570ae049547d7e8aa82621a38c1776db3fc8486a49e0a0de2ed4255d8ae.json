@@ -6,7 +6,13 @@
       {
         "ordinal": 0,
         "name": "ingest_attempts",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "documents",
+            "name": "ingest_attempts"
+          }
+        }
       }
     ],
     "parameters": {

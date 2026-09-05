@@ -47,6 +47,8 @@ pub mod keys {
     pub const COURSE_EMBEDDING_PROVIDER: &str = "course.embedding_provider";
     pub const COURSE_SYSTEM_PROMPT: &str = "course.system_prompt";
     pub const COURSE_DAILY_COST_LIMIT_USD: &str = "course.daily_cost_limit_usd";
+    pub const COURSE_CONVERSATION_SOFT_TOKEN_LIMIT: &str = "course.conversation_soft_token_limit";
+    pub const COURSE_CONVERSATION_HARD_TOKEN_LIMIT: &str = "course.conversation_hard_token_limit";
 
     // ----- Platform-wide knobs (read live) -----
     pub const OWNER_DAILY_COST_LIMIT_USD: &str = "platform.owner_daily_cost_limit_usd";
@@ -228,6 +230,41 @@ pub fn registry() -> Vec<KnobDef> {
             env_var: Some("MINERVA_DEFAULT_COURSE_DAILY_USD"),
             fallback: json!(0.50),
         },
+        KnobDef {
+            key: keys::COURSE_CONVERSATION_SOFT_TOKEN_LIMIT,
+            category: CourseAi,
+            label_key: "defaults.course.conversationSoftTokenLimit.label",
+            description_key: "defaults.course.conversationSoftTokenLimit.description",
+            // Cumulative billed tokens in one conversation before the
+            // student is nudged to continue in a fresh one. 0 = never
+            // nudge. Default sits around the 95th percentile of observed
+            // conversation totals, i.e. it fires on the long tail only;
+            // a nudge students see routinely is a nudge they learn to
+            // dismiss.
+            kind: KnobKind::Int {
+                min: 0,
+                max: MAX_CONVERSATION_TOKEN_LIMIT,
+            },
+            env_var: None,
+            fallback: json!(300_000_i64),
+        },
+        KnobDef {
+            key: keys::COURSE_CONVERSATION_HARD_TOKEN_LIMIT,
+            category: CourseAi,
+            label_key: "defaults.course.conversationHardTokenLimit.label",
+            description_key: "defaults.course.conversationHardTokenLimit.description",
+            // Cumulative billed tokens after which the conversation stops
+            // accepting messages and the student must split. 0 = no
+            // ceiling. Must be >= the soft limit or the block lands with
+            // no warning; the courses table CHECKs that pairing and
+            // `routes::courses::apply_course_update` rejects it up front.
+            kind: KnobKind::Int {
+                min: 0,
+                max: MAX_CONVERSATION_TOKEN_LIMIT,
+            },
+            env_var: None,
+            fallback: json!(1_000_000_i64),
+        },
         // ---------- Platform-wide knobs ----------
         KnobDef {
             key: keys::OWNER_DAILY_COST_LIMIT_USD,
@@ -329,6 +366,13 @@ pub fn registry() -> Vec<KnobDef> {
 /// will actually accept.
 pub const BODY_LIMIT_CEILING: i64 = 2_000_000_000;
 pub const MBZ_BODY_LIMIT_CEILING: i64 = 5_000_000_000;
+
+/// Fat-finger ceiling for the per-conversation token limits. A single
+/// conversation has never come close to this (the largest observed is
+/// ~3.4M cumulative billed tokens), so anything above it is a typo, not
+/// a policy. Shared by the system-default knobs and the per-course
+/// override validation in `routes::courses` so the two cannot drift.
+pub const MAX_CONVERSATION_TOKEN_LIMIT: i64 = 100_000_000;
 
 /// Linear lookup by key. ~16 entries; not worth a HashMap.
 pub fn find(key: &str) -> Option<KnobDef> {
@@ -504,6 +548,14 @@ pub async fn course_daily_cost_limit_usd(db: &PgPool) -> Decimal {
         fetch::<f64>(db, keys::COURSE_DAILY_COST_LIMIT_USD).await,
     )
     .unwrap_or_default()
+}
+
+pub async fn course_conversation_soft_token_limit(db: &PgPool) -> i64 {
+    fetch(db, keys::COURSE_CONVERSATION_SOFT_TOKEN_LIMIT).await
+}
+
+pub async fn course_conversation_hard_token_limit(db: &PgPool) -> i64 {
+    fetch(db, keys::COURSE_CONVERSATION_HARD_TOKEN_LIMIT).await
 }
 
 pub async fn owner_daily_cost_limit_usd(db: &PgPool) -> Decimal {

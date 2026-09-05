@@ -6,82 +6,178 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "issuer",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "issuer"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "client_id",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "client_id"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "deployment_id",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "deployment_id"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "auth_login_url",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "auth_login_url"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "auth_token_url",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "auth_token_url"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "platform_jwks_url",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "platform_jwks_url"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "created_by",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "created_by"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "updated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "updated_at"
+          }
+        }
       },
       {
         "ordinal": 11,
         "name": "allowed_eppn_domains",
-        "type_info": "TextArray"
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "allowed_eppn_domains"
+          }
+        }
       },
       {
         "ordinal": 12,
         "name": "activated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "activated_at"
+          }
+        }
       },
       {
         "ordinal": 13,
         "name": "last_health_check_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "last_health_check_at"
+          }
+        }
       },
       {
         "ordinal": 14,
         "name": "last_health_check_status",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "last_health_check_status"
+          }
+        }
       },
       {
         "ordinal": 15,
         "name": "invalid_client_since",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "invalid_client_since"
+          }
+        }
       }
     ],
     "parameters": {

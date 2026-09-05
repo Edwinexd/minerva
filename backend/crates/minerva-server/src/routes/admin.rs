@@ -1264,6 +1264,8 @@ struct BulkCoursePatch {
     embedding_model: Option<String>,
     reranker_model: Option<String>,
     daily_cost_limit_usd: Option<rust_decimal::Decimal>,
+    conversation_soft_token_limit: Option<i64>,
+    conversation_hard_token_limit: Option<i64>,
     semester_label: Option<String>,
 }
 
@@ -1285,6 +1287,8 @@ impl BulkCoursePatch {
             && self.embedding_model.is_none()
             && self.reranker_model.is_none()
             && self.daily_cost_limit_usd.is_none()
+            && self.conversation_soft_token_limit.is_none()
+            && self.conversation_hard_token_limit.is_none()
             && self.semester_label.is_none()
     }
 }
@@ -1369,6 +1373,8 @@ async fn apply_bulk_one(
             embedding_model: patch.embedding_model.clone(),
             reranker_model: patch.reranker_model.clone(),
             daily_cost_limit_usd: patch.daily_cost_limit_usd,
+            conversation_soft_token_limit: patch.conversation_soft_token_limit,
+            conversation_hard_token_limit: patch.conversation_hard_token_limit,
             semester_label: patch.semester_label.clone(),
         };
         crate::routes::courses::apply_course_update(state, &existing, fields, true).await?;

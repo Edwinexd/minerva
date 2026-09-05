@@ -161,6 +161,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.custom_prompt,
         &rag.context,
         &rag.signals,
+        ctx.carryover.as_deref(),
     );
     let global_knowledge = common::retrieve_global_knowledge(
         &http_client,

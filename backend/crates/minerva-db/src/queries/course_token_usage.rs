@@ -39,6 +39,7 @@ pub const CATEGORY_EXTRACTION_GUARD: &str = "extraction_guard";
 pub const CATEGORY_AEGIS: &str = "aegis";
 pub const CATEGORY_SUGGESTED_QUESTIONS: &str = "suggested_questions";
 pub const CATEGORY_CONVERSATION_TOPICS: &str = "conversation_topics";
+pub const CATEGORY_CONVERSATION_CARRYOVER: &str = "conversation_carryover";
 
 /// Insert a single usage row. Best-effort: callers log a warning
 /// on error and continue; we never block a chat / ingest path

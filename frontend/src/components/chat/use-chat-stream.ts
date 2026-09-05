@@ -13,6 +13,7 @@
  * so the calling component can drive a `<ChatTranscript>`.
  */
 import { useState } from "react"
+import { ApiError } from "@/lib/api"
 
 export interface ChatStreamState {
   streaming: boolean
@@ -108,6 +109,12 @@ export interface ChatStreamActions {
 
 export function useChatStream(
   unknownErrorLabel: string,
+  /**
+   * Translates a structured backend error into display text. Defaults to
+   * the English fallback carried on the error, which keeps the
+   * pre-existing behaviour for callers that don't pass one.
+   */
+  formatError: (err: ApiError) => string = (err) => err.message,
 ): ChatStreamState & ChatStreamActions {
   const [streaming, setStreaming] = useState(false)
   const [streamedTokens, setStreamedTokens] = useState("")
@@ -159,6 +166,13 @@ export function useChatStream(
         // 429 quota cap so the student sees "daily token quota
         // exceeded" rather than the bare HTTP statusText.
         const body = await response.json().catch(() => ({}))
+        // Preserve the backend's stable `code` + `params` so the caller
+        // can translate. The SSE path bypasses `lib/api`, which is where
+        // that normally happens; without this a Swedish UI renders the
+        // English fallback for things like the conversation token cap.
+        if (typeof body.code === "string") {
+          throw new ApiError(response.status, body)
+        }
         throw new Error(body.message || body.error || response.statusText)
       }
 
@@ -265,7 +279,13 @@ export function useChatStream(
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : unknownErrorLabel)
+      setError(
+        e instanceof ApiError
+          ? formatError(e)
+          : e instanceof Error
+            ? e.message
+            : unknownErrorLabel,
+      )
       success = false
     } finally {
       setStreaming(false)

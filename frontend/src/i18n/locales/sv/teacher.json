@@ -95,7 +95,12 @@
     "systemPromptPlaceholder": "Valfria egna instruktioner för AI-assistenten",
     "savingButton": "Sparar...",
     "saveButton": "Spara konfiguration",
-    "savedToast": "Sparat!"
+    "savedToast": "Sparat!",
+    "conversationSoftTokenLimitLabel": "Påminn studenter om att starta ny chatt efter (tokens)",
+    "conversationSoftTokenLimitHelp": "Ackumulerade tokens i en chatt innan studenten ser ett förslag om att fortsätta i en ny. Långa chattar kostar mer per meddelande och gör ämnessammanfattningarna på din översikt otydligare. Sätt till 0 för att aldrig påminna.",
+    "conversationHardTokenLimitLabel": "Sluta ta emot meddelanden efter (tokens)",
+    "conversationHardTokenLimitHelp": "Ackumulerade tokens då en chatt stängs för nya meddelanden. Studenten får en fortsättning med ett klick som tar med sig en kort sammanfattning. Sätt till 0 för ingen gräns.",
+    "conversationHardBelowSoftWarning": "Gränsen ligger under påminnelsenivån, så chattar avbryts utan förvarning."
   },
   "apiKeys": {
     "title": "API-nycklar",

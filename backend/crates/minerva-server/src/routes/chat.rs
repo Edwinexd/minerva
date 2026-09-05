@@ -38,6 +38,13 @@ pub fn router() -> Router<AppState> {
         .route("/conversations/flag-kinds", get(list_flag_kinds))
         .route("/conversations/{cid}", get(get_conversation))
         .route("/conversations/{cid}/message", post(send_message))
+        // Split a conversation that has reached the course's
+        // per-conversation token ceiling into a fresh one carrying a
+        // recap. See `routes::conversation_continuation`.
+        .route(
+            "/conversations/{cid}/continue",
+            post(crate::routes::conversation_continuation::continue_conversation),
+        )
         .route("/conversations/{cid}/pin", put(set_pin))
         .route(
             "/conversations/{cid}/notes",
@@ -483,6 +490,72 @@ struct ConversationDetailResponse {
     /// is off for the course (no rows ever get written) or every
     /// turn so far soft-failed. Ordered oldest-first.
     prompt_analyses: Vec<PromptAnalysisResponse>,
+    /// Where this conversation sits against the course's
+    /// per-conversation token ceilings. The client renders the nudge
+    /// and locks the composer off this rather than summing the message
+    /// rows itself, so what it shows and what `send_message` enforces
+    /// can never disagree.
+    token_state: ConversationTokenState,
+    /// Set when this conversation was split off an earlier one that hit
+    /// the ceiling. The client shows a "continued from" affordance so
+    /// the carried-over recap is visible state, not a hidden prompt.
+    continued_from_id: Option<Uuid>,
+    carryover_summary: Option<String>,
+}
+
+/// A conversation's cumulative billed tokens alongside the ceilings it
+/// is measured against. Both limits mirror the course columns, where
+/// `0` means "no limit", matching the spend-cap convention.
+///
+/// Shared with the embed surface (`routes::embed`) rather than
+/// duplicated: the two surfaces must agree on the feature-flag
+/// resolution below, and a second copy is a second thing to forget to
+/// update.
+#[derive(Serialize, Clone, Copy)]
+pub(crate) struct ConversationTokenState {
+    pub(crate) total: i64,
+    pub(crate) soft_limit: i64,
+    pub(crate) hard_limit: i64,
+}
+
+impl ConversationTokenState {
+    /// Read a conversation's running total and pair it with the
+    /// ceilings actually in force for its course.
+    ///
+    /// This is the one place the `conversation_limits` feature flag is
+    /// consulted. A disabled flag resolves to `0 / 0`, which every
+    /// consumer already reads as "no ceiling" (the enforcement check,
+    /// the client's nudge threshold, and the split endpoint's
+    /// eligibility gate), so gating needs no extra branch anywhere
+    /// downstream. The course's stored limits are left alone, so
+    /// flipping the flag back on restores the teacher's configuration.
+    pub(crate) async fn resolve(
+        state: &AppState,
+        course: &minerva_db::queries::courses::CourseRow,
+        conversation_id: Uuid,
+    ) -> Result<Self, AppError> {
+        let total =
+            minerva_db::queries::conversations::token_total(&state.db, conversation_id).await?;
+        let enabled = crate::feature_flags::conversation_limits_enabled(&state.db, course.id).await;
+        Ok(Self {
+            total,
+            soft_limit: if enabled {
+                course.conversation_soft_token_limit
+            } else {
+                0
+            },
+            hard_limit: if enabled {
+                course.conversation_hard_token_limit
+            } else {
+                0
+            },
+        })
+    }
+
+    /// The thread is closed to new messages. `0` disables the ceiling.
+    fn is_over_hard_limit(&self) -> bool {
+        self.hard_limit > 0 && self.total >= self.hard_limit
+    }
 }
 
 async fn list_conversations(
@@ -708,9 +781,15 @@ async fn get_conversation(
     Extension(user): Extension<User>,
     Path((course_id, cid)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ConversationDetailResponse>, AppError> {
-    verify_course_access(&state, course_id, user.id).await?;
+    let course = verify_course_access(&state, course_id, user.id).await?;
 
-    let (_conv, is_teacher) = fetch_conversation_for_view(&state, course_id, cid, &user).await?;
+    let (conv, is_teacher) = fetch_conversation_for_view(&state, course_id, cid, &user).await?;
+
+    // Token state is resolved against the course's *current* ceilings,
+    // not any value snapshotted when the conversation started, so a
+    // teacher raising the limit unblocks an already-blocked thread on
+    // the next load.
+    let token_state = ConversationTokenState::resolve(&state, &course, cid).await?;
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
     let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;
@@ -910,6 +989,9 @@ async fn get_conversation(
             })
             .collect(),
         prompt_analyses,
+        token_state,
+        continued_from_id: conv.continued_from_id,
+        carryover_summary: conv.carryover_summary,
     }))
 }
 
@@ -1387,6 +1469,26 @@ pub(super) async fn run_chat_message(
         if row.pinned {
             return Err(AppError::bad_request("conversation.pinned_frozen"));
         }
+
+        // Per-conversation token ceiling. Checked here, before the
+        // daily caps, because it is a property of *this thread* and
+        // the remedy differs: the daily caps clear at midnight, this
+        // one never does, so the student is told to split rather than
+        // to wait. The new-conversation path below is exempt by
+        // construction (a conversation with no messages has burned
+        // nothing), which is exactly the escape hatch we want to leave
+        // open when a thread is closed.
+        let token_state = ConversationTokenState::resolve(state, &course, cid).await?;
+        if token_state.is_over_hard_limit() {
+            metrics::counter!("chat_conversation_token_cap_hits_total").increment(1);
+            return Err(AppError::ConversationTokenCapExceeded {
+                params: [
+                    ("total", token_state.total.to_string()),
+                    ("limit", token_state.hard_limit.to_string()),
+                ]
+                .into(),
+            });
+        }
         Some(row)
     } else {
         None
@@ -1661,6 +1763,7 @@ pub(super) async fn run_chat_message(
         embedding_model: course.embedding_model,
         embedding_version: course.embedding_version,
         history,
+        carryover: conv.carryover_summary.clone(),
         user_content,
         is_first_message,
         daily_token_budget,
@@ -2140,6 +2243,17 @@ async fn acknowledge_feedback(
 }
 
 // Access helpers
+
+/// Sibling-module accessor for [`verify_course_access`]. Keeps the
+/// helper private to `chat` while letting the continuation route run
+/// the identical membership check.
+pub(super) async fn verify_course_access_pub(
+    state: &AppState,
+    course_id: Uuid,
+    user_id: Uuid,
+) -> Result<minerva_db::queries::courses::CourseRow, AppError> {
+    verify_course_access(state, course_id, user_id).await
+}
 
 async fn verify_course_access(
     state: &AppState,

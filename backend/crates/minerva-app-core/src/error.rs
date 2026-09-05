@@ -76,6 +76,10 @@ impl LocalizedMessage {
             },
             AppError::QuotaExceeded => Self::new("quota.student_exceeded"),
             AppError::OwnerQuotaExceeded => Self::new("quota.owner_exceeded"),
+            AppError::ConversationTokenCapExceeded { params } => Self {
+                code: "conversation.token_cap_exceeded",
+                params: params.clone(),
+            },
             AppError::PrivacyNotAcknowledged => Self::new("privacy.not_acknowledged"),
             AppError::Database(_) | AppError::Internal(_) => Self::new("internal"),
         }
@@ -117,6 +121,16 @@ pub enum AppError {
 
     #[error("course owner has reached their daily AI spending cap")]
     OwnerQuotaExceeded,
+
+    /// This conversation has burned its per-course token ceiling and is
+    /// closed to new messages. Distinct from the two quota errors: no
+    /// budget has been exhausted and waiting does not help, so this is a
+    /// 409 (the conversation's state forbids the write) rather than a
+    /// 429. The remedy is to split the thread, which the client offers
+    /// as a one-click continuation. `params` carries `total` and `limit`
+    /// so the frontend can name the numbers.
+    #[error("conversation has reached its token limit; continue in a new conversation")]
+    ConversationTokenCapExceeded { params: ErrorParams },
 
     #[error("privacy acknowledgment required")]
     PrivacyNotAcknowledged,
@@ -170,6 +184,7 @@ mod into_response {
                 AppError::QuotaExceeded | AppError::OwnerQuotaExceeded => {
                     StatusCode::TOO_MANY_REQUESTS
                 }
+                AppError::ConversationTokenCapExceeded { .. } => StatusCode::CONFLICT,
                 AppError::Database(_) | AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             };
 

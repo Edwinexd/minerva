@@ -6,62 +6,134 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "course_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "course_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "src_doc_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "src_doc_id"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "dst_doc_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "dst_doc_id"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "relation",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "relation"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "confidence",
-        "type_info": "Float4"
+        "type_info": "Float4",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "confidence"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "rationale",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "rationale"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "rejected_by_teacher",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "rejected_by_teacher"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "rejected_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "rejected_at"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "rejected_by",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "rejected_by"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 11,
         "name": "updated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "document_relations",
+            "name": "updated_at"
+          }
+        }
       }
     ],
     "parameters": {

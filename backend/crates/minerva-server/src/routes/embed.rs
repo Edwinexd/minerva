@@ -50,6 +50,14 @@ pub fn router() -> Router<AppState> {
             "/course/{course_id}/conversations/{cid}/message",
             post(send_message),
         )
+        // Split a conversation that hit the course's per-conversation
+        // token ceiling. `run_chat_message` enforces that ceiling for
+        // the embed surface too, so the escape hatch has to exist here
+        // as well or an LTI student is simply stuck.
+        .route(
+            "/course/{course_id}/conversations/{cid}/continue",
+            post(continue_conversation),
+        )
         // Mirrors the Shibboleth chat router's mark-read. The embed
         // surface is always a student opening their own conversation
         // (embed tokens are owner-scoped), so this purely bumps
@@ -183,6 +191,12 @@ struct ConversationDetailResponse {
     /// shared `PromptAnalysisResponse` so a schema change touches
     /// one place.
     prompt_analyses: Vec<PromptAnalysisResponse>,
+    /// Conversation token state, resolved through the same helper (and
+    /// therefore the same `conversation_limits` feature flag) as the
+    /// Shibboleth route. Drives the embed composer's nudge / block.
+    token_state: crate::routes::chat::ConversationTokenState,
+    continued_from_id: Option<Uuid>,
+    carryover_summary: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -344,7 +358,13 @@ async fn get_conversation(
             .await?
             .ok_or(AppError::Unauthorized)?,
     );
-    let (_conv, _is_teacher) = fetch_conversation_for_view(&state, course_id, cid, &viewer).await?;
+    let (conv, _is_teacher) = fetch_conversation_for_view(&state, course_id, cid, &viewer).await?;
+
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let token_state =
+        crate::routes::chat::ConversationTokenState::resolve(&state, &course, cid).await?;
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
     // Teacher notes are the whole point of pinning a conversation, so the
@@ -453,7 +473,30 @@ async fn get_conversation(
             })
             .collect(),
         prompt_analyses,
+        token_state,
+        continued_from_id: conv.continued_from_id,
+        carryover_summary: conv.carryover_summary,
     }))
+}
+
+/// `POST /embed/course/{course_id}/conversations/{cid}/continue`
+///
+/// Embed-token counterpart to the Shibboleth route. The token is
+/// owner-scoped, and `split` re-checks conversation ownership against
+/// the user id encoded in it, so a token for course A cannot split a
+/// conversation in course B or someone else's thread in course A.
+async fn continue_conversation(
+    State(state): State<AppState>,
+    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Query(query): Query<TokenQuery>,
+) -> Result<Json<crate::routes::conversation_continuation::ContinuationResponse>, AppError> {
+    let (_, user_id) = authenticate(&state, course_id, &query)?;
+    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(
+        crate::routes::conversation_continuation::split(&state, &course, cid, user_id).await?,
+    ))
 }
 
 #[derive(Deserialize)]

@@ -6,32 +6,68 @@
       {
         "ordinal": 0,
         "name": "course_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "course_suggested_questions",
+            "name": "course_id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "questions: Json<Vec<String>>",
-        "type_info": "Jsonb"
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "course_suggested_questions",
+            "name": "questions"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "source_doc_ids",
-        "type_info": "UuidArray"
+        "type_info": "UuidArray",
+        "origin": {
+          "Table": {
+            "table": "course_suggested_questions",
+            "name": "source_doc_ids"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "model",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_suggested_questions",
+            "name": "model"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "generated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "course_suggested_questions",
+            "name": "generated_at"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "last_checked_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "course_suggested_questions",
+            "name": "last_checked_at"
+          }
+        }
       }
     ],
     "parameters": {

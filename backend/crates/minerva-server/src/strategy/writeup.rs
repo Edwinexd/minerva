@@ -49,6 +49,7 @@ pub fn build_writeup_system_prompt(
     chunks: &[RagChunk],
     research_transcript: &str,
     tool_log: &str,
+    carryover: Option<&str>,
 ) -> String {
     // Build the base prompt with NO chunks attached: we want to
     // present the chunks ourselves with explicit numeric IDs so the
@@ -56,7 +57,7 @@ pub fn build_writeup_system_prompt(
     // The base prompt's default `[Source: filename]` framing has no
     // IDs to reference, which is why citations on the legacy path
     // were always vague.
-    let base = common::build_system_prompt(course_name, custom_prompt, &[]);
+    let base = common::build_system_prompt(course_name, custom_prompt, &[], carryover);
 
     // Numbered chunk view: `[#N] <filename>` heading per chunk, then
     // the chunk body. The IDs are what the model cites against
@@ -143,6 +144,7 @@ pub async fn run(
         chunks,
         research_transcript,
         tool_log,
+        ctx.carryover.as_deref(),
     );
     let global_knowledge = common::retrieve_global_knowledge(
         &reqwest::Client::new(),
@@ -199,7 +201,7 @@ mod tests {
     fn prompt_embeds_tool_log() {
         let chunks: Vec<RagChunk> = Vec::new();
         let tool_log = "- keyword_search({\"query\":\"deadline\"}) -> 2 chunks";
-        let prompt = build_writeup_system_prompt("Test Course", &None, &chunks, "", tool_log);
+        let prompt = build_writeup_system_prompt("Test Course", &None, &chunks, "", tool_log, None);
         assert!(prompt.contains("Prior research"));
         assert!(prompt.contains("keyword_search"));
     }
@@ -214,6 +216,7 @@ mod tests {
             &chunks,
             transcript,
             "(no tool calls)",
+            None,
         );
         assert!(prompt.contains("Research agent findings"));
         assert!(prompt.contains("November 15"));
@@ -228,6 +231,7 @@ mod tests {
             &chunks,
             "",
             "- keyword_search(...) -> 0 chunks",
+            None,
         );
         assert!(!prompt.contains("Research agent findings"));
     }
@@ -235,7 +239,8 @@ mod tests {
     #[test]
     fn prompt_instructs_model_to_skip_tool_calls() {
         let chunks: Vec<RagChunk> = Vec::new();
-        let prompt = build_writeup_system_prompt("Test Course", &None, &chunks, "", "no calls");
+        let prompt =
+            build_writeup_system_prompt("Test Course", &None, &chunks, "", "no calls", None);
         assert!(prompt.contains("Do NOT call any tools"));
     }
 }

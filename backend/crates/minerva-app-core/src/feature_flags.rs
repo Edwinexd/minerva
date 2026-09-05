@@ -50,6 +50,22 @@ pub const FLAG_AEGIS: &str = "aegis";
 /// drop the persisted graph; it just hides the admin endpoints.
 pub const FLAG_CONCEPT_GRAPH: &str = "concept_graph";
 
+/// Per-conversation token ceilings: the nudge banner, the hard block
+/// on `POST .../message`, and the one-click split that carries a recap
+/// into a fresh conversation. Gated so the ceilings can be rolled out
+/// course by course rather than switched on for every student at once;
+/// the defaults were tuned against aggregate history, and a course
+/// whose legitimate workflow is one long thread should be able to opt
+/// out (or be opted in last) without an admin editing its two limit
+/// columns to 0.
+///
+/// When off, the course's `conversation_soft_token_limit` /
+/// `conversation_hard_token_limit` are ignored entirely: no nudge, no
+/// block, and the split endpoint reports nothing to continue from. The
+/// stored column values are left untouched, so flipping the flag back
+/// on restores whatever the teacher had configured.
+pub const FLAG_CONVERSATION_LIMITS: &str = "conversation_limits";
+
 /// All flags the application currently knows about. The admin UI
 /// uses this to enumerate available toggles per course; new flags
 /// must be added here AND have a `pub const` above.
@@ -58,6 +74,7 @@ pub const ALL_FLAGS: &[&str] = &[
     FLAG_EXTRACTION_GUARD,
     FLAG_AEGIS,
     FLAG_CONCEPT_GRAPH,
+    FLAG_CONVERSATION_LIMITS,
 ];
 
 /// True iff the KG bundle is enabled for this course. Resolution:
@@ -156,6 +173,33 @@ pub async fn concept_graph_enabled(db: &PgPool, course_id: Uuid) -> bool {
         Err(e) => {
             tracing::warn!(
                 "feature_flags: concept_graph lookup for course {} failed ({}); treating as disabled",
+                course_id,
+                e,
+            );
+            false
+        }
+    }
+}
+
+/// True iff the per-conversation token ceilings apply to this course.
+/// Same resolution + fail-closed semantics as `course_kg_enabled`.
+///
+/// Failing closed here means "no ceilings": a flaky DB must never be
+/// the reason a student is told their conversation is over. The read
+/// sits on the chat send path, so it also must not retry.
+pub async fn conversation_limits_enabled(db: &PgPool, course_id: Uuid) -> bool {
+    match minerva_db::queries::feature_flags::is_enabled_for_course(
+        db,
+        FLAG_CONVERSATION_LIMITS,
+        course_id,
+        false,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "feature_flags: conversation_limits lookup for course {} failed ({}); treating as disabled",
                 course_id,
                 e,
             );

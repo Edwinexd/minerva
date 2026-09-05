@@ -6,12 +6,19 @@
       {
         "ordinal": 0,
         "name": "course_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "course_members",
+            "name": "course_id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "n!",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": "Expression"
       }
     ],
     "parameters": {

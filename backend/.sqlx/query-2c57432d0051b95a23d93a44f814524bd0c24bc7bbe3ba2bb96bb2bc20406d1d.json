@@ -6,52 +6,112 @@
       {
         "ordinal": 0,
         "name": "binding_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_course_bindings",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "platform_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_course_bindings",
+            "name": "platform_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "platform_name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "platform_issuer",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "issuer"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "platform_client_id",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_platforms",
+            "name": "client_id"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "context_id",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_course_bindings",
+            "name": "context_id"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "context_label",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_course_bindings",
+            "name": "context_label"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "context_title",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_course_bindings",
+            "name": "context_title"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "course_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_course_bindings",
+            "name": "course_id"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "lti_course_bindings",
+            "name": "created_at"
+          }
+        }
       }
     ],
     "parameters": {

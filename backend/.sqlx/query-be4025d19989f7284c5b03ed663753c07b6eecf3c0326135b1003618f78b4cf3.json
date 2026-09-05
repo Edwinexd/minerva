@@ -6,52 +6,112 @@
       {
         "ordinal": 0,
         "name": "momenttillf_id",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "momenttillf_id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "course_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "course_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "course_code",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "course_code"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "semester_label",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "semester_label"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "info_url",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "info_url"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "syllabus_url",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "syllabus_url"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "unit",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "unit"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "last_synced_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "last_synced_at"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "created_at"
+          }
+        }
       }
     ],
     "parameters": {

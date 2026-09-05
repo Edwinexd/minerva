@@ -6,67 +6,145 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "message_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "message_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "user_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "user_id"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "rating",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "rating"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "category",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "category"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "comment",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "comment"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "updated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "updated_at"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "user_eppn?",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "eppn"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "user_display_name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "display_name"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "acknowledged_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "acknowledged_at"
+          }
+        }
       },
       {
         "ordinal": 11,
         "name": "acknowledged_by",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "acknowledged_by"
+          }
+        }
       },
       {
         "ordinal": 12,
         "name": "acknowledger_display_name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "display_name"
+          }
+        }
       }
     ],
     "parameters": {

@@ -1,0 +1,316 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code\n        FROM courses c\n        JOIN course_members cm ON cm.course_id = c.id\n        WHERE cm.user_id = $1 AND c.active = true\n        ORDER BY c.updated_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "context_ratio",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "context_ratio"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "temperature",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "temperature"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "system_prompt",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "system_prompt"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "max_chunks",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "max_chunks"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "min_score",
+        "type_info": "Float4",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "min_score"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "strategy",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "strategy"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "tool_use_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "tool_use_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "embedding_provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "embedding_provider"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "embedding_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "embedding_model"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "embedding_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "embedding_version"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "reranker_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "reranker_model"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "daily_cost_limit_usd",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "daily_cost_limit_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "conversation_soft_token_limit",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "conversation_soft_token_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "conversation_hard_token_limit",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "conversation_hard_token_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "active",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "active"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "semester_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "semester_label"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "auto_managed",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "auto_managed"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "course_code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "course_code"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "fc46e96772c97189367b506c48fdec7b6120eb5a134ee29902671bbd249dd24d"
+}

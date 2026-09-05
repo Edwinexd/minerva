@@ -97,7 +97,12 @@
     "systemPromptPlaceholder": "Optional custom instructions for the AI assistant",
     "savingButton": "Saving...",
     "saveButton": "Save Configuration",
-    "savedToast": "Saved!"
+    "savedToast": "Saved!",
+    "conversationSoftTokenLimitLabel": "Nudge students to start a new chat after (tokens)",
+    "conversationSoftTokenLimitHelp": "Cumulative tokens in one chat before students see a dismissible suggestion to continue in a new one. Long chats cost more per message and blur the topic summaries on your dashboard. Set to 0 to never nudge.",
+    "conversationHardTokenLimitLabel": "Stop accepting messages after (tokens)",
+    "conversationHardTokenLimitHelp": "Cumulative tokens after which a chat is closed to new messages. Students get a one-click continuation that carries a short summary across. Set to 0 for no ceiling.",
+    "conversationHardBelowSoftWarning": "The ceiling is below the nudge threshold, so chats will be cut off without any warning first."
   },
   "apiKeys": {
     "title": "API Keys",

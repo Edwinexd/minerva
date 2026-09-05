@@ -6,57 +6,123 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "course_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "course_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "canvas_base_url",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "canvas_base_url"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "canvas_api_token",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "canvas_api_token"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "canvas_course_id",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "canvas_course_id"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "auto_sync",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "auto_sync"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "created_by",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "created_by"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "updated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "updated_at"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "last_synced_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "canvas_connections",
+            "name": "last_synced_at"
+          }
+        }
       }
     ],
     "parameters": {

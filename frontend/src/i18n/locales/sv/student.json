@@ -146,5 +146,15 @@
     "agreeButton": "Jag förstår och godkänner",
     "savingButton": "Sparar…",
     "acknowledgeFailed": "Kunde inte registrera godkännandet"
+  },
+  "limit": {
+    "nudgeTitle": "Den här chatten börjar bli lång",
+    "nudgeBody": "Långa chattar blir långsammare och dyrare för varje meddelande, eftersom hela konversationen läses om varje gång. Att starta en ny inför nästa fråga håller svaren skarpa. Din lärare får också tydligare ämnessammanfattningar när chattar håller sig till ett ämne.",
+    "blockedTitle": "Den här chatten har nått sin gräns",
+    "blockedBody": "Du kan inte lägga till fler meddelanden här, men inget går förlorat. Fortsätt i en ny chatt så följer en kort sammanfattning av det ni gått igenom med.",
+    "continueAction": "Fortsätt i en ny chatt",
+    "continueWorking": "Förbereder...",
+    "dismiss": "Stäng",
+    "carryoverLabel": "Fortsättning från en tidigare chatt"
   }
 }

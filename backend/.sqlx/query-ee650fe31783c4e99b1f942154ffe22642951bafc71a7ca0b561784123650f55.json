@@ -6,12 +6,24 @@
       {
         "ordinal": 0,
         "name": "input_usd_per_mtok",
-        "type_info": "Numeric"
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "input_usd_per_mtok"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "output_usd_per_mtok",
-        "type_info": "Numeric"
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "output_usd_per_mtok"
+          }
+        }
       }
     ],
     "parameters": {

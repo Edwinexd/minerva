@@ -326,6 +326,12 @@ function CourseConfigForm({ course }: { course: Course }) {
   const [embeddingModel, setEmbeddingModel] = useState(course.embedding_model)
   const [rerankerModel, setRerankerModel] = useState(course.reranker_model)
   const [dailyCostLimitUsd, setDailyCostLimitUsd] = useState(course.daily_cost_limit_usd)
+  const [conversationSoftTokenLimit, setConversationSoftTokenLimit] = useState(
+    course.conversation_soft_token_limit,
+  )
+  const [conversationHardTokenLimit, setConversationHardTokenLimit] = useState(
+    course.conversation_hard_token_limit,
+  )
   // Backfill / rename of the per-semester grouping label. Empty
   // string means "no change" on submit (we only POST a label when
   // the field is non-empty, since UpdateCourseRequest treats the
@@ -368,6 +374,8 @@ function CourseConfigForm({ course }: { course: Course }) {
       embedding_model: embeddingModel,
       reranker_model: rerankerModel,
       daily_cost_limit_usd: dailyCostLimitUsd,
+      conversation_soft_token_limit: conversationSoftTokenLimit,
+      conversation_hard_token_limit: conversationHardTokenLimit,
       // Only include the key when the editable value actually changed
       // (and the field is editable in the first place). UpdateCourseRequest
       // treats a missing key as "no change"; sending the existing value
@@ -770,6 +778,61 @@ function CourseConfigForm({ course }: { course: Course }) {
               </p>
             )}
           </div>
+
+          {/* Hidden unless the course is enrolled in the ceilings.
+              The values still round-trip on save (the state is seeded
+              from the course either way), so an admin flipping the flag
+              back on restores what the teacher last configured. */}
+          {course.feature_flags?.conversation_limits && (
+            <>
+            <Separator />
+
+            <div className="space-y-2">
+              <Label htmlFor="conversationSoftTokenLimit">
+                {t("config.conversationSoftTokenLimitLabel")}
+              </Label>
+              <Input
+                id="conversationSoftTokenLimit"
+                type="number"
+                step="10000"
+                value={conversationSoftTokenLimit}
+                onChange={(e) =>
+                  setConversationSoftTokenLimit(parseInt(e.target.value, 10) || 0)
+                }
+                min={0}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t("config.conversationSoftTokenLimitHelp")}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="conversationHardTokenLimit">
+                {t("config.conversationHardTokenLimitLabel")}
+              </Label>
+              <Input
+                id="conversationHardTokenLimit"
+                type="number"
+                step="100000"
+                value={conversationHardTokenLimit}
+                onChange={(e) =>
+                  setConversationHardTokenLimit(parseInt(e.target.value, 10) || 0)
+                }
+                min={0}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t("config.conversationHardTokenLimitHelp")}
+              </p>
+              {conversationSoftTokenLimit > 0 &&
+                conversationHardTokenLimit > 0 &&
+                conversationHardTokenLimit < conversationSoftTokenLimit && (
+                  <p className="text-xs text-destructive">
+                    {t("config.conversationHardBelowSoftWarning")}
+                  </p>
+                )}
+            </div>
+            </>
+          )}
 
           <Separator />
 

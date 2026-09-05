@@ -56,7 +56,10 @@
     "feedback_only_assistant": "Feedback kan bara lämnas på assistentens meddelanden."
   },
   "conversation": {
-    "pinned_frozen": "Den här chatten har fästs av en lärare och är nu skrivskyddad. Starta en ny chatt för att fortsätta."
+    "pinned_frozen": "Den här chatten har fästs av en lärare och är nu skrivskyddad. Starta en ny chatt för att fortsätta.",
+    "token_cap_exceeded": "Den här chatten har nått sin längdgräns ({{total}} av {{limit}} tokens). Fortsätt i en ny chatt för att gå vidare.",
+    "split_not_available": "Den här kursen begränsar inte chattlängd, så det finns inget att fortsätta från. Använd Ny chatt i stället.",
+    "split_not_needed": "Den här chatten är fortfarande långt under sin längdgräns ({{threshold}} tokens). Använd Ny chatt i stället."
   },
   "signed_url": {
     "expired": "Den här inbjudningslänken har gått ut.",
@@ -107,7 +110,10 @@
     "reranker_model_invalid": "Ogiltig omrankningsmodell: {{model}}",
     "reranker_model_disabled": "Omrankningsmodellen \"{{model}}\" har inaktiverats av en administratör. Välj en annan modell eller be admin slå på den igen.",
     "model_does_not_support_tools": "Modellen \"{{model}}\" stödjer inte verktygsanrop. Välj en modell som klarar verktyg eller stäng av verktygsanvändning.",
-    "model_does_not_support_logprobs": "Modellen \"{{model}}\" returnerar inte logprobs per token, vilket FLARE-strategin behöver. Välj en modell som stödjer logprobs eller byt strategi till Simple."
+    "model_does_not_support_logprobs": "Modellen \"{{model}}\" returnerar inte logprobs per token, vilket FLARE-strategin behöver. Välj en modell som stödjer logprobs eller byt strategi till Simple.",
+    "conversation_token_limit_negative": "Tokengränser för konversationer måste vara 0 eller större.",
+    "conversation_token_limit_too_large": "Tokengränser för konversationer måste vara {{max}} eller mindre.",
+    "conversation_hard_limit_below_soft": "Den hårda gränsen måste vara minst lika hög som påminnelsegränsen, annars avbryts chattar utan förvarning."
   },
   "play": {
     "designation_invalid_length": "Beteckningen måste vara mellan 1 och 64 tecken.",

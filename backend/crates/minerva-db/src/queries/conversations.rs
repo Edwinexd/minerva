@@ -10,6 +10,14 @@ pub struct ConversationRow {
     pub pinned: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Set when this conversation was split off a thread that hit its
+    /// hard token ceiling. NULLed rather than cascaded if the original
+    /// is deleted, so a continuation never disappears with its parent.
+    pub continued_from_id: Option<Uuid>,
+    /// Bounded, model-written recap of the conversation this one
+    /// continues. Written once at split time. Rendered into the system
+    /// prompt as untrusted content, never as instructions.
+    pub carryover_summary: Option<String>,
 }
 
 #[derive(Debug)]
@@ -107,15 +115,54 @@ pub async fn create(
     course_id: Uuid,
     user_id: Uuid,
 ) -> Result<ConversationRow, sqlx::Error> {
+    create_continuation(db, id, course_id, user_id, None, None).await
+}
+
+/// `create`, plus the backlink and carryover recap written when a
+/// student splits a conversation that reached its hard token ceiling.
+/// Both extras are NULL for an ordinary new conversation, which is
+/// exactly what [`create`] passes.
+pub async fn create_continuation(
+    db: &PgPool,
+    id: Uuid,
+    course_id: Uuid,
+    user_id: Uuid,
+    continued_from_id: Option<Uuid>,
+    carryover_summary: Option<&str>,
+) -> Result<ConversationRow, sqlx::Error> {
     sqlx::query_as!(
         ConversationRow,
-        "INSERT INTO conversations (id, course_id, user_id) VALUES ($1, $2, $3) RETURNING id, course_id, user_id, title, pinned, created_at, updated_at",
+        "INSERT INTO conversations (id, course_id, user_id, continued_from_id, carryover_summary) \
+         VALUES ($1, $2, $3, $4, $5) \
+         RETURNING id, course_id, user_id, title, pinned, created_at, updated_at, continued_from_id, carryover_summary",
         id,
         course_id,
         user_id,
+        continued_from_id,
+        carryover_summary,
     )
     .fetch_one(db)
     .await
+}
+
+/// Cumulative billed tokens for one conversation: prompt + completion
+/// summed over every message in it. This is the quantity the
+/// per-conversation soft / hard ceilings are compared against.
+///
+/// Summed on read rather than kept as a running column on
+/// `conversations`: a conversation holds tens of rows, `messages` is
+/// indexed by `conversation_id`, and a derived value cannot drift out
+/// of sync with the ledger it is derived from. Message rows are only
+/// ever inserted, so the total is monotonic.
+pub async fn token_total(db: &PgPool, conversation_id: Uuid) -> Result<i64, sqlx::Error> {
+    let total = sqlx::query_scalar!(
+        r#"SELECT COALESCE(SUM(COALESCE(tokens_prompt, 0) + COALESCE(tokens_completion, 0)), 0) AS "total!"
+           FROM messages WHERE conversation_id = $1"#,
+        conversation_id,
+    )
+    .fetch_one(db)
+    .await?;
+    Ok(total)
 }
 
 pub async fn list_by_course_user(
@@ -158,7 +205,7 @@ pub async fn list_by_course_user(
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<ConversationRow>, sqlx::Error> {
     sqlx::query_as!(
         ConversationRow,
-        "SELECT id, course_id, user_id, title, pinned, created_at, updated_at FROM conversations WHERE id = $1",
+        "SELECT id, course_id, user_id, title, pinned, created_at, updated_at, continued_from_id, carryover_summary FROM conversations WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -342,7 +389,7 @@ pub async fn set_pinned(
 ) -> Result<Option<ConversationRow>, sqlx::Error> {
     sqlx::query_as!(
         ConversationRow,
-        "UPDATE conversations SET pinned = $2, updated_at = NOW() WHERE id = $1 RETURNING id, course_id, user_id, title, pinned, created_at, updated_at",
+        "UPDATE conversations SET pinned = $2, updated_at = NOW() WHERE id = $1 RETURNING id, course_id, user_id, title, pinned, created_at, updated_at, continued_from_id, carryover_summary",
         id,
         pinned,
     )

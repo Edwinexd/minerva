@@ -13,7 +13,18 @@ import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Menu, X } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
-import type { Message, MessageFeedback, PromptAnalysis } from "@/lib/types"
+import type {
+  ConversationContinuation,
+  Message,
+  MessageFeedback,
+  PromptAnalysis,
+} from "@/lib/types"
+import {
+  CarryoverNote,
+  ConversationLimitNotice,
+} from "./conversation-limit-notice"
+import { conversationLimitState } from "./conversation-limit-state"
+import { useConversationSplit } from "./use-conversation-split"
 import { FeedbackControls } from "@/components/message-feedback"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import type { ChatBubbleLabels } from "./chat-bubble"
@@ -250,6 +261,38 @@ export function ChatWindow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, courseId, readOnly])
 
+  // ---- Per-conversation token ceiling ----
+  //
+  // `token_state` is server-computed (see `chat::ConversationTokenState`)
+  // rather than summed from `messages` here, so the threshold the banner
+  // renders on is the same one the send endpoint enforces.
+  const rawLimitState = conversationLimitState(data?.token_state)
+  const split = useConversationSplit({
+    conversationId,
+    doSplit: (cid) =>
+      api.post<ConversationContinuation>(
+        `/courses/${courseId}/conversations/${cid}/continue`,
+        {},
+      ),
+    onSplit: (created) => {
+      // Land the student in the new conversation. The sidebar list is
+      // stale until invalidated, otherwise the row they were just moved
+      // into does not appear.
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "conversations"],
+      })
+      navigate({
+        to: "/course/$courseId/$conversationId",
+        params: { courseId, conversationId: created.id },
+      })
+    },
+  })
+  // A dismissed nudge collapses to `ok`; a block never does, because the
+  // composer is hidden in that state and the notice is the only thing
+  // explaining why.
+  const limitState =
+    rawLimitState === "nudge" && split.dismissed ? "ok" : rawLimitState
+
   // ---- ChatSurface adapter ----
 
   /**
@@ -456,6 +499,33 @@ export function ChatWindow({
       />
     ),
     readOnly,
+    limitState,
+    renderLimitNotice: () =>
+      limitState === "ok" ? null : (
+        <ConversationLimitNotice
+          state={limitState}
+          continuing={split.pending}
+          error={split.error}
+          onContinue={split.run}
+          onDismiss={split.dismiss}
+          labels={{
+            nudgeTitle: t("limit.nudgeTitle"),
+            nudgeBody: t("limit.nudgeBody"),
+            blockedTitle: t("limit.blockedTitle"),
+            blockedBody: t("limit.blockedBody"),
+            continueAction: t("limit.continueAction"),
+            continueWorking: t("limit.continueWorking"),
+            dismiss: t("limit.dismiss"),
+          }}
+        />
+      ),
+    renderCarryoverNote: () =>
+      data?.carryover_summary ? (
+        <CarryoverNote
+          summary={data.carryover_summary}
+          label={t("limit.carryoverLabel")}
+        />
+      ) : null,
     aegisEnabled,
     labels,
     layout,

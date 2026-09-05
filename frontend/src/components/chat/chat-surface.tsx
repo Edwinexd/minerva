@@ -49,6 +49,8 @@ import type { ThinkingBlockLabels } from "./thinking-block"
 import { EmptyChatGreeting } from "./empty-chat-greeting"
 import { TeacherNoteInline } from "./teacher-note-inline"
 import { useChatStream } from "./use-chat-stream"
+import { useApiErrorMessage } from "@/lib/use-api-error"
+import type { ConversationLimitState } from "./conversation-limit-state"
 import { AegisFeedbackPanel } from "./aegis-feedback-panel"
 import { AegisSuggestionsBanner } from "./aegis-suggestions-banner"
 import { useAegisLiveAnalyzer } from "./use-aegis-live-analyzer"
@@ -228,6 +230,27 @@ export interface ChatSurfaceAdapter<M extends ChatBubbleMessage> {
 
   /** Per-conv pinned read-only view; hides the composer entirely. */
   readOnly: boolean
+
+  /**
+   * Conversation token-ceiling state, resolved by the adapter from the
+   * server's `token_state`. `ok` renders nothing. `nudge` shows a
+   * dismissible banner above a live composer. `blocked` replaces the
+   * composer entirely, because the send endpoint would reject anything
+   * typed into it. Defaults to `ok` so a caller that doesn't care about
+   * ceilings is unaffected.
+   */
+  limitState?: ConversationLimitState
+  /**
+   * Rendered above (or in place of) the composer when `limitState` is
+   * not `ok`. The adapter owns the split action and its pending state,
+   * so this surface stays free of the mutation.
+   */
+  renderLimitNotice?: () => React.ReactNode
+  /**
+   * Recap banner for a conversation split off an earlier one. Rendered
+   * at the top of the transcript.
+   */
+  renderCarryoverNote?: () => React.ReactNode
   /** Per-course Aegis feature flag. */
   aegisEnabled: boolean
 
@@ -292,13 +315,17 @@ export function ChatSurface<M extends ChatBubbleMessage>({
     renderFeedbackSlot,
     getPersistedThinking,
     readOnly,
+    limitState = "ok",
+    renderLimitNotice,
+    renderCarryoverNote,
     aegisEnabled,
     labels,
     layout,
   } = adapter
 
   const [input, setInput] = useState("")
-  const stream = useChatStream(labels.unknownError)
+  const formatStreamError = useApiErrorMessage()
+  const stream = useChatStream(labels.unknownError, formatStreamError)
   const { send, reset } = stream
 
   // Subject-expertise mode (Beginner/Expert). The panel toggle
@@ -633,139 +660,151 @@ export function ChatSurface<M extends ChatBubbleMessage>({
               />
             </div>
           ) : (
-            <ChatTranscript<M>
-              messages={messages}
-              isLoading={isLoading}
-              pendingUserMsg={stream.pendingUserMsg}
-              streaming={stream.streaming}
-              streamedTokens={stream.streamedTokens}
-              error={stream.error}
-              thinkingTokens={stream.thinkingTokens}
-              toolEvents={stream.toolEvents}
-              thinkingActive={stream.thinkingActive}
-              thinkingDurationMs={stream.thinkingDurationMs}
-              thinkingHidden={stream.thinkingHidden}
-              bubbleLabels={labels.bubble}
-              thinkingLabels={labels.thinking}
-              getPersistedThinking={getThinking}
-              assistantResponseLabel={labels.assistantResponse}
-              renderBeforeMessages={() =>
-                conversationNotes.length > 0 ? (
-                  // Pin conversation-wide teacher notes to the top
-                  // of the scrolling transcript so students still
-                  // see them when reading further down a long
-                  // conversation. Embed leaves them inline (the
-                  // iframe is short enough that they stay visible
-                  // anyway, and the sticky backdrop reads oddly
-                  // against Moodle's chrome).
-                  <div
-                    className={
-                      layout.stickyConversationNotes
-                        ? "sticky top-0 z-10 py-2 bg-background/95 supports-[backdrop-filter]:bg-background/80 backdrop-blur space-y-2"
-                        : "space-y-2"
-                    }
-                  >
-                    {conversationNotes.map((note) => (
-                      <TeacherNoteInline
-                        key={note.id}
-                        note={note}
-                        label={labels.teacherNote}
-                      />
-                    ))}
-                  </div>
-                ) : null
-              }
-              renderFeedbackSlot={
-                !readOnly && renderFeedbackSlot
-                  ? (msg) =>
-                      msg.role === "assistant" ? renderFeedbackSlot(msg) : null
-                  : undefined
-              }
-              renderAfterMessage={(msg) =>
-                notesByMessage.get(msg.id)?.map((note) => (
-                  <TeacherNoteInline
-                    key={note.id}
-                    note={note}
-                    label={labels.teacherNote}
-                  />
-                ))
-              }
-            />
+            <>
+              {renderCarryoverNote?.()}
+              <ChatTranscript<M>
+                messages={messages}
+                isLoading={isLoading}
+                pendingUserMsg={stream.pendingUserMsg}
+                streaming={stream.streaming}
+                streamedTokens={stream.streamedTokens}
+                error={stream.error}
+                thinkingTokens={stream.thinkingTokens}
+                toolEvents={stream.toolEvents}
+                thinkingActive={stream.thinkingActive}
+                thinkingDurationMs={stream.thinkingDurationMs}
+                thinkingHidden={stream.thinkingHidden}
+                bubbleLabels={labels.bubble}
+                thinkingLabels={labels.thinking}
+                getPersistedThinking={getThinking}
+                assistantResponseLabel={labels.assistantResponse}
+                renderBeforeMessages={() =>
+                  conversationNotes.length > 0 ? (
+                    // Pin conversation-wide teacher notes to the top
+                    // of the scrolling transcript so students still
+                    // see them when reading further down a long
+                    // conversation. Embed leaves them inline (the
+                    // iframe is short enough that they stay visible
+                    // anyway, and the sticky backdrop reads oddly
+                    // against Moodle's chrome).
+                    <div
+                      className={
+                        layout.stickyConversationNotes
+                          ? "sticky top-0 z-10 py-2 bg-background/95 supports-[backdrop-filter]:bg-background/80 backdrop-blur space-y-2"
+                          : "space-y-2"
+                      }
+                    >
+                      {conversationNotes.map((note) => (
+                        <TeacherNoteInline
+                          key={note.id}
+                          note={note}
+                          label={labels.teacherNote}
+                        />
+                      ))}
+                    </div>
+                  ) : null
+                }
+                renderFeedbackSlot={
+                  !readOnly && renderFeedbackSlot
+                    ? (msg) =>
+                        msg.role === "assistant" ? renderFeedbackSlot(msg) : null
+                    : undefined
+                }
+                renderAfterMessage={(msg) =>
+                  notesByMessage.get(msg.id)?.map((note) => (
+                    <TeacherNoteInline
+                      key={note.id}
+                      note={note}
+                      label={labels.teacherNote}
+                    />
+                  ))
+                }
+              />
+            </>
           )}
         </section>
 
         {!readOnly && (
           <div className={`${layout.inputBlock} border-t space-y-2`}>
-            {needsPrivacyAck && (
-              <PrivacyAckBanner onAcknowledge={onAcknowledgePrivacy} />
+            {limitState !== "ok" && renderLimitNotice?.()}
+            {/* A blocked conversation keeps the notice but loses the
+                composer: the send endpoint returns 409 for it, so an
+                input the student can type into would only produce an
+                error after they had written a message. */}
+            {limitState !== "blocked" && (
+              <>
+                {needsPrivacyAck && (
+                  <PrivacyAckBanner onAcknowledge={onAcknowledgePrivacy} />
+                )}
+                {showBanner && (
+                  <AegisSuggestionsBanner
+                    suggestions={liveSuggestions}
+                    blocked={sendNeedsConfirm}
+                    working={rewriting}
+                    onPreview={handlePreviewIdeas}
+                    onApply={handleApplyRewrite}
+                    onDismiss={() => setBannerDismissedFor(input)}
+                  />
+                )}
+                {aegisEnabled && !showBanner && (
+                  // Persistent status row above the input. Three states
+                  // mirror the right-rail panel so a student with the
+                  // panel hidden still has a clear "is aegis doing
+                  // something?" signal. The pending branch covers BOTH
+                  // the typing-debounce check AND the just-in-time
+                  // analyzeNow intercept on Send, so the student never
+                  // wonders "did my Send go through?" while the analyzer
+                  // is still racing.
+                  <output
+                    aria-live="polite"
+                    className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+                  >
+                    <AegisShieldFilled
+                      className={`w-4 h-4 shrink-0 ${liveAnalyzer.pending ? "animate-pulse" : ""}`}
+                    />
+                    <span>
+                      {liveAnalyzer.pending
+                        ? labels.aegisPendingTitle
+                        : liveAnalyzer.analysis &&
+                            liveAnalyzer.analysis.suggestions.length === 0
+                          ? labels.aegisLooksGoodTitle
+                          : labels.aegisEmptyTitle}
+                    </span>
+                  </output>
+                )}
+                <form onSubmit={handleSubmit} className="flex gap-2">
+                  <Input
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={labels.inputPlaceholder}
+                    aria-label={labels.inputLabel}
+                    disabled={stream.streaming || needsPrivacyAck}
+                    className="flex-1"
+                  />
+                  <Button
+                    type="submit"
+                    variant={sendNeedsConfirm ? "outline" : "default"}
+                    disabled={
+                      stream.streaming ||
+                      !input.trim() ||
+                      needsPrivacyAck ||
+                      submitChecking
+                    }
+                  >
+                    {submitChecking
+                      ? labels.aegisChecking
+                      : sendNeedsConfirm
+                        ? labels.aegisSendAsIs
+                        : labels.send}
+                  </Button>
+                </form>
+                <p className="text-xs text-muted-foreground text-center">
+                  {labels.disclaimerBefore}
+                  <DataHandlingLink label={labels.disclaimerLink} />
+                  {labels.disclaimerAfter}
+                </p>
+              </>
             )}
-            {showBanner && (
-              <AegisSuggestionsBanner
-                suggestions={liveSuggestions}
-                blocked={sendNeedsConfirm}
-                working={rewriting}
-                onPreview={handlePreviewIdeas}
-                onApply={handleApplyRewrite}
-                onDismiss={() => setBannerDismissedFor(input)}
-              />
-            )}
-            {aegisEnabled && !showBanner && (
-              // Persistent status row above the input. Three states
-              // mirror the right-rail panel so a student with the
-              // panel hidden still has a clear "is aegis doing
-              // something?" signal. The pending branch covers BOTH
-              // the typing-debounce check AND the just-in-time
-              // analyzeNow intercept on Send, so the student never
-              // wonders "did my Send go through?" while the analyzer
-              // is still racing.
-              <output
-                aria-live="polite"
-                className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
-              >
-                <AegisShieldFilled
-                  className={`w-4 h-4 shrink-0 ${liveAnalyzer.pending ? "animate-pulse" : ""}`}
-                />
-                <span>
-                  {liveAnalyzer.pending
-                    ? labels.aegisPendingTitle
-                    : liveAnalyzer.analysis &&
-                        liveAnalyzer.analysis.suggestions.length === 0
-                      ? labels.aegisLooksGoodTitle
-                      : labels.aegisEmptyTitle}
-                </span>
-              </output>
-            )}
-            <form onSubmit={handleSubmit} className="flex gap-2">
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={labels.inputPlaceholder}
-                aria-label={labels.inputLabel}
-                disabled={stream.streaming || needsPrivacyAck}
-                className="flex-1"
-              />
-              <Button
-                type="submit"
-                variant={sendNeedsConfirm ? "outline" : "default"}
-                disabled={
-                  stream.streaming ||
-                  !input.trim() ||
-                  needsPrivacyAck ||
-                  submitChecking
-                }
-              >
-                {submitChecking
-                  ? labels.aegisChecking
-                  : sendNeedsConfirm
-                    ? labels.aegisSendAsIs
-                    : labels.send}
-              </Button>
-            </form>
-            <p className="text-xs text-muted-foreground text-center">
-              {labels.disclaimerBefore}
-              <DataHandlingLink label={labels.disclaimerLink} />
-              {labels.disclaimerAfter}
-            </p>
           </div>
         )}
       </div>

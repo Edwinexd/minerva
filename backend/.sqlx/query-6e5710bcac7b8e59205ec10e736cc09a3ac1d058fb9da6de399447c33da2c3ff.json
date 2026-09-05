@@ -6,32 +6,68 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "prompt_analyses",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "message_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "prompt_analyses",
+            "name": "message_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "suggestions",
-        "type_info": "Jsonb"
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "prompt_analyses",
+            "name": "suggestions"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "mode",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prompt_analyses",
+            "name": "mode"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "model_used",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "prompt_analyses",
+            "name": "model_used"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "prompt_analyses",
+            "name": "created_at"
+          }
+        }
       }
     ],
     "parameters": {

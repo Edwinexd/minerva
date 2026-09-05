@@ -697,7 +697,12 @@ struct PendingToolCall {
 }
 
 fn build_research_system_prompt(ctx: &GenerationContext, chunks: &[RagChunk]) -> String {
-    let base = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, chunks);
+    let base = common::build_system_prompt(
+        &ctx.course_name,
+        &ctx.custom_prompt,
+        chunks,
+        ctx.carryover.as_deref(),
+    );
     format!(
         "{base}\n\n## Research phase (you are the FIRST of two agents)\n\
         You are the RESEARCH agent in a two-step pipeline. A separate WRITEUP \
@@ -1241,6 +1246,7 @@ mod stream_integration_tests {
             embedding_model: "test".to_string(),
             embedding_version: 1,
             history: Vec::<MessageRow>::new(),
+            carryover: None,
             user_content: "Hello".to_string(),
             is_first_message: true,
             daily_token_budget: 0,

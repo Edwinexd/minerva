@@ -63,6 +63,13 @@ pub struct GenerationContext {
     /// vectors land in the same collection ingest writes to.
     pub embedding_version: i32,
     pub history: Vec<minerva_db::queries::conversations::MessageRow>,
+    /// `conversations.carryover_summary`: a recap of the thread this
+    /// conversation was split off when the previous one hit its hard
+    /// token ceiling. Present only on continuations. Rendered into the
+    /// system prompt as inert reference text by
+    /// `common::build_system_prompt_with_signals`, never as
+    /// instructions, because it is model-written from student input.
+    pub carryover: Option<String>,
     pub user_content: String,
     pub is_first_message: bool,
     /// Per-response token budget for the tool-use / FLARE fail-safe: the

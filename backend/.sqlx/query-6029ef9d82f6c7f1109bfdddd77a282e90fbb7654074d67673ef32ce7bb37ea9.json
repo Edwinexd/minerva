@@ -6,27 +6,42 @@
       {
         "ordinal": 0,
         "name": "category",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_token_usage",
+            "name": "category"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "model",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_token_usage",
+            "name": "model"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "call_count!",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": "Expression"
       },
       {
         "ordinal": 3,
         "name": "prompt_tokens!",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": "Expression"
       },
       {
         "ordinal": 4,
         "name": "completion_tokens!",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": "Expression"
       }
     ],
     "parameters": {

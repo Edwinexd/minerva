@@ -324,13 +324,15 @@
       "course_kg": "Course knowledge graph",
       "extraction_guard": "Extraction guard",
       "aegis": "Aegis prompt coaching",
-      "concept_graph": "Concept knowledge graph"
+      "concept_graph": "Concept knowledge graph",
+      "conversation_limits": "Conversation token ceilings"
     },
     "featureFlagDescription": {
       "course_kg": "Per-document kind classification, cross-document linker, knowledge-graph viewer, assignment-refusal addendum, and per-chunk adversarial filter. Off by default while we calibrate.",
       "extraction_guard": "Pre-generation intent classifier + output-side solution detector + Socratic rewriter, plus multi-turn assignment-proximity tracking. Catches the 'student pasted assignment, asks for code' case and intercepts the response with a Socratic question. Independent of course_kg so admins can pilot separately.",
       "aegis": "Right-side prompt-coaching panel. Every user turn is scored on five dimensions (clarity, context, constraints, reasoning demand, critical thinking) plus three short callouts (structural clarity, terminology, missing constraint). Non-blocking by design - the analyzer races the assistant reply and the student can ignore the feedback freely.",
-      "concept_graph": "Eureka-2 concept graph: per-document LLM extraction of domain concepts and directed relations, persisted with document-level provenance and cosine/structural/community dedup. Distinct from the course knowledge graph (which is at document granularity). When on, admins can run extraction and view the graph; toggling off hides the admin endpoints but preserves the persisted graph."
+      "concept_graph": "Eureka-2 concept graph: per-document LLM extraction of domain concepts and directed relations, persisted with document-level provenance and cosine/structural/community dedup. Distinct from the course knowledge graph (which is at document granularity). When on, admins can run extraction and view the graph; toggling off hides the admin endpoints but preserves the persisted graph.",
+      "conversation_limits": "Per-conversation spend ceilings: a dismissible nudge to start a fresh chat, a hard block once the conversation stops accepting messages, and a one-click continuation that carries an LLM-written recap across. Thresholds are per-course (Nudge / Stop accepting on the course config page); this flag decides whether they apply at all. Off by default so the ceilings roll out course by course. Turning it off ignores the thresholds without erasing them."
     },
     "statusFilterLabel": "Filter by status",
     "statusFilter": {
@@ -415,7 +417,11 @@
         "embedding": "Embedding provider / model",
         "embeddingHelp": "Force every selected course onto this embedding provider/model.",
         "systemPrompt": "System prompt",
-        "systemPromptHelp": "Replaces the system prompt on every selected course."
+        "systemPromptHelp": "Replaces the system prompt on every selected course.",
+        "conversationSoftTokenLimit": "Conversation nudge threshold (tokens)",
+        "conversationSoftTokenLimitHelp": "0 disables the nudge.",
+        "conversationHardTokenLimit": "Conversation hard ceiling (tokens)",
+        "conversationHardTokenLimitHelp": "Must be at least the nudge threshold. 0 disables the ceiling."
       }
     }
   },
@@ -712,6 +718,14 @@
       "dailyCostLimitUsd": {
         "label": "Default per-student daily spend cap (USD)",
         "description": "Applied per new course. 0 = unlimited (the per-owner cap is then the only spend backstop)."
+      },
+      "conversationSoftTokenLimit": {
+        "label": "Conversation nudge threshold (tokens)",
+        "description": "Default for new courses. Cumulative tokens in one conversation before the student is nudged to continue in a fresh one. 0 disables the nudge."
+      },
+      "conversationHardTokenLimit": {
+        "label": "Conversation hard ceiling (tokens)",
+        "description": "Default for new courses. Cumulative tokens after which a conversation stops accepting messages. Must be at least the nudge threshold. 0 disables the ceiling."
       }
     },
     "platform": {

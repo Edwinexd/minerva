@@ -60,6 +60,7 @@ const KNOWN_FEATURE_FLAGS = [
   "extraction_guard",
   "aegis",
   "concept_graph",
+  "conversation_limits",
 ] as const
 type FeatureFlagName = (typeof KNOWN_FEATURE_FLAGS)[number]
 
@@ -1316,6 +1317,8 @@ type ScalarField =
   | "max_chunks"
   | "min_score"
   | "daily_cost_limit_usd"
+  | "conversation_soft_token_limit"
+  | "conversation_hard_token_limit"
   | "system_prompt"
   | "semester_label"
   | "embedding"
@@ -1352,6 +1355,10 @@ function BulkEditDialog({
   const [maxChunks, setMaxChunks] = useState(10)
   const [minScore, setMinScore] = useState(0)
   const [dailyCostLimitUsd, setDailyCostLimitUsd] = useState(0)
+  const [conversationSoftTokenLimit, setConversationSoftTokenLimit] =
+    useState(300000)
+  const [conversationHardTokenLimit, setConversationHardTokenLimit] =
+    useState(1000000)
   const [systemPrompt, setSystemPrompt] = useState("")
   const [semesterLabel, setSemesterLabel] = useState("")
   const [embeddingProvider, setEmbeddingProvider] = useState("local")
@@ -1413,6 +1420,10 @@ function BulkEditDialog({
     if (included.has("min_score")) patch.min_score = minScore
     if (included.has("daily_cost_limit_usd"))
       patch.daily_cost_limit_usd = dailyCostLimitUsd
+    if (included.has("conversation_soft_token_limit"))
+      patch.conversation_soft_token_limit = conversationSoftTokenLimit
+    if (included.has("conversation_hard_token_limit"))
+      patch.conversation_hard_token_limit = conversationHardTokenLimit
     if (included.has("system_prompt")) patch.system_prompt = systemPrompt
     if (included.has("semester_label"))
       patch.semester_label = semesterLabel.trim().toUpperCase()
@@ -1642,6 +1653,40 @@ function BulkEditDialog({
               value={dailyCostLimitUsd}
               onChange={(e) =>
                 setDailyCostLimitUsd(parseFloat(e.target.value) || 0)
+              }
+              min={0}
+            />
+          </FieldRow>
+
+          <FieldRow
+            label={t("courses.bulk.fields.conversationSoftTokenLimit")}
+            help={t("courses.bulk.fields.conversationSoftTokenLimitHelp")}
+            enabled={included.has("conversation_soft_token_limit")}
+            onToggle={(v) => toggleField("conversation_soft_token_limit", v)}
+          >
+            <Input
+              type="number"
+              step="10000"
+              value={conversationSoftTokenLimit}
+              onChange={(e) =>
+                setConversationSoftTokenLimit(parseInt(e.target.value, 10) || 0)
+              }
+              min={0}
+            />
+          </FieldRow>
+
+          <FieldRow
+            label={t("courses.bulk.fields.conversationHardTokenLimit")}
+            help={t("courses.bulk.fields.conversationHardTokenLimitHelp")}
+            enabled={included.has("conversation_hard_token_limit")}
+            onToggle={(v) => toggleField("conversation_hard_token_limit", v)}
+          >
+            <Input
+              type="number"
+              step="100000"
+              value={conversationHardTokenLimit}
+              onChange={(e) =>
+                setConversationHardTokenLimit(parseInt(e.target.value, 10) || 0)
               }
               min={0}
             />

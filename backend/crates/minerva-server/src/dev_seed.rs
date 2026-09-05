@@ -495,6 +495,11 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             description: config.description.map(|s| s.to_string()),
             owner_id: config.owner_id,
             daily_cost_limit_usd: rust_decimal::Decimal::ZERO, // unlimited per-student for seed
+            // Seed courses keep the migration's per-conversation
+            // ceilings so a dev can exercise the nudge / block flow
+            // without hand-editing the course first.
+            conversation_soft_token_limit: None,
+            conversation_hard_token_limit: None,
             // Seed leaves the AI knobs at SQL DEFAULT; the immediate
             // `update()` below overrides each seed course's policy
             // (model, strategy, tool_use, etc.) explicitly.
@@ -541,6 +546,8 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             // None = no change from the row's SQL DEFAULT.
             reranker_model: None,
             daily_cost_limit_usd: None,
+            conversation_soft_token_limit: None,
+            conversation_hard_token_limit: None,
             semester_label: None,
         },
     )

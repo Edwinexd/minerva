@@ -6,87 +6,189 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "conversation_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "conversation_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "role",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "role"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "content",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "content"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "chunks_used",
-        "type_info": "Jsonb"
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "chunks_used"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "model_used",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "model_used"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "tokens_prompt",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "tokens_prompt"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "tokens_completion",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "tokens_completion"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "generation_ms",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "generation_ms"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "retrieval_count",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "retrieval_count"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "thinking_transcript",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "thinking_transcript"
+          }
+        }
       },
       {
         "ordinal": 11,
         "name": "tool_events",
-        "type_info": "Jsonb"
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "tool_events"
+          }
+        }
       },
       {
         "ordinal": 12,
         "name": "thinking_ms",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "thinking_ms"
+          }
+        }
       },
       {
         "ordinal": 13,
         "name": "research_prompt_tokens",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "research_prompt_tokens"
+          }
+        }
       },
       {
         "ordinal": 14,
         "name": "research_completion_tokens",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "research_completion_tokens"
+          }
+        }
       },
       {
         "ordinal": 15,
         "name": "thinking_hidden",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "thinking_hidden"
+          }
+        }
       },
       {
         "ordinal": 16,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "created_at"
+          }
+        }
       }
     ],
     "parameters": {

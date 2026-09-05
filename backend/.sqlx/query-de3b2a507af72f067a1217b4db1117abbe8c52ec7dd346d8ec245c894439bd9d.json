@@ -6,7 +6,13 @@
       {
         "ordinal": 0,
         "name": "enabled",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "feature_flags",
+            "name": "enabled"
+          }
+        }
       }
     ],
     "parameters": {

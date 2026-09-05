@@ -6,37 +6,79 @@
       {
         "ordinal": 0,
         "name": "a_doc_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "a_doc_id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "b_doc_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "b_doc_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "decided_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "decided_at"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "a_classified_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "a_classified_at"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "b_classified_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "b_classified_at"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "relation",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "relation"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "confidence",
-        "type_info": "Float4"
+        "type_info": "Float4",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "confidence"
+          }
+        }
       }
     ],
     "parameters": {

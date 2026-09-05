@@ -87,6 +87,8 @@ struct UpdateCourseRequest {
     /// No re-embed: applies on the next chat turn.
     reranker_model: Option<String>,
     daily_cost_limit_usd: Option<Decimal>,
+    conversation_soft_token_limit: Option<i64>,
+    conversation_hard_token_limit: Option<i64>,
     /// Admin / owner backfill: stamp or rewrite the per-semester
     /// label on an existing course. Format-validated identically to
     /// `CreateCourseRequest::semester_label`.
@@ -142,6 +144,13 @@ pub(crate) struct CourseResponse {
     /// re-embed cost. Frontend renders a dropdown on the config page.
     reranker_model: String,
     daily_cost_limit_usd: Decimal,
+    /// Cumulative billed tokens at which a conversation in this course
+    /// nudges the student to continue in a fresh one (0 = never), and
+    /// at which it stops accepting messages entirely (0 = no ceiling).
+    /// See migration `20260905000001` for why these are per-conversation
+    /// and denominated in tokens rather than USD.
+    conversation_soft_token_limit: i64,
+    conversation_hard_token_limit: i64,
     active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
@@ -226,6 +235,11 @@ pub(crate) struct CourseFeatureFlagsView {
     /// distinct from `course_kg` (the document-level graph).
     /// Resolves through the same path as the others.
     pub(crate) concept_graph: bool,
+    /// Per-conversation token ceilings (nudge / block / split). When
+    /// FALSE the two `conversation_*_token_limit` columns are ignored
+    /// at runtime, so the teacher config page hides their inputs rather
+    /// than offering knobs that do nothing.
+    pub(crate) conversation_limits: bool,
 }
 
 impl CourseResponse {
@@ -254,6 +268,8 @@ impl CourseResponse {
             embedding_version: row.embedding_version,
             reranker_model: row.reranker_model,
             daily_cost_limit_usd: row.daily_cost_limit_usd,
+            conversation_soft_token_limit: row.conversation_soft_token_limit,
+            conversation_hard_token_limit: row.conversation_hard_token_limit,
             active: row.active,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -280,6 +296,7 @@ pub(crate) async fn resolve_course_flags(
         course_kg: crate::feature_flags::course_kg_enabled(db, course_id).await,
         aegis: crate::feature_flags::aegis_enabled(db, course_id).await,
         concept_graph: crate::feature_flags::concept_graph_enabled(db, course_id).await,
+        conversation_limits: crate::feature_flags::conversation_limits_enabled(db, course_id).await,
     }
 }
 
@@ -378,6 +395,12 @@ async fn create_course(
         owner_id: user.id,
         semester_label,
         daily_cost_limit_usd: crate::system_defaults::course_daily_cost_limit_usd(&state.db).await,
+        conversation_soft_token_limit: Some(
+            crate::system_defaults::course_conversation_soft_token_limit(&state.db).await,
+        ),
+        conversation_hard_token_limit: Some(
+            crate::system_defaults::course_conversation_hard_token_limit(&state.db).await,
+        ),
         model: Some(crate::system_defaults::course_model(&state.db).await),
         temperature: Some(crate::system_defaults::course_temperature(&state.db).await),
         context_ratio: Some(crate::system_defaults::course_context_ratio(&state.db).await),
@@ -465,6 +488,8 @@ pub(crate) struct CourseUpdateFields {
     pub embedding_model: Option<String>,
     pub reranker_model: Option<String>,
     pub daily_cost_limit_usd: Option<Decimal>,
+    pub conversation_soft_token_limit: Option<i64>,
+    pub conversation_hard_token_limit: Option<i64>,
     pub semester_label: Option<String>,
 }
 
@@ -508,6 +533,47 @@ pub(crate) async fn apply_course_update(
                 [("max", max.to_string())],
             ));
         }
+    }
+
+    // Per-conversation token ceilings. Validated together because the
+    // pair has to stay ordered: a hard limit below the soft one would
+    // close the conversation before the student was ever nudged, which
+    // is the one outcome this feature exists to avoid. A partial PUT
+    // sets only one of them, so the check overlays the request on the
+    // existing row rather than looking at the body alone; the courses
+    // table CHECKs the same invariant as a backstop.
+    let effective_soft = body
+        .conversation_soft_token_limit
+        .unwrap_or(existing.conversation_soft_token_limit);
+    let effective_hard = body
+        .conversation_hard_token_limit
+        .unwrap_or(existing.conversation_hard_token_limit);
+    for limit in [
+        body.conversation_soft_token_limit,
+        body.conversation_hard_token_limit,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if limit < 0 {
+            return Err(AppError::bad_request(
+                "course.conversation_token_limit_negative",
+            ));
+        }
+        if limit > minerva_app_core::system_defaults::MAX_CONVERSATION_TOKEN_LIMIT {
+            return Err(AppError::bad_request_with(
+                "course.conversation_token_limit_too_large",
+                [(
+                    "max",
+                    minerva_app_core::system_defaults::MAX_CONVERSATION_TOKEN_LIMIT.to_string(),
+                )],
+            ));
+        }
+    }
+    if effective_soft > 0 && effective_hard > 0 && effective_hard < effective_soft {
+        return Err(AppError::bad_request(
+            "course.conversation_hard_limit_below_soft",
+        ));
     }
 
     // Capability check: reject mismatches between the chosen
@@ -739,6 +805,8 @@ pub(crate) async fn apply_course_update(
         embedding_model: None,
         reranker_model: body.reranker_model,
         daily_cost_limit_usd: body.daily_cost_limit_usd,
+        conversation_soft_token_limit: body.conversation_soft_token_limit,
+        conversation_hard_token_limit: body.conversation_hard_token_limit,
         semester_label: validated_semester_label,
     };
 
@@ -776,6 +844,8 @@ async fn update_course(
         embedding_model: body.embedding_model,
         reranker_model: body.reranker_model,
         daily_cost_limit_usd: body.daily_cost_limit_usd,
+        conversation_soft_token_limit: body.conversation_soft_token_limit,
+        conversation_hard_token_limit: body.conversation_hard_token_limit,
         semester_label: body.semester_label,
     };
 

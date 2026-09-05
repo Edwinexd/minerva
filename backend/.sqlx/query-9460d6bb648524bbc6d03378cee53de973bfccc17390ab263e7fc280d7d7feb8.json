@@ -6,42 +6,90 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "signed_urls",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "course_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "signed_urls",
+            "name": "course_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "created_by",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "signed_urls",
+            "name": "created_by"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "token",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "signed_urls",
+            "name": "token"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "expires_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "signed_urls",
+            "name": "expires_at"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "max_uses",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "signed_urls",
+            "name": "max_uses"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "use_count",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "signed_urls",
+            "name": "use_count"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "signed_urls",
+            "name": "created_at"
+          }
+        }
       }
     ],
     "parameters": {

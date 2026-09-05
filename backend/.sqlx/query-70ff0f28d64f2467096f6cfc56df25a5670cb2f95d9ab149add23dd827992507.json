@@ -6,42 +6,90 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_launches",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "state",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_launches",
+            "name": "state"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "nonce",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_launches",
+            "name": "nonce"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "registration_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_launches",
+            "name": "registration_id"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "platform_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_launches",
+            "name": "platform_id"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "target_link_uri",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_launches",
+            "name": "target_link_uri"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "lti_launches",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "expires_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "lti_launches",
+            "name": "expires_at"
+          }
+        }
       }
     ],
     "parameters": {

@@ -49,6 +49,24 @@ export interface Course {
   reranker_model: string
   /** Per-student-per-course daily AI spending cap in USD. 0 = unlimited. */
   daily_cost_limit_usd: number
+  /**
+   * Cumulative billed tokens (prompt + completion, summed over every
+   * message) at which one conversation starts nudging the student to
+   * continue in a fresh one. 0 = never nudge.
+   *
+   * A hygiene limit on conversation length, not a budget, which is why
+   * it is in tokens while the spend caps are in USD: the chat route
+   * re-sends the whole history every turn and the research loop re-sends
+   * it once per iteration, so a long thread costs progressively more per
+   * turn and lands as a single truncated data point in the teacher's
+   * topic clustering.
+   */
+  conversation_soft_token_limit: number
+  /**
+   * Cumulative billed tokens at which a conversation stops accepting new
+   * messages. 0 = no ceiling. Always >= the soft limit when both are set.
+   */
+  conversation_hard_token_limit: number
   active: boolean
   created_at: string
   updated_at: string
@@ -150,6 +168,14 @@ export interface CourseFeatureFlags {
    * graph viewer and the extract/run-dedup actions.
    */
   concept_graph: boolean
+  /**
+   * Per-conversation token ceilings (nudge banner, hard block, and the
+   * one-click split). Off by default so the ceilings roll out course by
+   * course. When false the course's two `conversation_*_token_limit`
+   * values are ignored server-side and the teacher config page hides
+   * their inputs.
+   */
+  conversation_limits: boolean
 }
 
 export interface AdminUser {
@@ -387,6 +413,35 @@ export interface ConversationDetail {
    * with `messages`.
    */
   prompt_analyses: PromptAnalysis[]
+  /**
+   * Where this conversation sits against the course's per-conversation
+   * token ceilings. Server-computed rather than summed from `messages`
+   * so what the UI shows and what the send endpoint enforces cannot
+   * disagree.
+   */
+  token_state: ConversationTokenState
+  /** Set when this conversation was split off one that hit the ceiling. */
+  continued_from_id: string | null
+  /** Recap carried over from `continued_from_id`, if one was generated. */
+  carryover_summary: string | null
+}
+
+export interface ConversationTokenState {
+  /** Cumulative billed tokens across every message in the conversation. */
+  total: number
+  /** Mirrors `Course.conversation_soft_token_limit`. 0 = no nudge. */
+  soft_limit: number
+  /** Mirrors `Course.conversation_hard_token_limit`. 0 = no ceiling. */
+  hard_limit: number
+}
+
+/** The new conversation minted by `POST .../conversations/{id}/continue`. */
+export interface ConversationContinuation {
+  id: string
+  course_id: string
+  continued_from_id: string
+  /** Null when summarization was unavailable; the split still happened. */
+  carryover_summary: string | null
 }
 
 /**

@@ -13,7 +13,19 @@ import {
   type ChatSurfaceLabels,
   type ChatSurfaceLayout,
 } from "@/components/chat/chat-surface"
-import type { PromptAnalysis, TeacherNote } from "@/lib/types"
+import type {
+  ConversationContinuation,
+  ConversationTokenState,
+  PromptAnalysis,
+  TeacherNote,
+} from "@/lib/types"
+import { ApiError } from "@/lib/api"
+import {
+  CarryoverNote,
+  ConversationLimitNotice,
+} from "@/components/chat/conversation-limit-notice"
+import { conversationLimitState } from "@/components/chat/conversation-limit-state"
+import { useConversationSplit } from "@/components/chat/use-conversation-split"
 
 //; Types for embed API responses --
 
@@ -98,6 +110,10 @@ interface EmbedConversationDetail {
    * the course or every turn so far soft-failed.
    */
   prompt_analyses: PromptAnalysis[]
+  /** Same shape as the Shibboleth route's; drives the nudge / block. */
+  token_state: ConversationTokenState
+  continued_from_id: string | null
+  carryover_summary: string | null
 }
 
 interface EmbedMe {
@@ -121,13 +137,20 @@ function useToken(): string | null {
 
 
 /** Thin wrapper around fetch for the embed API. */
+/// Turn a non-2xx embed response into the same `ApiError` the Shibboleth
+/// `lib/api` layer produces, so callers can localize from the backend's
+/// stable `code` + `params` via `useApiErrorMessage`. The pre-existing
+/// `body.error` shape stays as a fallback.
+async function embedError(res: Response): Promise<Error> {
+  const body = await res.json().catch(() => ({}))
+  if (typeof body.code === "string") return new ApiError(res.status, body)
+  return new Error(body.error || res.statusText)
+}
+
 async function embedGet<T>(path: string, token: string): Promise<T> {
   const sep = path.includes("?") ? "&" : "?"
   const res = await fetch(`/api/embed${path}${sep}token=${encodeURIComponent(token)}`)
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(body.error || res.statusText)
-  }
+  if (!res.ok) throw await embedError(res)
   return res.json()
 }
 
@@ -138,10 +161,7 @@ async function embedPost<T>(path: string, token: string, body?: unknown): Promis
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
   })
-  if (!res.ok) {
-    const b = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(b.error || res.statusText)
-  }
+  if (!res.ok) throw await embedError(res)
   return res.json()
 }
 
@@ -488,6 +508,8 @@ function EmbedChatWindow({
   const [messages, setMessages] = useState<EmbedMessage[]>([])
   const [notes, setNotes] = useState<TeacherNote[]>([])
   const [promptAnalyses, setPromptAnalyses] = useState<PromptAnalysis[]>([])
+  const [tokenState, setTokenState] = useState<ConversationTokenState>()
+  const [carryover, setCarryover] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   // Load messages when conversation changes. When conversationId is null,
@@ -505,6 +527,8 @@ function EmbedChatWindow({
       setMessages([])
       setNotes([])
       setPromptAnalyses([])
+      setTokenState(undefined)
+      setCarryover(null)
       setLoading(false)
     } else {
       setLoading(true)
@@ -519,6 +543,8 @@ function EmbedChatWindow({
           setMessages(data.messages)
           setNotes(data.notes ?? [])
           setPromptAnalyses(data.prompt_analyses ?? [])
+          setTokenState(data.token_state)
+          setCarryover(data.carryover_summary)
           setLoading(false)
         }
       })
@@ -530,6 +556,26 @@ function EmbedChatWindow({
       })
     return () => { cancelled = true }
   }, [courseId, conversationId, token])
+
+  // ---- Per-conversation token ceiling ----
+  //
+  // The ceiling is enforced in `run_chat_message`, which the embed send
+  // path shares with the Shibboleth one, so this surface needs the same
+  // way out or an LTI student just gets a 409 and no next step.
+  const rawLimitState = conversationLimitState(tokenState)
+  const split = useConversationSplit({
+    conversationId,
+    doSplit: (cid) =>
+      embedPost<ConversationContinuation>(
+        `/course/${courseId}/conversations/${cid}/continue`,
+        token,
+      ),
+    // No router here: the embed shell swaps conversations by state, the
+    // same hand-off `conversation_created` uses.
+    onSplit: (created) => onConversationCreated(created.id),
+  })
+  const limitState =
+    rawLimitState === "nudge" && split.dismissed ? "ok" : rawLimitState
 
   // ---- ChatSurface adapter ----
 
@@ -627,6 +673,8 @@ function EmbedChatWindow({
         setMessages(data.messages)
         setNotes(data.notes ?? [])
         setPromptAnalyses(data.prompt_analyses ?? [])
+        setTokenState(data.token_state)
+        setCarryover(data.carryover_summary)
       } catch {
         // Silent
       }
@@ -707,6 +755,33 @@ function EmbedChatWindow({
     onAfterSend,
     onConversationCreated,
     readOnly,
+    limitState,
+    renderLimitNotice: () =>
+      limitState === "ok" ? null : (
+        <ConversationLimitNotice
+          state={limitState}
+          continuing={split.pending}
+          error={split.error}
+          onContinue={split.run}
+          onDismiss={split.dismiss}
+          labels={{
+            nudgeTitle: tStudent("limit.nudgeTitle"),
+            nudgeBody: tStudent("limit.nudgeBody"),
+            blockedTitle: tStudent("limit.blockedTitle"),
+            blockedBody: tStudent("limit.blockedBody"),
+            continueAction: tStudent("limit.continueAction"),
+            continueWorking: tStudent("limit.continueWorking"),
+            dismiss: tStudent("limit.dismiss"),
+          }}
+        />
+      ),
+    renderCarryoverNote: () =>
+      carryover ? (
+        <CarryoverNote
+          summary={carryover}
+          label={tStudent("limit.carryoverLabel")}
+        />
+      ) : null,
     aegisEnabled,
     labels,
     layout,

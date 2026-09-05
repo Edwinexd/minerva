@@ -6,12 +6,24 @@
       {
         "ordinal": 0,
         "name": "conversation_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "conversation_id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "content",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "content"
+          }
+        }
       }
     ],
     "parameters": {

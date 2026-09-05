@@ -6,62 +6,134 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "momenttillf_id",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "momenttillf_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "course_code",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "course_code"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "semester_label",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "semester_label"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "daisy_info_url",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "daisy_info_url"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "daisy_syllabus_url",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "daisy_syllabus_url"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "daisy_unit",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "daisy_unit"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "participants!: JsonValue",
-        "type_info": "Jsonb"
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "participants"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "existing_course_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "existing_course_id"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "first_seen_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "first_seen_at"
+          }
+        }
       },
       {
         "ordinal": 11,
         "name": "last_seen_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "last_seen_at"
+          }
+        }
       }
     ],
     "parameters": {

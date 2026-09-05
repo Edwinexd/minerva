@@ -38,6 +38,14 @@ pub struct CourseRow {
     /// Per-student-per-course daily AI spending cap in USD. 0 = unlimited.
     /// Spend is derived on read from token usage x each model's rate.
     pub daily_cost_limit_usd: Decimal,
+    /// Cumulative billed tokens at which a conversation starts nudging
+    /// the student to continue in a fresh one. 0 = never nudge.
+    pub conversation_soft_token_limit: i64,
+    /// Cumulative billed tokens at which a conversation stops accepting
+    /// new messages entirely. 0 = no ceiling. Enforced in
+    /// `routes::chat::send_message`; see the `20260905000001` migration
+    /// for why the limit is per-conversation and denominated in tokens.
+    pub conversation_hard_token_limit: i64,
     pub active: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -70,6 +78,12 @@ pub struct CreateCourse {
     pub description: Option<String>,
     pub owner_id: Uuid,
     pub daily_cost_limit_usd: Decimal,
+    /// Snapshotted from the `course.conversation_soft_token_limit` /
+    /// `course.conversation_hard_token_limit` system defaults at create
+    /// time, like every other CourseAi knob. `None` falls through to the
+    /// column DEFAULT for the dev-seed / test callers.
+    pub conversation_soft_token_limit: Option<i64>,
+    pub conversation_hard_token_limit: Option<i64>,
     pub model: Option<String>,
     pub temperature: Option<f64>,
     pub context_ratio: Option<f64>,
@@ -108,6 +122,9 @@ pub struct UpdateCourse {
     /// just lands in the row.
     pub reranker_model: Option<String>,
     pub daily_cost_limit_usd: Option<Decimal>,
+    /// Per-conversation token ceilings. `None` = no change.
+    pub conversation_soft_token_limit: Option<i64>,
+    pub conversation_hard_token_limit: Option<i64>,
     /// Admin / owner backfill of the per-semester grouping label.
     /// Outer `Option` distinguishes "no change" (None) from "set
     /// to value" (Some). We don't expose a way to clear the label
@@ -133,7 +150,8 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             id, name, description, owner_id, daily_cost_limit_usd,
             model, temperature, context_ratio, max_chunks, min_score,
             strategy, tool_use_enabled, embedding_provider, embedding_model, system_prompt,
-            semester_label, reranker_model
+            semester_label, reranker_model,
+            conversation_soft_token_limit, conversation_hard_token_limit
         ) VALUES (
             $1, $2, $3, $4, $5,
             COALESCE($6, 'gpt-oss-120b'),
@@ -147,9 +165,11 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
             COALESCE($14, 'sentence-transformers/all-MiniLM-L6-v2'),
             $15,
             $16,
-            COALESCE($17, 'jinaai/jina-reranker-v2-base-multilingual')
+            COALESCE($17, 'jinaai/jina-reranker-v2-base-multilingual'),
+            COALESCE($18::BIGINT, 300000),
+            COALESCE($19::BIGINT, 1000000)
         )
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, conversation_soft_token_limit, conversation_hard_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
         id,
         input.name,
         input.description,
@@ -167,6 +187,8 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
         input.system_prompt.as_deref(),
         input.semester_label,
         input.reranker_model.as_deref(),
+        input.conversation_soft_token_limit,
+        input.conversation_hard_token_limit,
     )
     .fetch_one(db)
     .await
@@ -175,7 +197,7 @@ pub async fn create(db: &PgPool, id: Uuid, input: &CreateCourse) -> Result<Cours
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE id = $1 AND active = true",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, conversation_soft_token_limit, conversation_hard_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE id = $1 AND active = true",
         id,
     )
     .fetch_optional(db)
@@ -185,7 +207,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<CourseRow>, sqlx
 pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, conversation_soft_token_limit, conversation_hard_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE owner_id = $1 AND active = true ORDER BY updated_at DESC",
         owner_id,
     )
     .fetch_all(db)
@@ -195,7 +217,7 @@ pub async fn list_by_owner(db: &PgPool, owner_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
+        r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
         FROM courses c
         JOIN course_members cm ON cm.course_id = c.id
         WHERE cm.user_id = $1 AND c.active = true
@@ -212,7 +234,7 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>
 pub async fn list_for_teacher(db: &PgPool, user_id: Uuid) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -234,7 +256,7 @@ pub async fn list_for_teacher_strict(
 ) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
+        r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at, c.updated_at, c.semester_label, c.auto_managed, c.course_code
         FROM courses c
         LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $1
         WHERE c.active = true
@@ -249,7 +271,7 @@ pub async fn list_for_teacher_strict(
 pub async fn list_all(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE active = true ORDER BY updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, conversation_soft_token_limit, conversation_hard_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses WHERE active = true ORDER BY updated_at DESC",
     )
     .fetch_all(db)
     .await
@@ -278,9 +300,11 @@ pub async fn update(
             min_score = COALESCE($14, min_score),
             semester_label = COALESCE($15, semester_label),
             reranker_model = COALESCE($16, reranker_model),
+            conversation_soft_token_limit = COALESCE($17, conversation_soft_token_limit),
+            conversation_hard_token_limit = COALESCE($18, conversation_hard_token_limit),
             updated_at = NOW()
         WHERE id = $1 AND active = true
-        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
+        RETURNING id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, conversation_soft_token_limit, conversation_hard_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code"#,
         id,
         input.name,
         input.description,
@@ -297,6 +321,8 @@ pub async fn update(
         input.min_score,
         input.semester_label,
         input.reranker_model,
+        input.conversation_soft_token_limit,
+        input.conversation_hard_token_limit,
     )
     .fetch_optional(db)
     .await
@@ -592,6 +618,12 @@ pub struct DaisyCourseInput<'a> {
     /// `system_defaults::course_daily_cost_limit_usd` by the route layer.
     /// Applied on INSERT only.
     pub daily_cost_limit_usd: Decimal,
+    /// Per-conversation token ceilings, sourced from
+    /// `system_defaults::course_conversation_{soft,hard}_token_limit`.
+    /// Applied on INSERT only, like every other AI default here: a
+    /// later Daisy sync must not silently undo a teacher's override.
+    pub conversation_soft_token_limit: Option<i64>,
+    pub conversation_hard_token_limit: Option<i64>,
     /// Admin-default chat model (`system_defaults::course_model`).
     pub model: Option<&'a str>,
     pub temperature: Option<f64>,
@@ -673,7 +705,8 @@ pub async fn upsert_from_daisy(
                     id, name, owner_id, daily_cost_limit_usd,
                     model, temperature, context_ratio, max_chunks, min_score,
                     strategy, tool_use_enabled, embedding_provider, embedding_model,
-                    system_prompt, semester_label, auto_managed, course_code, reranker_model
+                    system_prompt, semester_label, auto_managed, course_code, reranker_model,
+                    conversation_soft_token_limit, conversation_hard_token_limit
                 ) VALUES (
                     $1, $2, $3, $4,
                     COALESCE($5, 'gpt-oss-120b'),
@@ -686,7 +719,9 @@ pub async fn upsert_from_daisy(
                     COALESCE($12, 'local'),
                     COALESCE($13, 'sentence-transformers/all-MiniLM-L6-v2'),
                     $14, $15, TRUE, $16,
-                    COALESCE($17, 'jinaai/jina-reranker-v2-base-multilingual')
+                    COALESCE($17, 'jinaai/jina-reranker-v2-base-multilingual'),
+                    COALESCE($18::BIGINT, 300000),
+                    COALESCE($19::BIGINT, 1000000)
                 )"#,
                 new_id,
                 input.name,
@@ -705,6 +740,8 @@ pub async fn upsert_from_daisy(
                 input.semester_label,
                 input.beteckning,
                 input.reranker_model,
+                input.conversation_soft_token_limit,
+                input.conversation_hard_token_limit,
             )
             .execute(&mut *tx)
             .await?;
@@ -748,7 +785,7 @@ pub async fn find_by_daisy_momenttillf_id(
         r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature,
                c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy,
                c.tool_use_enabled, c.embedding_provider, c.embedding_model,
-               c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.active, c.created_at,
+               c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at,
                c.updated_at, c.semester_label, c.auto_managed, c.course_code
             FROM courses c
             JOIN course_daisy_offerings o ON o.course_id = c.id
@@ -765,7 +802,7 @@ pub async fn find_by_daisy_momenttillf_id(
 pub async fn list_all_including_archived(db: &PgPool) -> Result<Vec<CourseRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseRow,
-        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses ORDER BY active DESC, updated_at DESC",
+        "SELECT id, name, description, owner_id, context_ratio, temperature, model, system_prompt, max_chunks, min_score, strategy, tool_use_enabled, embedding_provider, embedding_model, embedding_version, reranker_model, daily_cost_limit_usd, conversation_soft_token_limit, conversation_hard_token_limit, active, created_at, updated_at, semester_label, auto_managed, course_code FROM courses ORDER BY active DESC, updated_at DESC",
     )
     .fetch_all(db)
     .await

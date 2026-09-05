@@ -1398,6 +1398,12 @@ pub(super) async fn apply_one(
             syllabus_url: input.syllabus_url.as_deref(),
             unit: input.unit.as_deref(),
             owner_id,
+            conversation_soft_token_limit: Some(
+                crate::system_defaults::course_conversation_soft_token_limit(&state.db).await,
+            ),
+            conversation_hard_token_limit: Some(
+                crate::system_defaults::course_conversation_hard_token_limit(&state.db).await,
+            ),
             daily_cost_limit_usd: crate::system_defaults::course_daily_cost_limit_usd(&state.db)
                 .await,
             model: Some(model.as_str()),

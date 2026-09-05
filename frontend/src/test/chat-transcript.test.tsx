@@ -15,7 +15,7 @@ const bubbleLabels: ChatBubbleLabels = {
 }
 
 describe("ChatTranscript", () => {
-  it("scrolls only its transcript container when a user sends a message", () => {
+  it("scrolls its transcript viewport rather than the document on send", () => {
     const scrollTo = vi.fn()
     const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView")
     const scrollContainerRef = {

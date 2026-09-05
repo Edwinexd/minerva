@@ -47,7 +47,7 @@ export interface PersistedThinking {
 }
 
 export interface ChatTranscriptProps<M extends ChatBubbleMessage> {
-  /** The transcript region to scroll; never scroll the page itself. */
+  /** The existing transcript viewport; auto-scroll must never move the page. */
   scrollContainerRef: React.RefObject<HTMLElement | null>
   messages: M[] | undefined
   isLoading: boolean
@@ -127,13 +127,12 @@ export function ChatTranscript<M extends ChatBubbleMessage>({
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current
     if (!container) return
-    // `scrollIntoView` also scrolls every ancestor, including the document.
-    // The chat owns this region, so it must move only this region's viewport.
+    // `scrollIntoView` walks up through every scrollable ancestor, including
+    // the document. The transcript is already the intended scroll viewport.
     if (typeof container.scrollTo === "function") {
       container.scrollTo({ top: container.scrollHeight, behavior: "smooth" })
     } else {
-      // `scrollTo` is absent in jsdom and can be missing in older embedded
-      // webviews. Direct assignment still confines movement to this region.
+      // jsdom and a few older embedded webviews do not expose `scrollTo`.
       container.scrollTop = container.scrollHeight
     }
   }, [scrollContainerRef])

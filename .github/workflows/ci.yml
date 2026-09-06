@@ -151,13 +151,14 @@ jobs:
           # embedder that isn't there, filling the log with failures.
           MINERVA_RUN_WORKER: "false"
           MINERVA_DEV_MODE: "true"
-          # The header's dev user-switcher persists its first option
-          # (`student@su.se`) to localStorage on first load, after which
-          # `api.ts` sends that as X-Dev-User on every request, overriding the
-          # header pa11y sets. Whichever wins the race decides what renders, so
-          # rather than fight it, grant admin to exactly that identity: both
-          # paths then resolve to the same admin and every page renders its
-          # full authenticated state deterministically.
+          # The header's dev user-switcher persists its first option to
+          # localStorage on first load, after which `api.ts` sends that as
+          # X-Dev-User on every request, overriding the header pa11y sets.
+          # That first option is the first MINERVA_ADMINS entry, so setting
+          # it to `student` makes the switcher pick `student@su.se`: the
+          # same identity MINERVA_A11Y_ADMIN sends. Both paths then resolve
+          # to one admin and every page renders its full authenticated
+          # state deterministically.
           MINERVA_ADMINS: student
           MINERVA_HMAC_SECRET: pa11y-ci-secret
           # `Config::from_env` hard-requires this one, so the process exits

@@ -119,7 +119,13 @@ not just reviewed by hand, across three layers:
 |-------|------|---------|
 | Static lint | `eslint-plugin-jsx-a11y` (`strict`) | Markup-level issues: alt text, label/control association, ARIA misuse, missing keyboard handlers |
 | Rendered components | Vitest + Testing Library + `axe-core` (WCAG 2.2 AA tags) | Violations only visible once a component is rendered to the DOM |
-| End-to-end | `pa11y-ci` (htmlcs WCAG2AA + axe) in a real browser | Color contrast and other render-time criteria jsdom can't compute |
+| End-to-end | `pa11y-ci` (htmlcs WCAG2AA + axe) in a real browser | Color contrast, scrollable regions, and other render-time criteria jsdom can't compute |
+
+The first two layers run per commit. The third needs a built SPA, a running
+backend and a real browser, so it runs **per push** (`scripts/a11y-pa11y.sh`,
+wired as a `pre-push` pre-commit hook) and again in CI. It builds everything
+itself against a scratch database on a free port, so it never disturbs a dev
+stack; `SKIP=pa11y git push` bypasses it for a one-off.
 
 Modal dialogs use the native `<dialog>` element with `showModal()`, so focus
 trapping, Escape-to-close, top-layer rendering and the `::backdrop` come from the
@@ -137,7 +143,7 @@ CLA in [CLA.md](CLA.md). CI runs:
 - **Style gates**: ban emdashes + ban space-dash-dash-space anywhere a non-whitespace char precedes them on the line.
 - **Migrations**: `migrations-immutable` blocks edits to already-committed `backend/migrations/*.sql` files (sqlx content-hashes them at startup).
 
-Pre-commit mirrors the same set; install with `pre-commit install` (the hook is wired via `pipx install pre-commit`).
+Pre-commit mirrors the same set; install with `pre-commit install` (the hook is wired via `pipx install pre-commit`). That installs both stages: the fast gates on commit and the pa11y browser pass on push.
 
 After editing any `sqlx::query!` / `query_as!` macro:
 

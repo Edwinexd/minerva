@@ -245,6 +245,24 @@
       "unlimited": "unlimited"
     }
   },
+  "userUsage": {
+    "title": "AI usage for {{name}}",
+    "backToUsage": "Back to the usage overview",
+    "description": "Spend across the courses {{name}} owns, priced from the tokens their students and the indexing pipeline used. This is what their daily limit is enforced against.",
+    "capReached": "{{name}} has reached today's limit, so chat is paused in the courses they own until the daily counter resets.",
+    "capNear": "{{name}} is close to today's limit. Chat pauses in the courses they own once it is reached.",
+    "noCourses": "{{name}} owns no courses, so there is no spend to bill to this account. Student conversations count against the owner of the course they are in.",
+    "limitUsed": "{{percent}}% of the {{limit}} daily limit",
+    "limitScope": "Across every course {{name}} owns, per day",
+    "byCourseDescription": "Courses {{name}} owns. The Today column is what counts against their daily limit right now.",
+    "limitCard": {
+      "title": "Daily limit",
+      "current": "Currently {{value}} per day, across every course they own.",
+      "unlimited": "No limit set: this account can spend without a daily ceiling.",
+      "peak": "Busiest day in the last {{days}} days: {{value}}. A limit below that will cut the course out on its heaviest day.",
+      "edit": "Change this limit on the Users tab"
+    }
+  },
   "users": {
     "title": "Users ({{total}})",
     "description": "Manage user roles, daily AI spending limits, and account status. Setting a role manually locks it from auto-promotion rules.",
@@ -273,6 +291,7 @@
     "actionsLabel": "User actions",
     "unlockRole": "Unlock role",
     "resetDailyUsage": "Reset daily usage",
+    "viewUsage": "View AI usage",
     "suspend": "Suspend",
     "unsuspend": "Unsuspend",
     "ownerLimit": {

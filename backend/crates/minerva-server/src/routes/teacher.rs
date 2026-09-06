@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use axum::extract::{Extension, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
 use minerva_core::models::User;
@@ -25,10 +25,19 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::guards::require_admin;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/usage", get(get_owner_usage))
+}
+
+/// Mounted under `/admin`: the same view for someone else's account.
+/// Admins carry the cap dial (`/admin/users`), so they need to see the
+/// spend it is being set against without asking the teacher to read
+/// their own page out loud.
+pub fn admin_router() -> Router<AppState> {
+    Router::new().route("/users/{id}/usage", get(get_user_usage))
 }
 
 /// Default reporting window. Long enough to cover a course's ingest
@@ -43,7 +52,12 @@ struct WindowQuery {
 
 #[derive(Serialize)]
 struct OwnerUsageResponse {
-    /// The caller's aggregate daily cap in USD. 0 = unlimited.
+    /// Whose spend this is. Populated for the self view too, so the
+    /// admin drill-down needs no second request to name the account.
+    owner_id: Uuid,
+    owner_eppn: String,
+    owner_display_name: Option<String>,
+    /// The owner's aggregate daily cap in USD. 0 = unlimited.
     daily_cost_limit_usd: Decimal,
     /// Today's spend across every owned course, chat + pipeline. This is
     /// the number the cap is tested against.
@@ -136,6 +150,7 @@ struct DailyAgg {
     requests: i64,
 }
 
+/// The signed-in teacher's own spend.
 async fn get_owner_usage(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -144,11 +159,47 @@ async fn get_owner_usage(
     if !user.role.is_teacher_or_above() {
         return Err(AppError::Forbidden);
     }
-    let days = params
+    Ok(Json(
+        owner_usage(&state, &user, window_days(&params)).await?,
+    ))
+}
+
+/// Any account's spend, for an admin. Not restricted to users who
+/// currently hold a teacher role: a demoted or suspended account can
+/// still own courses that spent money, and that spend is exactly what an
+/// admin is looking for.
+async fn get_user_usage(
+    State(state): State<AppState>,
+    Extension(caller): Extension<User>,
+    Path(user_id): Path<Uuid>,
+    Query(params): Query<WindowQuery>,
+) -> Result<Json<OwnerUsageResponse>, AppError> {
+    require_admin(&caller)?;
+    let owner = minerva_db::queries::users::find_by_id(&state.db, user_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(
+        owner_usage(
+            &state,
+            &crate::auth::user_from_row(owner),
+            window_days(&params),
+        )
+        .await?,
+    ))
+}
+
+fn window_days(params: &WindowQuery) -> i32 {
+    params
         .days
         .unwrap_or(DEFAULT_WINDOW_DAYS)
-        .clamp(1, MAX_WINDOW_DAYS);
+        .clamp(1, MAX_WINDOW_DAYS)
+}
 
+async fn owner_usage(
+    state: &AppState,
+    user: &User,
+    days: i32,
+) -> Result<OwnerUsageResponse, AppError> {
     let owned = minerva_db::queries::courses::list_by_owner(&state.db, user.id).await?;
     let student_counts = minerva_db::queries::courses::count_students_by_course(&state.db).await?;
     let chat_rows =
@@ -304,7 +355,10 @@ async fn get_owner_usage(
         .map(|c| c.window_pipeline_spend_usd)
         .sum();
 
-    Ok(Json(OwnerUsageResponse {
+    Ok(OwnerUsageResponse {
+        owner_id: user.id,
+        owner_eppn: user.eppn.clone(),
+        owner_display_name: user.display_name.clone(),
         daily_cost_limit_usd: user.owner_daily_cost_limit_usd,
         spend_today_usd: course_rows.iter().map(|c| c.spend_today_usd).sum(),
         window_days: days,
@@ -315,5 +369,5 @@ async fn get_owner_usage(
         courses: course_rows,
         providers: provider_rows,
         daily: daily_rows,
-    }))
+    })
 }

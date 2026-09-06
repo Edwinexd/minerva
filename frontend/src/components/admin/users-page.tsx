@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { Menu } from "@base-ui/react/menu"
@@ -201,6 +202,14 @@ function UserRow({ user }: { user: AdminUser }) {
                         {t("users.unlockRole")}
                       </Menu.Item>
                     )}
+                    <Menu.Item
+                      className="relative flex cursor-default items-center rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50"
+                      render={
+                        <Link to="/admin/usage/$userId" params={{ userId: user.id }} />
+                      }
+                    >
+                      {t("users.viewUsage")}
+                    </Menu.Item>
                     <Menu.Item
                       className="relative flex cursor-default items-center rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50"
                       disabled={resetUsageMutation.isPending}

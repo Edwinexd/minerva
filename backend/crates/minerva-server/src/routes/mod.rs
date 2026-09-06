@@ -89,6 +89,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/courses/{course_id}", suggested_questions::router())
         .nest("/teacher", teacher::router())
         .nest("/admin", admin::router())
+        .nest("/admin", teacher::admin_router())
         .nest("/admin", external_auth::admin_router())
         .nest("/admin", lti::admin_router())
         .nest("/admin", integration_admin::router())

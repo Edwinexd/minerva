@@ -311,6 +311,10 @@ export interface UsageRecord {
  * tokens x the model's current rate.
  */
 export interface OwnerUsage {
+  /** Whose spend this is; populated for the self view too. */
+  owner_id: string
+  owner_eppn: string
+  owner_display_name: string | null
   /** Aggregate daily cap in USD across every owned course. 0 = unlimited. */
   daily_cost_limit_usd: number
   /** Today's spend, i.e. the value the cap is tested against. */

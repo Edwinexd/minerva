@@ -1,9 +1,11 @@
 import { useState } from "react"
+import type { ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { teacherUsageQuery, userQuery } from "@/lib/queries"
 import { formatUsd } from "@/lib/currency"
+import { peakSpendDay } from "@/lib/owner-usage"
 import { useCopyFeedback } from "@/lib/use-copy-feedback"
 import type { OwnerCourseUsage, OwnerUsage } from "@/lib/types"
 import {
@@ -43,45 +45,109 @@ function courseLabel(course: OwnerCourseUsage): string {
   return course.course_code ? `${course.name} (${course.course_code})` : course.name
 }
 
+/// The signed-in teacher's own spend, plus the limit-increase draft.
 export function OwnerUsagePage() {
   const { t } = useTranslation("teacher")
   const [days, setDays] = useState<number>(30)
   const { data: user } = useQuery(userQuery)
   const { data: usage, isLoading } = useQuery(teacherUsageQuery(days))
 
-  if (isLoading) {
-    return (
-      <div className="space-y-4">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className="h-32 w-full" />
-        ))}
-      </div>
-    )
-  }
+  if (isLoading) return <OwnerUsageSkeleton />
   if (!usage) return null
 
+  return (
+    <OwnerUsageView
+      usage={usage}
+      days={days}
+      onDaysChange={setDays}
+      copy={{
+        description: t("ownerUsage.description"),
+        capReached: t("ownerUsage.capReached"),
+        capNear: t("ownerUsage.capNear"),
+        noCourses: t("ownerUsage.byCourse.empty"),
+        limitUsed: t("ownerUsage.limitUsed", {
+          percent: Math.round(
+            usage.daily_cost_limit_usd > 0
+              ? (usage.spend_today_usd / usage.daily_cost_limit_usd) * 100
+              : 0,
+          ),
+          limit: formatUsd(usage.daily_cost_limit_usd),
+        }),
+        limitScope: t("ownerUsage.limitScope"),
+        byCourseDescription: t("ownerUsage.byCourse.description"),
+      }}
+      actionCard={
+        <IncreaseRequestCard
+          usage={usage}
+          eppn={user?.eppn ?? ""}
+          displayName={user?.display_name ?? null}
+          peakDay={peakSpendDay(usage)}
+        />
+      }
+    />
+  )
+}
+
+export function OwnerUsageSkeleton() {
+  return (
+    <div className="space-y-4">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <Skeleton key={i} className="h-32 w-full" />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The strings whose voice differs between the two views: a teacher reads
+ * "your limit", an admin reads "Tess Teacher's limit". Passing them in
+ * beats a `variant` flag, which would put the fork in the shared
+ * component and make every future string a third case to handle.
+ */
+export interface OwnerUsageCopy {
+  description: string
+  capReached: string
+  capNear: string
+  noCourses: string
+  /** Already interpolated with the percentage and the limit. */
+  limitUsed: string
+  limitScope: string
+  byCourseDescription: string
+}
+
+/**
+ * Everything that is identical whether a teacher is looking at their own
+ * spend or an admin is looking at someone else's. The card offering an
+ * action (request an increase / change the limit) is a slot.
+ */
+export function OwnerUsageView({
+  usage,
+  days,
+  onDaysChange,
+  copy,
+  actionCard,
+}: {
+  usage: OwnerUsage
+  days: number
+  onDaysChange: (days: number) => void
+  copy: OwnerUsageCopy
+  actionCard?: ReactNode
+}) {
+  const { t } = useTranslation("teacher")
   const limit = usage.daily_cost_limit_usd
   const usedFraction = limit > 0 ? usage.spend_today_usd / limit : 0
   const usedPercent = Math.round(usedFraction * 100)
   const capReached = limit > 0 && usage.spend_today_usd >= limit
   const capNear = !capReached && usedFraction >= 0.8
-  // The busiest day in the window is what a limit request should be
-  // sized against: a cap set to the average would still cut out on the
-  // day a class actually uses the tool.
-  const peakDay = usage.daily.reduce(
-    (max, d) => Math.max(max, d.chat_spend_usd + d.pipeline_spend_usd),
-    0,
-  )
+  const peakDay = peakSpendDay(usage)
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <p className="text-sm text-muted-foreground max-w-3xl">
-          {t("ownerUsage.description")}
-        </p>
+        <p className="text-sm text-muted-foreground max-w-3xl">{copy.description}</p>
         <Select
           value={String(days)}
-          onValueChange={(value) => value && setDays(Number(value))}
+          onValueChange={(value) => value && onDaysChange(Number(value))}
         >
           <SelectTrigger className="w-44" aria-label={t("ownerUsage.windowLabel")}>
             <SelectValue>{t("ownerUsage.windowOption", { days })}</SelectValue>
@@ -115,12 +181,7 @@ export function OwnerUsagePage() {
                       : "[&::-moz-progress-bar]:bg-primary [&::-webkit-progress-value]:bg-primary"
                   }`}
                 />
-                <p className="text-xs text-muted-foreground">
-                  {t("ownerUsage.limitUsed", {
-                    percent: usedPercent,
-                    limit: formatUsd(limit),
-                  })}
-                </p>
+                <p className="text-xs text-muted-foreground">{copy.limitUsed}</p>
               </>
             )}
           </CardHeader>
@@ -131,9 +192,7 @@ export function OwnerUsagePage() {
             <CardTitle className="text-2xl">
               {limit > 0 ? formatUsd(limit) : t("ownerUsage.unlimited")}
             </CardTitle>
-            <p className="text-xs text-muted-foreground">
-              {t("ownerUsage.limitScope")}
-            </p>
+            <p className="text-xs text-muted-foreground">{copy.limitScope}</p>
           </CardHeader>
         </Card>
         <Card>
@@ -167,34 +226,27 @@ export function OwnerUsagePage() {
 
       {capReached && (
         <p className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm">
-          {t("ownerUsage.capReached")}
+          {copy.capReached}
         </p>
       )}
       {capNear && (
         <p className="rounded-md border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-          {t("ownerUsage.capNear")}
+          {copy.capNear}
         </p>
       )}
 
-      <IncreaseRequestCard
-        usage={usage}
-        eppn={user?.eppn ?? ""}
-        displayName={user?.display_name ?? null}
-        peakDay={peakDay}
-      />
+      {actionCard}
 
       <Card>
         <CardHeader>
           <CardTitle>{t("ownerUsage.byCourse.title")}</CardTitle>
           <CardDescription>
-            {t("ownerUsage.byCourse.description")}
+            {copy.byCourseDescription}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {usage.courses.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {t("ownerUsage.byCourse.empty")}
-            </p>
+            <p className="text-sm text-muted-foreground">{copy.noCourses}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

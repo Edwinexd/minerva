@@ -529,6 +529,16 @@ export const teacherUsageQuery = (days: number) =>
     queryFn: () => api.get<OwnerUsage>(`/teacher/usage?days=${days}`),
   })
 
+/**
+ * The same owner-scoped spend for someone else's account, for admins.
+ * Keyed under `admin` so it never collides with the caller's own view.
+ */
+export const adminUserUsageQuery = (userId: string, days: number) =>
+  queryOptions({
+    queryKey: ["admin", "user-usage", userId, days],
+    queryFn: () => api.get<OwnerUsage>(`/admin/users/${userId}/usage?days=${days}`),
+  })
+
 export const externalAuthInvitesQuery = queryOptions({
   queryKey: ["admin", "external-invites"],
   queryFn: () => api.get<ExternalAuthInvite[]>("/admin/external-invites"),

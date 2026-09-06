@@ -114,7 +114,12 @@ export function AdminLayout() {
     "/admin/lti-approve",
   )
     ? "lti"
-    : null
+    : // `/admin/usage/<user>` is the per-account drill-down; its last
+      // segment is an id, so name the tab it belongs to explicitly
+      // rather than leaning on the fallback.
+      location.pathname.startsWith("/admin/usage/")
+      ? "usage"
+      : null
   const lastSegment = location.pathname.split("/").pop() || ""
   const activeTab: TabValue =
     pathOverrideTab ??
@@ -126,7 +131,7 @@ export function AdminLayout() {
   // specific title (e.g. the LTI approve page). Passing `undefined` keeps
   // this layout's effect from overwriting it.
   useDocumentTitle(
-    pathOverrideTab
+    pathOverrideTab && !location.pathname.startsWith("/admin/usage/")
       ? undefined
       : `${tCommon("pageTitles.admin")} – ${tCommon(TAB_TITLE_KEYS[activeTab])}`,
   )

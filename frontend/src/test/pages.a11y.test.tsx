@@ -94,6 +94,7 @@ import { DaisyImportsPanel } from "@/components/admin/daisy-imports-page"
 import { AdminDefaultsPanel } from "@/components/admin/defaults-page"
 import { RoleRulesPanel } from "@/components/admin/rules-page"
 import { OwnerUsagePage } from "@/components/teacher/owner-usage-page"
+import { AdminUserUsagePage } from "@/components/admin/user-usage-page"
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -324,6 +325,9 @@ const roleRules = [
  * archived badge and the paid-provider callout at once.
  */
 const ownerUsage: OwnerUsage = {
+  owner_id: "user-1",
+  owner_eppn: "teacher@su.se",
+  owner_display_name: "Teacher One",
   daily_cost_limit_usd: 0.8,
   spend_today_usd: 0.824,
   window_days: 30,
@@ -658,6 +662,15 @@ describe("Authenticated pages a11y", () => {
       ],
     ])
     expect(getByText("DSV staff to teacher")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("admin per-user AI usage has no axe violations", async () => {
+    const { container, getByText } = renderPage(
+      <AdminUserUsagePage useParams={() => ({ userId: "user-1" })} />,
+      [[queries.adminUserUsageQuery("user-1", 30).queryKey, ownerUsage]],
+    )
+    expect(getByText("AI usage for Teacher One")).toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
   })
 

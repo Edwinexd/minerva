@@ -243,6 +243,24 @@
       "unlimited": "obegränsat"
     }
   },
+  "userUsage": {
+    "title": "AI-användning för {{name}}",
+    "backToUsage": "Tillbaka till användningsöversikten",
+    "description": "Kostnader för de kurser {{name}} äger, prissatta utifrån de tokens studenterna och indexeringen använt. Det är detta som dagsgränsen mäts mot.",
+    "capReached": "{{name}} har nått dagens gräns, så chatten är pausad i kurserna de äger tills dagsräknaren nollställs.",
+    "capNear": "{{name}} närmar sig dagens gräns. Chatten pausas i kurserna de äger när den nås.",
+    "noCourses": "{{name}} äger inga kurser, så det finns ingen kostnad att belasta kontot med. Studenternas konversationer räknas mot ägaren av kursen de går i.",
+    "limitUsed": "{{percent}} % av dagsgränsen på {{limit}}",
+    "limitScope": "Gäller alla kurser {{name}} äger, per dag",
+    "byCourseDescription": "Kurser som {{name}} äger. Kolumnen Idag är det som räknas mot deras dagsgräns just nu.",
+    "limitCard": {
+      "title": "Dagsgräns",
+      "current": "Just nu {{value}} per dag, för alla kurser de äger.",
+      "unlimited": "Ingen gräns satt: kontot kan spendera utan dagligt tak.",
+      "peak": "Dyraste dagen senaste {{days}} dagarna: {{value}}. En gräns under det stänger av kursen på dess tyngsta dag.",
+      "edit": "Ändra gränsen på fliken Användare"
+    }
+  },
   "users": {
     "title": "Användare ({{total}})",
     "description": "Hantera användarroller, dagliga AI-kostnadsgränser och kontostatus. Att manuellt ändra en roll låser den från automatiska befordringsregler.",
@@ -271,6 +289,7 @@
     "actionsLabel": "Användaråtgärder",
     "unlockRole": "Lås upp roll",
     "resetDailyUsage": "Nollställ dagens förbrukning",
+    "viewUsage": "Visa AI-användning",
     "suspend": "Stäng av",
     "unsuspend": "Aktivera igen",
     "ownerLimit": {

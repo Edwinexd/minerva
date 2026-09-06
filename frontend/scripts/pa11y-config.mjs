@@ -91,6 +91,13 @@ if (!conversation) {
 
 const token = mintEmbedToken(course.id, me.id)
 
+// The seeder's teacher owns courses with spend, so their id is what makes
+// the admin drill-down render a populated page rather than an empty one.
+const users = await api("/admin/users")
+const adminUserId =
+  users.find((u) => u.eppn === "seed-teacher@dev.local")?.id ?? users[0]?.id
+if (!adminUserId) throw new Error("dev seed produced no users")
+
 // Every page a teacher/admin can reach that renders seeded data. Anything
 // whose markup is a pure duplicate of another entry is left out to keep the
 // job's wall-clock sane; the goal is one instance of each distinct layout.
@@ -116,6 +123,9 @@ const authenticated = [
   "/admin/courses",
   "/admin/users",
   "/admin/rules",
+  // The per-account spend drill-down, which renders the same panels as
+  // the teacher's own page against another user's id.
+  `/admin/usage/${adminUserId}`,
 ]
 
 // `.pa11yci.json` holds paths, not absolute URLs, so $MINERVA_BASE_URL is the

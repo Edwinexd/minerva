@@ -20,6 +20,7 @@ pub mod service;
 mod signed_urls;
 pub(crate) mod suggested_questions;
 mod system;
+mod teacher;
 mod usage;
 
 use axum::extract::{Extension, State};
@@ -86,6 +87,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/courses/{course_id}", canvas::course_router())
         .nest("/courses/{course_id}", usage::course_router())
         .nest("/courses/{course_id}", suggested_questions::router())
+        .nest("/teacher", teacher::router())
         .nest("/admin", admin::router())
         .nest("/admin", external_auth::admin_router())
         .nest("/admin", lti::admin_router())

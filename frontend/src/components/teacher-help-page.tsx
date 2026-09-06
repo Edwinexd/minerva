@@ -18,15 +18,23 @@ function Shot({ src, alt }: { src: string; alt: string }) {
   )
 }
 
-export function TeacherHelpPage() {
+/**
+ * `embedded` renders the guide as a section of the teacher portal, which
+ * already owns the page h1 and the document title: the guide title drops
+ * to an h2 and every step heading follows it down one level, so the
+ * portal page keeps a single heading hierarchy.
+ */
+export function TeacherHelpPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation("common")
-  useDocumentTitle(t("pageTitles.teacherHelp"))
+  const Title = embedded ? "h2" : "h1"
+  const Section = embedded ? "h3" : "h2"
+  useDocumentTitle(embedded ? undefined : t("pageTitles.teacherHelp"))
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold tracking-tight mb-3">
+      <Title className="text-2xl font-bold tracking-tight mb-3">
         {t("teacherGuide.title")}
-      </h1>
+      </Title>
       <p className="text-sm leading-relaxed text-muted-foreground">
         {t("teacherGuide.intro")}
       </p>
@@ -41,9 +49,9 @@ export function TeacherHelpPage() {
 
       <ol className="mt-8 space-y-12">
         <li>
-          <h2 className="text-lg font-semibold">
+          <Section className="text-lg font-semibold">
             {t("teacherGuide.steps.login.title")}
-          </h2>
+          </Section>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             {t("teacherGuide.steps.login.body")}
           </p>
@@ -54,9 +62,9 @@ export function TeacherHelpPage() {
         </li>
 
         <li>
-          <h2 className="text-lg font-semibold">
+          <Section className="text-lg font-semibold">
             {t("teacherGuide.steps.enableTool.title")}
-          </h2>
+          </Section>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             {t("teacherGuide.steps.enableTool.body")}
           </p>
@@ -70,9 +78,9 @@ export function TeacherHelpPage() {
         </li>
 
         <li>
-          <h2 className="text-lg font-semibold">
+          <Section className="text-lg font-semibold">
             {t("teacherGuide.steps.addActivity.title")}
-          </h2>
+          </Section>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             {t("teacherGuide.steps.addActivity.body")}
           </p>
@@ -94,9 +102,9 @@ export function TeacherHelpPage() {
         </li>
 
         <li>
-          <h2 className="text-lg font-semibold">
+          <Section className="text-lg font-semibold">
             {t("teacherGuide.steps.linkMaterials.title")}
-          </h2>
+          </Section>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             {t("teacherGuide.steps.linkMaterials.body")}
           </p>
@@ -118,9 +126,9 @@ export function TeacherHelpPage() {
         </li>
 
         <li>
-          <h2 className="text-lg font-semibold">
+          <Section className="text-lg font-semibold">
             {t("teacherGuide.steps.firstLaunch.title")}
-          </h2>
+          </Section>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             {t("teacherGuide.steps.firstLaunch.body")}
           </p>
@@ -132,9 +140,9 @@ export function TeacherHelpPage() {
       </ol>
 
       <section className="mt-12">
-        <h2 className="text-lg font-semibold">
+        <Section className="text-lg font-semibold">
           {t("teacherGuide.result.title")}
-        </h2>
+        </Section>
         <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
           {t("teacherGuide.result.body")}
         </p>
@@ -149,7 +157,7 @@ export function TeacherHelpPage() {
       </section>
 
       <section className="mt-12">
-        <h2 className="text-lg font-semibold">{t("teacherGuide.tips.title")}</h2>
+        <Section className="text-lg font-semibold">{t("teacherGuide.tips.title")}</Section>
         <ul className="mt-2 list-disc pl-5 space-y-2 text-sm leading-relaxed text-muted-foreground">
           <li>{t("teacherGuide.tips.materials")}</li>
           <li>{t("teacherGuide.tips.resync")}</li>

@@ -1,7 +1,7 @@
 {
   "nav": {
     "admin": "Admin",
-    "teacherHelp": "Teacher guide",
+    "teacher": "Teaching",
     "teacherView": "Teacher view",
     "dataHandling": "Data handling",
     "acknowledgements": "Acknowledgements",
@@ -12,6 +12,11 @@
   "pageTitles": {
     "home": "Home",
     "teacherHelp": "Teacher guide",
+    "teacher": "Teaching",
+    "teacherTab": {
+      "usage": "AI usage",
+      "guide": "Guide"
+    },
     "admin": "Admin",
     "adminTab": {
       "usage": "Usage",

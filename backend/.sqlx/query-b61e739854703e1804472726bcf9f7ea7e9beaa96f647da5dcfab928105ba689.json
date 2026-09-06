@@ -1,0 +1,131 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id AS \"course_id!\", c.name AS \"course_name!\", c.course_code,\n                  c.semester_label AS \"course_semester_label\", c.active AS \"course_active!\",\n                  ctu.created_at::date AS \"date!\", ctu.model AS \"model!\",\n                  COALESCE(cm.provider, 'unknown') AS \"provider!\",\n                  (ctu.created_at >= CURRENT_DATE) AS \"is_today!\",\n                  SUM(ctu.prompt_tokens)::bigint AS \"prompt_tokens!\",\n                  SUM(ctu.completion_tokens)::bigint AS \"completion_tokens!\",\n                  COALESCE(SUM(\n                      (ctu.prompt_tokens * COALESCE(cm.input_usd_per_mtok, 0)\n                       + ctu.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000\n                  ), 0)::numeric AS \"cost_usd!\"\n             FROM course_token_usage ctu\n             JOIN courses c ON c.id = ctu.course_id\n             LEFT JOIN chat_models cm ON cm.model = ctu.model\n            WHERE c.owner_id = $1\n              AND ctu.created_at >= (CURRENT_DATE - $2::int)::timestamptz\n            GROUP BY c.id, ctu.created_at::date, ctu.model,\n                     COALESCE(cm.provider, 'unknown'),\n                     (ctu.created_at >= CURRENT_DATE)\n            ORDER BY ctu.created_at::date DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "course_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "course_name!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "course_code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "course_code"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "course_semester_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "semester_label"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "course_active!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "active"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "date!",
+        "type_info": "Date",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "model!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_token_usage",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "provider!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "is_today!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "prompt_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "completion_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "cost_usd!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      null,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b61e739854703e1804472726bcf9f7ea7e9beaa96f647da5dcfab928105ba689"
+}

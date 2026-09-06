@@ -99,10 +99,10 @@ export function RootLayout() {
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm min-w-0">
             {!isEmbed && user && isTeacherOrAbove(user.role) && (
               <Link
-                to="/teacher-help"
+                to="/teacher/usage"
                 className="text-muted-foreground hover:text-foreground"
               >
-                {t("nav.teacherHelp")}
+                {t("nav.teacher")}
               </Link>
             )}
             {!isEmbed && user && canManageSiteIntegrations(user.role) && (

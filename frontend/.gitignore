@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Router plugin scratch output from route-tree generation
+.tanstack

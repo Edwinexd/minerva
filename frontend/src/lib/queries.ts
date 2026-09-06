@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, DevConfig, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiDiagnostics, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, DevConfig, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiDiagnostics, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, OwnerUsage, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -517,6 +517,17 @@ export const adminUsageQuery = queryOptions({
   queryKey: ["admin", "usage"],
   queryFn: () => api.get<UsageRecord[]>("/usage"),
 })
+
+/**
+ * The signed-in teacher's own spend against their per-owner daily cap,
+ * over a rolling window. Keyed by window length so switching the range
+ * caches both rather than thrashing one entry.
+ */
+export const teacherUsageQuery = (days: number) =>
+  queryOptions({
+    queryKey: ["teacher", "usage", days],
+    queryFn: () => api.get<OwnerUsage>(`/teacher/usage?days=${days}`),
+  })
 
 export const externalAuthInvitesQuery = queryOptions({
   queryKey: ["admin", "external-invites"],

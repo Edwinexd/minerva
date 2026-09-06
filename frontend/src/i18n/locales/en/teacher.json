@@ -18,6 +18,14 @@
       "usage": "Usage"
     }
   },
+  "portal": {
+    "title": "Teaching",
+    "sectionNavLabel": "Teacher section",
+    "tabs": {
+      "usage": "AI usage",
+      "guide": "Guide"
+    }
+  },
   "shared": {
     "loading": "Loading...",
     "unknownUser": "Unknown"
@@ -482,6 +490,85 @@
     "colRequests": "Requests",
     "colDate": "Date",
     "dailyBreakdown": "Daily breakdown"
+  },
+  "ownerUsage": {
+    "description": "AI spend for the courses you own, priced from the tokens your students and the indexing pipeline used. Courses you only assist on count against their owner's limit, not yours.",
+    "windowLabel": "Time range",
+    "windowOption": "Last {{days}} days",
+    "spendToday": "Spend today",
+    "limitUsed": "{{percent}}% of your {{limit}} daily limit",
+    "limitUsedLabel": "Share of today's limit used",
+    "dailyLimit": "Daily limit",
+    "limitScope": "Across every course you own, per day",
+    "unlimited": "Unlimited",
+    "unknown": "Unknown",
+    "windowSpend": "Spend, last {{days}} days",
+    "spendSplit": "{{chat}} chat + {{pipeline}} indexing",
+    "peakDay": "Busiest day",
+    "windowRequests_one": "{{count}} chat request in the window",
+    "windowRequests_other": "{{count}} chat requests in the window",
+    "capReached": "Today's limit is reached. Chat is paused in your courses until the daily counter resets; ask for a higher limit below if this keeps happening.",
+    "capNear": "You are close to today's limit. Chat pauses in your courses once it is reached.",
+    "empty": "No AI usage recorded yet.",
+    "byCourse": {
+      "title": "By course",
+      "description": "Courses you own. The Today column is what counts against your daily limit right now.",
+      "empty": "You do not own any courses yet. The daily limit applies to courses you own.",
+      "colCourse": "Course",
+      "colModel": "Model",
+      "colToday": "Today",
+      "colWindow": "Last {{days}} days",
+      "colStudents": "Active students",
+      "colStudentLimit": "Per student, per day",
+      "tokens": "{{tokens}} tokens, {{requests}} requests",
+      "enrolled_one": "{{count}} enrolled",
+      "enrolled_other": "{{count}} enrolled",
+      "archived": "Archived"
+    },
+    "providers": {
+      "title": "By provider",
+      "description": "Which service ran the models. Paid providers are the ones a limit increase needs budget approval for.",
+      "colProvider": "Provider",
+      "colSpend": "Spend",
+      "colTokens": "Tokens",
+      "budgeted": "Billed to a budget"
+    },
+    "daily": {
+      "title": "Daily spend",
+      "description": "Last {{days}} days, newest first.",
+      "colDate": "Date",
+      "colChat": "Chat",
+      "colPipeline": "Indexing",
+      "colTotal": "Total"
+    },
+    "increase": {
+      "title": "Need a higher limit?",
+      "lead": "Mail lambda@dsv.su.se with the details below. Include:",
+      "items": {
+        "identity": "Your SU username (eppn), so the limit lands on the right account.",
+        "unit": "Your unit or department, which carries the cost.",
+        "courses": "The course or courses the limit is for.",
+        "amount": "The daily limit you need, and why (class size, planned exercise, exam period)."
+      },
+      "budgetNote": "Your courses run on {{providers}}, which is billed to your unit's budget. Get the increase approved by whoever owns that budget and say so in the mail; without it the request stalls.",
+      "subject": "Minerva: raise daily AI limit for {{eppn}}",
+      "mailButton": "Mail {{email}}",
+      "copyButton": "Copy the details",
+      "copied": "Copied",
+      "draft": {
+        "name": "Name: {{name}}",
+        "eppn": "SU username (eppn): {{eppn}}",
+        "unit": "Unit / department: ",
+        "courses": "Courses: {{courses}}",
+        "noCourses": "(none yet)",
+        "currentLimit": "Current daily limit: {{limit}}",
+        "peak": "Busiest day in the last {{days}} days: {{peak}}",
+        "requested": "Requested daily limit: ",
+        "reason": "Reason: ",
+        "budgetedProviders": "Models run on: {{providers}} (paid, needs unit budget approval)",
+        "selfHostedOnly": "Models run on self-hosted providers only"
+      }
+    }
   },
   "daisyMeta": {
     "title": "Daisy linkage",

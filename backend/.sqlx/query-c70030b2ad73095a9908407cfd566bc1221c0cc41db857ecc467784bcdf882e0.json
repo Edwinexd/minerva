@@ -1,0 +1,148 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id AS \"course_id!\", c.name AS \"course_name!\", c.course_code,\n                  c.semester_label AS \"course_semester_label\", c.active AS \"course_active!\",\n                  u.date AS \"date!\",\n                  u.model AS \"model!\", u.provider AS \"provider!\",\n                  (u.date = CURRENT_DATE) AS \"is_today!\",\n                  SUM(u.prompt_tokens)::bigint AS \"prompt_tokens!\",\n                  SUM(u.completion_tokens)::bigint AS \"completion_tokens!\",\n                  SUM(u.request_count)::bigint AS \"request_count!\",\n                  COALESCE(SUM(\n                      (u.prompt_tokens * COALESCE(cm.input_usd_per_mtok, 0)\n                       + u.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000\n                  ), 0)::numeric AS \"cost_usd!\"\n             FROM usage_daily u\n             JOIN courses c ON c.id = u.course_id\n             LEFT JOIN chat_models cm ON cm.model = u.model\n            WHERE c.owner_id = $1 AND u.date >= CURRENT_DATE - $2::int\n            GROUP BY c.id, u.date, u.model, u.provider\n            ORDER BY u.date DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "course_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "course_name!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "course_code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "course_code"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "course_semester_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "semester_label"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "course_active!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "courses",
+            "name": "active"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "date!",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "usage_daily",
+            "name": "date"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "model!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_daily",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "provider!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_daily",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "is_today!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "prompt_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "completion_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "cost_usd!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "c70030b2ad73095a9908407cfd566bc1221c0cc41db857ecc467784bcdf882e0"
+}

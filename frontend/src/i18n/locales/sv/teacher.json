@@ -18,6 +18,14 @@
       "usage": "Användning"
     }
   },
+  "portal": {
+    "title": "Undervisning",
+    "sectionNavLabel": "Lärarsektion",
+    "tabs": {
+      "usage": "AI-användning",
+      "guide": "Guide"
+    }
+  },
   "shared": {
     "loading": "Laddar...",
     "unknownUser": "Okänd"
@@ -480,6 +488,85 @@
     "colRequests": "Förfrågningar",
     "colDate": "Datum",
     "dailyBreakdown": "Fördelning per dag"
+  },
+  "ownerUsage": {
+    "description": "AI-kostnader för de kurser du äger, prissatta utifrån de tokens dina studenter och indexeringen använt. Kurser där du bara är assistent räknas mot ägarens gräns, inte din.",
+    "windowLabel": "Tidsintervall",
+    "windowOption": "Senaste {{days}} dagarna",
+    "spendToday": "Kostnad idag",
+    "limitUsed": "{{percent}} % av din dagsgräns på {{limit}}",
+    "limitUsedLabel": "Andel av dagens gräns som använts",
+    "dailyLimit": "Dagsgräns",
+    "limitScope": "Gäller alla kurser du äger, per dag",
+    "unlimited": "Obegränsad",
+    "unknown": "Okänd",
+    "windowSpend": "Kostnad, senaste {{days}} dagarna",
+    "spendSplit": "{{chat}} chatt + {{pipeline}} indexering",
+    "peakDay": "Dyraste dagen",
+    "windowRequests_one": "{{count}} chattförfrågan under perioden",
+    "windowRequests_other": "{{count}} chattförfrågningar under perioden",
+    "capReached": "Dagens gräns är nådd. Chatten är pausad i dina kurser tills dagsräknaren nollställs. Be om en högre gräns nedan om det händer ofta.",
+    "capNear": "Du närmar dig dagens gräns. Chatten pausas i dina kurser när den nås.",
+    "empty": "Ingen AI-användning registrerad än.",
+    "byCourse": {
+      "title": "Per kurs",
+      "description": "Kurser du äger. Kolumnen Idag är det som räknas mot din dagsgräns just nu.",
+      "empty": "Du äger inga kurser än. Dagsgränsen gäller kurser du äger.",
+      "colCourse": "Kurs",
+      "colModel": "Modell",
+      "colToday": "Idag",
+      "colWindow": "Senaste {{days}} dagarna",
+      "colStudents": "Aktiva studenter",
+      "colStudentLimit": "Per student och dag",
+      "tokens": "{{tokens}} tokens, {{requests}} förfrågningar",
+      "enrolled_one": "{{count}} registrerad",
+      "enrolled_other": "{{count}} registrerade",
+      "archived": "Arkiverad"
+    },
+    "providers": {
+      "title": "Per leverantör",
+      "description": "Vilken tjänst som kört modellerna. Betaltjänster är de som kräver budgetgodkännande vid en höjning.",
+      "colProvider": "Leverantör",
+      "colSpend": "Kostnad",
+      "colTokens": "Tokens",
+      "budgeted": "Belastar en budget"
+    },
+    "daily": {
+      "title": "Kostnad per dag",
+      "description": "Senaste {{days}} dagarna, nyast först.",
+      "colDate": "Datum",
+      "colChat": "Chatt",
+      "colPipeline": "Indexering",
+      "colTotal": "Totalt"
+    },
+    "increase": {
+      "title": "Behöver du en högre gräns?",
+      "lead": "Mejla lambda@dsv.su.se med uppgifterna nedan. Ta med:",
+      "items": {
+        "identity": "Ditt SU-användarnamn (eppn), så gränsen hamnar på rätt konto.",
+        "unit": "Din enhet eller institution, som står för kostnaden.",
+        "courses": "Kursen eller kurserna som gränsen gäller.",
+        "amount": "Vilken dagsgräns du behöver och varför (kursstorlek, planerad övning, tentaperiod)."
+      },
+      "budgetNote": "Dina kurser körs på {{providers}}, som faktureras din enhets budget. Få höjningen godkänd av den som äger budgeten och skriv det i mejlet, annars fastnar ärendet.",
+      "subject": "Minerva: höj dagsgränsen för AI för {{eppn}}",
+      "mailButton": "Mejla {{email}}",
+      "copyButton": "Kopiera uppgifterna",
+      "copied": "Kopierat",
+      "draft": {
+        "name": "Namn: {{name}}",
+        "eppn": "SU-användarnamn (eppn): {{eppn}}",
+        "unit": "Enhet / institution: ",
+        "courses": "Kurser: {{courses}}",
+        "noCourses": "(inga än)",
+        "currentLimit": "Nuvarande dagsgräns: {{limit}}",
+        "peak": "Dyraste dagen senaste {{days}} dagarna: {{peak}}",
+        "requested": "Önskad dagsgräns: ",
+        "reason": "Motivering: ",
+        "budgetedProviders": "Modeller körs på: {{providers}} (betaltjänst, kräver budgetgodkännande från enheten)",
+        "selfHostedOnly": "Modeller körs endast på egna servrar"
+      }
+    }
   },
   "daisyMeta": {
     "title": "Daisy-koppling",

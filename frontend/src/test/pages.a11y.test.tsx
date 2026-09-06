@@ -79,6 +79,7 @@ import type {
   CourseMember,
   Document,
   Message,
+  OwnerUsage,
   User,
 } from "@/lib/types"
 import { UserManagementPanel } from "@/components/admin/users-page"
@@ -92,6 +93,7 @@ import { CourseManagementPanel } from "@/components/admin/courses-page"
 import { DaisyImportsPanel } from "@/components/admin/daisy-imports-page"
 import { AdminDefaultsPanel } from "@/components/admin/defaults-page"
 import { RoleRulesPanel } from "@/components/admin/rules-page"
+import { OwnerUsagePage } from "@/components/teacher/owner-usage-page"
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -315,6 +317,89 @@ const roleRules = [
     ],
   },
 ]
+
+/**
+ * Owner spend over the cap, with an archived course and a second
+ * provider, so the axe pass covers the limit-reached banner, the
+ * archived badge and the paid-provider callout at once.
+ */
+const ownerUsage: OwnerUsage = {
+  daily_cost_limit_usd: 0.8,
+  spend_today_usd: 0.824,
+  window_days: 30,
+  window_spend_usd: 8.2347,
+  window_chat_spend_usd: 7.7097,
+  window_pipeline_spend_usd: 0.525,
+  window_requests: 678,
+  courses: [
+    {
+      id: COURSE_ID,
+      name: "Database Systems",
+      course_code: "DBSYS",
+      semester_label: "VT2026",
+      active: true,
+      model: "gpt-oss-120b",
+      provider: "cerebras",
+      student_daily_cost_limit_usd: 0.25,
+      student_count: 30,
+      window_active_students: 12,
+      spend_today_usd: 0.7865,
+      window_spend_usd: 4.481,
+      window_chat_spend_usd: 4.2185,
+      window_pipeline_spend_usd: 0.2625,
+      window_requests: 356,
+      window_prompt_tokens: 7594000,
+      window_completion_tokens: 2430800,
+    },
+    {
+      id: "course-3",
+      name: "Discrete Math",
+      course_code: null,
+      semester_label: "HT2025",
+      active: false,
+      model: null,
+      provider: null,
+      student_daily_cost_limit_usd: 0,
+      student_count: 0,
+      window_active_students: 1,
+      spend_today_usd: 0,
+      window_spend_usd: 0.0217,
+      window_chat_spend_usd: 0.0217,
+      window_pipeline_spend_usd: 0,
+      window_requests: 28,
+      window_prompt_tokens: 560000,
+      window_completion_tokens: 175000,
+    },
+  ],
+  providers: [
+    {
+      provider: "cerebras",
+      window_spend_usd: 8.213,
+      window_prompt_tokens: 13948000,
+      window_completion_tokens: 4441600,
+    },
+    {
+      provider: "local",
+      window_spend_usd: 0.0217,
+      window_prompt_tokens: 560000,
+      window_completion_tokens: 175000,
+    },
+  ],
+  daily: [
+    {
+      date: "2026-09-05",
+      chat_spend_usd: 0,
+      pipeline_spend_usd: 0.075,
+      requests: 0,
+    },
+    {
+      date: "2026-09-06",
+      chat_spend_usd: 0.749,
+      pipeline_spend_usd: 0.075,
+      requests: 62,
+    },
+  ],
+}
 
 const chatMessage = (
   id: string,
@@ -573,6 +658,15 @@ describe("Authenticated pages a11y", () => {
       ],
     ])
     expect(getByText("DSV staff to teacher")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("teacher AI usage has no axe violations", async () => {
+    const { container, getByText } = renderPage(<OwnerUsagePage />, [
+      [queries.userQuery.queryKey, user],
+      [queries.teacherUsageQuery(30).queryKey, ownerUsage],
+    ])
+    expect(getByText("Database Systems (DBSYS)")).toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
   })
 })

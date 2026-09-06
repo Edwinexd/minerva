@@ -304,6 +304,63 @@ export interface UsageRecord {
   request_count: number
 }
 
+/**
+ * Owner-scoped spend for the teacher portal (`GET /teacher/usage`).
+ * Covers the two axes the per-owner daily cap enforces against: student
+ * chat and pipeline / classification work, both priced on read from
+ * tokens x the model's current rate.
+ */
+export interface OwnerUsage {
+  /** Aggregate daily cap in USD across every owned course. 0 = unlimited. */
+  daily_cost_limit_usd: number
+  /** Today's spend, i.e. the value the cap is tested against. */
+  spend_today_usd: number
+  window_days: number
+  window_spend_usd: number
+  window_chat_spend_usd: number
+  window_pipeline_spend_usd: number
+  window_requests: number
+  courses: OwnerCourseUsage[]
+  providers: OwnerProviderUsage[]
+  daily: OwnerDailyUsage[]
+}
+
+export interface OwnerCourseUsage {
+  id: string
+  name: string
+  course_code: string | null
+  semester_label: string | null
+  /** False for an archived course that still carries spend in the window. */
+  active: boolean
+  model: string | null
+  provider: string | null
+  /** Per-student-per-day cap for this course. 0 = unlimited. */
+  student_daily_cost_limit_usd: number
+  student_count: number
+  window_active_students: number
+  spend_today_usd: number
+  window_spend_usd: number
+  window_chat_spend_usd: number
+  window_pipeline_spend_usd: number
+  window_requests: number
+  window_prompt_tokens: number
+  window_completion_tokens: number
+}
+
+export interface OwnerProviderUsage {
+  provider: string
+  window_spend_usd: number
+  window_prompt_tokens: number
+  window_completion_tokens: number
+}
+
+export interface OwnerDailyUsage {
+  date: string
+  chat_spend_usd: number
+  pipeline_spend_usd: number
+  requests: number
+}
+
 export interface CourseMember {
   user_id: string
   eppn: string | null

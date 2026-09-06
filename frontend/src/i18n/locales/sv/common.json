@@ -1,7 +1,7 @@
 {
   "nav": {
     "admin": "Admin",
-    "teacherHelp": "Lärarguide",
+    "teacher": "Undervisning",
     "teacherView": "Lärarvy",
     "dataHandling": "Datahantering",
     "acknowledgements": "Tack till",
@@ -12,6 +12,11 @@
   "pageTitles": {
     "home": "Start",
     "teacherHelp": "Lärarguide",
+    "teacher": "Undervisning",
+    "teacherTab": {
+      "usage": "AI-användning",
+      "guide": "Guide"
+    },
     "admin": "Admin",
     "adminTab": {
       "usage": "Användning",

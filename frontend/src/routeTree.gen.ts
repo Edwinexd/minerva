@@ -31,11 +31,14 @@ import { Route as EmbedCourseIdRouteImport } from "./routes/embed/$courseId"
 import { Route as JoinTokenRouteImport } from "./routes/join/$token"
 import { Route as LtiBindRouteImport } from "./routes/lti/bind"
 import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
+import { Route as TeacherPortalRouteImport } from "./routes/teacher/_portal"
 import { Route as AdminLtiApprovePlatformIdRouteImport } from "./routes/admin/lti-approve.$platformId"
 import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
 import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
 import { Route as CourseCourseIdNewRouteImport } from "./routes/course/$courseId/new"
 import { Route as LtiSetupPlatformIdRouteImport } from "./routes/lti/setup.$platformId"
+import { Route as TeacherPortalGuideRouteImport } from "./routes/teacher/_portal.guide"
+import { Route as TeacherPortalUsageRouteImport } from "./routes/teacher/_portal.usage"
 import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
 import { Route as TeacherCoursesCourseIdIndexRouteImport } from "./routes/teacher/courses.$courseId/index"
 import { Route as TeacherCoursesCourseIdApiKeysRouteImport } from "./routes/teacher/courses.$courseId/api-keys"
@@ -161,6 +164,11 @@ const TeacherIndexRoute = TeacherIndexRouteImport.update({
   path: "/teacher/",
   getParentRoute: () => rootRouteImport,
 } as any)
+const TeacherPortalRoute = TeacherPortalRouteImport.update({
+  id: "/teacher/_portal",
+  path: "/teacher",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminLtiApprovePlatformIdRoute =
   AdminLtiApprovePlatformIdRouteImport.update({
     id: "/lti-approve/$platformId",
@@ -187,6 +195,16 @@ const LtiSetupPlatformIdRoute = LtiSetupPlatformIdRouteImport.update({
   id: "/lti/setup/$platformId",
   path: "/lti/setup/$platformId",
   getParentRoute: () => rootRouteImport,
+} as any)
+const TeacherPortalGuideRoute = TeacherPortalGuideRouteImport.update({
+  id: "/guide",
+  path: "/guide",
+  getParentRoute: () => TeacherPortalRoute,
+} as any)
+const TeacherPortalUsageRoute = TeacherPortalUsageRouteImport.update({
+  id: "/usage",
+  path: "/usage",
+  getParentRoute: () => TeacherPortalRoute,
 } as any)
 const TeacherCoursesCourseIdRoute = TeacherCoursesCourseIdRouteImport.update({
   id: "/teacher/courses/$courseId",
@@ -293,12 +311,15 @@ export interface FileRoutesByFullPath {
   "/embed/$courseId": typeof EmbedCourseIdRoute
   "/join/$token": typeof JoinTokenRoute
   "/lti/bind": typeof LtiBindRoute
+  "/teacher": typeof TeacherPortalRouteWithChildren
   "/admin/": typeof AdminIndexRoute
   "/teacher/": typeof TeacherIndexRoute
   "/admin/lti-approve/$platformId": typeof AdminLtiApprovePlatformIdRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
+  "/teacher/guide": typeof TeacherPortalGuideRoute
+  "/teacher/usage": typeof TeacherPortalUsageRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
@@ -335,12 +356,14 @@ export interface FileRoutesByTo {
   "/embed/$courseId": typeof EmbedCourseIdRoute
   "/join/$token": typeof JoinTokenRoute
   "/lti/bind": typeof LtiBindRoute
-  "/admin": typeof AdminIndexRoute
   "/teacher": typeof TeacherIndexRoute
+  "/admin": typeof AdminIndexRoute
   "/admin/lti-approve/$platformId": typeof AdminLtiApprovePlatformIdRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
+  "/teacher/guide": typeof TeacherPortalGuideRoute
+  "/teacher/usage": typeof TeacherPortalUsageRoute
   "/course/$courseId": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
   "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
@@ -378,12 +401,15 @@ export interface FileRoutesById {
   "/embed/$courseId": typeof EmbedCourseIdRoute
   "/join/$token": typeof JoinTokenRoute
   "/lti/bind": typeof LtiBindRoute
+  "/teacher/_portal": typeof TeacherPortalRouteWithChildren
   "/admin/": typeof AdminIndexRoute
   "/teacher/": typeof TeacherIndexRoute
   "/admin/lti-approve/$platformId": typeof AdminLtiApprovePlatformIdRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
   "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
+  "/teacher/_portal/guide": typeof TeacherPortalGuideRoute
+  "/teacher/_portal/usage": typeof TeacherPortalUsageRoute
   "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
   "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
@@ -423,12 +449,15 @@ export interface FileRouteTypes {
     | "/embed/$courseId"
     | "/join/$token"
     | "/lti/bind"
+    | "/teacher"
     | "/admin/"
     | "/teacher/"
     | "/admin/lti-approve/$platformId"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
     | "/lti/setup/$platformId"
+    | "/teacher/guide"
+    | "/teacher/usage"
     | "/teacher/courses/$courseId"
     | "/course/$courseId/"
     | "/teacher/courses/$courseId/api-keys"
@@ -465,12 +494,14 @@ export interface FileRouteTypes {
     | "/embed/$courseId"
     | "/join/$token"
     | "/lti/bind"
-    | "/admin"
     | "/teacher"
+    | "/admin"
     | "/admin/lti-approve/$platformId"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
     | "/lti/setup/$platformId"
+    | "/teacher/guide"
+    | "/teacher/usage"
     | "/course/$courseId"
     | "/teacher/courses/$courseId/api-keys"
     | "/teacher/courses/$courseId/canvas"
@@ -507,12 +538,15 @@ export interface FileRouteTypes {
     | "/embed/$courseId"
     | "/join/$token"
     | "/lti/bind"
+    | "/teacher/_portal"
     | "/admin/"
     | "/teacher/"
     | "/admin/lti-approve/$platformId"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
     | "/lti/setup/$platformId"
+    | "/teacher/_portal/guide"
+    | "/teacher/_portal/usage"
     | "/teacher/courses/$courseId"
     | "/course/$courseId/"
     | "/teacher/courses/$courseId/api-keys"
@@ -540,6 +574,7 @@ export interface RootRouteChildren {
   EmbedCourseIdRoute: typeof EmbedCourseIdRoute
   JoinTokenRoute: typeof JoinTokenRoute
   LtiBindRoute: typeof LtiBindRoute
+  TeacherPortalRoute: typeof TeacherPortalRouteWithChildren
   TeacherIndexRoute: typeof TeacherIndexRoute
   CourseCourseIdConversationIdRoute: typeof CourseCourseIdConversationIdRoute
   CourseCourseIdNewRoute: typeof CourseCourseIdNewRoute
@@ -704,6 +739,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof TeacherIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/teacher/_portal": {
+      id: "/teacher/_portal"
+      path: "/teacher"
+      fullPath: "/teacher"
+      preLoaderRoute: typeof TeacherPortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/admin/lti-approve/$platformId": {
       id: "/admin/lti-approve/$platformId"
       path: "/lti-approve/$platformId"
@@ -738,6 +780,20 @@ declare module "@tanstack/react-router" {
       fullPath: "/lti/setup/$platformId"
       preLoaderRoute: typeof LtiSetupPlatformIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    "/teacher/_portal/guide": {
+      id: "/teacher/_portal/guide"
+      path: "/guide"
+      fullPath: "/teacher/guide"
+      preLoaderRoute: typeof TeacherPortalGuideRouteImport
+      parentRoute: typeof TeacherPortalRoute
+    }
+    "/teacher/_portal/usage": {
+      id: "/teacher/_portal/usage"
+      path: "/usage"
+      fullPath: "/teacher/usage"
+      preLoaderRoute: typeof TeacherPortalUsageRouteImport
+      parentRoute: typeof TeacherPortalRoute
     }
     "/teacher/courses/$courseId": {
       id: "/teacher/courses/$courseId"
@@ -874,6 +930,20 @@ const AdminRouteChildren: AdminRouteChildren = {
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
+interface TeacherPortalRouteChildren {
+  TeacherPortalGuideRoute: typeof TeacherPortalGuideRoute
+  TeacherPortalUsageRoute: typeof TeacherPortalUsageRoute
+}
+
+const TeacherPortalRouteChildren: TeacherPortalRouteChildren = {
+  TeacherPortalGuideRoute: TeacherPortalGuideRoute,
+  TeacherPortalUsageRoute: TeacherPortalUsageRoute,
+}
+
+const TeacherPortalRouteWithChildren = TeacherPortalRoute._addFileChildren(
+  TeacherPortalRouteChildren,
+)
+
 interface TeacherCoursesCourseIdRouteChildren {
   TeacherCoursesCourseIdApiKeysRoute: typeof TeacherCoursesCourseIdApiKeysRoute
   TeacherCoursesCourseIdCanvasRoute: typeof TeacherCoursesCourseIdCanvasRoute
@@ -925,6 +995,7 @@ const rootRouteChildren: RootRouteChildren = {
   EmbedCourseIdRoute: EmbedCourseIdRoute,
   JoinTokenRoute: JoinTokenRoute,
   LtiBindRoute: LtiBindRoute,
+  TeacherPortalRoute: TeacherPortalRouteWithChildren,
   TeacherIndexRoute: TeacherIndexRoute,
   CourseCourseIdConversationIdRoute: CourseCourseIdConversationIdRoute,
   CourseCourseIdNewRoute: CourseCourseIdNewRoute,

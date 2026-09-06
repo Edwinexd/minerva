@@ -47,9 +47,12 @@ Local plugin that connects Moodle to a [Minerva](https://github.com/Edwinexd/min
 
 | Task | Schedule | Purpose |
 | --- | --- | --- |
+| `autolink_courses` | 5 past the hour | Link courses to Minerva by external id, so a teacher never has to link by hand. |
 | `sync_materials` | 15 and 45 past the hour | Discover, upload, and reconcile course resources (and, when opted in, forum conversations) against Minerva. |
 
-The task respects the `autosync_materials` admin toggle. The reconcile sweep runs at the end of every invocation regardless of whether new items were uploaded.
+`sync_materials` respects the `autosync_materials` admin toggle. The reconcile sweep runs at the end of every invocation regardless of whether new items were uploaded.
+
+`autolink_courses` links a course whose **Course ID number** (`idnumber`) holds one or more Daisy offering ids to the matching Minerva course, provisioning through `/api/integration/site/provision-by-offering` on the site key (a cron run has no acting teacher, and setting an idnumber is manager-only in Moodle, so the external-id match is the trust anchor). It runs 10 minutes ahead of the first material sync so a freshly linked course gets its content in the same hour. A manual link always wins, and an explicit unlink records an opt-out so the sweep leaves the course alone; the manage page says so on a course that was linked this way.
 
 ## Settings
 
@@ -57,6 +60,7 @@ The task respects the `autosync_materials` admin toggle. The reconcile sweep run
 | --- | --- | --- |
 | `minerva_url` | empty | Lock the Minerva URL site-wide. When set, teachers can't edit it per course. |
 | `site_api_key` | empty | Optional site-integration key. When set, teachers pick from a course dropdown instead of pasting an API key. |
+| `autolink_by_external_id` | ON | Auto-link courses by their Daisy offering id. Requires the site integration key. Disable to make every link manual. |
 | `autosync_materials` | ON | Disable to pause the scheduled task without removing it. |
 | `enable_forum_sync` | ON | Kill switch for forum syncing. When OFF, the per-course toggle is hidden and forums are never read. |
 

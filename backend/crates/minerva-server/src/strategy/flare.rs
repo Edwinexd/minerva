@@ -63,13 +63,14 @@ const REPEAT_FINGERPRINT_LEN: usize = 150;
 /// 60 chars ≈ every ~15 tokens.
 const REPEAT_CHECK_INTERVAL: usize = 60;
 
-/// Fallback single-response token cap when a course has `daily_token_limit = 0`
-/// (unlimited per student). Even "unlimited" courses shouldn't allow one
+/// Fallback single-response token cap when a course has
+/// `daily_cost_limit_usd = 0` (unlimited per student), so the per-response
+/// budget derived from it is 0 too. Even "unlimited" courses shouldn't allow one
 /// answer to burn six-figure token counts; this is a backstop.
 const UNLIMITED_COURSE_RESPONSE_CAP: i64 = 200_000;
 
-/// Multiplier applied to `courses.daily_token_limit` to derive the per-response
-/// fail-safe cap. At 2x a student cannot burn more than two days of their
+/// Multiplier applied to the token budget derived from
+/// `courses.daily_cost_limit_usd` to get the per-response fail-safe cap. At 2x a student cannot burn more than two days of their
 /// daily allowance in a single answer, even if daily-limit enforcement hasn't
 /// kicked in yet (that check runs at request start; intra-response drift is
 /// what this cap guards).
@@ -499,9 +500,10 @@ where
     // Every other exit path overwrites it explicitly.
     let mut stop_reason = StopReason::Completed;
 
-    // Per-response token fail-safe. If the course has `daily_token_limit = 0`
-    // (unlimited), fall back to `UNLIMITED_COURSE_RESPONSE_CAP`; otherwise cap
-    // at DAILY_LIMIT_RESPONSE_MULTIPLIER * course limit. A single answer
+    // Per-response token fail-safe. If the course is unlimited (its
+    // `daily_cost_limit_usd` is 0, so the derived token budget is 0 too),
+    // fall back to `UNLIMITED_COURSE_RESPONSE_CAP`; otherwise cap at
+    // DAILY_LIMIT_RESPONSE_MULTIPLIER * the derived budget. A single answer
     // cannot burn more than this many total tokens (prompt + completion
     // across all FLARE iterations).
     let per_response_token_cap: i64 = if cfg.daily_token_limit > 0 {

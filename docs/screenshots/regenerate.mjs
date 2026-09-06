@@ -4,13 +4,9 @@
 //   1. Start the dev stack:
 //        cp .env.example .env  # edit if needed; CEREBRAS_/OPENAI_ keys can be stubs
 //        docker compose -f docker-compose.yml up -d
-//   2. Optionally seed a couple of demo courses (any teacher account works):
-//        curl -s -X POST http://localhost:3000/api/courses \
-//          -H 'X-Dev-User: edsu8469' -H 'Content-Type: application/json' \
-//          -d '{"name":"Discrete Mathematics","description":"Sets, relations, and graph theory."}'
-//        curl -s -X POST http://localhost:3000/api/courses \
-//          -H 'X-Dev-User: edsu8469' -H 'Content-Type: application/json' \
-//          -d '{"name":"Information Retrieval 2026","description":"Vector search, ranking, and evaluation.","strategy":"flare"}'
+//   2. Seed the fixture cast (courses, members, documents and the AI spend
+//      ledger the teacher usage shot needs):
+//        MINERVA_ADMINS=<your-username> scripts/seed-dev.sh
 //   3. Install playwright in a temp dir and run this script:
 //        mkdir -p /tmp/minerva-shots && cd /tmp/minerva-shots
 //        npm init -y && npm i playwright
@@ -30,7 +26,10 @@ const browser = await chromium.launch({ headless: true });
 const ctx = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   deviceScaleFactor: 2,
-  extraHTTPHeaders: { "X-Dev-User": "edsu8469" },
+  // Same identity the header-less dev fallback resolves to (first
+  // MINERVA_ADMINS entry + @su.se) and the one `scripts/seed-dev.sh`
+  // seeds against, so the shots show a populated account.
+  extraHTTPHeaders: { "X-Dev-User": "edsu8469@su.se" },
 });
 const page = await ctx.newPage();
 
@@ -65,6 +64,7 @@ await snap("/admin/courses", "05-admin-courses.png", { fullPage: true, settle: 2
 await snap("/admin/users", "06-admin-users.png", { fullPage: true, settle: 2000 });
 await snap("/admin/rules", "07-admin-rules.png", { fullPage: true, settle: 2000 });
 await snap("/acknowledgements", "08-acknowledgements.png", { fullPage: true, settle: 1500 });
+await snap("/teacher/usage", "09-teacher-usage.png", { fullPage: true, settle: 2000 });
 
 await browser.close();
 console.log("done");

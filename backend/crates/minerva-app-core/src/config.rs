@@ -58,13 +58,13 @@ pub struct Config {
     pub run_worker: bool,
     //
     // Note: the four fields that used to live here ;
-    //   default_course_daily_token_limit
-    //   default_owner_daily_token_limit
+    //   default_course_daily_cost_limit_usd
+    //   default_owner_daily_cost_limit_usd
     //   canvas_auto_sync_interval_hours
     //   lti_nrps_sync_interval_hours
     // ; moved into the admin-tunable `system_defaults` table. Their
-    // env vars (`MINERVA_DEFAULT_COURSE_DAILY_TOKEN_LIMIT`,
-    // `MINERVA_DEFAULT_OWNER_DAILY_TOKEN_LIMIT`,
+    // env vars (`MINERVA_DEFAULT_COURSE_DAILY_USD`,
+    // `MINERVA_DEFAULT_OWNER_DAILY_USD`,
     // `MINERVA_CANVAS_AUTO_SYNC_INTERVAL_HOURS`,
     // `MINERVA_LTI_NRPS_SYNC_INTERVAL_HOURS`) are still honoured as
     // *seeds* for fresh installs via `crate::system_defaults::seed_all`,

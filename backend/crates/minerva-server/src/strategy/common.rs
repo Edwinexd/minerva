@@ -758,7 +758,7 @@ async fn retrieve_global_knowledge_inner(
         match fastembed.embed_query(embedding_model, vec![query]).await {
             Ok(vectors) => vectors,
             Err(error) => {
-                tracing::warn!(%error, "data-handling semantic retrieval failed");
+                tracing::warn!(%error, "global knowledge semantic retrieval failed");
                 return Vec::new();
             }
         }
@@ -768,7 +768,7 @@ async fn retrieve_global_knowledge_inner(
         {
             Ok(result) => result.embeddings,
             Err(error) => {
-                tracing::warn!(%error, "data-handling semantic retrieval failed");
+                tracing::warn!(%error, "global knowledge semantic retrieval failed");
                 return Vec::new();
             }
         }

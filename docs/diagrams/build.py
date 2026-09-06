@@ -207,7 +207,11 @@ def system_overview() -> graphviz.Digraph:
 
     with g.subgraph(name="cluster_ai") as c:
         c.attr(label="AI providers", **CLUSTER_BASE)
-        _box(c, "llm", "Cerebras", subtitle="OpenAI-compatible LLM")
+        # One registry, many vendors: which one a call lands on is the
+        # `provider` column of the model it names in the `chat_models`
+        # catalog, and a provider is only registered when its key is set.
+        _box(c, "llm", "LLM registry",
+             subtitle="Cerebras / OpenAI / Anthropic<BR/>Groq / Gemini")
         _box(c, "oai", "OpenAI", subtitle="embeddings")
 
     with g.subgraph(name="cluster_ext") as c:
@@ -228,7 +232,8 @@ def system_overview() -> graphviz.Digraph:
     g.edge("api", "qd", dir="both")
     g.edge("api", "docs", dir="both")
 
-    # API <-> LLM (request + SSE response).
+    # API <-> LLM (request + SSE response). The per-course model decides
+    # the provider; every provider is reached through the same registry.
     g.edge("api", "llm", dir="both", label="chat")
 
     # API -> model servers over gRPC (chat query embed + rerank). The api
@@ -271,7 +276,7 @@ def ingest_pipeline() -> graphviz.Digraph:
         c.attr(label="Ingest worker", **CLUSTER_BASE)
         _box(c, "gate", "mime / source router", shape="diamond", bold=False)
         _box(c, "extract", "poppler / extractor")
-        _box(c, "classify", "kind classifier", subtitle="gpt-oss-120b")
+        _box(c, "classify", "kind classifier", subtitle="utility-default model")
         _box(c, "chunk", "chunker")
         _box(c, "embed", "embedder", subtitle="OpenAI or fastembed")
         _box(c, "kg", "KG linker", subtitle="cross-doc edges")
@@ -357,8 +362,8 @@ def chat_pipeline() -> graphviz.Digraph:
              bold=False)
         _box(c, "prompt", "assemble prompt",
              subtitle="system + chunks + history\n(writeup phase if tool_use)")
-        _box(c, "llm", "Cerebras LLM",
-             subtitle="OpenAI-compatible SSE stream")
+        _box(c, "llm", "chat model",
+             subtitle="provider from the course model<BR/>(SSE stream)")
         _box(c, "flare_check", "low-logprob token?",
              shape="diamond", subtitle="FLARE only", bold=False)
         c.edge("prompt", "llm")

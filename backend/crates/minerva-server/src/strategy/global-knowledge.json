@@ -14,6 +14,20 @@
       ],
       "contentFile": "../../../../../frontend/src/i18n/locales/en/common.json",
       "contentKey": "dataHandling"
+    },
+    {
+      "id": "how-minerva-works",
+      "route": "https://github.com/Edwinexd/minerva/blob/master/docs/ARCHITECTURE.md",
+      "minSimilarity": 0.4,
+      "retrievalTexts": [
+        "What AI model are you? Which LLM, which version? Are you ChatGPT, GPT-4, Gemini, Llama, or another vendor's chatbot?",
+        "How do you work? How do you find and use my course material to answer? Retrieval, embeddings, vector search, RAG.",
+        "Who built Minerva? Is it open source, where is the code and the technical documentation?",
+        "What can you see? Do you have access to the internet, to other courses, or to other students' conversations?",
+        "Vilken AI-modell är du och vem har byggt dig? Hur fungerar du och hur hittar du svaren i kursmaterialet?"
+      ],
+      "contentFile": "how-minerva-works.json",
+      "contentKey": "howMinervaWorks"
     }
   ]
 }

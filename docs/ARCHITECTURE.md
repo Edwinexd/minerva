@@ -19,6 +19,28 @@ LMS, iframe, and service-account routes carry their own bearer-token or
 HMAC-signed-token middleware. Double-headed arrows indicate read/write
 relationships; single-headed arrows are push-only.
 
+## LLM providers
+
+No vendor is hard-coded. `LlmRegistry` is built once at startup and registers a
+provider only when its API key is present: `cerebras`, `openai`, `groq` and
+`gemini` share one OpenAI-compatible implementation, `anthropic` goes through
+the Messages API. Each provider's base URL is overridable with
+`MINERVA_LLM_BASE_URL__<PROVIDER>`, which is how a self-hosted or proxied
+endpoint slots in.
+
+Which provider a call reaches is a property of the *model*, not of the call
+site. The admin-managed `chat_models` catalog maps every model id to its
+provider and its input / output USD rates, and a model may only be enabled once
+both rates are known. Courses name a chat model; classification, KG linking and
+the guards use the catalog's utility default.
+
+That mapping is also what makes spend computable. Both ledgers (`usage_daily`
+for student chat, `course_token_usage` for pipeline work) store tokens plus the
+model that produced them, never a currency amount; cost is derived on read as
+tokens x the model's current rate. A re-price therefore moves enforcement and
+every dashboard at once without rewriting history, and a model that has left the
+catalog prices at 0 rather than dropping its rows out of the sum.
+
 ## Service topology
 
 The backend is five Rust binaries built from one Cargo workspace, split by
@@ -139,11 +161,24 @@ Inline citations: replies carry `[n]` badges (naked-digit + filename-form
 variants both accepted); the right-rail sources panel reports actually-cited
 sources first with a toggle for the uncited remainder.
 
-Classifiers run on `gpt-oss-120b` at `reasoning_effort: low` (the previous
-cheaper `llama3.1-8b` path was deprecated by Cerebras; everything in the
-classifier stack collapsed onto gpt-oss as a result, and low effort keeps
-the latency profile roughly where it was). Token spend lands in
-`course_token_usage` under per-feature categories so daily caps
-(per-student-per-course + per-owner aggregate) cover Aegis, the
-extraction guard, and the writeup phase as cleanly as they cover the main
-chat reply.
+**Global knowledge** is the one thing in the prompt that is not course
+material. `strategy/global-knowledge.json` declares sources (today: the
+data-handling policy and a "how Minerva works" note covering which model
+answers, how retrieval works, and where this document lives). Each carries
+retrieval texts that are embedded once per process with the course's own
+embedding model; a source is appended to the system prompt only when the
+student's question clears its similarity threshold, with an instruction to
+refer the user to its route rather than cite it as a course document. So
+"what model are you?" and "who can read my chats?" get grounded answers
+without either becoming a document in someone's course.
+
+Classifiers run on the catalog's utility default (seeded `gpt-oss-120b`) at
+`reasoning_effort: low` (the previous cheaper `llama3.1-8b` path was deprecated
+by Cerebras; everything in the classifier stack collapsed onto gpt-oss as a
+result, and low effort keeps the latency profile roughly where it was). Token
+spend lands in `course_token_usage` under per-feature categories so the daily
+USD caps (per-student-per-course + per-owner aggregate) cover Aegis, the
+extraction guard, and the writeup phase as cleanly as they cover the main chat
+reply. The owner-side view of that spend is the teacher portal's AI usage tab
+(`GET /api/teacher/usage`), which reads both ledgers through the same on-read
+pricing the caps use.

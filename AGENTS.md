@@ -528,19 +528,56 @@ next push to `master`; no manual server step needed.
 
 ## AI Spending Caps
 
-Two layers, both daily:
+Two layers, both daily, both in USD. Nothing stores a currency amount in
+the ledger: `usage_daily` (student chat) and `course_token_usage`
+(pipeline / classification) store tokens plus the model, and spend is
+derived on read as tokens x that model's current `chat_models` rate. A
+re-price therefore moves enforcement and every dashboard at once.
 
-1. **Per-student-per-course** (`courses.daily_token_limit`, existing).
-   New courses default to `MINERVA_DEFAULT_COURSE_DAILY_TOKEN_LIMIT`
-   (default `100000` tokens/student/day). Teachers can set `0` =
+1. **Per-student-per-course** (`courses.daily_cost_limit_usd`). New
+   courses default to the `course.daily_cost_limit_usd` system default
+   (env `MINERVA_DEFAULT_COURSE_DAILY_USD`, fallback `$0.50`). `0` =
    unlimited per student.
-2. **Per-owner aggregate** (`users.owner_daily_token_limit`, new). Sums
-   tokens across every course the user owns. New users default to
-   `MINERVA_DEFAULT_OWNER_DAILY_TOKEN_LIMIT` (default `500000`/day).
-   Existing users default to `0` (unlimited); admin dials individuals
-   down via `/admin/users`. `0` = unlimited. When breached, chat +
-   embed routes return `429` with a body pointing teachers to
+2. **Per-owner aggregate** (`users.owner_daily_cost_limit_usd`). Sums
+   chat *and* pipeline spend across every course the user owns. New
+   users default to `platform.owner_daily_cost_limit_usd` (env
+   `MINERVA_DEFAULT_OWNER_DAILY_USD`, fallback `$2.50`); admin dials
+   individuals via `/admin/users`. `0` = unlimited. When breached, chat
+   + embed routes return `429` with a body pointing teachers to
    `lambda@dsv.su.se` for an increase.
+
+The token-denominated columns these replaced (`daily_token_limit`,
+`owner_daily_token_limit`) were converted at the seeded gpt-oss-120b
+blended rate and dropped in `20260610000003_cost_limits.sql`.
+
+## Teacher Portal
+
+`/teacher` is a pathless-layout section (`routes/teacher/_portal.tsx`)
+with two tabs, deliberately outside `/teacher/courses/$id/*` so the
+course pages keep their own tab bar:
+
+- **AI usage** (`/teacher/usage`, `GET /api/teacher/usage?days=N`):
+  the caller's own spend against their owner cap. Today, a rolling
+  window (default 30 days, clamped 1..180), per owned course, per
+  provider and per day, chat and pipeline split out. Owner-scoped, so
+  courses the caller only assists on are absent: those bill to their
+  owner. Rows are pre-aggregated in SQL by (course, day, model), and
+  the DB tags today (`u.date = CURRENT_DATE`) so the cap-facing figure
+  uses the same date boundary as enforcement. Archived courses that
+  still carry spend in the window are folded back in from their usage
+  rows. The page also drafts the limit-increase mail to
+  `lambda@dsv.su.se` (identity, the courses the teacher ticks, current
+  limit, busiest day).
+- **Guide** (`/teacher/guide`): the onboarding walkthrough, formerly
+  `/teacher-help` (kept as a redirect). Mirrored by the LaTeX guides in
+  `docs/teacher-guide/`; update both.
+
+`scripts/seed-dev.sh` populates five weeks of weekday chat plus pipeline
+spend across the fixture courses (including one archived offering and a
+stretch on a second provider), so the portal and the admin usage tab are
+never empty in dev. The dev-user switcher lists the seeded cast, and
+admins lead the list because its first entry is what a fresh browser
+writes to localStorage.
 
 ## Terraform
 

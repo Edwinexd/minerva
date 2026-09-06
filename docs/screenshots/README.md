@@ -11,18 +11,16 @@ To regenerate them after a UI change:
    docker compose -f docker-compose.yml up -d
    ```
 
-2. Optionally seed a few demo courses (any teacher account works):
+2. Seed the fixture cast. This is what fills the shots: courses, members,
+   documents and five weeks of AI spend for the teacher usage page.
 
    ```bash
-   curl -s -X POST http://localhost:3000/api/courses \
-     -H 'X-Dev-User: edsu8469' -H 'Content-Type: application/json' \
-     -d '{"name":"Discrete Mathematics","description":"Sets, relations, and graph theory."}'
-   curl -s -X POST http://localhost:3000/api/courses \
-     -H 'X-Dev-User: edsu8469' -H 'Content-Type: application/json' \
-     -d '{"name":"Information Retrieval 2026","description":"Vector search, ranking, and evaluation.","strategy":"flare"}'
+   MINERVA_ADMINS=<your-username> scripts/seed-dev.sh
    ```
 
-3. Run the Playwright capture script (uses the dev `X-Dev-User` header to skip Shibboleth):
+3. Run the Playwright capture script (uses the dev `X-Dev-User` header to skip
+   Shibboleth; it sends `<your-username>@su.se`, the identity the seeder and the
+   dev-auth fallback both use, so edit that constant if your admin differs):
 
    ```bash
    mkdir -p /tmp/minerva-shots && cd /tmp/minerva-shots

@@ -13,7 +13,8 @@ RAG platform for educational use at DSV, Stockholm University. Teachers upload c
 - **Aegis prompt coaching**: per-keystroke live analyzer (`gpt-oss-120b`, JSON-schema-strict, `reasoning_effort: low`) that returns 0..=2 tagged suggestions for the draft the student is typing, severity-coloured against an 8-kind CLEAR-grounded rubric, with a Beginner/Expert calibration toggle. Soft-blocks Send when suggestions are present; `Use ideas` rewrites the draft via `gpt-oss-120b`. Mobile drawer + tablet support; per-iteration history persisted for export. Gated by the `aegis` feature flag.
 - **Extraction guard**: separate from Aegis. Per-turn intent classifier + per-chunk output check (`gpt-oss-120b`, low effort) + Socratic rewriter (`gpt-oss-120b`), with KG-driven multi-turn proximity tracking. Gated by the `extraction_guard` feature flag.
 - **Pluggable embeddings**: admin-managed catalog (Snowflake arctic-embed-m-v2.0 default, BGE, BAAI, GTE, mxbai, EmbeddingGemma, multilingual-e5, Qwen3-Embedding, OpenAI) with memory-budgeted LRU cache and on-demand benchmarks. Per-course rotation via lazy re-embed against versioned Qdrant collections.
-- **Daily AI spending caps**: per-student-per-course and per-owner aggregate, both daily. Chat returns 429 with the optimistic bubble preserved and the real error surfaced.
+- **Daily AI spending caps**: per-student-per-course and per-owner aggregate, both daily and denominated in USD. Spend is derived on read (tokens x the model's current catalog rate), so a re-price changes enforcement without rewriting the ledger. Chat returns 429 with the optimistic bubble preserved and the real error surfaced.
+- **Teacher portal**: a `Teacher` section beside `Admin` showing the teacher's own spend against their daily cap: today, a rolling window, per course, per provider and per day, including the ingest / classification spend that has no student behind it. When the cap is too low it drafts the increase request (identity, the courses it covers, current limit, busiest day) for `lambda@dsv.su.se`. The onboarding guide is its second tab.
 - **Conversations UX**: theme toggle (light/dark/system) in the header, fresh new-chat as default landing, LLM-grounded suggested questions on the empty state (drawn from the three latest sources), bidirectional unread + explicit acknowledgements, frozen pins for owners, sticky teacher unreviewed-tab list.
 - **LMS integration**: Moodle local plugin (iframe + enrolment sync + MBZ import), site-level Moodle/Canvas LTI 1.3 with first-launch course binding, Canvas REST sync.
 - **DSV Play transcript pipeline**: hourly VTT fetch + index for play.dsv.su.se URLs; teacher-configurable Play designation codes drive automatic discovery of new lecture recordings.
@@ -33,7 +34,8 @@ Detail figures for the document-ingest and chat/RAG pipelines (including the FLA
 | ![Course list](docs/screenshots/01-home-courses.png) | ![Chat](docs/screenshots/02-chat-new.png) |
 | ![Teacher config](docs/screenshots/03-teacher-course-config.png) | ![Embedding catalog](docs/screenshots/04-admin-system-embedding.png) |
 | ![Admin courses](docs/screenshots/05-admin-courses.png) | ![Admin users](docs/screenshots/06-admin-users.png) |
-| ![Role rules](docs/screenshots/07-admin-rules.png) | ![Acknowledgements](docs/screenshots/08-acknowledgements.png) |
+| ![Role rules](docs/screenshots/07-admin-rules.png) | ![Teacher AI usage](docs/screenshots/09-teacher-usage.png) |
+| ![Acknowledgements](docs/screenshots/08-acknowledgements.png) | |
 
 Regenerate with `docs/screenshots/regenerate.mjs` (see [docs/screenshots/README.md](docs/screenshots/README.md)).
 
@@ -46,7 +48,7 @@ Regenerate with `docs/screenshots/regenerate.mjs` (see [docs/screenshots/README.
 | Frontend runtime | Node 26 (Alpine) in Docker |
 | Database | PostgreSQL 16 |
 | Vector DB | Qdrant (per-course versioned collections) |
-| LLM | Cerebras (default; `gpt-oss-120b` across the stack ; classifiers, Aegis, rewrites, writeup) or any OpenAI-compatible endpoint |
+| LLM | Admin-managed `chat_models` catalog (per-model provider + USD rates). Providers register from env keys: Cerebras (default; `gpt-oss-120b` across the stack ; classifiers, Aegis, rewrites, writeup), OpenAI, Anthropic, Groq, Gemini, or any OpenAI-compatible endpoint via `MINERVA_LLM_BASE_URL__<PROVIDER>` |
 | Embeddings | OpenAI or local fastembed (memory-budgeted LRU cache, HuggingFace cache persisted on `/data0` in prod) |
 | Edge | Apache 2 with `mod_shib` + `mod_lua` |
 
@@ -78,14 +80,17 @@ For the k3s production layout used at DSV, see `k8s/`.
 | `MINERVA_HMAC_SECRET` | Signs embed/invite/LTI tokens; mirrored to Apache for `mod_lua` |
 | `MINERVA_ADMINS` | Comma-separated admin eppn prefixes |
 | `MINERVA_DOCS_PATH` | Document storage path |
-| `CEREBRAS_API_KEY` | Inference key |
-| `OPENAI_API_KEY` | Embedding key (optional with fastembed) |
+| `CEREBRAS_API_KEY` | Inference key; required (the default chat + utility models are Cerebras-hosted) |
+| `OPENAI_API_KEY` | OpenAI chat models and OpenAI embeddings (optional with fastembed) |
+| `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` | Optional; a provider is registered only when its key is set |
+| `MINERVA_LLM_BASE_URL__<PROVIDER>` | Overrides a provider's base URL (self-hosted or proxied endpoints) |
+| `MINERVA_EMBEDDER_URL`, `MINERVA_RERANKER_URL` | gRPC endpoints of the model servers |
 | `MINERVA_BASE_URL` | Public base URL for LTI tool URLs |
 | `MINERVA_LTI_KEY_SEED` | RSA seed for LTI 1.3 (falls back to HMAC secret) |
 | `MINERVA_SERVICE_API_KEY` | Bearer for `/api/service/*` pipelines |
 | `MINERVA_DEV_MODE` | `true` bypasses Shibboleth |
-| `MINERVA_DEFAULT_COURSE_DAILY_TOKEN_LIMIT` | Per-student-per-course default (`0` = unlimited) |
-| `MINERVA_DEFAULT_OWNER_DAILY_TOKEN_LIMIT` | Per-owner aggregate default (`0` = unlimited) |
+| `MINERVA_DEFAULT_COURSE_DAILY_USD` | Per-student-per-course spend default (`0` = unlimited) |
+| `MINERVA_DEFAULT_OWNER_DAILY_USD` | Per-owner aggregate spend default (`0` = unlimited) |
 | `MINERVA_CANVAS_AUTO_SYNC_INTERVAL_HOURS` | Canvas re-sync interval |
 
 See [.env.example](.env.example) for the rest.

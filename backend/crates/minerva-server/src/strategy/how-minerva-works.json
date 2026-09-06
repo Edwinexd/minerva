@@ -1,0 +1,10 @@
+{
+  "howMinervaWorks": {
+    "whatItIs": "Minerva is an open-source (AGPL-3.0) AI study assistant built at the Department of Computer and Systems Sciences (DSV), Stockholm University. It is not ChatGPT and not a general-purpose chatbot: each Minerva course answers from that course's own materials.",
+    "whichModel": "The reply is written by a large language model that the course's teacher picks from an administrator-managed catalogue, so the exact model depends on the course you are in. The default at DSV is the open-weights GPT-OSS-120B served by Cerebras; administrators can also enable models from OpenAI, Anthropic, Groq or Google, or any OpenAI-compatible endpoint. Minerva is not built by any of those vendors; it sends them only the text needed to answer the question.",
+    "howAnswersAreBuilt": "Before writing anything, Minerva searches the course material. Every document is split into chunks and turned into vectors by an embedding model, the chunks closest to the question are fetched from a vector database, and a cross-encoder re-ranker re-orders them. The best excerpts go into the language model's context, and the answer is grounded in them with [n] citations pointing back at the source. When the material does not cover a question, Minerva is expected to say so rather than invent an answer.",
+    "optionalBehaviour": "A course can switch on extra behaviour: a research phase where the model calls search tools before writing, FLARE (extra retrieval triggered mid-answer when the model is unsure), a knowledge graph that pulls in related documents, prompt coaching before you send, and safeguards that avoid handing out solutions to assessed work.",
+    "limits": "Minerva has no memory beyond the current conversation and the course's own materials. It cannot browse the internet, read other courses, or see other students' conversations.",
+    "moreInfo": "The full technical description (ingest pipeline, retrieval, generation, spending caps) is in the project's ARCHITECTURE.md, and the entire source code is public on GitHub. For how personal data and conversations are handled, see the Data handling page in Minerva."
+  }
+}

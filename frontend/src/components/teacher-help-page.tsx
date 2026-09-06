@@ -2,10 +2,13 @@ import { useTranslation } from "react-i18next"
 import { useDocumentTitle } from "@/lib/use-document-title"
 
 /**
- * Teacher onboarding guide. Walks a teacher through wiring Minerva into a
- * Moodle course end to end (add the activity, link materials, first launch).
- * The screenshots live in `public/help/` and are captured against the real
- * dev stacks; keep them in sync with the LaTeX guide under `docs/`.
+ * Teacher onboarding guide. The per-course setup is down to three Moodle
+ * steps: the Daisy import, the plugin's external-id auto-link and the
+ * twice-hourly material sync do the rest, so the guide leads with what
+ * already happens on its own and only then asks the teacher to do
+ * something. The screenshots live in `public/help/` and are captured
+ * against the real dev stacks; keep them in sync with the LaTeX guide
+ * under `docs/`.
  */
 function Shot({ src, alt }: { src: string; alt: string }) {
   return (
@@ -21,8 +24,8 @@ function Shot({ src, alt }: { src: string; alt: string }) {
 /**
  * `embedded` renders the guide as a section of the teacher portal, which
  * already owns the page h1 and the document title: the guide title drops
- * to an h2 and every step heading follows it down one level, so the
- * portal page keeps a single heading hierarchy.
+ * to an h2, every step heading follows it down one level, and the column
+ * stops centring itself so it lines up with the portal's other tabs.
  */
 export function TeacherHelpPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation("common")
@@ -31,7 +34,7 @@ export function TeacherHelpPage({ embedded = false }: { embedded?: boolean }) {
   useDocumentTitle(embedded ? undefined : t("pageTitles.teacherHelp"))
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className={embedded ? "max-w-3xl" : "max-w-3xl mx-auto"}>
       <Title className="text-2xl font-bold tracking-tight mb-3">
         {t("teacherGuide.title")}
       </Title>
@@ -47,20 +50,23 @@ export function TeacherHelpPage({ embedded = false }: { embedded?: boolean }) {
         {t("teacherGuide.adminNote")}
       </div>
 
-      <ol className="mt-8 space-y-12">
-        <li>
-          <Section className="text-lg font-semibold">
-            {t("teacherGuide.steps.login.title")}
-          </Section>
-          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-            {t("teacherGuide.steps.login.body")}
-          </p>
-          <Shot
-            src="/help/minerva-dashboard.png"
-            alt={t("teacherGuide.steps.login.alt")}
-          />
-        </li>
+      <section className="mt-8">
+        <Section className="text-lg font-semibold">
+          {t("teacherGuide.automatic.title")}
+        </Section>
+        <ul className="mt-2 list-disc pl-5 space-y-2 text-sm leading-relaxed text-muted-foreground">
+          <li>{t("teacherGuide.automatic.items.courses")}</li>
+          <li>{t("teacherGuide.automatic.items.link")}</li>
+          <li>{t("teacherGuide.automatic.items.materials")}</li>
+          <li>{t("teacherGuide.automatic.items.play")}</li>
+        </ul>
+        <Shot
+          src="/help/minerva-dashboard.png"
+          alt={t("teacherGuide.automatic.alt")}
+        />
+      </section>
 
+      <ol className="mt-12 space-y-12">
         <li>
           <Section className="text-lg font-semibold">
             {t("teacherGuide.steps.enableTool.title")}
@@ -103,30 +109,6 @@ export function TeacherHelpPage({ embedded = false }: { embedded?: boolean }) {
 
         <li>
           <Section className="text-lg font-semibold">
-            {t("teacherGuide.steps.linkMaterials.title")}
-          </Section>
-          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-            {t("teacherGuide.steps.linkMaterials.body")}
-          </p>
-          <Shot
-            src="/help/link-form.png"
-            alt={t("teacherGuide.steps.linkMaterials.alt")}
-          />
-          <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
-            {t("teacherGuide.steps.linkMaterials.body2")}
-          </p>
-          <Shot
-            src="/help/linked.png"
-            alt={t("teacherGuide.steps.linkMaterials.altLinked")}
-          />
-          <Shot
-            src="/help/sync-complete.png"
-            alt={t("teacherGuide.steps.linkMaterials.altSync")}
-          />
-        </li>
-
-        <li>
-          <Section className="text-lg font-semibold">
             {t("teacherGuide.steps.firstLaunch.title")}
           </Section>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
@@ -157,10 +139,44 @@ export function TeacherHelpPage({ embedded = false }: { embedded?: boolean }) {
       </section>
 
       <section className="mt-12">
+        <Section className="text-lg font-semibold">
+          {t("teacherGuide.ownCourse.title")}
+        </Section>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          {t("teacherGuide.ownCourse.body")}
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+          {t("teacherGuide.ownCourse.body2")}
+        </p>
+      </section>
+
+      <section className="mt-12">
+        <Section className="text-lg font-semibold">
+          {t("teacherGuide.manualLink.title")}
+        </Section>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          {t("teacherGuide.manualLink.body")}
+        </p>
+        <Shot
+          src="/help/link-form.png"
+          alt={t("teacherGuide.manualLink.alt")}
+        />
+        <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+          {t("teacherGuide.manualLink.body2")}
+        </p>
+        <Shot src="/help/linked.png" alt={t("teacherGuide.manualLink.altLinked")} />
+        <Shot
+          src="/help/sync-complete.png"
+          alt={t("teacherGuide.manualLink.altSync")}
+        />
+      </section>
+
+      <section className="mt-12">
         <Section className="text-lg font-semibold">{t("teacherGuide.tips.title")}</Section>
         <ul className="mt-2 list-disc pl-5 space-y-2 text-sm leading-relaxed text-muted-foreground">
           <li>{t("teacherGuide.tips.materials")}</li>
-          <li>{t("teacherGuide.tips.resync")}</li>
+          <li>{t("teacherGuide.tips.unlink")}</li>
+          <li>{t("teacherGuide.tips.forums")}</li>
           <li>
             {t("teacherGuide.tips.supportLead")}{" "}
             <a

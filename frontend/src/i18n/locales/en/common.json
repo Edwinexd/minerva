@@ -1,7 +1,8 @@
 {
   "nav": {
     "admin": "Admin",
-    "teacher": "Teaching",
+    "courses": "Courses",
+    "teacher": "Teacher",
     "teacherView": "Teacher view",
     "dataHandling": "Data handling",
     "acknowledgements": "Acknowledgements",
@@ -12,7 +13,7 @@
   "pageTitles": {
     "home": "Home",
     "teacherHelp": "Teacher guide",
-    "teacher": "Teaching",
+    "teacher": "Teacher",
     "teacherTab": {
       "usage": "AI usage",
       "guide": "Guide"
@@ -126,53 +127,64 @@
   },
   "teacherGuide": {
     "title": "Set up Minerva for your course",
-    "intro": "Minerva is an AI study assistant that answers from your own course materials. Your students reach it from a link inside your Moodle course, and setting it up takes about ten minutes.",
-    "adminNote": "Your administrator has registered Minerva as an external tool across Moodle. You still need to enable it for each of your courses (step 2) before it appears in the activity chooser.",
-    "timeBadge": "About 10 minutes, 5 steps",
-    "steps": {
-      "login": {
-        "title": "1. Log in to Minerva",
-        "body": "Go to minerva.dsv.su.se and sign in with your SU account. Courses imported nightly from Daisy appear on your dashboard. If a course is missing, create it with New Course.",
-        "alt": "Minerva dashboard showing the teacher's courses"
+    "intro": "Minerva is an AI study assistant that answers from your own course materials. Your course, its materials and its recorded lectures are already kept up to date in Minerva, so all that is left is putting a link to it inside Moodle.",
+    "timeBadge": "About 5 minutes, 3 steps",
+    "adminNote": "Your administrator has registered Minerva as an external tool across Moodle. You still need to enable it for each of your courses (step 1) before it appears in the activity chooser.",
+    "automatic": {
+      "title": "What happens on its own",
+      "items": {
+        "courses": "Courses are imported from Daisy every night, so yours is already in Minerva.",
+        "link": "A Moodle course whose Course ID number holds its Daisy offering id is linked to the matching Minerva course automatically, usually within the hour.",
+        "materials": "Linked material is re-synced twice an hour, so new files and pages are picked up without you doing anything.",
+        "play": "Recorded lectures from DSV Play are pulled in from the course's Play designation, transcripts and all."
       },
+      "alt": "Minerva dashboard showing the teacher's courses"
+    },
+    "steps": {
       "enableTool": {
-        "title": "2. Enable Minerva in your course",
+        "title": "1. Enable Minerva in your course",
         "body": "In your Moodle course, open the More menu and choose LTI External tools. Find Minerva, activate it, and turn on Show in activity chooser.",
         "alt": "Course LTI External tools page with Minerva activated and shown in the activity chooser",
         "body2": "Once enabled correctly, Minerva appears in the activity chooser with its logo. If you instead see a blank or generic icon, the tool was registered without its icon; contact lambda@dsv.su.se."
       },
       "addActivity": {
-        "title": "3. Add the Minerva activity to a section",
+        "title": "2. Add the Minerva activity to a section",
         "body": "In your Moodle course, turn on Edit mode, select Add an activity or resource in the section where you want the assistant, and choose Minerva.",
         "alt": "Moodle activity chooser with the Minerva tool and its logo",
         "body2": "Give it a name students will recognise, then choose Save and return to course. The activity now appears in your course.",
         "altConfig": "External tool settings with the activity name filled in",
         "altCourse": "Moodle course page with the Minerva activity added"
       },
-      "linkMaterials": {
-        "title": "4. Connect your course materials",
-        "body": "Open Minerva settings from the course's More menu, pick your matching Minerva course from the list, and choose Link Minerva course.",
-        "alt": "Minerva settings link form with the course dropdown",
-        "body2": "Then choose Sync materials to upload your files, pages, and section summaries so the assistant can answer from them. Re-run it whenever you change materials; it also runs automatically twice an hour.",
-        "altLinked": "Linked course with Sync materials and Unlink buttons",
-        "altSync": "Material sync complete confirmation"
-      },
       "firstLaunch": {
-        "title": "5. Open it once to connect the activity",
+        "title": "3. Open it once and pick the course",
         "body": "Click the Minerva activity you added. The first time, pick which Minerva course it should open and choose Link and open Minerva. Minerva remembers this, so every later launch by you or your students opens the right course.",
         "alt": "First-launch screen linking the Moodle activity to a Minerva course"
       }
     },
     "result": {
       "title": "That is it: here is what students see",
-      "body": "Students click the same activity and get a chat assistant that answers from your course materials, right inside Moodle. The suggested questions are drawn from what you synced.",
+      "body": "Students click the same activity and get a chat assistant that answers from your course materials, right inside Moodle. The suggested questions are drawn from those materials.",
       "altChat": "Minerva chat with suggested starter questions",
       "altInMoodle": "Minerva chat embedded inside the Moodle activity"
     },
+    "ownCourse": {
+      "title": "Deciding exactly what is indexed",
+      "body": "The automatic link indexes what is in your Moodle course. If you would rather choose precisely what the assistant answers from, create your own course in Minerva with New Course and upload only the documents you want.",
+      "body2": "Then add a second Minerva activity in Moodle and point it at that course the first time you open it. Both activities can sit in the same Moodle course; students get whichever one you send them to."
+    },
+    "manualLink": {
+      "title": "If the automatic link did not happen",
+      "body": "Without a Daisy offering id in the Moodle course's Course ID number there is nothing to match on, so nothing gets linked. Open Minerva settings from the course's More menu, pick the Minerva course and choose Link Minerva course.",
+      "alt": "Minerva settings link form with the course dropdown",
+      "body2": "Sync materials then uploads your files, pages and section summaries right away; after that the twice-hourly sync keeps them current.",
+      "altLinked": "Linked course with Sync materials and Unlink buttons",
+      "altSync": "Material sync complete confirmation"
+    },
     "tips": {
       "title": "Good to know",
-      "materials": "The assistant only uses materials you sync. Student conversations are visible to course staff; see Data handling for details.",
-      "resync": "Re-sync after you change materials. You can also include teacher-answered forum threads from Minerva settings (optional; student names are removed before upload).",
+      "materials": "The assistant only answers from material in the Minerva course the activity points at. Student conversations are visible to course staff; see Data handling for details.",
+      "unlink": "A course linked automatically says so in Minerva settings: unlinking it there keeps it unlinked, and it will not be auto-linked again.",
+      "forums": "Teacher-answered forum threads can be included from Minerva settings (optional; student names are removed before upload).",
       "supportLead": "Questions or need higher usage limits? Email"
     }
   },

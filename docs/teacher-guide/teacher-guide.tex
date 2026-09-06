@@ -48,7 +48,7 @@
 \begin{center}
   {\LARGE\bfseries Minerva}\\[2pt]
   {\Large\color{accent} Teacher Setup Guide}\\[6pt]
-  {\color{soft}\small Connect the Minerva AI study assistant to your Moodle course \textbullet{} about 10 minutes \textbullet{} 5 steps}
+  {\color{soft}\small Connect the Minerva AI study assistant to your Moodle course \textbullet{} about 5 minutes \textbullet{} 3 steps}
 \end{center}
 
 \vspace{0.4em}
@@ -57,23 +57,31 @@
 
 \noindent
 Minerva is an AI study assistant that answers from your own course materials.
-Your students reach it from a link inside your Moodle course. This guide walks
-you through the per-course setup from start to finish.
+Your course, its materials and its recorded lectures are already kept up to
+date in Minerva, so all that is left is putting a link to it inside Moodle.
 
 \callout{\textbf{Before you start:} your administrator has registered Minerva as
 an external tool across Moodle. You still need to enable it for each of your
-courses (Step 2) before it shows up in the activity chooser. If you do not see
+courses (Step 1) before it shows up in the activity chooser. If you do not see
 the options shown here, contact \href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.}
 
-\section{Step 1. Log in to Minerva}
+\section{What happens on its own}
 
-Go to \href{https://minerva.dsv.su.se}{minerva.dsv.su.se} and sign in with your
-SU account. Courses imported nightly from Daisy appear on your dashboard. If a
-course is missing, create it with \textbf{New Course}.
+\begin{itemize}[leftmargin=1.4em,itemsep=4pt]
+  \item Courses are imported from Daisy every night, so yours is already in
+  Minerva.
+  \item A Moodle course whose \textbf{Course ID number} holds its Daisy offering
+  id is linked to the matching Minerva course automatically, usually within the
+  hour.
+  \item Linked material is re-synced twice an hour, so new files and pages are
+  picked up without you doing anything.
+  \item Recorded lectures from DSV Play are pulled in from the course's Play
+  designation, transcripts and all.
+\end{itemize}
 
 \shot{minerva-dashboard.png}{Your Minerva dashboard, with the courses you teach.}
 
-\section{Step 2. Enable Minerva in your course}
+\section{Step 1. Enable Minerva in your course}
 
 Minerva is registered across Moodle, but it does not appear in a course until
 you switch it on. In your Moodle course, open the \textbf{More} menu and choose
@@ -86,7 +94,7 @@ Once enabled correctly, Minerva appears in the activity chooser with its logo.
 If you instead see a blank or generic icon, the tool was registered without its
 icon; contact \href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.
 
-\section{Step 3. Add the Minerva activity to a section}
+\section{Step 2. Add the Minerva activity to a section}
 
 In your Moodle course, turn on \textbf{Edit mode}, select \textbf{Add an
 activity or resource} in the section where you want the assistant, and choose
@@ -101,21 +109,7 @@ course.
 \shot{lti-config.png}{Name the activity and save.}
 \shot{course-activity.png}{The Minerva activity is now in your course.}
 
-\section{Step 4. Connect your course materials}
-
-Open \textbf{Minerva settings} from the course's \textbf{More} menu, pick your
-matching Minerva course from the list, and choose \textbf{Link Minerva course}.
-
-\shot{link-form.png}{Minerva settings: choose your Minerva course and link it.}
-
-Then choose \textbf{Sync materials} to upload your files, pages, and section
-summaries so the assistant can answer from them. Re-run it whenever you change
-materials; it also runs automatically twice an hour.
-
-\shot{linked.png}{Once linked, you can sync materials or unlink at any time.}
-\shot{sync-complete.png}{Minerva confirms how many resources were uploaded.}
-
-\section{Step 5. Open it once to connect the activity}
+\section{Step 3. Open it once and pick the course}
 
 Click the Minerva activity you added. The first time, pick which Minerva course
 it should open and choose \textbf{Link and open Minerva}. Minerva remembers
@@ -127,19 +121,46 @@ this, so every later launch by you or your students opens the right course.
 
 Students click the same activity and get a chat assistant that answers from your
 course materials, right inside Moodle. The suggested questions are drawn from
-what you synced.
+those materials.
 
 \shot{student-chat.png}{The student view: a course-grounded chat assistant.}
 \shot{launch-in-moodle.png}{The same assistant, embedded inside the Moodle activity.}
 
+\section{Deciding exactly what is indexed}
+
+The automatic link indexes what is in your Moodle course. If you would rather
+choose precisely what the assistant answers from, create your own course in
+Minerva with \textbf{New Course} and upload only the documents you want.
+
+Then add a second Minerva activity in Moodle and point it at that course the
+first time you open it. Both activities can sit in the same Moodle course;
+students get whichever one you send them to.
+
+\section{If the automatic link did not happen}
+
+Without a Daisy offering id in the Moodle course's \textbf{Course ID number}
+there is nothing to match on, so nothing gets linked. Open \textbf{Minerva
+settings} from the course's \textbf{More} menu, pick the Minerva course and
+choose \textbf{Link Minerva course}.
+
+\shot{link-form.png}{Minerva settings: choose your Minerva course and link it.}
+
+\textbf{Sync materials} then uploads your files, pages and section summaries
+right away; after that the twice-hourly sync keeps them current.
+
+\shot{linked.png}{Once linked, you can sync materials or unlink at any time.}
+\shot{sync-complete.png}{Minerva confirms how many resources were uploaded.}
+
 \section{Good to know}
 
 \begin{itemize}[leftmargin=1.4em,itemsep=4pt]
-  \item The assistant only uses materials you sync. Student conversations are
-  visible to course staff; see \textbf{Data handling} in Minerva for details.
-  \item Re-sync after you change materials. You can also include
-  teacher-answered forum threads from \textbf{Minerva settings} (optional;
-  student names are removed before upload).
+  \item The assistant only answers from material in the Minerva course the
+  activity points at. Student conversations are visible to course staff; see
+  \textbf{Data handling} in Minerva for details.
+  \item A course linked automatically says so in \textbf{Minerva settings}:
+  unlinking it there keeps it unlinked, and it will not be auto-linked again.
+  \item Teacher-answered forum threads can be included from \textbf{Minerva
+  settings} (optional; student names are removed before upload).
   \item Questions or need higher usage limits? Email
   \href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.
 \end{itemize}

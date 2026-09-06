@@ -48,7 +48,7 @@
 \begin{center}
   {\LARGE\bfseries Minerva}\\[2pt]
   {\Large\color{accent} Lärarguide}\\[6pt]
-  {\color{soft}\small Koppla AI-studieassistenten Minerva till din Moodle-kurs \textbullet{} ungefär 10 minuter \textbullet{} 5 steg}
+  {\color{soft}\small Koppla AI-studieassistenten Minerva till din Moodle-kurs \textbullet{} ungefär 5 minuter \textbullet{} 3 steg}
 \end{center}
 
 \vspace{0.4em}
@@ -56,25 +56,32 @@
 \vspace{1.0em}
 
 \noindent
-Minerva är en AI-studieassistent som svarar utifrån ditt eget kursmaterial.
-Dina studenter når den via en länk inne i din Moodle-kurs. Den här guiden går
-igenom inställningarna per kurs från början till slut.
+Minerva är en AI-studieassistent som svarar utifrån ditt eget kursmaterial. Din
+kurs, dess material och dess inspelade föreläsningar hålls redan uppdaterade i
+Minerva, så det som återstår är att lägga in en länk till den i Moodle.
 
 \callout{\textbf{Innan du börjar:} din administratör har registrerat Minerva som
 ett externt verktyg i hela Moodle. Du behöver fortfarande aktivera det för var
-och en av dina kurser (Steg 2) innan det visas i aktivitetsväljaren. Om du inte
+och en av dina kurser (Steg 1) innan det visas i aktivitetsväljaren. Om du inte
 ser alternativen som visas här, kontakta
 \href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.}
 
-\section{Steg 1. Logga in i Minerva}
+\section{Det här sker automatiskt}
 
-Gå till \href{https://minerva.dsv.su.se}{minerva.dsv.su.se} och logga in med ditt
-SU-konto. Kurser som importeras nattligen från Daisy visas på din översikt. Om en
-kurs saknas kan du skapa den med \textbf{New Course}.
+\begin{itemize}[leftmargin=1.4em,itemsep=4pt]
+  \item Kurser importeras från Daisy varje natt, så din kurs finns redan i
+  Minerva.
+  \item En Moodle-kurs vars \textbf{Course ID number} innehåller Daisy-tillfällets
+  id kopplas automatiskt till motsvarande Minerva-kurs, oftast inom en timme.
+  \item Kopplat material synkas två gånger i timmen, så nya filer och sidor kommer
+  med utan att du gör något.
+  \item Inspelade föreläsningar från DSV Play hämtas via kursens Play-beteckning,
+  transkript och allt.
+\end{itemize}
 
 \shot{minerva-dashboard.png}{Din Minerva-översikt med de kurser du undervisar i.}
 
-\section{Steg 2. Aktivera Minerva i din kurs}
+\section{Steg 1. Aktivera Minerva i din kurs}
 
 Minerva är registrerat i hela Moodle, men det visas inte i en kurs förrän du
 aktiverar det. I din Moodle-kurs, öppna menyn \textbf{More} och välj \textbf{LTI
@@ -87,7 +94,7 @@ När det är korrekt aktiverat visas Minerva i aktivitetsväljaren med sin logot
 Om du istället ser en tom eller generisk ikon har verktyget registrerats utan sin
 ikon; kontakta \href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.
 
-\section{Steg 3. Lägg till Minerva-aktiviteten i ett avsnitt}
+\section{Steg 2. Lägg till Minerva-aktiviteten i ett avsnitt}
 
 I din Moodle-kurs, slå på \textbf{Edit mode}, välj \textbf{Add an activity or
 resource} i det avsnitt där du vill ha assistenten och välj \textbf{Minerva}.
@@ -101,21 +108,7 @@ nu i din kurs.
 \shot{lti-config.png}{Namnge aktiviteten och spara.}
 \shot{course-activity.png}{Minerva-aktiviteten finns nu i din kurs.}
 
-\section{Steg 4. Koppla ditt kursmaterial}
-
-Öppna \textbf{Minerva settings} från kursens \textbf{More}-meny, välj din
-motsvarande Minerva-kurs i listan och välj \textbf{Link Minerva course}.
-
-\shot{link-form.png}{Minerva settings: välj din Minerva-kurs och länka den.}
-
-Välj sedan \textbf{Sync materials} för att ladda upp dina filer, sidor och
-avsnittssammanfattningar så att assistenten kan svara utifrån dem. Kör om det när
-du ändrar material; det körs även automatiskt två gånger i timmen.
-
-\shot{linked.png}{När kursen är länkad kan du synka material eller avlänka när som helst.}
-\shot{sync-complete.png}{Minerva bekräftar hur många resurser som laddades upp.}
-
-\section{Steg 5. Öppna den en gång för att koppla aktiviteten}
+\section{Steg 3. Öppna den en gång och välj kurs}
 
 Klicka på Minerva-aktiviteten du lade till. Första gången väljer du vilken
 Minerva-kurs den ska öppna och väljer \textbf{Link and open Minerva}. Minerva
@@ -128,20 +121,47 @@ rätt kurs.
 
 Studenterna klickar på samma aktivitet och får en chattassistent som svarar
 utifrån ditt kursmaterial, direkt i Moodle. De föreslagna frågorna hämtas från
-det du har synkat.
+materialet.
 
 \shot{student-chat.png}{Studentvyn: en kursförankrad chattassistent.}
 \shot{launch-in-moodle.png}{Samma assistent, inbäddad i Moodle-aktiviteten.}
 
+\section{Bestäm exakt vad som indexeras}
+
+Den automatiska kopplingen indexerar det som finns i din Moodle-kurs. Vill du
+istället välja precis vad assistenten svarar utifrån skapar du en egen kurs i
+Minerva med \textbf{New Course} och laddar upp bara de dokument du vill ha med.
+
+Lägg sedan till ytterligare en Minerva-aktivitet i Moodle och peka den mot den
+kursen första gången du öppnar den. Båda aktiviteterna kan ligga i samma
+Moodle-kurs; studenterna får den du skickar dem till.
+
+\section{Om den automatiska kopplingen uteblev}
+
+Utan ett Daisy-tillfälles id i Moodle-kursens \textbf{Course ID number} finns
+inget att matcha mot, och då kopplas ingenting. Öppna \textbf{Minerva settings}
+via kursens \textbf{More}-meny, välj Minerva-kursen och klicka \textbf{Link
+Minerva course}.
+
+\shot{link-form.png}{Minerva settings: välj din Minerva-kurs och länka den.}
+
+\textbf{Sync materials} laddar då upp dina filer, sidor och
+avsnittssammanfattningar direkt; därefter håller synken två gånger i timmen dem
+aktuella.
+
+\shot{linked.png}{När kursen är länkad kan du synka material eller avlänka när som helst.}
+\shot{sync-complete.png}{Minerva bekräftar hur många resurser som laddades upp.}
+
 \section{Bra att veta}
 
 \begin{itemize}[leftmargin=1.4em,itemsep=4pt]
-  \item Assistenten använder bara material du synkar. Studenternas
-  konversationer är synliga för kurspersonal; se \textbf{Data handling} i Minerva
-  för detaljer.
-  \item Synka om efter att du ändrat material. Du kan även inkludera
-  lärarbesvarade forumtrådar från \textbf{Minerva settings} (valfritt;
-  studenternas namn tas bort före uppladdning).
+  \item Assistenten svarar bara utifrån materialet i den Minerva-kurs som
+  aktiviteten pekar på. Studenternas konversationer är synliga för kurspersonal;
+  se \textbf{Data handling} i Minerva för detaljer.
+  \item En kurs som kopplats automatiskt visar det i \textbf{Minerva settings}:
+  tar du bort länken där förblir den olänkad och kopplas inte automatiskt igen.
+  \item Lärarbesvarade forumtrådar kan tas med från \textbf{Minerva settings}
+  (valfritt; studenternas namn tas bort före uppladdning).
   \item Frågor eller behöver du högre användningsgränser? Mejla
   \href{mailto:lambda@dsv.su.se}{lambda@dsv.su.se}.
 \end{itemize}

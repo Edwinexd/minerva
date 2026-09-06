@@ -97,6 +97,14 @@ export function RootLayout() {
             </Link>
           )}
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm min-w-0">
+            {!isEmbed && user && (
+              <Link
+                to="/"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                {t("nav.courses")}
+              </Link>
+            )}
             {!isEmbed && user && isTeacherOrAbove(user.role) && (
               <Link
                 to="/teacher/usage"

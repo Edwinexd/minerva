@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO course_token_usage\n                           (id, course_id, category, model, prompt_tokens,\n                            completion_tokens, created_at)\n                       VALUES ($1, $2, $3, $4, $5, $6,\n                               NOW() - ($7 || ' days')::interval\n                                     + ($8 || ' minutes')::interval)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9884e16fcc43c7acb8779387226a01210ee03a60c50a5acf612ba9a9a9d2ccea"
+}

@@ -142,16 +142,44 @@ async fn dev_config(State(state): State<AppState>) -> Json<Value> {
         return Json(json!({ "dev_mode": false }));
     }
 
-    let mut dev_users = vec![
-        json!({ "eppn": "student@su.se", "label": "Student" }),
-        json!({ "eppn": "teacher@su.se", "label": "Teacher" }),
-    ];
+    // Admins first: the switcher writes its first entry to localStorage
+    // on mount, so whatever leads this list is who a fresh browser
+    // becomes. Leading with the operator's own account matches the
+    // header-less dev fallback in `auth_middleware` (first
+    // MINERVA_ADMINS entry), instead of silently demoting them to a
+    // student on the first page load.
+    let mut dev_users: Vec<Value> = state
+        .config
+        .admin_usernames
+        .iter()
+        .map(|admin| {
+            json!({
+                "eppn": format!("{}@su.se", admin),
+                "label": format!("Admin ({})", admin),
+            })
+        })
+        .collect();
 
-    for admin in &state.config.admin_usernames {
-        dev_users.push(json!({
-            "eppn": format!("{}@su.se", admin),
-            "label": format!("Admin ({})", admin),
-        }));
+    dev_users.push(json!({ "eppn": "student@su.se", "label": "Student" }));
+    dev_users.push(json!({ "eppn": "teacher@su.se", "label": "Teacher" }));
+
+    // Whatever the seeder created is offered too. The fixture cast is
+    // where the interesting state lives (the teacher who owns the
+    // seeded courses and their spend, the TA, the ext: guest), and
+    // without this the only way to look at the app as one of them is
+    // to hand-edit localStorage.
+    if let Ok(rows) = sqlx::query!(
+        r#"SELECT eppn, display_name FROM users
+            WHERE eppn LIKE 'seed-%' OR eppn LIKE 'ext:seed-%'
+            ORDER BY eppn"#
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        for row in rows {
+            let label = row.display_name.unwrap_or_else(|| row.eppn.clone());
+            dev_users.push(json!({ "eppn": row.eppn, "label": label }));
+        }
     }
 
     Json(json!({

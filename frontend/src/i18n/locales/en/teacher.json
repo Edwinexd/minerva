@@ -527,11 +527,10 @@
     },
     "providers": {
       "title": "By provider",
-      "description": "Which service ran the models. Paid providers are the ones a limit increase needs budget approval for.",
+      "description": "Which service ran the models behind that spend.",
       "colProvider": "Provider",
       "colSpend": "Spend",
-      "colTokens": "Tokens",
-      "budgeted": "Billed to a budget"
+      "colTokens": "Tokens"
     },
     "daily": {
       "title": "Daily spend",
@@ -546,11 +545,10 @@
       "lead": "Mail lambda@dsv.su.se with the details below. Include:",
       "items": {
         "identity": "Your SU username (eppn), so the limit lands on the right account.",
-        "unit": "Your unit or department, which carries the cost.",
-        "courses": "The course or courses the limit is for.",
+        "courses": "Which of your courses the increase is for.",
         "amount": "The daily limit you need, and why (class size, planned exercise, exam period)."
       },
-      "budgetNote": "Your courses run on {{providers}}, which is billed to your unit's budget. Get the increase approved by whoever owns that budget and say so in the mail; without it the request stalls.",
+      "coursesLegend": "Courses this increase is for",
       "subject": "Minerva: raise daily AI limit for {{eppn}}",
       "mailButton": "Mail {{email}}",
       "copyButton": "Copy the details",
@@ -558,15 +556,12 @@
       "draft": {
         "name": "Name: {{name}}",
         "eppn": "SU username (eppn): {{eppn}}",
-        "unit": "Unit / department: ",
-        "courses": "Courses: {{courses}}",
-        "noCourses": "(none yet)",
+        "courses": "Courses the increase is for: {{courses}}",
+        "noCourses": "(none selected)",
         "currentLimit": "Current daily limit: {{limit}}",
         "peak": "Busiest day in the last {{days}} days: {{peak}}",
         "requested": "Requested daily limit: ",
-        "reason": "Reason: ",
-        "budgetedProviders": "Models run on: {{providers}} (paid, needs unit budget approval)",
-        "selfHostedOnly": "Models run on self-hosted providers only"
+        "reason": "Reason: "
       }
     }
   },

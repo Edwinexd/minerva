@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -27,11 +28,6 @@ import {
 /// Where limit-increase requests go. Same address as the 429 body the
 /// students see when a cap is hit.
 const SUPPORT_EMAIL = "lambda@dsv.su.se"
-
-/// Providers whose spend is real money off a unit's budget, so a limit
-/// increase needs that unit to approve it. Anything else (self-hosted)
-/// only costs cluster time.
-const BUDGETED_PROVIDERS = new Set(["cerebras"])
 
 const WINDOW_OPTIONS = [7, 30, 90] as const
 
@@ -330,14 +326,7 @@ export function OwnerUsagePage() {
                 <tbody>
                   {usage.providers.map((provider) => (
                     <tr key={provider.provider} className="border-b">
-                      <td className="py-2 pr-4">
-                        {provider.provider}
-                        {BUDGETED_PROVIDERS.has(provider.provider) && (
-                          <Badge variant="secondary" className="ml-2">
-                            {t("ownerUsage.providers.budgeted")}
-                          </Badge>
-                        )}
-                      </td>
+                      <td className="py-2 pr-4">{provider.provider}</td>
                       <td className="py-2 pr-4 text-right font-mono">
                         {formatUsd(provider.window_spend_usd)}
                       </td>
@@ -415,10 +404,10 @@ export function OwnerUsagePage() {
 /**
  * What to send when the daily cap is too low, plus a pre-filled draft.
  * The fields are the ones the request is actually decided on: who is
- * asking, which unit carries the cost, which courses, and how much is
- * already being spent. Everything except the unit and the requested
- * figure is filled in from the data on this page, so the teacher is
- * left with two blanks rather than a blank page.
+ * asking, which courses it covers, and what is already being spent.
+ * Everything except the requested figure and the reason is filled in
+ * from the data on this page; anything else the request turns out to
+ * need is a reply away.
  */
 function IncreaseRequestCard({
   usage,
@@ -433,19 +422,28 @@ function IncreaseRequestCard({
 }) {
   const { t } = useTranslation("teacher")
   const { copiedKey, copy } = useCopyFeedback()
+  const activeCourses = usage.courses.filter((c) => c.active)
+  // The request is per course, so the teacher picks which ones it
+  // covers. Everything they own is pre-selected: narrowing a list is
+  // less work than rebuilding it, and asking for all of them is the
+  // common case at the start of a term.
+  const [selected, setSelected] = useState<string[] | null>(null)
+  const selectedIds = selected ?? activeCourses.map((c) => c.id)
+  const toggle = (id: string) =>
+    setSelected(
+      selectedIds.includes(id)
+        ? selectedIds.filter((c) => c !== id)
+        : [...selectedIds, id],
+    )
 
-  const budgetedProviders = usage.providers
-    .map((p) => p.provider)
-    .filter((provider) => BUDGETED_PROVIDERS.has(provider))
-  const courseList = usage.courses
-    .filter((c) => c.active)
+  const courseList = activeCourses
+    .filter((c) => selectedIds.includes(c.id))
     .map((c) => courseLabel(c))
     .join(", ")
 
   const draft = [
     t("ownerUsage.increase.draft.name", { name: displayName || eppn }),
     t("ownerUsage.increase.draft.eppn", { eppn }),
-    t("ownerUsage.increase.draft.unit"),
     t("ownerUsage.increase.draft.courses", {
       courses: courseList || t("ownerUsage.increase.draft.noCourses"),
     }),
@@ -461,11 +459,6 @@ function IncreaseRequestCard({
     }),
     t("ownerUsage.increase.draft.requested"),
     t("ownerUsage.increase.draft.reason"),
-    budgetedProviders.length > 0
-      ? t("ownerUsage.increase.draft.budgetedProviders", {
-          providers: budgetedProviders.join(", "),
-        })
-      : t("ownerUsage.increase.draft.selfHostedOnly"),
   ].join("\n")
 
   const subject = t("ownerUsage.increase.subject", { eppn })
@@ -480,17 +473,28 @@ function IncreaseRequestCard({
       <CardContent className="space-y-4">
         <ul className="list-disc pl-5 space-y-1 text-sm text-muted-foreground">
           <li>{t("ownerUsage.increase.items.identity")}</li>
-          <li>{t("ownerUsage.increase.items.unit")}</li>
           <li>{t("ownerUsage.increase.items.courses")}</li>
           <li>{t("ownerUsage.increase.items.amount")}</li>
         </ul>
 
-        {budgetedProviders.length > 0 && (
-          <p className="rounded-md border bg-muted/40 px-4 py-3 text-sm">
-            {t("ownerUsage.increase.budgetNote", {
-              providers: budgetedProviders.join(", "),
-            })}
-          </p>
+        {activeCourses.length > 0 && (
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">
+              {t("ownerUsage.increase.coursesLegend")}
+            </legend>
+            {activeCourses.map((course) => (
+              <label
+                key={course.id}
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <Checkbox
+                  checked={selectedIds.includes(course.id)}
+                  onCheckedChange={() => toggle(course.id)}
+                />
+                {courseLabel(course)}
+              </label>
+            ))}
+          </fieldset>
         )}
 
         <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 text-xs whitespace-pre-wrap">

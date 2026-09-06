@@ -54,6 +54,12 @@ pub struct SeedReport {
     pub conversations: usize,
     pub messages: usize,
     pub external_invites: usize,
+    /// Rows in the student-chat ledger (`usage_daily`), one per
+    /// (student, course, day, model).
+    pub usage_rows: usize,
+    /// Rows in the pipeline / classification ledger
+    /// (`course_token_usage`).
+    pub pipeline_usage_rows: usize,
     pub wiped: WipeReport,
 }
 
@@ -65,6 +71,8 @@ pub struct WipeReport {
     pub messages: u64,
     pub conversations: u64,
     pub documents: u64,
+    pub usage_rows: u64,
+    pub pipeline_usage_rows: u64,
     pub course_members: u64,
     pub external_invites: u64,
     pub courses: u64,
@@ -83,8 +91,14 @@ const WIPE_TABLE_ORDER: &[&str] = &[
     "messages",
     "conversations",
     "documents",
+    // The two ledgers hold FKs to both `courses` and `users` without
+    // ON DELETE CASCADE, so they have to go before either parent or
+    // the course delete below fails on a constraint violation.
+    "usage_daily",
+    "course_token_usage",
     "course_members",
     "external_auth_invites",
+    "chat_models",
     "courses",
     "users",
 ];
@@ -199,6 +213,11 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             owner_id: admin_id,
             strategy: "simple",
             tool_use_enabled: false,
+            semester_label: "VT2026",
+            archived: false,
+            // Generous enough that clicking around never trips it, but
+            // present, so the per-student column is exercised.
+            student_cap_cents: 25,
         },
     )
     .await?;
@@ -210,6 +229,9 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             owner_id: admin_id,
             strategy: "flare",
             tool_use_enabled: false,
+            semester_label: "VT2026",
+            archived: false,
+            student_cap_cents: 0,
         },
     )
     .await?;
@@ -223,6 +245,9 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             owner_id: teacher,
             strategy: "flare",
             tool_use_enabled: true,
+            semester_label: "VT2026",
+            archived: false,
+            student_cap_cents: 0,
         },
     )
     .await?;
@@ -234,6 +259,23 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             owner_id: teacher,
             strategy: "simple",
             tool_use_enabled: false,
+            semester_label: "VT2026",
+            archived: false,
+            student_cap_cents: 0,
+        },
+    )
+    .await?;
+    let discrete = create_seed_course(
+        state,
+        SeedCourse {
+            name: "Discrete Math (seed)",
+            description: Some("Archived HT2025 offering. Still carries last term's spend."),
+            owner_id: teacher,
+            strategy: "simple",
+            tool_use_enabled: false,
+            semester_label: "HT2025",
+            archived: true,
+            student_cap_cents: 0,
         },
     )
     .await?;
@@ -273,6 +315,10 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
         (db_sys, "teacher", teacher),
         (db_sys, "student", bob),
         (db_sys, "student", dan),
+        // Discrete Math: archived, so it only has to be complete
+        // enough to show up in last term's lists.
+        (discrete, "teacher", teacher),
+        (discrete, "student", alice),
     ] {
         minerva_db::queries::courses::add_member(&state.db, course_id, user_id, role).await?;
         // Composite-PK table; encode the pair as `course_id:user_id`
@@ -426,18 +472,288 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
         msg_count += 1;
     }
 
+    // ---- AI spend ledger ---------------------------------------------
+    //
+    // The teacher portal (/teacher/usage) and the admin usage tab read
+    // `usage_daily` (student chat) and `course_token_usage` (ingest and
+    // classification). With neither populated both pages render an
+    // empty shell, which is exactly the state that hides layout, copy
+    // and rounding bugs. Seed five weeks of weekday traffic across all
+    // four courses, split so the calling admin and `seed-teacher` each
+    // own a populated pair.
+    //
+    // The rows carry a real model id so the on-read pricing join lands:
+    // spend is never stored, it is tokens x the model's current rate.
+    seed_alt_chat_model(state).await?;
+    let usage_rows = seed_usage_ledger(
+        state,
+        &[
+            UsagePlan {
+                course_id: intro,
+                students: vec![alice, bob, carol],
+                prompt_per_student: 95_000,
+                completion_per_student: 26_000,
+                research_share: 0,
+                alt_model_from_day: None,
+                days: 0..USAGE_WINDOW_DAYS,
+            },
+            UsagePlan {
+                course_id: algos,
+                students: vec![alice, bob],
+                prompt_per_student: 120_000,
+                completion_per_student: 34_000,
+                research_share: 0,
+                // Algorithms ran on a paid non-Cerebras provider earlier
+                // in the term, so the provider breakdown has two rows
+                // and the "who gets billed" copy has both cases to show.
+                alt_model_from_day: Some(18),
+                days: 0..USAGE_WINDOW_DAYS,
+            },
+            UsagePlan {
+                course_id: web,
+                students: vec![carol, dan, ext_guest],
+                prompt_per_student: 130_000,
+                completion_per_student: 38_000,
+                // Web Development is the tool-use course, so a third of
+                // its tokens belong to the research phase.
+                research_share: 33,
+                alt_model_from_day: None,
+                days: 0..USAGE_WINDOW_DAYS,
+            },
+            UsagePlan {
+                course_id: db_sys,
+                students: vec![bob, dan],
+                prompt_per_student: 110_000,
+                completion_per_student: 30_000,
+                research_share: 0,
+                // Same provider switch on the teacher's side of the
+                // fixture, so both owners' spend views have two
+                // differently-billed providers to show.
+                alt_model_from_day: Some(24),
+                days: 0..USAGE_WINDOW_DAYS,
+            },
+            UsagePlan {
+                course_id: discrete,
+                students: vec![alice],
+                prompt_per_student: 70_000,
+                completion_per_student: 18_000,
+                research_share: 0,
+                alt_model_from_day: None,
+                // Last term's course: spend stops where the term did.
+                days: 16..USAGE_WINDOW_DAYS,
+            },
+        ],
+    )
+    .await?;
+    let pipeline_usage_rows = seed_pipeline_ledger(state, &[intro, algos, web, db_sys]).await?;
+
+    // Give `seed-teacher` a cap their seeded spend sits comfortably
+    // under, so the portal shows a real limit and a progress bar rather
+    // than "unlimited". Deliberately not tight: a dev chatting in a
+    // seeded course must not trip the owner cap mid-session. The
+    // calling admin keeps whatever cap their own row already carries.
+    minerva_db::queries::users::update_owner_daily_cost_limit_usd(
+        &state.db,
+        teacher,
+        rust_decimal::Decimal::new(SEED_TEACHER_DAILY_CAP_CENTS, 2),
+    )
+    .await?;
+
     Ok(SeedReport {
         admin_eppn: admin_eppn.to_string(),
         admin_user_id: admin_id,
         users: 7, // teacher, integrator, alice, bob, carol, dan, ext_guest
-        courses: 4,
+        courses: 5,
         course_members: member_count,
         documents: doc_count,
         conversations: convo_count,
         messages: msg_count,
         external_invites: 1,
+        usage_rows,
+        pipeline_usage_rows,
         wiped,
     })
+}
+
+/// Daily owner cap handed to `seed-teacher`, in cents. Their seeded
+/// spend lands around two thirds of it, which is enough for the portal
+/// to render a limit and a progress bar without a dev session tripping
+/// the cap while clicking around.
+const SEED_TEACHER_DAILY_CAP_CENTS: i64 = 200;
+
+/// How far back the synthetic ledger goes.
+const USAGE_WINDOW_DAYS: i64 = 35;
+
+/// The model most of the ledger runs on. Seeded enabled + priced by the
+/// `chat_models` migration, so the on-read cost join always resolves.
+const USAGE_MODEL: (&str, &str) = ("gpt-oss-120b", "cerebras");
+
+/// A stretch of history on a second, differently-billed provider. Only
+/// ever referenced by ledger rows, never set as a course's model, so no
+/// dev course points at a provider whose key isn't in the shell.
+const USAGE_ALT_MODEL: (&str, &str) = ("gpt-4o-mini", "openai");
+
+/// One course's slice of the synthetic ledger.
+struct UsagePlan {
+    course_id: Uuid,
+    /// Who chats in this course; the ledger is per student per day.
+    students: Vec<Uuid>,
+    /// Roughly what one student burns on a normal day, before the
+    /// per-day variation below.
+    prompt_per_student: i64,
+    completion_per_student: i64,
+    /// Percent of the day's tokens attributed to the research phase.
+    /// Non-zero only for the tool-use course, matching what the real
+    /// chat path records.
+    research_share: i64,
+    /// Days-ago threshold at or beyond which this course's rows are
+    /// attributed to [`USAGE_ALT_MODEL`] instead.
+    alt_model_from_day: Option<i64>,
+    /// Days-ago range the course was actually running. Everything
+    /// current spans the whole window; the archived offering stops
+    /// partway back.
+    days: std::ops::Range<i64>,
+}
+
+/// Registers the alternate provider's model in the catalog so ledger
+/// rows priced against it resolve. Inserted *disabled*: it exists to be
+/// priced, not to be selectable in a course whose provider key the dev
+/// shell doesn't have.
+async fn seed_alt_chat_model(state: &AppState) -> Result<(), AppError> {
+    let (model, provider) = USAGE_ALT_MODEL;
+    sqlx::query!(
+        r#"INSERT INTO chat_models
+               (model, provider, display_name, enabled,
+                input_usd_per_mtok, output_usd_per_mtok)
+           VALUES ($1, $2, $3, FALSE, 0.15, 0.60)
+           ON CONFLICT (model) DO NOTHING"#,
+        model,
+        provider,
+        "GPT-4o mini (seed fixture)",
+    )
+    .execute(&state.db)
+    .await?;
+    track_composite(state, "chat_models", model).await?;
+    Ok(())
+}
+
+/// Writes the student-chat ledger: one row per (student, course, day,
+/// model) over [`USAGE_WINDOW_DAYS`], weekdays only.
+///
+/// The shape is deterministic rather than random so two runs of the
+/// seeder produce the same dashboard: the per-day variation is a
+/// function of the day offset and the student's position in the plan.
+/// Today is scaled up, so the "spend today" card (the one the cap is
+/// enforced against) is never a rounding-error next to the window.
+async fn seed_usage_ledger(state: &AppState, plans: &[UsagePlan]) -> Result<usize, AppError> {
+    let today = chrono::Utc::now().date_naive();
+    let mut rows = 0usize;
+
+    for plan in plans {
+        for day in plan.days.clone() {
+            let date = today - chrono::Duration::days(day);
+            // Weekends stay empty: a flat ledger reads as fake, and the
+            // gaps exercise the daily table's missing-day handling.
+            // Today is the exception, weekend or not - it is the figure
+            // the owner cap is enforced against, so a seeder that
+            // leaves it at zero half the time is useless for looking at
+            // the spend view.
+            if day != 0
+                && matches!(
+                    chrono::Datelike::weekday(&date),
+                    chrono::Weekday::Sat | chrono::Weekday::Sun
+                )
+            {
+                continue;
+            }
+            let (model, provider) = match plan.alt_model_from_day {
+                Some(threshold) if day >= threshold => USAGE_ALT_MODEL,
+                _ => USAGE_MODEL,
+            };
+            for (index, student) in plan.students.iter().enumerate() {
+                // 60-130% of the plan's baseline, and a busy day today
+                // so the cap-facing figure is worth looking at.
+                let variation = 60 + ((day * 7 + index as i64 * 23) % 71);
+                let scale = if day == 0 { variation * 3 } else { variation };
+                let prompt = plan.prompt_per_student * scale / 100;
+                let completion = plan.completion_per_student * scale / 100;
+                let requests = 4 + (scale / 25);
+                let research_prompt = prompt * plan.research_share / 100;
+                let research_completion = completion * plan.research_share / 100;
+
+                let id = Uuid::new_v4();
+                sqlx::query!(
+                    r#"INSERT INTO usage_daily
+                           (id, user_id, course_id, date, model, provider,
+                            prompt_tokens, completion_tokens, embedding_tokens,
+                            research_prompt_tokens, research_completion_tokens,
+                            request_count)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, $9, $10, $11)
+                       ON CONFLICT (user_id, course_id, date, model) DO NOTHING"#,
+                    id,
+                    student,
+                    plan.course_id,
+                    date,
+                    model,
+                    provider,
+                    prompt,
+                    completion,
+                    research_prompt,
+                    research_completion,
+                    requests as i32,
+                )
+                .execute(&state.db)
+                .await?;
+                track(state, "usage_daily", id).await?;
+                rows += 1;
+            }
+        }
+    }
+    Ok(rows)
+}
+
+/// Writes the pipeline ledger: the ingest burst when a course was first
+/// indexed, plus the steady classification / linker cost since. This is
+/// the spend a teacher has no student to attribute, and it counts
+/// against the owner cap just the same, so the portal has to show it.
+async fn seed_pipeline_ledger(state: &AppState, courses: &[Uuid]) -> Result<usize, AppError> {
+    let mut rows = 0usize;
+    for course_id in courses {
+        for (days_ago, category, calls, prompt, completion) in [
+            // Indexing burst five weeks back, when the course was set up.
+            (33_i64, "classification", 14_i64, 38_000_i64, 2_400_i64),
+            (33, "kg_extraction", 9, 52_000, 6_100),
+            // Steady state since, including today.
+            (12, "kg_linker", 4, 21_000, 1_800),
+            (5, "classification", 3, 18_000, 1_200),
+            (0, "aegis_guard", 6, 9_400, 700),
+        ] {
+            for call in 0..calls {
+                let id = Uuid::new_v4();
+                sqlx::query!(
+                    r#"INSERT INTO course_token_usage
+                           (id, course_id, category, model, prompt_tokens,
+                            completion_tokens, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6,
+                               NOW() - ($7 || ' days')::interval
+                                     + ($8 || ' minutes')::interval)"#,
+                    id,
+                    course_id,
+                    category,
+                    USAGE_MODEL.0,
+                    prompt as i32,
+                    completion as i32,
+                    days_ago.to_string(),
+                    (call * 7).to_string(),
+                )
+                .execute(&state.db)
+                .await?;
+                track(state, "course_token_usage", id).await?;
+                rows += 1;
+            }
+        }
+    }
+    Ok(rows)
 }
 
 /// Inserts (idempotently via `find_or_create_by_eppn`) a seed user and
@@ -477,6 +793,18 @@ struct SeedCourse<'a> {
     owner_id: Uuid,
     strategy: &'a str,
     tool_use_enabled: bool,
+    /// Free-text term label. Everything current sits in VT2026; the one
+    /// archived fixture carries the term it actually ran in.
+    semester_label: &'a str,
+    /// Archived (`active = false`) right after creation, so the fixture
+    /// set covers the "previous term, still holds spend" case the
+    /// course lists and the teacher spend view both have to handle.
+    archived: bool,
+    /// Per-student-per-day cap in cents. 0 = unlimited, which is what
+    /// most fixture courses use so a dev session can't spend itself out
+    /// of a course; one course carries a real cap so the per-student
+    /// column has something other than "unlimited" in it.
+    student_cap_cents: i64,
 }
 
 /// Inserts a course with the requested config and registers the row.
@@ -494,7 +822,7 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             name: config.name.to_string(),
             description: config.description.map(|s| s.to_string()),
             owner_id: config.owner_id,
-            daily_cost_limit_usd: rust_decimal::Decimal::ZERO, // unlimited per-student for seed
+            daily_cost_limit_usd: rust_decimal::Decimal::new(config.student_cap_cents, 2),
             // Seed courses keep the migration's per-conversation
             // ceilings so a dev can exercise the nudge / block flow
             // without hand-editing the course first.
@@ -514,10 +842,10 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             embedding_model: None,
             reranker_model: None,
             system_prompt: None,
-            // Dev seed predates the per-semester grouping; pin every
-            // seeded course to a stable VT2026 label so the My Courses
-            // page renders a single header instead of an Ad-hoc bucket.
-            semester_label: "VT2026".to_string(),
+            // Dev seed predates the per-semester grouping; give every
+            // seeded course an explicit label so the My Courses page
+            // renders real term headers instead of an Ad-hoc bucket.
+            semester_label: config.semester_label.to_string(),
         },
     )
     .await?;
@@ -552,6 +880,10 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
         },
     )
     .await?;
+
+    if config.archived {
+        minerva_db::queries::courses::archive(&state.db, course_id).await?;
+    }
 
     Ok(course_id)
 }
@@ -662,6 +994,11 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
             "messages" => delete_by_uuid_pk(&state.db, "messages", &pks).await?,
             "conversations" => delete_by_uuid_pk(&state.db, "conversations", &pks).await?,
             "documents" => delete_by_uuid_pk(&state.db, "documents", &pks).await?,
+            "usage_daily" => delete_by_uuid_pk(&state.db, "usage_daily", &pks).await?,
+            "course_token_usage" => {
+                delete_by_uuid_pk(&state.db, "course_token_usage", &pks).await?
+            }
+            "chat_models" => delete_chat_models(&state.db, &pks).await?,
             "course_members" => delete_course_members(&state.db, &pks).await?,
             "external_auth_invites" => {
                 delete_by_uuid_pk(&state.db, "external_auth_invites", &pks).await?
@@ -686,6 +1023,8 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
             "messages" => report.messages = deleted,
             "conversations" => report.conversations = deleted,
             "documents" => report.documents = deleted,
+            "usage_daily" => report.usage_rows = deleted,
+            "course_token_usage" => report.pipeline_usage_rows = deleted,
             "course_members" => report.course_members = deleted,
             "external_auth_invites" => report.external_invites = deleted,
             "courses" => report.courses = deleted,
@@ -720,6 +1059,8 @@ async fn delete_by_uuid_pk(
         "messages" => "DELETE FROM messages WHERE id = ANY($1)",
         "conversations" => "DELETE FROM conversations WHERE id = ANY($1)",
         "documents" => "DELETE FROM documents WHERE id = ANY($1)",
+        "usage_daily" => "DELETE FROM usage_daily WHERE id = ANY($1)",
+        "course_token_usage" => "DELETE FROM course_token_usage WHERE id = ANY($1)",
         "external_auth_invites" => "DELETE FROM external_auth_invites WHERE id = ANY($1)",
         "courses" => "DELETE FROM courses WHERE id = ANY($1)",
         "users" => "DELETE FROM users WHERE id = ANY($1)",
@@ -730,6 +1071,15 @@ async fn delete_by_uuid_pk(
         }
     };
     let result = sqlx::query(sql).bind(&uuid_vec).execute(db).await?;
+    Ok(result.rows_affected())
+}
+
+/// Text-PK delete for `chat_models`. The seeder only ever adds the one
+/// fixture model; a hand-added catalog row is untagged and survives.
+async fn delete_chat_models(db: &sqlx::PgPool, pks: &[String]) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query!("DELETE FROM chat_models WHERE model = ANY($1)", pks)
+        .execute(db)
+        .await?;
     Ok(result.rows_affected())
 }
 

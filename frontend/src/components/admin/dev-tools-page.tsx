@@ -30,6 +30,8 @@ interface WipeReport {
   messages: number
   conversations: number
   documents: number
+  usage_rows: number
+  pipeline_usage_rows: number
   course_members: number
   external_invites: number
   courses: number
@@ -48,6 +50,8 @@ interface SeedReport {
   conversations: number
   messages: number
   external_invites: number
+  usage_rows: number
+  pipeline_usage_rows: number
   wiped: WipeReport
 }
 
@@ -85,6 +89,11 @@ const SEEDED_COURSES: { name: string; config: string; ownership: string }[] = [
     name: "Database Systems (seed)",
     config: "simple",
     ownership: "owned by seed-teacher; you are NOT enrolled",
+  },
+  {
+    name: "Discrete Math (seed)",
+    config: "simple, archived (HT2025)",
+    ownership: "owned by seed-teacher; last term's spend only",
   },
 ]
 
@@ -227,6 +236,12 @@ function ReseedReport({ report }: { report: SeedReport }) {
             <li>{t("devTools.report.members", { n: report.wiped.course_members })}</li>
             <li>{t("devTools.report.conversations", { n: report.wiped.conversations })}</li>
             <li>{t("devTools.report.messages", { n: report.wiped.messages })}</li>
+            <li>{t("devTools.report.usage", { n: report.wiped.usage_rows })}</li>
+            <li>
+              {t("devTools.report.pipelineUsage", {
+                n: report.wiped.pipeline_usage_rows,
+              })}
+            </li>
             <li>{t("devTools.report.invites", { n: report.wiped.external_invites })}</li>
             <li>{t("devTools.report.dirs", { n: report.wiped.course_dirs_removed })}</li>
             <li>{t("devTools.report.qdrant", { n: report.wiped.qdrant_collections_removed })}</li>
@@ -243,6 +258,12 @@ function ReseedReport({ report }: { report: SeedReport }) {
             <li>{t("devTools.report.members", { n: report.course_members })}</li>
             <li>{t("devTools.report.conversations", { n: report.conversations })}</li>
             <li>{t("devTools.report.messages", { n: report.messages })}</li>
+            <li>{t("devTools.report.usage", { n: report.usage_rows })}</li>
+            <li>
+              {t("devTools.report.pipelineUsage", {
+                n: report.pipeline_usage_rows,
+              })}
+            </li>
             <li>{t("devTools.report.invites", { n: report.external_invites })}</li>
           </ul>
         </div>

@@ -662,11 +662,13 @@ describe("Authenticated pages a11y", () => {
   })
 
   it("teacher AI usage has no axe violations", async () => {
-    const { container, getByText } = renderPage(<OwnerUsagePage />, [
+    const { container, getAllByText } = renderPage(<OwnerUsagePage />, [
       [queries.userQuery.queryKey, user],
       [queries.teacherUsageQuery(30).queryKey, ownerUsage],
     ])
-    expect(getByText("Database Systems (DBSYS)")).toBeInTheDocument()
+    // The course name appears twice on a loaded page: the per-course
+    // table and the course picker in the limit-increase card.
+    expect(getAllByText("Database Systems (DBSYS)")).toHaveLength(2)
     expect(await axe(container)).toHaveNoViolations()
   })
 })

@@ -46,6 +46,8 @@
       "members": "{{n}} medlemskap",
       "conversations": "{{n}} konversationer",
       "messages": "{{n}} meddelanden",
+      "usage": "{{n}} rader chattanvändning",
+      "pipelineUsage": "{{n}} rader pipelineanvändning",
       "invites": "{{n}} externa inbjudningar",
       "dirs": "{{n}} dokumentmappar",
       "qdrant": "{{n}} Qdrant-collections",

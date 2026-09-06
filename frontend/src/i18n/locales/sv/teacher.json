@@ -525,11 +525,10 @@
     },
     "providers": {
       "title": "Per leverantör",
-      "description": "Vilken tjänst som kört modellerna. Betaltjänster är de som kräver budgetgodkännande vid en höjning.",
+      "description": "Vilken tjänst som kört modellerna bakom kostnaden.",
       "colProvider": "Leverantör",
       "colSpend": "Kostnad",
-      "colTokens": "Tokens",
-      "budgeted": "Belastar en budget"
+      "colTokens": "Tokens"
     },
     "daily": {
       "title": "Kostnad per dag",
@@ -544,11 +543,10 @@
       "lead": "Mejla lambda@dsv.su.se med uppgifterna nedan. Ta med:",
       "items": {
         "identity": "Ditt SU-användarnamn (eppn), så gränsen hamnar på rätt konto.",
-        "unit": "Din enhet eller institution, som står för kostnaden.",
-        "courses": "Kursen eller kurserna som gränsen gäller.",
+        "courses": "Vilken eller vilka av dina kurser höjningen gäller.",
         "amount": "Vilken dagsgräns du behöver och varför (kursstorlek, planerad övning, tentaperiod)."
       },
-      "budgetNote": "Dina kurser körs på {{providers}}, som faktureras din enhets budget. Få höjningen godkänd av den som äger budgeten och skriv det i mejlet, annars fastnar ärendet.",
+      "coursesLegend": "Kurser som höjningen gäller",
       "subject": "Minerva: höj dagsgränsen för AI för {{eppn}}",
       "mailButton": "Mejla {{email}}",
       "copyButton": "Kopiera uppgifterna",
@@ -556,15 +554,12 @@
       "draft": {
         "name": "Namn: {{name}}",
         "eppn": "SU-användarnamn (eppn): {{eppn}}",
-        "unit": "Enhet / institution: ",
-        "courses": "Kurser: {{courses}}",
-        "noCourses": "(inga än)",
+        "courses": "Kurser som höjningen gäller: {{courses}}",
+        "noCourses": "(inga valda)",
         "currentLimit": "Nuvarande dagsgräns: {{limit}}",
         "peak": "Dyraste dagen senaste {{days}} dagarna: {{peak}}",
         "requested": "Önskad dagsgräns: ",
-        "reason": "Motivering: ",
-        "budgetedProviders": "Modeller körs på: {{providers}} (betaltjänst, kräver budgetgodkännande från enheten)",
-        "selfHostedOnly": "Modeller körs endast på egna servrar"
+        "reason": "Motivering: "
       }
     }
   },

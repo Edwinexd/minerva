@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT eppn, display_name FROM users\n            WHERE eppn LIKE 'seed-%' OR eppn LIKE 'ext:seed-%'\n            ORDER BY eppn",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "eppn",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "eppn"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "display_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "3135597c78dc6762bd6cdaeafc976eb111840b5ad584c02f07fec268c71721ce"
+}

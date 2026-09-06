@@ -46,6 +46,8 @@
       "members": "{{n}} memberships",
       "conversations": "{{n}} conversations",
       "messages": "{{n}} messages",
+      "usage": "{{n}} chat usage rows",
+      "pipelineUsage": "{{n}} pipeline usage rows",
       "invites": "{{n}} external invites",
       "dirs": "{{n}} course doc dirs",
       "qdrant": "{{n}} Qdrant collections",

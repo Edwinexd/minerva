@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO chat_models\n               (model, provider, display_name, enabled,\n                input_usd_per_mtok, output_usd_per_mtok)\n           VALUES ($1, $2, $3, FALSE, 0.15, 0.60)\n           ON CONFLICT (model) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "53f34a0e12f1bc32a8ec13d8ae7f0a0c4902392d91601c19a9675b207defa1ab"
+}

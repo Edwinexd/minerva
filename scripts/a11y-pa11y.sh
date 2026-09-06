@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Real-browser accessibility pass, the same one CI's `frontend-a11y` job
-# runs, so a layout-dependent violation is caught before the push rather
-# than after it.
+# Real-browser accessibility pass: the same check CI's `frontend-a11y`
+# job runs, in one command, for when you have touched layout, a scroll
+# container or a colour and don't want to find out from CI.
 #
-# Why this can't be folded into the fast hooks: the vitest + axe layer
-# runs in jsdom, which reports every element as zero-sized. Rules that
+# It is deliberately not a git hook. The vitest + axe layer in pre-commit
+# runs in jsdom, which reports every element as zero-sized, so rules that
 # depend on layout (axe's `scrollable-region-focusable`, colour contrast)
-# therefore cannot fire there at all. Only a real browser against a real
-# backend sees them, which costs a frontend build, a server build and a
-# couple of minutes of Chromium - hence pre-push, not pre-commit.
+# cannot fire there; catching those needs a frontend build, a server
+# build and a couple of minutes of Chromium. That is CI's job, not
+# something to put in front of every push.
 #
 # Self-contained and non-destructive to your own data: it builds the SPA,
 # builds the server binary, and starts it on a scratch database and a

@@ -61,6 +61,28 @@ Postgres refuses TEMPLATE-copy while the source has live connections, so
 sqlx pools auto-reconnect within a request. If you want a long-running
 branch DB to pick up new master changes mid-branch, run `refresh`.
 
+## Accessibility gates
+
+Three layers, and only two of them run in pre-commit:
+`eslint-plugin-jsx-a11y` (strict) and vitest + axe-core. Both are blind to
+anything layout-dependent, because jsdom reports every element as
+zero-sized. Colour contrast and axe's `scrollable-region-focusable` can
+only fail in a real browser, which is the CI-only `frontend-a11y`
+(pa11y-ci) job.
+
+So: after touching a scroll container, a capped-height list, or a colour,
+run `scripts/a11y-pa11y.sh` before pushing. It reproduces that CI job in
+one command (builds the SPA and the server, seeds a scratch database on a
+free port, drives Chromium over every audited page) and takes a couple of
+minutes. A green pre-commit run says nothing about either rule.
+
+Fixing `scrollable-region-focusable` means `tabIndex={0}` plus an
+`aria-label` on the scrolling element, with an
+`eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex`: that rule
+and axe disagree here, and axe wins because the region is otherwise
+unreachable by keyboard. See the chat transcript in `chat-surface.tsx`
+for the canonical shape.
+
 ## Container Image
 
 - **Registry:** ghcr.io/edwinexd/minerva (private)

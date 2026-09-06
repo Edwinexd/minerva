@@ -122,10 +122,11 @@ not just reviewed by hand, across three layers:
 | End-to-end | `pa11y-ci` (htmlcs WCAG2AA + axe) in a real browser | Color contrast, scrollable regions, and other render-time criteria jsdom can't compute |
 
 The first two layers run per commit. The third needs a built SPA, a running
-backend and a real browser, so it runs **per push** (`scripts/a11y-pa11y.sh`,
-wired as a `pre-push` pre-commit hook) and again in CI. It builds everything
-itself against a scratch database on a free port, so it never disturbs a dev
-stack; `SKIP=pa11y git push` bypasses it for a one-off.
+backend and a real browser, so it is enforced in CI rather than in a hook.
+Run it locally with `scripts/a11y-pa11y.sh` when you touch layout, scroll
+containers or colours: it builds the SPA and the server itself and drives
+Chromium over every audited page against a scratch database on a free port,
+so it never disturbs a running dev stack.
 
 Modal dialogs use the native `<dialog>` element with `showModal()`, so focus
 trapping, Escape-to-close, top-layer rendering and the `::backdrop` come from the
@@ -143,7 +144,7 @@ CLA in [CLA.md](CLA.md). CI runs:
 - **Style gates**: ban emdashes + ban space-dash-dash-space anywhere a non-whitespace char precedes them on the line.
 - **Migrations**: `migrations-immutable` blocks edits to already-committed `backend/migrations/*.sql` files (sqlx content-hashes them at startup).
 
-Pre-commit mirrors the same set; install with `pre-commit install` (the hook is wired via `pipx install pre-commit`). That installs both stages: the fast gates on commit and the pa11y browser pass on push.
+Pre-commit mirrors the same set except the pa11y browser pass, which is too slow for a hook; install with `pre-commit install` (the hook is wired via `pipx install pre-commit`).
 
 After editing any `sqlx::query!` / `query_as!` macro:
 

@@ -1,8 +1,3 @@
-# `pre-commit install` wires both stages: the fast gates run per commit,
-# and the pa11y hook below runs per push (see its comment for why it
-# cannot be a commit-time check).
-default_install_hook_types: [pre-commit, pre-push]
-
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -105,29 +100,6 @@ repos:
         language: system
         types: [text]
         exclude: (\.lock|\.ya?ml$|node_modules|target|dist|\.gen\.|^backend/migrations/.*\.sql$)
-
-      - id: pa11y
-        name: accessibility (pa11y, real browser)
-        # The gate that CI's `frontend-a11y` job is, run before the push
-        # instead of after it. It exists separately from the vitest+axe
-        # hook because that one runs in jsdom, which reports every element
-        # as zero-sized: every rule that depends on layout (axe's
-        # `scrollable-region-focusable`, colour contrast) is invisible to
-        # it by construction. Only a real browser against a real backend
-        # sees them.
-        #
-        # pre-push, not pre-commit: the script builds the SPA and the
-        # server binary and drives Chromium over 21 pages, which is a
-        # couple of minutes. It uses its own scratch database and a free
-        # port, so it never disturbs a running dev stack. Skip a one-off
-        # with `SKIP=pa11y git push`.
-        entry: bash scripts/a11y-pa11y.sh
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-        # Anything that changes rendered markup, the audited URL list, or
-        # the fixture data those pages render.
-        files: ^(frontend/(src/|scripts/pa11y-config\.mjs|\.pa11yci\.json)|backend/crates/minerva-server/src/dev_seed\.rs)
 
       - id: tsc-check
         name: tsc check

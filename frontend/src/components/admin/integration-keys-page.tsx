@@ -3,8 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useState } from "react"
 import { adminIntegrationKeysQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
-import { copyToClipboard as copyText } from "@/lib/clipboard"
-import { useApiErrorMessage } from "@/lib/use-api-error"
+import { SecretRevealCallout } from "@/components/ui/secret-reveal-callout"
 import type { SiteIntegrationKey, SiteIntegrationKeyCreated } from "@/lib/types"
 import { RelativeTime } from "@/components/relative-time"
 import { Button } from "@/components/ui/button"
@@ -19,6 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
+import { ErrorText } from "@/components/ui/error-text"
 
 /// Admin page for site-level integration keys used by the Moodle / Canvas
 /// plugin. A key here can provision per-course api_keys on behalf of any
@@ -110,7 +110,6 @@ function CreateKeyForm({
   onCreated: (k: SiteIntegrationKeyCreated) => void
 }) {
   const { t } = useTranslation("admin")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
   // Free-form comma/space/newline separated list; parsed on submit. Admins
@@ -173,7 +172,7 @@ function CreateKeyForm({
         {mutation.isPending ? t("integrationKeys.form.creating") : t("integrationKeys.form.create")}
       </Button>
       {mutation.isError && (
-        <p className="text-xs text-destructive">{formatError(mutation.error)}</p>
+        <ErrorText error={mutation.error} className="text-xs" />
       )}
     </form>
   )
@@ -198,45 +197,18 @@ function CreatedKeyCallout({
   onDismiss: () => void
 }) {
   const { t } = useTranslation("admin")
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    if (await copyText(created.key)) {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    }
-  }
 
   return (
-    <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950/40">
-      <div className="mb-2 flex items-center justify-between">
-        <strong>{t("integrationKeys.callout.title", { name: created.name })}</strong>
-        <button
-          type="button"
-          className="text-xs text-muted-foreground hover:underline"
-          onClick={onDismiss}
-        >
-          {t("integrationKeys.callout.dismiss")}
-        </button>
-      </div>
-      <p className="mb-2 text-xs text-muted-foreground">
-        {t("integrationKeys.callout.note")}
-      </p>
-      <div className="flex gap-2">
-        <input
-          readOnly
-          value={created.key}
-          aria-label={t("integrationKeys.callout.keyLabel")}
-          className="flex-1 rounded border bg-background px-2 py-1 font-mono text-xs"
-          onFocus={(e) => e.currentTarget.select()}
-        />
-        <Button type="button" size="sm" variant="outline" onClick={copy}>
-          {copied ? t("integrationKeys.callout.copied") : t("integrationKeys.callout.copy")}
-        </Button>
-        <output className="sr-only">
-          {copied ? t("integrationKeys.callout.copied") : ""}
-        </output>
-      </div>
-    </div>
+    <SecretRevealCallout
+      title={t("integrationKeys.callout.title", { name: created.name })}
+      note={t("integrationKeys.callout.note")}
+      dismissLabel={t("integrationKeys.callout.dismiss")}
+      value={created.key}
+      valueLabel={t("integrationKeys.callout.keyLabel")}
+      copyLabel={t("integrationKeys.callout.copy")}
+      copiedLabel={t("integrationKeys.callout.copied")}
+      onDismiss={onDismiss}
+    />
   )
 }
 

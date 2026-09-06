@@ -1,9 +1,11 @@
 import { Link } from "@tanstack/react-router"
 import { RelativeTime } from "@/components/relative-time"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { QueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import {
   adminCoursesQuery,
+  coursesQuery,
   adminEmbeddingModelsQuery,
   adminMergeSuggestionsQuery,
   adminRerankerModelsQuery,
@@ -47,6 +49,8 @@ import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorText } from "@/components/ui/error-text"
+import { Label } from "@/components/ui/label"
 import { useEffect, useId, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { useApiErrorMessage, useLocalizedMessage } from "@/lib/use-api-error"
@@ -64,6 +68,14 @@ const KNOWN_FEATURE_FLAGS = [
   "topic_switch_nudge",
 ] as const
 type FeatureFlagName = (typeof KNOWN_FEATURE_FLAGS)[number]
+
+/// Every admin course mutation has to refresh both caches: the admin
+/// listing (which includes archived courses) and the teacher/student
+/// one, which is keyed separately.
+function invalidateCourseCaches(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: adminCoursesQuery.queryKey })
+  queryClient.invalidateQueries({ queryKey: coursesQuery.queryKey })
+}
 
 export function CourseManagementPanel() {
   const { t } = useTranslation("admin")
@@ -333,7 +345,6 @@ function CourseFeatureFlagsCell({
   courseName: string
 }) {
   const { t } = useTranslation("admin")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
 
@@ -409,9 +420,7 @@ function CourseFeatureFlagsCell({
             {flagsQuery.isLoading ? (
               <Skeleton className="h-20 w-full" />
             ) : flagsQuery.error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {formatError(flagsQuery.error)}
-              </p>
+              <ErrorText error={flagsQuery.error} />
             ) : (
               KNOWN_FEATURE_FLAGS.map((flag) => {
                 const state = flags.find((f) => f.flag === flag)
@@ -469,9 +478,7 @@ function CourseFeatureFlagsCell({
               })
             )}
             {setFlagMutation.isError && (
-              <p role="alert" className="text-sm text-destructive">
-                {formatError(setFlagMutation.error)}
-              </p>
+              <ErrorText error={setFlagMutation.error} />
             )}
           </div>
           <AlertDialogFooter>
@@ -550,7 +557,6 @@ function CourseMigrateDialog({
   onOpenChange: (o: boolean) => void
 }) {
   const { t } = useTranslation("admin")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const { data: catalog } = useQuery(adminEmbeddingModelsQuery)
 
@@ -567,8 +573,7 @@ function CourseMigrateDialog({
           provider === "openai" ? course.embedding_model : model,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["courses"] })
-      queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
+      invalidateCourseCaches(queryClient)
       onOpenChange(false)
     },
   })
@@ -599,9 +604,9 @@ function CourseMigrateDialog({
         </AlertDialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1">
-            <label className="text-sm font-medium">
+            <Label>
               {t("courses.migrateProviderLabel")}
-            </label>
+            </Label>
             <Select value={provider} onValueChange={(v) => v && setProvider(v)}>
               <SelectTrigger className="w-full" aria-label={t("courses.migrateProviderLabel")}>
                 <SelectValue />
@@ -617,9 +622,9 @@ function CourseMigrateDialog({
           </div>
           {provider === "local" && (
             <div className="space-y-1">
-              <label className="text-sm font-medium">
+              <Label>
                 {t("courses.migrateModelLabel")}
-              </label>
+              </Label>
               <Select value={model} onValueChange={(v) => v && setModel(v)}>
                 <SelectTrigger className="w-full" aria-label={t("courses.migrateModelLabel")}>
                   <SelectValue />
@@ -645,9 +650,7 @@ function CourseMigrateDialog({
             </div>
           )}
           {mutation.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {formatError(mutation.error)}
-            </p>
+            <ErrorText error={mutation.error} />
           )}
         </div>
         <AlertDialogFooter>
@@ -697,8 +700,7 @@ function CourseActionsCell({
         ? api.post(`/admin/courses/${course.id}/archive`, {})
         : api.post(`/admin/courses/${course.id}/unarchive`, {}),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
-      queryClient.invalidateQueries({ queryKey: ["courses"] })
+      invalidateCourseCaches(queryClient)
     },
   })
 
@@ -763,7 +765,6 @@ function MergeCourseDialog({
   onOpenChange: (o: boolean) => void
 }) {
   const { t } = useTranslation("admin")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [survivorId, setSurvivorId] = useState("")
 
@@ -774,8 +775,7 @@ function MergeCourseDialog({
         source_id: source.id,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
-      queryClient.invalidateQueries({ queryKey: ["courses"] })
+      invalidateCourseCaches(queryClient)
       onOpenChange(false)
     },
   })
@@ -800,9 +800,9 @@ function MergeCourseDialog({
             </p>
           ) : (
             <div className="space-y-1">
-              <label className="text-sm font-medium">
+              <Label>
                 {t("courses.mergeSurvivorLabel")}
-              </label>
+              </Label>
               <Select
                 value={survivorId}
                 onValueChange={(v) => v && setSurvivorId(v)}
@@ -836,9 +836,7 @@ function MergeCourseDialog({
             </div>
           )}
           {mutation.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {formatError(mutation.error)}
-            </p>
+            <ErrorText error={mutation.error} />
           )}
         </div>
         <AlertDialogFooter>
@@ -892,7 +890,6 @@ function SuggestedMergesCard() {
 
 function SuggestedMergeGroup({ group }: { group: MergeSuggestionGroup }) {
   const { t } = useTranslation("admin")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   // Default the survivor to the Daisy-managed course if one is present
   // (that's the canonical record for the pre-Daisy -> Daisy case);
@@ -915,8 +912,7 @@ function SuggestedMergeGroup({ group }: { group: MergeSuggestionGroup }) {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
-      queryClient.invalidateQueries({ queryKey: ["courses"] })
+      invalidateCourseCaches(queryClient)
       setConfirmOpen(false)
     },
   })
@@ -958,9 +954,9 @@ function SuggestedMergeGroup({ group }: { group: MergeSuggestionGroup }) {
         ))}
       </ul>
       <div className="flex flex-wrap items-center gap-2">
-        <label className="text-sm font-medium">
+        <Label>
           {t("courses.suggestions.survivorLabel")}
-        </label>
+        </Label>
         <Select value={survivorId} onValueChange={(v) => v && setSurvivorId(v)}>
           <SelectTrigger
             className="w-72 max-w-full"
@@ -987,9 +983,7 @@ function SuggestedMergeGroup({ group }: { group: MergeSuggestionGroup }) {
         </Button>
       </div>
       {mergeMutation.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {formatError(mergeMutation.error)}
-        </p>
+        <ErrorText error={mergeMutation.error} />
       )}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
@@ -1146,8 +1140,7 @@ function BulkActionBar({
         { course_ids: ids },
       ),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
-      queryClient.invalidateQueries({ queryKey: ["courses"] })
+      invalidateCourseCaches(queryClient)
       setConfirm(null)
       onResult(data)
       if (data.failed === 0) onClearSelection()
@@ -1341,7 +1334,6 @@ function BulkEditDialog({
   onResult: (result: BulkResponse | null) => void
 }) {
   const { t } = useTranslation("admin")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const { data: modelsData } = useQuery(modelsQuery)
   const { data: embeddingModelsData } = useQuery(adminEmbeddingModelsQuery)
@@ -1471,8 +1463,7 @@ function BulkEditDialog({
         feature_flags: flags,
       }),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "courses"] })
-      queryClient.invalidateQueries({ queryKey: ["courses"] })
+      invalidateCourseCaches(queryClient)
       if (data.failed === 0) {
         // Dialog is about to close, so the summary has to survive
         // outside it.
@@ -1879,9 +1870,7 @@ function BulkEditDialog({
           </div>
 
           {mutation.isError && (
-            <p className="text-sm text-destructive">
-              {formatError(mutation.error)}
-            </p>
+            <ErrorText error={mutation.error} />
           )}
           {result && (
             <BulkResultSummary

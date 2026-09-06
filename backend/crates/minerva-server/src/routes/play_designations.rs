@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::guards::require_course_owner;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -81,22 +82,12 @@ struct CreatePlayDesignationRequest {
     designation: String,
 }
 
-async fn authorize(state: &AppState, user: &User, course_id: Uuid) -> Result<(), AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
-}
-
 async fn list_play_designations(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<PlayDesignationResponse>>, AppError> {
-    authorize(&state, &user, course_id).await?;
+    require_course_owner(&state, course_id, &user).await?;
     let rows = minerva_db::queries::play_designations::list_by_course(&state.db, course_id).await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
@@ -107,7 +98,7 @@ async fn create_play_designation(
     Path(course_id): Path<Uuid>,
     Json(body): Json<CreatePlayDesignationRequest>,
 ) -> Result<Json<PlayDesignationResponse>, AppError> {
-    authorize(&state, &user, course_id).await?;
+    require_course_owner(&state, course_id, &user).await?;
 
     let designation = body.designation.trim().to_string();
     if designation.is_empty() || designation.len() > 64 {
@@ -145,7 +136,7 @@ async fn delete_play_designation(
     Extension(user): Extension<User>,
     Path((course_id, designation_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    authorize(&state, &user, course_id).await?;
+    require_course_owner(&state, course_id, &user).await?;
     let deleted =
         minerva_db::queries::play_designations::delete(&state.db, designation_id, course_id)
             .await?;

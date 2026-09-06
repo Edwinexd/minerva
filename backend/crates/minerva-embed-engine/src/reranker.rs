@@ -68,20 +68,8 @@ use serde::Serialize;
 use crate::mem;
 use crate::model_cache::{ModelCache, ModelLoader};
 
-/// Default cross-encoder. Multilingual (Swedish + English), the lightest
-/// multilingual model in fastembed's reranker catalog. Mirrored by the
-/// `courses.reranker_model` column DEFAULT and the `reranker_models`
-/// seed; kept here so validation / fallbacks have a single source.
 pub use minerva_catalog::DEFAULT_RERANK_MODEL;
 
-/// Compile-time catalog of re-ranker model ids the runtime can load.
-///
-/// Policy (which of these a teacher may actually pick, and which is the
-/// default for new courses) lives in the `reranker_models` DB table;
-/// this slice is just "code exists for these". Mirrors
-/// `pipeline::VALID_LOCAL_MODELS` for embeddings. Each id must be a
-/// `model_code` fastembed's [`RerankerModel`] understands (asserted in
-/// tests).
 pub use minerva_catalog::VALID_RERANKER_MODELS;
 
 /// Token cap per `(query, chunk)` pair. Course chunks are ~500 tokens

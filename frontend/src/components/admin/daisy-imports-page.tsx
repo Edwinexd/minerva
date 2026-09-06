@@ -7,8 +7,8 @@ import {
   type DaisyPendingImport,
   type DaisyPendingListResponse,
 } from "@/lib/queries"
+import { groupBySemester } from "@/lib/semester"
 import { api } from "@/lib/api"
-import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -21,6 +21,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Label } from "@/components/ui/label"
+import { ErrorText } from "@/components/ui/error-text"
 import { RelativeTime } from "@/components/relative-time"
 
 /**
@@ -62,7 +63,6 @@ export function DaisyImportsPanel() {
 
 function AutoApplyCard({ data }: { data: DaisyPendingListResponse }) {
   const { t } = useTranslation("admin")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
 
   const mutation = useMutation({
@@ -98,9 +98,7 @@ function AutoApplyCard({ data }: { data: DaisyPendingListResponse }) {
           </Label>
         </div>
         {mutation.isError && (
-          <p role="alert" className="mt-2 text-sm text-destructive">
-            {formatError(mutation.error)}
-          </p>
+          <ErrorText error={mutation.error} className="mt-2" />
         )}
       </CardContent>
     </Card>
@@ -109,7 +107,6 @@ function AutoApplyCard({ data }: { data: DaisyPendingListResponse }) {
 
 function PendingTableCard({ data }: { data: DaisyPendingListResponse }) {
   const { t } = useTranslation("admin")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   // Selection state lives in the page rather than in URL params; an
   // admin who navigates away and back probably wants a fresh list
@@ -203,9 +200,7 @@ function PendingTableCard({ data }: { data: DaisyPendingListResponse }) {
           </div>
         </div>
         {applyMutation.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            {formatError(applyMutation.error)}
-          </p>
+          <ErrorText error={applyMutation.error} />
         )}
         {applyMutation.isSuccess && (
           <ApplyResultSummary result={applyMutation.data} />
@@ -232,7 +227,7 @@ function PendingTableCard({ data }: { data: DaisyPendingListResponse }) {
               </tr>
             </thead>
             <tbody>
-              {groups.map(({ semester, rows }) => (
+              {groups.map(({ label: semester, items: rows }) => (
                 <SemesterGroup
                   key={semester}
                   semester={semester}
@@ -482,35 +477,4 @@ function ApplyResultSummary({
       )}
     </output>
   )
-}
-
-/**
- * Bucket pending rows by `semester_label`, newest-semester-first.
- * Empty/missing labels (shouldn't happen post-validation, but be
- * defensive) sort to the end.
- */
-function groupBySemester(
-  rows: DaisyPendingImport[],
-): Array<{ semester: string; rows: DaisyPendingImport[] }> {
-  const buckets = new Map<string, DaisyPendingImport[]>()
-  for (const r of rows) {
-    const key = r.semester_label || ""
-    if (!buckets.has(key)) buckets.set(key, [])
-    buckets.get(key)!.push(r)
-  }
-  const entries = Array.from(buckets.entries()).map(([semester, rs]) => ({
-    semester,
-    rows: rs,
-  }))
-  entries.sort((a, b) => semesterSortKey(b.semester) - semesterSortKey(a.semester))
-  return entries
-}
-
-function semesterSortKey(label: string): number {
-  if (!label) return -Infinity
-  const m = label.match(/^(VT|HT)(\d{4})$/)
-  if (!m) return -Infinity
-  const year = parseInt(m[2], 10)
-  const seasonOffset = m[1] === "HT" ? 0.5 : 0
-  return year + seasonOffset
 }

@@ -24,40 +24,16 @@
 //!
 //! All three run on the chat hot path. Intent + output check
 //! keep latency bounded with tight `max_completion_tokens`,
-//! `temperature: 0.0`, and `reasoning_effort: "low"` (we're back
-//! on gpt-oss-120b across the classifier stack after Cerebras
-//! deprecated llama3.1-8b, which is the only model that ever
-//! 400'd on that parameter). Soft-fail throughout: a transient
-//! Cerebras hiccup never blocks a chat turn; worst case we
-//! treat the verdict as "not extraction" / "not solution" and
-//! continue.
+//! `temperature: 0.0`, and `reasoning_effort: "low"`. Soft-fail
+//! throughout: a transient provider hiccup never blocks a chat
+//! turn; worst case we treat the verdict as "not extraction" /
+//! "not solution" and continue.
 
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::llm::util_request;
 use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
-
-// ── Cerebras model selection ───────────────────────────────────────
-//
-// All four guard calls run on gpt-oss-120b now. Three of them
-// (intent / output / engagement) are simple binary-classification
-// tasks where a smaller fast model would historically have been
-// the right tool ; we ran them on llama3.1-8b for cost / latency
-// until Cerebras deprecated that model, at which point the whole
-// classifier stack in this crate collapsed onto gpt-oss-120b. The
-// intent classifier in particular runs on EVERY chat turn when
-// the feature flag is on, so its latency is the single most
-// important number in this whole module; the call bodies set
-// `reasoning_effort: "low"` to keep it bounded.
-//
-// The rewrite call is unchanged: it produces user-visible prose
-// (the Socratic question + policy-note), runs only when the
-// output check tripped (rare), and the model's writing quality
-// directly affects whether the student's experience feels coherent.
-// Kept as a separate constant so the rewrite path can move (back
-// to a larger model, to a smaller one, ...) independently from
-// the classifiers.
 
 // All four guard calls run on the admin-selected utility model
 // (resolved per call via `AppState::utility_model`), at temperature 0 +

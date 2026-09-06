@@ -4,7 +4,7 @@
 //! Pipeline (all course-scoped):
 //!
 //!   1. **Aggressive embedding filter.** Per-doc top-K nearest
-//!      neighbours above `MIN_EMBEDDING_SIMILARITY` (0.65). The
+//!      neighbours above `MIN_EMBEDDING_SIMILARITY`. The
 //!      embeddings do the heavy lifting of "do these two docs
 //!      share substantive content?"; a course of 50 docs typically
 //!      yields ~20-50 surviving pairs, never anywhere near N^2.
@@ -250,14 +250,35 @@ fn is_rejected(rejected: &HashSet<RejectedPairKey>, a: Uuid, b: Uuid, relation: 
     })
 }
 
-/// Pair-level test: should the linker consider this pair at all? Used
-/// to drop candidates BEFORE the LLM call; if both relation types
-/// for a pair have been vetoed, there's no point asking the model.
+/// Canonical ordering for an undirected pair, so a pair keys the same
+/// way whichever side it arrives on.
+fn pair_key(a: Uuid, b: Uuid) -> (Uuid, Uuid) {
+    if a < b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Every relation the model is allowed to propose, and so every relation
+/// a teacher can veto (`rejected_edge_pairs` carries the same CHECK).
+const VETOABLE_RELATIONS: &[&str] = &[
+    "part_of_unit",
+    "solution_of",
+    "prerequisite_of",
+    "applied_in",
+];
+
+/// Pair-level test: should the linker consider this pair at all? Used to
+/// drop candidates BEFORE the LLM call, so a pair the teacher has ruled
+/// out entirely stops costing one call per relink.
+///
+/// Vetoes are direction-insensitive (see `is_rejected`), so a directional
+/// relation counts as vetoed whichever way round it was rejected.
 fn pair_fully_rejected(rejected: &HashSet<RejectedPairKey>, a: Uuid, b: Uuid) -> bool {
-    is_rejected(rejected, a, b, "solution_of")
-        && is_rejected(rejected, a, b, "part_of_unit")
-        // solution_of is directional, so we also need to check b->a.
-        && is_rejected(rejected, b, a, "solution_of")
+    VETOABLE_RELATIONS
+        .iter()
+        .all(|relation| is_rejected(rejected, a, b, relation))
 }
 
 /// Run the cross-doc linker over a course's classified documents.
@@ -265,16 +286,17 @@ fn pair_fully_rejected(rejected: &HashSet<RejectedPairKey>, a: Uuid, b: Uuid) ->
 /// Pipeline:
 ///   1. **Embeddings**: every doc has a pooled embedding from the
 ///      ingest pipeline. For docs missing one (older data), lazily
-///      backfill by re-embedding the doc text. Embeddings are
-///      L2-normalised so cosine similarity is just a dot product.
+///      backfill by mean-pooling their chunk vectors out of Qdrant.
+///      Embeddings are L2-normalised so cosine similarity is just a
+///      dot product.
 ///   2. **Candidate generation**: per doc, top-K most similar OTHER
 ///      docs above `MIN_EMBEDDING_SIMILARITY`. PURE embedding-based --
 ///      no filename heuristics.
 ///   3. **Content excerpts**: for each doc that appears in any
-///      candidate, read the first EXCERPT_CHARS from disk so the LLM
-///      grounds its decisions in actual content.
-///   4. **LLM labelling**: single Cerebras call labels each
-///      candidate as solution_of / part_of_unit / nothing.
+///      candidate, pull the first EXCERPT_CHARS out of Qdrant so the
+///      LLM grounds its decisions in actual content.
+///   4. **LLM labelling**: one call per pair labels each candidate as
+///      solution_of / part_of_unit / nothing.
 ///   5. **Post-filters**: confidence floor, similarity floors per
 ///      relation type, duplicate detection (cosine ~ 1), teacher
 ///      vetoes.
@@ -422,11 +444,7 @@ pub async fn link_course(
     const AUTO_NONE_KINDS: &[&str] = &["unknown", "syllabus"];
     let mut auto_none_pairs: Vec<(Uuid, Uuid)> = Vec::new();
     candidates.retain(|pair| {
-        let key = if pair.0 < pair.1 {
-            (pair.0, pair.1)
-        } else {
-            (pair.1, pair.0)
-        };
+        let key = pair_key(pair.0, pair.1);
         let (Some(da), Some(db_doc)) = (docs_by_id.get(&key.0), docs_by_id.get(&key.1)) else {
             return true;
         };
@@ -512,11 +530,7 @@ pub async fn link_course(
     let mut fresh_candidates: HashSet<(Uuid, Uuid)> = HashSet::new();
     let mut cached_hits: usize = 0;
     for pair in &candidates {
-        let key = if pair.0 < pair.1 {
-            (pair.0, pair.1)
-        } else {
-            (pair.1, pair.0)
-        };
+        let key = pair_key(pair.0, pair.1);
         let (Some(da), Some(db)) = (docs_by_id.get(&key.0), docs_by_id.get(&key.1)) else {
             // Shouldn't happen; candidate ids come from `truncated`.
             // Treat as fresh and let the LLM handle it.
@@ -628,12 +642,8 @@ pub async fn link_course(
             continue;
         }
 
-        let pair_key = if edge.src_id < edge.dst_id {
-            (edge.src_id, edge.dst_id)
-        } else {
-            (edge.dst_id, edge.src_id)
-        };
-        let sim = similarity_by_pair.get(&pair_key).copied().unwrap_or(0.0);
+        let key = pair_key(edge.src_id, edge.dst_id);
+        let sim = similarity_by_pair.get(&key).copied().unwrap_or(0.0);
 
         // Relation-specific similarity floor.
         let floor = match edge.relation.as_str() {
@@ -654,7 +664,7 @@ pub async fn link_course(
             continue;
         }
 
-        edges_by_pair.insert(pair_key, edge);
+        edges_by_pair.insert(key, edge);
     }
     if dropped_sim > 0 || dropped_rejected > 0 {
         tracing::info!(
@@ -668,11 +678,7 @@ pub async fn link_course(
     // edge for the unordered pair, optionally upsert the new one,
     // and record the cache row with the snapshot timestamps.
     for pair in &fresh_candidates {
-        let key = if pair.0 < pair.1 {
-            (pair.0, pair.1)
-        } else {
-            (pair.1, pair.0)
-        };
+        let key = pair_key(pair.0, pair.1);
         // Doc lookup; both should exist; if not, skip rather
         // than panic.
         let (Some(da), Some(db_doc)) = (docs_by_id.get(&key.0), docs_by_id.get(&key.1)) else {
@@ -750,10 +756,6 @@ pub async fn link_course(
     })
 }
 
-/// Pull pooled embeddings from `DocumentRow` where available, fall
-/// back to re-embedding on the fly for older docs whose
-/// pooled_embedding is NULL. Lazy backfill writes the result back to
-/// the DB so subsequent link calls don't repeat the work.
 /// Gather pooled embeddings for every doc the linker is going to
 /// consider. Two paths:
 ///
@@ -870,40 +872,7 @@ async fn pool_from_qdrant(
         })
         .collect();
 
-    Ok(mean_pool_normalized(&vectors))
-}
-
-/// Mean-pool + L2-normalise. Same shape as the ingest pipeline's
-/// version but pulled into the linker module so backfill doesn't need
-/// to re-export from minerva-pipeline.
-fn mean_pool_normalized(embeddings: &[Vec<f32>]) -> Option<Vec<f32>> {
-    if embeddings.is_empty() {
-        return None;
-    }
-    let dim = embeddings[0].len();
-    if dim == 0 {
-        return None;
-    }
-    let mut sum = vec![0.0f32; dim];
-    for e in embeddings {
-        if e.len() != dim {
-            return None;
-        }
-        for (i, v) in e.iter().enumerate() {
-            sum[i] += v;
-        }
-    }
-    let n = embeddings.len() as f32;
-    for v in sum.iter_mut() {
-        *v /= n;
-    }
-    let norm: f32 = sum.iter().map(|v| v * v).sum::<f32>().sqrt();
-    if norm > 0.0 {
-        for v in sum.iter_mut() {
-            *v /= norm;
-        }
-    }
-    Some(sum)
+    Ok(minerva_pipeline::pipeline::mean_pool_normalized(&vectors))
 }
 
 /// Cosine similarity for L2-normalised vectors is just the dot
@@ -952,28 +921,12 @@ fn build_similarity_matrix(
         }
         neighbors.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         for (other, _) in neighbors.into_iter().take(top_k) {
-            let pair = if di.id < other {
-                (di.id, other)
-            } else {
-                (other, di.id)
-            };
-            candidates.insert(pair);
+            candidates.insert(pair_key(di.id, other));
         }
     }
     sims
 }
 
-/// Read the first `EXCERPT_CHARS` of each in-candidate doc's text
-/// from disk. URL/awaiting-transcript/unsupported docs may have no
-/// readable file; those simply get an empty excerpt.
-///
-/// **Concurrency**: each doc's text extraction runs on the blocking
-/// thread pool via `spawn_blocking`, fanned out concurrently via
-/// `join_all`. Sync PDF parsing on the main runtime previously blocked
-/// the worker thread for hundreds of ms per doc; a large course
-/// (~30 docs) could stall request handling for several seconds during
-/// every relink. Now the runtime thread just awaits a join_all of
-/// blocking-pool tasks; HTTP handlers stay responsive.
 /// Pull a content excerpt for each in-candidate doc out of Qdrant.
 /// We grab a few chunks per doc (sorted by chunk_index ascending) and
 /// concatenate their text up to `EXCERPT_CHARS`. No file I/O, no PDF
@@ -1143,7 +1096,7 @@ async fn call_linker_llm(
 
     let total_pairs = pair_inputs.len();
     tracing::info!(
-        "linker: dispatching {} per-pair Cerebras calls (concurrency {})",
+        "linker: dispatching {} per-pair utility-model calls (concurrency {})",
         total_pairs,
         PAIR_CALL_CONCURRENCY,
     );
@@ -1357,13 +1310,7 @@ async fn classify_one_pair(
     let theory = ["lecture", "lecture_transcript", "reading"];
     let practice = ["tutorial_exercise", "assignment_brief", "lab_brief", "exam"];
     let (src, dst) = match canonical_relation {
-        "part_of_unit" => {
-            if p.a_id < p.b_id {
-                (p.a_id, p.b_id)
-            } else {
-                (p.b_id, p.a_id)
-            }
-        }
+        "part_of_unit" => pair_key(p.a_id, p.b_id),
         "solution_of" => {
             if p.a_kind == "sample_solution" {
                 (p.a_id, p.b_id)
@@ -1493,25 +1440,13 @@ mod tests {
         assert_eq!(sims.len(), 6);
 
         // doc1<->doc2 above 0.5 -> candidate.
-        let key12 = if docs[0].id < docs[1].id {
-            (docs[0].id, docs[1].id)
-        } else {
-            (docs[1].id, docs[0].id)
-        };
+        let key12 = pair_key(docs[0].id, docs[1].id);
         assert!(candidates.contains(&key12));
         // doc1<->doc4 above 0.5 -> candidate.
-        let key14 = if docs[0].id < docs[3].id {
-            (docs[0].id, docs[3].id)
-        } else {
-            (docs[3].id, docs[0].id)
-        };
+        let key14 = pair_key(docs[0].id, docs[3].id);
         assert!(candidates.contains(&key14));
         // doc1<->doc3 below 0.5 -> NOT a candidate.
-        let key13 = if docs[0].id < docs[2].id {
-            (docs[0].id, docs[2].id)
-        } else {
-            (docs[2].id, docs[0].id)
-        };
+        let key13 = pair_key(docs[0].id, docs[2].id);
         assert!(!candidates.contains(&key13));
     }
 }

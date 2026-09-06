@@ -28,6 +28,7 @@ use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::guards::require_admin;
 use crate::state::AppState;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -314,13 +315,6 @@ fn verify_token_signature(hmac_secret: &str, token: &str) -> Result<TokenClaims,
 }
 
 // ---- Misc helpers ---------------------------------------------------------
-
-fn require_admin(user: &User) -> Result<(), AppError> {
-    if !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
-}
 
 fn row_to_response(
     row: minerva_db::queries::external_auth::ExternalAuthInviteRow,

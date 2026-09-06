@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation } from "@tanstack/react-query"
 import { Route as SetupRoute } from "@/routes/lti/setup.$platformId"
-import { useApiErrorMessage } from "@/lib/use-api-error"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import {
   DYNREG_CHANNEL,
@@ -18,6 +17,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ErrorText } from "@/components/ui/error-text"
 
 /**
  * Trust-scope picker for LTI 1.3 Dynamic Registration. The Rust dynreg
@@ -36,7 +36,6 @@ export function LtiSetupScopePage() {
   const { t } = useTranslation("admin")
   const { t: tCommon } = useTranslation("common")
   useDocumentTitle(tCommon("pageTitles.ltiSetup"))
-  const formatError = useApiErrorMessage()
 
   const { platformId } = SetupRoute.useParams()
   const { name: platformName, issuer } = SetupRoute.useSearch()
@@ -277,9 +276,7 @@ export function LtiSetupScopePage() {
           )}
 
           {mutation.isError && (
-            <p className="text-sm text-destructive">
-              {formatError(mutation.error)}
-            </p>
+            <ErrorText error={mutation.error} />
           )}
 
           <div className="flex flex-wrap gap-2">

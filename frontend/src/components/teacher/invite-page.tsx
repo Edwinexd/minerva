@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ListRow, ListSkeleton } from "@/components/ui/list"
 import { useState } from "react"
 
 export function InvitePage({ useParams }: { useParams: () => { courseId: string } }) {
@@ -106,19 +106,11 @@ export function InvitePage({ useParams }: { useParams: () => { courseId: string 
           </Button>
         </div>
 
-        {isLoading && (
-          <div className="space-y-2">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        )}
+        {isLoading && <ListSkeleton />}
 
         <div className="space-y-3">
           {links?.map((link) => (
-            <div
-              key={link.id}
-              className="flex items-center justify-between py-2 border-b last:border-0"
-            >
+            <ListRow key={link.id}>
               <div className="space-y-1 flex-1 min-w-0">
                 <code className="text-xs bg-muted px-2 py-1 rounded block truncate">
                   {window.location.origin}/join/{link.token}
@@ -150,7 +142,7 @@ export function InvitePage({ useParams }: { useParams: () => { courseId: string 
                   {t("invite.revoke")}
                 </Button>
               </div>
-            </div>
+            </ListRow>
           ))}
         </div>
       </CardContent>

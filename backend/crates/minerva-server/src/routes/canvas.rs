@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{AppError, LocalizedMessage};
+use crate::routes::guards::{require_course_teacher, TeacherScope};
 use crate::state::AppState;
 use minerva_app_core::canvas::{discover_items, paginate_json, run_sync, ItemKind, SyncResult};
 use minerva_core::models::User;
@@ -33,32 +34,6 @@ pub fn course_router() -> Router<AppState> {
         .route("/canvas/{connection_id}/auto-sync", patch(update_auto_sync))
         .route("/canvas/{connection_id}/sync", post(trigger_sync))
         .route("/canvas/{connection_id}/files", get(list_canvas_items))
-}
-
-async fn require_course_teacher(
-    state: &AppState,
-    course_id: Uuid,
-    user: &User,
-) -> Result<(), AppError> {
-    if user.role.is_admin() {
-        return Ok(());
-    }
-
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id == user.id {
-        return Ok(());
-    }
-
-    let is_teacher =
-        minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?;
-    if is_teacher {
-        return Ok(());
-    }
-
-    Err(AppError::Forbidden)
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +74,7 @@ async fn list_connections(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<ConnectionResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let rows = minerva_db::queries::canvas::list_connections(&state.db, course_id).await?;
     Ok(Json(
@@ -133,7 +108,7 @@ async fn lookup_courses(
     Path(course_id): Path<Uuid>,
     Json(body): Json<LookupCoursesRequest>,
 ) -> Result<Json<Vec<CanvasCourseInfo>>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let base = body.canvas_base_url.trim().trim_end_matches('/');
     let token = body.canvas_api_token.trim();
@@ -173,7 +148,7 @@ async fn create_connection(
     Path(course_id): Path<Uuid>,
     Json(body): Json<CreateConnectionRequest>,
 ) -> Result<Json<ConnectionResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     if body.name.trim().is_empty() {
         return Err(AppError::bad_request("canvas.name_required"));
@@ -225,7 +200,7 @@ async fn delete_connection(
     Extension(user): Extension<User>,
     Path((course_id, connection_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conn = minerva_db::queries::canvas::find_connection(&state.db, connection_id)
         .await?
@@ -266,7 +241,7 @@ async fn list_canvas_items(
     Extension(user): Extension<User>,
     Path((course_id, connection_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<CanvasItemsResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conn = minerva_db::queries::canvas::find_connection(&state.db, connection_id)
         .await?
@@ -327,7 +302,7 @@ async fn trigger_sync(
     Extension(user): Extension<User>,
     Path((course_id, connection_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<SyncResult>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conn = minerva_db::queries::canvas::find_connection(&state.db, connection_id)
         .await?
@@ -352,7 +327,7 @@ async fn update_auto_sync(
     Path((course_id, connection_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<AutoSyncRequest>,
 ) -> Result<Json<ConnectionResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conn = minerva_db::queries::canvas::find_connection(&state.db, connection_id)
         .await?

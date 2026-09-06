@@ -3,8 +3,7 @@
 //!
 //! ## Why this exists
 //!
-//! The fastembed cache has its own measured-cost LRU budget (see
-//! `fastembed_embedder::DEFAULT_CACHE_BUDGET_FRACTION`). Everything else
+//! The fastembed cache has its own measured-cost LRU budget. Everything else
 //! that allocates non-trivial memory in the background (the cross-encoder
 //! reranker, per-doc ingest jobs, the MBZ parser, the bulk
 //! reclassify-all-in-course task, the KG linker) was running with no
@@ -127,7 +126,7 @@ impl MemBudget {
                 return (Self::new(n), source);
             }
         }
-        let Some(cgroup_bytes) = read_cgroup_memory_limit() else {
+        let Some(cgroup_bytes) = crate::mem::read_cgroup_memory_limit() else {
             return (
                 Self::new(DEFAULT_TOTAL_MIB),
                 format!(
@@ -214,33 +213,6 @@ impl MemBudget {
             label: label.to_string(),
         })
     }
-}
-
-/// Read the active cgroup memory limit. Cgroup v2 first, v1 fallback.
-/// Returns `None` for unlimited or unreadable. Mirrors the helper in
-/// `fastembed_embedder.rs`; deliberately duplicated to avoid having
-/// the budget module depend on the embedder's internals.
-fn read_cgroup_memory_limit() -> Option<u64> {
-    if let Ok(s) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
-        let trimmed = s.trim();
-        if trimmed == "max" {
-            return None;
-        }
-        if let Ok(n) = trimmed.parse::<u64>() {
-            return Some(n);
-        }
-    }
-    if let Ok(s) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
-        if let Ok(n) = s.trim().parse::<u64>() {
-            // v1 sentinel "unlimited" is a value larger than any
-            // realistic RAM. Treat anything north of 1 PiB as unlimited.
-            if n >= 1u64 << 50 {
-                return None;
-            }
-            return Some(n);
-        }
-    }
-    None
 }
 
 #[cfg(test)]

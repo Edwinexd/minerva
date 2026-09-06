@@ -10,7 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ListSkeleton } from "@/components/ui/list"
 
 interface UsageRow {
   user_id: string
@@ -108,12 +108,7 @@ export function UsagePage({ useParams }: { useParams: () => { courseId: string }
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {isLoading && (
-          <div className="space-y-2">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        )}
+        {isLoading && <ListSkeleton />}
 
         {!isLoading && byUser.size === 0 && (
           <p className="text-muted-foreground text-sm">{t("usage.empty")}</p>

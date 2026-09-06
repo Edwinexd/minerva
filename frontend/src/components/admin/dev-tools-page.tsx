@@ -15,8 +15,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { api } from "@/lib/api"
-import { useApiErrorMessage } from "@/lib/use-api-error"
+import { devConfigQuery } from "@/lib/queries"
 import { Button } from "@/components/ui/button"
+import { ErrorText } from "@/components/ui/error-text"
 import {
   Card,
   CardContent,
@@ -24,10 +25,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-
-interface DevConfig {
-  dev_mode: boolean
-}
 
 interface WipeReport {
   messages: number
@@ -94,13 +91,8 @@ const SEEDED_COURSES: { name: string; config: string; ownership: string }[] = [
 export function DevToolsPanel() {
   const { t } = useTranslation("admin")
   const queryClient = useQueryClient()
-  const formatError = useApiErrorMessage()
 
-  const { data: devConfig, isLoading: devLoading } = useQuery({
-    queryKey: ["dev", "config"],
-    queryFn: () => api.get<DevConfig>("/dev/config"),
-    staleTime: Infinity,
-  })
+  const { data: devConfig, isLoading: devLoading } = useQuery(devConfigQuery)
 
   const [lastReport, setLastReport] = useState<SeedReport | null>(null)
 
@@ -154,9 +146,7 @@ export function DevToolsPanel() {
               {seed.isPending ? t("devTools.reseeding") : t("devTools.reseedButton")}
             </Button>
             {seed.isError && (
-              <p role="alert" className="text-sm text-destructive">
-                {formatError(seed.error)}
-              </p>
+              <ErrorText error={seed.error} />
             )}
           </div>
 

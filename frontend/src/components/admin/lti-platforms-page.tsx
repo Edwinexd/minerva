@@ -9,8 +9,8 @@ import {
   adminLtiSetupQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
-import { copyToClipboard as copyText } from "@/lib/clipboard"
-import { useApiErrorMessage } from "@/lib/use-api-error"
+import { useCopyFeedback } from "@/lib/use-copy-feedback"
+import { LtiManualConfigTable } from "@/components/lti-manual-config-table"
 import type { LtiOverscopedRegistration, LtiPlatform } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,13 +25,14 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ListEmpty } from "@/components/ui/list"
+import { ErrorText } from "@/components/ui/error-text"
 import { RelativeTime } from "@/components/relative-time"
 
 export function LtiPlatformsPanel() {
   const { t } = useTranslation("admin")
   const { t: tCommon } = useTranslation("common")
   const queryClient = useQueryClient()
-  const formatError = useApiErrorMessage()
   const { data: setup } = useQuery(adminLtiSetupQuery)
   const { data: platforms, isLoading } = useQuery(adminLtiPlatformsQuery)
   // Setup-health warnings (currently: per-course registrations that are
@@ -48,7 +49,7 @@ export function LtiPlatformsPanel() {
   // the site-integration-keys picker so admins don't see two different
   // syntaxes for the same concept.
   const [domainsRaw, setDomainsRaw] = useState("")
-  const [copiedField, setCopiedField] = useState<string | null>(null)
+  const { copiedKey, copy } = useCopyFeedback()
 
   const createMutation = useMutation({
     mutationFn: (data: {
@@ -98,16 +99,6 @@ export function LtiPlatformsPanel() {
 
   const config = setup?.moodle_tool_config
 
-  async function copyToClipboard(text: string, field: string) {
-    // Uses the shared helper so the button works on plain-HTTP LAN URLs
-    // (where navigator.clipboard is undefined). See lib/clipboard.ts.
-    const ok = await copyText(text)
-    if (ok) {
-      setCopiedField(field)
-      setTimeout(() => setCopiedField(null), 2000)
-    }
-  }
-
   return (
     <div className="space-y-6">
       {overscoped.length > 0 && (
@@ -149,14 +140,14 @@ export function LtiPlatformsPanel() {
                       variant="default"
                       size="sm"
                       className="shrink-0"
-                      onClick={() => copyToClipboard(setup.dynamic_registration_url!, "dynreg")}
+                      onClick={() => void copy(setup.dynamic_registration_url!, "dynreg")}
                     >
-                      {copiedField === "dynreg"
+                      {copiedKey === "dynreg"
                         ? t("ltiPlatforms.copied")
                         : tCommon("actions.copy")}
                     </Button>
                     <output className="sr-only">
-                      {copiedField === "dynreg" ? t("ltiPlatforms.copied") : ""}
+                      {copiedKey === "dynreg" ? t("ltiPlatforms.copied") : ""}
                     </output>
                   </div>
                   <p className="text-xs text-muted-foreground">
@@ -193,34 +184,11 @@ export function LtiPlatformsPanel() {
                     <Label className="text-xs font-medium uppercase text-muted-foreground tracking-wide">
                       {t("ltiPlatforms.manualSetupValuesHeading")}
                     </Label>
-                    {[
-                      { label: t("ltiPlatforms.toolUrl"), value: config.tool_url, key: "tool_url" },
-                      { label: t("ltiPlatforms.ltiVersion"), value: config.lti_version, key: "lti_version" },
-                      { label: t("ltiPlatforms.publicKeyType"), value: config.public_key_type, key: "public_key_type" },
-                      { label: t("ltiPlatforms.publicKeysetUrl"), value: config.public_keyset_url, key: "keyset" },
-                      { label: t("ltiPlatforms.initiateLoginUrl"), value: config.initiate_login_url, key: "login" },
-                      { label: t("ltiPlatforms.redirectionUris"), value: config.redirection_uris, key: "redirect" },
-                      { label: t("ltiPlatforms.customParameters"), value: config.custom_parameters, key: "custom" },
-                      { label: t("ltiPlatforms.iconUrl"), value: config.icon_url, key: "icon" },
-                    ].map(({ label, value, key }) => (
-                      <div key={key} className="flex items-center justify-between gap-4">
-                        <div className="min-w-0 flex-1">
-                          <Label className="text-xs text-muted-foreground">{label}</Label>
-                          <code className="block text-sm bg-muted px-2 py-1 rounded truncate">{value}</code>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="shrink-0"
-                          onClick={() => copyToClipboard(value, key)}
-                        >
-                          {copiedField === key ? t("ltiPlatforms.copied") : tCommon("actions.copy")}
-                        </Button>
-                        <output className="sr-only">
-                          {copiedField === key ? t("ltiPlatforms.copied") : ""}
-                        </output>
-                      </div>
-                    ))}
+                    <LtiManualConfigTable
+                      config={config}
+                      ns="admin"
+                      keyPrefix="ltiPlatforms"
+                    />
                     <Separator />
                     <p className="text-sm text-muted-foreground">
                       {t("ltiPlatforms.siteLevelNote")}
@@ -315,7 +283,7 @@ export function LtiPlatformsPanel() {
               </div>
 
               {createMutation.isError && (
-                <p className="text-sm text-destructive">{formatError(createMutation.error)}</p>
+                <ErrorText error={createMutation.error} />
               )}
 
               <div className="flex gap-2">
@@ -346,9 +314,7 @@ export function LtiPlatformsPanel() {
           )}
 
           {platforms && platforms.length === 0 && !showForm && (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              {t("ltiPlatforms.empty")}
-            </p>
+            <ListEmpty>{t("ltiPlatforms.empty")}</ListEmpty>
           )}
 
           <div className="space-y-2">

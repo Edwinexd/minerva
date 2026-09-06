@@ -27,7 +27,7 @@ import {
 import { conversationLimitState } from "@/components/chat/conversation-limit-state"
 import { useConversationSplit } from "@/components/chat/use-conversation-split"
 
-//; Types for embed API responses --
+// ── Types for embed API responses ──────────────────────────────────
 
 interface EmbedCourse {
   id: string
@@ -166,7 +166,7 @@ async function embedPost<T>(path: string, token: string, body?: unknown): Promis
   return res.json()
 }
 
-//; Main page --
+// ── Main page ──────────────────────────────────────────────────────
 
 export function EmbedPage({ useParams }: { useParams: () => { courseId: string } }) {
   const { t } = useTranslation("auth")
@@ -182,8 +182,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   const [conversations, setConversations] = useState<EmbedConversation[]>([])
   // Pinned-by-teacher chats. Loaded alongside the user's own
   // conversations so the sidebar can surface them with attribution,
-  // mirroring the regular Shibboleth chat page. Previously absent from
-  // the embed view, leaving teacher pins invisible inside iframes.
+  // mirroring the regular Shibboleth chat page.
   const [pinned, setPinned] = useState<EmbedPinnedConversation[]>([])
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
   const [me, setMe] = useState<EmbedMe | null>(null)
@@ -271,13 +270,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
         setPinned(pins)
         setSuggestedQuestions(suggestions.questions)
         // Deliberately leave `activeConvId` as null on first load,
-        // mirroring the Shibboleth route's `/new` redirect. LTI
-        // re-launches and iframe refreshes used to land on the
-        // student's most recent chat (or a teacher pin), which
-        // polluted the context window with whatever they were last
-        // doing. The empty state below now greets the user and
-        // surfaces the input directly; the sidebar still lists
-        // every prior + pinned chat for one-click resume.
+        // mirroring the Shibboleth route's `/new` redirect.
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : t("embed.failedToLoad"))
       } finally {
@@ -331,11 +324,8 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
     )
   }
 
-  // Teacher pin freezes the chat for EVERYONE, owner included.
-  // Previously this also required the viewer to not own the
-  // conv, which let students keep appending to their own chats
-  // after a pin and broke the "vetted exemplar" contract.
-  // Backend enforces the same rule via `conversation.pinned_frozen`.
+  // A teacher pin freezes the chat for EVERYONE, the owner
+  // included. Backend enforces via `conversation.pinned_frozen`.
   const isPinnedView =
     activeConvId !== null &&
     pinned.some((p) => p.id === activeConvId)
@@ -452,7 +442,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   )
 }
 
-//; Chat window --
+// ── Chat window ────────────────────────────────────────────────────
 
 /**
  * Embed-side ChatSurface wrapper. Owns the embed-specific bits
@@ -561,7 +551,7 @@ function EmbedChatWindow({
     return () => { cancelled = true }
   }, [courseId, conversationId, token])
 
-  // ---- Per-conversation token ceiling ----
+  // ── Per-conversation token ceiling ───────────────────────────────
   //
   // The ceiling is enforced in `run_chat_message`, which the embed send
   // path shares with the Shibboleth one, so this surface needs the same
@@ -586,7 +576,7 @@ function EmbedChatWindow({
       ? "ok"
       : rawLimitState
 
-  // ---- ChatSurface adapter ----
+  // ── ChatSurface adapter ──────────────────────────────────────────
 
   const buildSendFetch = useCallback<
     ChatSurfaceAdapter<EmbedMessage>["buildSendFetch"]

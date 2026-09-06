@@ -32,6 +32,7 @@ use uuid::Uuid;
 
 use crate::error::{AppError, ErrorParams};
 use crate::lti;
+use crate::routes::guards::{require_course_teacher, require_site_integrator, TeacherScope};
 use crate::state::AppState;
 use minerva_core::models::User;
 
@@ -646,7 +647,7 @@ async fn lti_setup(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<LtiSetupResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     Ok(Json(build_setup_response(&state.config.base_url)))
 }
 
@@ -752,7 +753,7 @@ async fn list_registrations(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<RegistrationResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
 
     let rows =
         minerva_db::queries::lti::list_registrations_for_course(&state.db, course_id).await?;
@@ -784,7 +785,7 @@ async fn create_registration(
     Path(course_id): Path<Uuid>,
     Json(body): Json<CreateRegistrationRequest>,
 ) -> Result<Json<RegistrationResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
 
     let issuer = body.issuer.trim_end_matches('/');
     let auth_login_url = body
@@ -843,7 +844,7 @@ async fn delete_registration(
     Extension(user): Extension<User>,
     Path((course_id, registration_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
 
     let reg = minerva_db::queries::lti::find_registration_by_id(&state.db, registration_id)
         .await?
@@ -859,34 +860,6 @@ async fn delete_registration(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-async fn require_course_teacher(
-    state: &AppState,
-    course_id: Uuid,
-    user: &User,
-) -> Result<(), AppError> {
-    if user.role.is_admin() {
-        return Ok(());
-    }
-
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id == user.id {
-        return Ok(());
-    }
-
-    // LTI registrations are a teacher-only operation; TAs are excluded.
-    let is_teacher =
-        minerva_db::queries::courses::is_course_teacher_strict(&state.db, course_id, user.id)
-            .await?;
-    if is_teacher {
-        return Ok(());
-    }
-
-    Err(AppError::Forbidden)
-}
 
 fn build_moodle_config(base_url: &str) -> MoodleToolConfig {
     MoodleToolConfig {
@@ -1204,16 +1177,6 @@ async fn bind_complete(
 // ---------------------------------------------------------------------------
 // Admin (site-level) platforms
 // ---------------------------------------------------------------------------
-
-/// Site-wide LTI platform management is open to admins and integrators; the
-/// integrator role exists precisely to delegate this (and site integration
-/// keys) without full admin.
-fn require_site_integrator(user: &User) -> Result<(), AppError> {
-    if !user.role.can_manage_site_integrations() {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
-}
 
 /// GET /admin/lti/setup; the same Moodle/Canvas tool config hints the
 /// per-course flow offers, but for the site admin. Exposes tool URLs and the
@@ -2180,7 +2143,7 @@ async fn list_course_nrps_status(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<NrpsStatusResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let rows =
         minerva_db::queries::lti_nrps::list_contexts_for_course(&state.db, course_id).await?;
     Ok(Json(rows.into_iter().map(nrps_to_response).collect()))
@@ -2239,7 +2202,7 @@ async fn list_course_site_bindings(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<CourseSiteBindingResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let rows = minerva_db::queries::lti::list_bindings_for_course(&state.db, course_id).await?;
     Ok(Json(
         rows.into_iter()
@@ -2271,7 +2234,7 @@ async fn delete_course_site_binding(
     Extension(user): Extension<User>,
     Path((course_id, binding_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let bindings = minerva_db::queries::lti::list_bindings_for_course(&state.db, course_id).await?;
     if !bindings.iter().any(|b| b.binding_id == binding_id) {
         return Err(AppError::NotFound);

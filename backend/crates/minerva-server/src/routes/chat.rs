@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use crate::error::AppError;
 use crate::ext_obfuscate::{self, Pseudonymizer};
 use crate::routes::enforce_owner_cap;
+use crate::routes::guards::{self, require_course_teacher, TeacherScope};
 use crate::state::AppState;
 use crate::strategy;
 
@@ -606,7 +607,7 @@ async fn list_all_conversations(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<ConversationWithFeedbackResponse>>, AppError> {
-    verify_course_teacher_access(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let rows = minerva_db::queries::conversations::list_all_by_course_with_feedback(
         &state.db, course_id, user.id,
@@ -666,7 +667,7 @@ async fn list_flag_kinds(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<HashMap<Uuid, Vec<String>>>, AppError> {
-    verify_course_teacher_access(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     let map =
         minerva_db::queries::conversation_flags::flag_kinds_by_conversation(&state.db, course_id)
             .await?;
@@ -679,7 +680,7 @@ async fn get_course_feedback_stats(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<CourseFeedbackStatsResponse>, AppError> {
-    verify_course_teacher_access(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let summary =
         minerva_db::queries::message_feedback::total_ratings_for_course(&state.db, course_id)
@@ -713,7 +714,8 @@ pub(crate) async fn list_pinned_conversations_for(
     course_id: Uuid,
     viewer: &User,
 ) -> Result<Vec<ConversationWithUserResponse>, AppError> {
-    let is_teacher = is_course_teacher_or_admin(state, course_id, viewer).await?;
+    let is_teacher =
+        guards::is_course_teacher(state, course_id, viewer, TeacherScope::WithAssistants).await?;
     let rows =
         minerva_db::queries::conversations::list_pinned_by_course(&state.db, course_id).await?;
     let ps = Pseudonymizer::for_viewer(&state.db, viewer, &state.config.hmac_secret).await?;
@@ -784,7 +786,8 @@ pub(crate) async fn fetch_conversation_for_view(
         return Err(AppError::NotFound);
     }
 
-    let is_teacher = is_course_teacher_or_admin(state, course_id, viewer).await?;
+    let is_teacher =
+        guards::is_course_teacher(state, course_id, viewer, TeacherScope::WithAssistants).await?;
     if conv.user_id != viewer.id && !is_teacher && !conv.pinned {
         return Err(AppError::Forbidden);
     }
@@ -1408,7 +1411,8 @@ async fn send_message(
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course = verify_course_access(&state, course_id, user.id).await?;
-    let viewer_is_teacher = is_teacher_of_loaded_course(&state, &course, &user).await?;
+    let viewer_is_teacher =
+        guards::is_teacher_of(&state, &course, &user, TeacherScope::WithAssistants).await?;
     run_chat_message(
         &state,
         course,
@@ -1429,7 +1433,8 @@ async fn start_conversation(
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
     let course = verify_course_access(&state, course_id, user.id).await?;
-    let viewer_is_teacher = is_teacher_of_loaded_course(&state, &course, &user).await?;
+    let viewer_is_teacher =
+        guards::is_teacher_of(&state, &course, &user, TeacherScope::WithAssistants).await?;
     run_chat_message(
         &state,
         course,
@@ -1849,7 +1854,7 @@ async fn set_pin(
     Path((course_id, cid)): Path<(Uuid, Uuid)>,
     Json(body): Json<SetPinRequest>,
 ) -> Result<Json<ConversationResponse>, AppError> {
-    verify_course_teacher_access(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
@@ -1910,7 +1915,8 @@ async fn list_notes(
     }
 
     // Anyone can see notes on pinned conversations, or own conversations, or teachers
-    let is_teacher = is_course_teacher_or_admin(&state, course_id, &user).await?;
+    let is_teacher =
+        guards::is_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     if conv.user_id != user.id && !is_teacher && !conv.pinned {
         return Err(AppError::Forbidden);
     }
@@ -1945,7 +1951,7 @@ async fn create_note(
     Path((course_id, cid)): Path<(Uuid, Uuid)>,
     Json(body): Json<CreateNoteRequest>,
 ) -> Result<Json<TeacherNoteResponse>, AppError> {
-    verify_course_teacher_access(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
@@ -1984,7 +1990,7 @@ async fn update_note(
     Path((course_id, cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
     Json(body): Json<UpdateNoteRequest>,
 ) -> Result<Json<TeacherNoteResponse>, AppError> {
-    verify_course_teacher_access(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     // Verify the note lives in the conversation from the URL, and the
     // conversation lives in the URL's course. Without this, a teacher of
@@ -2027,7 +2033,7 @@ async fn delete_note(
     Extension(user): Extension<User>,
     Path((course_id, cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    verify_course_teacher_access(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     // Verify the note lives in the conversation from the URL, and the
     // conversation lives in the URL's course. Without this, a teacher of
@@ -2156,7 +2162,8 @@ async fn mark_read(
     }
 
     let is_owner = conv.user_id == user.id;
-    let is_teacher = is_course_teacher_or_admin(&state, course_id, &user).await?;
+    let is_teacher =
+        guards::is_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     // Reject early if neither relationship applies. Pinned
     // conversations are readable by non-owner students, but
     // there's no "student bookmark" concept here; silently
@@ -2185,7 +2192,7 @@ async fn acknowledge_flag(
     Extension(user): Extension<User>,
     Path((course_id, cid, flag_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<ConversationFlagResponse>, AppError> {
-    verify_course_teacher_access(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     // Triple-check the (course, conversation, flag) URL path:
     // otherwise a teacher of course A could ack a flag in
@@ -2238,7 +2245,7 @@ async fn acknowledge_feedback(
     Extension(user): Extension<User>,
     Path((course_id, cid, fb_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<MessageFeedbackResponse>, AppError> {
-    verify_course_teacher_access(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
@@ -2549,54 +2556,6 @@ async fn verify_course_access(
 
     if course.owner_id != user_id
         && !minerva_db::queries::courses::is_member(&state.db, course_id, user_id).await?
-    {
-        return Err(AppError::Forbidden);
-    }
-
-    Ok(course)
-}
-
-async fn is_course_teacher_or_admin(
-    state: &AppState,
-    course_id: Uuid,
-    user: &User,
-) -> Result<bool, AppError> {
-    if user.role.is_admin() {
-        return Ok(true);
-    }
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    is_teacher_of_loaded_course(state, &course, user).await
-}
-
-/// Same check against a course row the caller already has in hand.
-/// The send path resolves the course before it can do anything else,
-/// so going through `is_course_teacher_or_admin` there would re-fetch
-/// it by primary key on every chat turn just to answer one bool.
-pub(crate) async fn is_teacher_of_loaded_course(
-    state: &AppState,
-    course: &minerva_db::queries::courses::CourseRow,
-    user: &User,
-) -> Result<bool, AppError> {
-    if user.role.is_admin() || course.owner_id == user.id {
-        return Ok(true);
-    }
-    Ok(minerva_db::queries::courses::is_course_teacher(&state.db, course.id, user.id).await?)
-}
-
-async fn verify_course_teacher_access(
-    state: &AppState,
-    course_id: Uuid,
-    user: &User,
-) -> Result<minerva_db::queries::courses::CourseRow, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if !user.role.is_admin()
-        && course.owner_id != user.id
-        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
     {
         return Err(AppError::Forbidden);
     }

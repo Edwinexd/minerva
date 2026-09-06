@@ -3,8 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { apiKeysQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
-import { copyToClipboard as copyText } from "@/lib/clipboard"
-import { useApiErrorMessage } from "@/lib/use-api-error"
+import { useCopyFeedback } from "@/lib/use-copy-feedback"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -14,7 +13,8 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ListRow, ListSkeleton, ListEmpty } from "@/components/ui/list"
+import { ErrorText } from "@/components/ui/error-text"
 import { useState } from "react"
 import type { ApiKeyCreated } from "@/lib/types"
 
@@ -23,10 +23,9 @@ export function ApiKeysPage({ useParams }: { useParams: () => { courseId: string
   const queryClient = useQueryClient()
   const { t } = useTranslation("teacher")
   const { t: tCommon } = useTranslation("common")
-  const formatError = useApiErrorMessage()
   const [keyName, setKeyName] = useState("")
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null)
-  const [copied, setCopied] = useState(false)
+  const { copiedKey, copy } = useCopyFeedback()
   const { data: keys, isLoading } = useQuery(apiKeysQuery(courseId))
 
   const createMutation = useMutation({
@@ -36,7 +35,7 @@ export function ApiKeysPage({ useParams }: { useParams: () => { courseId: string
       setNewKey(data)
       setKeyName("")
       queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "api-keys"],
+        queryKey: apiKeysQuery(courseId).queryKey,
       })
     },
   })
@@ -46,7 +45,7 @@ export function ApiKeysPage({ useParams }: { useParams: () => { courseId: string
       api.delete(`/courses/${courseId}/api-keys/${keyId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "api-keys"],
+        queryKey: apiKeysQuery(courseId).queryKey,
       })
     },
   })
@@ -82,7 +81,7 @@ export function ApiKeysPage({ useParams }: { useParams: () => { courseId: string
         </form>
 
         {createMutation.isError && (
-          <p className="text-sm text-destructive">{formatError(createMutation.error)}</p>
+          <ErrorText error={createMutation.error} />
         )}
 
         {newKey && (
@@ -97,41 +96,26 @@ export function ApiKeysPage({ useParams }: { useParams: () => { courseId: string
               <Button
                 variant="outline"
                 size="sm"
-                onClick={async () => {
-                  if (await copyText(newKey.key)) {
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 2000)
-                  }
-                }}
+                onClick={() => void copy(newKey.key)}
               >
-                {copied ? t("apiKeys.copied") : tCommon("actions.copy")}
+                {copiedKey ? t("apiKeys.copied") : tCommon("actions.copy")}
               </Button>
               <output className="sr-only">
-                {copied ? t("apiKeys.copied") : ""}
+                {copiedKey ? t("apiKeys.copied") : ""}
               </output>
             </div>
           </div>
         )}
 
-        {isLoading && (
-          <div className="space-y-2">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        )}
+        {isLoading && <ListSkeleton />}
 
         {keys && keys.length === 0 && !newKey && (
-          <p className="text-sm text-muted-foreground py-4 text-center">
-            {t("apiKeys.empty")}
-          </p>
+          <ListEmpty>{t("apiKeys.empty")}</ListEmpty>
         )}
 
         <div className="space-y-3">
           {keys?.map((k) => (
-            <div
-              key={k.id}
-              className="flex items-center justify-between py-2 border-b last:border-0"
-            >
+            <ListRow key={k.id}>
               <div className="space-y-1 flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-sm">{k.name}</span>
@@ -154,7 +138,7 @@ export function ApiKeysPage({ useParams }: { useParams: () => { courseId: string
               >
                 {t("apiKeys.revoke")}
               </Button>
-            </div>
+            </ListRow>
           ))}
         </div>
       </CardContent>

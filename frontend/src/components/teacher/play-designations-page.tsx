@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { playCourseCatalogQuery, playDesignationsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
-import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -13,7 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ListRow, ListSkeleton, ListEmpty } from "@/components/ui/list"
+import { ErrorText } from "@/components/ui/error-text"
 import { useState } from "react"
 import type { PlayDesignation } from "@/lib/types"
 
@@ -21,7 +21,6 @@ export function PlayDesignationsPage({ useParams }: { useParams: () => { courseI
   const { courseId } = useParams()
   const queryClient = useQueryClient()
   const { t } = useTranslation("teacher")
-  const formatError = useApiErrorMessage()
   const [designation, setDesignation] = useState("")
   const { data: designations, isLoading } = useQuery(
     playDesignationsQuery(courseId),
@@ -96,30 +95,18 @@ export function PlayDesignationsPage({ useParams }: { useParams: () => { courseI
         </form>
 
         {createMutation.isError && (
-          <p className="text-sm text-destructive">
-            {formatError(createMutation.error)}
-          </p>
+          <ErrorText error={createMutation.error} />
         )}
 
-        {isLoading && (
-          <div className="space-y-2">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        )}
+        {isLoading && <ListSkeleton />}
 
         {designations && designations.length === 0 && (
-          <p className="text-sm text-muted-foreground py-4 text-center">
-            {t("playDesignations.empty")}
-          </p>
+          <ListEmpty>{t("playDesignations.empty")}</ListEmpty>
         )}
 
         <div className="space-y-3">
           {designations?.map((d) => (
-            <div
-              key={d.id}
-              className="flex items-center justify-between py-2 border-b last:border-0"
-            >
+            <ListRow key={d.id}>
               <div className="space-y-1 flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <code className="font-mono text-sm bg-muted px-1.5 py-0.5 rounded">
@@ -149,7 +136,7 @@ export function PlayDesignationsPage({ useParams }: { useParams: () => { courseI
               >
                 {t("playDesignations.remove")}
               </Button>
-            </div>
+            </ListRow>
           ))}
         </div>
       </CardContent>

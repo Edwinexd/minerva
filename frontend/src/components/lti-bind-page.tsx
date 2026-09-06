@@ -21,6 +21,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorText } from "@/components/ui/error-text"
+import { Label } from "@/components/ui/label"
 
 /// First-launch LTI bind picker. Reachable without Shibboleth; the token
 /// in the URL is the auth. Renders when the backend's launch handler
@@ -133,7 +135,7 @@ export function LtiBindPage() {
         )}
 
         <div className="space-y-2">
-          <label className="text-sm font-medium">{t("ltiBind.courseLabel")}</label>
+          <Label>{t("ltiBind.courseLabel")}</Label>
           <Select
             value={selectedCourseId}
             onValueChange={(v) => setSelectedCourseId(v ?? "")}
@@ -154,7 +156,7 @@ export function LtiBindPage() {
         <p className="text-xs text-muted-foreground">{t("ltiBind.linkNote")}</p>
 
         {mutation.isError && (
-          <p className="text-sm text-destructive">{formatError(mutation.error)}</p>
+          <ErrorText error={mutation.error} />
         )}
 
         <Button

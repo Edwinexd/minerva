@@ -222,8 +222,8 @@ async fn next_job(
 ///
 /// The budget caps the sum of measured per-model costs; it does NOT cap
 /// total process RSS (other parts of the app can grow independently).
-/// Default: 40% of the cgroup memory limit, env-overridable via
-/// `MINERVA_FASTEMBED_CACHE_BUDGET_BYTES`.
+/// Defaults to `DEFAULT_CACHE_BUDGET_FRACTION` of the cgroup memory
+/// limit, env-overridable via `MINERVA_FASTEMBED_CACHE_BUDGET_BYTES`.
 ///
 /// Concurrency: the cache mutex is held only across admission (lookup +
 /// possible eviction + load + insert). Embeds run with the lock released,

@@ -1,7 +1,8 @@
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import type { QueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { allConversationsQuery, conversationDetailQuery, conversationFlagKindsQuery, courseFeedbackStatsQuery, conversationTopicsQuery } from "@/lib/queries"
+import { allConversationsQuery, conversationDetailQuery, conversationFlagKindsQuery, conversationsQuery, courseFeedbackStatsQuery, conversationTopicsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ListSkeleton } from "@/components/ui/list"
 import {
   ChatBubble,
   type ChatBubbleLabels,
@@ -26,6 +28,22 @@ import { ThinkingBlock, type ThinkingBlockLabels } from "@/components/chat/think
 import React, { useCallback, useMemo, useState } from "react"
 import type { ConversationFlag, ConversationWithUser, MessageFeedback, TeacherNote } from "@/lib/types"
 import { FEEDBACK_CATEGORIES } from "@/lib/types"
+
+/// Acknowledging feedback or a flag changes state read by both the
+/// expanded detail panel and the course-level conversation list, so
+/// both caches have to be refreshed.
+function invalidateConversationAndList(
+  queryClient: QueryClient,
+  courseId: string,
+  conversationId: string,
+) {
+  queryClient.invalidateQueries({
+    queryKey: conversationDetailQuery(courseId, conversationId).queryKey,
+  })
+  queryClient.invalidateQueries({
+    queryKey: allConversationsQuery(courseId).queryKey,
+  })
+}
 
 function useCategoryLabel() {
   const { t } = useTranslation("teacher")
@@ -54,6 +72,10 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   // available as an opt-in filter rather than making it mandatory.
   const [includeReadByOthers, setIncludeReadByOthers] = useState(false)
   const queryClient = useQueryClient()
+  const invalidateConversations = () =>
+    queryClient.invalidateQueries({
+      queryKey: conversationsQuery(courseId).queryKey,
+    })
   // Sticky membership for the "Unreviewed" tab. Snapshotted on tab
   // entry; rows here stay visible for the rest of the visit even
   // after the teacher opens them and the live `teacher_unreviewed`
@@ -122,21 +144,13 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   const markReviewedMutation = useMutation({
     mutationFn: (cid: string) =>
       api.post(`/courses/${courseId}/conversations/${cid}/mark-read`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations"],
-      })
-    },
+    onSuccess: invalidateConversations,
   })
 
   const pinMutation = useMutation({
     mutationFn: ({ cid, pinned }: { cid: string; pinned: boolean }) =>
       api.put(`/courses/${courseId}/conversations/${cid}/pin`, { pinned }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations"],
-      })
-    },
+    onSuccess: invalidateConversations,
   })
 
   const activeTopic = useMemo(
@@ -408,13 +422,7 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
             </div>
           )}
 
-          {isLoading && (
-            <div className="space-y-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          )}
+          {isLoading && <ListSkeleton rows={3} />}
           {!isLoading && displayConversations.length === 0 && (
             <p className="text-muted-foreground text-sm">
               {activeTab === "flagged"
@@ -579,14 +587,8 @@ function FeedbackBadges({
         `/courses/${courseId}/conversations/${conversationId}/feedback/${fbId}/acknowledge`,
         {},
       ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations", conversationId],
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations", "all"],
-      })
-    },
+    onSuccess: () =>
+      invalidateConversationAndList(queryClient, courseId, conversationId),
   })
   const down = feedback.filter((f) => f.rating === "down")
   const up = feedback.filter((f) => f.rating === "up")
@@ -687,14 +689,9 @@ function ConversationFlagDisplay({
       // Both the detail panel (for the acknowledged caption) and the
       // course-level conversation list (for the badge + Flagged
       // tab counter) read flag state, so invalidate both.
+      invalidateConversationAndList(queryClient, courseId, conversationId)
       queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations", conversationId],
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations", "flag-kinds"],
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations", "all"],
+        queryKey: conversationFlagKindsQuery(courseId).queryKey,
       })
     },
   })
@@ -796,6 +793,10 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
     toolCallsAriaLabel: tStudent("chat.toolCallsAriaLabel"),
   }
   const queryClient = useQueryClient()
+  const invalidateDetail = () =>
+    queryClient.invalidateQueries({
+      queryKey: conversationDetailQuery(courseId, conversationId).queryKey,
+    })
   const [noteContent, setNoteContent] = useState("")
   const [noteForMessage, setNoteForMessage] = useState<string | null>(null)
 
@@ -803,9 +804,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
     mutationFn: (body: { content: string; message_id?: string }) =>
       api.post<TeacherNote>(`/courses/${courseId}/conversations/${conversationId}/notes`, body),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations", conversationId],
-      })
+      invalidateDetail()
       setNoteContent("")
       setNoteForMessage(null)
     },
@@ -814,11 +813,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
   const deleteNoteMutation = useMutation({
     mutationFn: (noteId: string) =>
       api.delete(`/courses/${courseId}/conversations/${conversationId}/notes/${noteId}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations", conversationId],
-      })
-    },
+    onSuccess: invalidateDetail,
   })
 
   const openNoteForFeedback = (messageId: string, feedback: MessageFeedback[]) => {

@@ -2,8 +2,8 @@ import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ErrorText } from "@/components/ui/error-text"
 import { DataHandlingContent } from "@/components/data-handling"
-import { useApiErrorMessage } from "@/lib/use-api-error"
 
 /**
  * Blocking banner + modal shown above the chat input for students who have
@@ -18,7 +18,6 @@ export function PrivacyAckBanner({
 }) {
   const { t } = useTranslation("student")
   const { t: tCommon } = useTranslation("common")
-  const formatError = useApiErrorMessage()
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<unknown>(null)
@@ -105,7 +104,7 @@ export function PrivacyAckBanner({
             </div>
             <div className="flex flex-col-reverse gap-2 border-t bg-muted/50 px-6 py-3 sm:flex-row sm:justify-end">
               {error !== null && (
-                <p role="alert" className="mr-auto self-center text-sm text-destructive">{formatError(error)}</p>
+                <ErrorText error={error} className="mr-auto self-center" />
               )}
               <Button variant="outline" onClick={handleClose} disabled={submitting}>
                 {tCommon("actions.close")}

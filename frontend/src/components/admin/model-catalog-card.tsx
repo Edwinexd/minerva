@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next"
 import React from "react"
 
 import { api } from "@/lib/api"
-import { useApiErrorMessage } from "@/lib/use-api-error"
 import {
   Card,
   CardContent,
@@ -15,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
+import { ErrorText } from "@/components/ui/error-text"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -90,7 +90,6 @@ export function ModelCatalogCard<Row extends BaseModelRow>({
   speedOf: (m: Row) => number | null
 }) {
   const { t } = useTranslation("admin")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [pendingModel, setPendingModel] = React.useState<string | null>(null)
   // Confirmation gate for disabling a model that courses still use.
@@ -147,7 +146,7 @@ export function ModelCatalogCard<Row extends BaseModelRow>({
         {isLoading ? (
           <Skeleton className="h-40 w-full" />
         ) : error || !data ? (
-          <p role="alert" className="text-sm text-destructive">{formatError(error)}</p>
+          <ErrorText error={error} />
         ) : (
           <div className="space-y-3">
             {data.running && (
@@ -295,13 +294,13 @@ export function ModelCatalogCard<Row extends BaseModelRow>({
             {(enabledMutation.isError ||
               defaultMutation.isError ||
               benchmarkMutation.isError) && (
-              <p role="alert" className="text-sm text-destructive">
-                {formatError(
+              <ErrorText
+                error={
                   enabledMutation.error ??
-                    defaultMutation.error ??
-                    benchmarkMutation.error,
-                )}
-              </p>
+                  defaultMutation.error ??
+                  benchmarkMutation.error
+                }
+              />
             )}
             <p className="text-xs text-muted-foreground">{tx("note")}</p>
           </div>

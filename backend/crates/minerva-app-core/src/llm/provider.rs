@@ -30,6 +30,78 @@ use crate::config::Config;
 /// `[DONE]`. Applied per `stream.next().await`, not as a total deadline.
 const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// Splits an SSE byte stream into trimmed lines.
+///
+/// Raw TCP frames may split a multi-byte UTF-8 codepoint across chunks, so
+/// bytes are accumulated and only a validated prefix is promoted into the
+/// line buffer. Shared by the OpenAI-compatible and Anthropic streams,
+/// which frame identically and differ only in how they dispatch a line.
+struct SseFramer<S> {
+    stream: S,
+    byte_carry: Vec<u8>,
+    buffer: String,
+}
+
+impl<S, B, E> SseFramer<S>
+where
+    S: futures::Stream<Item = Result<B, E>> + Unpin,
+    B: AsRef<[u8]>,
+    E: std::fmt::Display,
+{
+    fn new(stream: S) -> Self {
+        Self {
+            stream,
+            byte_carry: Vec::new(),
+            buffer: String::new(),
+        }
+    }
+
+    /// Next line, or `Ok(None)` once the stream closes. A trailing partial
+    /// line (no newline before close) is dropped, same as an unterminated
+    /// frame. `id` only labels errors.
+    async fn next_line(&mut self, id: &str) -> Result<Option<String>, String> {
+        loop {
+            if let Some(line_end) = self.buffer.find('\n') {
+                let line = self.buffer[..line_end].trim().to_string();
+                self.buffer.drain(..=line_end);
+                return Ok(Some(line));
+            }
+
+            let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, self.stream.next()).await {
+                Ok(n) => n,
+                Err(_) => {
+                    return Err(format!(
+                        "{} stream idle timeout ({}s)",
+                        id,
+                        STREAM_IDLE_TIMEOUT.as_secs()
+                    ));
+                }
+            };
+            let chunk = match next {
+                Some(Ok(c)) => c,
+                Some(Err(e)) => {
+                    tracing::error!("{} stream error: {}", id, e);
+                    return Err(format!("Stream interrupted: {}", e));
+                }
+                None => return Ok(None),
+            };
+
+            self.byte_carry.extend_from_slice(chunk.as_ref());
+            let valid_up_to = match std::str::from_utf8(&self.byte_carry) {
+                Ok(_) => self.byte_carry.len(),
+                Err(e) => e.valid_up_to(),
+            };
+            if valid_up_to > 0 {
+                self.buffer.push_str(
+                    std::str::from_utf8(&self.byte_carry[..valid_up_to])
+                        .expect("prefix was UTF-8 validated"),
+                );
+                self.byte_carry.drain(..valid_up_to);
+            }
+        }
+    }
+}
+
 /// Stable provider ids (the `chat_models.provider` column references these).
 pub const PROVIDER_CEREBRAS: &str = "cerebras";
 pub const PROVIDER_OPENAI: &str = "openai";
@@ -517,84 +589,45 @@ impl ChatProvider for OpenAiCompatibleProvider {
         let response =
             super::openai_chat_request(&self.client, &self.chat_url, &self.api_key, &body).await?;
 
-        let mut stream = response.bytes_stream();
-        // Raw TCP frames may split multi-byte UTF-8 codepoints across
-        // chunks; accumulate bytes and promote only validated prefixes.
-        let mut byte_carry: Vec<u8> = Vec::new();
-        let mut buffer = String::new();
+        let mut framer = SseFramer::new(response.bytes_stream());
         let mut usage = ChatUsage::default();
 
-        'outer: loop {
-            let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
-                Ok(n) => n,
-                Err(_) => {
-                    return Err(format!(
-                        "{} stream idle timeout ({}s)",
-                        self.id,
-                        STREAM_IDLE_TIMEOUT.as_secs()
-                    ));
-                }
-            };
-            let chunk = match next {
-                Some(Ok(c)) => c,
-                Some(Err(e)) => {
-                    tracing::error!("{} stream error: {}", self.id, e);
-                    return Err(format!("Stream interrupted: {}", e));
-                }
-                None => break, // stream closed without [DONE]
-            };
-            byte_carry.extend_from_slice(&chunk);
-            let valid_up_to = match std::str::from_utf8(&byte_carry) {
-                Ok(_) => byte_carry.len(),
-                Err(e) => e.valid_up_to(),
-            };
-            if valid_up_to > 0 {
-                let valid_str = std::str::from_utf8(&byte_carry[..valid_up_to])
-                    .expect("prefix was UTF-8 validated");
-                buffer.push_str(valid_str);
-                byte_carry.drain(..valid_up_to);
+        // `None` is a stream closed without [DONE].
+        while let Some(line) = framer.next_line(&self.id).await? {
+            if line == "data: [DONE]" {
+                break;
             }
 
-            while let Some(line_end) = buffer.find('\n') {
-                let line = buffer[..line_end].trim().to_string();
-                buffer.drain(..=line_end);
+            if let Some(data) = line.strip_prefix("data: ") {
+                if let Ok(parsed) = serde_json::from_str::<Value>(data) {
+                    if let Some(err) = parsed.get("error") {
+                        let msg = err["message"]
+                            .as_str()
+                            .unwrap_or("unknown error")
+                            .to_string();
+                        return Err(msg);
+                    }
 
-                if line == "data: [DONE]" {
-                    break 'outer;
-                }
-
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if let Ok(parsed) = serde_json::from_str::<Value>(data) {
-                        if let Some(err) = parsed.get("error") {
-                            let msg = err["message"]
-                                .as_str()
-                                .unwrap_or("unknown error")
-                                .to_string();
-                            return Err(msg);
+                    if let Some(text) = parsed["choices"][0]["delta"]["content"].as_str() {
+                        let logprob = parsed["choices"][0]["logprobs"]["content"][0]["logprob"]
+                            .as_f64()
+                            .map(|v| v as f32);
+                        if delta_tx
+                            .send(ChatDelta {
+                                text: Some(text.to_string()),
+                                logprob,
+                            })
+                            .await
+                            .is_err()
+                        {
+                            return Err("delta receiver dropped".to_string());
                         }
+                    }
 
-                        if let Some(text) = parsed["choices"][0]["delta"]["content"].as_str() {
-                            let logprob = parsed["choices"][0]["logprobs"]["content"][0]["logprob"]
-                                .as_f64()
-                                .map(|v| v as f32);
-                            if delta_tx
-                                .send(ChatDelta {
-                                    text: Some(text.to_string()),
-                                    logprob,
-                                })
-                                .await
-                                .is_err()
-                            {
-                                return Err("delta receiver dropped".to_string());
-                            }
-                        }
-
-                        if let Some(u) = parsed.get("usage") {
-                            if !u.is_null() {
-                                usage.prompt_tokens = u["prompt_tokens"].as_i64().unwrap_or(0);
-                                usage.completion_tokens =
-                                    u["completion_tokens"].as_i64().unwrap_or(0);
-                            }
+                    if let Some(u) = parsed.get("usage") {
+                        if !u.is_null() {
+                            usage.prompt_tokens = u["prompt_tokens"].as_i64().unwrap_or(0);
+                            usage.completion_tokens = u["completion_tokens"].as_i64().unwrap_or(0);
                         }
                     }
                 }
@@ -830,101 +863,63 @@ impl ChatProvider for AnthropicProvider {
         let body = self.build_body(&req);
         let response = self.post_with_retry(&body).await?;
 
-        let mut stream = response.bytes_stream();
-        let mut byte_carry: Vec<u8> = Vec::new();
-        let mut buffer = String::new();
+        let mut framer = SseFramer::new(response.bytes_stream());
         let mut usage = ChatUsage::default();
 
-        'outer: loop {
-            let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
-                Ok(n) => n,
-                Err(_) => {
-                    return Err(format!(
-                        "{} stream idle timeout ({}s)",
-                        self.id,
-                        STREAM_IDLE_TIMEOUT.as_secs()
-                    ));
-                }
+        while let Some(line) = framer.next_line(&self.id).await? {
+            // Anthropic SSE interleaves `event: <type>` and
+            // `data: <json>` lines. We dispatch off the JSON payload's
+            // own `type` field and ignore the `event:` lines.
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
             };
-            let chunk = match next {
-                Some(Ok(c)) => c,
-                Some(Err(e)) => {
-                    tracing::error!("{} stream error: {}", self.id, e);
-                    return Err(format!("Stream interrupted: {}", e));
-                }
-                None => break,
+            let Ok(parsed) = serde_json::from_str::<Value>(data) else {
+                continue;
             };
-            byte_carry.extend_from_slice(&chunk);
-            let valid_up_to = match std::str::from_utf8(&byte_carry) {
-                Ok(_) => byte_carry.len(),
-                Err(e) => e.valid_up_to(),
-            };
-            if valid_up_to > 0 {
-                buffer.push_str(
-                    std::str::from_utf8(&byte_carry[..valid_up_to])
-                        .expect("prefix was UTF-8 validated"),
-                );
-                byte_carry.drain(..valid_up_to);
-            }
-
-            while let Some(line_end) = buffer.find('\n') {
-                let line = buffer[..line_end].trim().to_string();
-                buffer.drain(..=line_end);
-
-                // Anthropic SSE interleaves `event: <type>` and
-                // `data: <json>` lines. We dispatch off the JSON payload's
-                // own `type` field and ignore the `event:` lines.
-                let Some(data) = line.strip_prefix("data: ") else {
-                    continue;
-                };
-                let Ok(parsed) = serde_json::from_str::<Value>(data) else {
-                    continue;
-                };
-                match parsed.get("type").and_then(|t| t.as_str()) {
-                    Some("message_start") => {
-                        if let Some(i) = parsed
-                            .pointer("/message/usage/input_tokens")
-                            .and_then(|v| v.as_i64())
-                        {
-                            usage.prompt_tokens = i;
-                        }
-                    }
-                    Some("content_block_delta")
-                        if parsed.pointer("/delta/type").and_then(|t| t.as_str())
-                            == Some("text_delta") =>
+            match parsed.get("type").and_then(|t| t.as_str()) {
+                Some("message_start") => {
+                    if let Some(i) = parsed
+                        .pointer("/message/usage/input_tokens")
+                        .and_then(|v| v.as_i64())
                     {
-                        if let Some(text) = parsed.pointer("/delta/text").and_then(|t| t.as_str()) {
-                            if delta_tx
-                                .send(ChatDelta {
-                                    text: Some(text.to_string()),
-                                    logprob: None,
-                                })
-                                .await
-                                .is_err()
-                            {
-                                return Err("delta receiver dropped".to_string());
-                            }
-                        }
+                        usage.prompt_tokens = i;
                     }
-                    Some("message_delta") => {
-                        if let Some(o) = parsed
-                            .pointer("/usage/output_tokens")
-                            .and_then(|v| v.as_i64())
-                        {
-                            usage.completion_tokens = o;
-                        }
-                    }
-                    Some("message_stop") => break 'outer,
-                    Some("error") => {
-                        let msg = parsed
-                            .pointer("/error/message")
-                            .and_then(|m| m.as_str())
-                            .unwrap_or("anthropic stream error")
-                            .to_string();
-                        return Err(msg);
-                    }
-                    _ => {}
                 }
+                Some("content_block_delta")
+                    if parsed.pointer("/delta/type").and_then(|t| t.as_str())
+                        == Some("text_delta") =>
+                {
+                    if let Some(text) = parsed.pointer("/delta/text").and_then(|t| t.as_str()) {
+                        if delta_tx
+                            .send(ChatDelta {
+                                text: Some(text.to_string()),
+                                logprob: None,
+                            })
+                            .await
+                            .is_err()
+                        {
+                            return Err("delta receiver dropped".to_string());
+                        }
+                    }
+                }
+                Some("message_delta") => {
+                    if let Some(o) = parsed
+                        .pointer("/usage/output_tokens")
+                        .and_then(|v| v.as_i64())
+                    {
+                        usage.completion_tokens = o;
+                    }
+                }
+                Some("message_stop") => break,
+                Some("error") => {
+                    let msg = parsed
+                        .pointer("/error/message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("anthropic stream error")
+                        .to_string();
+                    return Err(msg);
+                }
+                _ => {}
             }
         }
 
@@ -1040,6 +1035,48 @@ fn base_url_override(id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Feed the framer fixed chunks, collecting every line it yields.
+    async fn frame_all(chunks: Vec<&[u8]>) -> Vec<String> {
+        let owned: Vec<Vec<u8>> = chunks.into_iter().map(|c| c.to_vec()).collect();
+        let stream = futures::stream::iter(
+            owned
+                .into_iter()
+                .map(Ok::<Vec<u8>, std::convert::Infallible>),
+        );
+        let mut framer = SseFramer::new(stream);
+        let mut out = Vec::new();
+        while let Some(line) = framer.next_line("test").await.unwrap() {
+            out.push(line);
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn framer_splits_lines_and_trims() {
+        let lines = frame_all(vec![b"data: one\ndata: two\n"]).await;
+        assert_eq!(lines, vec!["data: one", "data: two"]);
+    }
+
+    #[tokio::test]
+    async fn framer_joins_a_line_split_across_chunks() {
+        let lines = frame_all(vec![b"data: he", b"llo\n"]).await;
+        assert_eq!(lines, vec!["data: hello"]);
+    }
+
+    #[tokio::test]
+    async fn framer_carries_utf8_split_mid_codepoint() {
+        // "ä" is 0xC3 0xA4; the frame boundary lands between its two bytes,
+        // which is the case byte_carry exists for.
+        let lines = frame_all(vec![b"data: \xc3", b"\xa4\n"]).await;
+        assert_eq!(lines, vec!["data: ä"]);
+    }
+
+    #[tokio::test]
+    async fn framer_drops_unterminated_trailing_line() {
+        let lines = frame_all(vec![b"data: done\ndata: partial"]).await;
+        assert_eq!(lines, vec!["data: done"]);
+    }
 
     #[test]
     fn instruct_excluded_only_for_openai() {

@@ -80,8 +80,8 @@ pub(crate) async fn wait_for_headroom(needed: u64, label: &str) -> bool {
     tracing::warn!(
         "{} cache: waited {}s and still no room for {} MiB ({}); refusing the load rather than \
          allocating into an OOM",
-        HEADROOM_WAIT_BUDGET.as_secs(),
         label,
+        HEADROOM_WAIT_BUDGET.as_secs(),
         needed / MIB,
         check_rss_headroom(needed).err().unwrap_or_default(),
     );

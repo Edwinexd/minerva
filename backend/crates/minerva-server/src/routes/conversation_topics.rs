@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::guards::{require_course_teacher, TeacherScope};
 use crate::state::AppState;
 
 /// Keeps the prompt bounded while covering enough of the current class activity
@@ -96,7 +97,8 @@ pub async fn conversation_themes(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<TopicResponse>>, AppError> {
-    let course = verify_teacher_access(&state, course_id, &user).await?;
+    let course =
+        require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let messages =
         minerva_db::queries::conversations::list_user_messages_by_course(&state.db, course_id)
@@ -587,23 +589,6 @@ async fn cache_and_return(
     )
     .await?;
     Ok(Json(topics))
-}
-
-async fn verify_teacher_access(
-    state: &AppState,
-    course_id: Uuid,
-    user: &User,
-) -> Result<minerva_db::queries::courses::CourseRow, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if !user.role.is_admin()
-        && course.owner_id != user.id
-        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
-    {
-        return Err(AppError::Forbidden);
-    }
-    Ok(course)
 }
 
 #[cfg(test)]

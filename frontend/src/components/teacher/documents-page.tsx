@@ -4,6 +4,7 @@ import { LockIcon } from "lucide-react"
 import { courseDocumentsQuery, courseQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
+import { formatBytes } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -15,6 +16,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
+import { ErrorText } from "@/components/ui/error-text"
+import { ListRow } from "@/components/ui/list"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -36,16 +40,9 @@ import React from "react"
 import type { Document as DocType, DocumentKind } from "@/lib/types"
 import { DOCUMENT_KINDS } from "@/lib/types"
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 /// Per-kind tint for the kind badge. Soft Tailwind palette so the
 /// teacher gets a glanceable color signal without anything looking
-/// like an error; previously assignment_brief used the destructive
-/// (red) variant and read as a system error rather than a category.
+/// like an error.
 ///
 /// Picked to coordinate with the graph viewer's KIND_COLORS (same
 /// hue family per kind) so a doc's badge here matches its node color
@@ -127,6 +124,10 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   // which 404s the KG endpoints in the same case.
   const kgEnabled = course?.feature_flags?.course_kg === true
   const queryClient = useQueryClient()
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: courseDocumentsQuery(courseId).queryKey,
+    })
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const mbzInputRef = React.useRef<HTMLInputElement>(null)
   const [mbzResult, setMbzResult] = React.useState<{
@@ -184,9 +185,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
-      })
+      invalidate()
       if (fileInputRef.current) fileInputRef.current.value = ""
     },
   })
@@ -199,9 +198,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
       ),
     onSuccess: (res) => {
       setMbzResult({ imported: res.imported, skippedHidden: res.skipped_hidden })
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
-      })
+      invalidate()
       if (mbzInputRef.current) mbzInputRef.current.value = ""
     },
   })
@@ -211,9 +208,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
       api.delete(`/courses/${courseId}/documents/${docId}`),
     onSuccess: () => {
       setConfirmSingle(null)
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
-      })
+      invalidate()
     },
   })
 
@@ -230,11 +225,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
       }
       return { deleted: docIds.length }
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
-      })
-    },
+    onSettled: invalidate,
     onSuccess: () => {
       setSelected(new Set())
       setConfirmBulk(false)
@@ -265,14 +256,10 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   const toggleDisplayableMutation = useMutation({
     mutationFn: ({ docId, displayable }: { docId: string; displayable: boolean }) =>
       api.patch(`/courses/${courseId}/documents/${docId}`, { displayable }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
-      })
-    },
+    onSuccess: invalidate,
   })
 
-  // Slice 2: teacher-editable source_ref. Server caps which docs
+  // Teacher-editable source_ref. Server caps which docs
   // accept the edit (returns 4xx for plugin-owned source_systems);
   // the UI gates the affordance up front so teachers don't see a
   // disabled-looking button. Empty string clears the ref + system
@@ -280,41 +267,25 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   const setSourceRefMutation = useMutation({
     mutationFn: ({ docId, sourceRef }: { docId: string; sourceRef: string }) =>
       api.patch(`/courses/${courseId}/documents/${docId}`, { source_ref: sourceRef }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
-      })
-    },
+    onSuccess: invalidate,
   })
 
   const setKindMutation = useMutation({
     mutationFn: ({ docId, kind }: { docId: string; kind: DocumentKind }) =>
       api.patch(`/courses/${courseId}/documents/${docId}/kind`, { kind }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
-      })
-    },
+    onSuccess: invalidate,
   })
 
   const clearLockMutation = useMutation({
     mutationFn: ({ docId }: { docId: string }) =>
       api.delete(`/courses/${courseId}/documents/${docId}/kind/lock`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
-      })
-    },
+    onSuccess: invalidate,
   })
 
   const reclassifyMutation = useMutation({
     mutationFn: ({ docId }: { docId: string }) =>
       api.post(`/courses/${courseId}/documents/${docId}/reclassify`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
-      })
-    },
+    onSuccess: invalidate,
   })
 
   // Bulk reclassify the currently-selected documents. We loop the
@@ -350,11 +321,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
       }
       return { ok: eligible.length, skippedLocked }
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
-      })
-    },
+    onSettled: invalidate,
     onSuccess: () => {
       setSelected(new Set())
     },
@@ -366,12 +333,6 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
     if (status === "failed") return "destructive" as const
     return "outline" as const
   }
-
-  // Visual signal: each kind gets a soft semantic tint via
-  // KIND_BADGE_CLASS rather than the destructive (red) variant we
-  // used to use for assessment kinds. The destructive look read as a
-  // system error; the new palette keeps assessments distinct (warm
-  // amber/orange/rose) while staying calm.
 
   // When the kind dialog closes after a successful mutation, sync the
   // displayed editingKind state with the freshly-fetched row so a
@@ -413,9 +374,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
               )}
             </div>
             {uploadMutation.isError && (
-              <p role="alert" className="text-sm text-destructive">
-                {formatError(uploadMutation.error)}
-              </p>
+              <ErrorText error={uploadMutation.error} />
             )}
 
             <div className="space-y-1">
@@ -448,9 +407,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                 )}
               </div>
               {mbzMutation.isError && (
-                <p className="text-sm text-destructive">
-                  {formatError(mbzMutation.error)}
-                </p>
+                <ErrorText error={mbzMutation.error} />
               )}
               {mbzResult && (
                 <p className="text-sm text-muted-foreground">
@@ -517,14 +474,10 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
         )}
 
         {bulkDeleteMutation.isError && (
-          <p className="text-sm text-destructive">
-            {formatError(bulkDeleteMutation.error)}
-          </p>
+          <ErrorText error={bulkDeleteMutation.error} />
         )}
         {bulkReclassifyMutation.isError && (
-          <p className="text-sm text-destructive">
-            {formatError(bulkReclassifyMutation.error)}
-          </p>
+          <ErrorText error={bulkReclassifyMutation.error} />
         )}
         {bulkReclassifyMutation.isSuccess &&
           bulkReclassifyMutation.data &&
@@ -538,10 +491,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
 
         <div className="space-y-2">
           {documents?.map((doc) => (
-            <div
-              key={doc.id}
-              className="flex items-center justify-between py-2 border-b last:border-0"
-            >
+            <ListRow key={doc.id}>
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 {canMutate && (
                   <Checkbox
@@ -681,7 +631,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                   </Button>
                 )}
               </div>
-            </div>
+            </ListRow>
           ))}
         </div>
 
@@ -786,9 +736,9 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
 
             <div className="space-y-4 py-2">
               <div className="space-y-1">
-                <label className="text-sm font-medium">
+                <Label>
                   {t("documents.kindDialogOverrideLabel")}
-                </label>
+                </Label>
                 <Select
                   value={editingKindFresh?.kind ?? ""}
                   onValueChange={(value) => {

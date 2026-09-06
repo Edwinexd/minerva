@@ -613,8 +613,6 @@ async fn download_github_pdf(
     gh: &crate::github_url::GithubPdfUrl,
     docs_path: &str,
 ) -> Result<(uuid::Uuid, String), String> {
-    use sha2::{Digest, Sha256};
-
     let max_bytes: usize = crate::system_defaults::max_upload_bytes(db).await as usize;
 
     // `redirect(Limited(10))` mirrors reqwest's default but is explicit:
@@ -676,9 +674,7 @@ async fn download_github_pdf(
 
     let child_filename = derive_pdf_filename(&parent.filename, &gh.suggested_filename);
     let size_bytes = buf.len() as i64;
-    let mut hasher = Sha256::new();
-    hasher.update(&buf);
-    let content_hash = hex::encode(hasher.finalize());
+    let content_hash = minerva_pipeline::pipeline::compute_content_hash(&buf);
 
     let result = minerva_db::queries::documents::insert_tracked_child(
         db,

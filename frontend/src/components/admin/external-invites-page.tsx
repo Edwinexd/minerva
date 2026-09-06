@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next"
 import { useState } from "react"
 import { externalAuthInvitesQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
-import { copyToClipboard as copyText } from "@/lib/clipboard"
+import { SecretRevealCallout } from "@/components/ui/secret-reveal-callout"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import type { ExternalAuthInvite, ExternalAuthInviteCreated } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -165,48 +165,24 @@ function CreatedInviteCallout({
   onDismiss: () => void
 }) {
   const { t } = useTranslation("admin")
-  const [copied, setCopied] = useState(false)
-
-  const copy = async () => {
-    if (await copyText(invite.url)) {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    }
-  }
 
   return (
-    <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950/40">
-      <div className="mb-2 flex items-center justify-between">
-        <strong>{t("externalInvites.callout.title", { eppn: invite.eppn })}</strong>
-        <button
-          type="button"
-          className="text-xs text-muted-foreground hover:underline"
-          onClick={onDismiss}
-          aria-label={t("externalInvites.callout.dismiss")}
-        >
-          {t("externalInvites.callout.dismiss")}
-        </button>
-      </div>
-      <p className="mb-2 text-xs text-muted-foreground">
-        {t("externalInvites.callout.note")}
-        <RelativeTime date={invite.expires_at} />.
-      </p>
-      <div className="flex gap-2">
-        <input
-          readOnly
-          value={invite.url}
-          aria-label={t("externalInvites.callout.urlLabel", { eppn: invite.eppn })}
-          className="flex-1 rounded border bg-background px-2 py-1 font-mono text-xs"
-          onFocus={(e) => e.currentTarget.select()}
-        />
-        <Button type="button" size="sm" variant="outline" onClick={copy}>
-          {copied ? t("externalInvites.callout.copied") : t("externalInvites.callout.copy")}
-        </Button>
-        <output className="sr-only">
-          {copied ? t("externalInvites.callout.copied") : ""}
-        </output>
-      </div>
-    </div>
+    <SecretRevealCallout
+      title={t("externalInvites.callout.title", { eppn: invite.eppn })}
+      note={
+        <>
+          {t("externalInvites.callout.note")}
+          <RelativeTime date={invite.expires_at} />.
+        </>
+      }
+      dismissLabel={t("externalInvites.callout.dismiss")}
+      dismissAriaLabel={t("externalInvites.callout.dismiss")}
+      value={invite.url}
+      valueLabel={t("externalInvites.callout.urlLabel", { eppn: invite.eppn })}
+      copyLabel={t("externalInvites.callout.copy")}
+      copiedLabel={t("externalInvites.callout.copied")}
+      onDismiss={onDismiss}
+    />
   )
 }
 

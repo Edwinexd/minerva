@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::guards::{require_course_owner, require_course_teacher, TeacherScope};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -825,13 +826,7 @@ async fn update_course(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateCourseRequest>,
 ) -> Result<Json<CourseResponse>, AppError> {
-    let existing = minerva_db::queries::courses::find_by_id(&state.db, id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if existing.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
+    let existing = require_course_owner(&state, id, &user).await?;
 
     let fields = CourseUpdateFields {
         name: body.name,
@@ -873,13 +868,7 @@ async fn archive_course(
     Extension(user): Extension<User>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let existing = minerva_db::queries::courses::find_by_id(&state.db, id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if existing.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
+    require_course_owner(&state, id, &user).await?;
 
     minerva_db::queries::courses::archive(&state.db, id).await?;
     Ok(Json(serde_json::json!({ "archived": true })))
@@ -899,17 +888,8 @@ async fn list_members(
     Extension(user): Extension<User>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<MemberResponse>>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
     // Owner, admin, teacher, and TA can all view the member list (read-only).
-    if course.owner_id != user.id
-        && !user.role.is_admin()
-        && !minerva_db::queries::courses::is_course_teacher(&state.db, id, user.id).await?
-    {
-        return Err(AppError::Forbidden);
-    }
+    require_course_teacher(&state, id, &user, TeacherScope::WithAssistants).await?;
 
     let rows = minerva_db::queries::courses::list_members(&state.db, id).await?;
     let ps = crate::ext_obfuscate::Pseudonymizer::for_viewer(
@@ -948,13 +928,7 @@ async fn add_member(
     Path(id): Path<Uuid>,
     Json(body): Json<AddMemberRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
+    require_course_owner(&state, id, &user).await?;
 
     // Find or create the user by eppn. EPPN is treated case-insensitively
     // to avoid creating duplicate accounts for `alice@su.se` vs `alice@SU.SE`.
@@ -982,13 +956,7 @@ async fn remove_member(
     Extension(user): Extension<User>,
     Path((id, user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
+    require_course_owner(&state, id, &user).await?;
 
     let removed = minerva_db::queries::courses::remove_member(&state.db, id, user_id).await?;
     Ok(Json(serde_json::json!({ "removed": removed })))
@@ -1015,16 +983,7 @@ async fn list_role_suggestions(
     Extension(user): Extension<User>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<RoleSuggestionResponse>>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id
-        && !user.role.is_admin()
-        && !minerva_db::queries::courses::is_course_teacher(&state.db, id, user.id).await?
-    {
-        return Err(AppError::Forbidden);
-    }
+    require_course_teacher(&state, id, &user, TeacherScope::WithAssistants).await?;
 
     let rows =
         minerva_db::queries::role_suggestions::list_pending_for_course(&state.db, id).await?;
@@ -1060,13 +1019,7 @@ async fn approve_role_suggestion(
     Extension(user): Extension<User>,
     Path((id, suggestion_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
+    require_course_owner(&state, id, &user).await?;
 
     let suggestion =
         minerva_db::queries::role_suggestions::find_pending_by_id(&state.db, suggestion_id)
@@ -1095,13 +1048,7 @@ async fn decline_role_suggestion(
     Extension(user): Extension<User>,
     Path((id, suggestion_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
+    require_course_owner(&state, id, &user).await?;
 
     let suggestion =
         minerva_db::queries::role_suggestions::find_pending_by_id(&state.db, suggestion_id)

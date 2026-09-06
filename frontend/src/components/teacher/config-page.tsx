@@ -10,7 +10,6 @@ import {
 import { chatModelDisplayName } from "@/lib/chat-models"
 import { formatUsd } from "@/lib/currency"
 import { api } from "@/lib/api"
-import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -25,6 +24,7 @@ import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
+import { ErrorText } from "@/components/ui/error-text"
 import {
   Select,
   SelectContent,
@@ -298,7 +298,6 @@ function CourseConfigForm({ course }: { course: Course }) {
   const queryClient = useQueryClient()
   const { t } = useTranslation("teacher")
   const { t: tCommon } = useTranslation("common")
-  const formatError = useApiErrorMessage()
   const { data: chatModelsData } = useQuery(chatModelsQuery)
   // Backend filters this list to admin-enabled catalog rows. If an
   // admin disabled the model this course is currently on, it won't be
@@ -856,7 +855,7 @@ function CourseConfigForm({ course }: { course: Course }) {
             <output className="text-sm text-muted-foreground ml-2">{t("config.savedToast")}</output>
           )}
           {mutation.isError && (
-            <p role="alert" className="text-sm text-destructive">{formatError(mutation.error)}</p>
+            <ErrorText error={mutation.error} />
           )}
         </form>
 

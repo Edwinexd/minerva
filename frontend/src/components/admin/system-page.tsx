@@ -6,6 +6,7 @@ import {
 } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
+import { formatBytes } from "@/lib/utils"
 import {
   Card,
   CardContent,
@@ -16,18 +17,8 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorText } from "@/components/ui/error-text"
 import React from "react"
-
-function formatBytes(bytes: number | null | undefined): string {
-  if (bytes == null) return "-"
-  if (bytes === 0) return "0 B"
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"]
-  const i = Math.min(
-    Math.floor(Math.log(Math.abs(bytes)) / Math.log(1024)),
-    units.length - 1,
-  )
-  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 2)} ${units[i]}`
-}
 
 export function SystemPanel() {
   const { t } = useTranslation("admin")
@@ -272,7 +263,6 @@ export function SystemPanel() {
 /// visible without manual refresh).
 function ClassificationBackfillCard() {
   const { t } = useTranslation("admin")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const { data: stats, isLoading, error } = useQuery(adminClassificationStatsQuery)
   const [lastQueued, setLastQueued] = React.useState<number | null>(null)
@@ -296,7 +286,7 @@ function ClassificationBackfillCard() {
         {isLoading ? (
           <Skeleton className="h-20 w-full" />
         ) : error || !stats ? (
-          <p className="text-sm text-destructive">{formatError(error)}</p>
+          <ErrorText error={error} />
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -401,9 +391,7 @@ function ClassificationBackfillCard() {
               </div>
             )}
             {backfillMutation.isError && (
-              <p className="text-sm text-destructive">
-                {formatError(backfillMutation.error)}
-              </p>
+              <ErrorText error={backfillMutation.error} />
             )}
             <p className="text-xs text-muted-foreground">
               {t("system.classifications.note")}

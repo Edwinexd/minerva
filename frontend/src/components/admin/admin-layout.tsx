@@ -1,7 +1,7 @@
 import { Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { userQuery } from "@/lib/queries"
+import { devConfigQuery, userQuery } from "@/lib/queries"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -11,11 +11,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { api } from "@/lib/api"
-
-interface DevConfig {
-  dev_mode: boolean
-}
 
 const TAB_VALUES = [
   "usage",
@@ -96,11 +91,7 @@ export function AdminLayout() {
   // dropped from `visibleTabs` for everyone (including the admin).
   // Same query is already cached at the root layout (Infinity stale)
   // so this is a free read of the existing result.
-  const { data: devConfig } = useQuery({
-    queryKey: ["dev", "config"],
-    queryFn: () => api.get<DevConfig>("/dev/config"),
-    staleTime: Infinity,
-  })
+  const { data: devConfig } = useQuery(devConfigQuery)
 
   // Admins see every tab; integrators are limited to their two site-wide
   // surfaces. Anyone else shouldn't reach this layout (the nav entry and the

@@ -6,6 +6,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::guards::{require_course_teacher, TeacherScope};
 use crate::state::AppState;
 
 pub fn course_router() -> Router<AppState> {
@@ -44,16 +45,7 @@ async fn get_course_usage(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<UsageResponse>>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id
-        && !user.role.is_admin()
-        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
-    {
-        return Err(AppError::Forbidden);
-    }
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let rows = minerva_db::queries::usage::get_course_usage(&state.db, course_id).await?;
     Ok(Json(
@@ -102,18 +94,9 @@ async fn get_course_kg_token_usage(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<KgTokenUsageResponse>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
     // Same access rule as the chat-usage endpoint above: course
     // owner, course teacher, or admin.
-    if course.owner_id != user.id
-        && !user.role.is_admin()
-        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
-    {
-        return Err(AppError::Forbidden);
-    }
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     // 30-day rolling window. Long enough to cover a course's
     // ingest-burst week and the steady chat-time guard cost,

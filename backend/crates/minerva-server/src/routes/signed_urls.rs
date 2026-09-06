@@ -8,6 +8,7 @@ use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::guards::require_course_owner;
 use crate::state::AppState;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -49,14 +50,7 @@ async fn create_signed_url(
     Path(course_id): Path<Uuid>,
     Json(body): Json<CreateSignedUrlRequest>,
 ) -> Result<Json<SignedUrlResponse>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-
+    require_course_owner(&state, course_id, &user).await?;
     let id = Uuid::new_v4();
     let hours = body.expires_in_hours.unwrap_or(168); // Default 1 week
     let expires_at = chrono::Utc::now() + chrono::Duration::hours(hours);
@@ -95,14 +89,7 @@ async fn list_signed_urls(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<SignedUrlResponse>>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-
+    require_course_owner(&state, course_id, &user).await?;
     let rows = minerva_db::queries::signed_urls::list_by_course(&state.db, course_id).await?;
     Ok(Json(
         rows.into_iter()
@@ -125,14 +112,7 @@ async fn delete_signed_url(
     Extension(user): Extension<User>,
     Path((course_id, sid)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-
+    require_course_owner(&state, course_id, &user).await?;
     minerva_db::queries::signed_urls::delete(&state.db, sid).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
 }

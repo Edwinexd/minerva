@@ -1,9 +1,10 @@
 import { RelativeTime } from "@/components/relative-time"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { canvasConnectionsQuery, canvasFilesQuery } from "@/lib/queries"
+import { canvasConnectionsQuery, canvasFilesQuery, courseDocumentsQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage, useLocalizedMessage } from "@/lib/use-api-error"
+import { formatBytes } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -17,6 +18,8 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ListSkeleton, ListEmpty } from "@/components/ui/list"
+import { ErrorText } from "@/components/ui/error-text"
 import {
   Select,
   SelectContent,
@@ -28,12 +31,6 @@ import { useState } from "react"
 import type { CanvasConnection, CanvasSyncResult } from "@/lib/types"
 
 type CanvasCourseInfo = { id: string; name: string; course_code: string | null }
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 export function CanvasPage({ useParams }: { useParams: () => { courseId: string } }) {
   const { courseId } = useParams()
@@ -53,6 +50,10 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
   const [availableCourses, setAvailableCourses] = useState<CanvasCourseInfo[] | null>(null)
   const [isLoadingCourses, setIsLoadingCourses] = useState(false)
   const [coursesError, setCoursesError] = useState<string | null>(null)
+  const invalidateConnections = () =>
+    queryClient.invalidateQueries({
+      queryKey: canvasConnectionsQuery(courseId).queryKey,
+    })
 
   const createMutation = useMutation({
     mutationFn: (data: {
@@ -69,9 +70,7 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
       setCanvasCourseId("")
       setAvailableCourses(null)
       setCoursesError(null)
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "canvas"],
-      })
+      invalidateConnections()
     },
   })
 
@@ -98,11 +97,7 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
   const deleteMutation = useMutation({
     mutationFn: (connId: string) =>
       api.delete(`/courses/${courseId}/canvas/${connId}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "canvas"],
-      })
-    },
+    onSuccess: invalidateConnections,
   })
 
   const syncMutation = useMutation({
@@ -110,11 +105,9 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
       api.post<CanvasSyncResult>(`/courses/${courseId}/canvas/${connId}/sync`, {}),
     onSuccess: (data) => {
       setSyncResult(data)
+      invalidateConnections()
       queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "canvas"],
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "documents"],
+        queryKey: courseDocumentsQuery(courseId).queryKey,
       })
     },
   })
@@ -125,11 +118,7 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
         `/courses/${courseId}/canvas/${connId}/auto-sync`,
         { auto_sync: autoSync },
       ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "canvas"],
-      })
-    },
+    onSuccess: invalidateConnections,
   })
 
   return (
@@ -242,7 +231,7 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
               </div>
 
               {createMutation.isError && (
-                <p className="text-sm text-destructive">{formatError(createMutation.error)}</p>
+                <ErrorText error={createMutation.error} />
               )}
 
               <div className="flex gap-2">
@@ -256,16 +245,10 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
             </form>
           )}
 
-          {isLoading && (
-            <div className="space-y-2">
-              <Skeleton className="h-10 w-full" />
-            </div>
-          )}
+          {isLoading && <ListSkeleton rows={1} />}
 
           {connections && connections.length === 0 && !showForm && (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              {t("canvas.noConnections")}
-            </p>
+            <ListEmpty>{t("canvas.noConnections")}</ListEmpty>
           )}
 
           <div className="space-y-3">
@@ -364,7 +347,7 @@ export function CanvasPage({ useParams }: { useParams: () => { courseId: string 
           )}
 
           {syncMutation.isError && (
-            <p role="alert" className="text-sm text-destructive">{formatError(syncMutation.error)}</p>
+            <ErrorText error={syncMutation.error} />
           )}
         </CardContent>
       </Card>

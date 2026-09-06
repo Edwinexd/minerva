@@ -10,7 +10,6 @@ import {
   type KnowledgeGraphEdge,
   type KnowledgeGraphNode,
 } from "@/lib/queries"
-import { useApiErrorMessage } from "@/lib/use-api-error"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -30,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorText } from "@/components/ui/error-text"
 import { DOCUMENT_KINDS, type DocumentKind } from "@/lib/types"
 
 /// Render the course knowledge graph: every classified document as a
@@ -58,7 +58,6 @@ export function KnowledgeGraphPage({
 }) {
   const { courseId } = useParams()
   const { t } = useTranslation("teacher")
-  const formatError = useApiErrorMessage()
   const { data, isLoading, error } = useQuery(courseKnowledgeGraphQuery(courseId))
 
   // Filter state. Defaults: all kinds visible, both relations
@@ -136,7 +135,7 @@ export function KnowledgeGraphPage({
         {isLoading ? (
           <Skeleton className="h-[500px] w-full" />
         ) : error || !data ? (
-          <p className="text-sm text-destructive">{formatError(error)}</p>
+          <ErrorText error={error} />
         ) : data.nodes.length === 0 ? (
           <EmptyState message={t("knowledgeGraph.noDocuments")} />
         ) : (
@@ -763,7 +762,6 @@ function EdgeList({
 }) {
   const { t } = useTranslation("teacher")
   const queryClient = useQueryClient()
-  const formatError = useApiErrorMessage()
   const nameById = React.useMemo(() => {
     const m = new Map<string, string>()
     for (const n of nodes) m.set(n.id, n.filename)
@@ -824,9 +822,7 @@ function EdgeList({
         {t("knowledgeGraph.edgeListTitle", { count: edges.length })}
       </summary>
       {lastError && (
-        <p className="px-3 py-2 text-sm text-destructive">
-          {formatError(lastError)}
-        </p>
+        <ErrorText error={lastError} className="px-3 py-2" />
       )}
       <ul className="divide-y text-sm">
         {edges.map((e) => (

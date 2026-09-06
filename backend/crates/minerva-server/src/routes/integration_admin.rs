@@ -18,6 +18,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::guards::require_site_integrator;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -34,16 +35,6 @@ pub fn router() -> Router<AppState> {
             "/integration-keys/{id}/eppn-domains",
             put(update_site_integration_key_scope),
         )
-}
-
-/// Site integration keys are mintable by admins and integrators alike;
-/// delegating this without full admin is the whole point of the integrator
-/// role.
-fn require_site_integrator(user: &User) -> Result<(), AppError> {
-    if !user.role.can_manage_site_integrations() {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
 }
 
 #[derive(Serialize)]

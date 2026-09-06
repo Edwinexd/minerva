@@ -10,25 +10,18 @@ Requires: SU_USERNAME, SU_PASSWORD, MINERVA_API_URL, MINERVA_SERVICE_API_KEY
 """
 
 import os
-import sys
 from urllib.parse import parse_qs, urlparse
 
 import requests
 from dsv_wrapper import PlayClient, PresentationNotReadyError
+
+from _minerva_api import MinervaSession, minerva_session, su_credentials
 
 PLAY_PRESENTATION_URL = "https://play.dsv.su.se/presentation/{id}"
 
 # Tags used to enumerate the play.dsv.su.se course catalog. Unioning the
 # English and Swedish lecture tags yields a near-complete designation list.
 CATALOG_TAGS = ["Lecture", "Föreläsning"]
-
-
-def get_env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        print(f"error: {name} not set", file=sys.stderr)
-        sys.exit(1)
-    return value
 
 
 def extract_presentation_id(url: str) -> str | None:
@@ -65,8 +58,7 @@ def sanitize_filename(title: str, fallback: str) -> str:
 
 def push_catalog(
     client: PlayClient,
-    api_url: str,
-    headers: dict,
+    session: MinervaSession,
 ) -> None:
     """Fetch the union of courses across CATALOG_TAGS and push to Minerva."""
     union: dict[str, str] = {}
@@ -82,11 +74,7 @@ def push_catalog(
         return
 
     entries = [{"code": code, "name": name} for code, name in sorted(union.items())]
-    resp = requests.put(
-        f"{api_url}/api/service/play-courses",
-        headers=headers,
-        json=entries,
-    )
+    resp = session.put("/api/service/play-courses", json=entries)
     resp.raise_for_status()
     body = resp.json()
     print(
@@ -97,13 +85,12 @@ def push_catalog(
 
 def discover_designations(
     client: PlayClient,
-    api_url: str,
-    headers: dict,
+    session: MinervaSession,
 ) -> None:
     """Discovery phase: for each watched designation, create URL docs for any
     presentations that aren't already tracked in the owning course.
     """
-    resp = requests.get(f"{api_url}/api/service/play-designations", headers=headers)
+    resp = session.get("/api/service/play-designations")
     resp.raise_for_status()
     designations = resp.json()
 
@@ -123,9 +110,8 @@ def discover_designations(
         except Exception as e:
             error_msg = f"failed to list presentations: {e}"
             print(f"  [{code}] {error_msg}")
-            requests.post(
-                f"{api_url}/api/service/play-designations/{des_id}/mark-synced",
-                headers=headers,
+            session.post(
+                f"/api/service/play-designations/{des_id}/mark-synced",
                 json={"error": error_msg},
             )
             continue
@@ -140,9 +126,8 @@ def discover_designations(
             )
 
             try:
-                resp = requests.post(
-                    f"{api_url}/api/service/courses/{course_id}/documents/url",
-                    headers=headers,
+                resp = session.post(
+                    f"/api/service/courses/{course_id}/documents/url",
                     json={"url": url, "filename": filename},
                 )
                 resp.raise_for_status()
@@ -159,9 +144,8 @@ def discover_designations(
             f"{created} new, {skipped} already tracked"
         )
 
-        requests.post(
-            f"{api_url}/api/service/play-designations/{des_id}/mark-synced",
-            headers=headers,
+        session.post(
+            f"/api/service/play-designations/{des_id}/mark-synced",
             json={},
         )
 
@@ -177,10 +161,26 @@ TRANSCRIPTS_PAGE_SIZE = int(
 )
 
 
+def submit_transcript(
+    session: MinervaSession,
+    doc_id: str,
+    *,
+    text: str | None = None,
+    error: str | None = None,
+) -> requests.Response:
+    """Report one doc's transcript outcome to Minerva and raise on
+    transport failure. Pass `text` on success or `error` to mark the doc
+    failed; those are the two body shapes the endpoint accepts. Returns
+    the response so the success path can read the resulting status."""
+    body = {"error": error} if error is not None else {"text": text}
+    resp = session.post(f"/api/service/documents/{doc_id}/transcript", json=body)
+    resp.raise_for_status()
+    return resp
+
+
 def _process_pending_doc(
     client: PlayClient,
-    api_url: str,
-    headers: dict,
+    session: MinervaSession,
     doc: dict,
 ) -> None:
     """Fetch the VTT for one pending doc and submit (or mark failed).
@@ -193,12 +193,11 @@ def _process_pending_doc(
     presentation_id = extract_presentation_id(url)
     if not presentation_id:
         print(f"  [{filename}] Could not extract presentation ID from: {url}")
-        resp = requests.post(
-            f"{api_url}/api/service/documents/{doc_id}/transcript",
-            headers=headers,
-            json={"error": f"could not extract presentation ID from URL: {url}"},
+        submit_transcript(
+            session,
+            doc_id,
+            error=f"could not extract presentation ID from URL: {url}",
         )
-        resp.raise_for_status()
         return
 
     print(f"  [{filename}] Fetching transcript for {presentation_id}...")
@@ -217,30 +216,17 @@ def _process_pending_doc(
     except Exception as e:
         error_msg = str(e)
         print(f"  [{filename}] Failed: {error_msg}")
-        resp = requests.post(
-            f"{api_url}/api/service/documents/{doc_id}/transcript",
-            headers=headers,
-            json={"error": error_msg},
-        )
-        resp.raise_for_status()
+        submit_transcript(session, doc_id, error=error_msg)
         return
 
     if not transcript or not transcript.strip():
         print(f"  [{filename}] Empty transcript, marking as failed.")
-        resp = requests.post(
-            f"{api_url}/api/service/documents/{doc_id}/transcript",
-            headers=headers,
-            json={"error": "transcript is empty (no subtitles)"},
+        submit_transcript(
+            session, doc_id, error="transcript is empty (no subtitles)"
         )
-        resp.raise_for_status()
         return
 
-    resp = requests.post(
-        f"{api_url}/api/service/documents/{doc_id}/transcript",
-        headers=headers,
-        json={"text": transcript},
-    )
-    resp.raise_for_status()
+    resp = submit_transcript(session, doc_id, text=transcript)
     result = resp.json()
     print(
         f"  [{filename}] Submitted ({len(transcript)} chars) -> {result.get('status')}"
@@ -249,8 +235,7 @@ def _process_pending_doc(
 
 def fetch_pending_transcripts(
     client: PlayClient,
-    api_url: str,
-    headers: dict,
+    session: MinervaSession,
 ) -> None:
     """Transcript phase: drain every `awaiting_transcript` doc via
     cursor-paginated fetches. Memory peak is one page's worth of doc
@@ -277,11 +262,7 @@ def fetch_pending_transcripts(
             params["after_created_at"] = after_created_at
             params["after_id"] = after_id
 
-        resp = requests.get(
-            f"{api_url}/api/service/pending-transcripts",
-            headers=headers,
-            params=params,
-        )
+        resp = session.get("/api/service/pending-transcripts", params=params)
         resp.raise_for_status()
         page = resp.json()
         if not page:
@@ -305,7 +286,7 @@ def fetch_pending_transcripts(
                 f"({len(play_docs)} play.dsv.su.se); processing..."
             )
             for doc in play_docs:
-                _process_pending_doc(client, api_url, headers, doc)
+                _process_pending_doc(client, session, doc)
                 total_processed += 1
         # A page strictly smaller than the requested limit means we've
         # reached the end of the queue; one more empty round-trip would
@@ -323,27 +304,23 @@ def fetch_pending_transcripts(
 
 
 def main() -> None:
-    api_url = get_env("MINERVA_API_URL").rstrip("/")
-    api_key = get_env("MINERVA_SERVICE_API_KEY")
-    su_username = get_env("SU_USERNAME")
-    su_password = get_env("SU_PASSWORD")
+    session = minerva_session()
+    su_username, su_password = su_credentials()
 
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    with PlayClient(username=su_username, password=su_password) as client:
+    with session, PlayClient(username=su_username, password=su_password) as client:
         # Phase 0: refresh Minerva's catalog of known designations (for
         # teacher-facing autocomplete). Best-effort; failure doesn't abort.
         try:
-            push_catalog(client, api_url, headers)
+            push_catalog(client, session)
         except Exception as e:
             print(f"Catalog push failed: {e}")
 
         # Phase 1: discover new presentations for watched designations.
-        discover_designations(client, api_url, headers)
+        discover_designations(client, session)
 
         # Phase 2: fetch transcripts for awaiting_transcript docs (including any
         # newly created by phase 1 that have already been triaged).
-        fetch_pending_transcripts(client, api_url, headers)
+        fetch_pending_transcripts(client, session)
 
     print("Done.")
 

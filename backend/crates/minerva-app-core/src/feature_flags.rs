@@ -87,25 +87,21 @@ pub const ALL_FLAGS: &[&str] = &[
     FLAG_TOPIC_SWITCH_NUDGE,
 ];
 
-/// True iff the KG bundle is enabled for this course. Resolution:
-/// course-scoped row -> global row -> default (FALSE).
+/// Resolution: course-scoped row -> global row -> default (FALSE).
 ///
-/// Errors are logged and treated as "not enabled"; the safer
-/// choice when the DB is flaky, since failing closed avoids
-/// emitting half-classified state, mark_dirty noise, etc.
-pub async fn course_kg_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    match minerva_db::queries::feature_flags::is_enabled_for_course(
-        db,
-        FLAG_COURSE_KG,
-        course_id,
-        false,
-    )
-    .await
+/// Every flag fails closed: a lookup error is logged and reported as
+/// "not enabled". Each of these reads sits on a request path that must
+/// not retry, so a flaky DB degrades to pre-feature behaviour rather
+/// than stalling the caller.
+async fn flag_enabled(db: &PgPool, flag: &'static str, course_id: Uuid) -> bool {
+    match minerva_db::queries::feature_flags::is_enabled_for_course(db, flag, course_id, false)
+        .await
     {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(
-                "feature_flags: course_kg lookup for course {} failed ({}); treating as disabled",
+                "feature_flags: {} lookup for course {} failed ({}); treating as disabled",
+                flag,
                 course_id,
                 e,
             );
@@ -114,134 +110,45 @@ pub async fn course_kg_enabled(db: &PgPool, course_id: Uuid) -> bool {
     }
 }
 
-/// True iff the extraction guard is enabled for this course. Same
-/// resolution + fail-closed semantics as `course_kg_enabled`.
+/// True iff the KG bundle is enabled for this course. Failing closed
+/// avoids emitting half-classified state, mark_dirty noise, etc.
+pub async fn course_kg_enabled(db: &PgPool, course_id: Uuid) -> bool {
+    flag_enabled(db, FLAG_COURSE_KG, course_id).await
+}
+
+/// True iff the extraction guard is enabled for this course.
 /// Used by the chat strategies (wired in a follow-up commit).
 #[allow(dead_code)]
 pub async fn extraction_guard_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    match minerva_db::queries::feature_flags::is_enabled_for_course(
-        db,
-        FLAG_EXTRACTION_GUARD,
-        course_id,
-        false,
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "feature_flags: extraction_guard lookup for course {} failed ({}); treating as disabled",
-                course_id,
-                e,
-            );
-            false
-        }
-    }
+    flag_enabled(db, FLAG_EXTRACTION_GUARD, course_id).await
 }
 
 /// True iff aegis prompt-coaching is enabled for this course at the
-/// course/umbrella level.
-///
-/// Resolution: course-scoped row -> global row -> default (FALSE).
-/// Errors are logged and treated as "not enabled"; the analyzer runs
-/// on every user turn so a flaky DB shouldn't slow down the chat path
-/// with retries; falling closed reverts to pre-aegis behaviour
-/// transparently.
+/// course/umbrella level. Failing closed reverts to pre-aegis
+/// behaviour transparently.
 pub async fn aegis_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    match minerva_db::queries::feature_flags::is_enabled_for_course(
-        db, FLAG_AEGIS, course_id, false,
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "feature_flags: aegis lookup for course {} failed ({}); treating as disabled",
-                course_id,
-                e,
-            );
-            false
-        }
-    }
+    flag_enabled(db, FLAG_AEGIS, course_id).await
 }
 
 /// True iff the eureka concept-graph integration is enabled for
-/// this course. Same resolution + fail-closed semantics as
-/// `course_kg_enabled`. Gates the admin endpoints in
+/// this course. Gates the admin endpoints in
 /// `routes::admin::concept_graph` and any future read-side
 /// integrations.
 pub async fn concept_graph_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    match minerva_db::queries::feature_flags::is_enabled_for_course(
-        db,
-        FLAG_CONCEPT_GRAPH,
-        course_id,
-        false,
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "feature_flags: concept_graph lookup for course {} failed ({}); treating as disabled",
-                course_id,
-                e,
-            );
-            false
-        }
-    }
+    flag_enabled(db, FLAG_CONCEPT_GRAPH, course_id).await
 }
 
 /// True iff the per-conversation token ceilings apply to this course.
-/// Same resolution + fail-closed semantics as `course_kg_enabled`.
-///
 /// Failing closed here means "no ceilings": a flaky DB must never be
-/// the reason a student is told their conversation is over. The read
-/// sits on the chat send path, so it also must not retry.
+/// the reason a student is told their conversation is over.
 pub async fn conversation_limits_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    match minerva_db::queries::feature_flags::is_enabled_for_course(
-        db,
-        FLAG_CONVERSATION_LIMITS,
-        course_id,
-        false,
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "feature_flags: conversation_limits lookup for course {} failed ({}); treating as disabled",
-                course_id,
-                e,
-            );
-            false
-        }
-    }
+    flag_enabled(db, FLAG_CONVERSATION_LIMITS, course_id).await
 }
 
-/// True iff the topic-switch nudge runs for this course. Same
-/// resolution + fail-closed semantics as `course_kg_enabled`.
-///
-/// Failing closed means no detection and no model call, which is the
-/// right default: the check costs a classification call on roughly a
-/// third of turns, and a flaky DB should not be the reason a student
-/// gets told they changed subject.
+/// True iff the topic-switch nudge runs for this course. Failing
+/// closed means no detection and no model call, which is the right
+/// default: the check costs a classification call on roughly a third
+/// of turns.
 pub async fn topic_switch_nudge_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    match minerva_db::queries::feature_flags::is_enabled_for_course(
-        db,
-        FLAG_TOPIC_SWITCH_NUDGE,
-        course_id,
-        false,
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "feature_flags: topic_switch_nudge lookup for course {} failed ({}); treating as disabled",
-                course_id,
-                e,
-            );
-            false
-        }
-    }
+    flag_enabled(db, FLAG_TOPIC_SWITCH_NUDGE, course_id).await
 }

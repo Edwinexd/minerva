@@ -6,6 +6,7 @@ import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import { isTeacherOrAbove } from "@/lib/roles"
+import { groupBySemester, type SemesterGroup } from "@/lib/semester"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -19,6 +20,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorText } from "@/components/ui/error-text"
 import { useState } from "react"
 import type { Course } from "@/lib/types"
 
@@ -118,52 +120,6 @@ export function Home() {
   )
 }
 
-/**
- * Bucket a flat course list by `semester_label` and return groups
- * sorted by recency (VT2027 > HT2026 > VT2026 > ...). Courses
- * lacking a semester label fall into a sentinel "" group that
- * renders last under an "Ad-hoc" heading.
- *
- * The sort key extracts the year from `YYYY` and the season order
- * (HT > VT within a year because Aug-Dec lands later in the calendar
- * than Jan-Jun). Anything malformed (shouldn't happen post-server-
- * validation, but be defensive) sorts to the end.
- */
-function semesterSortKey(label: string): number {
-  if (!label) return -Infinity
-  const m = label.match(/^(VT|HT)(\d{4})$/)
-  if (!m) return -Infinity
-  const year = parseInt(m[2], 10)
-  // HT (autumn) chronologically follows VT (spring) of the same year.
-  const seasonOffset = m[1] === "HT" ? 0.5 : 0
-  return year + seasonOffset
-}
-
-function groupBySemester(courses: Course[]): Array<{
-  label: string
-  courses: Course[]
-}> {
-  const buckets = new Map<string, Course[]>()
-  for (const c of courses) {
-    const key = c.semester_label ?? ""
-    if (!buckets.has(key)) buckets.set(key, [])
-    buckets.get(key)!.push(c)
-  }
-  const entries = Array.from(buckets.entries()).map(([label, courses]) => ({
-    label,
-    courses,
-  }))
-  // Newest semester first; "Ad-hoc" (empty key) always last so it
-  // doesn't hijack the visual hierarchy when most of a teacher's
-  // courses are semester-tagged.
-  entries.sort((a, b) => {
-    if (a.label === "" && b.label !== "") return 1
-    if (b.label === "" && a.label !== "") return -1
-    return semesterSortKey(b.label) - semesterSortKey(a.label)
-  })
-  return entries
-}
-
 function SemesterGroupedSections({
   topTitle,
   groups,
@@ -171,7 +127,7 @@ function SemesterGroupedSections({
   showUnread = false,
 }: {
   topTitle: string | null
-  groups: Array<{ label: string; courses: Course[] }>
+  groups: SemesterGroup<Course>[]
   variant: "teacher" | "student"
   showUnread?: boolean
 }) {
@@ -186,7 +142,7 @@ function SemesterGroupedSections({
     return (
       <CourseSection
         title={topTitle}
-        courses={groups[0]?.courses ?? []}
+        courses={groups[0]?.items ?? []}
         variant={variant}
         showUnread={showUnread}
       />
@@ -203,7 +159,7 @@ function SemesterGroupedSections({
         <CourseSection
           key={g.label || "_adhoc"}
           title={g.label === "" ? t("home.adhocSection") : g.label}
-          courses={g.courses}
+          courses={g.items}
           variant={variant}
           showUnread={showUnread}
         />
@@ -378,7 +334,6 @@ function defaultSemesterLabel(today: Date = new Date()): string {
 
 function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
   const { t } = useTranslation("common")
-  const formatError = useApiErrorMessage()
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -470,9 +425,7 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
               : t("home.create.submit")}
           </Button>
           {mutation.isError && (
-            <p className="text-sm text-destructive">
-              {formatError(mutation.error)}
-            </p>
+            <ErrorText error={mutation.error} />
           )}
         </form>
       </CardContent>

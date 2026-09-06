@@ -9,6 +9,7 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::guards::{require_course_owner, require_course_teacher, TeacherScope};
 use crate::state::AppState;
 
 /// Hard ceiling on `axum::DefaultBodyLimit::max(...)` for single-doc
@@ -272,16 +273,7 @@ async fn list_documents(
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<DocumentResponse>>, AppError> {
     // Verify access; owner, admin, teacher, and TA can read the document list.
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id
-        && !user.role.is_admin()
-        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
-    {
-        return Err(AppError::Forbidden);
-    }
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let rows = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
     Ok(Json(rows.into_iter().map(DocumentResponse::from).collect()))
@@ -293,14 +285,7 @@ async fn upload_document(
     Path(course_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<DocumentResponse>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-
+    require_course_owner(&state, course_id, &user).await?;
     // Teacher-facing upload accepts an optional `source_ref` multipart
     // field. When set, the doc is tagged with `source_system = "manual"`
     // (UI uploads, as opposed to the integration `"moodle"` /
@@ -398,14 +383,7 @@ async fn upload_mbz(
     Path(course_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<MbzImportResponse>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-
+    require_course_owner(&state, course_id, &user).await?;
     let field = multipart
         .next_field()
         .await
@@ -531,14 +509,7 @@ async fn patch_document(
     Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<PatchDocumentBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-
+    require_course_owner(&state, course_id, &user).await?;
     // Scope doc_id to this course: the DB helper filters by id only, so
     // without this check a course owner could modify documents in other
     // courses by putting a foreign doc_id in the path.
@@ -589,14 +560,7 @@ async fn delete_document(
     Extension(user): Extension<User>,
     Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id && !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-
+    let course = require_course_owner(&state, course_id, &user).await?;
     // Scope doc_id to this course: the DB delete filters by id only, so
     // without this check a course owner could delete documents in other
     // courses by putting a foreign doc_id in the path.
@@ -673,16 +637,8 @@ async fn list_chunks(
     Extension(user): Extension<User>,
     Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<ChunkResponse>>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id
-        && !user.role.is_admin()
-        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
-    {
-        return Err(AppError::Forbidden);
-    }
+    let course =
+        require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let collection_name =
         minerva_pipeline::pipeline::collection_name(course_id, course.embedding_version);
@@ -755,16 +711,8 @@ async fn search_chunks(
     Path(course_id): Path<Uuid>,
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<Vec<SearchResult>>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    if course.owner_id != user.id
-        && !user.role.is_admin()
-        && !minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await?
-    {
-        return Err(AppError::Forbidden);
-    }
+    let course =
+        require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let collection_name =
         minerva_pipeline::pipeline::collection_name(course_id, course.embedding_version);
@@ -826,28 +774,6 @@ async fn search_chunks(
 pub use minerva_pipeline::pipeline::extension_from_filename;
 
 // ── Course-knowledge-graph V1 endpoints ────────────────────────────
-//
-// Auth: same pattern as `patch_document`; course owner OR admin OR a
-// teacher of the course. We don't allow students or TAs to flip a
-// document's classification.
-
-/// Shared auth check: caller is course owner, admin, or course teacher.
-async fn require_course_teacher(
-    state: &AppState,
-    course_id: Uuid,
-    user: &User,
-) -> Result<(), AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if course.owner_id == user.id || user.role.is_admin() {
-        return Ok(());
-    }
-    if minerva_db::queries::courses::is_course_teacher(&state.db, course_id, user.id).await? {
-        return Ok(());
-    }
-    Err(AppError::Forbidden)
-}
 
 /// Gate every KG-related endpoint on the `course_kg` feature flag.
 /// Returns 404 (not 403) when off so a non-KG course "looks like"
@@ -946,7 +872,7 @@ async fn reclassify_document(
     Extension(user): Extension<User>,
     Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ReclassifyResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     require_kg_enabled(&state, course_id).await?;
     let doc = load_doc_in_course(&state, course_id, doc_id).await?;
 
@@ -986,7 +912,7 @@ async fn set_document_kind(
     Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<SetKindBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     require_kg_enabled(&state, course_id).await?;
     let doc = load_doc_in_course(&state, course_id, doc_id).await?;
 
@@ -1065,7 +991,7 @@ async fn clear_kind_lock(
     Extension(user): Extension<User>,
     Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     require_kg_enabled(&state, course_id).await?;
     let _doc = load_doc_in_course(&state, course_id, doc_id).await?;
     minerva_db::queries::documents::clear_kind_lock(&state.db, doc_id).await?;
@@ -1088,7 +1014,7 @@ async fn reclassify_all_in_course(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<ReclassifyAllResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     require_kg_enabled(&state, course_id).await?;
 
     let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
@@ -1202,7 +1128,7 @@ async fn get_knowledge_graph(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<GraphResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     require_kg_enabled(&state, course_id).await?;
 
     let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
@@ -1276,7 +1202,7 @@ async fn reject_edge(
     Extension(user): Extension<User>,
     Path((course_id, edge_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<EdgeMutationResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     require_kg_enabled(&state, course_id).await?;
 
     // Cross-course safety: if the edge id resolves to a different
@@ -1308,7 +1234,7 @@ async fn unreject_edge(
     Extension(user): Extension<User>,
     Path((course_id, edge_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<EdgeMutationResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     require_kg_enabled(&state, course_id).await?;
 
     let edge = minerva_db::queries::document_relations::find_by_id(&state.db, edge_id)
@@ -1343,7 +1269,7 @@ async fn rebuild_knowledge_graph(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<RelinkResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user).await?;
+    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     require_kg_enabled(&state, course_id).await?;
     let edges = crate::relink_scheduler::relink_course(&state, course_id)
         .await

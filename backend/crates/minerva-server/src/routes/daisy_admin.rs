@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::routes::guards::require_admin;
 use crate::routes::service::{
     apply_one, compute_offering_diff, DaisyCourseInputPayload, DaisyImportSummary,
     DaisyParticipantInput, OfferingDiff,
@@ -33,13 +34,6 @@ pub fn router() -> Router<AppState> {
         .route("/daisy-pending/apply", post(apply_pending))
         .route("/daisy-pending/{id}", delete(dismiss_pending))
         .route("/daisy-settings/auto-apply", put(set_auto_apply))
-}
-
-fn require_admin(user: &User) -> Result<(), AppError> {
-    if !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
 }
 
 #[derive(Serialize)]

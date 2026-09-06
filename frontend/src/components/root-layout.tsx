@@ -1,7 +1,6 @@
 import { Link, Outlet } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { userQuery } from "@/lib/queries"
-import { api } from "@/lib/api"
+import { devConfigQuery, userQuery } from "@/lib/queries"
 import { canManageSiteIntegrations, isCourseTeacher, isTeacherOrAbove } from "@/lib/roles"
 import type { CourseRole } from "@/lib/roles"
 import { ExternalLink } from "lucide-react"
@@ -10,11 +9,6 @@ import { useTranslation } from "react-i18next"
 import { LanguageSwitcher } from "@/components/language-switcher"
 import { useEmbedNav } from "@/lib/embed-nav"
 import { ThemeToggle } from "@/components/theme-toggle"
-
-interface DevConfig {
-  dev_mode: boolean
-  users?: { eppn: string; label: string }[]
-}
 
 interface EmbedMe {
   id: string
@@ -52,9 +46,7 @@ export function RootLayout() {
 
   const { data: user } = useQuery({ ...userQuery, enabled: !isEmbed && !isLtiBind && !isLtiSetup })
   const { data: devConfig } = useQuery({
-    queryKey: ["dev", "config"],
-    queryFn: () => api.get<DevConfig>("/dev/config"),
-    staleTime: Infinity,
+    ...devConfigQuery,
     enabled: !isEmbed && !isLtiBind && !isLtiSetup,
   })
 
@@ -194,10 +186,10 @@ export function DevUserSwitcher({
     return localStorage.getItem("minerva-dev-user") || users[0]?.eppn || ""
   })
 
-  // Set the header for all future requests
+  // localStorage is the transport: devHeaders() in lib/api.ts reads
+  // this key on every request and sends it as the dev-user header.
   useEffect(() => {
     localStorage.setItem("minerva-dev-user", selected)
-    // Invalidate all queries to refetch with new user
     queryClient.invalidateQueries()
   }, [selected, queryClient])
 

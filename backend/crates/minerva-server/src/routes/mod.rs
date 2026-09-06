@@ -10,6 +10,7 @@ mod dev;
 pub(crate) mod documents;
 pub mod embed;
 mod external_auth;
+pub(crate) mod guards;
 mod health;
 pub mod integration;
 mod integration_admin;

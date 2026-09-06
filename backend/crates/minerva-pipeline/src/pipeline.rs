@@ -130,46 +130,8 @@ pub async fn collection_name_for_course(
 
 pub use minerva_catalog::VALID_EMBEDDING_PROVIDERS;
 
-/// Whitelist of local embedding models a course owner can pick. Each
-/// entry is `(huggingface-style id, output dimension)`. The dimension is
-/// authoritative: `ensure_collection` reads from this list when creating
-/// the per-course Qdrant collection, so a wrong number here means
-/// upserts will fail with a vector-size mismatch.
-///
-/// Sourced from three backends, all dispatched by
-/// `fastembed_embedder::FastEmbedder`:
-/// * fastembed-rs's `EmbeddingModel` enum (ONNX, the default path);
-/// * the Qwen3 candle entry (`Qwen3TextEmbedding`, gated behind
-///   fastembed's `qwen3` feature);
-/// * "bring your own ONNX" via `UserDefinedEmbeddingModel` for HF repos
-///   whose ONNX export works but isn't part of `EmbeddingModel` yet --
-///   currently snowflake-arctic-embed-m-v2.0.
-///
-/// Adding a model here: also add a `parse_fast_model_name` arm (or a
-/// `custom_model_spec` arm for the user-defined path) in
-/// `fastembed_embedder.rs`, and consider whether it's small enough to
-/// warm up at boot (`STARTUP_BENCHMARK_MODELS` below). If unsure, leave
-/// it out of startup; admins can run `POST /api/admin/embedding-benchmark`
-/// to benchmark on demand without OOMing the box.
 pub use minerva_catalog::VALID_LOCAL_MODELS;
 
-/// Models the server warms up + benchmarks at boot. Subset of
-/// `VALID_LOCAL_MODELS`: small/fast ONNX models the pod can hold in RAM
-/// simultaneously without touching the cache budget too hard.
-/// Everything else gets benchmarked on demand via the admin endpoint
-/// so a single boot doesn't try to load every candidate at once and
-/// OOM-kill the pod.
-///
-/// Arctic-m-v2.0 is in the warm set despite its ~311 MB int8 footprint
-/// because (a) it's the multilingual default we now recommend for new
-/// SU/DSV courses and (b) on first benchmark its session takes 30-60 s
-/// to materialize from the freshly-downloaded ONNX; warming at boot
-/// shifts that cost off the first teacher's "Run benchmark" click.
-///
-/// `BAAI/bge-base-en-v1.5` is intentionally not warmed: it's English-
-/// only and overlapping with bge-small-en (also warmed). Existing
-/// courses on bge-base still work; teachers who want a benchmark can
-/// trigger one from the admin page.
 pub use minerva_catalog::STARTUP_BENCHMARK_MODELS;
 
 pub use minerva_catalog::OPENAI_EMBEDDING_MODEL;
@@ -498,7 +460,7 @@ pub async fn process_document(
 /// L2-normalize. Returns None if there are no chunks (caller treats
 /// missing pooled embedding as "skip persist"). Pre-normalizing here
 /// means cosine similarity in the linker is a single dot product.
-fn mean_pool_normalized(embeddings: &[Vec<f32>]) -> Option<Vec<f32>> {
+pub fn mean_pool_normalized(embeddings: &[Vec<f32>]) -> Option<Vec<f32>> {
     if embeddings.is_empty() {
         return None;
     }
@@ -681,23 +643,6 @@ pub async fn ensure_document_id_index(qdrant: &Qdrant, collection: &str) {
     }
 }
 
-/// Idempotent text payload index on the chunk `text` field. Backs the
-/// `keyword_search` tool exposed in the agentic research phase
-/// (`strategy::tools`): tokenised, lowercased word match against chunk
-/// bodies via Qdrant's `match_text` filter.
-///
-/// Word tokenizer with lowercasing + ASCII folding handles the mixed
-/// English / Swedish content the platform sees ("inlämning" folds to
-/// "inlamning", "café" to "cafe"). Phrase matching is left off; the
-/// filter is set-membership over tokens, which matches what
-/// `common::keyword_lookup` expects.
-///
-/// Same error-swallow contract as `ensure_document_id_index`: an
-/// existing index returns an error from Qdrant, which we treat as
-/// success. We call this from both the create-collection branch (so
-/// new courses get the index immediately) and the existing-collection
-/// path (so a course that pre-dates this change is backfilled on its
-/// next ingest event).
 /// Idempotent text payload index on the chunk `filename` field.
 /// Lets `keyword_search` match by filename too, not just chunk
 /// body, so the model can search for "syllabus" and find chunks
@@ -732,6 +677,23 @@ pub async fn ensure_filename_text_index(qdrant: &Qdrant, collection: &str) {
     }
 }
 
+/// Idempotent text payload index on the chunk `text` field. Backs the
+/// `keyword_search` tool exposed in the agentic research phase
+/// (`strategy::tools`): tokenised, lowercased word match against chunk
+/// bodies via Qdrant's `match_text` filter.
+///
+/// Word tokenizer with lowercasing + ASCII folding handles the mixed
+/// English / Swedish content the platform sees ("inlämning" folds to
+/// "inlamning", "café" to "cafe"). Phrase matching is left off; the
+/// filter is set-membership over tokens, which matches what
+/// `common::keyword_lookup` expects.
+///
+/// Same error-swallow contract as `ensure_document_id_index`: an
+/// existing index returns an error from Qdrant, which we treat as
+/// success. We call this from both the create-collection branch (so
+/// new courses get the index immediately) and the existing-collection
+/// path (so a course that pre-dates this change is backfilled on its
+/// next ingest event).
 pub async fn ensure_text_index(qdrant: &Qdrant, collection: &str) {
     // Word tokenizer with lowercasing. Min/max token length matches
     // the smoke test that locked in the design ; drops very short

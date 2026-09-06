@@ -514,6 +514,110 @@ fn needs_resync(
     }
 }
 
+/// A discovered Canvas item already materialized as bytes, ready to be
+/// written to disk as a document.
+struct SyncedDoc<'a> {
+    file_path: String,
+    filename: &'a str,
+    content_type: &'a str,
+    data: &'a [u8],
+    updated_at: Option<DateTime<Utc>>,
+}
+
+/// Overwrite an already-synced doc in place and reopen it for ingest:
+/// drop its old vectors, rewrite the file, then reset the row so the
+/// worker re-chunks it. Shared by the file and page resync paths.
+async fn resync_synced_doc(
+    state: &AppState,
+    conn: &minerva_db::queries::canvas::ConnectionRow,
+    item: &DiscoveredItem,
+    doc_id: Uuid,
+    doc: SyncedDoc<'_>,
+) -> Result<Outcome, AppError> {
+    purge_chunks(state, conn.course_id, doc_id).await?;
+    write_doc_file(&doc.file_path, doc.data).await?;
+    let content_hash = compute_content_hash(doc.data);
+    minerva_db::queries::documents::reset_for_resync(
+        &state.db,
+        doc_id,
+        doc.filename,
+        doc.content_type,
+        doc.data.len() as i64,
+        Some(&content_hash),
+    )
+    .await?;
+    log_synced_item(state, conn, item, &doc, doc_id).await?;
+    Ok(Outcome::Resynced)
+}
+
+/// Write a newly discovered Canvas item as a fresh document. Shared by the
+/// file and page create paths.
+async fn create_synced_doc(
+    state: &AppState,
+    conn: &minerva_db::queries::canvas::ConnectionRow,
+    owner_id: Uuid,
+    item: &DiscoveredItem,
+    doc_id: Uuid,
+    doc: SyncedDoc<'_>,
+) -> Result<Outcome, AppError> {
+    write_doc_file(&doc.file_path, doc.data).await?;
+    let content_hash = compute_content_hash(doc.data);
+    minerva_db::queries::documents::insert(
+        &state.db,
+        minerva_db::queries::documents::NewDocument {
+            id: doc_id,
+            course_id: conn.course_id,
+            filename: doc.filename,
+            mime_type: doc.content_type,
+            size_bytes: doc.data.len() as i64,
+            uploaded_by: owner_id,
+            source_url: None,
+            content_hash: Some(&content_hash),
+            source_system: None,
+            source_ref: None,
+            parent_document_id: None,
+        },
+    )
+    .await?;
+    log_synced_item(state, conn, item, &doc, doc_id).await?;
+    Ok(Outcome::Created)
+}
+
+async fn write_doc_file(path: &str, data: &[u8]) -> Result<(), AppError> {
+    tokio::fs::write(path, data)
+        .await
+        .map_err(|e| AppError::Internal(format!("write failed: {}", e)))
+}
+
+async fn ensure_course_dir(docs_path: &str, course_id: Uuid) -> Result<String, AppError> {
+    let dir = format!("{}/{}", docs_path, course_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Internal(format!("mkdir failed: {}", e)))?;
+    Ok(dir)
+}
+
+async fn log_synced_item(
+    state: &AppState,
+    conn: &minerva_db::queries::canvas::ConnectionRow,
+    item: &DiscoveredItem,
+    doc: &SyncedDoc<'_>,
+    doc_id: Uuid,
+) -> Result<(), AppError> {
+    minerva_db::queries::canvas::upsert_sync_log(
+        &state.db,
+        Uuid::new_v4(),
+        conn.id,
+        &item.key,
+        doc.filename,
+        Some(doc.content_type),
+        Some(doc_id),
+        doc.updated_at,
+    )
+    .await?;
+    Ok(())
+}
+
 async fn purge_chunks(state: &AppState, course_id: Uuid, doc_id: Uuid) -> Result<(), AppError> {
     // Look up the live collection name from the course's
     // embedding_version. Canvas resync runs on a sweeper, not the
@@ -606,101 +710,62 @@ async fn sync_file(
         .content_type
         .as_deref()
         .unwrap_or("application/octet-stream");
-    let dir = format!("{}/{}", state.config.docs_path, conn.course_id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| AppError::Internal(format!("mkdir failed: {}", e)))?;
+    let dir = ensure_course_dir(&state.config.docs_path, conn.course_id).await?;
     let ext = extension_from_filename(&file.filename);
 
     if resync {
         let prev = prev.unwrap();
         let Some(doc_id) = prev.minerva_document_id else {
             // Log says synced but the doc row is gone; fall through to create.
-            return create_file_doc(state, conn, owner_id, item, &file, &data, content_type, ext)
-                .await;
+            let doc_id = Uuid::new_v4();
+            return create_synced_doc(
+                state,
+                conn,
+                owner_id,
+                item,
+                doc_id,
+                SyncedDoc {
+                    file_path: format!("{}/{}.{}", dir, doc_id, ext),
+                    filename: &file.display_name,
+                    content_type,
+                    data: &data,
+                    updated_at: file.updated_at,
+                },
+            )
+            .await;
         };
-        purge_chunks(state, conn.course_id, doc_id).await?;
-        let file_path = format!("{}/{}.{}", dir, doc_id, ext);
-        tokio::fs::write(&file_path, &data)
-            .await
-            .map_err(|e| AppError::Internal(format!("write failed: {}", e)))?;
-        let content_hash = compute_content_hash(&data);
-        minerva_db::queries::documents::reset_for_resync(
-            &state.db,
+        return resync_synced_doc(
+            state,
+            conn,
+            item,
             doc_id,
-            &file.display_name,
-            content_type,
-            size_bytes,
-            Some(&content_hash),
+            SyncedDoc {
+                file_path: format!("{}/{}.{}", dir, doc_id, ext),
+                filename: &file.display_name,
+                content_type,
+                data: &data,
+                updated_at: file.updated_at,
+            },
         )
-        .await?;
-        minerva_db::queries::canvas::upsert_sync_log(
-            &state.db,
-            Uuid::new_v4(),
-            conn.id,
-            &item.key,
-            &file.display_name,
-            Some(content_type),
-            Some(doc_id),
-            file.updated_at,
-        )
-        .await?;
-        return Ok(Outcome::Resynced);
+        .await;
     }
 
-    create_file_doc(state, conn, owner_id, item, &file, &data, content_type, ext).await
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn create_file_doc(
-    state: &AppState,
-    conn: &minerva_db::queries::canvas::ConnectionRow,
-    owner_id: Uuid,
-    item: &DiscoveredItem,
-    file: &CanvasFile,
-    data: &[u8],
-    content_type: &str,
-    ext: &str,
-) -> Result<Outcome, AppError> {
     let doc_id = Uuid::new_v4();
-    let dir = format!("{}/{}", state.config.docs_path, conn.course_id);
-    let file_path = format!("{}/{}.{}", dir, doc_id, ext);
-    tokio::fs::write(&file_path, data)
-        .await
-        .map_err(|e| AppError::Internal(format!("write failed: {}", e)))?;
-
-    let content_hash = compute_content_hash(data);
-    minerva_db::queries::documents::insert(
-        &state.db,
-        minerva_db::queries::documents::NewDocument {
-            id: doc_id,
-            course_id: conn.course_id,
+    create_synced_doc(
+        state,
+        conn,
+        owner_id,
+        item,
+        doc_id,
+        SyncedDoc {
+            file_path: format!("{}/{}.{}", dir, doc_id, ext),
             filename: &file.display_name,
-            mime_type: content_type,
-            size_bytes: data.len() as i64,
-            uploaded_by: owner_id,
-            source_url: None,
-            content_hash: Some(&content_hash),
-            source_system: None,
-            source_ref: None,
-            parent_document_id: None,
+            content_type,
+            data: &data,
+            updated_at: file.updated_at,
         },
     )
-    .await?;
-
-    minerva_db::queries::canvas::upsert_sync_log(
-        &state.db,
-        Uuid::new_v4(),
-        conn.id,
-        &item.key,
-        &file.display_name,
-        Some(content_type),
-        Some(doc_id),
-        file.updated_at,
-    )
-    .await?;
-
-    Ok(Outcome::Created)
+    .await
 }
 
 async fn sync_page(
@@ -750,82 +815,44 @@ async fn sync_page(
 
     let filename = format!("{}.html", safe_filename(&page.title));
     let content_type = "text/html";
-    let dir = format!("{}/{}", state.config.docs_path, conn.course_id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| AppError::Internal(format!("mkdir failed: {}", e)))?;
+    let dir = ensure_course_dir(&state.config.docs_path, conn.course_id).await?;
 
     if resync {
         let prev = prev.unwrap();
         if let Some(doc_id) = prev.minerva_document_id {
-            purge_chunks(state, conn.course_id, doc_id).await?;
-            let file_path = format!("{}/{}.html", dir, doc_id);
-            tokio::fs::write(&file_path, &data)
-                .await
-                .map_err(|e| AppError::Internal(format!("write failed: {}", e)))?;
-            let content_hash = compute_content_hash(&data);
-            minerva_db::queries::documents::reset_for_resync(
-                &state.db,
+            return resync_synced_doc(
+                state,
+                conn,
+                item,
                 doc_id,
-                &filename,
-                content_type,
-                size_bytes,
-                Some(&content_hash),
+                SyncedDoc {
+                    file_path: format!("{}/{}.html", dir, doc_id),
+                    filename: &filename,
+                    content_type,
+                    data: &data,
+                    updated_at: page.updated_at,
+                },
             )
-            .await?;
-            minerva_db::queries::canvas::upsert_sync_log(
-                &state.db,
-                Uuid::new_v4(),
-                conn.id,
-                &item.key,
-                &filename,
-                Some(content_type),
-                Some(doc_id),
-                page.updated_at,
-            )
-            .await?;
-            return Ok(Outcome::Resynced);
+            .await;
         }
     }
 
     let doc_id = Uuid::new_v4();
-    let file_path = format!("{}/{}.html", dir, doc_id);
-    tokio::fs::write(&file_path, &data)
-        .await
-        .map_err(|e| AppError::Internal(format!("write failed: {}", e)))?;
-
-    let content_hash = compute_content_hash(&data);
-    minerva_db::queries::documents::insert(
-        &state.db,
-        minerva_db::queries::documents::NewDocument {
-            id: doc_id,
-            course_id: conn.course_id,
+    create_synced_doc(
+        state,
+        conn,
+        owner_id,
+        item,
+        doc_id,
+        SyncedDoc {
+            file_path: format!("{}/{}.html", dir, doc_id),
             filename: &filename,
-            mime_type: content_type,
-            size_bytes,
-            uploaded_by: owner_id,
-            source_url: None,
-            content_hash: Some(&content_hash),
-            source_system: None,
-            source_ref: None,
-            parent_document_id: None,
+            content_type,
+            data: &data,
+            updated_at: page.updated_at,
         },
     )
-    .await?;
-
-    minerva_db::queries::canvas::upsert_sync_log(
-        &state.db,
-        Uuid::new_v4(),
-        conn.id,
-        &item.key,
-        &filename,
-        Some(content_type),
-        Some(doc_id),
-        page.updated_at,
-    )
-    .await?;
-
-    Ok(Outcome::Created)
+    .await
 }
 
 async fn sync_url(

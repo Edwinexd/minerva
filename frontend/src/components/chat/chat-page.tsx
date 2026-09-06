@@ -71,12 +71,7 @@ function ChatPage({
   useDocumentTitle(course ? tCommon("pageTitles.course", { course: course.name }) : null)
 
   // A teacher pin freezes the chat for EVERYONE, the owner
-  // included. Previously this also required the viewer to not
-  // own the conv (`!conversations.some(...)`), which meant
-  // students could still append to their own chats after a
-  // pin; defeating the whole point of pinning ("this is the
-  // vetted answer, don't change it"). Backend enforces the
-  // same rule via `conversation.pinned_frozen`.
+  // included. Backend enforces via `conversation.pinned_frozen`.
   const isPinnedView = conversationId !== null &&
     !!pinned?.some((p) => p.id === conversationId)
 
@@ -261,7 +256,7 @@ export function ChatWindow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, courseId, readOnly])
 
-  // ---- Per-conversation token ceiling ----
+  // ── Per-conversation token ceiling ───────────────────────────────
   //
   // `token_state` is server-computed (see `chat::ConversationTokenState`)
   // rather than summed from `messages` here, so the threshold the banner
@@ -297,13 +292,12 @@ export function ChatWindow({
   // A dismissed nudge collapses to `ok`; a block never does, because the
   // composer is hidden in that state and the notice is the only thing
   // explaining why.
-  // Both advisory states are dismissible; the block is not.
   const limitState =
     (rawLimitState === "nudge" || rawLimitState === "topic") && split.dismissed
       ? "ok"
       : rawLimitState
 
-  // ---- ChatSurface adapter ----
+  // ── ChatSurface adapter ──────────────────────────────────────────
 
   /**
    * Shared header builder for the Shibboleth auth flow: cookies

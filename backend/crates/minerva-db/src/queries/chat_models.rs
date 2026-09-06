@@ -177,26 +177,10 @@ pub async fn current_utility_default(db: &PgPool) -> Result<Option<String>, sqlx
         .await
 }
 
-#[derive(Debug)]
-pub enum SetDefaultError {
-    NotFound,
-    Disabled,
-    Db(sqlx::Error),
-}
-
-impl std::fmt::Display for SetDefaultError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SetDefaultError::NotFound => write!(f, "chat model not in catalog"),
-            SetDefaultError::Disabled => {
-                write!(f, "chat model is disabled and cannot be a default")
-            }
-            SetDefaultError::Db(e) => write!(f, "{}", e),
-        }
-    }
-}
-
-impl std::error::Error for SetDefaultError {}
+crate::queries::model_catalog::define_set_default_error!(
+    not_found: "chat model not in catalog",
+    disabled: "chat model is disabled and cannot be a default",
+);
 
 /// Atomically promote one model to the course-chat default and demote
 /// the previous holder. The target must exist and be enabled.

@@ -9,7 +9,6 @@ import {
   DYNREG_CHANNEL,
   type DynregBroadcastMessage,
 } from "@/lib/lti-dynreg-channel"
-import { useApiErrorMessage } from "@/lib/use-api-error"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -23,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorText } from "@/components/ui/error-text"
 
 /**
  * Focused approve flow for a single pending LTI platform. Deep-linked
@@ -37,7 +37,6 @@ export function LtiApprovePlatformPage() {
   const { t } = useTranslation("admin")
   const { t: tCommon } = useTranslation("common")
   useDocumentTitle(tCommon("pageTitles.ltiApprove"))
-  const formatError = useApiErrorMessage()
 
   const { platformId } = ApproveRoute.useParams()
   const navigate = useNavigate()
@@ -192,9 +191,7 @@ export function LtiApprovePlatformPage() {
             </div>
 
             {approveMutation.isError && (
-              <p className="text-sm text-destructive">
-                {formatError(approveMutation.error)}
-              </p>
+              <ErrorText error={approveMutation.error} />
             )}
 
             <div className="flex flex-wrap gap-2">

@@ -19,11 +19,9 @@ the failure is visible; the next day's cron starts fresh.
 """
 
 import os
-import sys
 from datetime import date, datetime
 from typing import Any
 
-import requests
 from icalendar import Calendar
 from dsv_wrapper import (
     AmbiguousMatchError,
@@ -32,13 +30,7 @@ from dsv_wrapper import (
     TermSeason,
 )
 
-
-def get_env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        print(f"error: {name} not set", file=sys.stderr)
-        sys.exit(1)
-    return value
+from _minerva_api import MinervaSession, minerva_session, su_credentials
 
 
 def current_and_next_semesters(today: date) -> list[Semester]:
@@ -228,22 +220,34 @@ def iter_payloads(
             yield build_course_payload(daisy, course, participant_cache)
 
 
-def post_batch(
-    api_url: str,
-    headers: dict,
+def send_batch(
+    session: MinervaSession,
     batch: list[dict],
-) -> dict:
-    """POST one chunk and raise on transport failure. Per-course
-    errors inside the batch come back inside the summary's `errors`
-    array; only HTTP-level failures (4xx/5xx/timeout) bubble up."""
-    resp = requests.post(
-        f"{api_url}/api/service/daisy-courses",
-        headers=headers,
-        json=batch,
-        timeout=300,
-    )
+    total: dict,
+    batch_number: int,
+    with_staged: bool = False,
+) -> None:
+    """POST one chunk, fold its summary into `total`, and print the
+    per-batch line. Raises on transport failure: per-course errors
+    inside the batch come back inside the summary's `errors` array;
+    only HTTP-level failures (4xx/5xx/timeout) bubble up.
+
+    `with_staged` adds the staged= counter to the printed line, which
+    only the trailing partial batch reports."""
+    resp = session.post("/api/service/daisy-courses", json=batch)
     resp.raise_for_status()
-    return resp.json()
+    batch_summary = resp.json()
+    merge_summary(total, batch_summary)
+    staged = (
+        f"staged={batch_summary.get('courses_staged', 0)}, " if with_staged else ""
+    )
+    print(
+        f"  batch {batch_number}: {len(batch)} courses -> "
+        f"{staged}"
+        f"created={batch_summary.get('courses_created', 0)}, "
+        f"updated={batch_summary.get('courses_updated', 0)}, "
+        f"members+={batch_summary.get('members_added', 0)}"
+    )
 
 
 def serialize_schedule(calendar: Any) -> list[dict[str, str | None]]:
@@ -312,12 +316,10 @@ def serialize_schedule(calendar: Any) -> list[dict[str, str | None]]:
     return events
 
 
-def post_schedule(api_url: str, headers: dict, momenttillf_id: str, events: list[dict]) -> dict:
-    resp = requests.put(
-        f"{api_url}/api/service/daisy-course-schedules/{momenttillf_id}",
-        headers=headers,
+def post_schedule(session: MinervaSession, momenttillf_id: str, events: list[dict]) -> dict:
+    resp = session.put(
+        f"/api/service/daisy-course-schedules/{momenttillf_id}",
         json={"events": events},
-        timeout=300,
     )
     resp.raise_for_status()
     return resp.json()
@@ -352,12 +354,9 @@ def merge_summary(into: dict, batch_summary: dict) -> None:
 
 
 def main() -> None:
-    api_url = get_env("MINERVA_API_URL").rstrip("/")
-    api_key = get_env("MINERVA_SERVICE_API_KEY")
-    su_username = get_env("SU_USERNAME")
-    su_password = get_env("SU_PASSWORD")
+    session = minerva_session()
+    su_username, su_password = su_credentials()
 
-    headers = {"Authorization": f"Bearer {api_key}"}
     today = date.today()
     semesters = current_and_next_semesters(today)
     print(
@@ -371,7 +370,7 @@ def main() -> None:
     participant_cache: dict[str, dict] = {}
     dry_run = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
 
-    with DaisyClient(username=su_username, password=su_password) as daisy:
+    with session, DaisyClient(username=su_username, password=su_password) as daisy:
         if dry_run:
             # Dry-run is for human inspection; buffer everything so the
             # final stats + sample are computed against the full set.
@@ -397,28 +396,13 @@ def main() -> None:
             offering_ids.append(payload["momenttillf_id"])
             batch.append(payload)
             if len(batch) >= CHUNK_SIZE:
-                batch_summary = post_batch(api_url, headers, batch)
-                merge_summary(total, batch_summary)
+                send_batch(session, batch, total, batches_sent + 1)
                 batches_sent += 1
-                print(
-                    f"  batch {batches_sent}: {len(batch)} courses -> "
-                    f"created={batch_summary.get('courses_created', 0)}, "
-                    f"updated={batch_summary.get('courses_updated', 0)}, "
-                    f"members+={batch_summary.get('members_added', 0)}"
-                )
                 batch = []
 
         if batch:
-            batch_summary = post_batch(api_url, headers, batch)
-            merge_summary(total, batch_summary)
+            send_batch(session, batch, total, batches_sent + 1, with_staged=True)
             batches_sent += 1
-            print(
-                f"  batch {batches_sent}: {len(batch)} courses -> "
-                f"staged={batch_summary.get('courses_staged', 0)}, "
-                f"created={batch_summary.get('courses_created', 0)}, "
-                f"updated={batch_summary.get('courses_updated', 0)}, "
-                f"members+={batch_summary.get('members_added', 0)}"
-            )
 
         schedule_upserted = 0
         schedule_deleted = 0
@@ -427,7 +411,7 @@ def main() -> None:
         schedule_documents_orphaned = 0
         for offering_id in offering_ids:
             events = serialize_schedule(daisy.get_course_schedule_ical(offering_id))
-            result = post_schedule(api_url, headers, offering_id, events)
+            result = post_schedule(session, offering_id, events)
             schedule_upserted += result.get("upserted", 0)
             schedule_deleted += result.get("deleted", 0)
             schedule_skipped += int(result.get("skipped", False))

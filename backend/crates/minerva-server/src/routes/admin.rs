@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{AppError, LocalizedMessage};
+use crate::routes::guards::require_admin;
 use crate::rules::{validate_regex, SUPPORTED_ATTRIBUTES};
 use crate::state::AppState;
 
@@ -87,13 +88,6 @@ pub fn router() -> Router<AppState> {
             get(list_system_defaults).put(update_system_default),
         )
         .route("/system-defaults/{key}", delete(reset_system_default))
-}
-
-fn require_admin(user: &User) -> Result<(), AppError> {
-    if !user.role.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
 }
 
 /// All courses including archived ones, in the same wire shape as

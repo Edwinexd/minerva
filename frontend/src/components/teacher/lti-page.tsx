@@ -7,8 +7,7 @@ import {
   ltiSetupQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
-import { copyToClipboard as copyText } from "@/lib/clipboard"
-import { useApiErrorMessage } from "@/lib/use-api-error"
+import { LtiManualConfigTable } from "@/components/lti-manual-config-table"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -22,6 +21,8 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ListRow, ListEmpty } from "@/components/ui/list"
+import { ErrorText } from "@/components/ui/error-text"
 import { RelativeTime } from "@/components/relative-time"
 import { useState } from "react"
 import type { LtiRegistration } from "@/lib/types"
@@ -31,7 +32,6 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
   const queryClient = useQueryClient()
   const { t } = useTranslation("teacher")
   const { t: tCommon } = useTranslation("common")
-  const formatError = useApiErrorMessage()
   const { data: setup } = useQuery(ltiSetupQuery(courseId))
   const { data: registrations, isLoading } = useQuery(ltiRegistrationsQuery(courseId))
   const { data: nrps } = useQuery(ltiNrpsStatusQuery(courseId))
@@ -40,7 +40,11 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
   const [name, setName] = useState("")
   const [issuer, setIssuer] = useState("")
   const [clientId, setClientId] = useState("")
-  const [copiedField, setCopiedField] = useState<string | null>(null)
+  // Prefix key, so this also covers the nrps / site-bindings caches.
+  const invalidateLti = () =>
+    queryClient.invalidateQueries({
+      queryKey: ltiRegistrationsQuery(courseId).queryKey,
+    })
 
   const createMutation = useMutation({
     mutationFn: (data: {
@@ -53,39 +57,21 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
       setName("")
       setIssuer("")
       setClientId("")
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "lti"],
-      })
+      invalidateLti()
     },
   })
 
   const deleteMutation = useMutation({
     mutationFn: (regId: string) =>
       api.delete(`/courses/${courseId}/lti/${regId}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "lti"],
-      })
-    },
+    onSuccess: invalidateLti,
   })
 
   const unlinkSiteBindingMutation = useMutation({
     mutationFn: (bindingId: string) =>
       api.delete(`/courses/${courseId}/lti/site-bindings/${bindingId}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "lti"],
-      })
-    },
+    onSuccess: invalidateLti,
   })
-
-  async function copyToClipboard(text: string, field: string) {
-    const ok = await copyText(text)
-    if (ok) {
-      setCopiedField(field)
-      setTimeout(() => setCopiedField(null), 2000)
-    }
-  }
 
   const config = setup?.moodle_tool_config
 
@@ -109,34 +95,7 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
         <CardContent className="space-y-3">
           {config ? (
             <>
-              {[
-                { label: t("lti.toolUrl"), value: config.tool_url, key: "tool_url" },
-                { label: t("lti.ltiVersion"), value: config.lti_version, key: "lti_version" },
-                { label: t("lti.publicKeyType"), value: config.public_key_type, key: "public_key_type" },
-                { label: t("lti.publicKeysetUrl"), value: config.public_keyset_url, key: "keyset" },
-                { label: t("lti.initiateLoginUrl"), value: config.initiate_login_url, key: "login" },
-                { label: t("lti.redirectionUris"), value: config.redirection_uris, key: "redirect" },
-                { label: t("lti.customParameters"), value: config.custom_parameters, key: "custom" },
-                { label: t("lti.iconUrl"), value: config.icon_url, key: "icon" },
-              ].map(({ label, value, key }) => (
-                <div key={key} className="flex items-center justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <Label className="text-xs text-muted-foreground">{label}</Label>
-                    <code className="block text-sm bg-muted px-2 py-1 rounded truncate">{value}</code>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => copyToClipboard(value, key)}
-                  >
-                    {copiedField === key ? t("lti.copied") : tCommon("actions.copy")}
-                  </Button>
-                  <output className="sr-only">
-                    {copiedField === key ? t("lti.copied") : ""}
-                  </output>
-                </div>
-              ))}
+              <LtiManualConfigTable config={config} ns="teacher" keyPrefix="lti" />
               <Separator />
               <div className="text-sm text-muted-foreground space-y-1">
                 <p>{t("lti.customParamExplainPrefix")}<strong>{t("lti.customParamExplainBoldCustom")}</strong>{t("lti.customParamExplainMid")}<code>user_eppn=$User.username</code>{t("lti.customParamExplainSuffix")}</p>
@@ -194,7 +153,7 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
               </div>
 
               {createMutation.isError && (
-                <p className="text-sm text-destructive">{formatError(createMutation.error)}</p>
+                <ErrorText error={createMutation.error} />
               )}
 
               <div className="flex gap-2">
@@ -215,17 +174,12 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
           )}
 
           {registrations && registrations.length === 0 && !showForm && (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              {t("lti.emptyRegistrations")}
-            </p>
+            <ListEmpty>{t("lti.emptyRegistrations")}</ListEmpty>
           )}
 
           <div className="space-y-3">
             {registrations?.map((reg) => (
-              <div
-                key={reg.id}
-                className="flex items-center justify-between py-2 border-b last:border-0"
-              >
+              <ListRow key={reg.id}>
                 <div className="space-y-1 flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-sm">{reg.name}</span>
@@ -241,7 +195,7 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
                 >
                   {t("lti.remove")}
                 </Button>
-              </div>
+              </ListRow>
             ))}
           </div>
         </CardContent>
@@ -292,9 +246,7 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
               )
             })}
             {unlinkSiteBindingMutation.isError && (
-              <p className="text-sm text-destructive">
-                {formatError(unlinkSiteBindingMutation.error)}
-              </p>
+              <ErrorText error={unlinkSiteBindingMutation.error} />
             )}
           </CardContent>
         </Card>

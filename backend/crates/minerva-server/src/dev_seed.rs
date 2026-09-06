@@ -977,6 +977,23 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
         }
     }
 
+    // A conversation started by hand inside a seeded course (or as a
+    // seeded user) is not in the registry, but both
+    // `conversations.course_id` and `.user_id` are NO ACTION, so such a
+    // row blocks the course / user delete below and fails the whole
+    // reseed with a foreign-key violation. It cannot outlive its course
+    // anyway, so clear it here; `messages` cascades from it. The
+    // developer's own rows in non-seeded courses are untouched.
+    let orphan_conversations = sqlx::query!(
+        r#"DELETE FROM conversations
+            WHERE course_id = ANY($1)
+               OR user_id IN (SELECT pk::uuid FROM seeds WHERE table_name = 'users')"#,
+        &course_ids,
+    )
+    .execute(&state.db)
+    .await?
+    .rows_affected();
+
     // Walk the registry table-by-table. Each step deletes the target
     // rows by id-set, then removes the matching `seeds` rows. We split
     // the per-table queries by composite vs UUID so the SQL stays
@@ -1032,6 +1049,10 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
             _ => {}
         }
     }
+
+    // Registry-tagged conversations are counted by the loop; fold in the
+    // untagged ones removed above so the report matches what went away.
+    report.conversations += orphan_conversations;
 
     Ok(report)
 }

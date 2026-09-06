@@ -107,8 +107,12 @@ const authenticated = [
   `/teacher/courses/${course.id}/rag`,
   `/teacher/courses/${course.id}/usage`,
   `/teacher/courses/${course.id}/invite`,
-  "/teacher",
-  "/teacher-help",
+  // Canonical paths, not the `/teacher` and `/teacher-help` redirects
+  // that used to stand in for them: pa11y follows the redirect either
+  // way, so naming the target is the only way the list says what it
+  // actually audits.
+  "/teacher/usage",
+  "/teacher/guide",
   "/admin/courses",
   "/admin/users",
   "/admin/rules",

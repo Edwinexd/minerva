@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM conversations\n            WHERE course_id = ANY($1)\n               OR user_id IN (SELECT pk::uuid FROM seeds WHERE table_name = 'users')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b93b478a414bb31652572c8956c9fbf8ec5cf029aa401681148298b0d341a9c7"
+}

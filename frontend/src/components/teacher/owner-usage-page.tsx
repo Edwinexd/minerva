@@ -352,12 +352,24 @@ export function OwnerUsagePage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* The day list scrolls once the window has more days than
+                fit. jsdom can't compute overflow, so the axe unit test
+                cannot see this; only the pa11y layer catches it. */}
             {usage.daily.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {t("ownerUsage.empty")}
               </p>
             ) : (
-              <div className="max-h-72 overflow-y-auto">
+              <section
+                className="max-h-72 overflow-y-auto"
+                // Same standoff as the chat transcript: jsx-a11y wants
+                // tabindex only on interactive elements, axe's
+                // scrollable-region-focusable wants it exactly here. axe
+                // wins, or the day list is unreachable by keyboard.
+                // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+                tabIndex={0}
+                aria-label={t("ownerUsage.daily.title")}
+              >
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left">
@@ -392,7 +404,7 @@ export function OwnerUsagePage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </section>
             )}
           </CardContent>
         </Card>

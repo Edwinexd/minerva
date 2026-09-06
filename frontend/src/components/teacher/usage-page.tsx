@@ -195,7 +195,14 @@ export function UsagePage({ useParams }: { useParams: () => { courseId: string }
             <Separator />
             <div>
               <h4 className="text-sm font-medium mb-2">{t("usage.dailyBreakdown")}</h4>
-              <div className="space-y-1 max-h-64 overflow-y-auto">
+              {/* Capped-height scroller, so it needs the same treatment as
+                  the chat transcript: focusable and labelled. */}
+              <section
+                className="space-y-1 max-h-64 overflow-y-auto"
+                // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+                tabIndex={0}
+                aria-label={t("usage.dailyBreakdown")}
+              >
                 <div className="grid grid-cols-5 gap-2 text-xs font-medium text-muted-foreground px-2 pb-1">
                   <span>{t("usage.colDate")}</span>
                   <span>{t("usage.colUser")}</span>
@@ -212,7 +219,7 @@ export function UsagePage({ useParams }: { useParams: () => { courseId: string }
                     <span className="text-right">{row.request_count}</span>
                   </div>
                 ))}
-              </div>
+              </section>
             </div>
           </>
         )}

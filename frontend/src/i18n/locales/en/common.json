@@ -252,5 +252,18 @@
     "feedbackBody": "If you find problems that are not described on this page, or believe we are not meeting the requirements, let us know so we can fix it. Contact us at <email>{{email}}</email>.",
     "enforcementHeading": "Enforcement procedure",
     "enforcementBody": "The Agency for Digital Government (DIGG) is responsible for supervising the Act on the Accessibility of Digital Public Service. If you are not satisfied with how we handle your feedback, you can <digg>report it to DIGG</digg>."
+  },
+  "clampedText": {
+    "showFull": "Show full excerpt",
+    "showLess": "Show less"
+  },
+  "sourcesPanel": {
+    "badge": "Source {{index}}",
+    "badgeCited": "Source {{index}}, cited in the reply",
+    "badgeUncited": "Source {{index}}, not directly cited",
+    "showUncited_one": "Show {{count}} retrieved but not cited",
+    "showUncited_other": "Show {{count}} retrieved but not cited",
+    "hideUncited_one": "Hide {{count}} retrieved but not cited",
+    "hideUncited_other": "Hide {{count}} retrieved but not cited"
   }
 }

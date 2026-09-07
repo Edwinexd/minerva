@@ -252,5 +252,18 @@
     "feedbackBody": "Om du upptäcker problem som inte beskrivs på den här sidan, eller om du anser att vi inte uppfyller kraven, vill vi gärna veta det så att vi kan åtgärda det. Kontakta oss på <email>{{email}}</email>.",
     "enforcementHeading": "Tillsyn",
     "enforcementBody": "Myndigheten för digital förvaltning (DIGG) har ansvaret för tillsyn över lagen om tillgänglighet till digital offentlig service. Om du inte är nöjd med hur vi hanterar din återkoppling kan du <digg>anmäla det till DIGG</digg>."
+  },
+  "clampedText": {
+    "showFull": "Visa hela utdraget",
+    "showLess": "Visa mindre"
+  },
+  "sourcesPanel": {
+    "badge": "Källa {{index}}",
+    "badgeCited": "Källa {{index}}, citerad i svaret",
+    "badgeUncited": "Källa {{index}}, inte direkt citerad",
+    "showUncited_one": "Visa {{count}} hämtad men inte citerad",
+    "showUncited_other": "Visa {{count}} hämtade men inte citerade",
+    "hideUncited_one": "Dölj {{count}} hämtad men inte citerad",
+    "hideUncited_other": "Dölj {{count}} hämtade men inte citerade"
   }
 }

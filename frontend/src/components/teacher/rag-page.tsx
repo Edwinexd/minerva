@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
+import { ClampedText } from "@/components/clamped-text"
 import { useState } from "react"
 import type { Course } from "@/lib/types"
 
@@ -197,7 +198,7 @@ function RagDebugPanel({
                   <p className="text-xs text-muted-foreground">
                     {t("rag.chunkIndex", { index: r.chunk_index })}
                   </p>
-                  <p className="text-sm whitespace-pre-wrap line-clamp-4">{r.text}</p>
+                  <ClampedText text={r.text} lines={4} className="text-sm" />
                 </div>
               )
             })}

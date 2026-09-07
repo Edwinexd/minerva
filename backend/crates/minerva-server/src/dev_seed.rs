@@ -366,9 +366,15 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
     // shows prior history on login. We hard-code the message text
     // rather than running the LLM; the goal is fixture coverage, not a
     // realistic chat transcript.
+    //
+    // One turn carries a retrieval set. The sources panel, its
+    // citation badges and its per-source expand toggle only exist on a
+    // message with `chunks_used`, so without a fixture that whole
+    // surface is unreachable in dev and invisible to the real-browser
+    // a11y pass.
     let mut convo_count = 0usize;
     let mut msg_count = 0usize;
-    for (course_id, user_id, user_msg, assistant_msg) in [
+    for (course_id, user_id, user_msg, assistant_msg, chunks) in [
         // Admin gets one conversation per course they participate in, so
         // switching courses doesn't always greet them with an empty
         // sidebar. They own intro + algos and are enrolled in web; db_sys
@@ -377,19 +383,22 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             intro,
             admin_id,
             "Show me the late submission policy.",
-            "Late submissions lose 10% per day, capped at 50% off. Resubmissions allowed up to one week after the deadline.",
+            "Late submissions lose 10% per day, capped at 50% off [#1]. Resubmissions are allowed up to one week after the original deadline [#2].",
+            FIXTURE_CHUNKS_INTRO,
         ),
         (
             algos,
             admin_id,
             "What's the grading breakdown?",
             "40% weekly problem sets, 25% midterm, 35% final exam. Problem sets due each Sunday at 23:59.",
+            &[],
         ),
         (
             web,
             admin_id,
             "Which router does this course use?",
             "Tanstack Router on the frontend.",
+            &[],
         ),
         // Plus a few seed-student conversations so the teacher
         // dashboard for those courses has cross-user data to show.
@@ -398,26 +407,31 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             alice,
             "What does the syllabus say about late submissions?",
             "Late submissions lose 10% per day. See the syllabus document.",
+            &[],
         ),
         (
             intro,
             bob,
             "When is the first assignment due?",
             "Week 2, Friday at 23:59. The full schedule is in the syllabus.",
+            &[],
         ),
         (
             algos,
             alice,
             "Can you summarise the algorithms covered in week 1?",
             "Week 1 covers asymptotic analysis, master theorem, and divide-and-conquer.",
+            &[],
         ),
         (
             web,
             ext_guest,
             "Is this course taught in English?",
             "Yes - all materials and lectures are in English.",
+            &[],
         ),
     ] {
+        let chunks_json = (!chunks.is_empty()).then(|| serde_json::json!(chunks));
         let conv_id = Uuid::new_v4();
         minerva_db::queries::conversations::create(&state.db, conv_id, course_id, user_id).await?;
         track(state, "conversations", conv_id).await?;
@@ -454,7 +468,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             conv_id,
             "assistant",
             assistant_msg,
-            None,
+            chunks_json.as_ref(),
             Some("seed-fixture"),
             Some(0),
             Some(0),
@@ -1228,3 +1242,27 @@ Assessment: weekly lab exercises (50%), one design project (20%),
 and a written exam (30%). The lab exercises must be demoed to a TA
 in person; sign-up sheets are posted on the LMS each Monday.
 ";
+
+/// Retrieval set for the one seeded turn that has sources. Shaped like
+/// what the chunker actually stores: a `[Source: <filename>]` header
+/// over a slab of document text. The first chunk is long enough to be
+/// clamped in the sources panel, the second short enough not to be, and
+/// the third is retrieved but never cited, so every state of the panel
+/// has a fixture.
+const FIXTURE_CHUNKS_INTRO: &[&str] = &[
+    "[Source: intro-syllabus.txt]
+Grading: 50% assignments, 30% final project, 20% quizzes. Late
+submissions lose 10 percent per day, capped at 50 percent off. The cap
+applies per assignment, not per course, and the deduction is computed
+from the grade the submission would otherwise have received.
+
+A submission is late from the minute after the deadline; the grader
+uses the timestamp recorded by the submission system, not the file's
+modification time. Extensions are granted only in advance and only by
+the course responsible, who records them in the grading sheet.",
+    "[Source: intro-syllabus.txt]
+Resubmissions are allowed up to one week after the original deadline.",
+    "[Source: intro-week1.txt]
+Week 1 covers variables, expressions and control flow. Bring a laptop
+with Python 3.11 or newer installed before the first lab.",
+];

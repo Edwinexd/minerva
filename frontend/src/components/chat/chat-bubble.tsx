@@ -13,8 +13,11 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, ChevronUp } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import Markdown, { defaultUrlTransform } from "react-markdown"
 import remarkGfm from "remark-gfm"
+
+import { ClampedText } from "@/components/clamped-text"
 
 /**
  * Citation markers the writeup phase emits inline. The model is
@@ -193,9 +196,12 @@ export interface ChatBubbleMessage {
 }
 
 /**
- * Strings the bubble needs. Passed in rather than read via
- * `useTranslation` because the two call sites use different i18n
- * namespaces ("student" vs the embed-only "auth.embed").
+ * Strings whose wording differs per caller. They are passed in rather
+ * than read via `useTranslation` because the two call sites use
+ * different i18n namespaces ("student" vs the embed-only
+ * "auth.embed"). Strings that read the same either way (the sources
+ * panel's own controls) come from `common` instead, so they exist once
+ * rather than once per namespace.
  */
 export interface ChatBubbleLabels {
   /** Text on the source toggle button, e.g. "3 sources". */
@@ -250,6 +256,7 @@ export function MarkdownContent({
    */
   chunks?: string[] | null
 }) {
+  const { t } = useTranslation("common")
   const filenameIndex = useMemo(
     () => buildFilenameIndex(chunks ?? null),
     [chunks],
@@ -290,7 +297,7 @@ export function MarkdownContent({
                       onCitationClick(n)
                     }}
                     className="inline-flex items-center justify-center min-w-[1.1rem] h-4 px-1 mx-0.5 rounded text-[0.65rem] font-semibold tabular-nums align-super bg-primary/15 text-primary hover:bg-primary/25 no-underline cursor-pointer"
-                    aria-label={`Source ${n}`}
+                    aria-label={t("sourcesPanel.badge", { index: n })}
                   >
                     {n}
                   </button>
@@ -321,6 +328,7 @@ export function ChatBubble({
   /** Rendered inside the assistant footer (e.g. <FeedbackControls/>). */
   feedbackSlot?: React.ReactNode
 }) {
+  const { t } = useTranslation("common")
   const isUser = message.role === "user"
   const [showSources, setShowSources] = useState(false)
   const chunks = message.chunks_used
@@ -515,8 +523,8 @@ export function ChatBubble({
                         }`}
                         aria-label={
                           wasCited
-                            ? `Source ${sourceId}, cited in the reply`
-                            : `Source ${sourceId}, not directly cited`
+                            ? t("sourcesPanel.badgeCited", { index: sourceId })
+                            : t("sourcesPanel.badgeUncited", { index: sourceId })
                         }
                       >
                         {sourceId}
@@ -524,7 +532,10 @@ export function ChatBubble({
                       <span>{source}</span>
                     </span>
                     {text ? (
-                      <p className="text-muted-foreground/80 mt-0.5 line-clamp-3">{text}</p>
+                      <ClampedText
+                        text={text}
+                        className="text-muted-foreground/80 mt-0.5"
+                      />
                     ) : (
                       <p className="text-muted-foreground/60 mt-0.5 italic">
                         {labels.sourceUnavailable}
@@ -548,8 +559,8 @@ export function ChatBubble({
                   onClick={() => setUserShowUncitedOverride(!showUncited)}
                 >
                   {showUncited
-                    ? `Hide ${uncitedCount} retrieved but not cited`
-                    : `Show ${uncitedCount} retrieved but not cited`}
+                    ? t("sourcesPanel.hideUncited", { count: uncitedCount })
+                    : t("sourcesPanel.showUncited", { count: uncitedCount })}
                 </button>
               )
             })()}

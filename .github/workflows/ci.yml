@@ -131,7 +131,7 @@ jobs:
         run: npm run build
 
       - name: Download server binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: minerva-server
           path: ${{ runner.temp }}/bin

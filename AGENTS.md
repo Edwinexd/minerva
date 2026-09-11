@@ -572,6 +572,32 @@ The token-denominated columns these replaced (`daily_token_limit`,
 `owner_daily_token_limit`) were converted at the seeded gpt-oss-120b
 blended rate and dropped in `20260610000003_cost_limits.sql`.
 
+**Ledger completeness.** Audited against the Cerebras per-day export on
+2026-09-11: term-time spend matched to within 0.5% of input tokens, and
+most days matched exactly. The rules that keep it that way:
+
+- A chat turn accumulates a `strategy::TurnUsage` keyed by the model +
+  provider that actually served each call, so a fallback route is billed
+  at its own rate. `usage_daily` gets one row per model; only the first
+  counts toward `request_count`.
+- Every upstream call that finished is recorded, even when the turn
+  errors: error paths call `common::record_turn_usage` without saving a
+  message.
+- Never abandon a billed call mid-stream. Providers report usage only in
+  the final frame, so a client disconnect or a FLARE repeat-abort keeps
+  reading (and discards the text) instead of dropping the connection.
+  The adversarial filter spawns its checks, so its 800ms timeout drops
+  only the wait, not the calls.
+- Utility calls go through `llm::record_pipeline_usage`, which logs
+  insert failures instead of discarding them.
+- gpt-oss counts reasoning against the output cap. A cap sized for the
+  answer alone truncates it (adversarial filter and topic switch shipped
+  at 4 / 64 and returned nothing usable); short verdicts use
+  `classification::VERDICT_MAX_TOKENS`.
+
+Known, accepted gaps: a call whose stream errors mid-way reports no usage
+(unknowable), and `course_token_usage` rows are deleted with their course.
+
 ## Teacher Portal
 
 `/teacher` is a pathless-layout section (`routes/teacher/_portal.tsx`)

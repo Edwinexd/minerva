@@ -351,13 +351,12 @@ async fn summarize(
 
     match crate::llm::util_request(&state.http_client, &utility, &body).await {
         Some(Ok((content, usage))) => {
-            let _ = minerva_db::queries::course_token_usage::record(
+            crate::llm::record_pipeline_usage(
                 &state.db,
                 course_id,
                 minerva_db::queries::course_token_usage::CATEGORY_CONVERSATION_CARRYOVER,
                 &utility.model,
-                usage.prompt_tokens as i32,
-                usage.completion_tokens as i32,
+                &usage,
             )
             .await;
             let trimmed = content.trim();

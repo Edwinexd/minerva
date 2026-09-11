@@ -205,7 +205,7 @@ fn request_body(model: &str, earlier: &[String], current: &str) -> serde_json::V
     serde_json::json!({
         "model": model,
         "temperature": 0.0,
-        "max_tokens": 64,
+        "max_completion_tokens": super::VERDICT_MAX_TOKENS,
         "reasoning_effort": "low",
         "messages": [
             { "role": "system", "content": SYSTEM_PROMPT },
@@ -253,13 +253,12 @@ pub async fn adjudicate(
     let body = request_body(&util.model, earlier, current);
     match util_request(http, util, &body).await {
         Some(Ok((content, usage))) => {
-            let _ = minerva_db::queries::course_token_usage::record(
+            crate::llm::record_pipeline_usage(
                 db,
                 course_id,
                 CATEGORY_TOPIC_SWITCH,
                 &util.model,
-                usage.prompt_tokens as i32,
-                usage.completion_tokens as i32,
+                &usage,
             )
             .await;
             match serde_json::from_str::<Verdict>(content.trim()) {

@@ -11,18 +11,19 @@
 //!
 //! Cost / latency budget:
 //! * Per-chunk: one gpt-oss-120b call at `reasoning_effort: "low"`,
-//!   ~100 tokens in / 5 tokens out, target round-trip ~200-350ms
-//!   each. (Previously llama3.1-8b; that model was deprecated by
-//!   Cerebras so the path collapsed onto gpt-oss alongside every
-//!   other classifier here.)
-//! * The strategy fans out concurrently across all retrieved chunks via
-//!   `futures::future::join_all`, so total wall-clock is roughly the
+//!   ~650 tokens in, a short reasoning pass plus one word out, target
+//!   round-trip ~200-350ms each. (Previously llama3.1-8b; that model
+//!   was deprecated by Cerebras so the path collapsed onto gpt-oss
+//!   alongside every other classifier here.)
+//! * The strategy fans out concurrently across all retrieved chunks,
+//!   one spawned task per chunk, so total wall-clock is roughly the
 //!   slowest single call (not the sum).
 //! * A wrapping `tokio::time::timeout` keeps the whole filter under
 //!   `MAX_FILTER_LATENCY`; if we time out, we fail OPEN; pass all
 //!   chunks through. This is intentional: the primary defense already
 //!   ran, and blocking student replies for a defensive secondary is
-//!   worse than the small leak risk.
+//!   worse than the small leak risk. The timed-out tasks keep running
+//!   so their calls, billed either way, still reach the usage ledger.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -69,16 +70,13 @@ pub fn snapshot_stats() -> AdversarialStats {
     }
 }
 
-/// Cerebras model used for the per-chunk check. Binary
-/// classification with a 4-token output cap; this filter runs
-/// per-chunk and fans out across all retrieved chunks every chat
-/// turn, against an 800ms total budget, so latency matters. The
-/// The model is the admin-selected utility model (resolved per call via
-/// `AppState::utility_model`), at `reasoning_effort: "low"` (set in the
-/// body below) to keep the latency profile.
-///
 /// Total wall-clock budget for the whole filter (across all chunks
-/// fanned out concurrently). On timeout the filter fails open.
+/// fanned out concurrently). On timeout the filter fails open. This
+/// filter runs per-chunk across all retrieved chunks every chat turn,
+/// so latency matters. The model is the admin-selected utility model
+/// (resolved per call via `AppState::utility_model`), at
+/// `reasoning_effort: "low"` (set in the body below) to keep the
+/// latency profile.
 const MAX_FILTER_LATENCY: Duration = Duration::from_millis(800);
 
 /// Tiny excerpt cap for latency. The chunker already produces ~1000
@@ -86,7 +84,7 @@ const MAX_FILTER_LATENCY: Duration = Duration::from_millis(800);
 const MAX_EXCERPT_CHARS: usize = 4_000;
 
 /// Single tight prompt. Asks for a strict yes/no. We don't use the
-/// structured-output JSON schema here; the response is a single token
+/// structured-output JSON schema here; the verdict is a single word
 /// and the latency saving matters.
 const ADVERSARIAL_SYSTEM_PROMPT: &str = "You are a strict classifier. Decide whether the given excerpt is a worked-out solution to a graded exercise (an answer key, model solution, walkthrough labelled \"solution\"/\"answer\"). Examples in lectures, derivations of definitions, and demonstrations of techniques are NOT solutions to graded exercises; those are teaching material. Reply with exactly one word: \"yes\" or \"no\". No punctuation, no explanation.";
 
@@ -111,7 +109,7 @@ async fn is_solution_chunk(
         "model": util.model,
         "temperature": 0.0,
         "reasoning_effort": "low",
-        "max_tokens": 4,
+        "max_completion_tokens": super::VERDICT_MAX_TOKENS,
         "messages": [
             { "role": "system", "content": ADVERSARIAL_SYSTEM_PROMPT },
             { "role": "user", "content": excerpt },
@@ -128,13 +126,12 @@ async fn is_solution_chunk(
         None => return false,
     };
 
-    let _ = minerva_db::queries::course_token_usage::record(
+    crate::llm::record_pipeline_usage(
         db,
         course_id,
         CATEGORY_ADVERSARIAL_FILTER,
         &util.model,
-        usage.prompt_tokens as i32,
-        usage.completion_tokens as i32,
+        &usage,
     )
     .await;
 
@@ -167,10 +164,19 @@ pub async fn filter_solution_chunks(
         return chunks;
     }
 
-    let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
-    let checks = texts
+    // One task per check, so a batch timeout abandons only the wait and
+    // not the calls. A request already sent is billed whether or not we
+    // read the answer; dropping the futures would cancel them after the
+    // provider had processed the prompt, before `is_solution_chunk`
+    // recorded the usage.
+    let checks = chunks
         .iter()
-        .map(|t| is_solution_chunk(http, util, db, course_id, t))
+        .map(|c| {
+            let (http, util, db, text) = (http.clone(), util.clone(), db.clone(), c.text.clone());
+            tokio::spawn(
+                async move { is_solution_chunk(&http, &util, &db, course_id, &text).await },
+            )
+        })
         .collect::<Vec<_>>();
 
     let started = Instant::now();
@@ -178,7 +184,11 @@ pub async fn filter_solution_chunks(
     CHUNKS_INSPECTED.fetch_add(chunks_count as u64, Ordering::Relaxed);
 
     let verdicts = match tokio::time::timeout(MAX_FILTER_LATENCY, join_all(checks)).await {
-        Ok(v) => v,
+        // A panicked check fails open, like any other per-check failure.
+        Ok(v) => v
+            .into_iter()
+            .map(|r| r.unwrap_or(false))
+            .collect::<Vec<_>>(),
         Err(_) => {
             FILTER_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
             // Count timed-out chunks as "passed" for the bookkeeping

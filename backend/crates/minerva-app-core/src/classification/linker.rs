@@ -1227,15 +1227,7 @@ async fn classify_one_pair(
     // call against `course_id` in the `linker` category, regardless
     // of whether the call ultimately produced an edge; the cost
     // was paid either way.
-    let _ = minerva_db::queries::course_token_usage::record(
-        db,
-        course_id,
-        CATEGORY_LINKER,
-        &util.model,
-        usage.prompt_tokens as i32,
-        usage.completion_tokens as i32,
-    )
-    .await;
+    crate::llm::record_pipeline_usage(db, course_id, CATEGORY_LINKER, &util.model, &usage).await;
     // An empty body means the model produced nothing usable (e.g. it
     // hit the completion-token cap mid-token); a truncated-but-nonempty
     // body falls through to the JSON parse below and is rejected there.

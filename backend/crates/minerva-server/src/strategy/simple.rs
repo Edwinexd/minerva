@@ -181,7 +181,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let messages = common::build_chat_messages(&system, &ctx.history);
 
     let mut full_text = String::new();
-    let (prompt_tokens, completion_tokens, _used_route) = match common::stream_chat_to_client(
+    let mut usage = super::TurnUsage::default();
+    if let Err(e) = common::stream_chat_to_client(
         &ctx.provider,
         &ctx.model,
         ctx.temperature,
@@ -190,19 +191,18 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &tx,
         &mut full_text,
         &ctx.fallback_routes,
+        &mut usage,
     )
     .await
     {
-        Ok(usage) => usage,
-        Err(e) => {
-            let _ = tx
-                .send(Ok(Event::default().data(
-                    serde_json::json!({"type": "error", "error": e}).to_string(),
-                )))
-                .await;
-            return;
-        }
-    };
+        common::record_turn_usage(&ctx, &usage).await;
+        let _ = tx
+            .send(Ok(Event::default().data(
+                serde_json::json!({"type": "error", "error": e}).to_string(),
+            )))
+            .await;
+        return;
+    }
 
     // Post-generation extraction-guard intercept: when the
     // constraint is active for this turn, run the output-side
@@ -228,17 +228,13 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &tx,
         &final_text,
         chunks_json.as_ref(),
-        prompt_tokens,
-        completion_tokens,
+        &usage,
         true,
         started_at.elapsed().as_millis() as i64,
         1,
         // Legacy single-pass path; no research transcript, no tool
-        // events, no thinking duration, no research-phase token
-        // split (both research_prompt and research_completion are
-        // None, which the daily aggregate treats as 0).
-        None,
-        None,
+        // events, no thinking duration. `usage` carries no research
+        // split, so the message's research columns stay NULL.
         None,
         None,
         None,

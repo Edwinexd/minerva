@@ -1270,9 +1270,15 @@ pub async fn keyword_lookup(
 /// Provider-agnostic: resolves the wire protocol from `provider`
 /// (`ChatProvider::stream` normalizes any provider's deltas to
 /// `ChatDelta`). The provider pushes deltas onto an internal channel
-/// which this fn drains and forwards as SSE `token` events; on the
-/// client disconnecting we stop and surface an error. The SSE parsing,
-/// UTF-8 frame-carry, and idle timeout live in the provider impl.
+/// which this fn drains and forwards as SSE `token` events. The SSE
+/// parsing, UTF-8 frame-carry, and idle timeout live in the provider
+/// impl.
+///
+/// A client disconnect does not end the call. The provider bills the
+/// generation either way and only reports usage in its final frame, so
+/// the reply is read to the end (and later persisted, which the student
+/// sees on reload). Stopping the forwarder instead would also leave the
+/// provider blocked forever on a full delta channel.
 async fn stream_one_chat_to_client(
     provider: &Arc<dyn crate::llm::ChatProvider>,
     model: &str,
@@ -1303,29 +1309,30 @@ async fn stream_one_chat_to_client(
     // ending the forwarder.
     let stream_fut = provider.stream(req, delta_tx);
     let forward = async {
+        let mut client_connected = true;
         while let Some(delta) = delta_rx.recv().await {
             if let Some(text) = delta.text {
                 full_text.push_str(&text);
-                if tx
-                    .send(Ok(Event::default().data(
-                        serde_json::json!({"type": "token", "token": text}).to_string(),
-                    )))
-                    .await
-                    .is_err()
-                {
-                    return Err("client disconnected".to_string());
+                if client_connected {
+                    client_connected = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::json!({"type": "token", "token": text}).to_string(),
+                        )))
+                        .await
+                        .is_ok();
                 }
             }
         }
-        Ok::<(), String>(())
     };
 
-    let (stream_res, forward_res) = tokio::join!(stream_fut, forward);
-    forward_res?;
+    let (stream_res, ()) = tokio::join!(stream_fut, forward);
     let usage = stream_res?;
     Ok((usage.prompt_tokens as i32, usage.completion_tokens as i32))
 }
 
+/// Stream the student-facing answer, falling back through
+/// `fallback_routes` when the primary fails before its first token. The
+/// tokens are added to `usage` under whichever route actually answered.
 #[allow(clippy::too_many_arguments)]
 pub async fn stream_chat_to_client(
     provider: &Arc<dyn crate::llm::ChatProvider>,
@@ -1336,7 +1343,8 @@ pub async fn stream_chat_to_client(
     tx: &mpsc::Sender<Result<Event, AppError>>,
     full_text: &mut String,
     fallback_routes: &[super::ChatRoute],
-) -> Result<(i32, i32, Option<super::ChatRoute>), String> {
+    usage: &mut super::TurnUsage,
+) -> Result<(), String> {
     match stream_one_chat_to_client(
         provider,
         model,
@@ -1348,7 +1356,10 @@ pub async fn stream_chat_to_client(
     )
     .await
     {
-        Ok((prompt, completion)) => Ok((prompt, completion, None)),
+        Ok((prompt, completion)) => {
+            usage.add_answer(model, provider.id(), prompt, completion);
+            Ok(())
+        }
         Err(primary_error) if full_text.is_empty() => {
             let mut errors = vec![format!("{}/{}: {primary_error}", provider.id(), model)];
             for route in fallback_routes {
@@ -1372,7 +1383,8 @@ pub async fn stream_chat_to_client(
                 .await
                 {
                     Ok((prompt, completion)) => {
-                        return Ok((prompt, completion, Some(route.clone())))
+                        usage.add_answer(&route.model, route.provider.id(), prompt, completion);
+                        return Ok(());
                     }
                     Err(error) if full_text.is_empty() => {
                         errors.push(format!("{}/{}: {error}", route.provider.id(), route.model))
@@ -1383,6 +1395,109 @@ pub async fn stream_chat_to_client(
             Err(format!("all chat routes failed: {}", errors.join("; ")))
         }
         Err(error) => Err(error),
+    }
+}
+
+/// Write a turn's spend to `usage_daily`, one row per model that served
+/// part of it, and bump the fleet-wide token / cost counters.
+///
+/// `finalize` calls this for every completed turn. Error paths that end a
+/// turn without an assistant message call it directly, because every
+/// upstream call that already finished was billed whether or not the
+/// student got an answer. The turn counts as one request, on its first
+/// row.
+pub async fn record_turn_usage(ctx: &super::GenerationContext, usage: &super::TurnUsage) {
+    for (i, route) in usage.routes().iter().enumerate() {
+        if let Err(e) = minerva_db::queries::usage::record_usage(
+            &ctx.db,
+            ctx.user_id,
+            ctx.course_id,
+            // Billing model + provider; the daily cost is derived on read
+            // from that model's current rate.
+            &route.model,
+            &route.provider,
+            route.prompt_tokens,
+            route.completion_tokens,
+            0,
+            route.research_prompt_tokens,
+            route.research_completion_tokens,
+            if i == 0 { 1 } else { 0 },
+        )
+        .await
+        {
+            tracing::warn!(
+                conversation_id = %ctx.conversation_id,
+                model = %route.model,
+                "usage_daily: insert failed: {e}"
+            );
+        }
+        record_route_metrics(ctx, route, usage.research_phase_ran()).await;
+    }
+}
+
+/// Fleet-wide token and $ counters for one route of a turn.
+///
+/// Token counters are labelled only by `kind` (bounded), never by
+/// course / user / owner: those are unbounded and would blow up
+/// Prometheus label cardinality. Per-course spend lives in the DB.
+///
+/// The $ rate is computed on emit from the model's current rate (NOT
+/// stored in the ledger; the ledger keeps tokens + model and derives $ on
+/// read). Encoded as micro-USD so it fits the `metrics` u64 counter;
+/// dashboards divide by 1e6. Labels (provider, model, kind) are bounded by
+/// the catalog. The configured model's rates were resolved once at the
+/// chat-route handler (`ctx.billing_rates`); only a fallback model costs a
+/// `rates_of` lookup. An unknown price bumps `chat_unpriced_calls_total`
+/// instead, which in steady state never fires (unpriced models can't be
+/// enabled).
+async fn record_route_metrics(
+    ctx: &super::GenerationContext,
+    route: &super::RouteUsage,
+    research_phase: bool,
+) {
+    metrics::counter!("chat_tokens_total", "kind" => "prompt")
+        .increment(route.prompt_tokens.max(0) as u64);
+    metrics::counter!("chat_tokens_total", "kind" => "completion")
+        .increment(route.completion_tokens.max(0) as u64);
+    if research_phase {
+        metrics::counter!("chat_tokens_total", "kind" => "research_prompt")
+            .increment(route.research_prompt_tokens.max(0) as u64);
+        metrics::counter!("chat_tokens_total", "kind" => "research_completion")
+            .increment(route.research_completion_tokens.max(0) as u64);
+    }
+
+    let rates = if route.model == ctx.model {
+        ctx.billing_rates
+    } else {
+        minerva_db::queries::chat_models::rates_of(&ctx.db, &route.model)
+            .await
+            .ok()
+            .flatten()
+    };
+    match rates {
+        Some((in_rate, out_rate)) => {
+            let to_micro = |d: rust_decimal::Decimal| -> u64 {
+                use rust_decimal::prelude::ToPrimitive;
+                (d * rust_decimal::Decimal::from(1_000_000))
+                    .round()
+                    .to_u64()
+                    .unwrap_or(0)
+            };
+            let prompt_cost =
+                crate::llm::cost_usd(route.prompt_tokens.max(0), 0, in_rate, out_rate);
+            let completion_cost =
+                crate::llm::cost_usd(0, route.completion_tokens.max(0), in_rate, out_rate);
+            metrics::counter!("chat_cost_microusd_total",
+                "provider" => route.provider.clone(), "model" => route.model.clone(), "kind" => "prompt")
+            .increment(to_micro(prompt_cost));
+            metrics::counter!("chat_cost_microusd_total",
+                "provider" => route.provider.clone(), "model" => route.model.clone(), "kind" => "completion")
+            .increment(to_micro(completion_cost));
+        }
+        None => {
+            metrics::counter!("chat_unpriced_calls_total", "model" => route.model.clone())
+                .increment(1);
+        }
     }
 }
 
@@ -1405,18 +1520,17 @@ pub async fn finalize(
     tx: &mpsc::Sender<Result<Event, AppError>>,
     full_text: &str,
     chunks_json: Option<&serde_json::Value>,
-    prompt_tokens: i32,
-    completion_tokens: i32,
+    usage: &super::TurnUsage,
     rag_injected: bool,
     generation_ms: i64,
     retrieval_count: i32,
     thinking_transcript: Option<&str>,
     tool_events: Option<&serde_json::Value>,
     thinking_ms: Option<i32>,
-    research_prompt_tokens: Option<i32>,
-    research_completion_tokens: Option<i32>,
     disclosure: super::ThinkingDisclosure,
 ) {
+    let prompt_tokens = usage.prompt_tokens();
+    let completion_tokens = usage.completion_tokens();
     let assistant_msg_id = uuid::Uuid::new_v4();
     let _ = minerva_db::queries::conversations::insert_message(
         &ctx.db,
@@ -1425,7 +1539,7 @@ pub async fn finalize(
         "assistant",
         full_text,
         chunks_json,
-        Some(&ctx.model),
+        Some(usage.answered_by().unwrap_or(&ctx.model)),
         Some(prompt_tokens),
         Some(completion_tokens),
         Some(generation_ms as i32),
@@ -1433,8 +1547,8 @@ pub async fn finalize(
         thinking_transcript,
         tool_events,
         thinking_ms,
-        research_prompt_tokens,
-        research_completion_tokens,
+        usage.research_prompt_tokens(),
+        usage.research_completion_tokens(),
         // Persisted audit bit: did the guard fire on this turn? Role
         // of whoever happened to be watching does not enter into it,
         // so a turn a teacher chatted through is still marked
@@ -1455,79 +1569,19 @@ pub async fn finalize(
                 .await;
     }
 
-    let _ = minerva_db::queries::usage::record_usage(
-        &ctx.db,
-        ctx.user_id,
-        ctx.course_id,
-        // Record the billing model + provider so the daily cost is
-        // derived on read from the model's current rate.
-        &ctx.model,
-        ctx.provider.id(),
-        prompt_tokens as i64,
-        completion_tokens as i64,
-        0,
-        // Research prompt / completion subtotals for the daily
-        // aggregate. Legacy single-pass strategies pass `None` on
-        // both message columns, which we treat as 0 at the
-        // aggregate; usage_daily uses BIGINT so the 32-bit cap on
-        // the per-message column doesn't matter here.
-        research_prompt_tokens.unwrap_or(0) as i64,
-        research_completion_tokens.unwrap_or(0) as i64,
-    )
-    .await;
-
-    // Token-spend counters. Labelled only by `kind` (4 bounded values), not
-    // by course/user/owner: those identifiers are unbounded and would blow
-    // up Prometheus label cardinality. Per-course spend lives in the DB
-    // (usage_daily) and the cap-enforcement counters below; this is the
-    // fleet-wide spend rate.
-    metrics::counter!("chat_tokens_total", "kind" => "prompt")
-        .increment(prompt_tokens.max(0) as u64);
-    metrics::counter!("chat_tokens_total", "kind" => "completion")
-        .increment(completion_tokens.max(0) as u64);
-    if let Some(rp) = research_prompt_tokens {
-        metrics::counter!("chat_tokens_total", "kind" => "research_prompt")
-            .increment(rp.max(0) as u64);
-    }
-    if let Some(rc) = research_completion_tokens {
-        metrics::counter!("chat_tokens_total", "kind" => "research_completion")
-            .increment(rc.max(0) as u64);
-    }
-
-    // Fleet-wide $ spend rate, computed on emit from the model's current
-    // rate (NOT stored in the ledger; the ledger keeps tokens + model and
-    // derives $ on read). Encoded as micro-USD so it fits the `metrics`
-    // u64 counter; dashboards divide by 1e6. Labels (provider, model,
-    // kind) are bounded by the catalog, so cardinality is safe. The rates
-    // were resolved once at the chat-route handler and threaded in via
-    // `ctx.billing_rates` (no second `rates_of` round-trip here). An
-    // unknown price bumps `chat_unpriced_calls_total` instead, which in
-    // steady state never fires (unpriced models can't be enabled).
-    match ctx.billing_rates {
-        Some((in_rate, out_rate)) => {
-            let to_micro = |d: rust_decimal::Decimal| -> u64 {
-                use rust_decimal::prelude::ToPrimitive;
-                (d * rust_decimal::Decimal::from(1_000_000))
-                    .round()
-                    .to_u64()
-                    .unwrap_or(0)
-            };
-            let provider = ctx.provider.id().to_string();
-            let prompt_cost =
-                crate::llm::cost_usd(prompt_tokens.max(0) as i64, 0, in_rate, out_rate);
-            let completion_cost =
-                crate::llm::cost_usd(0, completion_tokens.max(0) as i64, in_rate, out_rate);
-            metrics::counter!("chat_cost_microusd_total",
-                "provider" => provider.clone(), "model" => ctx.model.clone(), "kind" => "prompt")
-            .increment(to_micro(prompt_cost));
-            metrics::counter!("chat_cost_microusd_total",
-                "provider" => provider, "model" => ctx.model.clone(), "kind" => "completion")
-            .increment(to_micro(completion_cost));
-        }
-        None => {
-            metrics::counter!("chat_unpriced_calls_total", "model" => ctx.model.clone())
-                .increment(1);
-        }
+    // A persisted turn always gets a `usage_daily` row, so
+    // `request_count` keeps counting turns even if the provider reported
+    // no usage.
+    if usage.is_empty() {
+        tracing::warn!(
+            conversation_id = %ctx.conversation_id,
+            "chat turn finished without provider-reported usage; recording 0 tokens"
+        );
+        let mut zero = usage.clone();
+        zero.add_answer(&ctx.model, ctx.provider.id(), 0, 0);
+        record_turn_usage(ctx, &zero).await;
+    } else {
+        record_turn_usage(ctx, usage).await;
     }
 
     // On a guarded turn the `done` event omits `chunks_used` for a
@@ -1555,8 +1609,8 @@ pub async fn finalize(
                 "type": "done",
                 "tokens_prompt": prompt_tokens,
                 "tokens_completion": completion_tokens,
-                "research_prompt_tokens": research_prompt_tokens,
-                "research_completion_tokens": research_completion_tokens,
+                "research_prompt_tokens": usage.research_prompt_tokens(),
+                "research_completion_tokens": usage.research_completion_tokens(),
                 "rag_injected": rag_injected,
                 "chunks_used": done_chunks,
                 "generation_ms": generation_ms,
@@ -1938,5 +1992,117 @@ mod tests {
         assert!(rerank_chunks(&reranker, true, model, "q", many, 0)
             .await
             .is_empty());
+    }
+
+    mod answer_stream {
+        use super::*;
+        use crate::llm::{ChatProvider, OpenAiCompatibleProvider};
+        use crate::strategy::{ChatRoute, TurnUsage};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        fn sse_reply(deltas: usize, prompt: i64, completion: i64) -> String {
+            let mut body = String::new();
+            for i in 0..deltas {
+                body.push_str(&format!(
+                    "data: {{\"choices\":[{{\"delta\":{{\"content\":\"t{i} \"}}}}]}}\n\n"
+                ));
+            }
+            body.push_str(&format!(
+                "data: {{\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"stop\"}}],\
+                 \"usage\":{{\"prompt_tokens\":{prompt},\"completion_tokens\":{completion}}}}}\n\n\
+                 data: [DONE]\n\n"
+            ));
+            body
+        }
+
+        async fn serve(status: u16, body: String) -> MockServer {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/chat/completions"))
+                .respond_with(
+                    ResponseTemplate::new(status)
+                        .insert_header("content-type", "text/event-stream")
+                        .set_body_string(body),
+                )
+                .mount(&server)
+                .await;
+            server
+        }
+
+        fn provider(id: &str, server: &MockServer) -> Arc<dyn ChatProvider> {
+            Arc::new(OpenAiCompatibleProvider::new(
+                id,
+                &server.uri(),
+                "key",
+                reqwest::Client::new(),
+            ))
+        }
+
+        #[tokio::test]
+        async fn client_disconnect_reads_the_reply_to_its_usage() {
+            // More deltas than the 64-slot channel: before the fix the
+            // provider blocked forever on a full channel once the client
+            // was gone, and the turn's tokens were never recorded.
+            let server = serve(200, sse_reply(200, 30, 200)).await;
+            let (tx, rx) = mpsc::channel(1);
+            drop(rx);
+            let mut full_text = String::new();
+            let mut usage = TurnUsage::default();
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                stream_chat_to_client(
+                    &provider("cerebras", &server),
+                    "gpt-oss-120b",
+                    0.0,
+                    &[serde_json::json!({"role": "user", "content": "hi"})],
+                    false,
+                    &tx,
+                    &mut full_text,
+                    &[],
+                    &mut usage,
+                ),
+            )
+            .await
+            .expect("a disconnect must not hang the turn")
+            .expect("a disconnect is not an upstream error");
+
+            assert_eq!(usage.prompt_tokens(), 30);
+            assert_eq!(usage.completion_tokens(), 200);
+            assert_eq!(usage.routes()[0].model, "gpt-oss-120b");
+            assert!(full_text.starts_with("t0 t1 "));
+        }
+
+        #[tokio::test]
+        async fn fallback_answer_is_billed_to_the_fallback_route() {
+            let primary = serve(429, "{}".to_string()).await;
+            let fallback = serve(200, sse_reply(2, 11, 3)).await;
+            let routes = [ChatRoute {
+                model: "qwen-3.8-27b".to_string(),
+                provider: provider("cerebras-alt", &fallback),
+            }];
+            let (tx, _rx) = mpsc::channel(64);
+            let mut full_text = String::new();
+            let mut usage = TurnUsage::default();
+            stream_chat_to_client(
+                &provider("cerebras", &primary),
+                "gpt-oss-120b",
+                0.0,
+                &[serde_json::json!({"role": "user", "content": "hi"})],
+                false,
+                &tx,
+                &mut full_text,
+                &routes,
+                &mut usage,
+            )
+            .await
+            .expect("fallback should answer");
+
+            assert_eq!(usage.routes().len(), 1);
+            assert_eq!(usage.routes()[0].model, "qwen-3.8-27b");
+            assert_eq!(usage.routes()[0].provider, "cerebras-alt");
+            assert_eq!(usage.answered_by(), Some("qwen-3.8-27b"));
+            assert_eq!((usage.prompt_tokens(), usage.completion_tokens()), (11, 3));
+        }
     }
 }

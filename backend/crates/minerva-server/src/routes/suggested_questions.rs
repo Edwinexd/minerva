@@ -203,13 +203,12 @@ async fn regenerate(
         }
     };
 
-    let _ = minerva_db::queries::course_token_usage::record(
+    crate::llm::record_pipeline_usage(
         &state.db,
         course_id,
         CATEGORY_SUGGESTED_QUESTIONS,
         &util.model,
-        usage.prompt_tokens as i32,
-        usage.completion_tokens as i32,
+        &usage,
     )
     .await;
 

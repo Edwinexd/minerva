@@ -106,13 +106,12 @@ impl LlmClassifier {
         // classifier (e.g. a smaller-model fallback for routine cases
         // or a high-effort retry for low-confidence ones) would
         // automatically split into separate rows.
-        let _ = minerva_db::queries::course_token_usage::record(
+        crate::llm::record_pipeline_usage(
             &self.db,
             course_id,
             CATEGORY_DOCUMENT_CLASSIFIER,
             &self.util.model,
-            usage.prompt_tokens as i32,
-            usage.completion_tokens as i32,
+            &usage,
         )
         .await;
 

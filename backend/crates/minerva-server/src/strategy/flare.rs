@@ -371,21 +371,26 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     )
     .await;
 
+    // FLARE streams straight at `ctx.chat_base_url` with no fallback
+    // routes, so every iteration was served by the course's model.
+    let mut usage = super::TurnUsage::default();
+    usage.add_answer(
+        &ctx.model,
+        ctx.provider.id(),
+        output.total_prompt_tokens,
+        output.total_completion_tokens,
+    );
     common::finalize(
         &ctx,
         &tx,
         &final_text,
         chunks_json.as_ref(),
-        output.total_prompt_tokens,
-        output.total_completion_tokens,
+        &usage,
         !output.all_chunks.is_empty(),
         started_at.elapsed().as_millis() as i64,
         1 + output.restarts as i32,
         // Legacy FLARE path; no research transcript, no tool
-        // events, no thinking duration, no research-phase token
-        // split (research_prompt + research_completion both None).
-        None,
-        None,
+        // events, no thinking duration, no research-phase token split.
         None,
         None,
         None,
@@ -465,6 +470,8 @@ enum StopReason {
     FullTextByteCap,
     /// Upstream Cerebras stream errored.
     StreamError,
+    /// The client disconnected mid-iteration.
+    ClientDisconnected,
 }
 
 /// Core FLARE outer loop. Parameterised on the mid-stream retrieval
@@ -695,6 +702,14 @@ where
                 stop_reason = StopReason::RepeatDetected;
                 break;
             }
+            StreamOutcome::ClientDisconnected => {
+                tracing::info!(
+                    "flare: client disconnected, stopping after iteration {}",
+                    iterations
+                );
+                stop_reason = StopReason::ClientDisconnected;
+                break;
+            }
             StreamOutcome::HitLimit {
                 low_confidence_sentence: None,
             } => {
@@ -781,6 +796,9 @@ enum StreamOutcome {
     /// earlier in `full_text`. Streaming was stopped early; the caller should
     /// break the outer loop rather than try to continue.
     RepeatDetected,
+    /// The client went away mid-window. The window was still read to its
+    /// usage frame; the caller should start no further iterations.
+    ClientDisconnected,
 }
 
 /// Stream from Cerebras with logprobs enabled, bounded by FLARE_MAX_TOKENS_PER_CHUNK.
@@ -838,6 +856,12 @@ async fn stream_with_logprobs(
     // model is regenerating and we abort early.
     let iteration_start_len = full_text.len();
     let mut chars_since_last_check: usize = 0;
+    // Set when the window stops being useful (repeat detected, client
+    // gone). The rest of the window is still read, without keeping its
+    // text: the provider bills it either way and reports usage only in
+    // the final frame, so dropping the connection would lose the
+    // iteration's tokens from the ledger.
+    let mut ended_early: Option<StreamOutcome> = None;
 
     loop {
         let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
@@ -872,6 +896,13 @@ async fn stream_with_logprobs(
             sse_buffer.drain(..=line_end);
 
             if line == "data: [DONE]" {
+                if let Some(kind) = ended_early.take() {
+                    return Ok(StreamWithLogprobsResult {
+                        prompt_tokens,
+                        completion_tokens,
+                        kind,
+                    });
+                }
                 // Detect window exhaustion by token count: more reliable than
                 // parsing finish_reason strings which vary across API versions.
                 let hit_limit = completion_tokens >= FLARE_MAX_TOKENS_PER_CHUNK
@@ -918,7 +949,10 @@ async fn stream_with_logprobs(
                             finish_reason = Some(fr.to_string());
                         }
 
-                        if let Some(delta_content) = choice["delta"]["content"].as_str() {
+                        if let Some(delta_content) = choice["delta"]["content"]
+                            .as_str()
+                            .filter(|_| ended_early.is_none())
+                        {
                             full_text.push_str(delta_content);
                             sentence_buffer.push_str(delta_content);
                             chars_since_last_check += delta_content.len();
@@ -932,14 +966,15 @@ async fn stream_with_logprobs(
                                 .await
                                 .is_err()
                             {
-                                return Err("client disconnected".to_string());
+                                ended_early = Some(StreamOutcome::ClientDisconnected);
                             }
 
                             // Periodic repeat check: if recent new content
                             // duplicates text that was in full_text before
                             // this iteration started, the model has looped
-                            // back and is regenerating. Abort immediately.
-                            if chars_since_last_check >= REPEAT_CHECK_INTERVAL
+                            // back and is regenerating. Stop keeping text.
+                            if ended_early.is_none()
+                                && chars_since_last_check >= REPEAT_CHECK_INTERVAL
                                 && iteration_start_len > 0
                                 && full_text.len() > iteration_start_len + REPEAT_FINGERPRINT_LEN
                             {
@@ -951,11 +986,7 @@ async fn stream_with_logprobs(
                                         "flare: repeat detected during stream (new_content_len={}), aborting",
                                         new_content.len()
                                     );
-                                    return Ok(StreamWithLogprobsResult {
-                                        prompt_tokens,
-                                        completion_tokens,
-                                        kind: StreamOutcome::RepeatDetected,
-                                    });
+                                    ended_early = Some(StreamOutcome::RepeatDetected);
                                 }
                             }
 
@@ -1005,7 +1036,7 @@ async fn stream_with_logprobs(
     Ok(StreamWithLogprobsResult {
         prompt_tokens,
         completion_tokens,
-        kind: StreamOutcome::Completed,
+        kind: ended_early.unwrap_or(StreamOutcome::Completed),
     })
 }
 
@@ -1973,6 +2004,14 @@ mod stream_integration_tests {
             full_text.len() > prior.len(),
             "at least some new content was streamed before detection"
         );
+        // The window is read to its usage frame after the abort, so the
+        // billed tokens reach the ledger instead of being dropped as 0.
+        assert_eq!(result.prompt_tokens, 20);
+        assert_eq!(result.completion_tokens, 50);
+        assert!(
+            full_text.len() < prior.len() + repeated.len(),
+            "text after the detection point must not be kept"
+        );
     }
 
     // ── UTF-8 multi-byte safety ────────────────────────────────
@@ -2046,7 +2085,7 @@ mod stream_integration_tests {
         let url = format!("{}/chat/completions", server.uri());
         let mut full_text = String::new();
         let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
-        let err = stream_with_logprobs(
+        let result = stream_with_logprobs(
             &client,
             &url,
             "test-key",
@@ -2057,9 +2096,13 @@ mod stream_integration_tests {
             &mut full_text,
         )
         .await
-        .expect_err("should error on client disconnect");
+        .expect("a disconnect is not an upstream error");
 
-        assert!(err.contains("client disconnected"), "got: {}", err);
+        assert!(matches!(result.kind, StreamOutcome::ClientDisconnected));
+        // The window is read to its usage frame after the disconnect, so
+        // the billed tokens reach the ledger.
+        assert_eq!(result.prompt_tokens, 5);
+        assert_eq!(result.completion_tokens, 1);
         // Invariant: even on disconnect, any token we ATTEMPTED to send is
         // already in full_text (push_str runs before tx.send).
         assert_eq!(full_text, "hi");

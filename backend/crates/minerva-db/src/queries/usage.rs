@@ -30,6 +30,10 @@ pub struct UsageDailyRow {
     pub research_completion_tokens: i64,
 }
 
+/// Add one chat turn's tokens for one model to the day's row.
+/// `request_count` is how many turns this write counts as: a turn that a
+/// fallback route partly served writes one row per model, and only one of
+/// them may count the turn.
 #[allow(clippy::too_many_arguments)]
 pub async fn record_usage(
     db: &PgPool,
@@ -42,10 +46,11 @@ pub async fn record_usage(
     embedding_tokens: i64,
     research_prompt_tokens: i64,
     research_completion_tokens: i64,
+    request_count: i32,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"INSERT INTO usage_daily (user_id, course_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, research_prompt_tokens, research_completion_tokens, request_count)
-        VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, 1)
+        VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (user_id, course_id, date, model)
         DO UPDATE SET
             prompt_tokens = usage_daily.prompt_tokens + $5,
@@ -53,7 +58,7 @@ pub async fn record_usage(
             embedding_tokens = usage_daily.embedding_tokens + $7,
             research_prompt_tokens = usage_daily.research_prompt_tokens + $8,
             research_completion_tokens = usage_daily.research_completion_tokens + $9,
-            request_count = usage_daily.request_count + 1"#,
+            request_count = usage_daily.request_count + $10"#,
         user_id,
         course_id,
         model,
@@ -63,6 +68,7 @@ pub async fn record_usage(
         embedding_tokens,
         research_prompt_tokens,
         research_completion_tokens,
+        request_count,
     )
     .execute(db)
     .await?;

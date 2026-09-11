@@ -147,36 +147,27 @@ pub fn extract_openai_usage(payload: &serde_json::Value) -> Option<(i32, i32)> {
     Some((p as i32, c as i32))
 }
 
-/// Convenience wrapper: pull usage out of `payload` and record a
-/// `course_token_usage` row. Best-effort; logs a warning on
-/// either missing-usage or DB error and returns silently. Used
-/// from every classification call site so they don't all repeat
-/// the same boilerplate.
+/// Record one utility call's `usage` as a `course_token_usage` row.
+/// Best-effort: a DB error is logged, never propagated, so tracking can
+/// never block a chat / ingest path. Used from every utility call site
+/// so none of them drops a failed insert silently.
 pub async fn record_pipeline_usage(
     db: &sqlx::PgPool,
     course_id: uuid::Uuid,
-    category: &'static str,
+    category: &str,
     model: &str,
-    payload: &serde_json::Value,
+    usage: &ChatUsage,
 ) {
-    let Some((prompt_tokens, completion_tokens)) = extract_openai_usage(payload) else {
-        tracing::warn!(
-            "course_token_usage: skipping record for course={} category={}: usage block missing/malformed",
-            course_id,
-            category
-        );
-        return;
-    };
     // The row records model + tokens; USD cost is derived on read by
     // joining the model's current rate (see usage cost queries), so a
-    // later re-price never rewrites historical spend.
+    // re-price moves every past figure along with enforcement.
     if let Err(e) = minerva_db::queries::course_token_usage::record(
         db,
         course_id,
         category,
         model,
-        prompt_tokens,
-        completion_tokens,
+        usage.prompt_tokens as i32,
+        usage.completion_tokens as i32,
     )
     .await
     {

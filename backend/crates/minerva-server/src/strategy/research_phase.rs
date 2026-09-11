@@ -125,8 +125,9 @@ pub struct ResearchOutput {
     /// message so the post-refresh disclosure can render the same
     /// structured list it showed during streaming.
     pub tool_events: Vec<ToolEventRecord>,
-    pub total_prompt_tokens: i32,
-    pub total_completion_tokens: i32,
+    /// Tokens of every completed research round, per serving route. The
+    /// writeup adds its own call to this before the turn is recorded.
+    pub usage: super::TurnUsage,
     pub turns: usize,
     pub tool_calls_executed: usize,
     pub flare_injections: usize,
@@ -346,8 +347,7 @@ pub async fn run(
     // message. Parallel to `tool_log` (which is the compressed,
     // model-facing summary): same calls, different shape.
     let mut tool_events: Vec<ToolEventRecord> = Vec::new();
-    let mut total_prompt_tokens: i32 = 0;
-    let mut total_completion_tokens: i32 = 0;
+    let mut usage = super::TurnUsage::with_research_phase();
     let mut turns: usize = 0;
     let mut tool_calls_executed: usize = 0;
     let mut flare_injections: usize = 0;
@@ -369,7 +369,7 @@ pub async fn run(
             break ResearchStopReason::HitMaxToolCalls;
         }
         let tokens_so_far =
-            (total_prompt_tokens as i64).saturating_add(total_completion_tokens as i64);
+            (usage.prompt_tokens() as i64).saturating_add(usage.completion_tokens() as i64);
         if tokens_so_far >= per_response_token_cap {
             tracing::warn!(
                 "research: per-response token cap hit ({} >= {}), handing off to writeup",
@@ -410,8 +410,12 @@ pub async fn run(
             }
         };
 
-        total_prompt_tokens += outcome.prompt_tokens;
-        total_completion_tokens += outcome.completion_tokens;
+        usage.add_research(
+            &outcome.model,
+            &outcome.provider,
+            outcome.prompt_tokens,
+            outcome.completion_tokens,
+        );
 
         // Persist the assistant turn in the conversation so the model
         // sees its own prior content on the next turn. Tool calls are
@@ -660,8 +664,7 @@ pub async fn run(
         transcript,
         research_summary,
         tool_events,
-        total_prompt_tokens,
-        total_completion_tokens,
+        usage,
         turns,
         tool_calls_executed,
         flare_injections,
@@ -690,6 +693,10 @@ struct TurnOutcome {
     low_confidence_sentence: Option<String>,
     prompt_tokens: i32,
     completion_tokens: i32,
+    /// Model + provider id that served this round: the course's model,
+    /// or a fallback route when the primary request failed.
+    model: String,
+    provider: String,
 }
 
 #[derive(Debug, Clone)]
@@ -832,6 +839,7 @@ async fn stream_research_turn(
         body["top_logprobs"] = serde_json::Value::Number(1.into());
     }
 
+    let mut served_by = (ctx.model.clone(), ctx.provider.id().to_string());
     let response = match common::openai_chat_request(
         http_client,
         &ctx.chat_base_url,
@@ -864,6 +872,7 @@ async fn stream_research_turn(
                 match common::openai_chat_request(http_client, url, key, &body).await {
                     Ok(response) => {
                         selected = Some(response);
+                        served_by = (route.model.clone(), route.provider.id().to_string());
                         break;
                     }
                     Err(error) => {
@@ -933,6 +942,8 @@ async fn stream_research_turn(
                     low_confidence_sentence: first_low_confidence_sentence,
                     prompt_tokens,
                     completion_tokens,
+                    model: served_by.0,
+                    provider: served_by.1,
                 });
             }
             let Some(data) = line.strip_prefix("data: ") else {
@@ -1031,6 +1042,8 @@ async fn stream_research_turn(
         low_confidence_sentence: first_low_confidence_sentence,
         prompt_tokens,
         completion_tokens,
+        model: served_by.0,
+        provider: served_by.1,
     })
 }
 
@@ -1509,6 +1522,9 @@ mod stream_integration_tests {
         assert_eq!(outcome.content, "fallback worked");
         assert_eq!(outcome.prompt_tokens, 7);
         assert_eq!(outcome.completion_tokens, 2);
+        // Billed to the route that served the round, not the course model.
+        assert_eq!(outcome.model, "fallback-model");
+        assert_eq!(outcome.provider, "openai");
     }
 
     #[tokio::test]

@@ -29,5 +29,14 @@ pub mod topic_switch;
 pub mod types;
 
 pub use document::LlmClassifier;
+
+/// Output cap for the short-verdict classifiers (adversarial filter,
+/// topic switch), reasoning included. gpt-oss is a reasoning model and
+/// counts its reasoning against the cap, so a cap sized for the verdict
+/// alone runs out mid-reasoning: the reply comes back empty or as
+/// truncated JSON while the prompt is still billed. In prod the old caps
+/// did that on every adversarial call (4 tokens) and on 229 of the first
+/// 300 topic-switch calls (64 tokens).
+pub(crate) const VERDICT_MAX_TOKENS: usize = 256;
 // Other exports (DocumentKind, ALL_KINDS, is_signal_only_kind) are reached
 // via the `types` submodule directly from callers.

@@ -168,13 +168,12 @@ pub async fn classify_intent(
             };
         }
     };
-    let _ = minerva_db::queries::course_token_usage::record(
+    crate::llm::record_pipeline_usage(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
-        usage.prompt_tokens as i32,
-        usage.completion_tokens as i32,
+        &usage,
     )
     .await;
     let raw = content.as_str();
@@ -292,13 +291,12 @@ pub async fn check_output_for_solution(
             };
         }
     };
-    let _ = minerva_db::queries::course_token_usage::record(
+    crate::llm::record_pipeline_usage(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
-        usage.prompt_tokens as i32,
-        usage.completion_tokens as i32,
+        &usage,
     )
     .await;
     let raw = content.as_str();
@@ -372,13 +370,12 @@ pub async fn generate_socratic_rewrite(
         }
         None => return fallback,
     };
-    let _ = minerva_db::queries::course_token_usage::record(
+    crate::llm::record_pipeline_usage(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
-        usage.prompt_tokens as i32,
-        usage.completion_tokens as i32,
+        &usage,
     )
     .await;
     let raw = content.as_str();
@@ -515,13 +512,12 @@ pub async fn classify_engagement(
             };
         }
     };
-    let _ = minerva_db::queries::course_token_usage::record(
+    crate::llm::record_pipeline_usage(
         db,
         course_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
-        usage.prompt_tokens as i32,
-        usage.completion_tokens as i32,
+        &usage,
     )
     .await;
     let raw = content.as_str();

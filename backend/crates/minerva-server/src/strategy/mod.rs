@@ -22,6 +22,125 @@ pub struct ChatRoute {
     pub provider: std::sync::Arc<dyn crate::llm::ChatProvider>,
 }
 
+/// Tokens one chat turn spent, keyed by the model + provider that
+/// actually served each upstream call. A fallback route can serve part
+/// of a turn (one research round, or the whole answer), and billing
+/// those tokens under the course's configured model would price them
+/// at the wrong rate and credit them to the wrong provider.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TurnUsage {
+    routes: Vec<RouteUsage>,
+    /// Model that produced the student-facing answer, when it is known.
+    answered_by: Option<String>,
+    /// Set on the tool-use path so the message row persists the research
+    /// split (even a zero one) instead of NULL.
+    research_phase: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteUsage {
+    pub model: String,
+    pub provider: String,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    /// Research-phase share of the two totals above.
+    pub research_prompt_tokens: i64,
+    pub research_completion_tokens: i64,
+}
+
+impl TurnUsage {
+    pub fn with_research_phase() -> Self {
+        Self {
+            research_phase: true,
+            ..Self::default()
+        }
+    }
+
+    fn route_mut(&mut self, model: &str, provider: &str) -> &mut RouteUsage {
+        let idx = match self
+            .routes
+            .iter()
+            .position(|r| r.model == model && r.provider == provider)
+        {
+            Some(idx) => idx,
+            None => {
+                self.routes.push(RouteUsage {
+                    model: model.to_string(),
+                    provider: provider.to_string(),
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    research_prompt_tokens: 0,
+                    research_completion_tokens: 0,
+                });
+                self.routes.len() - 1
+            }
+        };
+        &mut self.routes[idx]
+    }
+
+    /// Tokens of a call that wrote (part of) the student-facing answer.
+    pub fn add_answer(&mut self, model: &str, provider: &str, prompt: i32, completion: i32) {
+        let route = self.route_mut(model, provider);
+        route.prompt_tokens += prompt as i64;
+        route.completion_tokens += completion as i64;
+        self.answered_by = Some(model.to_string());
+    }
+
+    /// Tokens of a hidden research-phase call.
+    pub fn add_research(&mut self, model: &str, provider: &str, prompt: i32, completion: i32) {
+        self.research_phase = true;
+        let route = self.route_mut(model, provider);
+        route.prompt_tokens += prompt as i64;
+        route.completion_tokens += completion as i64;
+        route.research_prompt_tokens += prompt as i64;
+        route.research_completion_tokens += completion as i64;
+    }
+
+    pub fn routes(&self) -> &[RouteUsage] {
+        &self.routes
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.routes.is_empty()
+    }
+
+    pub fn answered_by(&self) -> Option<&str> {
+        self.answered_by.as_deref()
+    }
+
+    fn sum(&self, field: impl Fn(&RouteUsage) -> i64) -> i32 {
+        self.routes
+            .iter()
+            .map(field)
+            .sum::<i64>()
+            .clamp(0, i32::MAX as i64) as i32
+    }
+
+    pub fn prompt_tokens(&self) -> i32 {
+        self.sum(|r| r.prompt_tokens)
+    }
+
+    pub fn completion_tokens(&self) -> i32 {
+        self.sum(|r| r.completion_tokens)
+    }
+
+    pub fn research_phase_ran(&self) -> bool {
+        self.research_phase
+    }
+
+    /// `None` off the tool-use path, matching the NULL the message
+    /// columns carried before the research split existed.
+    pub fn research_prompt_tokens(&self) -> Option<i32> {
+        self.research_phase
+            .then(|| self.sum(|r| r.research_prompt_tokens))
+    }
+
+    pub fn research_completion_tokens(&self) -> Option<i32> {
+        self.research_phase
+            .then(|| self.sum(|r| r.research_completion_tokens))
+    }
+}
+
 /// What the extraction guard does to this turn's *visible* research
 /// trace (thinking tokens, tool calls / results, sources panel).
 ///
@@ -207,7 +326,45 @@ pub async fn run_strategy(
 
 #[cfg(test)]
 mod tests {
-    use super::ThinkingDisclosure;
+    use super::{ThinkingDisclosure, TurnUsage};
+
+    #[test]
+    fn turn_usage_splits_by_serving_route() {
+        let mut usage = TurnUsage::with_research_phase();
+        usage.add_research("gpt-oss-120b", "cerebras", 100, 10);
+        // A research round that fell back, then an answer from the fallback.
+        usage.add_research("qwen-3.8-27b", "cerebras", 50, 5);
+        usage.add_answer("qwen-3.8-27b", "cerebras", 70, 20);
+
+        let routes = usage.routes();
+        assert_eq!(routes.len(), 2);
+        assert_eq!(
+            (routes[0].prompt_tokens, routes[0].research_prompt_tokens),
+            (100, 100)
+        );
+        assert_eq!(
+            (routes[1].prompt_tokens, routes[1].research_prompt_tokens),
+            (120, 50)
+        );
+        assert_eq!(usage.prompt_tokens(), 220);
+        assert_eq!(usage.completion_tokens(), 35);
+        assert_eq!(usage.research_prompt_tokens(), Some(150));
+        assert_eq!(usage.research_completion_tokens(), Some(15));
+        assert_eq!(usage.answered_by(), Some("qwen-3.8-27b"));
+    }
+
+    #[test]
+    fn turn_usage_without_research_keeps_the_split_null() {
+        let mut usage = TurnUsage::default();
+        usage.add_answer("gpt-oss-120b", "cerebras", 10, 2);
+        assert_eq!(usage.research_prompt_tokens(), None);
+        assert_eq!(usage.research_completion_tokens(), None);
+        // A tool-use turn whose research produced nothing still persists 0.
+        assert_eq!(
+            TurnUsage::with_research_phase().research_prompt_tokens(),
+            Some(0)
+        );
+    }
 
     #[test]
     fn disclosure_separates_the_guard_verdict_from_the_viewer() {

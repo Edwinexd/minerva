@@ -603,15 +603,7 @@ pub async fn analyze_prompt(
         }
         None => return Err("no utility model configured".to_string()),
     };
-    let _ = minerva_db::queries::course_token_usage::record(
-        db,
-        course_id,
-        CATEGORY_AEGIS,
-        &model_used,
-        usage.prompt_tokens as i32,
-        usage.completion_tokens as i32,
-    )
-    .await;
+    crate::llm::record_pipeline_usage(db, course_id, CATEGORY_AEGIS, &model_used, &usage).await;
 
     let raw = content.as_str();
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
@@ -780,15 +772,7 @@ pub async fn rewrite_prompt(
         }
         None => return Err("no utility model configured".to_string()),
     };
-    let _ = minerva_db::queries::course_token_usage::record(
-        db,
-        course_id,
-        CATEGORY_AEGIS,
-        &util.model,
-        usage.prompt_tokens as i32,
-        usage.completion_tokens as i32,
-    )
-    .await;
+    crate::llm::record_pipeline_usage(db, course_id, CATEGORY_AEGIS, &util.model, &usage).await;
 
     let rewritten = content.trim();
     if rewritten.is_empty() {

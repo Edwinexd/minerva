@@ -180,13 +180,12 @@ pub async fn conversation_themes(
         Some(Ok((content, usage))) => {
             // The provider charged for a successful completion even if its JSON
             // is malformed, so account for usage before validating the payload.
-            let _ = minerva_db::queries::course_token_usage::record(
+            crate::llm::record_pipeline_usage(
                 &state.db,
                 course_id,
                 minerva_db::queries::course_token_usage::CATEGORY_CONVERSATION_TOPICS,
                 &utility.model,
-                usage.prompt_tokens as i32,
-                usage.completion_tokens as i32,
+                &usage,
             )
             .await;
             match serde_json::from_str::<ModelReply>(content.trim()) {

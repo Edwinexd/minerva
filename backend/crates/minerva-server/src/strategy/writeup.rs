@@ -19,17 +19,6 @@ use super::common::RagChunk;
 use super::GenerationContext;
 use crate::error::AppError;
 
-/// Result of the writeup phase. Mirrors what
-/// `common::stream_cerebras_to_client` returns plus the final text
-/// for downstream consumers (extraction-guard intercept, message
-/// persistence).
-#[derive(Debug)]
-pub struct WriteupOutput {
-    pub full_text: String,
-    pub prompt_tokens: i32,
-    pub completion_tokens: i32,
-}
-
 /// Build the writeup system prompt: the standard course system
 /// prompt seeded with the consolidated chunk set, plus a "Prior
 /// research" section that carries BOTH the research agent's
@@ -129,15 +118,17 @@ pub fn build_writeup_system_prompt(
 }
 
 /// Run the writeup phase. Forwards every content token to the SSE
-/// channel as `{"type":"token", ...}`, then returns the full
-/// accumulated text and usage counts.
+/// channel as `{"type":"token", ...}`, adds the call's tokens to
+/// `usage` under the route that answered, and returns the full
+/// accumulated text.
 pub async fn run(
     ctx: &GenerationContext,
     chunks: &[RagChunk],
     research_transcript: &str,
     tool_log: &str,
     tx: &mpsc::Sender<Result<Event, AppError>>,
-) -> Result<WriteupOutput, AppError> {
+    usage: &mut super::TurnUsage,
+) -> Result<String, AppError> {
     let mut system = build_writeup_system_prompt(
         &ctx.course_name,
         &ctx.custom_prompt,
@@ -159,7 +150,7 @@ pub async fn run(
     let messages = compose_messages(&system, ctx);
 
     let mut full_text = String::new();
-    let (prompt_tokens, completion_tokens, _used_route) = common::stream_chat_to_client(
+    common::stream_chat_to_client(
         &ctx.provider,
         &ctx.model,
         ctx.temperature,
@@ -168,15 +159,12 @@ pub async fn run(
         tx,
         &mut full_text,
         &ctx.fallback_routes,
+        usage,
     )
     .await
     .map_err(AppError::Internal)?;
 
-    Ok(WriteupOutput {
-        full_text,
-        prompt_tokens,
-        completion_tokens,
-    })
+    Ok(full_text)
 }
 
 /// Build the writeup-phase message list. Mirrors what

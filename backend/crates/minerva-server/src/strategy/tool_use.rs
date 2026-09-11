@@ -358,17 +358,21 @@ pub async fn run(
     } else {
         &research.transcript
     };
-    let writeup_output = match writeup::run(
+    let mut usage = std::mem::take(&mut research.usage);
+    let writeup_text = match writeup::run(
         &ctx,
         &research.chunks,
         writeup_transcript,
         &research.research_summary,
         &tx,
+        &mut usage,
     )
     .await
     {
-        Ok(o) => o,
+        Ok(text) => text,
         Err(e) => {
+            // The research rounds already ran and were billed.
+            common::record_turn_usage(&ctx, &usage).await;
             let msg = format!("{}", e);
             let _ = tx
                 .send(Ok(Event::default().data(
@@ -393,7 +397,7 @@ pub async fn run(
         ctx.conversation_id,
         &guard_decision,
         &ctx.user_content,
-        &writeup_output.full_text,
+        &writeup_text,
         &tx,
     )
     .await;
@@ -419,9 +423,6 @@ pub async fn run(
     let client_chunks = common::chunks_for_client(&displayed, &hidden);
     let chunks_json = serde_json::to_value(&client_chunks).ok();
 
-    let total_prompt = research.total_prompt_tokens + writeup_output.prompt_tokens;
-    let total_completion = research.total_completion_tokens + writeup_output.completion_tokens;
-
     // Persist the research-phase artefacts alongside the assistant
     // message so the frontend's "Thinking" disclosure survives a
     // page refresh. We persist even when the research is trivial
@@ -446,32 +447,23 @@ pub async fn run(
     let retrieval_count =
         (prelim_count + research.tool_calls_executed + research.flare_injections) as i32;
 
-    // Split of the message's token total into research vs writeup.
-    // Tracked separately for prompt and completion so the
+    // `usage` carries the research rounds and the writeup call, with the
+    // research share tracked separately for prompt and completion so the
     // per-message footer and the daily-usage dashboards can render
-    // research / writeup as honest subsets of the prompt and
-    // completion totals (writeup_prompt = `total_prompt -
-    // research_prompt`, writeup_completion = `total_completion -
-    // research_completion`). `i32` cap is fine: the per-message
-    // token budget (200K default) is well under i32::MAX.
-    let research_prompt_tokens = research.total_prompt_tokens;
-    let research_completion_tokens = research.total_completion_tokens;
-
+    // research / writeup as honest subsets of the totals (writeup_prompt
+    // = `total_prompt - research_prompt`, and likewise for completion).
     common::finalize(
         &ctx,
         &tx,
         &final_text,
         chunks_json.as_ref(),
-        total_prompt,
-        total_completion,
+        &usage,
         !research.chunks.is_empty() || !rag.signals.is_empty(),
         started_at.elapsed().as_millis() as i64,
         retrieval_count,
         thinking_transcript,
         tool_events_json.as_ref(),
         Some(research.duration_ms.clamp(0, i32::MAX as i64) as i32),
-        Some(research_prompt_tokens),
-        Some(research_completion_tokens),
         // Carries both halves: `guarded()` is the persisted record of
         // whether the guard was active for this turn (the read-time
         // gate on `get_conversation` uses it to blank the disclosure

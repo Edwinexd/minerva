@@ -65,7 +65,7 @@ hex = "0.4"
 rand = "0.10"
 jsonwebtoken = { version = "11", features = ["rust_crypto"] }
 rsa = "0.9"
-rand_chacha = "0.3"
+rand_chacha = "0.9"
 urlencoding = "2"
 
 # Utilities

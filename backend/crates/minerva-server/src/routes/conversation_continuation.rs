@@ -9,9 +9,11 @@
 //! * [`branch`] ; the topic-switch check confirmed the student moved to
 //!   a new question. Here continuity of the *old* topic is the last
 //!   thing they want, but they have already asked (and been answered)
-//!   the new question in the old chat. Carrying that one exchange
-//!   verbatim means they can ask a follow-up immediately instead of
-//!   retyping. No LLM call: the text already exists.
+//!   the new question in the old chat, and the nudge stays up until
+//!   acted on, so they may have followed up once or twice there too.
+//!   Carrying that exchange verbatim means they can carry on
+//!   immediately instead of retyping. No LLM call: the text already
+//!   exists.
 //!
 //! Both write `conversations.carryover_summary`, which
 //! `strategy::common::build_system_prompt_with_signals` renders into
@@ -187,10 +189,37 @@ const BRANCH_QUESTION_CHARS: usize = 900;
 /// and it rides in the system prompt for the life of the new chat.
 const BRANCH_ANSWER_CHARS: usize = 1200;
 
+/// Ceiling on each follow-up the student asked after the switch. The
+/// nudge stays up until acted on, so a student may add a turn or two on
+/// the new topic before moving; their gist is what matters here.
+const BRANCH_FOLLOW_UP_CHARS: usize = 300;
+
+/// Newest follow-ups carried. Older ones are dropped: by then the latest
+/// answer has absorbed them.
+const BRANCH_FOLLOW_UPS: usize = 3;
+
+/// The conversation's unacted-on topic switch, gated on the
+/// `topic_switch_nudge` flag at read time as well as at write time, so
+/// switching the flag off silences existing verdicts immediately.
+///
+/// Shared by both conversation-detail routes and [`branch`]: the banner
+/// must only ever offer a branch the endpoint will accept.
+pub(crate) async fn pending_topic_switch(
+    state: &AppState,
+    course_id: Uuid,
+    cid: Uuid,
+) -> Result<Option<Uuid>, AppError> {
+    if !crate::feature_flags::topic_switch_nudge_enabled(&state.db, course_id).await {
+        return Ok(None);
+    }
+    Ok(minerva_db::queries::conversations::pending_topic_switch(&state.db, cid).await?)
+}
+
 /// `POST /courses/{course_id}/conversations/{cid}/branch`
 ///
 /// Start a fresh conversation seeded with the exchange that triggered
-/// the topic-switch nudge.
+/// the topic-switch nudge, plus whatever the student asked on the new
+/// topic since.
 ///
 /// Deliberately not [`split`]: that path spends a utility-model call
 /// summarising the *whole* conversation, which for a topic switch would
@@ -229,23 +258,16 @@ pub(super) async fn branch(
 
     // Authorization for branching *is* the detection result: a client
     // can only branch where both layers agreed the student changed
-    // topic. That keeps this from becoming a general "clone my chat"
-    // endpoint, and it re-checks the feature flag for free, since a
-    // disabled course never writes a `confirmed` verdict and the read
-    // below is gated on the flag too.
-    let confirmed = crate::feature_flags::topic_switch_nudge_enabled(&state.db, course_id).await
-        && minerva_db::queries::conversations::latest_topic_shift(&state.db, cid)
-            .await?
-            .and_then(|v| {
-                minerva_app_core::classification::topic_switch::TopicShift::from_stored(&v)
-            })
-            .is_some_and(|v| v.nudges());
-    if !confirmed {
+    // topic and nothing has been minted from that switch yet. That keeps
+    // this from becoming a general "clone my chat" endpoint (a second
+    // branch off the same switch is refused), and the read is gated on
+    // the feature flag.
+    let Some(switch_id) = pending_topic_switch(state, course_id, cid).await? else {
         return Err(AppError::bad_request("conversation.branch_not_available"));
-    }
+    };
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
-    let carryover = branch_carryover(&messages);
+    let carryover = branch_carryover(&messages, switch_id);
 
     let new_id = Uuid::new_v4();
     minerva_db::queries::conversations::create_continuation(
@@ -268,24 +290,40 @@ pub(super) async fn branch(
     })
 }
 
-/// Build the carried-over text from the conversation's last user turn
-/// and the assistant reply to it.
+/// Build the carried-over text from the switch turn onward: the question
+/// that opened the new topic, the student's newest follow-ups on it, and
+/// the latest assistant reply.
 ///
-/// The old conversation keeps both messages. Moving them would mutate
-/// history a teacher may already have reviewed, and would strand the
-/// feedback / analysis rows that reference those message ids; the
+/// The old conversation keeps all of these messages. Moving them would
+/// mutate history a teacher may already have reviewed, and would strand
+/// the feedback / analysis rows that reference those message ids; the
 /// duplication is a few hundred characters and is the safe trade.
 ///
-/// `None` when there is no user turn to carry, which leaves the new
-/// conversation simply blank rather than failing the branch.
-fn branch_carryover(messages: &[minerva_db::queries::conversations::MessageRow]) -> Option<String> {
-    let last_user = messages.iter().rposition(|m| m.role == "user")?;
-    let question = messages[last_user].content.trim();
+/// Falls back to the newest user turn if `switch_id` is not in
+/// `messages`. `None` when there is no user turn to carry, which leaves
+/// the new conversation simply blank rather than failing the branch.
+fn branch_carryover(
+    messages: &[minerva_db::queries::conversations::MessageRow],
+    switch_id: Uuid,
+) -> Option<String> {
+    let start = messages
+        .iter()
+        .position(|m| m.id == switch_id && m.role == "user")
+        .or_else(|| messages.iter().rposition(|m| m.role == "user"))?;
+    let question = messages[start].content.trim();
     if question.is_empty() {
         return None;
     }
-    let answer = messages[last_user + 1..]
+    let since = &messages[start + 1..];
+    let follow_ups: Vec<&str> = since
         .iter()
+        .filter(|m| m.role == "user")
+        .map(|m| m.content.trim())
+        .filter(|c| !c.is_empty())
+        .collect();
+    let answer = since
+        .iter()
+        .rev()
         .find(|m| m.role == "assistant")
         .map(|m| m.content.trim())
         .filter(|a| !a.is_empty());
@@ -294,6 +332,16 @@ fn branch_carryover(messages: &[minerva_db::queries::conversations::MessageRow])
         "The student asked this, which is what they are continuing here:\n{}",
         truncate_chars(question, BRANCH_QUESTION_CHARS)
     );
+    if !follow_ups.is_empty() {
+        out.push_str("\n\nThey followed up with:");
+        let skip = follow_ups.len().saturating_sub(BRANCH_FOLLOW_UPS);
+        for follow_up in &follow_ups[skip..] {
+            out.push_str(&format!(
+                "\n- {}",
+                truncate_chars(follow_up, BRANCH_FOLLOW_UP_CHARS)
+            ));
+        }
+    }
     if let Some(answer) = answer {
         out.push_str(&format!(
             "\n\nThey have already been given this answer; build on it rather than repeating it:\n{}",
@@ -446,46 +494,127 @@ mod tests {
         // The student was answered in the old chat before the nudge
         // appeared, so carrying only the question would make the new
         // chat regenerate the same reply.
-        let carry = branch_carryover(&[
-            user("Hur fungerar tvakomplement?"),
-            assistant("Invertera bitarna och addera 1."),
-            user("Hur normaliserar man till 3NF?"),
-            assistant("Eliminera transitiva beroenden."),
-        ])
+        let switch = user("Hur normaliserar man till 3NF?");
+        let switch_id = switch.id;
+        let carry = branch_carryover(
+            &[
+                user("Hur fungerar tvakomplement?"),
+                assistant("Invertera bitarna och addera 1."),
+                switch,
+                assistant("Eliminera transitiva beroenden."),
+            ],
+            switch_id,
+        )
         .unwrap();
         assert!(carry.contains("Hur normaliserar man till 3NF?"));
         assert!(carry.contains("Eliminera transitiva beroenden"));
         // The topic being left behind must not come along.
         assert!(!carry.contains("tvakomplement"));
         assert!(carry.contains("build on it rather than repeating it"));
+        assert!(!carry.contains("followed up"));
     }
 
     #[test]
     fn branch_carries_the_question_alone_when_no_answer_landed() {
-        let carry = branch_carryover(&[
-            user("Hur fungerar tvakomplement?"),
-            assistant("Invertera bitarna."),
-            user("Hur normaliserar man till 3NF?"),
-        ])
+        let switch = user("Hur normaliserar man till 3NF?");
+        let switch_id = switch.id;
+        let carry = branch_carryover(
+            &[
+                user("Hur fungerar tvakomplement?"),
+                assistant("Invertera bitarna."),
+                switch,
+            ],
+            switch_id,
+        )
         .unwrap();
         assert!(carry.contains("Hur normaliserar man till 3NF?"));
         assert!(!carry.contains("build on it"));
     }
 
     #[test]
-    fn branch_bounds_both_halves() {
+    fn branch_carries_follow_ups_since_the_switch_and_the_latest_answer() {
+        // The nudge stays up until acted on, so the student may have gone
+        // a turn deeper on the new topic before moving.
+        let switch = user("Hur normaliserar man till 3NF?");
+        let switch_id = switch.id;
+        let carry = branch_carryover(
+            &[
+                user("Hur fungerar tvakomplement?"),
+                assistant("Invertera bitarna."),
+                switch,
+                assistant("Eliminera transitiva beroenden."),
+                user("Vad är ett transitivt beroende?"),
+                assistant("A bestämmer B som bestämmer C."),
+            ],
+            switch_id,
+        )
+        .unwrap();
+        assert!(carry.contains("Hur normaliserar man till 3NF?"));
+        assert!(carry.contains("They followed up with:\n- Vad är ett transitivt beroende?"));
+        // Only the latest answer rides along; it already builds on the
+        // earlier one.
+        assert!(carry.contains("A bestämmer B som bestämmer C."));
+        assert!(!carry.contains("Eliminera transitiva beroenden"));
+        assert!(!carry.contains("tvakomplement"));
+    }
+
+    #[test]
+    fn branch_keeps_only_the_newest_follow_ups() {
+        let switch = user("switch question");
+        let switch_id = switch.id;
+        let mut messages = vec![switch];
+        for i in 0..BRANCH_FOLLOW_UPS + 2 {
+            messages.push(assistant("reply"));
+            messages.push(user(&format!("follow-up {i}")));
+        }
+        let carry = branch_carryover(&messages, switch_id).unwrap();
+        assert!(!carry.contains("follow-up 0"));
+        assert!(!carry.contains("follow-up 1"));
+        assert!(carry.contains(&format!("follow-up {}", BRANCH_FOLLOW_UPS + 1)));
+        assert_eq!(carry.matches("\n- ").count(), BRANCH_FOLLOW_UPS);
+    }
+
+    #[test]
+    fn branch_falls_back_to_the_newest_user_turn_for_an_unknown_switch() {
+        let carry = branch_carryover(
+            &[
+                user("first"),
+                assistant("a"),
+                user("newest"),
+                assistant("b"),
+            ],
+            Uuid::new_v4(),
+        )
+        .unwrap();
+        assert!(carry.contains("newest"));
+        assert!(!carry.contains("first"));
+    }
+
+    #[test]
+    fn branch_bounds_every_part() {
         let long_q = "q".repeat(BRANCH_QUESTION_CHARS + 200);
+        let long_f = "f".repeat(BRANCH_FOLLOW_UP_CHARS + 200);
         let long_a = "a".repeat(BRANCH_ANSWER_CHARS + 200);
-        let carry = branch_carryover(&[user(&long_q), assistant(&long_a)]).unwrap();
+        let switch = user(&long_q);
+        let switch_id = switch.id;
+        let carry = branch_carryover(
+            &[switch, assistant("x"), user(&long_f), assistant(&long_a)],
+            switch_id,
+        )
+        .unwrap();
         assert!(!carry.contains(&"q".repeat(BRANCH_QUESTION_CHARS + 1)));
+        assert!(!carry.contains(&"f".repeat(BRANCH_FOLLOW_UP_CHARS + 1)));
         assert!(!carry.contains(&"a".repeat(BRANCH_ANSWER_CHARS + 1)));
     }
 
     #[test]
     fn branch_is_absent_without_a_user_turn() {
-        assert_eq!(branch_carryover(&[]), None);
-        assert_eq!(branch_carryover(&[assistant("hello")]), None);
-        assert_eq!(branch_carryover(&[user("   ")]), None);
+        let id = Uuid::new_v4();
+        assert_eq!(branch_carryover(&[], id), None);
+        assert_eq!(branch_carryover(&[assistant("hello")], id), None);
+        let blank = user("   ");
+        let blank_id = blank.id;
+        assert_eq!(branch_carryover(&[blank], blank_id), None);
     }
 
     #[test]

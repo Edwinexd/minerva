@@ -627,6 +627,43 @@ never empty in dev. The dev-user switcher lists the seeded cast, and
 admins lead the list because its first entry is what a fresh browser
 writes to localStorage.
 
+## Conversation Nudges
+
+Two per-course, feature-flagged banners ask a student to carry on in a
+fresh chat. Both render through `ConversationLimitNotice` above the
+composer on the Shibboleth and embed surfaces, resolved by the pure
+`resolveConversationLimit` in
+`frontend/src/components/chat/conversation-limit-state.ts`.
+
+- **Length** (`conversation_limits` flag): cumulative billed tokens per
+  conversation against `courses.conversation_soft_token_limit` (nudge)
+  and `conversation_hard_token_limit` (block: composer hidden, send
+  returns 409). New courses snapshot the `course.conversation_*` system
+  defaults: 450k / 800k on prod, 300k / 1M as the code fallback.
+- **Topic switch** (`topic_switch_nudge` flag): per user turn, a cached
+  embedding cosine against earlier turns, then a utility-model verdict
+  only when that trips; stored in `messages.topic_shift`. The banner
+  stays up while a `confirmed` turn is unacted on
+  (`conversations::pending_topic_switch`: no branch or split minted
+  since), so a follow-up on the new topic does not clear it.
+- **Action:** a pending switch means `/branch` even when the length
+  banner is the one showing. It carries the switch question, the 3
+  newest follow-ups and the latest answer verbatim, with no LLM call,
+  and is refused once the switch has been acted on. Otherwise
+  `/continue` carries an LLM recap of the whole thread.
+- **Ask in new chat:** while a dismissible banner is up the composer
+  has a second button that mints the continuation and carries the typed
+  text into the new chat's composer (TanStack history state
+  `composerDraft` on Shibboleth, parent state keyed to the conversation
+  on embed). Nothing is sent until the student presses Send there.
+- **Dismissal** is per conversation and per kind (`length` / `topic`)
+  in sessionStorage. Dismissing a combined long-and-off-topic banner
+  silences both.
+
+Measured on prod (IDSV, Sep 2026): with the topic banner visible, 59%
+of students kept going in the same chat, against about 80% after
+comparable turns that got no banner.
+
 ## Terraform
 
 Manages GitHub environment secrets for the `prod` environment. Generates `K8S_SECRETS` manifest from individual secret variables.

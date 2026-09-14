@@ -25,6 +25,10 @@ declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router
   }
+  interface HistoryState {
+    /** Composer text carried into a continuation by "ask in new chat". */
+    composerDraft?: string
+  }
 }
 
 createRoot(document.getElementById("root")!).render(

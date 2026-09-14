@@ -31,3 +31,64 @@ export function conversationLimitState(
   // also explains why the chat may stop accepting messages.
   return topicSwitch ? "topic" : "ok"
 }
+
+/**
+ * What a banner's button does, named after the endpoint it calls:
+ *
+ *   * `branch`   ; carry the new-topic exchange into a fresh chat, verbatim.
+ *   * `continue` ; carry an LLM recap of the whole thread into a fresh chat.
+ */
+export type ConversationLimitAction = "branch" | "continue"
+
+/** The two dismissible banner families, dismissed independently. */
+export type LimitNoticeKind = "length" | "topic"
+
+/**
+ * A pending topic switch means the student is changing subject, so
+ * carrying the new question beats recapping the thread they are
+ * leaving, whichever banner is up. Only the length ceiling with no
+ * switch in sight falls back to the recap.
+ */
+export function conversationLimitAction(
+  topicSwitch: boolean | undefined,
+): ConversationLimitAction {
+  return topicSwitch ? "branch" : "continue"
+}
+
+export interface ConversationLimitView {
+  state: ConversationLimitState
+  action: ConversationLimitAction
+  /** Kinds that dismissing the visible banner silences. */
+  dismisses: LimitNoticeKind[]
+}
+
+/**
+ * The banner a surface should render once the student's dismissals are
+ * applied.
+ *
+ * Dismissing a banner that carries both signals (long AND off-topic)
+ * silences both; otherwise the topic banner would pop up in its place
+ * the moment the student waved the length one away. A length nudge
+ * dismissed earlier, before any switch, still lets a later topic
+ * banner through, since that is new information.
+ */
+export function resolveConversationLimit(
+  token: ConversationTokenState | undefined,
+  topicSwitch = false,
+  dismissed: ReadonlySet<LimitNoticeKind> = new Set(),
+): ConversationLimitView {
+  const action = conversationLimitAction(topicSwitch)
+  const raw = conversationLimitState(token, topicSwitch)
+  if (raw === "blocked") return { state: raw, action, dismisses: [] }
+  if (raw === "nudge" && !dismissed.has("length")) {
+    return {
+      state: raw,
+      action,
+      dismisses: topicSwitch ? ["length", "topic"] : ["length"],
+    }
+  }
+  if (topicSwitch && !dismissed.has("topic")) {
+    return { state: "topic", action, dismisses: ["topic"] }
+  }
+  return { state: "ok", action, dismisses: [] }
+}

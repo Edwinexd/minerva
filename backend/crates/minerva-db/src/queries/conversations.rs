@@ -606,22 +606,31 @@ pub async fn set_topic_shift(
     Ok(())
 }
 
-/// The `topic_shift` verdict on the conversation's newest user turn, if
-/// any. Drives the student-facing nudge, which is deliberately scoped
-/// to the latest turn: a switch three turns ago is stale advice.
-pub async fn latest_topic_shift(
+/// The newest user turn confirmed as a topic switch that the student has
+/// not yet acted on, if any. Drives the student-facing nudge.
+///
+/// "Acted on" means any continuation (branch or split) was minted from
+/// this conversation after the switch. Not scoped to the newest turn,
+/// so a follow-up on the new topic does not clear the nudge. Dismissal
+/// is handled client-side.
+///
+/// `'confirmed'` mirrors `TopicShift::Confirmed`, the only nudging
+/// verdict; this crate sits below `minerva-app-core` and cannot name it.
+pub async fn pending_topic_switch(
     db: &PgPool,
     conversation_id: Uuid,
-) -> Result<Option<String>, sqlx::Error> {
-    let row = sqlx::query_scalar!(
-        r#"SELECT topic_shift FROM messages
-            WHERE conversation_id = $1 AND role = 'user'
-         ORDER BY created_at DESC LIMIT 1"#,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT m.id FROM messages m
+            WHERE m.conversation_id = $1 AND m.role = 'user' AND m.topic_shift = 'confirmed'
+              AND NOT EXISTS (
+                  SELECT 1 FROM conversations c
+                   WHERE c.continued_from_id = $1 AND c.created_at > m.created_at)
+         ORDER BY m.created_at DESC LIMIT 1"#,
         conversation_id,
     )
     .fetch_optional(db)
-    .await?;
-    Ok(row.flatten())
+    .await
 }
 
 pub async fn list_messages(

@@ -47,9 +47,10 @@ pub fn router() -> Router<AppState> {
             post(crate::routes::conversation_continuation::continue_conversation),
         )
         // Start a fresh conversation seeded with the exchange that
-        // tripped the topic-switch nudge, so the student can follow up
-        // without retyping. Distinct from `/continue`, which summarises
-        // the whole thread for the length-ceiling case.
+        // tripped the topic-switch nudge (and any follow-ups since), so
+        // the student can carry on without retyping. Distinct from
+        // `/continue`, which summarises the whole thread for the
+        // length-ceiling case.
         .route(
             "/conversations/{cid}/branch",
             post(crate::routes::conversation_continuation::branch_conversation),
@@ -512,9 +513,10 @@ struct ConversationDetailResponse {
     /// the carried-over recap is visible state, not a hidden prompt.
     continued_from_id: Option<Uuid>,
     carryover_summary: Option<String>,
-    /// TRUE when the newest user turn was confirmed by both detection
-    /// layers to have started a new topic. Scoped to the newest turn on
-    /// purpose: a switch three turns ago is stale advice. Only a
+    /// TRUE while a user turn confirmed by both detection layers as a
+    /// new topic is still unacted on, i.e. no branch or split has been
+    /// minted from this conversation since. See
+    /// `conversation_continuation::pending_topic_switch`. Only a
     /// `confirmed` verdict sets this; `rejected` and `undetermined` do
     /// not, so an outage cannot produce an accusation.
     topic_switch: bool,
@@ -810,16 +812,10 @@ async fn get_conversation(
     // the next load.
     let token_state = ConversationTokenState::resolve(&state, &course, cid).await?;
 
-    // The nudge is gated on the flag at read time as well as at write
-    // time, so switching the flag off silences existing verdicts
-    // immediately instead of leaving already-classified turns nudging.
-    let topic_switch = crate::feature_flags::topic_switch_nudge_enabled(&state.db, course_id).await
-        && minerva_db::queries::conversations::latest_topic_shift(&state.db, cid)
+    let topic_switch =
+        crate::routes::conversation_continuation::pending_topic_switch(&state, course_id, cid)
             .await?
-            .and_then(|v| {
-                minerva_app_core::classification::topic_switch::TopicShift::from_stored(&v)
-            })
-            .is_some_and(|v| v.nudges());
+            .is_some();
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
     let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;

@@ -201,8 +201,8 @@ struct ConversationDetailResponse {
     token_state: crate::routes::chat::ConversationTokenState,
     continued_from_id: Option<Uuid>,
     carryover_summary: Option<String>,
-    /// Newest user turn confirmed as a topic switch. Same meaning and
-    /// same read-time flag gate as the Shibboleth route.
+    /// An unacted-on confirmed topic switch. Same meaning and same
+    /// read-time flag gate as the Shibboleth route.
     topic_switch: bool,
 }
 
@@ -372,13 +372,10 @@ async fn get_conversation(
         .ok_or(AppError::NotFound)?;
     let token_state =
         crate::routes::chat::ConversationTokenState::resolve(&state, &course, cid).await?;
-    let topic_switch = crate::feature_flags::topic_switch_nudge_enabled(&state.db, course_id).await
-        && minerva_db::queries::conversations::latest_topic_shift(&state.db, cid)
+    let topic_switch =
+        crate::routes::conversation_continuation::pending_topic_switch(&state, course_id, cid)
             .await?
-            .and_then(|v| {
-                minerva_app_core::classification::topic_switch::TopicShift::from_stored(&v)
-            })
-            .is_some_and(|v| v.nudges());
+            .is_some();
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
     // Teacher notes are the whole point of pinning a conversation, so the

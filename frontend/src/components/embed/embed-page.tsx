@@ -24,7 +24,11 @@ import {
   CarryoverNote,
   ConversationLimitNotice,
 } from "@/components/chat/conversation-limit-notice"
-import { conversationLimitState } from "@/components/chat/conversation-limit-state"
+import { useConversationLimitLabels } from "@/components/chat/use-conversation-limit-labels"
+import {
+  conversationLimitAction,
+  resolveConversationLimit,
+} from "@/components/chat/conversation-limit-state"
 import { useConversationSplit } from "@/components/chat/use-conversation-split"
 
 // ── Types for embed API responses ──────────────────────────────────
@@ -185,6 +189,16 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   // mirroring the regular Shibboleth chat page.
   const [pinned, setPinned] = useState<EmbedPinnedConversation[]>([])
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
+  // Composer text carried into a continuation by "ask in new chat",
+  // keyed to that conversation so it cannot prefill any other one.
+  const [carriedDraft, setCarriedDraft] = useState<{
+    conversationId: string
+    draft: string
+  } | null>(null)
+  const openConversation = (id: string, draft?: string) => {
+    setActiveConvId(id)
+    setCarriedDraft(draft ? { conversationId: id, draft } : null)
+  }
   const [me, setMe] = useState<EmbedMe | null>(null)
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -426,7 +440,12 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
           conversationId={activeConvId}
           token={token}
           onMessageSent={refreshConversations}
-          onConversationCreated={setActiveConvId}
+          onConversationCreated={openConversation}
+          initialDraft={
+            carriedDraft?.conversationId === activeConvId
+              ? carriedDraft.draft
+              : undefined
+          }
           needsPrivacyAck={needsPrivacyAck}
           onAcknowledgePrivacy={acknowledgePrivacy}
           readOnly={isPinnedView}
@@ -457,6 +476,7 @@ function EmbedChatWindow({
   token,
   onMessageSent,
   onConversationCreated,
+  initialDraft,
   needsPrivacyAck,
   onAcknowledgePrivacy,
   readOnly = false,
@@ -469,7 +489,10 @@ function EmbedChatWindow({
   conversationId: string | null
   token: string
   onMessageSent: () => void
-  onConversationCreated: (id: string) => void
+  /** `draft`: composer text carried into a continuation. */
+  onConversationCreated: (id: string, draft?: string) => void
+  /** Composer text carried in from the conversation the student left. */
+  initialDraft?: string
   needsPrivacyAck: boolean
   onAcknowledgePrivacy: () => Promise<void>
   /**
@@ -556,25 +579,26 @@ function EmbedChatWindow({
   // The ceiling is enforced in `run_chat_message`, which the embed send
   // path shares with the Shibboleth one, so this surface needs the same
   // way out or an LTI student just gets a 409 and no next step.
-  const rawLimitState = conversationLimitState(tokenState, topicSwitch)
   // See the Shibboleth adapter: `/branch` for a topic switch,
   // `/continue` for the length ceiling.
-  const branchPath = rawLimitState === "topic" ? "branch" : "continue"
+  const limitAction = conversationLimitAction(topicSwitch)
+  const limitLabels = useConversationLimitLabels()
+  // No router here: the embed shell swaps conversations by state, the
+  // same hand-off `conversation_created` uses.
+  const openContinuation = (
+    created: ConversationContinuation,
+    draft?: string,
+  ) => onConversationCreated(created.id, draft)
   const split = useConversationSplit({
     conversationId,
     doSplit: (cid) =>
       embedPost<ConversationContinuation>(
-        `/course/${courseId}/conversations/${cid}/${branchPath}`,
+        `/course/${courseId}/conversations/${cid}/${limitAction}`,
         token,
       ),
-    // No router here: the embed shell swaps conversations by state, the
-    // same hand-off `conversation_created` uses.
-    onSplit: (created) => onConversationCreated(created.id),
+    onSplit: openContinuation,
   })
-  const limitState =
-    (rawLimitState === "nudge" || rawLimitState === "topic") && split.dismissed
-      ? "ok"
-      : rawLimitState
+  const limit = resolveConversationLimit(tokenState, topicSwitch, split.dismissed)
 
   // ── ChatSurface adapter ──────────────────────────────────────────
 
@@ -706,6 +730,7 @@ function EmbedChatWindow({
     assistantResponse: t("embed.assistantResponseLabel"),
     unknownError: t("embed.unknownError"),
     send: t("embed.send"),
+    askInNewChat: tStudent("limit.askInNewChat"),
     inputPlaceholder: t("embed.inputPlaceholder"),
     inputLabel: t("embed.inputLabel"),
     heading: courseName
@@ -757,30 +782,21 @@ function EmbedChatWindow({
     onAfterSend,
     onConversationCreated,
     readOnly,
-    limitState,
+    limitState: limit.state,
     renderLimitNotice: () =>
-      limitState === "ok" ? null : (
+      limit.state === "ok" ? null : (
         <ConversationLimitNotice
-          state={limitState}
+          state={limit.state}
+          action={limit.action}
           continuing={split.pending}
           error={split.error}
-          onContinue={split.run}
-          onNewChat={split.run}
-          onDismiss={split.dismiss}
-          labels={{
-            topicTitle: tStudent("limit.topicTitle"),
-            topicBody: tStudent("limit.topicBody"),
-            newChatAction: tStudent("limit.newChatAction"),
-            nudgeTitle: tStudent("limit.nudgeTitle"),
-            nudgeBody: tStudent("limit.nudgeBody"),
-            blockedTitle: tStudent("limit.blockedTitle"),
-            blockedBody: tStudent("limit.blockedBody"),
-            continueAction: tStudent("limit.continueAction"),
-            continueWorking: tStudent("limit.continueWorking"),
-            dismiss: tStudent("limit.dismiss"),
-          }}
+          onAction={() => split.run()}
+          onDismiss={() => split.dismiss(limit.dismisses)}
+          labels={limitLabels}
         />
       ),
+    moveDraftToNewChat: split.run,
+    initialDraft,
     renderCarryoverNote: () =>
       carryover ? (
         <CarryoverNote

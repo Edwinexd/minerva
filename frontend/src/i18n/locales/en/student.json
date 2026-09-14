@@ -159,7 +159,10 @@
     "dismiss": "Dismiss",
     "carryoverLabel": "Carried over from an earlier chat",
     "topicTitle": "Looks like a new question",
-    "topicBody": "Minerva gives you sharper answers when a chat stays on one topic. Move this question to its own chat and carry on there; the earlier thread stays put.",
-    "newChatAction": "Move to a new chat"
+    "topicBody": "Minerva gives you sharper answers when each chat sticks to one topic. Move this question to a new chat: your question and the answer you got come with you, and this chat stays in your list.",
+    "newChatAction": "Move to a new chat",
+    "nudgeTopicBody": "This chat has grown long, and your latest question looks like a new topic. Move it to a new chat: your question and the answer you got come with you, and this chat stays in your list.",
+    "blockedTopicBody": "This chat has covered a lot of ground, and answers get vaguer the more topics one chat carries. Continue in a new chat and your latest question comes with you, along with the answer you got.",
+    "askInNewChat": "Ask in new chat"
   }
 }

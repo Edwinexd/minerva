@@ -1,25 +1,34 @@
 import { Button } from "@/components/ui/button"
 import { X } from "lucide-react"
-import type { ConversationLimitState } from "./conversation-limit-state"
+import type {
+  ConversationLimitAction,
+  ConversationLimitState,
+} from "./conversation-limit-state"
 
 export interface ConversationLimitLabels {
   topicTitle: string
   topicBody: string
   nudgeTitle: string
   nudgeBody: string
+  /** Nudge body when the long thread has also switched topic, so the
+   * action carries the new question rather than a recap. */
+  nudgeTopicBody: string
   blockedTitle: string
   blockedBody: string
+  /** Blocked body for the same combined case as `nudgeTopicBody`. */
+  blockedTopicBody: string
   continueAction: string
   continueWorking: string
-  /** Action label for the topic-switch variant, which starts a plain
-   * new chat rather than splitting with a carried-over recap. */
+  /** Action label when the button branches (carries the new-topic
+   * exchange) rather than splitting with a recap. */
   newChatAction: string
   dismiss: string
 }
 
 /**
- * Banner above the composer telling the student their conversation is
- * getting expensive, and offering to carry it into a fresh one.
+ * Banner above the composer asking the student to carry on in a fresh
+ * conversation, either because this one is getting long or because they
+ * have moved on to a new question.
  *
  * Rendered by `ChatSurface` for both the Shibboleth and embed surfaces.
  * The `blocked` variant is deliberately not dismissible: the composer is
@@ -28,27 +37,24 @@ export interface ConversationLimitLabels {
  */
 export function ConversationLimitNotice({
   state,
+  action,
   labels,
-  onContinue,
-  onNewChat,
+  onAction,
   continuing,
   onDismiss,
   error,
 }: {
   state: Exclude<ConversationLimitState, "ok">
+  /** Which endpoint `onAction` calls; picks the body copy and label. */
+  action: ConversationLimitAction
   labels: ConversationLimitLabels
-  /** Split this conversation, carrying a recap across. Length states only. */
-  onContinue: () => void
-  /** Branch into a fresh chat seeded with the exchange that tripped the
-   * nudge. Used by the topic-switch variant instead of `onContinue`:
-   * that one summarises the whole thread with an LLM call, which for a
-   * topic switch would carry across the very topic being left. */
-  onNewChat: () => void
+  onAction: () => void
   continuing: boolean
   onDismiss?: () => void
   error?: string | null
 }) {
   const blocked = state === "blocked"
+  const branching = action === "branch"
   const title =
     blocked
       ? labels.blockedTitle
@@ -57,10 +63,10 @@ export function ConversationLimitNotice({
         : labels.nudgeTitle
   const body =
     blocked
-      ? labels.blockedBody
+      ? branching ? labels.blockedTopicBody : labels.blockedBody
       : state === "topic"
         ? labels.topicBody
-        : labels.nudgeBody
+        : branching ? labels.nudgeTopicBody : labels.nudgeBody
   return (
     <div
       // `alert` for the block (the student is stopped and needs to know
@@ -79,25 +85,18 @@ export function ConversationLimitNotice({
         {error && <p className="text-destructive">{error}</p>}
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        {state === "topic" ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onNewChat}
-            disabled={continuing}
-          >
-            {continuing ? labels.continueWorking : labels.newChatAction}
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            variant={blocked ? "default" : "outline"}
-            onClick={onContinue}
-            disabled={continuing}
-          >
-            {continuing ? labels.continueWorking : labels.continueAction}
-          </Button>
-        )}
+        <Button
+          size="sm"
+          variant={blocked ? "default" : "outline"}
+          onClick={onAction}
+          disabled={continuing}
+        >
+          {continuing
+            ? labels.continueWorking
+            : branching
+              ? labels.newChatAction
+              : labels.continueAction}
+        </Button>
         {!blocked && onDismiss && (
           <Button
             size="sm"

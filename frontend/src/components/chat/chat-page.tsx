@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useLocation, useNavigate } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import {
@@ -23,7 +23,11 @@ import {
   CarryoverNote,
   ConversationLimitNotice,
 } from "./conversation-limit-notice"
-import { conversationLimitState } from "./conversation-limit-state"
+import { useConversationLimitLabels } from "./use-conversation-limit-labels"
+import {
+  conversationLimitAction,
+  resolveConversationLimit,
+} from "./conversation-limit-state"
 import { useConversationSplit } from "./use-conversation-split"
 import { FeedbackControls } from "@/components/message-feedback"
 import { useDocumentTitle } from "@/lib/use-document-title"
@@ -197,6 +201,7 @@ export function ChatWindow({
 }) {
   const navigate = useNavigate()
   const { t } = useTranslation("student")
+  const composerDraft = useLocation({ select: (l) => l.state.composerDraft })
   // Course is already loaded by the parent ChatPage; React Query
   // dedups so this is a cache hit.
   const { data: course } = useQuery(courseQuery(courseId))
@@ -256,46 +261,51 @@ export function ChatWindow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, courseId, readOnly])
 
-  // ── Per-conversation token ceiling ───────────────────────────────
+  // ── Per-conversation token ceiling / topic switch ────────────────
   //
   // `token_state` is server-computed (see `chat::ConversationTokenState`)
   // rather than summed from `messages` here, so the threshold the banner
   // renders on is the same one the send endpoint enforces.
-  const rawLimitState = conversationLimitState(
-    data?.token_state,
-    data?.topic_switch,
-  )
+  //
   // One hook, two endpoints. `/continue` summarises the thread for the
-  // length ceiling; `/branch` carries the just-answered off-topic
-  // exchange forward so the student can follow up without retyping.
-  const branchPath = rawLimitState === "topic" ? "branch" : "continue"
+  // length ceiling; `/branch` carries the off-topic exchange forward so
+  // the student can follow up without retyping.
+  const limitAction = conversationLimitAction(data?.topic_switch)
+  const limitLabels = useConversationLimitLabels()
+  // Land the student in a new continuation. The sidebar list is stale
+  // until invalidated, otherwise the row they were just moved into does
+  // not appear. A carried draft rides in the history entry's state, so
+  // it belongs to that navigation and no other.
+  const openContinuation = (
+    created: ConversationContinuation,
+    draft?: string,
+  ) => {
+    queryClient.invalidateQueries({
+      queryKey: ["courses", courseId, "conversations"],
+    })
+    navigate({
+      to: "/course/$courseId/$conversationId",
+      params: { courseId, conversationId: created.id },
+      state: { composerDraft: draft },
+    })
+  }
   const split = useConversationSplit({
     conversationId,
     doSplit: (cid) =>
       api.post<ConversationContinuation>(
-        `/courses/${courseId}/conversations/${cid}/${branchPath}`,
+        `/courses/${courseId}/conversations/${cid}/${limitAction}`,
         {},
       ),
-    onSplit: (created) => {
-      // Land the student in the new conversation. The sidebar list is
-      // stale until invalidated, otherwise the row they were just moved
-      // into does not appear.
-      queryClient.invalidateQueries({
-        queryKey: ["courses", courseId, "conversations"],
-      })
-      navigate({
-        to: "/course/$courseId/$conversationId",
-        params: { courseId, conversationId: created.id },
-      })
-    },
+    onSplit: openContinuation,
   })
   // A dismissed nudge collapses to `ok`; a block never does, because the
   // composer is hidden in that state and the notice is the only thing
   // explaining why.
-  const limitState =
-    (rawLimitState === "nudge" || rawLimitState === "topic") && split.dismissed
-      ? "ok"
-      : rawLimitState
+  const limit = resolveConversationLimit(
+    data?.token_state,
+    data?.topic_switch,
+    split.dismissed,
+  )
 
   // ── ChatSurface adapter ──────────────────────────────────────────
 
@@ -448,6 +458,7 @@ export function ChatWindow({
     assistantResponse: t("chat.assistantResponseLabel"),
     unknownError: t("chat.unknownError"),
     send: t("chat.send"),
+    askInNewChat: t("limit.askInNewChat"),
     inputPlaceholder: t("chat.inputPlaceholder"),
     inputLabel: t("chat.inputLabel"),
     heading: course?.name
@@ -505,30 +516,21 @@ export function ChatWindow({
       />
     ),
     readOnly,
-    limitState,
+    limitState: limit.state,
     renderLimitNotice: () =>
-      limitState === "ok" ? null : (
+      limit.state === "ok" ? null : (
         <ConversationLimitNotice
-          state={limitState}
+          state={limit.state}
+          action={limit.action}
           continuing={split.pending}
           error={split.error}
-          onContinue={split.run}
-          onNewChat={split.run}
-          onDismiss={split.dismiss}
-          labels={{
-            topicTitle: t("limit.topicTitle"),
-            topicBody: t("limit.topicBody"),
-            newChatAction: t("limit.newChatAction"),
-            nudgeTitle: t("limit.nudgeTitle"),
-            nudgeBody: t("limit.nudgeBody"),
-            blockedTitle: t("limit.blockedTitle"),
-            blockedBody: t("limit.blockedBody"),
-            continueAction: t("limit.continueAction"),
-            continueWorking: t("limit.continueWorking"),
-            dismiss: t("limit.dismiss"),
-          }}
+          onAction={() => split.run()}
+          onDismiss={() => split.dismiss(limit.dismisses)}
+          labels={limitLabels}
         />
       ),
+    moveDraftToNewChat: split.run,
+    initialDraft: composerDraft,
     renderCarryoverNote: () =>
       data?.carryover_summary ? (
         <CarryoverNote

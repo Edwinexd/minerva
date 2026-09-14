@@ -29,7 +29,11 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
   }: {
     children?: React.ReactNode
   } & Record<string, unknown>) => createElement("a", { href: "#" }, children)
-  return { ...actual, Link, useNavigate: () => () => {} }
+  // No history entry here, so no draft carried in by "ask in new chat".
+  const useLocation = (opts?: {
+    select?: (l: { state: Record<string, unknown> }) => unknown
+  }) => (opts?.select ? opts.select({ state: {} }) : { state: {} })
+  return { ...actual, Link, useNavigate: () => () => {}, useLocation }
 })
 
 vi.mock("@/lib/api", () => {

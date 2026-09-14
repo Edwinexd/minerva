@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.id FROM messages m\n            WHERE m.conversation_id = $1 AND m.role = 'user' AND m.topic_shift = 'confirmed'\n              AND NOT EXISTS (\n                  SELECT 1 FROM conversations c\n                   WHERE c.continued_from_id = $1 AND c.created_at > m.created_at)\n         ORDER BY m.created_at DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b594d419a62861bca9171594b5346d6f3ea9ff66fe9cf9d2bf96dd3d12b41ce0"
+}

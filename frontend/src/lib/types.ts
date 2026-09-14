@@ -494,9 +494,10 @@ export interface ConversationDetail {
   /** Recap carried over from `continued_from_id`, if one was generated. */
   carryover_summary: string | null
   /**
-   * True when the newest user turn was confirmed by both detection
-   * layers to have started a new topic. Only an affirmative model
-   * verdict sets this, so a classifier outage never produces a nudge.
+   * True while a user turn confirmed by both detection layers as a new
+   * topic is still unacted on: no branch or split has been minted from
+   * this conversation since. Only an affirmative model verdict sets
+   * this, so a classifier outage never produces a nudge.
    */
   topic_switch: boolean
 }

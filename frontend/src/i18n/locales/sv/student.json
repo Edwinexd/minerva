@@ -159,7 +159,10 @@
     "dismiss": "Stäng",
     "carryoverLabel": "Överfört från en tidigare chatt",
     "topicTitle": "Det här ser ut som en ny fråga",
-    "topicBody": "Minerva ger dig skarpare svar när en chatt håller sig till ett ämne. Flytta den här frågan till en egen chatt och fortsätt där; den tidigare tråden ligger kvar.",
-    "newChatAction": "Flytta till en ny chatt"
+    "topicBody": "Minerva ger dig skarpare svar när varje chatt håller sig till ett ämne. Flytta frågan till en ny chatt: frågan och svaret du fick följer med, och den här chatten ligger kvar i listan.",
+    "newChatAction": "Flytta till en ny chatt",
+    "nudgeTopicBody": "Chatten har blivit lång, och din senaste fråga ser ut att handla om något nytt. Flytta den till en ny chatt: frågan och svaret du fick följer med, och den här chatten ligger kvar i listan.",
+    "blockedTopicBody": "Den här chatten har hunnit med mycket, och svaren blir vagare ju fler ämnen en och samma chatt bär på. Fortsätt i en ny chatt så följer din senaste fråga med, tillsammans med svaret du fick.",
+    "askInNewChat": "Fråga i ny chatt"
   }
 }

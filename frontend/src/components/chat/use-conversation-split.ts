@@ -1,10 +1,11 @@
 import { useCallback, useState } from "react"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import type { ConversationContinuation } from "@/lib/types"
+import type { LimitNoticeKind } from "./conversation-limit-state"
 
 /**
- * sessionStorage key holding the conversation ids whose nudge the
- * student has dismissed.
+ * sessionStorage key holding `<conversation id>:<kind>` entries for the
+ * banners the student has dismissed.
  *
  * Dismissal has to outlive the component: the student can navigate to
  * another conversation and back, and a banner that reappears every time
@@ -12,8 +13,16 @@ import type { ConversationContinuation } from "@/lib/types"
  * does NOT outlive the browser session, so the nudge gets one more
  * chance the next time they sit down with the same thread. The blocked
  * state ignores this entirely; it is not dismissible.
+ *
+ * Tracked per kind so that waving off a topic-switch nudge at turn
+ * three does not also silence the length nudge that arrives later.
  */
 const DISMISSED_KEY = "minerva-conversation-limit-dismissed"
+
+const KINDS: readonly LimitNoticeKind[] = ["length", "topic"]
+
+const entry = (conversationId: string, kind: LimitNoticeKind) =>
+  `${conversationId}:${kind}`
 
 function readDismissed(): string[] {
   try {
@@ -30,9 +39,9 @@ function readDismissed(): string[] {
   }
 }
 
-function writeDismissed(ids: string[]) {
+function writeDismissed(entries: string[]) {
   try {
-    sessionStorage.setItem(DISMISSED_KEY, JSON.stringify(ids))
+    sessionStorage.setItem(DISMISSED_KEY, JSON.stringify(entries))
   } catch {
     // Best-effort; dismissal just won't persist across navigation.
   }
@@ -43,15 +52,19 @@ export interface ConversationSplit {
   pending: boolean
   /** Translated failure text, or null. */
   error: string | null
-  /** True when the student dismissed this conversation's nudge. */
-  dismissed: boolean
-  run: () => void
-  dismiss: () => void
+  /** Banner kinds the student dismissed for this conversation. */
+  dismissed: ReadonlySet<LimitNoticeKind>
+  /**
+   * Mint the continuation and move there. `draft` is composer text to
+   * carry into the new conversation's composer.
+   */
+  run: (draft?: string) => void
+  dismiss: (kinds: readonly LimitNoticeKind[]) => void
 }
 
 /**
  * Owns the "continue this conversation in a new one" action and the
- * dismissal state for its nudge.
+ * dismissal state for its nudges.
  *
  * Surface-agnostic: the caller supplies `doSplit`, because the
  * Shibboleth route goes through `lib/api` (cookie auth) while the embed
@@ -64,12 +77,12 @@ export function useConversationSplit({
 }: {
   conversationId: string | null
   doSplit: (conversationId: string) => Promise<ConversationContinuation>
-  onSplit: (created: ConversationContinuation) => void
+  onSplit: (created: ConversationContinuation, draft?: string) => void
 }): ConversationSplit {
   const formatError = useApiErrorMessage()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [dismissedIds, setDismissedIds] = useState<string[]>(readDismissed)
+  const [dismissedEntries, setDismissedEntries] = useState<string[]>(readDismissed)
 
   // A stale error from a previous conversation must not render over a
   // different thread's banner. Cleared during render rather than in an
@@ -82,35 +95,46 @@ export function useConversationSplit({
     setError(null)
   }
 
-  const run = useCallback(() => {
-    if (!conversationId || pending) return
-    setPending(true)
-    setError(null)
-    doSplit(conversationId)
-      .then(onSplit)
-      .catch((e) => setError(formatError(e)))
-      .finally(() => setPending(false))
+  const run = useCallback(
+    (draft?: string) => {
+      if (!conversationId || pending) return
+      setPending(true)
+      setError(null)
+      doSplit(conversationId)
+        .then((created) => onSplit(created, draft))
+        .catch((e) => setError(formatError(e)))
+        .finally(() => setPending(false))
+    },
     // `formatError` and `onSplit` are rebuilt per render by their
     // callers; depending on them would rebuild this callback every
     // render for no benefit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, pending, doSplit])
+    [conversationId, pending, doSplit],
+  )
 
-  const dismiss = useCallback(() => {
-    if (!conversationId) return
-    setDismissedIds((prev) => {
-      if (prev.includes(conversationId)) return prev
-      const next = [...prev, conversationId]
-      writeDismissed(next)
-      return next
-    })
-  }, [conversationId])
+  const dismiss = useCallback(
+    (kinds: readonly LimitNoticeKind[]) => {
+      if (!conversationId) return
+      setDismissedEntries((prev) => {
+        const added = kinds
+          .map((kind) => entry(conversationId, kind))
+          .filter((e) => !prev.includes(e))
+        if (added.length === 0) return prev
+        const next = [...prev, ...added]
+        writeDismissed(next)
+        return next
+      })
+    },
+    [conversationId],
+  )
 
-  return {
-    pending,
-    error,
-    dismissed: conversationId !== null && dismissedIds.includes(conversationId),
-    run,
-    dismiss,
-  }
+  const dismissed = new Set(
+    conversationId === null
+      ? []
+      : KINDS.filter((kind) =>
+          dismissedEntries.includes(entry(conversationId, kind)),
+        ),
+  )
+
+  return { pending, error, dismissed, run, dismiss }
 }

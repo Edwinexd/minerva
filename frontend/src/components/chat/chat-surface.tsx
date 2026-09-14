@@ -77,6 +77,8 @@ export interface ChatSurfaceLabels {
   unknownError: string
   // Composer
   send: string
+  // Carries the draft to a new chat while a move-to-a-new-chat banner is up
+  askInNewChat: string
   inputPlaceholder: string
   // Accessible name for the composer. Separate from the placeholder,
   // which stops being announced the moment the student types.
@@ -247,6 +249,20 @@ export interface ChatSurfaceAdapter<M extends ChatBubbleMessage> {
    */
   renderLimitNotice?: () => React.ReactNode
   /**
+   * Move to a new conversation (the banner's own action, branch or
+   * split) carrying `draft` into its composer. Offered next to Send
+   * while a dismissible banner is up, so a follow-up typed during the
+   * nudge can go to the new chat instead.
+   */
+  moveDraftToNewChat?: (draft: string) => void
+  /**
+   * Composer text to start with when this conversation opens, carried
+   * over by `moveDraftToNewChat` from the conversation the student
+   * left. Applied only when the conversation changes, never on mount,
+   * so a reload does not refill it.
+   */
+  initialDraft?: string
+  /**
    * Recap banner for a conversation split off an earlier one. Rendered
    * at the top of the transcript.
    */
@@ -317,6 +333,8 @@ export function ChatSurface<M extends ChatBubbleMessage>({
     readOnly,
     limitState = "ok",
     renderLimitNotice,
+    moveDraftToNewChat,
+    initialDraft,
     renderCarryoverNote,
     aegisEnabled,
     labels,
@@ -422,7 +440,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
   if (conversationId !== prevConversationId) {
     setPrevConversationId(conversationId)
     reset()
-    setInput("")
+    setInput(initialDraft ?? "")
   }
 
   // Index notes by message_id for inline display. Notes without a
@@ -622,6 +640,10 @@ export function ChatSurface<M extends ChatBubbleMessage>({
       : "md:static md:inset-auto md:z-auto md:w-72 md:max-w-none md:shrink-0 md:py-0 md:pr-0 md:bg-transparent"
   const panelWidthClass = drawerBp === "lg" ? "w-80" : "w-72"
 
+  // Offered only while a dismissible banner is asking the student to
+  // move; a blocked conversation has no composer at all.
+  const offerNewChat = limitState === "nudge" || limitState === "topic"
+
   return (
     <div className={`relative flex flex-1 min-h-0 ${layout.outerGap}`}>
       {/* The chat surface fills the viewport and has no visible page
@@ -782,7 +804,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
                     placeholder={labels.inputPlaceholder}
                     aria-label={labels.inputLabel}
                     disabled={stream.streaming || needsPrivacyAck}
-                    className="flex-1"
+                    className="flex-1 min-w-0"
                   />
                   <Button
                     type="submit"
@@ -800,6 +822,18 @@ export function ChatSurface<M extends ChatBubbleMessage>({
                         ? labels.aegisSendAsIs
                         : labels.send}
                   </Button>
+                  {offerNewChat && moveDraftToNewChat && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => moveDraftToNewChat(input)}
+                      disabled={
+                        stream.streaming || !input.trim() || needsPrivacyAck
+                      }
+                    >
+                      {labels.askInNewChat}
+                    </Button>
+                  )}
                 </form>
                 <p className="text-xs text-muted-foreground text-center">
                   {labels.disclaimerBefore}

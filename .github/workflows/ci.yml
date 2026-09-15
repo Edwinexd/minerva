@@ -51,7 +51,7 @@ jobs:
       # Handed to `frontend-a11y`, which needs a real backend to render the
       # authenticated pages. Reusing this build keeps that job on Node only.
       - name: Upload server binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: minerva-server
           path: backend/target/debug/minerva

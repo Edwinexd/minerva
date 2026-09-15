@@ -7,9 +7,9 @@
 //! `AppState` without the route tree.
 
 use base64::Engine;
+use rand_chacha::rand_core::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rsa::pkcs8::{EncodePrivateKey, LineEnding};
-use rsa::rand_core::SeedableRng;
 use rsa::traits::PublicKeyParts;
 use rsa::RsaPrivateKey;
 use sha2::{Digest, Sha256};
@@ -29,7 +29,7 @@ impl LtiKeyPair {
 
         // Hash the seed to get a 32-byte PRNG seed.
         let seed_bytes: [u8; 32] = Sha256::digest(seed.as_bytes()).into();
-        let mut rng = ChaCha20Rng::from_seed(seed_bytes);
+        let mut rng = RsaRng(ChaCha20Rng::from_seed(seed_bytes));
 
         let private_key = RsaPrivateKey::new(&mut rng, 2048)?;
 
@@ -63,6 +63,33 @@ impl LtiKeyPair {
         })
     }
 }
+
+/// rsa 0.9 draws randomness through rand_core 0.6 traits, which rand_chacha
+/// no longer implements. Both rand_core versions consume the ChaCha stream
+/// word by word the same way, so forwarding keeps the derived key, and the
+/// JWKS every platform has registered, unchanged.
+struct RsaRng(ChaCha20Rng);
+
+impl rsa::rand_core::RngCore for RsaRng {
+    fn next_u32(&mut self) -> u32 {
+        self.0.next_u32()
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.0.next_u64()
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.0.fill_bytes(dest);
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rsa::rand_core::Error> {
+        self.0.fill_bytes(dest);
+        Ok(())
+    }
+}
+
+impl rsa::rand_core::CryptoRng for RsaRng {}
 
 // ---------------------------------------------------------------------------
 // LTI role helpers
@@ -99,4 +126,18 @@ pub fn lti_roles_to_course_role(roles: &[String]) -> &'static str {
         }
     }
     "student"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A dependency bump that shifts the ChaCha stream would silently rotate
+    /// the key every platform has registered. Pinned from rand_chacha 0.3.
+    #[test]
+    fn key_derivation_is_pinned() {
+        let key = LtiKeyPair::from_seed("minerva-lti-golden").unwrap();
+        let n = key.jwks_json["keys"][0]["n"].as_str().unwrap();
+        assert_eq!(&n[..40], "snC7ehdzBPuvBSkBZrYYKj91HMUTNmzYleyuU0dh");
+    }
 }

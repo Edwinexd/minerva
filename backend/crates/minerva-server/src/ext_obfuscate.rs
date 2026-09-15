@@ -22,8 +22,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use minerva_core::models::User;
+use rand_chacha::rand_core::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use rsa::rand_core::{RngCore, SeedableRng};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -177,5 +177,14 @@ mod tests {
         used.insert(a);
         let b = roll_pair("alice@su.se", "salt", 7776, &used);
         assert_ne!(a, b);
+    }
+
+    /// Pseudonyms are re-derived per request, so a shifted ChaCha8 stream
+    /// would rename every user an external viewer sees. Pinned from 0.3.
+    #[test]
+    fn roll_is_pinned() {
+        let used = HashSet::new();
+        assert_eq!(roll_pair("alice@su.se", "salt", 7776, &used), (936, 3116));
+        assert_eq!(roll_pair("bob@su.se", "salt", 7776, &used), (4174, 6269));
     }
 }

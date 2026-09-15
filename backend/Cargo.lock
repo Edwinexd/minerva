@@ -3200,7 +3200,7 @@ dependencies = [
  "minerva-rpc-local",
  "qdrant-client",
  "rand 0.10.2",
- "rand_chacha 0.9.0",
+ "rand_chacha 0.10.0",
  "regex",
  "reqwest 0.13.5",
  "rsa",
@@ -3420,7 +3420,7 @@ dependencies = [
  "minerva-rpc",
  "qdrant-client",
  "rand 0.10.2",
- "rand_chacha 0.9.0",
+ "rand_chacha 0.10.0",
  "regex",
  "reqwest 0.13.5",
  "rsa",
@@ -4562,6 +4562,16 @@ checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
  "rand_core 0.9.5",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e6af7f3e25ded52c41df4e0b1af2d047e45896c2f3281792ed68a1c243daedb"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.10.0",
 ]
 
 [[package]]
@@ -5877,7 +5887,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

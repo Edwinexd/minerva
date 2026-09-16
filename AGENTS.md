@@ -510,6 +510,23 @@ accounts (e.g. external collaborators).
 - `/etc/apache2/secrets/minerva-hmac` must be updated by hand whenever
   `MINERVA_HMAC_SECRET` rotates; it does not auto-sync from k8s.
 
+## LTI NRPS Roster Sync
+
+`minerva-scheduler` pulls each linked LMS course's roster every
+`platform.lti_nrps_sync_interval_hours` (`lti_nrps.rs`) and adds or removes
+course members. A member must resolve to the same eppn the launch path
+gives that person, or the sync creates a second account for them.
+
+Moodle's roster (verified against nextilearn, Sep 2026) has no `message`
+block, so the launch's `user_eppn=$User.username` custom param never
+arrives. The username is sent as the non-standard top-level
+`ext_user_username` (present whenever name sharing is on). Emails are
+`abcd1234@student.su.se` for students and fail the `su.se` eppn scope.
+Resolution order is therefore `user_eppn`, then `ext_user_username`, then
+email, then a synthetic `lti_<source>_<sub>` id. Members skipped by the
+eppn scope are counted into `last_sync_warning` rather than dropped
+silently.
+
 ## Role Auto-Promotion Rules
 
 Admin-managed rules at `/admin/rules` auto-promote users to a target role

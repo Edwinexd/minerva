@@ -86,9 +86,13 @@ struct Member {
     name: Option<String>,
     #[serde(default)]
     email: Option<String>,
+    /// Moodle's non-standard username field, sent whenever the tool shares
+    /// names. Moodle usernames are eppns at DSV, and it is the same value
+    /// the launch path receives via `user_eppn=$User.username`.
+    #[serde(default)]
+    ext_user_username: Option<String>,
     /// Per-member LTI message payload; carries the custom params (notably
-    /// `user_eppn`) that we use for identity resolution, exactly like a
-    /// launch JWT's custom claim.
+    /// `user_eppn`) on platforms that include them. Moodle never does.
     #[serde(default)]
     message: Vec<MemberMessage>,
 }
@@ -225,9 +229,11 @@ fn parse_next_link(header: &str) -> Option<String> {
 // Identity resolution (mirrors the launch handler)
 // ---------------------------------------------------------------------------
 
-/// Resolve a member's Minerva eppn the same way the launch handler does:
-///   a) custom `user_eppn` param, b) email claim, c) synthetic
-///      `lti_<source_id>_<sub>`.
+/// Resolve a member's Minerva eppn so it matches the identity the launch
+/// handler resolves for the same person:
+///   a) custom `user_eppn` param, b) Moodle's `ext_user_username` (the
+///      value the launch's `user_eppn=$User.username` substitutes),
+///   c) email claim, d) synthetic `lti_<source_id>_<sub>`.
 /// Returns `(eppn, is_claimed)` where `is_claimed` is false for the synthetic
 /// fallback (which is trivially distinct from any real eppn and so is exempt
 /// from the platform's eppn-domain allowlist, matching the launch path).
@@ -242,7 +248,9 @@ fn resolve_member_eppn(m: &Member, source_identifier: &str) -> (String, bool) {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
         })
-        .or_else(|| m.email.clone());
+        .or_else(|| m.ext_user_username.clone())
+        .or_else(|| m.email.clone())
+        .filter(|s| !s.is_empty());
     match claimed {
         Some(e) => (e.to_lowercase(), true),
         None => (
@@ -338,14 +346,13 @@ pub async fn reconcile_context(
 
     let mut added = 0i32;
     let mut active_user_ids: HashSet<Uuid> = HashSet::new();
-    // Track how many Active members we processed and how many of those
-    // fell through to the synthetic-eppn fallback (no `user_eppn` custom
-    // claim AND no `email`). When ALL active members are synthetic, the
-    // LMS has identity-sharing locked down and the admin needs to flip
-    // the relevant tool-privacy switches; we surface this as a warning
-    // independent of the sync's success/error status below.
+    // Track how many Active members we processed, how many fell through to
+    // the synthetic-eppn fallback, and how many were skipped by the eppn
+    // allowlist. Both feed `sync_warning`, surfaced independent of the
+    // sync's success/error status.
     let mut active_count: i32 = 0;
     let mut synthetic_count: i32 = 0;
+    let mut out_of_scope_count: i32 = 0;
 
     for m in &members {
         // Absent status means Active per spec; anything else means the user
@@ -362,6 +369,7 @@ pub async fn reconcile_context(
         // A real (claimed) eppn must satisfy the platform's allowlist, same
         // as on launch; the synthetic fallback is exempt.
         if is_claimed && !eppn_in_allowlist(&cfg.allowed_eppn_domains, &eppn) {
+            out_of_scope_count += 1;
             continue;
         }
 
@@ -437,25 +445,55 @@ pub async fn reconcile_context(
         minerva_db::queries::lti_nrps::delete_membership(db, ctx.id, row.user_id).await?;
     }
 
-    // Identity-sharing health check. Fires only on a non-empty roster where
-    // EVERY active member fell through to the synthetic-eppn fallback (so
-    // we're confident this is platform-side privacy lockdown, not a per-user
-    // hole). A partial population is left alone: that's a different problem
-    // (a specific member missing fields), not a tool-config one.
-    let warning = if active_count > 0 && synthetic_count == active_count {
-        Some(format!(
-            "The LMS did not share identity claims for any of the {} active member(s) in this roster (no `name`, `email`, or `user_eppn` custom claim). Members were added with synthetic ids and will NOT match the same person if they ever log in directly via Shibboleth. To fix: in the LMS tool settings, enable identity sharing for this tool. In Moodle: External tool > Privacy > set 'Share launcher's name with tool' and 'Share launcher's email with tool' to 'Always'. The setup instructions at /admin/lti/setup document this.",
-            active_count
-        ))
-    } else {
-        None
-    };
-
     Ok(SyncOutcome {
         added,
         removed,
-        warning,
+        warning: sync_warning(
+            active_count,
+            synthetic_count,
+            out_of_scope_count,
+            &cfg.allowed_eppn_domains,
+        ),
     })
+}
+
+/// Actionable note for a sync whose roster could not be fully mapped to real
+/// identities. Two independent causes, reported together when both occur:
+///
+/// * Every active member fell through to the synthetic-eppn fallback. Only
+///   the all-synthetic case is reported, since that points at platform-side
+///   privacy lockdown rather than one member missing fields.
+/// * Members were skipped because their resolved eppn is outside the
+///   platform's allowed domains. Any non-zero count is reported: those
+///   people are silently absent from the course otherwise.
+fn sync_warning(
+    active_count: i32,
+    synthetic_count: i32,
+    out_of_scope_count: i32,
+    allowed_eppn_domains: &Option<Vec<String>>,
+) -> Option<String> {
+    let mut notes = Vec::new();
+    if active_count > 0 && synthetic_count == active_count {
+        notes.push(format!(
+            "The LMS did not share identity claims for any of the {} active member(s) in this roster (no `user_eppn` custom claim, username, or email). Members were added with synthetic ids and will NOT match the same person if they ever log in directly via Shibboleth. To fix: in the LMS tool settings, enable identity sharing for this tool. In Moodle: External tool > Privacy > set 'Share launcher's name with tool' and 'Share launcher's email with tool' to 'Always'. The setup instructions at /admin/lti/setup document this.",
+            active_count
+        ));
+    }
+    if out_of_scope_count > 0 {
+        let domains = allowed_eppn_domains
+            .as_deref()
+            .unwrap_or_default()
+            .join(", ");
+        notes.push(format!(
+            "{} of the {} active member(s) in this roster were skipped because their identity is outside this platform's allowed eppn domains ({}). They are not course members in Minerva until they launch the tool with an in-scope identity, or the platform's eppn scope is widened.",
+            out_of_scope_count, active_count, domains
+        ));
+    }
+    if notes.is_empty() {
+        None
+    } else {
+        Some(notes.join(" "))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -538,4 +576,87 @@ pub async fn probe_platform_health(
         return "invalid_client".into();
     }
     format!("http_{}", status.as_u16())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SOURCE: &str = "f2e650d3-fa5b-452e-b300-3ef9f6491186";
+
+    fn member(json: serde_json::Value) -> Member {
+        serde_json::from_value(json).unwrap()
+    }
+
+    /// Field set Moodle 4.5 serves for an LTI 1.3 roster with name and
+    /// email sharing on: no `message`, username in `ext_user_username`.
+    fn moodle_member() -> serde_json::Value {
+        serde_json::json!({
+            "status": "Active",
+            "roles": ["http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"],
+            "user_id": "9404",
+            "lis_person_sourcedid": "123456",
+            "name": "Test Student",
+            "given_name": "Test",
+            "family_name": "Student",
+            "email": "abcd1234@student.su.se",
+            "ext_user_username": "ABCD1234@su.se",
+        })
+    }
+
+    #[test]
+    fn moodle_roster_resolves_to_username_not_email() {
+        let (eppn, claimed) = resolve_member_eppn(&member(moodle_member()), SOURCE);
+        assert_eq!(eppn, "abcd1234@su.se");
+        assert!(claimed);
+        assert!(eppn_in_allowlist(&Some(vec!["su.se".into()]), &eppn));
+    }
+
+    #[test]
+    fn custom_user_eppn_wins_over_username() {
+        let mut json = moodle_member();
+        json["message"] = serde_json::json!([{
+            "https://purl.imsglobal.org/spec/lti/claim/custom": { "user_eppn": "efgh5678@su.se" }
+        }]);
+        let (eppn, _) = resolve_member_eppn(&member(json), SOURCE);
+        assert_eq!(eppn, "efgh5678@su.se");
+    }
+
+    #[test]
+    fn email_is_used_without_username() {
+        let mut json = moodle_member();
+        json.as_object_mut().unwrap().remove("ext_user_username");
+        let (eppn, claimed) = resolve_member_eppn(&member(json), SOURCE);
+        assert_eq!(eppn, "abcd1234@student.su.se");
+        assert!(claimed);
+    }
+
+    #[test]
+    fn no_identity_falls_back_to_synthetic() {
+        let (eppn, claimed) = resolve_member_eppn(
+            &member(serde_json::json!({ "user_id": "9404", "ext_user_username": "" })),
+            SOURCE,
+        );
+        assert_eq!(eppn, format!("lti_{}_9404", SOURCE));
+        assert!(!claimed);
+    }
+
+    #[test]
+    fn clean_sync_has_no_warning() {
+        assert_eq!(sync_warning(10, 0, 0, &Some(vec!["su.se".into()])), None);
+        assert_eq!(sync_warning(0, 0, 0, &None), None);
+    }
+
+    #[test]
+    fn out_of_scope_members_are_reported() {
+        let warning = sync_warning(573, 0, 566, &Some(vec!["su.se".into()])).unwrap();
+        assert!(warning.contains("566 of the 573"));
+        assert!(warning.contains("(su.se)"));
+    }
+
+    #[test]
+    fn all_synthetic_roster_is_reported() {
+        let warning = sync_warning(3, 3, 0, &None).unwrap();
+        assert!(warning.contains("any of the 3 active member(s)"));
+    }
 }

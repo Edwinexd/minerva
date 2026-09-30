@@ -23,6 +23,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorText } from "@/components/ui/error-text"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 
 /// First-launch LTI bind picker. Reachable without Shibboleth; the token
 /// in the URL is the auth. Renders when the backend's launch handler
@@ -40,6 +41,7 @@ export function LtiBindPage() {
   }, [])
 
   const [selectedCourseId, setSelectedCourseId] = useState<string>("")
+  const [syncMembers, setSyncMembers] = useState(true)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["lti", "bind", token],
@@ -54,6 +56,7 @@ export function LtiBindPage() {
       const res = await api.post<{ redirect_url: string }>("/lti/bind", {
         token,
         course_id: selectedCourseId,
+        sync_members: syncMembers,
       })
       return res
     },
@@ -152,6 +155,32 @@ export function LtiBindPage() {
             </SelectContent>
           </Select>
         </div>
+
+        {data.roster_sync_available && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <Checkbox
+                id="lti-bind-sync-members"
+                checked={syncMembers}
+                onCheckedChange={(checked) => setSyncMembers(checked === true)}
+                disabled={!selectedCourseId}
+                aria-describedby="lti-bind-sync-members-hint"
+              />
+              <Label
+                htmlFor="lti-bind-sync-members"
+                className={selectedCourseId ? "cursor-pointer" : undefined}
+              >
+                {t("ltiBind.syncMembersLabel")}
+              </Label>
+            </div>
+            <p
+              id="lti-bind-sync-members-hint"
+              className="text-xs text-muted-foreground"
+            >
+              {t("ltiBind.syncMembersHint")}
+            </p>
+          </div>
+        )}
 
         <p className="text-xs text-muted-foreground">{t("ltiBind.linkNote")}</p>
 

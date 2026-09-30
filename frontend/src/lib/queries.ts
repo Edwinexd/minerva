@@ -1,6 +1,6 @@
-import { queryOptions } from "@tanstack/react-query"
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, DevConfig, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiDiagnostics, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, OwnerUsage, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, DevConfig, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiDiagnostics, LtiNrpsRun, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, OwnerUsage, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -394,6 +394,26 @@ export const ltiNrpsStatusQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "lti", "nrps"],
     queryFn: () => api.get<LtiNrpsStatus[]>(`/courses/${courseId}/lti/nrps`),
+  })
+
+/// Older pages of one context's run history, behind the newest page that
+/// `ltiNrpsStatusQuery` already carries. Keyed on `before` (the oldest
+/// `ran_at` of that newest page) so a new run starts the paging over
+/// instead of leaving a gap.
+export const ltiNrpsOlderRunsQuery = (
+  courseId: string,
+  contextId: string,
+  before: string,
+) =>
+  infiniteQueryOptions({
+    queryKey: ["courses", courseId, "lti", "nrps", contextId, "runs", before],
+    queryFn: ({ pageParam }) =>
+      api.get<LtiNrpsRun[]>(
+        `/courses/${courseId}/lti/nrps/${contextId}/runs?before=${encodeURIComponent(pageParam)}`,
+      ),
+    initialPageParam: before,
+    getNextPageParam: (lastPage) => lastPage.at(-1)?.ran_at,
+    enabled: false,
   })
 
 export const ltiCourseSiteBindingsQuery = (courseId: string) =>

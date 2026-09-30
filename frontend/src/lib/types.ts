@@ -884,6 +884,9 @@ export interface LtiNrpsStatus {
   /// "registration" (per-course) or "platform" (site-level).
   source: "registration" | "platform"
   context_id: string
+  /// false = the periodic sync skips this context; members then only join
+  /// by launching the tool.
+  sync_enabled: boolean
   last_sync_at: string | null
   last_sync_status: "ok" | "error" | null
   last_sync_error: string | null
@@ -895,6 +898,25 @@ export interface LtiNrpsStatus {
   last_sync_warning: string | null
   last_sync_added: number | null
   last_sync_removed: number | null
+  /// Members added / removed over every recorded run.
+  total_added: number
+  total_removed: number
+  /// How many runs are recorded in all; more than `history` holds means
+  /// older pages exist.
+  history_total: number
+  /// Runs that changed membership or whose outcome differs from the run
+  /// before, newest first. Repeats of the same outcome are not recorded.
+  history: LtiNrpsRun[]
+}
+
+export interface LtiNrpsRun {
+  id: string
+  ran_at: string
+  status: "ok" | "error"
+  error: string | null
+  warning: string | null
+  added: number | null
+  removed: number | null
 }
 
 export interface LtiPlatformBinding {
@@ -974,6 +996,9 @@ export interface LtiBindInfo {
   context_label: string | null
   context_title: string | null
   is_teacher_role: boolean
+  /// Whether the LMS advertised a roster endpoint, i.e. member sync is on
+  /// offer for this link.
+  roster_sync_available: boolean
   courses: { id: string; name: string }[]
 }
 

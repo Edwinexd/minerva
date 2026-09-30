@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT nrps_context_id,\n                  COUNT(*) AS \"runs!\",\n                  COALESCE(SUM(added), 0)::bigint AS \"added!\",\n                  COALESCE(SUM(removed), 0)::bigint AS \"removed!\"\n        FROM lti_nrps_sync_runs\n        WHERE nrps_context_id = ANY($1)\n        GROUP BY nrps_context_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "nrps_context_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_sync_runs",
+            "name": "nrps_context_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "runs!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "added!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "removed!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f76d9b9d7a99766a7f5be159e19daa29abb15f18e6b75833bdf9799b16ec3c54"
+}

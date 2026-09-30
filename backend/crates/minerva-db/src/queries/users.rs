@@ -67,6 +67,48 @@ pub async fn find_by_eppn_or_alias(
     Ok(Some((row, true)))
 }
 
+/// The first of `eppns` (in order) that resolves to a user, by primary or
+/// alias.
+pub async fn find_by_any_eppn<S: AsRef<str>>(
+    db: &PgPool,
+    eppns: impl IntoIterator<Item = S>,
+) -> Result<Option<UserRow>, sqlx::Error> {
+    for eppn in eppns {
+        if let Some((row, _via_alias)) = find_by_eppn_or_alias(db, eppn.as_ref()).await? {
+            return Ok(Some(row));
+        }
+    }
+    Ok(None)
+}
+
+/// Resolve one person who is known under several eppns: the account already
+/// held under `canonical` or, failing that, under any of `alternates` (in
+/// order); only when none resolves is a new user created under `canonical`.
+/// Registering the unmatched eppns as aliases is the caller's call.
+pub async fn find_or_create_by_any_eppn<S: AsRef<str>>(
+    db: &PgPool,
+    canonical: &str,
+    alternates: impl IntoIterator<Item = S>,
+    display_name: Option<&str>,
+    role: &str,
+    default_owner_daily_cost_limit_usd: Decimal,
+) -> Result<(UserRow, bool), sqlx::Error> {
+    if let Some((row, _via_alias)) = find_by_eppn_or_alias(db, canonical).await? {
+        return Ok((row, false));
+    }
+    if let Some(row) = find_by_any_eppn(db, alternates).await? {
+        return Ok((row, false));
+    }
+    find_or_create_by_eppn(
+        db,
+        canonical,
+        display_name,
+        role,
+        default_owner_daily_cost_limit_usd,
+    )
+    .await
+}
+
 /// Resolve a user by primary or alias eppn, or create one with the given
 /// defaults if the identity is entirely unknown.
 /// Returns `(user, created)` where `created` is true iff this call inserted

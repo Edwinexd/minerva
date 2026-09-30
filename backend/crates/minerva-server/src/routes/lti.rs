@@ -34,6 +34,7 @@ use crate::error::{AppError, ErrorParams};
 use crate::lti;
 use crate::routes::guards::{require_course_teacher, require_site_integrator, TeacherScope};
 use crate::state::AppState;
+use minerva_app_core::lti_identity::{self, LtiIdentity};
 use minerva_core::models::User;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -83,6 +84,14 @@ pub fn course_router() -> Router<AppState> {
         .route("/lti/setup", get(lti_setup))
         .route("/lti", get(list_registrations).post(create_registration))
         .route("/lti/nrps", get(list_course_nrps_status))
+        .route(
+            "/lti/nrps/{nrps_context_id}/sync-enabled",
+            put(set_course_nrps_sync_enabled),
+        )
+        .route(
+            "/lti/nrps/{nrps_context_id}/runs",
+            get(list_course_nrps_runs),
+        )
         .route("/lti/site-bindings", get(list_course_site_bindings))
         .route(
             "/lti/site-bindings/{binding_id}",
@@ -345,44 +354,39 @@ async fn handle_launch(
         }
     }
 
-    // 5. Map user identity. Priority:
-    //    a) Custom param "user_eppn" (Moodle can substitute $User.username)
-    //    b) email claim
-    //    c) Synthetic eppn from LTI sub + source id
-    let claimed_eppn_explicit = claims
-        .custom
-        .as_ref()
-        .and_then(|c| c.get("user_eppn"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .or_else(|| claims.email.clone());
+    // 5. Map user identity. The order of identities (custom `user_eppn`,
+    //    Moodle username, email, synthetic) lives in `lti_identity`, shared
+    //    with the NRPS roster sync so both land on the same account.
+    let identity = LtiIdentity::new(
+        claims
+            .custom
+            .as_ref()
+            .and_then(|c| c.get("user_eppn"))
+            .and_then(|v| v.as_str()),
+        claims.ext.as_ref().and_then(|e| e.user_username.as_deref()),
+        claims.email.as_deref(),
+        &source.identifier(),
+        &claims.sub,
+    );
 
-    // A platform's eppn scope applies to the JWT's claimed identity (the
-    // user_eppn custom param or email claim); the fallback synthetic form
-    // is tagged with the source id and therefore trivially distinguishable
-    // from any real eppn, so it needs no scope check. Enforced BEFORE the
-    // user find/create so a rogue platform admin can't pre-create victim
+    // A platform's eppn scope applies to the JWT's claimed identities; the
+    // synthetic fallback needs no scope check. Enforced BEFORE the user
+    // find/create so a rogue platform admin can't pre-create victim
     // accounts or log in as an existing victim with a forged claim.
-    if let ResolvedSource::Platform(p) = &source {
-        if let Some(ref claimed) = claimed_eppn_explicit {
-            enforce_platform_eppn_domain(p, &claimed.to_lowercase())?;
-        }
-    }
-
-    let eppn = claimed_eppn_explicit
-        .unwrap_or_else(|| format!("lti_{}_{}", source.identifier(), claims.sub))
-        .to_lowercase();
-
-    let display_name = claims.name.as_deref();
+    let identity = match &source {
+        ResolvedSource::Platform(p) => identity
+            .within_scope(p.allowed_eppn_domains.as_deref())
+            .map_err(|claimed| eppn_domain_forbidden(p, &claimed))?,
+        ResolvedSource::Registration(_) => identity,
+    };
 
     // 6. Find or create the user.
     //    Reuses an existing Shib user's record if present; does NOT modify
     //    their role or display name; LTI should not alter existing accounts.
-    let (user, _) = minerva_db::queries::users::find_or_create_by_eppn(
+    let user = lti_identity::resolve_user(
         &state.db,
-        &eppn,
-        display_name,
-        "student",
+        &identity,
+        claims.name.as_deref(),
         crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
     )
     .await?;
@@ -446,6 +450,7 @@ async fn handle_launch(
             .names_role_service
             .as_ref()
             .map(|n| n.context_memberships_url.as_str()),
+        None,
     )
     .await?;
 
@@ -457,12 +462,16 @@ async fn handle_launch(
 /// `context_memberships_url`. No-op when NRPS isn't enabled for the tool
 /// (the claim is absent) so non-NRPS platforms are unaffected. Shared by
 /// the launch handler and the bind-complete handler.
+///
+/// `sync_enabled` is the teacher's choice from the bind picker; the launch
+/// handler passes `None`, which keeps whatever the context already has.
 async fn capture_nrps_context(
     state: &AppState,
     source: minerva_db::queries::lti_nrps::NrpsSource,
     context_id: &str,
     course_id: Uuid,
     memberships_url: Option<&str>,
+    sync_enabled: Option<bool>,
 ) -> Result<(), AppError> {
     let Some(url) = memberships_url.filter(|u| !u.is_empty()) else {
         return Ok(());
@@ -474,6 +483,7 @@ async fn capture_nrps_context(
         context_id,
         course_id,
         url,
+        sync_enabled,
     )
     .await?;
     Ok(())
@@ -1006,6 +1016,9 @@ struct BindInfoResponse {
     /// Whether the LMS-claimed roles look teacher-ish (used by UI for
     /// messaging; the actual authorization check is on submit).
     is_teacher_role: bool,
+    /// Whether the LMS advertised a roster endpoint on this launch. The
+    /// picker only offers the member-sync choice when it did.
+    roster_sync_available: bool,
     /// Minerva courses the launching user can bind to (owner + teacher/ta).
     /// Non-teachers see this empty and must ask a course teacher to launch.
     courses: Vec<BindInfoCourse>,
@@ -1052,6 +1065,10 @@ async fn bind_info(
         context_label: payload.context_label,
         context_title: payload.context_title,
         is_teacher_role,
+        roster_sync_available: payload
+            .memberships_url
+            .as_deref()
+            .is_some_and(|u| !u.is_empty()),
         courses: courses
             .into_iter()
             .map(|c| BindInfoCourse {
@@ -1066,6 +1083,13 @@ async fn bind_info(
 struct BindCompleteRequest {
     token: String,
     course_id: Uuid,
+    /// Whether to keep this course's members in sync with the LMS roster.
+    #[serde(default = "default_sync_members")]
+    sync_members: bool,
+}
+
+fn default_sync_members() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize)]
@@ -1114,12 +1138,14 @@ async fn bind_complete(
 
     // Idempotent-ish: if a binding already exists for this (platform, context),
     // reuse it instead of failing. The UNIQUE index guarantees at most one.
-    let binding = if let Some(existing) =
+    // The picker's sync choice only applies to a binding this request
+    // creates; a stale or second bind link must not flip an existing one.
+    let (binding, sync_choice) = if let Some(existing) =
         minerva_db::queries::lti::find_binding(&state.db, platform.id, &payload.context_id).await?
     {
-        existing
+        (existing, None)
     } else {
-        minerva_db::queries::lti::create_binding(
+        let created = minerva_db::queries::lti::create_binding(
             &state.db,
             Uuid::new_v4(),
             &minerva_db::queries::lti::CreateBinding {
@@ -1131,7 +1157,8 @@ async fn bind_complete(
                 created_by: user.id,
             },
         )
-        .await?
+        .await?;
+        (created, Some(body.sync_members))
     };
 
     // Apply course membership + role suggestion as on a normal launch.
@@ -1153,6 +1180,7 @@ async fn bind_complete(
         context: None,
         resource_link: None,
         custom: None,
+        ext: None,
         launch_presentation: None,
         names_role_service: None,
     };
@@ -1166,6 +1194,7 @@ async fn bind_complete(
         &payload.context_id,
         binding.course_id,
         payload.memberships_url.as_deref(),
+        sync_choice,
     )
     .await?;
 
@@ -2011,34 +2040,22 @@ fn normalize_eppn_domains(raw: &[String]) -> Result<Vec<String>, AppError> {
     Ok(out)
 }
 
-/// Reject a platform launch when the JWT-claimed eppn sits outside the
-/// platform's allowlist. Helper lives next to `CreatePlatformRequest` so
+/// The error for a platform launch whose claimed identities all sit outside
+/// the platform's allowlist. Helper lives next to `CreatePlatformRequest` so
 /// it stays visually close to the admin ingestion path that sets the
 /// allowlist; matching helper for site integration keys is in
 /// `routes/integration.rs::enforce_eppn_domain`.
-fn enforce_platform_eppn_domain(
-    platform: &minerva_db::queries::lti::PlatformRow,
-    eppn: &str,
-) -> Result<(), AppError> {
-    let Some(domains) = platform.allowed_eppn_domains.as_ref() else {
-        return Ok(());
-    };
-    if domains.is_empty() {
-        return Ok(());
+fn eppn_domain_forbidden(platform: &minerva_db::queries::lti::PlatformRow, eppn: &str) -> AppError {
+    let allowed = platform
+        .allowed_eppn_domains
+        .as_deref()
+        .unwrap_or_default()
+        .join(", ");
+    AppError::ForbiddenWith {
+        code: "lti.eppn_domain_forbidden",
+        message: format!("forbidden: eppn '{eppn}' not in allowed domains [{allowed}]"),
+        params: ErrorParams::from([("eppn", eppn.to_string()), ("allowed_domains", allowed)]),
     }
-    // `@<domain>` suffix, not substring: see enforce_eppn_domain doc.
-    let matches = domains
-        .iter()
-        .any(|d| eppn.ends_with(&format!("@{}", d.to_lowercase())));
-    if !matches {
-        let allowed = domains.join(", ");
-        return Err(AppError::ForbiddenWith {
-            code: "lti.eppn_domain_forbidden",
-            message: format!("forbidden: eppn '{eppn}' not in allowed domains [{allowed}]"),
-            params: ErrorParams::from([("eppn", eppn.to_string()), ("allowed_domains", allowed)]),
-        });
-    }
-    Ok(())
 }
 
 async fn delete_platform(
@@ -2091,12 +2108,16 @@ async fn list_platform_bindings(
 }
 
 // ---------------------------------------------------------------------------
-// NRPS roster-sync status (read-only)
+// NRPS roster-sync status
 // ---------------------------------------------------------------------------
 
-/// Read-only view of an NRPS context's last reconcile. There is intentionally
-/// no manual-trigger endpoint: the reconcile runs on the in-process periodic
-/// loop (see `worker::start` / `lti_nrps::reconcile_context`).
+/// Page size of a context's run history: what `history` carries, and what
+/// each older page returns.
+const NRPS_HISTORY_LIMIT: i64 = 20;
+
+/// An NRPS context's sync setting, last reconcile and recent history. There
+/// is intentionally no manual-trigger endpoint: the reconcile runs on the
+/// scheduler's periodic loop (see `lti_nrps::reconcile_context`).
 #[derive(Debug, Serialize)]
 struct NrpsStatusResponse {
     id: Uuid,
@@ -2104,6 +2125,7 @@ struct NrpsStatusResponse {
     /// "registration" (per-course) or "platform" (site-level).
     source: &'static str,
     context_id: String,
+    sync_enabled: bool,
     last_sync_at: Option<chrono::DateTime<chrono::Utc>>,
     last_sync_status: Option<String>,
     last_sync_error: Option<String>,
@@ -2114,9 +2136,80 @@ struct NrpsStatusResponse {
     last_sync_warning: Option<String>,
     last_sync_added: Option<i32>,
     last_sync_removed: Option<i32>,
+    /// Members added / removed over every recorded run, not just the
+    /// `history` page.
+    total_added: i64,
+    total_removed: i64,
+    /// How many runs are recorded in all; more than `history` holds means
+    /// older pages exist.
+    history_total: i64,
+    /// Runs that changed membership or whose outcome differs from the run
+    /// before, newest first. Repeats of the same outcome are not recorded.
+    history: Vec<NrpsRunResponse>,
 }
 
-fn nrps_to_response(r: minerva_db::queries::lti_nrps::NrpsContextRow) -> NrpsStatusResponse {
+#[derive(Debug, Serialize)]
+struct NrpsRunResponse {
+    id: Uuid,
+    ran_at: chrono::DateTime<chrono::Utc>,
+    status: String,
+    error: Option<String>,
+    warning: Option<String>,
+    added: Option<i32>,
+    removed: Option<i32>,
+}
+
+impl From<minerva_db::queries::lti_nrps::NrpsSyncRunRow> for NrpsRunResponse {
+    fn from(run: minerva_db::queries::lti_nrps::NrpsSyncRunRow) -> Self {
+        Self {
+            id: run.id,
+            ran_at: run.ran_at,
+            status: run.status,
+            error: run.error,
+            warning: run.warning,
+            added: run.added,
+            removed: run.removed,
+        }
+    }
+}
+
+/// Attach each context's recent run history and shape the rows for the API.
+async fn nrps_status_responses(
+    state: &AppState,
+    rows: Vec<minerva_db::queries::lti_nrps::NrpsContextRow>,
+) -> Result<Vec<NrpsStatusResponse>, AppError> {
+    let ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+    let mut history: std::collections::HashMap<Uuid, Vec<NrpsRunResponse>> =
+        std::collections::HashMap::new();
+    for run in
+        minerva_db::queries::lti_nrps::list_recent_runs(&state.db, &ids, NRPS_HISTORY_LIMIT).await?
+    {
+        history
+            .entry(run.nrps_context_id)
+            .or_default()
+            .push(run.into());
+    }
+    let mut totals: std::collections::HashMap<Uuid, _> =
+        minerva_db::queries::lti_nrps::sync_totals(&state.db, &ids)
+            .await?
+            .into_iter()
+            .map(|t| (t.nrps_context_id, t))
+            .collect();
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let runs = history.remove(&r.id).unwrap_or_default();
+            let totals = totals.remove(&r.id);
+            nrps_to_response(r, runs, totals)
+        })
+        .collect())
+}
+
+fn nrps_to_response(
+    r: minerva_db::queries::lti_nrps::NrpsContextRow,
+    history: Vec<NrpsRunResponse>,
+    totals: Option<minerva_db::queries::lti_nrps::NrpsSyncTotalsRow>,
+) -> NrpsStatusResponse {
     NrpsStatusResponse {
         id: r.id,
         course_id: r.course_id,
@@ -2126,12 +2219,17 @@ fn nrps_to_response(r: minerva_db::queries::lti_nrps::NrpsContextRow) -> NrpsSta
             "platform"
         },
         context_id: r.context_id,
+        sync_enabled: r.sync_enabled,
         last_sync_at: r.last_sync_at,
         last_sync_status: r.last_sync_status,
         last_sync_error: r.last_sync_error,
         last_sync_warning: r.last_sync_warning,
         last_sync_added: r.last_sync_added,
         last_sync_removed: r.last_sync_removed,
+        total_added: totals.as_ref().map_or(0, |t| t.added),
+        total_removed: totals.as_ref().map_or(0, |t| t.removed),
+        history_total: totals.as_ref().map_or(0, |t| t.runs),
+        history,
     }
 }
 
@@ -2146,7 +2244,62 @@ async fn list_course_nrps_status(
     require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let rows =
         minerva_db::queries::lti_nrps::list_contexts_for_course(&state.db, course_id).await?;
-    Ok(Json(rows.into_iter().map(nrps_to_response).collect()))
+    Ok(Json(nrps_status_responses(&state, rows).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct SetNrpsSyncEnabledRequest {
+    enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct NrpsRunsQuery {
+    /// `ran_at` of the oldest run the client already has.
+    before: chrono::DateTime<chrono::Utc>,
+}
+
+/// GET /courses/{course_id}/lti/nrps/{nrps_context_id}/runs?before=...; the
+/// next page of a context's run history, older than `before`. Fixed page
+/// size; the client pages by passing the last `ran_at` it received.
+async fn list_course_nrps_runs(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, nrps_context_id)): Path<(Uuid, Uuid)>,
+    Query(q): Query<NrpsRunsQuery>,
+) -> Result<Json<Vec<NrpsRunResponse>>, AppError> {
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    let runs = minerva_db::queries::lti_nrps::list_runs_before(
+        &state.db,
+        nrps_context_id,
+        course_id,
+        q.before,
+        NRPS_HISTORY_LIMIT,
+    )
+    .await?;
+    Ok(Json(runs.into_iter().map(Into::into).collect()))
+}
+
+/// PUT /courses/{course_id}/lti/nrps/{nrps_context_id}/sync-enabled; switch
+/// periodic roster sync on or off for one context. Switching it off stops
+/// both adds and removals; members already provisioned stay.
+async fn set_course_nrps_sync_enabled(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, nrps_context_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<SetNrpsSyncEnabledRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    let updated = minerva_db::queries::lti_nrps::set_sync_enabled(
+        &state.db,
+        nrps_context_id,
+        course_id,
+        body.enabled,
+    )
+    .await?;
+    if !updated {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(serde_json::json!({ "sync_enabled": body.enabled })))
 }
 
 /// GET /admin/lti/platforms/{platform_id}/nrps; NRPS sync status for every
@@ -2159,7 +2312,7 @@ async fn list_platform_nrps_status(
     require_site_integrator(&user)?;
     let rows =
         minerva_db::queries::lti_nrps::list_contexts_for_platform(&state.db, platform_id).await?;
-    Ok(Json(rows.into_iter().map(nrps_to_response).collect()))
+    Ok(Json(nrps_status_responses(&state, rows).await?))
 }
 
 async fn delete_platform_binding(

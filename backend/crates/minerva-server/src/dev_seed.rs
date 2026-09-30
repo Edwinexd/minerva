@@ -99,6 +99,9 @@ const WIPE_TABLE_ORDER: &[&str] = &[
     "course_members",
     "external_auth_invites",
     "chat_models",
+    // Its bindings, NRPS contexts and sync runs cascade from it; it has
+    // to go before `users` because `created_by` does not cascade.
+    "lti_platforms",
     "courses",
     "users",
 ];
@@ -560,6 +563,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
     )
     .await?;
     let pipeline_usage_rows = seed_pipeline_ledger(state, &[intro, algos, web, db_sys]).await?;
+    seed_lti_roster_sync(state, admin_id, intro, algos, web).await?;
 
     // Give `seed-teacher` a cap their seeded spend sits comfortably
     // under, so the portal shows a real limit and a progress bar rather
@@ -768,6 +772,166 @@ async fn seed_pipeline_ledger(state: &AppState, courses: &[Uuid]) -> Result<usiz
         }
     }
     Ok(rows)
+}
+
+/// One recorded roster sync run: (days ago, status, error, warning, added,
+/// removed).
+type SeedSyncRun = (
+    i64,
+    &'static str,
+    Option<&'static str>,
+    Option<&'static str>,
+    Option<i32>,
+    Option<i32>,
+);
+
+const SEED_SYNC_SCOPE_WARNING: &str = "12 of the 58 active member(s) in this roster were skipped because their identity is outside this platform's allowed eppn domains (su.se). They are not course members in Minerva until they launch the tool with an in-scope identity, or the platform's eppn scope is widened.";
+
+/// A site-level Moodle platform with three linked courses, so the LTI tab
+/// has roster sync to show in each of its states: healthy with a history
+/// that includes a failure and its recovery, syncing with a standing
+/// warning, and switched off. The platform points at a host that does not
+/// resolve; a dev stack left running past the sync interval records one
+/// failed run on the two enabled links.
+async fn seed_lti_roster_sync(
+    state: &AppState,
+    admin_id: Uuid,
+    healthy: Uuid,
+    warned: Uuid,
+    switched_off: Uuid,
+) -> Result<(), AppError> {
+    const BASE: &str = "https://moodle.seed.invalid";
+    let platform_id = Uuid::new_v4();
+    sqlx::query!(
+        r#"INSERT INTO lti_platforms
+               (id, name, issuer, client_id, auth_login_url, auth_token_url,
+                platform_jwks_url, created_by, allowed_eppn_domains, activated_at)
+           VALUES ($1, 'Seed Moodle', $2, 'seed-client', $3, $4, $5, $6, $7, NOW())"#,
+        platform_id,
+        BASE,
+        format!("{BASE}/mod/lti/auth.php"),
+        format!("{BASE}/mod/lti/token.php"),
+        format!("{BASE}/mod/lti/certs.php"),
+        admin_id,
+        &["su.se".to_string()],
+    )
+    .execute(&state.db)
+    .await?;
+    track(state, "lti_platforms", platform_id).await?;
+
+    let links: [(Uuid, &str, &str, bool, &[SeedSyncRun]); 3] = [
+        (
+            healthy,
+            "PROG1",
+            "Programmering 1",
+            true,
+            &[
+                (34, "ok", None, None, Some(142), Some(0)),
+                (20, "ok", None, None, Some(6), Some(2)),
+                (
+                    9,
+                    "error",
+                    Some("token endpoint https://moodle.seed.invalid/mod/lti/token.php returned 503 Service Unavailable: "),
+                    None,
+                    None,
+                    None,
+                ),
+                (8, "ok", None, None, Some(0), Some(0)),
+                (3, "ok", None, None, Some(1), Some(4)),
+            ],
+        ),
+        (
+            warned,
+            "ALGO2",
+            "Algoritmer och datastrukturer",
+            true,
+            &[
+                (30, "ok", None, None, Some(46), Some(0)),
+                (11, "ok", None, Some(SEED_SYNC_SCOPE_WARNING), Some(0), Some(0)),
+                (2, "ok", None, Some(SEED_SYNC_SCOPE_WARNING), Some(3), Some(1)),
+            ],
+        ),
+        (
+            switched_off,
+            "WEBB1",
+            "Webbutveckling",
+            false,
+            &[(28, "ok", None, None, Some(31), Some(0))],
+        ),
+    ];
+
+    for (n, (course_id, label, title, sync_enabled, runs)) in links.into_iter().enumerate() {
+        let context_id = (n + 2).to_string();
+        minerva_db::queries::lti::create_binding(
+            &state.db,
+            Uuid::new_v4(),
+            &minerva_db::queries::lti::CreateBinding {
+                platform_id,
+                context_id: &context_id,
+                context_label: Some(label),
+                context_title: Some(title),
+                course_id,
+                created_by: admin_id,
+            },
+        )
+        .await?;
+        let ctx = minerva_db::queries::lti_nrps::upsert_context(
+            &state.db,
+            Uuid::new_v4(),
+            minerva_db::queries::lti_nrps::NrpsSource::Platform(platform_id),
+            &context_id,
+            course_id,
+            &format!(
+                "{BASE}/mod/lti/services.php/CourseSection/{context_id}/bindings/1/memberships"
+            ),
+            Some(sync_enabled),
+        )
+        .await?;
+
+        for (days_ago, status, error, warning, added, removed) in runs {
+            sqlx::query!(
+                r#"INSERT INTO lti_nrps_sync_runs
+                       (id, nrps_context_id, ran_at, status, error, warning, added, removed)
+                   VALUES ($1, $2, NOW() - ($3 || ' days')::interval, $4, $5, $6, $7, $8)"#,
+                Uuid::new_v4(),
+                ctx.id,
+                days_ago.to_string(),
+                *status,
+                *error,
+                *warning,
+                *added,
+                *removed,
+            )
+            .execute(&state.db)
+            .await?;
+        }
+
+        // The `last_sync_*` columns describe the newest run, which for an
+        // enabled link is a clean no-op a few minutes old (not in the
+        // history, and recent enough that the scheduler leaves it alone).
+        let (_, _, _, last_warning, _, _) = runs[runs.len() - 1];
+        let last_run_age = if sync_enabled {
+            "20 minutes"
+        } else {
+            "28 days"
+        };
+        sqlx::query!(
+            r#"UPDATE lti_nrps_contexts
+               SET last_sync_at = NOW() - $2::text::interval,
+                   last_sync_status = 'ok',
+                   last_sync_warning = $3,
+                   last_sync_added = $4,
+                   last_sync_removed = 0
+               WHERE id = $1"#,
+            ctx.id,
+            last_run_age,
+            last_warning,
+            if sync_enabled { 0 } else { 31 },
+        )
+        .execute(&state.db)
+        .await?;
+    }
+    Ok(())
 }
 
 /// Inserts (idempotently via `find_or_create_by_eppn`) a seed user and
@@ -1034,6 +1198,7 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
             "external_auth_invites" => {
                 delete_by_uuid_pk(&state.db, "external_auth_invites", &pks).await?
             }
+            "lti_platforms" => delete_by_uuid_pk(&state.db, "lti_platforms", &pks).await?,
             "courses" => delete_by_uuid_pk(&state.db, "courses", &pks).await?,
             "users" => delete_by_uuid_pk(&state.db, "users", &pks).await?,
             other => {
@@ -1097,6 +1262,7 @@ async fn delete_by_uuid_pk(
         "usage_daily" => "DELETE FROM usage_daily WHERE id = ANY($1)",
         "course_token_usage" => "DELETE FROM course_token_usage WHERE id = ANY($1)",
         "external_auth_invites" => "DELETE FROM external_auth_invites WHERE id = ANY($1)",
+        "lti_platforms" => "DELETE FROM lti_platforms WHERE id = ANY($1)",
         "courses" => "DELETE FROM courses WHERE id = ANY($1)",
         "users" => "DELETE FROM users WHERE id = ANY($1)",
         other => {

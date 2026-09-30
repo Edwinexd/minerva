@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO lti_nrps_contexts\n                    (id, registration_id, platform_id, context_id, course_id, memberships_url)\n                VALUES ($1, $2, NULL, $3, $4, $5)\n                ON CONFLICT (registration_id, context_id) WHERE registration_id IS NOT NULL\n                DO UPDATE SET memberships_url = EXCLUDED.memberships_url,\n                              course_id = EXCLUDED.course_id,\n                              updated_at = NOW()\n                RETURNING id, registration_id, platform_id, context_id, course_id, memberships_url,\n                          last_sync_at, last_sync_status, last_sync_error, last_sync_warning,\n                          last_sync_added, last_sync_removed, created_at, updated_at",
+  "query": "INSERT INTO lti_nrps_contexts\n                    (id, registration_id, platform_id, context_id, course_id, memberships_url,\n                     sync_enabled)\n                VALUES ($1, NULL, $2, $3, $4, $5, COALESCE($6::boolean, TRUE))\n                ON CONFLICT (platform_id, context_id) WHERE platform_id IS NOT NULL\n                DO UPDATE SET memberships_url = EXCLUDED.memberships_url,\n                              course_id = EXCLUDED.course_id,\n                              sync_enabled = COALESCE($6::boolean, lti_nrps_contexts.sync_enabled),\n                              updated_at = NOW()\n                RETURNING id, registration_id, platform_id, context_id, course_id, memberships_url, sync_enabled,\n                          last_sync_at, last_sync_status, last_sync_error, last_sync_warning,\n                          last_sync_added, last_sync_removed, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "sync_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_contexts",
+            "name": "sync_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "last_sync_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "last_sync_status",
         "type_info": "Text",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "last_sync_error",
         "type_info": "Text",
         "origin": {
@@ -103,7 +114,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "last_sync_warning",
         "type_info": "Text",
         "origin": {
@@ -114,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "last_sync_added",
         "type_info": "Int4",
         "origin": {
@@ -125,7 +136,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "last_sync_removed",
         "type_info": "Int4",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -147,7 +158,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -164,13 +175,15 @@
         "Uuid",
         "Text",
         "Uuid",
-        "Text"
+        "Text",
+        "Bool"
       ]
     },
     "nullable": [
       false,
       true,
       true,
+      false,
       false,
       false,
       false,
@@ -184,5 +197,5 @@
       false
     ]
   },
-  "hash": "d1ba6ef92e4b9abb8e81da1f7ea96209025343f9a8777753a6ff6979025ab0f1"
+  "hash": "c46c8c470d94eb9fb5bcb59fe565ae92cd3f946a2b7f97f5a3a879e9223d590c"
 }

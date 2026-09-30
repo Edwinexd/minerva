@@ -170,6 +170,7 @@
     "nrpsStatusError": "Error",
     "nrpsStatusPending": "Pending",
     "nrpsStatusWarning": "Needs attention",
+    "nrpsStatusOff": "Sync off",
     "nrpsNeverSynced": "Not synced yet",
     "nrpsCounts": "{{added}} added, {{removed}} removed",
     "nrpsColumns": {

@@ -1,0 +1,115 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.id, r.nrps_context_id, r.ran_at, r.status, r.error, r.warning,\n                  r.added, r.removed\n        FROM lti_nrps_sync_runs r\n        JOIN lti_nrps_contexts c ON c.id = r.nrps_context_id\n        WHERE r.nrps_context_id = $1\n          AND c.course_id = $2\n          AND r.ran_at < $3\n        ORDER BY r.ran_at DESC\n        LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_sync_runs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "nrps_context_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_sync_runs",
+            "name": "nrps_context_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ran_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_sync_runs",
+            "name": "ran_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_sync_runs",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_sync_runs",
+            "name": "error"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "warning",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_sync_runs",
+            "name": "warning"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "added",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_sync_runs",
+            "name": "added"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "removed",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_sync_runs",
+            "name": "removed"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "577025d751d8cf5ee4dfcba88da61729bb25cd97ea010f8047dfd0f26d030b89"
+}

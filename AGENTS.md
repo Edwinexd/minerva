@@ -510,6 +510,62 @@ accounts (e.g. external collaborators).
 - `/etc/apache2/secrets/minerva-hmac` must be updated by hand whenever
   `MINERVA_HMAC_SECRET` rotates; it does not auto-sync from k8s.
 
+## LTI NRPS Roster Sync
+
+`minerva-scheduler` pulls each linked LMS course's roster every
+`platform.lti_nrps_sync_interval_hours` (`lti_nrps.rs`) and adds or removes
+course members. A member must resolve to the same eppn the launch path
+gives that person, or the sync creates a second account for them.
+
+Both paths therefore resolve through `minerva_app_core::lti_identity`,
+which owns the order: `user_eppn` custom param, then the Moodle username,
+then email, then a synthetic `lti_<source>_<sub>` id. An empty value is
+skipped per source. A platform's eppn scope drops the identities outside
+it and the strongest one left is used, so a local Moodle username with an
+in-scope email still resolves by email. A person with shared identities
+and none in scope is refused on launch and, in a sync, counted into
+`last_sync_warning` rather than dropped silently.
+
+Moodle's roster (verified against nextilearn, Sep 2026) has no `message`
+block, so the launch's `user_eppn=$User.username` custom param never
+arrives. The username is sent as the non-standard top-level
+`ext_user_username` (present whenever name sharing is on), and on a launch
+as `user_username` in the `.../claim/ext` claim, which is what keeps a tool
+configured without the custom param on the same eppn in both paths. Emails
+are `abcd1234@student.su.se` for students and fail the `su.se` eppn scope.
+
+One person keeps one account when the LMS starts sharing a stronger
+identity than the one their account was created under.
+`users::find_or_create_by_any_eppn` (also the Daisy import's resolver)
+returns the account held under any of the person's identities before it
+creates one, and `lti_identity::resolve_user` then registers the strongest
+identity as an alias in `user_eppn_aliases`, so a later Shibboleth login
+lands on the same account.
+
+The roster is the whole LMS course, not the LTI activity, so a course
+whose activity is hidden from students still has every enrolled student
+provisioned. `lti_nrps_contexts.sync_enabled` (default TRUE) is the
+opt-out: "Automatically sync course members to Minerva" is a checkbox on
+the bind picker (shown only when the launch advertised a roster URL) and
+on the course's LTI tab. Off means the scheduler skips the context, so
+nobody is added or removed and students join when they first launch.
+Members already provisioned stay. An ordinary launch never changes the
+setting; only the bind picker and the LTI tab do, and the picker only for
+a binding it creates (a second or stale bind link reuses the existing
+binding and leaves its setting alone).
+
+`lti_nrps_sync_runs` is the history behind the `last_sync_*` columns.
+`record_sync_result` appends a row only for a run that changed membership
+or whose outcome (status, error, warning) differs from the newest recorded
+run, so the table grows with events, not with the sync interval: a context
+that fails every interval leaves one row, and its recovery another. The
+LTI tab shows each link's roster sync under the site-level link it belongs
+to (contexts from a per-course registration get a card of their own): the
+totals added and removed over all recorded runs, summed server side, and
+the history 20 runs at a time. Older pages come from
+`GET /courses/{id}/lti/nrps/{context}/runs?before=<ran_at>`, a keyset on
+`ran_at` with a fixed page size.
+
 ## Role Auto-Promotion Rules
 
 Admin-managed rules at `/admin/rules` auto-promote users to a target role
@@ -623,7 +679,10 @@ course pages keep their own tab bar:
 `scripts/seed-dev.sh` populates five weeks of weekday chat plus pipeline
 spend across the fixture courses (including one archived offering and a
 stretch on a second provider), so the portal and the admin usage tab are
-never empty in dev. The dev-user switcher lists the seeded cast, and
+never empty in dev. It also links three fixture courses to a "Seed Moodle"
+site-level platform, one per roster-sync state (healthy with a failure and
+recovery in its history, syncing with a standing warning, switched off),
+so the LTI tab has history to show. The dev-user switcher lists the seeded cast, and
 admins lead the list because its first entry is what a fresh browser
 writes to localStorage.
 

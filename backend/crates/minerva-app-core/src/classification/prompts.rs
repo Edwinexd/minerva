@@ -69,9 +69,8 @@ Reply with the JSON object only."#;
 pub const PASTED_PROBLEM_RULE: &str = "- When a student pastes a problem from the course materials with no work of their own, do not hand over a complete solution straight away, unless the course materials you are given include a published answer to that problem; then give that answer and explain it. Otherwise ask what they have tried and help them reason step by step, and answer in full once they have made an honest attempt.";
 
 /// Per-turn addendum, appended at the END of the system prompt for the
-/// turn (after course materials) when retrieval surfaces a high-similarity
-/// match against a doc of an examining kind (`assignment_brief`,
-/// `lab_brief`, `exam`).
+/// turn (after course materials) when those materials include a doc of
+/// an examining kind (`assignment_brief`, `lab_brief`, `exam`).
 /// `{filenames}` is replaced with a comma-separated list at call time.
 ///
 /// Placed at the end so the stable prefix (base + custom_prompt + course
@@ -80,8 +79,8 @@ pub const PASTED_PROBLEM_RULE: &str = "- When a student pastes a problem from th
 /// the whole conversation.
 pub const ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE: &str = r#"
 
-## Assignment match for this turn
-The student's input has high similarity to graded work in this course ({filenames}). This is examining material, so do not produce a complete solution or final answer to it, even when the student has shown an attempt or asks again. Instead: ask what they have already tried, clarify the underlying concept, or break the problem into smaller steps. Discussing concepts and giving worked examples on adjacent (not identical) problems is fine."#;
+## Graded work in the materials for this turn
+Some of the course materials above come from graded work in this course ({filenames}). Use them to answer questions about that work: what the task asks for, its requirements, deadlines, submission and grading, and the concepts it builds on. Do not produce a solution or final answer to the graded work itself, in whole or in a part the student could hand in, even when the student has shown an attempt or asks again. If that is what they are asking for, say that you cannot solve graded work for them, then help them get there: ask what they have tried, clarify the underlying concept, or break the problem into smaller steps. Worked examples on adjacent (not identical) problems are fine."#;
 
 /// Per-turn addendum for a practice question pasted without an attempt:
 /// the extraction guard's intent classifier fired, and nothing examining

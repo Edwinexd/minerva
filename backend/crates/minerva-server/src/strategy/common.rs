@@ -22,18 +22,6 @@ pub use crate::llm::{
     RagChunk, CEREBRAS_CHAT_COMPLETIONS_URL,
 };
 
-/// Minimum retrieval score (cosine similarity in [0, 1]) below which an
-/// assignment-kind signal is considered tangential and the refusal
-/// addendum is NOT appended. Tuned so a student's question that
-/// glances on a topic word from an assignment doesn't trigger the
-/// refusal; only a substantive overlap with the brief itself does.
-///
-/// Calibrated against typical Qdrant cosine scores for course content:
-/// dense paraphrases of an assignment question score ~0.7+; tangential
-/// topic mentions score 0.5-0.65. 0.65 is the threshold where we
-/// stop trusting the signal as evidence of an actual assignment paste.
-pub const ASSIGNMENT_SIGNAL_MIN_SCORE: f32 = 0.65;
-
 /// Stable identity hash over `(document_id, text)`. Used by the agentic
 /// research loop (and historically FLARE) to dedupe chunks pulled from
 /// different sources: initial seed RAG, model-initiated tool calls,
@@ -48,36 +36,21 @@ pub fn chunk_identity_hash(c: &RagChunk) -> u64 {
     h.finish()
 }
 
-/// Result of a RAG lookup, partitioned by intended use.
+/// Result of a RAG lookup after the kind partition.
 ///
 /// * `context`; chunk text gets pasted into the system prompt under
-///   `## Course materials`. These are the kinds that legitimately help
-///   the model answer a student's question: teaching material, practice
-///   material (`tutorial_exercise`, `old_exam`), and sample solutions to
-///   anything that is not examining.
-/// * `signals`; chunks from examining docs (`assignment_brief`,
-///   `lab_brief`, `exam`).
-///   Their *existence* (and the matched filenames) is information we
-///   forward to the prompt as a refusal signal, but the chunk **text**
-///   never lands in context; otherwise the model would just read the
-///   assignment statement and solve it.
+///   `## Course materials`. Everything retrievable lands here, graded
+///   work included, so the model can answer questions *about* an
+///   assignment (what it asks, deadlines, submission).
+/// * `signals`; the subset of `context` that comes from examining docs
+///   (`assignment_brief`, `lab_brief`, `exam`). Their presence is what
+///   puts the turn under the no-full-solution policy: the prompt
+///   addendum, the adversarial solution filter and the extraction
+///   guard's reply check all key off it.
 #[derive(Debug, Clone, Default)]
 pub struct RagResult {
     pub context: Vec<RagChunk>,
     pub signals: Vec<RagChunk>,
-}
-
-impl RagResult {
-    /// All chunks (context first, then signals), used for the
-    /// chunks-displayed-to-client list. Signal chunks still appear in the
-    /// "sources" UI; students should see *that* an assignment matched,
-    /// just not the brief's text in the model's reply.
-    pub fn all(&self) -> Vec<RagChunk> {
-        let mut out = Vec::with_capacity(self.context.len() + self.signals.len());
-        out.extend(self.context.iter().cloned());
-        out.extend(self.signals.iter().cloned());
-        out
-    }
 }
 
 /// Build the list of chunk strings to send to the client/store in DB.
@@ -241,9 +214,11 @@ impl CourseKinds {
     }
 }
 
-/// Split chunks into prompt-context vs detection-signal buckets.
+/// Decide which retrieved chunks may enter the prompt, and mark the
+/// examining ones.
 ///
-/// * examining kinds become `signals`: matched, never quoted;
+/// * examining kinds are context like anything else and are also
+///   copied into `signals`;
 /// * a sample solution to examining material is dropped outright;
 /// * `unknown` and not-yet-classified docs are held back this turn
 ///   (we'd rather give a slightly worse answer than risk leaking
@@ -288,8 +263,7 @@ pub fn partition_chunks(chunks: Vec<RagChunk>, kinds: &CourseKinds, kg_enabled: 
             continue;
         }
         if is_examining_kind(kind) {
-            signals.push(c);
-            continue;
+            signals.push(c.clone());
         }
         if kinds.withheld_solutions.contains(&c.document_id) {
             tracing::debug!(
@@ -304,8 +278,8 @@ pub fn partition_chunks(chunks: Vec<RagChunk>, kinds: &CourseKinds, kg_enabled: 
 }
 
 /// The context half of [`partition_chunks`], for retrievals made after
-/// the seed (research tools, FLARE injections) whose signals nobody
-/// reads.
+/// the seed (research tools, FLARE injections). [`examining_chunks`]
+/// recovers the signals from the accumulated set afterwards.
 pub fn context_chunks(
     chunks: Vec<RagChunk>,
     kinds: &CourseKinds,
@@ -314,13 +288,23 @@ pub fn context_chunks(
     partition_chunks(chunks, kinds, kg_enabled).context
 }
 
+/// The chunks of a partitioned set that come from examining docs.
+pub fn examining_chunks(chunks: &[RagChunk]) -> Vec<RagChunk> {
+    chunks
+        .iter()
+        .filter(|c| c.kind.as_deref().is_some_and(is_examining_kind))
+        .cloned()
+        .collect()
+}
+
 /// Drop worked solutions from a turn's context when the turn touches
 /// examining material, i.e. `near_examining` is set or the chunks
 /// themselves carry an examining signal.
 ///
 /// The per-doc kind already keeps a graded assignment's own solution
 /// out. This catches the chunk-level leak: a lecture or an old exam
-/// that happens to work through the same problem. It is scoped to
+/// that happens to work through the same problem. The graded work's
+/// own chunks pose the task rather than solve it, so they pass. It is scoped to
 /// examining turns because everywhere else a worked solution is exactly
 /// what the student should get.
 pub async fn drop_solutions_near_examining(
@@ -466,8 +450,8 @@ pub fn rerank_candidate_count(top_k: i32) -> u64 {
 /// Pure (no model call) so it is unit-testable. Indices in `order` that
 /// fall outside `chunks` are skipped defensively; each chunk is emitted
 /// at most once. The chunks' `score` field (cosine similarity) is left
-/// untouched: downstream consumers (`ASSIGNMENT_SIGNAL_MIN_SCORE`, the
-/// RAG debug UI) are calibrated against cosine, not the cross-encoder
+/// untouched: downstream consumers (`min_score`, the RAG debug UI) are
+/// calibrated against cosine, not the cross-encoder
 /// logit, so re-ranking changes *order*, not the recorded score.
 fn apply_rerank_order(
     chunks: Vec<RagChunk>,
@@ -699,38 +683,18 @@ pub fn build_system_prompt_with_signals(
 /// The per-turn answer-policy addendum, or an empty string when the
 /// turn needs none.
 ///
-/// * A strong examining match gets the no-full-solution addendum. It
-///   wins over the practice one: graded work is refused whether or not
-///   the student has made an attempt.
+/// * Graded work in context gets the no-full-solution addendum. It
+///   wins over the practice one: graded work is never solved in full,
+///   whether or not the student has made an attempt.
 /// * Otherwise `practice_attempt_first` (the extraction guard saw a
 ///   practice question pasted without an attempt) gets the
 ///   published-answer-or-attempt-first addendum.
-///
-/// ASSIGNMENT_SIGNAL_MIN_SCORE applies: a low-scoring assignment match
-/// is too weak a signal to justify clamping the model into refusal mode
-/// for an otherwise legitimate question. The student asking "what's a
-/// recurrence relation" shouldn't trigger refusal just because an
-/// assignment_brief about recurrence relations exists in the course.
-pub fn policy_addendum(signal_chunks: &[RagChunk], practice_attempt_first: bool) -> String {
-    let mut filenames: Vec<String> = signal_chunks
-        .iter()
-        .filter(|c| c.score >= ASSIGNMENT_SIGNAL_MIN_SCORE)
-        .map(|c| c.filename.clone())
-        .collect();
-    if !filenames.is_empty() {
-        filenames.sort();
+pub fn policy_addendum(examining: &[RagChunk], practice_attempt_first: bool) -> String {
+    if !examining.is_empty() {
+        let mut filenames: Vec<&str> = examining.iter().map(|c| c.filename.as_str()).collect();
+        filenames.sort_unstable();
         filenames.dedup();
         return ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE.replace("{filenames}", &filenames.join(", "));
-    }
-    if !signal_chunks.is_empty() {
-        // Tangential assignment match; log so we can calibrate the
-        // threshold against real traffic. Not visible to the student.
-        tracing::debug!(
-            "rag: {} examining signal(s) below {:.2} threshold, refusal addendum suppressed (max score {:.3})",
-            signal_chunks.len(),
-            ASSIGNMENT_SIGNAL_MIN_SCORE,
-            signal_chunks.iter().map(|c| c.score).fold(f32::NEG_INFINITY, f32::max),
-        );
     }
     if practice_attempt_first {
         return PRACTICE_ATTEMPT_ADDENDUM.to_string();
@@ -1803,7 +1767,7 @@ mod tests {
     }
 
     #[test]
-    fn partition_routes_examining_kinds_into_signals() {
+    fn partition_keeps_examining_kinds_in_context_and_marks_them() {
         let chunks = vec![
             chunk("d1", "lecture1.pdf", "Lecture content.", Some("lecture")),
             chunk("d2", "lab2.pdf", "Implement function …", Some("lab_brief")),
@@ -1816,8 +1780,8 @@ mod tests {
             chunk("d4", "hemtenta.pdf", "Q1: prove …", Some("exam")),
         ];
         let r = partition_chunks(chunks, &CourseKinds::default(), true);
-        assert_eq!(r.context.len(), 1);
-        assert_eq!(r.context[0].filename, "lecture1.pdf");
+        assert_eq!(r.context.len(), 4);
+        assert_eq!(examining_chunks(&r.context), r.signals);
         assert_eq!(r.signals.len(), 3);
         let signal_files: Vec<&str> = r.signals.iter().map(|c| c.filename.as_str()).collect();
         assert!(signal_files.contains(&"lab2.pdf"));
@@ -1875,9 +1839,9 @@ mod tests {
         )];
         let kinds = CourseKinds::for_test(&[("d1", "assignment_brief")], &[]);
         let r = partition_chunks(chunks, &kinds, true);
-        assert!(r.context.is_empty());
         assert_eq!(r.signals.len(), 1);
         assert_eq!(r.signals[0].kind.as_deref(), Some("assignment_brief"));
+        assert_eq!(r.context, r.signals);
     }
 
     #[test]
@@ -1895,18 +1859,13 @@ mod tests {
 
     #[test]
     fn policy_addendum_prefers_examining_over_practice() {
-        let mut signal = chunk("d1", "lab1.pdf", "Implement …", Some("lab_brief"));
-        signal.score = 0.9;
-        let examining = policy_addendum(std::slice::from_ref(&signal), true);
+        let signal = chunk("d1", "lab1.pdf", "Implement …", Some("lab_brief"));
+        let examining = policy_addendum(&[signal], true);
         assert!(examining.contains("lab1.pdf"));
         assert!(!examining.contains("Practice question"));
 
         assert!(policy_addendum(&[], true).contains("Practice question"));
         assert!(policy_addendum(&[], false).is_empty());
-
-        // A tangential examining match does not displace the practice policy.
-        signal.score = 0.4;
-        assert!(policy_addendum(&[signal], true).contains("Practice question"));
     }
 
     #[test]
@@ -1977,12 +1936,9 @@ mod tests {
         )];
         let prompt =
             build_system_prompt_with_signals("Algorithms", &None, &context, &signals, false, None);
-        assert!(prompt.contains("Assignment match for this turn"));
+        assert!(prompt.contains("Graded work in the materials for this turn"));
         assert!(prompt.contains("assignment2.pdf"));
-        // Context text must still be there.
         assert!(prompt.contains("Recurrence relations"));
-        // Signal chunk text must NOT be there.
-        assert!(!prompt.contains("Your task is"));
     }
 
     #[test]
@@ -1995,7 +1951,7 @@ mod tests {
         )];
         let prompt =
             build_system_prompt_with_signals("Algorithms", &None, &context, &[], false, None);
-        assert!(!prompt.contains("Assignment match for this turn"));
+        assert!(!prompt.contains("Graded work in the materials"));
     }
 
     #[test]
@@ -2029,41 +1985,6 @@ mod tests {
 
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].id, "data-handling");
-    }
-
-    #[test]
-    fn build_system_prompt_skips_addendum_for_low_score_signals() {
-        // Score below the threshold -> no addendum.
-        let mut signal = chunk(
-            "d2",
-            "assignment2.pdf",
-            "Your task is …",
-            Some("assignment_brief"),
-        );
-        signal.score = ASSIGNMENT_SIGNAL_MIN_SCORE - 0.05;
-        let prompt =
-            build_system_prompt_with_signals("Algorithms", &None, &[], &[signal], false, None);
-        assert!(
-            !prompt.contains("Assignment match for this turn"),
-            "low-score signal should not trigger refusal addendum"
-        );
-    }
-
-    #[test]
-    fn build_system_prompt_keeps_addendum_for_strong_signals() {
-        let mut signal = chunk(
-            "d2",
-            "assignment2.pdf",
-            "Your task is …",
-            Some("assignment_brief"),
-        );
-        signal.score = ASSIGNMENT_SIGNAL_MIN_SCORE + 0.1;
-        let prompt =
-            build_system_prompt_with_signals("Algorithms", &None, &[], &[signal], false, None);
-        assert!(
-            prompt.contains("Assignment match for this turn"),
-            "strong-score signal should trigger refusal addendum"
-        );
     }
 
     #[test]
@@ -2131,8 +2052,8 @@ mod tests {
     #[test]
     fn apply_rerank_order_preserves_cosine_score_field() {
         // `score` must stay the cosine value (0.85 from `chunk`), not the
-        // cross-encoder logit; ASSIGNMENT_SIGNAL_MIN_SCORE and the RAG
-        // debug UI are calibrated against cosine.
+        // cross-encoder logit; `min_score` and the RAG debug UI are
+        // calibrated against cosine.
         let chunks = vec![chunk("d0", "a.pdf", "alpha", None)];
         let out = apply_rerank_order(chunks, vec![(0usize, 12.5f32)], 5);
         assert_eq!(out.len(), 1);

@@ -745,7 +745,7 @@ Qdrant point at ingest, which goes stale when a doc is reclassified.
 
 | Material | Kinds | Behaviour |
 |---|---|---|
-| Examining | `assignment_brief`, `lab_brief`, `exam` (take-home) | Text never enters context; never a full solution, attempt or not |
+| Examining | `assignment_brief`, `lab_brief`, `exam` (take-home) | Text is context, so questions about the work are answered; never a full solution, attempt or not |
 | Solution to examining work | `sample_solution` with a `solution_of` edge onto an examining doc | Withheld from context |
 | Practice | `tutorial_exercise`, `old_exam`, any other `sample_solution` | Ordinary context. A published answer is given; otherwise the answer follows an honest attempt |
 
@@ -762,23 +762,29 @@ Qdrant point at ingest, which goes stale when a doc is reclassified.
 - A `sample_solution` the linker has not paired with anything is treated
   as practice. To keep one out of chat, link it to its assignment or set
   its kind to `unknown`.
-- The extraction guard (`extraction_guard` flag) classifies intent per
-  turn: a task pasted with a request for its answer and no attempt.
-  With an examining doc matched (or recurring across turns) the
-  constraint goes on: every reply is checked and a complete solution is
-  replaced by a Socratic question. It comes off only when none of those
-  docs appears in the last five turns. Without an examining match the
-  turn gets `PRACTICE_ATTEMPT_ADDENDUM` and nothing is rewritten.
+- A turn with examining text in context gets
+  `ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE` (answer questions about the work,
+  do not solve it), whatever the retrieval score.
+- The extraction guard (`extraction_guard` flag) makes that binding. Its
+  constraint is on whenever examining text is in the turn's context (seed
+  or pulled in later by research tools / FLARE), or the same graded doc
+  recurs across turns; every reply is then checked and a complete
+  solution is replaced by a Socratic question. It comes off only when
+  none of those docs appears in the last five turns.
+- The guard's intent classifier is shown the matched graded excerpts and
+  answers two things: is this a task pasted with no attempt
+  (`is_extraction`), and is the student asking for that graded work to
+  be solved, pasted or by name (`targets_graded_work`). A pasted task
+  with nothing graded in context is practice and gets
+  `PRACTICE_ATTEMPT_ADDENDUM`; nothing is rewritten.
 - The adversarial per-chunk solution filter runs only on turns with an
   examining signal (`drop_solutions_near_examining`).
 - Teacher attention is reserved for deliberate attempts on graded work.
   Any unacknowledged `conversation_flags` row puts a conversation in the
-  review queue, so the guard writes one only when a pasted task matched
-  an examining doc (`extraction_intent_detected`, plus
-  `extraction_constraint_activated` when that armed the constraint) or a
-  reply was rewritten (`extraction_rewrote`). The practice nudge, a
-  constraint armed by proximity alone, and a constraint coming off are
-  logged to the application log only.
+  review queue, so the guard writes one only when the student asked for
+  graded work to be solved (`extraction_intent_detected`) or a reply was
+  rewritten (`extraction_rewrote`). The practice nudge and the
+  constraint going on and off are logged to the application log only.
 
 ## Terraform
 

@@ -145,12 +145,13 @@ persisted on the message and rendered above the assistant bubble.
 Two independent classifier paths sit around the chat hot path:
 
 - **Extraction guard** (gated by `extraction_guard`): per-turn intent
-  classifier before generation ("a task pasted with a request for its
-  answer and no attempt"). What happens next depends on the document
-  kinds retrieval matched. Graded work (assignment, lab, take-home exam)
-  arms an output check after generation and a Socratic rewriter on
-  `gpt-oss-120b` when it trips, with KG-driven multi-turn proximity
-  tracking; an attempt never lifts it. Practice material gets a prompt
+  classifier before generation, shown whatever graded work retrieval
+  matched. What happens next depends on the document kinds in context.
+  Graded work (assignment, lab, take-home exam) can be asked about, but
+  any turn that retrieves it arms an output check after generation and
+  a Socratic rewriter on `gpt-oss-120b` when it trips, with KG-driven
+  multi-turn proximity tracking; an attempt never lifts it. A request
+  to have graded work solved is flagged for the teacher. Practice material gets a prompt
   addendum instead: a published answer is given, otherwise the answer
   follows an honest attempt. Every decision is appended to
   `conversation_flags` so teachers can audit activations from the

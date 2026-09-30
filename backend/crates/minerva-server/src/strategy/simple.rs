@@ -143,11 +143,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
         .await
         .unwrap_or_default();
-    // Sources surfaced to the client include both context + signals; a
-    // student should see *that* an assignment matched even though its
-    // text is withheld from the model.
-    let displayed = rag.all();
-    let client_chunks = common::chunks_for_client(&displayed, &hidden);
+    let client_chunks = common::chunks_for_client(&rag.context, &hidden);
     let chunks_json = serde_json::to_value(&client_chunks).ok();
 
     let mut system = common::build_system_prompt_with_signals(

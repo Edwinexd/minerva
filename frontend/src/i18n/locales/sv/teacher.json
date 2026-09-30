@@ -216,7 +216,7 @@
     "correctionPrefixWithCategories": "Rättelse (ang. {{categories}}): ",
     "correctionPrefix": "Rättelse: ",
     "flagKind": {
-      "extraction_intent_detected": "Intent-klassificeraren markerade denna tur",
+      "extraction_intent_detected": "Bad om lösning på examinerande uppgift",
       "extraction_constraint_activated": "Extraktionsskydd aktiverat",
       "extraction_rewrote": "Svaret omskrevs av skyddet",
       "extraction_engagement_refused": "Studenten engagerade sig inte i den sokratiska frågan",

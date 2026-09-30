@@ -4,12 +4,14 @@
 //! policy, which turns on what kind of material the turn is about:
 //!
 //! * **Examining work** (a graded assignment, lab, or take-home exam):
-//!   never a full solution. The constraint goes on when the student
-//!   pastes the task and retrieval matches it, or when the same graded
-//!   doc keeps turning up across turns; while it is on, every reply is
-//!   checked and a complete solution is swapped for a Socratic rewrite.
-//!   An attempt does not lift it. It comes off once the conversation
-//!   has left that work behind.
+//!   its text is ordinary context, so questions about it get answered,
+//!   but never a full solution. The constraint is on whenever graded
+//!   work is in the turn's context or keeps turning up across turns;
+//!   while it is on, every reply is checked and a complete solution is
+//!   swapped for a Socratic rewrite. An attempt does not lift it. It
+//!   comes off once the conversation has left that work behind. A
+//!   student asking for the graded work to be solved is flagged for
+//!   the teacher.
 //! * **Practice material** (exercises, old exams): a published answer
 //!   is given; otherwise the answer follows an honest attempt. No
 //!   constraint and no rewrite: the turn gets a prompt addendum
@@ -20,8 +22,9 @@
 //! Two entry points the strategies call:
 //!
 //! 1. `evaluate_for_turn`; runs after RAG retrieval, before
-//!    generation. Runs the intent classifier, computes "graded work
-//!    near this turn" from RAG signals + KG `applied_in` partners,
+//!    generation. Runs the intent classifier (shown the graded work
+//!    retrieval matched), computes "graded work near this turn" from
+//!    RAG signals + KG `applied_in` partners,
 //!    slides the recent-turns window in `kg_state`, and decides which
 //!    of the two policies (if either) applies. Persists the updated
 //!    `kg_state`.
@@ -55,27 +58,20 @@ use crate::strategy::common::RagChunk;
 // We log an append-only event-stream of guard decisions to
 // `conversation_flags`. Every unacknowledged row puts the conversation
 // in the teacher's review queue, so a row is written only for a
-// deliberate attempt on graded work: a pasted examining task, or a
-// reply that had to be rewritten. The practice nudge, a constraint
-// armed by proximity alone, and a constraint coming off are routine
-// and go to the application log instead.
+// deliberate attempt on graded work: a request to have it solved, or a
+// reply that had to be rewritten. The practice nudge and the
+// constraint going on and off are routine (it is on whenever graded
+// work is in context) and go to the application log instead.
 // Each row records ONE classifier verdict or
 // state transition; the dashboard reconstructs the lifecycle by
-// reading them oldest-first. Three kinds, all turn-indexed so the
+// reading them oldest-first. Two kinds, both turn-indexed so the
 // per-turn UI on the conversation detail page can align them.
 
-/// The student pasted a graded task and asked for its answer with no
-/// attempt: the intent classifier said `is_extraction = true` and
-/// retrieval matched an examining doc. Logged on every such turn,
-/// independent of whether the constraint was already active.
+/// The student asked for graded work to be solved: the intent
+/// classifier, shown the graded work retrieval matched this turn, said
+/// the latest message asks for its solution (pasted or by name).
+/// Logged on every such turn.
 pub const INTENT_DETECTED_FLAG: &str = "extraction_intent_detected";
-
-/// Constraint flipped from off to on this turn because of a pasted
-/// graded task (see above); the metadata records whether proximity
-/// had tripped as well.
-/// This is the "the guard is now constraining this conversation"
-/// event the teacher dashboard primarily badges.
-pub const CONSTRAINT_ACTIVATED_FLAG: &str = "extraction_constraint_activated";
 
 /// Output check tripped during `intercept_reply` and we replaced
 /// the streamed assistant text with a Socratic rewrite. Distinct
@@ -148,9 +144,10 @@ pub struct GuardDecision {
     /// `is_extraction = false`.
     pub intent: IntentVerdict,
     /// Whether the examining constraint applies to *this* turn's
-    /// generation. True iff this turn is flagged (see
-    /// `flagged_this_turn`) OR an earlier turn was and the graded work
-    /// it matched is still inside the recent-turns window.
+    /// generation. True iff graded work is in this turn's context, OR
+    /// the turn is flagged (see `flagged_this_turn`), OR an earlier
+    /// turn armed it and that graded work is still inside the
+    /// recent-turns window.
     ///
     /// Controls the post-generation `intercept_reply` output check.
     /// NOT the right signal for "should the thinking stream + sources
@@ -159,10 +156,11 @@ pub struct GuardDecision {
     /// subsequent benign turn into the placeholder UX. Use
     /// `flagged_this_turn` for the live-suppression decision instead.
     pub constraint_active: bool,
-    /// Whether THIS specific turn put graded work in scope: a pasted
-    /// task that retrieval matched to an examining doc, OR the
-    /// multi-turn proximity threshold tripping on this turn's RAG.
-    /// Excludes the sticky `prev_active` carry-over.
+    /// Whether THIS specific turn is a push toward a graded solution:
+    /// the student asked for graded work to be solved, OR the
+    /// multi-turn proximity threshold tripped on this turn's RAG.
+    /// Excludes the sticky `prev_active` carry-over and the mere
+    /// presence of graded work in context.
     ///
     /// The right gate for hiding the research transcript / sources
     /// panel from the student on a guarded turn: a single past
@@ -174,7 +172,7 @@ pub struct GuardDecision {
     /// looking turn).
     pub flagged_this_turn: bool,
     /// The student pasted a task and asked for its answer without an
-    /// attempt, and nothing graded is in scope: practice material.
+    /// attempt, and nothing graded is in context: practice material.
     /// Drives the attempt-first prompt addendum; never a rewrite.
     pub practice_attempt_first: bool,
     /// Excerpts the output check feeds the model so it can compare
@@ -186,6 +184,19 @@ pub struct GuardDecision {
     /// flag-row metadata so the dashboard knows which assignments
     /// the guard tagged.
     pub in_scope_assignment_doc_ids: Vec<Uuid>,
+}
+
+impl GuardDecision {
+    /// Put the reply check on for graded work that entered the context
+    /// after `evaluate_for_turn` ran (research-tool retrievals), and
+    /// hand it that work to compare the reply against.
+    pub fn arm_for_examining(&mut self, examining: &[RagChunk]) {
+        if examining.is_empty() {
+            return;
+        }
+        self.constraint_active = true;
+        self.assignment_excerpts = examining.iter().map(|c| c.text.clone()).collect();
+    }
 }
 
 // ── public API ─────────────────────────────────────────────────────
@@ -227,21 +238,22 @@ pub async fn evaluate_for_turn(
     // assumption), so there is nothing to append; doing so would
     // duplicate the latest prompt in the classifier window.
     let recent_user_messages = recent_user_messages(history, INTENT_HISTORY_TURNS);
-    let intent =
-        extraction_guard::classify_intent(http, util, db, course_id, &recent_user_messages).await;
-    tracing::info!(
-        "extraction_guard: turn={} conversation={} intent.is_extraction={} intent.rationale={:?}",
-        turn_index,
-        conversation_id,
-        intent.is_extraction,
-        intent.rationale
-    );
-
+    let graded_work = graded_work_excerpts(rag_signals);
+    let intent = extraction_guard::classify_intent(
+        http,
+        util,
+        db,
+        course_id,
+        &recent_user_messages,
+        &graded_work,
+    )
+    .await;
     tracing::info!(
         target: "extraction_guard",
         conversation_id = %conversation_id,
         turn = turn_index,
         is_extraction = intent.is_extraction,
+        targets_graded_work = intent.targets_graded_work,
         rationale = %intent.rationale,
         "intent verdict",
     );
@@ -281,12 +293,9 @@ pub async fn evaluate_for_turn(
     }
     let assignments_near_vec: Vec<Uuid> = assignments_near.iter().copied().collect();
 
-    // A direct match: retrieval put an examining doc's own text next
-    // to the student's message with a score high enough to mean the
-    // message is that task, not merely a question on the same topic.
+    // The graded docs in this turn's context.
     let matched_examining: Vec<Uuid> = rag_signals
         .iter()
-        .filter(|s| s.score >= super::common::ASSIGNMENT_SIGNAL_MIN_SCORE)
         .filter_map(|s| Uuid::parse_str(&s.document_id).ok())
         .collect::<HashSet<_>>()
         .into_iter()
@@ -297,19 +306,20 @@ pub async fn evaluate_for_turn(
     let proximity_active = proximity_threshold_tripped(&state);
     let prev_active = state.constraint_active;
 
-    // Graded work is in scope this turn. A pasted task with no
-    // examining match is practice material and takes the other path.
-    let deliberate_attempt = intent.is_extraction && !matched_examining.is_empty();
+    // The student is asking for graded work to be solved: the one
+    // thing the teacher wants to hear about. Recorded on every such
+    // turn, not just the first one in a streak.
+    let deliberate_attempt = intent.targets_graded_work;
     let flagged_this_turn = deliberate_attempt || proximity_active;
-    let practice_attempt_first = intent.is_extraction && !flagged_this_turn;
+    // A pasted task with no graded work in context is practice
+    // material and takes the other path.
+    let practice_attempt_first = intent.is_extraction && matched_examining.is_empty();
 
-    // A pasted task that matched graded work is the deliberate attempt
-    // the teacher wants to hear about. Recorded on every such turn,
-    // not just the first one in a streak.
     if deliberate_attempt {
         let metadata = serde_json::json!({
             "intent": {
-                "is_extraction": true,
+                "is_extraction": intent.is_extraction,
+                "targets_graded_work": true,
                 "rationale": intent.rationale,
             },
             "matched_assignment_doc_ids": matched_examining,
@@ -328,11 +338,13 @@ pub async fn evaluate_for_turn(
     // An attempt does not lift the constraint: graded work is never
     // solved in full. What ends it is distance, i.e. none of the docs
     // that set it appearing anywhere in the recent-turns window.
-    let constraint_active = flagged_this_turn || (prev_active && scope_in_window(&state));
+    let constraint_active = !matched_examining.is_empty()
+        || flagged_this_turn
+        || (prev_active && scope_in_window(&state));
 
     if constraint_active && !prev_active {
         // Prefer the assignments in the proximity window if that's
-        // why we tripped; else the ones this turn matched.
+        // why we tripped; else the ones in this turn's context.
         state.constraint_active = true;
         state.constraint_assignment_doc_ids = if proximity_active {
             proximity_winners(&state)
@@ -340,28 +352,6 @@ pub async fn evaluate_for_turn(
             matched_examining
         };
         state.constraint_lifted_at_turn = None;
-
-        if deliberate_attempt {
-            let metadata = serde_json::json!({
-                "cause": if proximity_active { "intent_and_proximity" } else { "intent" },
-                "intent": {
-                    "is_extraction": true,
-                    "rationale": intent.rationale,
-                },
-                "proximity_active": proximity_active,
-                "constraint_assignment_doc_ids": state.constraint_assignment_doc_ids,
-                "recent_turns": state.recent_turns,
-            });
-            log_flag(
-                db,
-                conversation_id,
-                CONSTRAINT_ACTIVATED_FLAG,
-                turn_index,
-                &intent.rationale,
-                &metadata,
-            )
-            .await;
-        }
     } else if prev_active && !constraint_active {
         state.constraint_active = false;
         state.constraint_lifted_at_turn = Some(turn_index);
@@ -627,6 +617,24 @@ fn proximity_threshold_tripped(state: &KgState) -> bool {
         }
     }
     counts.values().any(|&n| n >= PROXIMITY_THRESHOLD)
+}
+
+/// How much of the matched graded work the intent classifier is shown.
+const GRADED_WORK_EXCERPTS: usize = 3;
+const GRADED_WORK_EXCERPT_CHARS: usize = 800;
+
+/// The best-matching graded chunks of the turn, labelled by filename,
+/// for the intent classifier to judge the student's request against.
+fn graded_work_excerpts(rag_signals: &[RagChunk]) -> Vec<String> {
+    let mut best: Vec<&RagChunk> = rag_signals.iter().collect();
+    best.sort_by(|a, b| b.score.total_cmp(&a.score));
+    best.into_iter()
+        .take(GRADED_WORK_EXCERPTS)
+        .map(|c| {
+            let text: String = c.text.chars().take(GRADED_WORK_EXCERPT_CHARS).collect();
+            format!("[{}] {}", c.filename, text)
+        })
+        .collect()
 }
 
 /// True while any doc the constraint was set for still appears in the

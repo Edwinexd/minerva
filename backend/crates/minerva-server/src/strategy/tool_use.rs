@@ -224,7 +224,7 @@ pub async fn run(
     //    ensures KG-derived assignment partners enter the sliding-
     //    window `assignments_near` set. (The intent classifier is
     //    unaffected ; it reads recent user messages, not RAG.)
-    let guard_decision = super::extraction_guard::evaluate_for_turn(
+    let mut guard_decision = super::extraction_guard::evaluate_for_turn(
         &ctx.db,
         &http_client,
         &ctx.utility,
@@ -354,6 +354,14 @@ pub async fn run(
     } else {
         &research.transcript
     };
+    // The research tools may have pulled in graded work the seed
+    // retrieval did not. The answer policy follows what the writeup
+    // model is actually shown, so both the addendum and the guard's
+    // reply check are taken from the final chunk set.
+    let examining = common::examining_chunks(&research.chunks);
+    if let Some(decision) = guard_decision.as_mut() {
+        decision.arm_for_examining(&examining);
+    }
     let mut usage = std::mem::take(&mut research.usage);
     let writeup_text = match writeup::run(
         &ctx,
@@ -361,7 +369,7 @@ pub async fn run(
         writeup_transcript,
         &research.research_summary,
         &common::policy_addendum(
-            &rag.signals,
+            &examining,
             super::extraction_guard::practice_attempt_first(&guard_decision),
         ),
         &tx,
@@ -418,9 +426,7 @@ pub async fn run(
     let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
         .await
         .unwrap_or_default();
-    let mut displayed = research.chunks.clone();
-    displayed.extend(rag.signals.iter().cloned());
-    let client_chunks = common::chunks_for_client(&displayed, &hidden);
+    let client_chunks = common::chunks_for_client(&research.chunks, &hidden);
     let chunks_json = serde_json::to_value(&client_chunks).ok();
 
     // Persist the research-phase artefacts alongside the assistant
@@ -458,7 +464,7 @@ pub async fn run(
         &final_text,
         chunks_json.as_ref(),
         &usage,
-        !research.chunks.is_empty() || !rag.signals.is_empty(),
+        !research.chunks.is_empty(),
         started_at.elapsed().as_millis() as i64,
         retrieval_count,
         thinking_transcript,

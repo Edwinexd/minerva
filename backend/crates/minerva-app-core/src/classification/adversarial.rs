@@ -3,8 +3,8 @@
 //! the prompt context, on turns that touch examining material (see
 //! `strategy::common::drop_solutions_near_examining`).
 //!
-//! The per-doc kind is the primary defense: a graded assignment's text
-//! is never context, and neither is a sample solution linked to one.
+//! The per-doc kind is the primary defense: a sample solution linked to
+//! graded work is never context.
 //! This layer catches the chunk-level leak inside otherwise-safe docs,
 //! e.g. a lecture or an old exam that works through the same problem.
 //! It stays off for every other turn, where a worked solution is what

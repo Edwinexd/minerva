@@ -93,11 +93,10 @@ impl DocumentKind {
     }
 }
 
-/// Kinds that examine the student. Their chunks stay in Qdrant as a
-/// detection signal (so the chat path can recognise that a student's
-/// input matches an assignment), but the chunk *text* never lands in
-/// the system prompt, and the extraction guard never lets a full
-/// solution to them through.
+/// Kinds that examine the student. Their text is ordinary context, so
+/// questions about the work get answered, but a turn that retrieves
+/// them runs under the no-full-solution policy and the extraction
+/// guard never lets a full solution to them through.
 pub fn is_examining_kind(kind: &str) -> bool {
     minerva_db::queries::documents::EXAMINING_KINDS.contains(&kind)
 }

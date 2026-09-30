@@ -132,8 +132,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // Kind partition and, on a turn that touches examining material,
     // the adversarial solution filter. Both are part of the KG bundle
     // and pass everything through when KG is gated off. The loop
-    // re-partitions its accumulator every iteration, so the signals
-    // stay in the list rather than being split off here.
+    // re-partitions its accumulator every iteration, which is where
+    // the signals are read.
     let kinds = common::CourseKinds::load(&ctx.db, ctx.course_id, ctx.kg_enabled).await;
     let seed = common::partition_chunks(initial_chunks_raw, &kinds, ctx.kg_enabled);
     let near_examining = !seed.signals.is_empty();
@@ -146,7 +146,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         false,
     )
     .await
-    .all();
+    .context;
 
     // Graph-aware enrichment: pull representative chunks from each
     // top hit's KG partners (part_of_unit + applied_in dst). Same
@@ -191,7 +191,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // reply itself is still caught. None when the feature flag is
     // off; Some(_) otherwise.
     let guard_partition = common::partition_chunks(initial_chunks.clone(), &kinds, ctx.kg_enabled);
-    let guard_decision = super::extraction_guard::evaluate_for_turn(
+    let mut guard_decision = super::extraction_guard::evaluate_for_turn(
         &ctx.db,
         &http_client,
         &ctx.utility,
@@ -298,7 +298,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 near_examining,
             )
             .await
-            .all();
+            .context;
             // Graph expansion on the mid-stream batch too; a
             // FLARE retrieval is itself a small RAG lookup, so we
             // enrich it the same way as the initial seed. Without
@@ -351,6 +351,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // fires: rewrites the assistant reply into a Socratic version,
     // emits an SSE `rewrite` event so the frontend swaps the
     // displayed message, and logs a `conversation_flag` row.
+    // Mid-stream retrievals may have pulled in graded work the seed
+    // did not; the reply check follows what the model was shown.
+    if let Some(decision) = guard_decision.as_mut() {
+        decision.arm_for_examining(&common::examining_chunks(&output.all_chunks));
+    }
     let final_text = super::extraction_guard::intercept_reply(
         &ctx.db,
         &http_client,

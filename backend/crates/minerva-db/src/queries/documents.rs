@@ -804,8 +804,8 @@ pub async fn clear_kind_lock(db: &PgPool, doc_id: Uuid) -> Result<bool, sqlx::Er
 }
 
 /// Kinds that examine the student: a graded assignment, a graded lab, or
-/// an exam they are sitting now. The chat path never puts their text in
-/// context and never gives a full solution to them. Everything else,
+/// an exam they are sitting now. The chat path answers questions about
+/// them but never gives a full solution to them. Everything else,
 /// `old_exam` and `tutorial_exercise` included, is practice material.
 pub const EXAMINING_KINDS: &[&str] = &["assignment_brief", "lab_brief", "exam"];
 

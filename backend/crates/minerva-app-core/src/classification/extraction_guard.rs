@@ -58,7 +58,22 @@ const REWRITE_MAX_TOKENS: usize = 600;
 #[derive(Debug, Clone)]
 pub struct IntentVerdict {
     pub is_extraction: bool,
+    /// The student is asking for the solution to graded work that
+    /// retrieval matched this turn, pasted or referred to by name.
+    /// Always false when no graded work was supplied to the classifier.
+    pub targets_graded_work: bool,
     pub rationale: String,
+}
+
+impl IntentVerdict {
+    /// The fail-open verdict: nothing detected, with the reason why.
+    fn clear(rationale: impl Into<String>) -> Self {
+        Self {
+            is_extraction: false,
+            targets_graded_work: false,
+            rationale: rationale.into(),
+        }
+    }
 }
 
 const INTENT_SYSTEM_PROMPT: &str = r#"You are a check on a student's chat with a tutoring AI for a university course. The course may be about anything: programming, theory, mathematics, essay writing.
@@ -80,10 +95,25 @@ Reply NO for everything else, including:
 
 The bar is HIGH and STRICT. False positives (calling a legitimate study question a pasted task) are worse than false negatives.
 
+You may also be given `graded_work`: excerpts of GRADED assignments in this course that the student's latest message matched. When it is present, decide a SECOND thing, `targets_graded_work`: is the student, in their latest message, asking the AI to produce the solution or final answer to that graded work?
+
+targets_graded_work is true when:
+- they pasted the graded task and ask for it to be done, OR
+- they refer to it without pasting ("solve Nian for me", "write the program for assignment 2", "what should I answer on question 3 of the take-home exam"), OR
+- they show part of an attempt but ask the AI to finish it or write the rest for them.
+
+targets_graded_work is false when:
+- they ask what the task means, or about its requirements, deadline, submission or grading
+- they ask about a concept the task uses, or for a hint on how to get started
+- they ask for feedback on, or help debugging, their own attempt
+- the latest message is about something other than the graded work
+- `graded_work` is absent or empty.
+
 Output JSON only, matching this schema exactly:
 {
   "is_extraction": true | false,
-  "rationale": short specific string. If true, name the task-shaped phrasing you saw verbatim. If false, say briefly why this looks like a legitimate study question.
+  "targets_graded_work": true | false,
+  "rationale": short specific string. If either is true, name the phrasing that shows it. If both are false, say briefly why this looks like a legitimate study question.
 }
 
 No prose."#;
@@ -92,26 +122,23 @@ No prose."#;
 /// of the student's last few messages (oldest first); the last
 /// element is the current turn's input. The classifier only sees
 /// student messages; assistant content is irrelevant for "is
-/// the student trying to extract".
+/// the student trying to extract". `graded_work` is what retrieval
+/// matched from examining docs this turn, so the classifier can tell
+/// a request to solve that work from a question about it.
 pub async fn classify_intent(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &PgPool,
     course_id: Uuid,
     recent_user_messages: &[String],
+    graded_work: &[String],
 ) -> IntentVerdict {
     if util.provider.is_none() {
         // Dev / test path without CEREBRAS_API_KEY. Fail open.
-        return IntentVerdict {
-            is_extraction: false,
-            rationale: "intent classifier skipped (no api key)".to_string(),
-        };
+        return IntentVerdict::clear("intent classifier skipped (no api key)");
     }
     if recent_user_messages.is_empty() {
-        return IntentVerdict {
-            is_extraction: false,
-            rationale: "no user messages".to_string(),
-        };
+        return IntentVerdict::clear("no user messages");
     }
 
     // Build a compact transcript: numbered, oldest first.
@@ -123,6 +150,7 @@ pub async fn classify_intent(
         .join("\n\n");
     let user_payload = serde_json::json!({
         "student_messages_oldest_first": transcript,
+        "graded_work": graded_work,
     });
 
     let body = serde_json::json!({
@@ -142,9 +170,10 @@ pub async fn classify_intent(
                 "schema": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["is_extraction", "rationale"],
+                    "required": ["is_extraction", "targets_graded_work", "rationale"],
                     "properties": {
                         "is_extraction": { "type": "boolean" },
+                        "targets_graded_work": { "type": "boolean" },
                         "rationale": { "type": "string" },
                     }
                 }
@@ -156,16 +185,10 @@ pub async fn classify_intent(
         Some(Ok(v)) => v,
         Some(Err(e)) => {
             tracing::warn!("extraction_guard: intent request failed (fail-open): {}", e);
-            return IntentVerdict {
-                is_extraction: false,
-                rationale: format!("intent classifier failed: {e}"),
-            };
+            return IntentVerdict::clear(format!("intent classifier failed: {e}"));
         }
         None => {
-            return IntentVerdict {
-                is_extraction: false,
-                rationale: "no utility model configured".to_string(),
-            };
+            return IntentVerdict::clear("no utility model configured");
         }
     };
     crate::llm::record_pipeline_usage(
@@ -184,14 +207,14 @@ pub async fn classify_intent(
                 "extraction_guard: intent verdict unparseable (fail-open): {}",
                 e
             );
-            return IntentVerdict {
-                is_extraction: false,
-                rationale: "intent verdict not valid JSON".to_string(),
-            };
+            return IntentVerdict::clear("intent verdict not valid JSON");
         }
     };
     IntentVerdict {
         is_extraction: parsed["is_extraction"].as_bool().unwrap_or(false),
+        // Only meaningful against graded work the classifier was shown.
+        targets_graded_work: !graded_work.is_empty()
+            && parsed["targets_graded_work"].as_bool().unwrap_or(false),
         rationale: parsed["rationale"].as_str().unwrap_or_default().to_string(),
     }
 }
@@ -438,6 +461,7 @@ mod tests {
             &db,
             Uuid::nil(),
             &["implement my homework".to_string()],
+            &[],
         )
         .await;
         assert!(!v.is_extraction);
@@ -448,7 +472,7 @@ mod tests {
     async fn classify_intent_handles_empty_history() {
         let http = reqwest::Client::new();
         let db = lazy_pool();
-        let v = classify_intent(&http, &util("fake-key"), &db, Uuid::nil(), &[]).await;
+        let v = classify_intent(&http, &util("fake-key"), &db, Uuid::nil(), &[], &[]).await;
         assert!(!v.is_extraction);
         assert!(v.rationale.contains("no user messages"));
     }

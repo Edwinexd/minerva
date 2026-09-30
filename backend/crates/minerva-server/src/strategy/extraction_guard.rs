@@ -53,20 +53,26 @@ use crate::strategy::common::RagChunk;
 // ── flag kind constants ────────────────────────────────────────────
 //
 // We log an append-only event-stream of guard decisions to
-// `conversation_flags`. Each row records ONE classifier verdict or
+// `conversation_flags`. Every unacknowledged row puts the conversation
+// in the teacher's review queue, so a row is written only for a
+// deliberate attempt on graded work: a pasted examining task, or a
+// reply that had to be rewritten. The practice nudge, a constraint
+// armed by proximity alone, and a constraint coming off are routine
+// and go to the application log instead.
+// Each row records ONE classifier verdict or
 // state transition; the dashboard reconstructs the lifecycle by
-// reading them oldest-first. Four kinds, all turn-indexed so the
+// reading them oldest-first. Three kinds, all turn-indexed so the
 // per-turn UI on the conversation detail page can align them.
 
-/// Intent classifier returned `is_extraction = true` for this turn:
-/// a task pasted with a request for its answer and no attempt. Logged
-/// for graded and practice material alike (the metadata says which),
-/// and independent of whether the constraint was already active.
+/// The student pasted a graded task and asked for its answer with no
+/// attempt: the intent classifier said `is_extraction = true` and
+/// retrieval matched an examining doc. Logged on every such turn,
+/// independent of whether the constraint was already active.
 pub const INTENT_DETECTED_FLAG: &str = "extraction_intent_detected";
 
-/// Constraint flipped from off to on this turn: graded work is in
-/// scope. Cause may be intent OR proximity OR both; the metadata
-/// records which.
+/// Constraint flipped from off to on this turn because of a pasted
+/// graded task (see above); the metadata records whether proximity
+/// had tripped as well.
 /// This is the "the guard is now constraining this conversation"
 /// event the teacher dashboard primarily badges.
 pub const CONSTRAINT_ACTIVATED_FLAG: &str = "extraction_constraint_activated";
@@ -79,11 +85,6 @@ pub const CONSTRAINT_ACTIVATED_FLAG: &str = "extraction_constraint_activated";
 /// intent classifier saying no, or the intent classifier flagged
 /// the input but the model handled it Socratically anyway).
 pub const REWROTE_FLAG: &str = "extraction_rewrote";
-
-/// The constraint came off because the conversation moved away from
-/// the graded work that set it. Pairs with the `_activated` flag from
-/// earlier in the conversation to bracket the lifecycle.
-pub const CONSTRAINT_LIFTED_FLAG: &str = "extraction_constraint_lifted";
 
 /// How many recent turns to keep in `kg_state.recent_turns` for the
 /// multi-turn proximity check, and how many turns away from the graded
@@ -298,22 +299,20 @@ pub async fn evaluate_for_turn(
 
     // Graded work is in scope this turn. A pasted task with no
     // examining match is practice material and takes the other path.
-    let flagged_this_turn =
-        (intent.is_extraction && !matched_examining.is_empty()) || proximity_active;
+    let deliberate_attempt = intent.is_extraction && !matched_examining.is_empty();
+    let flagged_this_turn = deliberate_attempt || proximity_active;
     let practice_attempt_first = intent.is_extraction && !flagged_this_turn;
 
-    // Per-turn intent classifier flag. Append-only event log:
-    // recorded whenever the classifier returns yes, *independent*
-    // of whether the constraint was already active. Lets the
-    // teacher see every turn the classifier flagged, not just the
-    // first one in a streak.
-    if intent.is_extraction {
+    // A pasted task that matched graded work is the deliberate attempt
+    // the teacher wants to hear about. Recorded on every such turn,
+    // not just the first one in a streak.
+    if deliberate_attempt {
         let metadata = serde_json::json!({
             "intent": {
                 "is_extraction": true,
                 "rationale": intent.rationale,
             },
-            "examining": flagged_this_turn,
+            "matched_assignment_doc_ids": matched_examining,
         });
         log_flag(
             db,
@@ -342,55 +341,30 @@ pub async fn evaluate_for_turn(
         };
         state.constraint_lifted_at_turn = None;
 
-        let cause = if intent.is_extraction && proximity_active {
-            "intent_and_proximity"
-        } else if intent.is_extraction {
-            "intent"
-        } else {
-            "proximity"
-        };
-        let rationale = if intent.is_extraction {
-            intent.rationale.clone()
-        } else {
-            format!(
-                "proximity threshold tripped; assignment(s) recurred in recent turns: {:?}",
-                state.constraint_assignment_doc_ids
+        if deliberate_attempt {
+            let metadata = serde_json::json!({
+                "cause": if proximity_active { "intent_and_proximity" } else { "intent" },
+                "intent": {
+                    "is_extraction": true,
+                    "rationale": intent.rationale,
+                },
+                "proximity_active": proximity_active,
+                "constraint_assignment_doc_ids": state.constraint_assignment_doc_ids,
+                "recent_turns": state.recent_turns,
+            });
+            log_flag(
+                db,
+                conversation_id,
+                CONSTRAINT_ACTIVATED_FLAG,
+                turn_index,
+                &intent.rationale,
+                &metadata,
             )
-        };
-        let metadata = serde_json::json!({
-            "cause": cause,
-            "intent": {
-                "is_extraction": intent.is_extraction,
-                "rationale": intent.rationale,
-            },
-            "proximity_active": proximity_active,
-            "constraint_assignment_doc_ids": state.constraint_assignment_doc_ids,
-            "recent_turns": state.recent_turns,
-        });
-        log_flag(
-            db,
-            conversation_id,
-            CONSTRAINT_ACTIVATED_FLAG,
-            turn_index,
-            &rationale,
-            &metadata,
-        )
-        .await;
+            .await;
+        }
     } else if prev_active && !constraint_active {
         state.constraint_active = false;
         state.constraint_lifted_at_turn = Some(turn_index);
-        let metadata = serde_json::json!({
-            "lifted_assignment_doc_ids": state.constraint_assignment_doc_ids,
-        });
-        log_flag(
-            db,
-            conversation_id,
-            CONSTRAINT_LIFTED_FLAG,
-            turn_index,
-            "conversation moved away from the graded work",
-            &metadata,
-        )
-        .await;
     }
 
     tracing::info!(

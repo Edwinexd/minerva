@@ -771,6 +771,14 @@ Qdrant point at ingest, which goes stale when a doc is reclassified.
   turn gets `PRACTICE_ATTEMPT_ADDENDUM` and nothing is rewritten.
 - The adversarial per-chunk solution filter runs only on turns with an
   examining signal (`drop_solutions_near_examining`).
+- Teacher attention is reserved for deliberate attempts on graded work.
+  Any unacknowledged `conversation_flags` row puts a conversation in the
+  review queue, so the guard writes one only when a pasted task matched
+  an examining doc (`extraction_intent_detected`, plus
+  `extraction_constraint_activated` when that armed the constraint) or a
+  reply was rewritten (`extraction_rewrote`). The practice nudge, a
+  constraint armed by proximity alone, and a constraint coming off are
+  logged to the application log only.
 
 ## Terraform
 

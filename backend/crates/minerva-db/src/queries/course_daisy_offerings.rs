@@ -25,6 +25,10 @@ pub struct DaisyOfferingRow {
     pub info_url: Option<String>,
     pub syllabus_url: Option<String>,
     pub unit: Option<String>,
+    /// First and last day of the offering's period in Daisy. NULL when
+    /// Daisy lists no period, or the offering predates the date sync.
+    pub start_date: Option<chrono::NaiveDate>,
+    pub end_date: Option<chrono::NaiveDate>,
     pub last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -38,7 +42,8 @@ pub async fn list_by_course(
     sqlx::query_as!(
         DaisyOfferingRow,
         r#"SELECT momenttillf_id, course_id, course_code, name, semester_label,
-                  info_url, syllabus_url, unit, last_synced_at, created_at
+                  info_url, syllabus_url, unit, start_date, end_date,
+                  last_synced_at, created_at
            FROM course_daisy_offerings
            WHERE course_id = $1
            ORDER BY created_at ASC, momenttillf_id ASC"#,
@@ -59,7 +64,8 @@ pub async fn find_by_momenttillf_id(
     sqlx::query_as!(
         DaisyOfferingRow,
         r#"SELECT momenttillf_id, course_id, course_code, name, semester_label,
-                  info_url, syllabus_url, unit, last_synced_at, created_at
+                  info_url, syllabus_url, unit, start_date, end_date,
+                  last_synced_at, created_at
            FROM course_daisy_offerings
            WHERE momenttillf_id = $1"#,
         momenttillf_id,

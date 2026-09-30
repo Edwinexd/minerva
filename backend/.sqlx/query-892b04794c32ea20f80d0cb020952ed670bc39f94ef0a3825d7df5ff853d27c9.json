@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "DELETE FROM daisy_pending_imports WHERE id = $1\n        RETURNING id, momenttillf_id, course_code, name, semester_label,\n                  daisy_info_url, daisy_syllabus_url, daisy_unit,\n                  participants AS \"participants!: JsonValue\",\n                  existing_course_id, first_seen_at, last_seen_at",
+  "query": "INSERT INTO daisy_pending_imports\n            (momenttillf_id, course_code, name, semester_label,\n             daisy_info_url, daisy_syllabus_url, daisy_unit,\n             participants, existing_course_id,\n             daisy_start_date, daisy_end_date)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n        ON CONFLICT (momenttillf_id) DO UPDATE SET\n            course_code = EXCLUDED.course_code,\n            name = EXCLUDED.name,\n            semester_label = EXCLUDED.semester_label,\n            daisy_info_url = EXCLUDED.daisy_info_url,\n            daisy_syllabus_url = EXCLUDED.daisy_syllabus_url,\n            daisy_unit = EXCLUDED.daisy_unit,\n            daisy_start_date = EXCLUDED.daisy_start_date,\n            daisy_end_date = EXCLUDED.daisy_end_date,\n            participants = EXCLUDED.participants,\n            existing_course_id = EXCLUDED.existing_course_id,\n            last_seen_at = NOW()\n        RETURNING id, momenttillf_id, course_code, name, semester_label,\n                  daisy_info_url, daisy_syllabus_url, daisy_unit,\n                  daisy_start_date, daisy_end_date,\n                  participants AS \"participants!: JsonValue\",\n                  existing_course_id, first_seen_at, last_seen_at",
   "describe": {
     "columns": [
       {
@@ -93,6 +93,28 @@
       },
       {
         "ordinal": 8,
+        "name": "daisy_start_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "daisy_start_date"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "daisy_end_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "daisy_end_date"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
         "name": "participants!: JsonValue",
         "type_info": "Jsonb",
         "origin": {
@@ -103,7 +125,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "existing_course_id",
         "type_info": "Uuid",
         "origin": {
@@ -114,7 +136,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "first_seen_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -125,7 +147,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "last_seen_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -138,7 +160,17 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Uuid",
+        "Date",
+        "Date"
       ]
     },
     "nullable": [
@@ -150,11 +182,13 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       true,
       false,
       false
     ]
   },
-  "hash": "0829eaf4195e3a172ea8cd2dcfd9af9b668887c97e44f96cd71cf34f53917e22"
+  "hash": "892b04794c32ea20f80d0cb020952ed670bc39f94ef0a3825d7df5ff853d27c9"
 }

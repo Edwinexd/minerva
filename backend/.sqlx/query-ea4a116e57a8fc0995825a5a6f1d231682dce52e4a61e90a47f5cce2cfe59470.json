@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO daisy_pending_imports\n            (momenttillf_id, course_code, name, semester_label,\n             daisy_info_url, daisy_syllabus_url, daisy_unit,\n             participants, existing_course_id)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n        ON CONFLICT (momenttillf_id) DO UPDATE SET\n            course_code = EXCLUDED.course_code,\n            name = EXCLUDED.name,\n            semester_label = EXCLUDED.semester_label,\n            daisy_info_url = EXCLUDED.daisy_info_url,\n            daisy_syllabus_url = EXCLUDED.daisy_syllabus_url,\n            daisy_unit = EXCLUDED.daisy_unit,\n            participants = EXCLUDED.participants,\n            existing_course_id = EXCLUDED.existing_course_id,\n            last_seen_at = NOW()\n        RETURNING id, momenttillf_id, course_code, name, semester_label,\n                  daisy_info_url, daisy_syllabus_url, daisy_unit,\n                  participants AS \"participants!: JsonValue\",\n                  existing_course_id, first_seen_at, last_seen_at",
+  "query": "SELECT id, momenttillf_id, course_code, name, semester_label,\n                  daisy_info_url, daisy_syllabus_url, daisy_unit,\n                  daisy_start_date, daisy_end_date,\n                  participants AS \"participants!: JsonValue\",\n                  existing_course_id, first_seen_at, last_seen_at\n        FROM daisy_pending_imports\n        WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -93,6 +93,28 @@
       },
       {
         "ordinal": 8,
+        "name": "daisy_start_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "daisy_start_date"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "daisy_end_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "daisy_end_date"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
         "name": "participants!: JsonValue",
         "type_info": "Jsonb",
         "origin": {
@@ -103,7 +125,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "existing_course_id",
         "type_info": "Uuid",
         "origin": {
@@ -114,7 +136,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "first_seen_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -125,7 +147,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "last_seen_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -138,14 +160,6 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Jsonb",
         "Uuid"
       ]
     },
@@ -158,11 +172,13 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       true,
       false,
       false
     ]
   },
-  "hash": "2acf5b94c1db7be677a1ae11a0adc263c697d8f76ad14deccbae0d5dbd4bd7eb"
+  "hash": "ea4a116e57a8fc0995825a5a6f1d231682dce52e4a61e90a47f5cce2cfe59470"
 }

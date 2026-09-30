@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO course_daisy_offerings\n                       (momenttillf_id, course_id, course_code, name,\n                        semester_label, info_url, syllabus_url, unit,\n                        start_date, end_date, last_synced_at)\n                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "96120a5d3fdd6746bf8ec758c71a96bac7248ab2f7c9d68533be32f2ecd19999"
+}

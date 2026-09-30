@@ -77,7 +77,7 @@ export function ConfigPage({ useParams }: { useParams: () => { courseId: string 
  * spot-check the offering without leaving Minerva.
  */
 function DaisyMetaCard({ course }: { course: Course }) {
-  const { t } = useTranslation("teacher")
+  const { t, i18n } = useTranslation("teacher")
   const offerings = course.daisy_offerings
   if (offerings.length === 0) return null
   const multiple = offerings.length > 1
@@ -103,6 +103,12 @@ function DaisyMetaCard({ course }: { course: Course }) {
             t("daisyMeta.neverSynced")
           )
           const semester = offering.semester_label ?? course.semester_label
+          const period = formatCoursePeriod(
+            offering.start_date,
+            offering.end_date,
+            i18n.language,
+            t,
+          )
           return (
             <div
               key={offering.momenttillf_id}
@@ -126,6 +132,9 @@ function DaisyMetaCard({ course }: { course: Course }) {
               />
               {semester && (
                 <DaisyMetaRow label={t("daisyMeta.semester")} value={semester} />
+              )}
+              {period && (
+                <DaisyMetaRow label={t("daisyMeta.period")} value={period} />
               )}
               {offering.unit && (
                 <DaisyMetaRow label={t("daisyMeta.unit")} value={offering.unit} />
@@ -170,6 +179,34 @@ function DaisyMetaCard({ course }: { course: Course }) {
       </CardContent>
     </Card>
   )
+}
+
+/** Parse a `YYYY-MM-DD` date as local midnight; `new Date(iso)` would
+ * read it as UTC and show the previous day west of Greenwich. */
+function parseDateOnly(iso: string): Date {
+  const [year, month, day] = iso.split("-").map(Number)
+  return new Date(year, month - 1, day)
+}
+
+/** The offering's Daisy period as one localized string, or null when
+ * Daisy has neither date. A lone date reads "From ..." / "Until ...". */
+function formatCoursePeriod(
+  start: string | null,
+  end: string | null,
+  locale: string,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string | null {
+  const format = new Intl.DateTimeFormat(locale, { dateStyle: "medium" })
+  if (start && end) {
+    return format.formatRange(parseDateOnly(start), parseDateOnly(end))
+  }
+  if (start) {
+    return t("daisyMeta.periodFrom", { date: format.format(parseDateOnly(start)) })
+  }
+  if (end) {
+    return t("daisyMeta.periodUntil", { date: format.format(parseDateOnly(end)) })
+  }
+  return null
 }
 
 function DaisyMetaRow({

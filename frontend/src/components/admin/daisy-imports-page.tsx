@@ -364,23 +364,20 @@ function roleLabel(t: TFn, role: string): string {
     : t("daisyImports.roleTeacher")
 }
 
+const FIELD_LABEL_KEYS: Record<string, string> = {
+  name: "daisyImports.fieldName",
+  course_code: "daisyImports.fieldCode",
+  semester_label: "daisyImports.fieldSemester",
+  info_url: "daisyImports.fieldInfoUrl",
+  syllabus_url: "daisyImports.fieldSyllabus",
+  unit: "daisyImports.fieldUnit",
+  start_date: "daisyImports.fieldStartDate",
+  end_date: "daisyImports.fieldEndDate",
+}
+
 function fieldLabel(t: TFn, field: string): string {
-  switch (field) {
-    case "name":
-      return t("daisyImports.fieldName")
-    case "course_code":
-      return t("daisyImports.fieldCode")
-    case "semester_label":
-      return t("daisyImports.fieldSemester")
-    case "info_url":
-      return t("daisyImports.fieldInfoUrl")
-    case "syllabus_url":
-      return t("daisyImports.fieldSyllabus")
-    case "unit":
-      return t("daisyImports.fieldUnit")
-    default:
-      return field
-  }
+  const key = FIELD_LABEL_KEYS[field]
+  return key ? t(key) : field
 }
 
 /**

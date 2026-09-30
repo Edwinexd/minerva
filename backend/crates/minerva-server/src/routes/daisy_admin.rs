@@ -46,6 +46,8 @@ struct PendingImportView {
     daisy_info_url: Option<String>,
     daisy_syllabus_url: Option<String>,
     daisy_unit: Option<String>,
+    daisy_start_date: Option<chrono::NaiveDate>,
+    daisy_end_date: Option<chrono::NaiveDate>,
     /// Total resolved participants. The admin UI uses this for the
     /// "5 staff" chip; the full list is in `participants` below.
     participant_count: usize,
@@ -149,6 +151,8 @@ async fn list_pending(
             info_url: row.daisy_info_url.clone(),
             syllabus_url: row.daisy_syllabus_url.clone(),
             unit: row.daisy_unit.clone(),
+            start_date: row.daisy_start_date,
+            end_date: row.daisy_end_date,
             participants,
         };
         let diff = compute_offering_diff(&state, &payload, existing_course_id).await?;
@@ -165,6 +169,8 @@ async fn list_pending(
             daisy_info_url: row.daisy_info_url,
             daisy_syllabus_url: row.daisy_syllabus_url,
             daisy_unit: row.daisy_unit,
+            daisy_start_date: row.daisy_start_date,
+            daisy_end_date: row.daisy_end_date,
             participant_count,
             participants: participant_views,
             existing_course_id,
@@ -250,6 +256,8 @@ async fn apply_pending(
             info_url: row.daisy_info_url.clone(),
             syllabus_url: row.daisy_syllabus_url.clone(),
             unit: row.daisy_unit.clone(),
+            start_date: row.daisy_start_date,
+            end_date: row.daisy_end_date,
             participants,
         };
 

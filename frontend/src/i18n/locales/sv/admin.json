@@ -817,6 +817,8 @@
     "fieldInfoUrl": "Info-URL",
     "fieldSyllabus": "Kursplan",
     "fieldUnit": "Enhet",
+    "fieldStartDate": "Startdatum",
+    "fieldEndDate": "Slutdatum",
     "staffCount_one": "{{count}} upplöst",
     "staffCount_other": "{{count}} upplösta",
     "openInDaisy": "Öppna i Daisy",

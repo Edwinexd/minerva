@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, momenttillf_id, course_code, name, semester_label,\n                  daisy_info_url, daisy_syllabus_url, daisy_unit,\n                  participants AS \"participants!: JsonValue\",\n                  existing_course_id, first_seen_at, last_seen_at\n        FROM daisy_pending_imports\n        ORDER BY first_seen_at ASC, momenttillf_id ASC",
+  "query": "SELECT id, momenttillf_id, course_code, name, semester_label,\n                  daisy_info_url, daisy_syllabus_url, daisy_unit,\n                  daisy_start_date, daisy_end_date,\n                  participants AS \"participants!: JsonValue\",\n                  existing_course_id, first_seen_at, last_seen_at\n        FROM daisy_pending_imports\n        ORDER BY first_seen_at ASC, momenttillf_id ASC",
   "describe": {
     "columns": [
       {
@@ -93,6 +93,28 @@
       },
       {
         "ordinal": 8,
+        "name": "daisy_start_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "daisy_start_date"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "daisy_end_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "daisy_pending_imports",
+            "name": "daisy_end_date"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
         "name": "participants!: JsonValue",
         "type_info": "Jsonb",
         "origin": {
@@ -103,7 +125,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "existing_course_id",
         "type_info": "Uuid",
         "origin": {
@@ -114,7 +136,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "first_seen_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -125,7 +147,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "last_seen_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -148,11 +170,13 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       true,
       false,
       false
     ]
   },
-  "hash": "afdf97f18084c8df6d2123a44997c6028c8bbe2d5cd2532931d70a6821a8de2d"
+  "hash": "d3b4d67189d5fa6d16d7ebbad6ceeed899a414e6f930d7d3d501ed0a758c3b67"
 }

@@ -819,6 +819,8 @@
     "fieldInfoUrl": "Info URL",
     "fieldSyllabus": "Syllabus",
     "fieldUnit": "Unit",
+    "fieldStartDate": "Start date",
+    "fieldEndDate": "End date",
     "staffCount_one": "{{count}} resolved",
     "staffCount_other": "{{count}} resolved",
     "openInDaisy": "Open in Daisy",

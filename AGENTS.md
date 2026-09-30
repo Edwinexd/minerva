@@ -441,6 +441,19 @@ Indexes video transcripts from DSV Play into Minerva as searchable documents.
 
 dsv-wrapper methods used: `get_courses_by_tag(tag)`, `get_presentations(designation)`, `get_transcript_text(uuid)`.
 
+## Daisy Course Period
+
+`scripts/sync_daisy_courses.py` sends each offering's `start_date` /
+`end_date` (`YYYY-MM-DD`) alongside the rest of its metadata. They come
+from the detail page (`DaisyClient.get_course`), with the search result's
+period as the fallback. Both are nullable `DATE` columns on
+`course_daisy_offerings` (and `daisy_start_date` / `daisy_end_date` on the
+`daisy_pending_imports` snapshot), per offering rather than per course
+because a merged course can carry offerings with different periods. They
+go through the same staging diff as every other metadata field, so a
+changed period shows up as a chip on `/admin/daisy`, and the teacher's
+course settings page renders the period in the Daisy linkage card.
+
 ## Daisy Course Schedules
 
 The daily Daisy workflow also calls

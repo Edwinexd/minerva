@@ -143,6 +143,9 @@ export interface DaisyOffering {
   info_url: string | null
   syllabus_url: string | null
   unit: string | null
+  /** First / last day of the offering's period in Daisy, `YYYY-MM-DD`. */
+  start_date: string | null
+  end_date: string | null
   last_synced_at: string | null
 }
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT momenttillf_id, course_id, course_code, name, semester_label,\n                  info_url, syllabus_url, unit, last_synced_at, created_at\n           FROM course_daisy_offerings\n           WHERE course_id = $1\n           ORDER BY created_at ASC, momenttillf_id ASC",
+  "query": "SELECT momenttillf_id, course_id, course_code, name, semester_label,\n                  info_url, syllabus_url, unit, start_date, end_date,\n                  last_synced_at, created_at\n           FROM course_daisy_offerings\n           WHERE course_id = $1\n           ORDER BY created_at ASC, momenttillf_id ASC",
   "describe": {
     "columns": [
       {
@@ -93,6 +93,28 @@
       },
       {
         "ordinal": 8,
+        "name": "start_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "start_date"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "end_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "course_daisy_offerings",
+            "name": "end_date"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
         "name": "last_synced_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -103,7 +125,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -129,8 +151,10 @@
       true,
       true,
       true,
+      true,
+      true,
       false
     ]
   },
-  "hash": "1977e9fe7778dc87fae30113d0a6a0339b7fd7540f33e901eab3034a8eac3c60"
+  "hash": "8ffb98431da12a6a40f1ca3bd21c5011c92f11105bb174a02d168ef2c9b8037f"
 }

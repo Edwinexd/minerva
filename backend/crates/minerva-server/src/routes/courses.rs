@@ -199,6 +199,8 @@ struct DaisyOfferingView {
     info_url: Option<String>,
     syllabus_url: Option<String>,
     unit: Option<String>,
+    start_date: Option<chrono::NaiveDate>,
+    end_date: Option<chrono::NaiveDate>,
     last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -212,6 +214,8 @@ impl DaisyOfferingView {
             info_url: o.info_url,
             syllabus_url: o.syllabus_url,
             unit: o.unit,
+            start_date: o.start_date,
+            end_date: o.end_date,
             last_synced_at: o.last_synced_at,
         }
     }

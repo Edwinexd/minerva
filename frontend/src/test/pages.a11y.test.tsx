@@ -235,6 +235,8 @@ const daisyPending = {
       daisy_info_url: null,
       daisy_syllabus_url: null,
       daisy_unit: "DSV",
+      daisy_start_date: "2026-01-19",
+      daisy_end_date: "2026-03-22",
       participant_count: 1,
       participants: [
         {

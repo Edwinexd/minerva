@@ -795,6 +795,12 @@ pub(super) struct DaisyCourseInputPayload {
     pub info_url: Option<String>,
     pub syllabus_url: Option<String>,
     pub unit: Option<String>,
+    /// First and last day of the offering's period (`YYYY-MM-DD`).
+    /// Absent when Daisy lists no period.
+    #[serde(default)]
+    pub start_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    pub end_date: Option<chrono::NaiveDate>,
     #[serde(default)]
     pub participants: Vec<DaisyParticipantInput>,
 }
@@ -894,8 +900,8 @@ impl OfferingDiff {
 #[derive(Serialize)]
 pub(super) struct FieldChange {
     /// Stable field key (`name`, `course_code`, `semester_label`,
-    /// `info_url`, `syllabus_url`, `unit`); the frontend maps it to a
-    /// localized label.
+    /// `info_url`, `syllabus_url`, `unit`, `start_date`, `end_date`);
+    /// the frontend maps it to a localized label.
     pub field: &'static str,
     pub old: Option<String>,
     pub new: Option<String>,
@@ -919,6 +925,12 @@ fn norm_opt(v: Option<&str>) -> Option<String> {
     v.map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
+}
+
+/// `YYYY-MM-DD` rendering of an offering date, so the period diffs
+/// through the same string comparison as every other metadata field.
+fn iso_date(d: Option<chrono::NaiveDate>) -> Option<String> {
+    d.map(|d| d.format("%Y-%m-%d").to_string())
 }
 
 fn push_field_change(
@@ -996,6 +1008,18 @@ pub(super) async fn compute_offering_diff(
             "unit",
             o.unit.as_deref(),
             input.unit.as_deref(),
+        );
+        push_field_change(
+            &mut diff.metadata_changes,
+            "start_date",
+            iso_date(o.start_date).as_deref(),
+            iso_date(input.start_date).as_deref(),
+        );
+        push_field_change(
+            &mut diff.metadata_changes,
+            "end_date",
+            iso_date(o.end_date).as_deref(),
+            iso_date(input.end_date).as_deref(),
         );
     }
 
@@ -1220,6 +1244,8 @@ async fn stage_one(
             daisy_info_url: input.info_url.as_deref(),
             daisy_syllabus_url: input.syllabus_url.as_deref(),
             daisy_unit: input.unit.as_deref(),
+            daisy_start_date: input.start_date,
+            daisy_end_date: input.end_date,
             participants: &participants_json,
             existing_course_id,
         },
@@ -1378,6 +1404,8 @@ pub(super) async fn apply_one(
             info_url: input.info_url.as_deref(),
             syllabus_url: input.syllabus_url.as_deref(),
             unit: input.unit.as_deref(),
+            start_date: input.start_date,
+            end_date: input.end_date,
             owner_id,
             conversation_soft_token_limit: Some(
                 crate::system_defaults::course_conversation_soft_token_limit(&state.db).await,

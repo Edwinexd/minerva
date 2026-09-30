@@ -161,13 +161,21 @@ def resolve_participant(
     return {**identity, "daisy_roles": list(cs.roles or [])}
 
 
+def iso_date(value: date | None) -> str | None:
+    return value.isoformat() if value else None
+
+
 def build_course_payload(
     daisy: DaisyClient,
     course: Any,
     participant_cache: dict[str, dict],
 ) -> dict:
-    """Per-course payload including detail-page enrichment (syllabus +
-    unit) and the resolved participants list."""
+    """Per-course payload including detail-page enrichment (syllabus,
+    unit, course period) and the resolved participants list.
+
+    The period comes from the detail page's `Datum:` row. The search
+    result carries one too, but its parser yields None silently on a
+    malformed cell, so it is only the fallback."""
     detail = daisy.get_course(course.momenttillf_id)
     roster = daisy.get_course_participants(course.momenttillf_id)
 
@@ -185,6 +193,8 @@ def build_course_payload(
         "info_url": course.info_url,
         "syllabus_url": detail.syllabus_url,
         "unit": detail.unit,
+        "start_date": iso_date(detail.start_date or course.start_date),
+        "end_date": iso_date(detail.end_date or course.end_date),
         "participants": participants_resolved,
     }
 

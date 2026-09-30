@@ -630,6 +630,9 @@ pub struct DaisyCourseInput<'a> {
     pub info_url: Option<&'a str>,
     pub syllabus_url: Option<&'a str>,
     pub unit: Option<&'a str>,
+    /// First and last day of the offering's period, when Daisy has one.
+    pub start_date: Option<chrono::NaiveDate>,
+    pub end_date: Option<chrono::NaiveDate>,
     /// Owner stamped on INSERT only. Subsequent syncs leave the
     /// course's `owner_id` untouched (admin reassignments win
     /// permanently). The route layer resolves this via
@@ -706,6 +709,8 @@ pub async fn upsert_from_daisy(
                        info_url = $5,
                        syllabus_url = $6,
                        unit = $7,
+                       start_date = $8,
+                       end_date = $9,
                        last_synced_at = NOW()
                    WHERE momenttillf_id = $1"#,
                 input.momenttillf_id,
@@ -715,6 +720,8 @@ pub async fn upsert_from_daisy(
                 input.info_url,
                 input.syllabus_url,
                 input.unit,
+                input.start_date,
+                input.end_date,
             )
             .execute(&mut *tx)
             .await?;
@@ -771,8 +778,9 @@ pub async fn upsert_from_daisy(
             sqlx::query!(
                 r#"INSERT INTO course_daisy_offerings
                        (momenttillf_id, course_id, course_code, name,
-                        semester_label, info_url, syllabus_url, unit, last_synced_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())"#,
+                        semester_label, info_url, syllabus_url, unit,
+                        start_date, end_date, last_synced_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())"#,
                 input.momenttillf_id,
                 new_id,
                 input.beteckning,
@@ -781,6 +789,8 @@ pub async fn upsert_from_daisy(
                 input.info_url,
                 input.syllabus_url,
                 input.unit,
+                input.start_date,
+                input.end_date,
             )
             .execute(&mut *tx)
             .await?;

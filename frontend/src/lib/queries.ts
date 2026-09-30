@@ -469,7 +469,10 @@ export interface DaisyPendingParticipant {
 
 /** One offering-metadata field a re-apply would overwrite. */
 export interface DaisyFieldChange {
-  /** `name` | `course_code` | `semester_label` | `info_url` | `syllabus_url` | `unit`. */
+  /**
+   * `name` | `course_code` | `semester_label` | `info_url` |
+   * `syllabus_url` | `unit` | `start_date` | `end_date`.
+   */
   field: string
   old: string | null
   new: string | null
@@ -508,6 +511,8 @@ export interface DaisyPendingImport {
   daisy_info_url: string | null
   daisy_syllabus_url: string | null
   daisy_unit: string | null
+  daisy_start_date: string | null
+  daisy_end_date: string | null
   participant_count: number
   participants: DaisyPendingParticipant[]
   /**

@@ -20,6 +20,8 @@ pub struct PendingImportRow {
     pub daisy_info_url: Option<String>,
     pub daisy_syllabus_url: Option<String>,
     pub daisy_unit: Option<String>,
+    pub daisy_start_date: Option<chrono::NaiveDate>,
+    pub daisy_end_date: Option<chrono::NaiveDate>,
     pub participants: JsonValue,
     pub existing_course_id: Option<Uuid>,
     pub first_seen_at: chrono::DateTime<chrono::Utc>,
@@ -36,6 +38,8 @@ pub struct StageInput<'a> {
     pub daisy_info_url: Option<&'a str>,
     pub daisy_syllabus_url: Option<&'a str>,
     pub daisy_unit: Option<&'a str>,
+    pub daisy_start_date: Option<chrono::NaiveDate>,
+    pub daisy_end_date: Option<chrono::NaiveDate>,
     pub participants: &'a JsonValue,
     /// `Some(course_id)` when an Apply would refresh an existing
     /// row; `None` for brand-new imports. Computed by the caller via
@@ -55,8 +59,9 @@ pub async fn upsert(db: &PgPool, input: &StageInput<'_>) -> Result<PendingImport
         r#"INSERT INTO daisy_pending_imports
             (momenttillf_id, course_code, name, semester_label,
              daisy_info_url, daisy_syllabus_url, daisy_unit,
-             participants, existing_course_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             participants, existing_course_id,
+             daisy_start_date, daisy_end_date)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         ON CONFLICT (momenttillf_id) DO UPDATE SET
             course_code = EXCLUDED.course_code,
             name = EXCLUDED.name,
@@ -64,11 +69,14 @@ pub async fn upsert(db: &PgPool, input: &StageInput<'_>) -> Result<PendingImport
             daisy_info_url = EXCLUDED.daisy_info_url,
             daisy_syllabus_url = EXCLUDED.daisy_syllabus_url,
             daisy_unit = EXCLUDED.daisy_unit,
+            daisy_start_date = EXCLUDED.daisy_start_date,
+            daisy_end_date = EXCLUDED.daisy_end_date,
             participants = EXCLUDED.participants,
             existing_course_id = EXCLUDED.existing_course_id,
             last_seen_at = NOW()
         RETURNING id, momenttillf_id, course_code, name, semester_label,
                   daisy_info_url, daisy_syllabus_url, daisy_unit,
+                  daisy_start_date, daisy_end_date,
                   participants AS "participants!: JsonValue",
                   existing_course_id, first_seen_at, last_seen_at"#,
         input.momenttillf_id,
@@ -80,6 +88,8 @@ pub async fn upsert(db: &PgPool, input: &StageInput<'_>) -> Result<PendingImport
         input.daisy_unit,
         input.participants,
         input.existing_course_id,
+        input.daisy_start_date,
+        input.daisy_end_date,
     )
     .fetch_one(db)
     .await
@@ -93,6 +103,7 @@ pub async fn list_all(db: &PgPool) -> Result<Vec<PendingImportRow>, sqlx::Error>
         PendingImportRow,
         r#"SELECT id, momenttillf_id, course_code, name, semester_label,
                   daisy_info_url, daisy_syllabus_url, daisy_unit,
+                  daisy_start_date, daisy_end_date,
                   participants AS "participants!: JsonValue",
                   existing_course_id, first_seen_at, last_seen_at
         FROM daisy_pending_imports
@@ -107,6 +118,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<PendingImportRow
         PendingImportRow,
         r#"SELECT id, momenttillf_id, course_code, name, semester_label,
                   daisy_info_url, daisy_syllabus_url, daisy_unit,
+                  daisy_start_date, daisy_end_date,
                   participants AS "participants!: JsonValue",
                   existing_course_id, first_seen_at, last_seen_at
         FROM daisy_pending_imports
@@ -127,6 +139,7 @@ pub async fn delete(db: &PgPool, id: Uuid) -> Result<Option<PendingImportRow>, s
         r#"DELETE FROM daisy_pending_imports WHERE id = $1
         RETURNING id, momenttillf_id, course_code, name, semester_label,
                   daisy_info_url, daisy_syllabus_url, daisy_unit,
+                  daisy_start_date, daisy_end_date,
                   participants AS "participants!: JsonValue",
                   existing_course_id, first_seen_at, last_seen_at"#,
         id,

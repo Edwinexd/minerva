@@ -342,6 +342,9 @@
     "featureOverridden": "course override",
     "featureInherited": "default",
     "featureRevertToDefault": "Revert to global default",
+    "featureRequires": "Requires {{flag}}",
+    "featureInactiveWithout": "No effect until {{flag}} is switched on",
+    "featureTurnsOffDependents": "Switching this off also switches off: {{flags}}",
     "featureFlagLabel": {
       "document_kinds": "Document classification",
       "course_kg": "Course knowledge graph",

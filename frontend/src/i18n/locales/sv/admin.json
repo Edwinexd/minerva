@@ -340,6 +340,9 @@
     "featureOverridden": "kursöverstyrning",
     "featureInherited": "standard",
     "featureRevertToDefault": "Återställ till global standard",
+    "featureRequires": "Kräver {{flag}}",
+    "featureInactiveWithout": "Har ingen effekt förrän {{flag}} är påslagen",
+    "featureTurnsOffDependents": "Om detta stängs av stängs även detta av: {{flags}}",
     "featureFlagLabel": {
       "document_kinds": "Dokumentklassificering",
       "course_kg": "Kunskapsgraf för kurs",

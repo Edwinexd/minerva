@@ -3,6 +3,7 @@ import { RelativeTime } from "@/components/relative-time"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { QueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
+import { cn } from "@/lib/utils"
 import {
   adminCoursesQuery,
   coursesQuery,
@@ -67,6 +68,18 @@ const KNOWN_FEATURE_FLAGS = [
   "concept_graph",
 ] as const
 type FeatureFlagName = (typeof KNOWN_FEATURE_FLAGS)[number]
+
+/// Flags that do nothing on their own, keyed to the flag they build
+/// on. Mirrors the backend, where `course_kg_enabled` and
+/// `extraction_guard_enabled` resolve to off without `document_kinds`.
+const FLAG_REQUIRES: Partial<Record<FeatureFlagName, FeatureFlagName>> = {
+  course_kg: "document_kinds",
+  extraction_guard: "document_kinds",
+}
+
+function dependentsOf(flag: FeatureFlagName): FeatureFlagName[] {
+  return KNOWN_FEATURE_FLAGS.filter((f) => FLAG_REQUIRES[f] === flag)
+}
 
 /// Every admin course mutation has to refresh both caches: the admin
 /// listing (which includes archived courses) and the teacher/student
@@ -361,16 +374,10 @@ function CourseFeatureFlagsCell({
   })
 
   const setFlagMutation = useMutation({
-    mutationFn: ({
-      flag,
-      enabled,
-    }: {
-      flag: FeatureFlagName
-      enabled: boolean | null
-    }) =>
+    mutationFn: (flags: Partial<Record<FeatureFlagName, boolean | null>>) =>
       api.put<CourseFeatureFlagsResponse>(
         `/admin/courses/${courseId}/feature-flags`,
-        { flags: { [flag]: enabled } },
+        { flags },
       ),
     onSuccess: (data) => {
       // Update the per-course feature-flags cache in place so the
@@ -389,6 +396,23 @@ function CourseFeatureFlagsCell({
 
   const flags = flagsQuery.data?.flags ?? []
   const enabledCount = flags.filter((f) => f.enabled).length
+  const isOn = (flag: FeatureFlagName) =>
+    flags.find((f) => f.flag === flag)?.enabled ?? false
+
+  // Switching a flag off takes the flags built on it with it, in the
+  // same request, so a course is never left with a dependent flag that
+  // is on but inert.
+  const toggle = (flag: FeatureFlagName, enabled: boolean) => {
+    const change: Partial<Record<FeatureFlagName, boolean>> = {
+      [flag]: enabled,
+    }
+    if (!enabled) {
+      for (const dependent of dependentsOf(flag)) {
+        if (isOn(dependent)) change[dependent] = false
+      }
+    }
+    setFlagMutation.mutate(change)
+  }
 
   return (
     <>
@@ -406,7 +430,7 @@ function CourseFeatureFlagsCell({
           : t("courses.featuresButtonShort")}
       </Button>
       <AlertDialog open={open} onOpenChange={setOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-h-[85vh] overflow-y-auto data-[size=default]:sm:max-w-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {t("courses.featuresDialogTitle")}
@@ -425,20 +449,27 @@ function CourseFeatureFlagsCell({
                 const state = flags.find((f) => f.flag === flag)
                 const enabled = state?.enabled ?? false
                 const overridden = state?.course_override ?? false
+                const requires = FLAG_REQUIRES[flag]
+                const requirementMet = !requires || isOn(requires)
+                // Off and unmet: cannot be switched on. On and unmet
+                // (a state older than the requirement) stays
+                // switchable so it can be turned off.
+                const locked = !requirementMet && !enabled
+                const activeDependents = dependentsOf(flag).filter(isOn)
                 return (
                   <label
                     key={flag}
-                    className="flex items-start gap-3 rounded border p-3 cursor-pointer hover:bg-muted/40"
+                    className={cn(
+                      "flex items-start gap-3 rounded border p-3",
+                      locked
+                        ? "cursor-not-allowed opacity-60"
+                        : "cursor-pointer hover:bg-muted/40",
+                    )}
                   >
                     <Checkbox
                       checked={enabled}
-                      onCheckedChange={(value) =>
-                        setFlagMutation.mutate({
-                          flag,
-                          enabled: value === true,
-                        })
-                      }
-                      disabled={setFlagMutation.isPending}
+                      onCheckedChange={(value) => toggle(flag, value === true)}
+                      disabled={setFlagMutation.isPending || locked}
                     />
                     <div className="space-y-1 flex-1">
                       <div className="flex items-center gap-2">
@@ -458,13 +489,34 @@ function CourseFeatureFlagsCell({
                       <p className="text-xs text-muted-foreground">
                         {t(`courses.featureFlagDescription.${flag}`)}
                       </p>
+                      {requires && !requirementMet && (
+                        <p className="text-xs font-medium">
+                          {t(
+                            enabled
+                              ? "courses.featureInactiveWithout"
+                              : "courses.featureRequires",
+                            {
+                              flag: t(`courses.featureFlagLabel.${requires}`),
+                            },
+                          )}
+                        </p>
+                      )}
+                      {enabled && activeDependents.length > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          {t("courses.featureTurnsOffDependents", {
+                            flags: activeDependents
+                              .map((d) => t(`courses.featureFlagLabel.${d}`))
+                              .join(", "),
+                          })}
+                        </p>
+                      )}
                       {overridden && (
                         <button
                           type="button"
                           className="text-xs text-muted-foreground underline-offset-4 hover:underline"
                           onClick={(e) => {
                             e.preventDefault()
-                            setFlagMutation.mutate({ flag, enabled: null })
+                            setFlagMutation.mutate({ [flag]: null })
                           }}
                           disabled={setFlagMutation.isPending}
                         >
@@ -1398,8 +1450,23 @@ function BulkEditDialog({
     }
   }
 
+  // Keeps the bulk choices consistent with `FLAG_REQUIRES`: switching a
+  // flag on switches on what it builds on, and taking that base away
+  // (anything but "on") drops the dependents' "on" back to no change,
+  // or to "off" when the base itself is being switched off.
   const setFlag = (flag: FeatureFlagName, choice: FlagChoice) =>
-    setFlagChoices((prev) => ({ ...prev, [flag]: choice }))
+    setFlagChoices((prev) => {
+      const next = { ...prev, [flag]: choice }
+      const requires = FLAG_REQUIRES[flag]
+      if (choice === "on" && requires) next[requires] = "on"
+      if (choice !== "on") {
+        for (const dependent of dependentsOf(flag)) {
+          if (choice === "off") next[dependent] = "off"
+          else if (next[dependent] === "on") next[dependent] = "nochange"
+        }
+      }
+      return next
+    })
 
   const buildPatch = () => {
     const patch: Record<string, unknown> = {}
@@ -1482,7 +1549,7 @@ function BulkEditDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+      <AlertDialogContent className="max-h-[85vh] overflow-y-auto data-[size=default]:sm:max-w-2xl">
         <AlertDialogHeader>
           <AlertDialogTitle>
             {t("courses.bulk.editTitle", { count: selected.length })}
@@ -1838,6 +1905,15 @@ function BulkEditDialog({
               >
                 <span className="min-w-0 truncate text-sm">
                   {t(`courses.featureFlagLabel.${flag}`)}
+                  {FLAG_REQUIRES[flag] && (
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {t("courses.featureRequires", {
+                        flag: t(
+                          `courses.featureFlagLabel.${FLAG_REQUIRES[flag]}`,
+                        ),
+                      })}
+                    </span>
+                  )}
                 </span>
                 <Select
                   value={flagChoices[flag]}

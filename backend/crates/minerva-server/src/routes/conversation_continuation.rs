@@ -132,11 +132,6 @@ pub(super) async fn split(
         return Err(AppError::Forbidden);
     }
 
-    // Resolved, not read straight off the course row, so a course with
-    // the `conversation_limits` flag off reports both ceilings as 0 and
-    // falls into the `split_not_available` arm below. That keeps the
-    // flag from leaving a live endpoint that bills a utility-model call
-    // for a feature the course is not enrolled in.
     let token_state =
         crate::routes::chat::ConversationTokenState::resolve(state, course, cid).await?;
     let threshold = split_threshold(token_state.soft_limit, token_state.hard_limit);
@@ -198,20 +193,14 @@ const BRANCH_FOLLOW_UP_CHARS: usize = 300;
 /// answer has absorbed them.
 const BRANCH_FOLLOW_UPS: usize = 3;
 
-/// The conversation's unacted-on topic switch, gated on the
-/// `topic_switch_nudge` flag at read time as well as at write time, so
-/// switching the flag off silences existing verdicts immediately.
+/// The conversation's unacted-on topic switch.
 ///
 /// Shared by both conversation-detail routes and [`branch`]: the banner
 /// must only ever offer a branch the endpoint will accept.
 pub(crate) async fn pending_topic_switch(
     state: &AppState,
-    course_id: Uuid,
     cid: Uuid,
 ) -> Result<Option<Uuid>, AppError> {
-    if !crate::feature_flags::topic_switch_nudge_enabled(&state.db, course_id).await {
-        return Ok(None);
-    }
     Ok(minerva_db::queries::conversations::pending_topic_switch(&state.db, cid).await?)
 }
 
@@ -262,7 +251,7 @@ pub(super) async fn branch(
     // this from becoming a general "clone my chat" endpoint (a second
     // branch off the same switch is refused), and the read is gated on
     // the feature flag.
-    let Some(switch_id) = pending_topic_switch(state, course_id, cid).await? else {
+    let Some(switch_id) = pending_topic_switch(state, cid).await? else {
         return Err(AppError::bad_request("conversation.branch_not_available"));
     };
 
@@ -631,10 +620,7 @@ mod tests {
 
     #[test]
     fn split_threshold_absent_when_both_ceilings_disabled() {
-        // Also the shape a course with the `conversation_limits` flag
-        // off resolves to: `ConversationTokenState::resolve` zeroes
-        // both ceilings, so the split endpoint reports nothing to
-        // continue from instead of billing a summarization call.
+        // Nothing to continue from, so no summarization call is billed.
         assert_eq!(split_threshold(0, 0), None);
     }
 

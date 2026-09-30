@@ -195,8 +195,7 @@ struct ConversationDetailResponse {
     /// shared `PromptAnalysisResponse` so a schema change touches
     /// one place.
     prompt_analyses: Vec<PromptAnalysisResponse>,
-    /// Conversation token state, resolved through the same helper (and
-    /// therefore the same `conversation_limits` feature flag) as the
+    /// Conversation token state, resolved through the same helper as the
     /// Shibboleth route. Drives the embed composer's nudge / block.
     token_state: crate::routes::chat::ConversationTokenState,
     continued_from_id: Option<Uuid>,
@@ -372,10 +371,9 @@ async fn get_conversation(
         .ok_or(AppError::NotFound)?;
     let token_state =
         crate::routes::chat::ConversationTokenState::resolve(&state, &course, cid).await?;
-    let topic_switch =
-        crate::routes::conversation_continuation::pending_topic_switch(&state, course_id, cid)
-            .await?
-            .is_some();
+    let topic_switch = crate::routes::conversation_continuation::pending_topic_switch(&state, cid)
+        .await?
+        .is_some();
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
     // Teacher notes are the whole point of pinning a conversation, so the

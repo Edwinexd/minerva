@@ -539,15 +539,9 @@ pub(crate) struct ConversationTokenState {
 
 impl ConversationTokenState {
     /// Read a conversation's running total and pair it with the
-    /// ceilings actually in force for its course.
-    ///
-    /// This is the one place the `conversation_limits` feature flag is
-    /// consulted. A disabled flag resolves to `0 / 0`, which every
-    /// consumer already reads as "no ceiling" (the enforcement check,
-    /// the client's nudge threshold, and the split endpoint's
-    /// eligibility gate), so gating needs no extra branch anywhere
-    /// downstream. The course's stored limits are left alone, so
-    /// flipping the flag back on restores the teacher's configuration.
+    /// ceilings of its course. A limit of `0` means "no ceiling" to
+    /// every consumer (the enforcement check, the client's nudge
+    /// threshold, and the split endpoint's eligibility gate).
     pub(crate) async fn resolve(
         state: &AppState,
         course: &minerva_db::queries::courses::CourseRow,
@@ -555,19 +549,10 @@ impl ConversationTokenState {
     ) -> Result<Self, AppError> {
         let total =
             minerva_db::queries::conversations::token_total(&state.db, conversation_id).await?;
-        let enabled = crate::feature_flags::conversation_limits_enabled(&state.db, course.id).await;
         Ok(Self {
             total,
-            soft_limit: if enabled {
-                course.conversation_soft_token_limit
-            } else {
-                0
-            },
-            hard_limit: if enabled {
-                course.conversation_hard_token_limit
-            } else {
-                0
-            },
+            soft_limit: course.conversation_soft_token_limit,
+            hard_limit: course.conversation_hard_token_limit,
         })
     }
 
@@ -812,10 +797,9 @@ async fn get_conversation(
     // the next load.
     let token_state = ConversationTokenState::resolve(&state, &course, cid).await?;
 
-    let topic_switch =
-        crate::routes::conversation_continuation::pending_topic_switch(&state, course_id, cid)
-            .await?
-            .is_some();
+    let topic_switch = crate::routes::conversation_continuation::pending_topic_switch(&state, cid)
+        .await?
+        .is_some();
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
     let notes = minerva_db::queries::conversations::list_notes(&state.db, cid).await?;
@@ -2387,10 +2371,6 @@ fn spawn_topic_switch_detection(
     let threshold = ts::similarity_threshold(course.min_score);
 
     tokio::spawn(async move {
-        if !crate::feature_flags::topic_switch_nudge_enabled(&state.db, course_id).await {
-            return;
-        }
-
         // Same dispatch and query-side prefix as retrieval
         // (`strategy::common::embedding_search`), so a cached vector is
         // directly comparable with the ones retrieval produces and with

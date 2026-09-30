@@ -815,12 +815,6 @@ function CourseConfigForm({ course }: { course: Course }) {
             )}
           </div>
 
-          {/* Hidden unless the course is enrolled in the ceilings.
-              The values still round-trip on save (the state is seeded
-              from the course either way), so an admin flipping the flag
-              back on restores what the teacher last configured. */}
-          {course.feature_flags?.conversation_limits && (
-            <>
             <Separator />
 
             <div className="space-y-2">
@@ -867,8 +861,6 @@ function CourseConfigForm({ course }: { course: Course }) {
                   </p>
                 )}
             </div>
-            </>
-          )}
 
           <Separator />
 

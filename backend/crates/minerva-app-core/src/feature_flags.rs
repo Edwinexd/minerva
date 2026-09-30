@@ -50,31 +50,6 @@ pub const FLAG_AEGIS: &str = "aegis";
 /// drop the persisted graph; it just hides the admin endpoints.
 pub const FLAG_CONCEPT_GRAPH: &str = "concept_graph";
 
-/// Per-conversation token ceilings: the nudge banner, the hard block
-/// on `POST .../message`, and the one-click split that carries a recap
-/// into a fresh conversation. Gated so the ceilings can be rolled out
-/// course by course rather than switched on for every student at once;
-/// the defaults were tuned against aggregate history, and a course
-/// whose legitimate workflow is one long thread should be able to opt
-/// out (or be opted in last) without an admin editing its two limit
-/// columns to 0.
-///
-/// When off, the course's `conversation_soft_token_limit` /
-/// `conversation_hard_token_limit` are ignored entirely: no nudge, no
-/// block, and the split endpoint reports nothing to continue from. The
-/// stored column values are left untouched, so flipping the flag back
-/// on restores whatever the teacher had configured.
-pub const FLAG_CONVERSATION_LIMITS: &str = "conversation_limits";
-
-/// Topic-switch nudge: a two-layer check on each user turn (cached
-/// query-embedding cosine against the conversation's earlier turns,
-/// then a small utility-model adjudication only on turns that trip it)
-/// that suggests starting a fresh chat when the student has moved to a
-/// new question. Flagged separately from `conversation_limits` because
-/// it evaluates every turn rather than firing on a cumulative ceiling,
-/// so it warrants its own rollout dial.
-pub const FLAG_TOPIC_SWITCH_NUDGE: &str = "topic_switch_nudge";
-
 /// All flags the application currently knows about. The admin UI
 /// uses this to enumerate available toggles per course; new flags
 /// must be added here AND have a `pub const` above.
@@ -83,8 +58,6 @@ pub const ALL_FLAGS: &[&str] = &[
     FLAG_EXTRACTION_GUARD,
     FLAG_AEGIS,
     FLAG_CONCEPT_GRAPH,
-    FLAG_CONVERSATION_LIMITS,
-    FLAG_TOPIC_SWITCH_NUDGE,
 ];
 
 /// Resolution: course-scoped row -> global row -> default (FALSE).
@@ -136,19 +109,4 @@ pub async fn aegis_enabled(db: &PgPool, course_id: Uuid) -> bool {
 /// integrations.
 pub async fn concept_graph_enabled(db: &PgPool, course_id: Uuid) -> bool {
     flag_enabled(db, FLAG_CONCEPT_GRAPH, course_id).await
-}
-
-/// True iff the per-conversation token ceilings apply to this course.
-/// Failing closed here means "no ceilings": a flaky DB must never be
-/// the reason a student is told their conversation is over.
-pub async fn conversation_limits_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    flag_enabled(db, FLAG_CONVERSATION_LIMITS, course_id).await
-}
-
-/// True iff the topic-switch nudge runs for this course. Failing
-/// closed means no detection and no model call, which is the right
-/// default: the check costs a classification call on roughly a third
-/// of turns.
-pub async fn topic_switch_nudge_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    flag_enabled(db, FLAG_TOPIC_SWITCH_NUDGE, course_id).await
 }

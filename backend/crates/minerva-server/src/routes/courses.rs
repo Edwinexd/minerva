@@ -240,14 +240,6 @@ pub(crate) struct CourseFeatureFlagsView {
     /// distinct from `course_kg` (the document-level graph).
     /// Resolves through the same path as the others.
     pub(crate) concept_graph: bool,
-    /// Per-conversation token ceilings (nudge / block / split). When
-    /// FALSE the two `conversation_*_token_limit` columns are ignored
-    /// at runtime, so the teacher config page hides their inputs rather
-    /// than offering knobs that do nothing.
-    pub(crate) conversation_limits: bool,
-    /// Topic-switch nudge. Independent of `conversation_limits`: it
-    /// evaluates every turn rather than firing on a cumulative ceiling.
-    pub(crate) topic_switch_nudge: bool,
 }
 
 impl CourseResponse {
@@ -304,8 +296,6 @@ pub(crate) async fn resolve_course_flags(
         course_kg: crate::feature_flags::course_kg_enabled(db, course_id).await,
         aegis: crate::feature_flags::aegis_enabled(db, course_id).await,
         concept_graph: crate::feature_flags::concept_graph_enabled(db, course_id).await,
-        conversation_limits: crate::feature_flags::conversation_limits_enabled(db, course_id).await,
-        topic_switch_nudge: crate::feature_flags::topic_switch_nudge_enabled(db, course_id).await,
     }
 }
 

@@ -701,18 +701,17 @@ writes to localStorage.
 
 ## Conversation Nudges
 
-Two per-course, feature-flagged banners ask a student to carry on in a
-fresh chat. Both render through `ConversationLimitNotice` above the
+Two banners ask a student to carry on in a fresh chat, on every course. Both render through `ConversationLimitNotice` above the
 composer on the Shibboleth and embed surfaces, resolved by the pure
 `resolveConversationLimit` in
 `frontend/src/components/chat/conversation-limit-state.ts`.
 
-- **Length** (`conversation_limits` flag): cumulative billed tokens per
+- **Length**: cumulative billed tokens per
   conversation against `courses.conversation_soft_token_limit` (nudge)
   and `conversation_hard_token_limit` (block: composer hidden, send
   returns 409). New courses snapshot the `course.conversation_*` system
   defaults: 450k / 800k on prod, 300k / 1M as the code fallback.
-- **Topic switch** (`topic_switch_nudge` flag): per user turn, a cached
+- **Topic switch**: per user turn, a cached
   embedding cosine against earlier turns, then a utility-model verdict
   only when that trips; stored in `messages.topic_shift`. The banner
   stays up while a `confirmed` turn is unacted on

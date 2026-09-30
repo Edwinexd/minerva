@@ -171,22 +171,6 @@ export interface CourseFeatureFlags {
    * graph viewer and the extract/run-dedup actions.
    */
   concept_graph: boolean
-  /**
-   * Per-conversation token ceilings (nudge banner, hard block, and the
-   * one-click split). Off by default so the ceilings roll out course by
-   * course. When false the course's two `conversation_*_token_limit`
-   * values are ignored server-side and the teacher config page hides
-   * their inputs.
-   */
-  conversation_limits: boolean
-  /**
-   * Topic-switch nudge: a cached-embedding cosine against the
-   * conversation's earlier turns, then a utility-model adjudication on
-   * the turns that trip it. Off by default and dialled independently of
-   * `conversation_limits`, since it evaluates every turn rather than
-   * firing on a cumulative ceiling.
-   */
-  topic_switch_nudge: boolean
 }
 
 export interface AdminUser {

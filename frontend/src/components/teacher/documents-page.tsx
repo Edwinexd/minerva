@@ -57,14 +57,17 @@ const KIND_BADGE_CLASS: Record<string, string> = {
   tutorial_exercise:
     "bg-teal-100 text-teal-800 border-teal-200 dark:bg-teal-950 dark:text-teal-200 dark:border-teal-800",
   // assignment_brief / lab_brief / exam: warm but not destructive.
-  // Teachers should *notice* assessment kinds (chat path treats them
-  // specially) without reading them as errors.
+  // Teachers should *notice* the examining kinds (the chat path never
+  // quotes them or solves them in full) without reading them as errors.
   assignment_brief:
     "bg-amber-100 text-amber-900 border-amber-200 dark:bg-amber-950 dark:text-amber-100 dark:border-amber-800",
   lab_brief:
     "bg-orange-100 text-orange-900 border-orange-200 dark:bg-orange-950 dark:text-orange-100 dark:border-orange-800",
   exam:
     "bg-rose-100 text-rose-900 border-rose-200 dark:bg-rose-950 dark:text-rose-100 dark:border-rose-800",
+  // Practice material, like tutorial_exercise: cool, not warm.
+  old_exam:
+    "bg-lime-100 text-lime-900 border-lime-200 dark:bg-lime-950 dark:text-lime-100 dark:border-lime-800",
   sample_solution:
     "bg-violet-100 text-violet-900 border-violet-200 dark:bg-violet-950 dark:text-violet-100 dark:border-violet-800",
   syllabus:

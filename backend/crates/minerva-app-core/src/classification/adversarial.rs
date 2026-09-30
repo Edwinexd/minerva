@@ -1,13 +1,14 @@
 //! Adversarial pre-retrieval filter: a per-chunk yes/no check that runs
 //! at chat time, after RAG retrieval but before chunks are pasted into
-//! the prompt context. Catches the rare case where a `sample_solution`
-//! chunk slipped past the per-doc classifier (or where a `lecture` doc
-//! happens to contain a worked solution); the per-doc kind is right
-//! at the document level but a single chunk inside it might still leak.
+//! the prompt context, on turns that touch examining material (see
+//! `strategy::common::drop_solutions_near_examining`).
 //!
-//! This is the belt-and-suspenders layer. The primary defense is the
-//! ingest-time classifier which excludes whole documents. This layer
-//! catches per-chunk leaks within otherwise-safe documents.
+//! The per-doc kind is the primary defense: a graded assignment's text
+//! is never context, and neither is a sample solution linked to one.
+//! This layer catches the chunk-level leak inside otherwise-safe docs,
+//! e.g. a lecture or an old exam that works through the same problem.
+//! It stays off for every other turn, where a worked solution is what
+//! the student should be given.
 //!
 //! Cost / latency budget:
 //! * Per-chunk: one gpt-oss-120b call at `reasoning_effort: "low"`,

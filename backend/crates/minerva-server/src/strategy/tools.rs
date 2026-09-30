@@ -71,6 +71,11 @@ pub struct ToolDispatchCtx<'a> {
     /// corpus as the strategy's seed retrieval. Computed once per
     /// turn by the strategy and reused for every tool call.
     pub orphaned_doc_ids: &'a std::collections::HashSet<String>,
+    /// The course's document kinds, so a tool-driven retrieval gets the
+    /// same kind partition as the seed: examining material and the
+    /// solutions to it never reach the research agent.
+    pub kinds: &'a common::CourseKinds,
+    pub kg_enabled: bool,
 }
 
 #[derive(Debug)]
@@ -316,6 +321,7 @@ async fn run_semantic_search(
         ctx.orphaned_doc_ids,
     )
     .await;
+    let chunks = common::context_chunks(chunks, ctx.kinds, ctx.kg_enabled);
     let model_message = format_chunks_for_model(&chunks);
     Ok(ToolOutcome {
         chunks,
@@ -340,6 +346,7 @@ async fn run_keyword_search(
         tool: "keyword_search",
         reason: e,
     })?;
+    let chunks = common::context_chunks(chunks, ctx.kinds, ctx.kg_enabled);
     let model_message = format_chunks_for_model(&chunks);
     Ok(ToolOutcome {
         chunks,
@@ -433,6 +440,7 @@ async fn run_get_document_chunks(
             score: 0.0,
         })
         .collect();
+    let chunks = common::context_chunks(chunks, ctx.kinds, ctx.kg_enabled);
 
     let model_message = format_chunks_for_model(&chunks);
     Ok(ToolOutcome {

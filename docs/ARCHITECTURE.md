@@ -145,9 +145,14 @@ persisted on the message and rendered above the assistant bubble.
 Two independent classifier paths sit around the chat hot path:
 
 - **Extraction guard** (gated by `extraction_guard`): per-turn intent
-  classifier before generation, per-chunk output classifier after, KG-driven
-  multi-turn proximity tracking, and a Socratic rewriter on `gpt-oss-120b`
-  when the output check trips. Every decision is appended to
+  classifier before generation ("a task pasted with a request for its
+  answer and no attempt"). What happens next depends on the document
+  kinds retrieval matched. Graded work (assignment, lab, take-home exam)
+  arms an output check after generation and a Socratic rewriter on
+  `gpt-oss-120b` when it trips, with KG-driven multi-turn proximity
+  tracking; an attempt never lifts it. Practice material gets a prompt
+  addendum instead: a published answer is given, otherwise the answer
+  follows an honest attempt. Every decision is appended to
   `conversation_flags` so teachers can audit activations from the
   "Needs Review" tab.
 - **Aegis** (gated by `aegis`): pre-send prompt-coaching analyzer that

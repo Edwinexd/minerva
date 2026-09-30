@@ -34,12 +34,10 @@ const INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_millis(50
 /// A chunk returned by RAG lookup, carrying metadata for display filtering.
 ///
 /// `kind` mirrors the document's classification (lecture, assignment_brief,
-/// sample_solution, ...). It is sourced from the Qdrant payload (stamped at
-/// embed time by `minerva_pipeline::pipeline`) so we don't need a per-chunk
-/// DB roundtrip on hot retrieval paths. Older points without `kind` (i.e.
-/// stale data, or vectors uploaded by an out-of-date worker) come through
-/// as `None`; the partition logic treats those as "context" with a DB
-/// safety check downstream via `unclassified_doc_ids`.
+/// sample_solution, ...). It arrives as the value stamped on the Qdrant
+/// point at embed time by `minerva_pipeline::pipeline` (`None` on older
+/// points), and the chat path's partition overwrites it with the
+/// document row's current kind before anything reads it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RagChunk {
     pub document_id: String,

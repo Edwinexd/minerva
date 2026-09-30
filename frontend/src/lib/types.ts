@@ -1089,6 +1089,7 @@ export type DocumentKind =
   | "sample_solution"
   | "lab_brief"
   | "exam"
+  | "old_exam"
   | "syllabus"
   | "unknown"
 
@@ -1101,6 +1102,7 @@ export const DOCUMENT_KINDS: DocumentKind[] = [
   "sample_solution",
   "lab_brief",
   "exam",
+  "old_exam",
   "syllabus",
   "unknown",
 ]

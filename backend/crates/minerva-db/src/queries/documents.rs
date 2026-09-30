@@ -803,42 +803,33 @@ pub async fn clear_kind_lock(db: &PgPool, doc_id: Uuid) -> Result<bool, sqlx::Er
     Ok(result.rows_affected() > 0)
 }
 
-/// IDs of docs in a course whose `kind` is in the given list. Used by the
-/// chat-time RAG filter to drop chunks that came from kinds we never want
-/// pasted into the prompt context (assignment_brief / lab_brief / exam /
-/// sample_solution as defense-in-depth in case stale vectors exist).
-pub async fn doc_ids_with_kind(
-    db: &PgPool,
-    course_id: Uuid,
-    kinds: &[&str],
-) -> Result<std::collections::HashSet<String>, sqlx::Error> {
-    let kinds_owned: Vec<String> = kinds.iter().map(|s| s.to_string()).collect();
-    let rows = sqlx::query_scalar!(
-        "SELECT id FROM documents WHERE course_id = $1 AND kind = ANY($2)",
-        course_id,
-        &kinds_owned,
-    )
-    .fetch_all(db)
-    .await?;
-    Ok(rows.into_iter().map(|id| id.to_string()).collect())
-}
+/// Kinds that examine the student: a graded assignment, a graded lab, or
+/// an exam they are sitting now. The chat path never puts their text in
+/// context and never gives a full solution to them. Everything else,
+/// `old_exam` and `tutorial_exercise` included, is practice material.
+pub const EXAMINING_KINDS: &[&str] = &["assignment_brief", "lab_brief", "exam"];
 
-/// IDs of docs in a course whose classification has not yet completed
-/// (`classified_at IS NULL`). The chat-time filter excludes their chunks
-/// from the prompt context; defensive: we'd rather give a slightly worse
-/// answer for the ~30s after upload than risk leaking an unclassified
-/// sample-solution into context.
-pub async fn unclassified_doc_ids(
+/// The current kind of every classified doc in a course, keyed by doc
+/// id. A doc missing from the map has not been classified yet.
+///
+/// This, not the `kind` stamped on a Qdrant point at ingest, is what
+/// the chat path partitions on: a reclassification or a teacher
+/// override changes the row and leaves the point payloads stale.
+pub async fn classified_kinds(
     db: &PgPool,
     course_id: Uuid,
-) -> Result<std::collections::HashSet<String>, sqlx::Error> {
-    let rows = sqlx::query_scalar!(
-        "SELECT id FROM documents WHERE course_id = $1 AND classified_at IS NULL",
+) -> Result<std::collections::HashMap<String, String>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, kind AS "kind!" FROM documents
+           WHERE course_id = $1 AND classified_at IS NOT NULL AND kind IS NOT NULL"#,
         course_id,
     )
     .fetch_all(db)
     .await?;
-    Ok(rows.into_iter().map(|id| id.to_string()).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.id.to_string(), r.kind))
+        .collect())
 }
 
 /// List docs that need (re)classification. `limit` caps batch size for

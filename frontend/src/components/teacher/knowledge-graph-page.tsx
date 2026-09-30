@@ -186,6 +186,7 @@ const KIND_COLORS: Record<string, { fill: string; stroke: string }> = {
   sample_solution: { fill: "#a855f7", stroke: "#7e22ce" },
   lab_brief: { fill: "#f97316", stroke: "#c2410c" },
   exam: { fill: "#e11d48", stroke: "#9f1239" },
+  old_exam: { fill: "#84cc16", stroke: "#4d7c0f" },
   syllabus: { fill: "#6b7280", stroke: "#374151" },
   unknown: { fill: "#9ca3af", stroke: "#4b5563" },
 }
@@ -226,6 +227,7 @@ function Legend() {
     "sample_solution",
     "lab_brief",
     "exam",
+    "old_exam",
     "syllabus",
     "unknown",
   ] as const

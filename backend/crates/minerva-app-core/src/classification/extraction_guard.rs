@@ -1,21 +1,21 @@
-//! Extraction guard: detect "student pasted an assignment and is
-//! asking the model to do it" and intercept the response.
+//! Extraction guard: detect "student pasted a task and is asking the
+//! model to do it" and, when the task is graded work, intercept the
+//! response. Whether the task is graded is not decided here: the chat
+//! strategy knows that from the course's document kinds.
 //!
 //! Three pieces, each a thin wrapper around a Cerebras call:
 //!
 //! 1. `classify_intent`: per-turn pre-generation classifier. Looks
 //!    at the last several user messages and decides whether the
-//!    current turn is a literal pasted-assignment-extraction
-//!    attempt. Strict by design; per the operational policy, the
-//!    only cases we lock down are the ones that are already
-//!    academic-dishonesty-by-the-rules; legitimate study questions
-//!    should always pass through, even ones that look code-y.
+//!    current turn is a pasted task with a request for its answer
+//!    and no attempt from the student. Strict by design: a study
+//!    question in the student's own words always passes through.
 //!
 //! 2. `check_output_for_solution`: post-generation verdict on the
-//!    assistant's reply. Asks "does this contain code that would
-//!    constitute a complete solution to a graded programming
-//!    exercise?". Used as the output-side guard when the input
-//!    was flagged or multi-turn proximity is high.
+//!    assistant's reply. Asks "would this pass as the student's
+//!    submission for the graded task?", whether that is code, a
+//!    calculation or a written answer. Used as the output-side
+//!    guard when graded work is in scope for the turn.
 //!
 //! 3. `generate_socratic_rewrite`: when the output check trips,
 //!    rewrite the assistant's reply into a Socratic question +
@@ -35,7 +35,7 @@ use uuid::Uuid;
 use crate::llm::util_request;
 use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
 
-// All four guard calls run on the admin-selected utility model
+// All three guard calls run on the admin-selected utility model
 // (resolved per call via `AppState::utility_model`), at temperature 0 +
 // `reasoning_effort: "low"` (set per call body) to keep the always-on
 // intent classifier bounded.
@@ -61,29 +61,29 @@ pub struct IntentVerdict {
     pub rationale: String,
 }
 
-const INTENT_SYSTEM_PROMPT: &str = r#"You are an academic-integrity check on a student's chat with a tutoring AI for a programming course.
+const INTENT_SYSTEM_PROMPT: &str = r#"You are a check on a student's chat with a tutoring AI for a university course. The course may be about anything: programming, theory, mathematics, essay writing.
 
-You will read the last few turns of the student's side of the conversation and decide ONE thing: did the student literally paste an assignment problem statement and ask the model to produce the implementation / solution / code that answers it?
+You will read the last few turns of the student's side of the conversation and decide ONE thing: did the student paste a task from the course and ask the AI to produce its answer, without any attempt of their own?
 
 Reply YES only when ALL of these hold:
-- The student's input includes verbatim or near-verbatim assignment text; numbered tasks, "your task is", "implement X that does Y", grading criteria, deadlines, structured problem statement.
-- AND the student's actual ask is to produce the code / answer for that pasted problem (e.g. "do this", "solve this", "write the code", "implement this", "give me the solution", or implicit by absence of any other question).
+- The student's input includes verbatim or near-verbatim task text: numbered tasks or sub-questions (a, b, c), "your task is", "implement X that does Y", "describe / explain / calculate ...", grading criteria, deadlines, a structured problem statement.
+- AND the student's actual ask is for the answer to that pasted task (e.g. "do this", "solve this", "write the code", "answer these", "give me the solution", or implicit by absence of any other question).
+- AND the student has shown no attempt of their own at it: no draft answer, no code, no reasoning to check.
 
 Reply NO for everything else, including:
-- Asking about a concept ("explain recursion", "what's a generic in Java")
-- Asking for a small example to learn syntax
-- Asking about a function from the standard library
-- Pasting the student's OWN code and asking for help debugging
+- Asking about a concept in their own words ("explain recursion", "what is a Turing machine")
+- Asking for a small example
+- Pasting a task together with their OWN answer, code or reasoning and asking for feedback or help with it
 - Asking how to approach a problem in general terms (without pasting the problem)
-- Even "implement bubble sort" alone; this is a textbook reference problem, not a pasted assignment unless the assignment text is also there.
-- Multi-turn conversations that drift toward implementation but never include a pasted assignment.
+- A single textbook-style question typed by the student ("implement bubble sort", "what does an operating system do")
+- Multi-turn conversations that drift toward a task but never include the pasted task text.
 
-The bar is HIGH and STRICT. False positives (calling a legit study question extraction) are worse than false negatives. We are enforcing what is already defined as academic dishonesty in the course rules; we are NOT making the AI more conservative than its baseline.
+The bar is HIGH and STRICT. False positives (calling a legitimate study question a pasted task) are worse than false negatives.
 
 Output JSON only, matching this schema exactly:
 {
   "is_extraction": true | false,
-  "rationale": short specific string. If true, name the assignment-shaped phrasing you saw verbatim. If false, say briefly why this looks like a legitimate study question.
+  "rationale": short specific string. If true, name the task-shaped phrasing you saw verbatim. If false, say briefly why this looks like a legitimate study question.
 }
 
 No prose."#;
@@ -203,20 +203,20 @@ pub struct OutputVerdict {
     pub rationale: String,
 }
 
-const OUTPUT_CHECK_SYSTEM_PROMPT: &str = r#"You judge whether an AI tutor's response gave away the answer to a graded programming assignment.
+const OUTPUT_CHECK_SYSTEM_PROMPT: &str = r#"You judge whether an AI tutor's response gave away the answer to a graded assignment.
 
-Context: a student MAY have just pasted assignment text and asked the model to solve it. The model has now produced its reply. Your job is to decide whether the reply contains code that, taken together, would constitute a complete or near-complete solution the student could submit.
+Context: a student is working on graded work and MAY have pasted the assignment text and asked the tutor to solve it. The tutor has now produced its reply. Your job is to decide whether the reply, taken together, is a complete or near-complete answer the student could submit. The assignment may ask for code, a calculation, or a written answer.
 
-Reply true ONLY when the assistant's reply contains code that:
-- Implements the specific function / class / algorithm the assignment asks for, AND
+Reply true ONLY when the tutor's reply:
+- Does the specific thing the assignment asks for (implements the function / class / program, works the calculation through to its result, or writes out the requested answer or text), AND
 - Could plausibly be submitted as the student's answer with little or no further work.
 
 Reply false for:
-- Code snippets that demonstrate a concept / library function in the abstract.
-- Pseudo-code or skeletal sketches.
-- Code paired with a question that requires the student to fill something in.
-- Explanatory prose with no code.
-- Code that addresses a different problem than the assignment.
+- Explaining a concept, or showing a snippet or example that demonstrates it in the abstract.
+- Pseudo-code, outlines, hints, or skeletal sketches.
+- Material paired with a question that requires the student to fill something in.
+- A worked example on a different problem than the assignment.
+- Feedback on an attempt the student wrote themselves that stops short of rewriting it into a finished answer.
 
 Output JSON only:
 {
@@ -320,12 +320,12 @@ pub async fn check_output_for_solution(
 /// caught itself rather than getting a silent swap.
 pub const REWRITE_PREFIX: &str = "_(I started to give you the full solution; per course policy I should help you work through it instead.)_\n\n";
 
-const REWRITE_SYSTEM_PROMPT: &str = r#"The AI tutor was about to give a student the full code answer to a graded assignment. You are rewriting the reply so it helps the student work through the problem instead.
+const REWRITE_SYSTEM_PROMPT: &str = r#"The AI tutor was about to give a student the full answer to a graded assignment. You are rewriting the reply so it helps the student work through the problem instead.
 
 Output a single short message that:
 - Asks ONE specific Socratic question that pushes the student to think about the next step.
-- Does NOT include the original implementation, even partially.
-- May reference the high-level concept involved without spelling out the algorithm.
+- Does NOT include the original answer, even partially.
+- May reference the high-level concept involved without spelling out the solution.
 - Stays in the same language as the student wrote (likely Swedish or English; match it).
 
 Output ONLY the message text. No JSON, no markdown headers, no explanation of what you did. Just the question."#;
@@ -383,159 +383,6 @@ pub async fn generate_socratic_rewrite(
         return fallback;
     }
     format!("{}{}", REWRITE_PREFIX, raw.trim())
-}
-
-/// Verdict from `classify_engagement`. `engaged` is the only value
-/// the caller acts on (it lifts the constraint). Rationale is logged
-/// onto the `constraint_lifted` flag for the dashboard.
-#[derive(Debug, Clone)]
-pub struct EngagementVerdict {
-    pub engaged: bool,
-    pub rationale: String,
-}
-
-const ENGAGEMENT_SYSTEM_PROMPT: &str = r#"You judge whether a student is actively engaging with a programming tutor's Socratic guidance, or still trying to extract a ready-made solution.
-
-Context: the tutor previously refused to give a complete answer to what looked like a pasted assignment, and instead asked the student a Socratic question or pushed them to think. You are reading the student's NEXT message and deciding whether they took the bait.
-
-Reply true (engaged) when the student's message does ANY of:
-- Includes their own code attempt (even if buggy / partial / wrong); a fenced code block, a function definition, a snippet they wrote.
-- Describes their own approach in their own words (pseudo-code, plan, reasoning).
-- Answers the tutor's Socratic question with a substantive opinion / guess / reasoning, not a deflection.
-- Asks a focused conceptual follow-up that shows they tried to understand ("why does X happen here", "is the pattern Y the right one for this", "I think we should do Z, is that right").
-- Shares an error / output / observation from running something themselves.
-
-Reply false (not engaged, still extracting) when the student:
-- Repeats the original request ("just give me the code", "but I need the answer", "stop with the questions").
-- Pastes more assignment text or another sub-task and asks for that to be solved.
-- Says they don't know / asks the tutor to do it for them with no attempt of their own.
-- Sends a one-word "yes" / "ok" / "do it" with no substance.
-
-The default when uncertain is true (engaged): we'd rather lift the constraint and risk a slip than keep pestering a student who is actually working. The output check still runs every turn; if they slip back into extraction, the constraint will re-trip on its own.
-
-Output JSON only:
-{
-  "engaged": true | false,
-  "rationale": short specific string. Name the engagement signal (or its absence).
-}
-
-No prose."#;
-
-/// Engagement classifier. Decides whether the student's *new*
-/// message represents genuine engagement with the prior Socratic
-/// guidance, in which case the chat path lifts the extraction
-/// constraint and resumes normal generation. The classifier sees
-/// both the prior assistant reply (so it knows what was asked) and
-/// the new student message.
-///
-/// Soft-fails to "engaged = true" on transport errors, matching the
-/// "default to engaged when uncertain" policy in the prompt: false
-/// negatives here would keep a working student stuck under the
-/// constraint, which is the harm we want to avoid.
-pub async fn classify_engagement(
-    http: &reqwest::Client,
-    util: &crate::llm::UtilityModel,
-    db: &PgPool,
-    course_id: Uuid,
-    prior_assistant_reply: &str,
-    new_student_message: &str,
-) -> EngagementVerdict {
-    // Cheap heuristic: a fenced code block in the new message is a
-    // strong "engaged" signal; the student is showing their own
-    // work. Skip the LLM call entirely in that case to save latency.
-    if new_student_message.contains("```") {
-        return EngagementVerdict {
-            engaged: true,
-            rationale: "student included a code block".to_string(),
-        };
-    }
-    if util.provider.is_none() {
-        // Dev / test path. Per the "default engaged" policy, lift.
-        return EngagementVerdict {
-            engaged: true,
-            rationale: "engagement check skipped (no api key)".to_string(),
-        };
-    }
-    if new_student_message.trim().is_empty() {
-        return EngagementVerdict {
-            engaged: false,
-            rationale: "empty student message".to_string(),
-        };
-    }
-    let user_payload = serde_json::json!({
-        "prior_assistant_reply": prior_assistant_reply,
-        "new_student_message": new_student_message,
-    });
-    let body = serde_json::json!({
-        "model": util.model,
-        "temperature": 0.0,
-        "reasoning_effort": "low",
-        "max_completion_tokens": OUTPUT_CHECK_MAX_TOKENS,
-        "messages": [
-            { "role": "system", "content": ENGAGEMENT_SYSTEM_PROMPT },
-            { "role": "user", "content": user_payload.to_string() },
-        ],
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "extraction_engagement_verdict",
-                "strict": true,
-                "schema": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["engaged", "rationale"],
-                    "properties": {
-                        "engaged": { "type": "boolean" },
-                        "rationale": { "type": "string" },
-                    }
-                }
-            }
-        }
-    });
-
-    let (content, usage) = match util_request(http, util, &body).await {
-        Some(Ok(v)) => v,
-        Some(Err(e)) => {
-            tracing::warn!(
-                "extraction_guard: engagement request failed (defaulting to engaged): {}",
-                e
-            );
-            return EngagementVerdict {
-                engaged: true,
-                rationale: format!("engagement classifier failed: {e}"),
-            };
-        }
-        None => {
-            return EngagementVerdict {
-                engaged: true,
-                rationale: "no utility model configured".to_string(),
-            };
-        }
-    };
-    crate::llm::record_pipeline_usage(
-        db,
-        course_id,
-        CATEGORY_EXTRACTION_GUARD,
-        &util.model,
-        &usage,
-    )
-    .await;
-    let raw = content.as_str();
-    let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
-        Ok(v) => v,
-        Err(_) => {
-            return EngagementVerdict {
-                engaged: true,
-                rationale: "engagement verdict not valid JSON".to_string(),
-            };
-        }
-    };
-    EngagementVerdict {
-        // Default-engaged is the safe fallback when the field is
-        // missing; matches the "default engaged" policy.
-        engaged: parsed["engaged"].as_bool().unwrap_or(true),
-        rationale: parsed["rationale"].as_str().unwrap_or_default().to_string(),
-    }
 }
 
 #[cfg(test)]
@@ -613,52 +460,5 @@ mod tests {
         let s = generate_socratic_rewrite(&http, &util(""), &db, Uuid::nil(), "Q", "A").await;
         assert!(s.starts_with(REWRITE_PREFIX));
         assert!(s.len() > REWRITE_PREFIX.len());
-    }
-
-    #[tokio::test]
-    async fn engagement_short_circuits_on_code_block() {
-        // A fenced code block is the cheap "engaged" signal; we
-        // never even hit the LLM. Verifies that path returns true
-        // without an API key.
-        let http = reqwest::Client::new();
-        let db = lazy_pool();
-        let v = classify_engagement(
-            &http,
-            &util(""),
-            &db,
-            Uuid::nil(),
-            "What's your first step?",
-            "Here's what I tried:\n```python\ndef f(x):\n    return x*2\n```\nIs that right?",
-        )
-        .await;
-        assert!(v.engaged);
-        assert!(v.rationale.contains("code block"));
-    }
-
-    #[tokio::test]
-    async fn engagement_defaults_engaged_without_api_key() {
-        // Dev/test path: no API key -> default to engaged so the
-        // constraint lifts. Matches the "lift on uncertainty" policy.
-        let http = reqwest::Client::new();
-        let db = lazy_pool();
-        let v = classify_engagement(
-            &http,
-            &util(""),
-            &db,
-            Uuid::nil(),
-            "ask",
-            "I think we should sort first",
-        )
-        .await;
-        assert!(v.engaged);
-        assert!(v.rationale.contains("no api key"));
-    }
-
-    #[tokio::test]
-    async fn engagement_returns_not_engaged_for_empty_message() {
-        let http = reqwest::Client::new();
-        let db = lazy_pool();
-        let v = classify_engagement(&http, &util("fake-key"), &db, Uuid::nil(), "ask", "   ").await;
-        assert!(!v.engaged);
     }
 }

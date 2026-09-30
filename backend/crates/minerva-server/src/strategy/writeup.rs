@@ -126,6 +126,7 @@ pub async fn run(
     chunks: &[RagChunk],
     research_transcript: &str,
     tool_log: &str,
+    policy_addendum: &str,
     tx: &mpsc::Sender<Result<Event, AppError>>,
     usage: &mut super::TurnUsage,
 ) -> Result<String, AppError> {
@@ -137,6 +138,10 @@ pub async fn run(
         tool_log,
         ctx.carryover.as_deref(),
     );
+    // The writeup is what the student reads, so the turn's answer
+    // policy (see `common::policy_addendum`) goes here and closes the
+    // prompt, after the reply rules it qualifies.
+    system.push_str(policy_addendum);
     let global_knowledge = common::retrieve_global_knowledge(
         &reqwest::Client::new(),
         &ctx.openai_api_key,

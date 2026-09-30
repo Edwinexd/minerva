@@ -15,9 +15,9 @@
 //!    [`minerva_db::queries::documents::set_classification`] which is a
 //!    no-op when the row is locked by a teacher.
 //!
-//! The chat path consumes this metadata via the Qdrant payload (each
-//! point's `kind` field) plus the DB-side `doc_ids_with_kind` /
-//! `unclassified_doc_ids` filters in `strategy::common`.
+//! The chat path consumes this metadata through
+//! `strategy::common::CourseKinds`, which reads each document's current
+//! kind from its row once per turn.
 
 pub mod adversarial;
 pub mod aegis;
@@ -38,5 +38,5 @@ pub use document::LlmClassifier;
 /// did that on every adversarial call (4 tokens) and on 229 of the first
 /// 300 topic-switch calls (64 tokens).
 pub(crate) const VERDICT_MAX_TOKENS: usize = 256;
-// Other exports (DocumentKind, ALL_KINDS, is_signal_only_kind) are reached
+// Other exports (DocumentKind, ALL_KINDS, is_examining_kind) are reached
 // via the `types` submodule directly from callers.

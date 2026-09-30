@@ -1,14 +1,17 @@
 use axum::response::sse::Event;
 use minerva_core::rpc::{EmbedderClient, RerankerClient};
 use qdrant_client::qdrant::{ScoredPoint, SearchPointsBuilder};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
-use crate::classification::prompts::{ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE, PASTED_PROBLEM_RULE};
-use crate::classification::types::is_signal_only_kind;
+use crate::classification::prompts::{
+    ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE, PASTED_PROBLEM_RULE, PRACTICE_ATTEMPT_ADDENDUM,
+};
+use crate::classification::types::is_examining_kind;
 use crate::error::AppError;
 
 // Primitives shared with the ingest-time classifier live in `crate::llm`
@@ -49,8 +52,11 @@ pub fn chunk_identity_hash(c: &RagChunk) -> u64 {
 ///
 /// * `context`; chunk text gets pasted into the system prompt under
 ///   `## Course materials`. These are the kinds that legitimately help
-///   the model answer a student's question (lecture / reading / syllabus).
-/// * `signals`; chunks from `assignment_brief`/`lab_brief`/`exam` docs.
+///   the model answer a student's question: teaching material, practice
+///   material (`tutorial_exercise`, `old_exam`), and sample solutions to
+///   anything that is not examining.
+/// * `signals`; chunks from examining docs (`assignment_brief`,
+///   `lab_brief`, `exam`).
 ///   Their *existence* (and the matched filenames) is information we
 ///   forward to the prompt as a refusal signal, but the chunk **text**
 ///   never lands in context; otherwise the model would just read the
@@ -181,19 +187,70 @@ pub fn scored_point_to_rag_chunk(point: &ScoredPoint) -> Option<RagChunk> {
     })
 }
 
-/// Split chunks into prompt-context vs detection-signal buckets, dropping
-/// stale `sample_solution` chunks defensively (those shouldn't have been
-/// embedded in the first place; the worker short-circuits; but we
-/// double-check in case data pre-dates the classifier rollout).
+/// What the chat path needs to know about a course's documents to
+/// decide where a retrieved chunk may go. Loaded once per turn.
 ///
-/// `unclassified_doc_ids` are docs whose classifier hasn't run yet: their
-/// chunks are excluded from context this turn (we'd rather give a
-/// slightly worse answer than risk leaking unclassified material).
-pub fn partition_chunks(
-    chunks: Vec<RagChunk>,
-    unclassified_doc_ids: &HashSet<String>,
-    kg_enabled: bool,
-) -> RagResult {
+/// The kinds come from the `documents` rows, not from the `kind` a
+/// Qdrant point was stamped with at ingest: a reclassification or a
+/// teacher override changes the row and leaves the payload stale.
+#[derive(Debug, Clone, Default)]
+pub struct CourseKinds {
+    /// Current kind per classified doc id. `None` when the lookup
+    /// failed; the partition then falls back to the point payload
+    /// rather than holding every chunk back as unclassified.
+    kinds: Option<HashMap<String, String>>,
+    /// Sample solutions that solve examining material.
+    withheld_solutions: HashSet<String>,
+}
+
+impl CourseKinds {
+    /// Empty (and free) for a course without the KG bundle, whose
+    /// partition passes every chunk through anyway.
+    pub async fn load(db: &sqlx::PgPool, course_id: Uuid, kg_enabled: bool) -> Self {
+        if !kg_enabled {
+            return Self::default();
+        }
+        let kinds = minerva_db::queries::documents::classified_kinds(db, course_id)
+            .await
+            .map_err(|e| tracing::warn!("rag: kind lookup failed for course {course_id}: {e}"))
+            .ok();
+        let withheld_solutions =
+            minerva_db::queries::document_relations::solutions_of_examining(db, course_id)
+                .await
+                .map_err(|e| {
+                    tracing::warn!("rag: solution lookup failed for course {course_id}: {e}")
+                })
+                .unwrap_or_default();
+        Self {
+            kinds,
+            withheld_solutions,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn for_test(kinds: &[(&str, &str)], withheld_solutions: &[&str]) -> Self {
+        Self {
+            kinds: Some(
+                kinds
+                    .iter()
+                    .map(|(id, kind)| (id.to_string(), kind.to_string()))
+                    .collect(),
+            ),
+            withheld_solutions: withheld_solutions.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+}
+
+/// Split chunks into prompt-context vs detection-signal buckets.
+///
+/// * examining kinds become `signals`: matched, never quoted;
+/// * a sample solution to examining material is dropped outright;
+/// * `unknown` and not-yet-classified docs are held back this turn
+///   (we'd rather give a slightly worse answer than risk leaking
+///   unclassified material);
+/// * everything else is context, practice material and the sample
+///   solutions to it included.
+pub fn partition_chunks(chunks: Vec<RagChunk>, kinds: &CourseKinds, kg_enabled: bool) -> RagResult {
     if !kg_enabled {
         // KG feature flag is off for this course: bypass every
         // kind-based partition rule and just feed every chunk into
@@ -205,38 +262,38 @@ pub fn partition_chunks(
     }
     let mut context = Vec::with_capacity(chunks.len());
     let mut signals = Vec::new();
-    for c in chunks {
-        // Defensive drop: a sample_solution should never have been
-        // embedded; if we see one, it's stale and never goes anywhere.
-        if c.kind.as_deref() == Some("sample_solution") {
-            tracing::warn!(
-                "rag: dropping stale sample_solution chunk (doc {})",
-                c.document_id
-            );
-            continue;
+    for mut c in chunks {
+        if let Some(current) = &kinds.kinds {
+            let Some(kind) = current.get(&c.document_id) else {
+                tracing::debug!(
+                    "rag: chunk from doc {} held back (classification pending)",
+                    c.document_id
+                );
+                continue;
+            };
+            c.kind = Some(kind.clone());
         }
+        let kind = c.kind.as_deref().unwrap_or_default();
         // `unknown` is the bucket the classifier uses when it can't
         // confidently place a doc (zero-text URL stubs, ambiguous
         // material, etc.). Quarantine these from context: a teacher
         // can promote them to a real kind via the documents UI, at
         // which point chunks come through normally on the next
-        // retrieval. The chat path stays defensive in the meantime.
-        if c.kind.as_deref() == Some("unknown") {
+        // retrieval.
+        if kind == "unknown" {
             tracing::debug!(
                 "rag: chunk from unknown-kind doc {} held back (teacher review needed)",
                 c.document_id
             );
             continue;
         }
-        // Signal-only kinds: keep the metadata, drop the text from context.
-        if c.kind.as_deref().map(is_signal_only_kind).unwrap_or(false) {
+        if is_examining_kind(kind) {
             signals.push(c);
             continue;
         }
-        // Unclassified: defensively keep out of context until classifier finishes.
-        if unclassified_doc_ids.contains(&c.document_id) {
+        if kinds.withheld_solutions.contains(&c.document_id) {
             tracing::debug!(
-                "rag: chunk from doc {} held back (classification pending)",
+                "rag: chunk from doc {} withheld (solution to examining material)",
                 c.document_id
             );
             continue;
@@ -244,6 +301,47 @@ pub fn partition_chunks(
         context.push(c);
     }
     RagResult { context, signals }
+}
+
+/// The context half of [`partition_chunks`], for retrievals made after
+/// the seed (research tools, FLARE injections) whose signals nobody
+/// reads.
+pub fn context_chunks(
+    chunks: Vec<RagChunk>,
+    kinds: &CourseKinds,
+    kg_enabled: bool,
+) -> Vec<RagChunk> {
+    partition_chunks(chunks, kinds, kg_enabled).context
+}
+
+/// Drop worked solutions from a turn's context when the turn touches
+/// examining material, i.e. `near_examining` is set or the chunks
+/// themselves carry an examining signal.
+///
+/// The per-doc kind already keeps a graded assignment's own solution
+/// out. This catches the chunk-level leak: a lecture or an old exam
+/// that happens to work through the same problem. It is scoped to
+/// examining turns because everywhere else a worked solution is exactly
+/// what the student should get.
+pub async fn drop_solutions_near_examining(
+    http: &reqwest::Client,
+    util: &crate::llm::UtilityModel,
+    db: &sqlx::PgPool,
+    course_id: Uuid,
+    mut rag: RagResult,
+    near_examining: bool,
+) -> RagResult {
+    if near_examining || !rag.signals.is_empty() {
+        rag.context = crate::classification::adversarial::filter_solution_chunks(
+            http,
+            util,
+            db,
+            course_id,
+            rag.context,
+        )
+        .await;
+    }
+    rag
 }
 
 // ── Embedding-aware Qdrant search ──────────────────────────────────
@@ -480,7 +578,7 @@ pub fn build_system_prompt(
     chunks: &[RagChunk],
     carryover: Option<&str>,
 ) -> String {
-    build_system_prompt_with_signals(course_name, custom_prompt, chunks, &[], carryover)
+    build_system_prompt_with_signals(course_name, custom_prompt, chunks, &[], false, carryover)
 }
 
 /// Framing for [`build_system_prompt_with_signals`]'s carryover section.
@@ -503,6 +601,7 @@ pub fn build_system_prompt_with_signals(
     custom_prompt: &Option<String>,
     chunks: &[RagChunk],
     signal_chunks: &[RagChunk],
+    practice_attempt_first: bool,
     carryover: Option<&str>,
 ) -> String {
     let base = format!(
@@ -588,41 +687,55 @@ pub fn build_system_prompt_with_signals(
         prompt.push_str("\n---");
     }
 
-    // Per-turn assignment-match addendum. Appended LAST so the prefix above
-    // stays byte-stable across turns within a session (Cerebras prompt
-    // cache friendliness). One cache miss per matched-turn rather than
-    // poisoning the entire conversation's cache.
-    //
-    // Apply ASSIGNMENT_SIGNAL_MIN_SCORE: a low-scoring assignment match
-    // is too weak a signal to justify clamping the model into refusal
-    // mode for an otherwise legitimate question. The student asking
-    // "what's a recurrence relation" shouldn't trigger refusal just
-    // because an assignment_brief about recurrence relations exists in
-    // the course.
-    let strong_signals: Vec<&RagChunk> = signal_chunks
-        .iter()
-        .filter(|c| c.score >= ASSIGNMENT_SIGNAL_MIN_SCORE)
-        .collect();
-    if !strong_signals.is_empty() {
-        let mut filenames: Vec<String> =
-            strong_signals.iter().map(|c| c.filename.clone()).collect();
-        filenames.sort();
-        filenames.dedup();
-        let joined = filenames.join(", ");
-        prompt.push_str(&ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE.replace("{filenames}", &joined));
-    } else if !signal_chunks.is_empty() {
-        // Tangential assignment match; log so we can calibrate the
-        // threshold against real traffic. Not visible to the student.
-        let scores: Vec<f32> = signal_chunks.iter().map(|c| c.score).collect();
-        tracing::debug!(
-            "rag: {} assignment-kind signal(s) below {:.2} threshold, refusal addendum suppressed (max score {:.3})",
-            signal_chunks.len(),
-            ASSIGNMENT_SIGNAL_MIN_SCORE,
-            scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
-        );
-    }
+    // Appended LAST so the prefix above stays byte-stable across turns
+    // within a session (Cerebras prompt cache friendliness). One cache
+    // miss per matched turn rather than poisoning the entire
+    // conversation's cache.
+    prompt.push_str(&policy_addendum(signal_chunks, practice_attempt_first));
 
     prompt
+}
+
+/// The per-turn answer-policy addendum, or an empty string when the
+/// turn needs none.
+///
+/// * A strong examining match gets the no-full-solution addendum. It
+///   wins over the practice one: graded work is refused whether or not
+///   the student has made an attempt.
+/// * Otherwise `practice_attempt_first` (the extraction guard saw a
+///   practice question pasted without an attempt) gets the
+///   published-answer-or-attempt-first addendum.
+///
+/// ASSIGNMENT_SIGNAL_MIN_SCORE applies: a low-scoring assignment match
+/// is too weak a signal to justify clamping the model into refusal mode
+/// for an otherwise legitimate question. The student asking "what's a
+/// recurrence relation" shouldn't trigger refusal just because an
+/// assignment_brief about recurrence relations exists in the course.
+pub fn policy_addendum(signal_chunks: &[RagChunk], practice_attempt_first: bool) -> String {
+    let mut filenames: Vec<String> = signal_chunks
+        .iter()
+        .filter(|c| c.score >= ASSIGNMENT_SIGNAL_MIN_SCORE)
+        .map(|c| c.filename.clone())
+        .collect();
+    if !filenames.is_empty() {
+        filenames.sort();
+        filenames.dedup();
+        return ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE.replace("{filenames}", &filenames.join(", "));
+    }
+    if !signal_chunks.is_empty() {
+        // Tangential assignment match; log so we can calibrate the
+        // threshold against real traffic. Not visible to the student.
+        tracing::debug!(
+            "rag: {} examining signal(s) below {:.2} threshold, refusal addendum suppressed (max score {:.3})",
+            signal_chunks.len(),
+            ASSIGNMENT_SIGNAL_MIN_SCORE,
+            signal_chunks.iter().map(|c| c.score).fold(f32::NEG_INFINITY, f32::max),
+        );
+    }
+    if practice_attempt_first {
+        return PRACTICE_ATTEMPT_ADDENDUM.to_string();
+    }
+    String::new()
 }
 
 /// Global, non-course knowledge is declared here rather than in a chat
@@ -1104,7 +1217,7 @@ pub fn build_chat_messages(
 ///
 /// Note: this returns the re-ranked top-`max_chunks` chunks (the raw
 /// kinds, unpartitioned). Strategies must call [`partition_chunks`] with
-/// the course's `unclassified_doc_ids` to split context from signals
+/// the course's [`CourseKinds`] to split context from signals
 /// before building the system prompt.
 #[allow(clippy::too_many_arguments)]
 pub async fn rag_lookup(
@@ -1690,7 +1803,7 @@ mod tests {
     }
 
     #[test]
-    fn partition_routes_signal_only_kinds_into_signals() {
+    fn partition_routes_examining_kinds_into_signals() {
         let chunks = vec![
             chunk("d1", "lecture1.pdf", "Lecture content.", Some("lecture")),
             chunk("d2", "lab2.pdf", "Implement function …", Some("lab_brief")),
@@ -1700,32 +1813,71 @@ mod tests {
                 "Your task is …",
                 Some("assignment_brief"),
             ),
-            chunk("d4", "midterm.pdf", "Q1: prove …", Some("exam")),
+            chunk("d4", "hemtenta.pdf", "Q1: prove …", Some("exam")),
         ];
-        let r = partition_chunks(chunks, &HashSet::new(), true);
+        let r = partition_chunks(chunks, &CourseKinds::default(), true);
         assert_eq!(r.context.len(), 1);
         assert_eq!(r.context[0].filename, "lecture1.pdf");
         assert_eq!(r.signals.len(), 3);
         let signal_files: Vec<&str> = r.signals.iter().map(|c| c.filename.as_str()).collect();
         assert!(signal_files.contains(&"lab2.pdf"));
         assert!(signal_files.contains(&"assignment.pdf"));
-        assert!(signal_files.contains(&"midterm.pdf"));
+        assert!(signal_files.contains(&"hemtenta.pdf"));
     }
 
     #[test]
-    fn partition_drops_stale_sample_solution_defensively() {
-        // sample_solution shouldn't be in Qdrant at all (worker
-        // short-circuits), but if a stale point sneaks through it must
-        // never reach context OR signals.
+    fn partition_keeps_practice_material_and_its_solutions_in_context() {
+        let chunks = vec![
+            chunk("d1", "tenta-2024.pdf", "Q1: prove …", Some("old_exam")),
+            chunk(
+                "d2",
+                "ovning3.pdf",
+                "Exercise 3 …",
+                Some("tutorial_exercise"),
+            ),
+            chunk(
+                "d3",
+                "tenta-2024-losning.pdf",
+                "Answer …",
+                Some("sample_solution"),
+            ),
+        ];
+        let r = partition_chunks(chunks, &CourseKinds::default(), true);
+        assert_eq!(r.context.len(), 3);
+        assert!(r.signals.is_empty());
+    }
+
+    #[test]
+    fn partition_withholds_solutions_to_examining_material() {
+        let chunks = vec![
+            chunk("d1", "lab2_solution.pdf", "Here is the answer …", None),
+            chunk("d2", "tenta-losning.pdf", "Answer …", None),
+        ];
+        let kinds = CourseKinds::for_test(
+            &[("d1", "sample_solution"), ("d2", "sample_solution")],
+            &["d1"],
+        );
+        let r = partition_chunks(chunks, &kinds, true);
+        assert_eq!(r.context.len(), 1);
+        assert_eq!(r.context[0].filename, "tenta-losning.pdf");
+        assert!(r.signals.is_empty());
+    }
+
+    #[test]
+    fn partition_trusts_the_document_row_over_a_stale_point_payload() {
+        // The point was stamped `lecture` at ingest; the doc has since
+        // been reclassified as a graded assignment.
         let chunks = vec![chunk(
             "d1",
-            "lab2_solution.pdf",
-            "Here is the answer …",
-            Some("sample_solution"),
+            "uppgift.pdf",
+            "Your task is …",
+            Some("lecture"),
         )];
-        let r = partition_chunks(chunks, &HashSet::new(), true);
+        let kinds = CourseKinds::for_test(&[("d1", "assignment_brief")], &[]);
+        let r = partition_chunks(chunks, &kinds, true);
         assert!(r.context.is_empty());
-        assert!(r.signals.is_empty());
+        assert_eq!(r.signals.len(), 1);
+        assert_eq!(r.signals[0].kind.as_deref(), Some("assignment_brief"));
     }
 
     #[test]
@@ -1734,12 +1886,27 @@ mod tests {
             chunk("d1", "ready.pdf", "Lecture stuff.", Some("lecture")),
             chunk("d2", "fresh-upload.pdf", "Just uploaded …", None),
         ];
-        let mut unclassified = HashSet::new();
-        unclassified.insert("d2".to_string());
-        let r = partition_chunks(chunks, &unclassified, true);
+        let kinds = CourseKinds::for_test(&[("d1", "lecture")], &[]);
+        let r = partition_chunks(chunks, &kinds, true);
         assert_eq!(r.context.len(), 1);
         assert_eq!(r.context[0].filename, "ready.pdf");
         assert!(r.signals.is_empty());
+    }
+
+    #[test]
+    fn policy_addendum_prefers_examining_over_practice() {
+        let mut signal = chunk("d1", "lab1.pdf", "Implement …", Some("lab_brief"));
+        signal.score = 0.9;
+        let examining = policy_addendum(std::slice::from_ref(&signal), true);
+        assert!(examining.contains("lab1.pdf"));
+        assert!(!examining.contains("Practice question"));
+
+        assert!(policy_addendum(&[], true).contains("Practice question"));
+        assert!(policy_addendum(&[], false).is_empty());
+
+        // A tangential examining match does not displace the practice policy.
+        signal.score = 0.4;
+        assert!(policy_addendum(&[signal], true).contains("Practice question"));
     }
 
     #[test]
@@ -1809,7 +1976,7 @@ mod tests {
             Some("assignment_brief"),
         )];
         let prompt =
-            build_system_prompt_with_signals("Algorithms", &None, &context, &signals, None);
+            build_system_prompt_with_signals("Algorithms", &None, &context, &signals, false, None);
         assert!(prompt.contains("Assignment match for this turn"));
         assert!(prompt.contains("assignment2.pdf"));
         // Context text must still be there.
@@ -1826,14 +1993,15 @@ mod tests {
             "Recurrence relations are …",
             Some("lecture"),
         )];
-        let prompt = build_system_prompt_with_signals("Algorithms", &None, &context, &[], None);
+        let prompt =
+            build_system_prompt_with_signals("Algorithms", &None, &context, &[], false, None);
         assert!(!prompt.contains("Assignment match for this turn"));
     }
 
     #[test]
     fn build_system_prompt_includes_pasted_problem_rule() {
         let prompt = build_system_prompt("Algorithms", &None, &[], None);
-        assert!(prompt.contains("pasted verbatim"));
+        assert!(prompt.contains(PASTED_PROBLEM_RULE));
     }
 
     #[test]
@@ -1873,7 +2041,8 @@ mod tests {
             Some("assignment_brief"),
         );
         signal.score = ASSIGNMENT_SIGNAL_MIN_SCORE - 0.05;
-        let prompt = build_system_prompt_with_signals("Algorithms", &None, &[], &[signal], None);
+        let prompt =
+            build_system_prompt_with_signals("Algorithms", &None, &[], &[signal], false, None);
         assert!(
             !prompt.contains("Assignment match for this turn"),
             "low-score signal should not trigger refusal addendum"
@@ -1889,7 +2058,8 @@ mod tests {
             Some("assignment_brief"),
         );
         signal.score = ASSIGNMENT_SIGNAL_MIN_SCORE + 0.1;
-        let prompt = build_system_prompt_with_signals("Algorithms", &None, &[], &[signal], None);
+        let prompt =
+            build_system_prompt_with_signals("Algorithms", &None, &[], &[signal], false, None);
         assert!(
             prompt.contains("Assignment match for this turn"),
             "strong-score signal should trigger refusal addendum"
@@ -1904,7 +2074,7 @@ mod tests {
             chunk("d1", "lecture.pdf", "Lecture content", Some("lecture")),
             chunk("d2", "mystery.pdf", "Ambiguous content", Some("unknown")),
         ];
-        let r = partition_chunks(chunks, &HashSet::new(), true);
+        let r = partition_chunks(chunks, &CourseKinds::default(), true);
         assert_eq!(r.context.len(), 1);
         assert_eq!(r.context[0].filename, "lecture.pdf");
         assert!(r.signals.is_empty());

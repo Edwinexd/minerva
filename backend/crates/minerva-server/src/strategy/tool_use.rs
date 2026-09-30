@@ -146,25 +146,17 @@ pub async fn run(
     )
     .await;
 
-    let unclassified = if ctx.kg_enabled {
-        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
-            .await
-            .unwrap_or_default()
-    } else {
-        std::collections::HashSet::new()
-    };
-    let mut rag = common::partition_chunks(raw_chunks, &unclassified, ctx.kg_enabled);
-
-    if ctx.kg_enabled {
-        rag.context = crate::classification::adversarial::filter_solution_chunks(
-            &http_client,
-            &ctx.utility,
-            &ctx.db,
-            ctx.course_id,
-            rag.context,
-        )
-        .await;
-    }
+    let kinds = common::CourseKinds::load(&ctx.db, ctx.course_id, ctx.kg_enabled).await;
+    let rag = common::partition_chunks(raw_chunks, &kinds, ctx.kg_enabled);
+    let mut rag = common::drop_solutions_near_examining(
+        &http_client,
+        &ctx.utility,
+        &ctx.db,
+        ctx.course_id,
+        rag,
+        false,
+    )
+    .await;
 
     // 2. Build the prelim retrieval records (seed + optional KG
     //    expansion) BEFORE the guard evaluation and BEFORE emitting
@@ -204,6 +196,10 @@ pub async fn run(
             &orphaned,
         )
         .await;
+        // The neighbours are fetched by document, so they get the same
+        // kind partition as a search hit: an `applied_in` partner is
+        // often the graded assignment itself.
+        let extra = common::context_chunks(extra, &kinds, ctx.kg_enabled);
         // Only surface the KG-expansion event when it actually
         // added something ; an empty extras list means the seed
         // chunks already covered the KG neighbourhood and there's
@@ -235,7 +231,6 @@ pub async fn run(
         ctx.course_id,
         ctx.conversation_id,
         &ctx.history,
-        &ctx.user_content,
         &rag.signals,
         &rag.context,
     )
@@ -307,6 +302,7 @@ pub async fn run(
         rag.context.clone(),
         cap,
         &orphaned,
+        &kinds,
         disclosure,
         &tx,
     )
@@ -364,6 +360,10 @@ pub async fn run(
         &research.chunks,
         writeup_transcript,
         &research.research_summary,
+        &common::policy_addendum(
+            &rag.signals,
+            super::extraction_guard::practice_attempt_first(&guard_decision),
+        ),
         &tx,
         &mut usage,
     )

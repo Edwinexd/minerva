@@ -56,34 +56,23 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     )
     .await;
 
-    // Kind-aware partition: assignment_brief / lab_brief / exam matches
-    // become `signals` (the model gets a refusal addendum but never the
-    // chunk text); sample_solution leftovers are dropped defensively;
-    // unclassified docs are held back for this turn. All gated on
-    // `kg_enabled`; KG-disabled courses bypass the partition and the
-    // adversarial filter entirely.
-    let unclassified = if ctx.kg_enabled {
-        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
-            .await
-            .unwrap_or_default()
-    } else {
-        std::collections::HashSet::new()
-    };
-    let mut rag = common::partition_chunks(raw_chunks, &unclassified, ctx.kg_enabled);
-
-    // Adversarial pre-retrieval check: drop any per-chunk worked
-    // solutions that slipped through the doc-level classifier.
-    // Fails open on timeout (see classification::adversarial).
-    if ctx.kg_enabled {
-        rag.context = crate::classification::adversarial::filter_solution_chunks(
-            &http_client,
-            &ctx.utility,
-            &ctx.db,
-            ctx.course_id,
-            rag.context,
-        )
-        .await;
-    }
+    // Kind-aware partition: examining matches become `signals` (the
+    // model gets a refusal addendum but never the chunk text);
+    // solutions to examining material are dropped; unclassified docs
+    // are held back for this turn. All gated on `kg_enabled`;
+    // KG-disabled courses bypass the partition and the adversarial
+    // filter entirely.
+    let kinds = common::CourseKinds::load(&ctx.db, ctx.course_id, ctx.kg_enabled).await;
+    let rag = common::partition_chunks(raw_chunks, &kinds, ctx.kg_enabled);
+    let mut rag = common::drop_solutions_near_examining(
+        &http_client,
+        &ctx.utility,
+        &ctx.db,
+        ctx.course_id,
+        rag,
+        false,
+    )
+    .await;
 
     // Graph-aware enrichment: same logic as parallel.rs; pull
     // representative chunks from each top hit's KG partners so
@@ -108,7 +97,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             &orphaned,
         )
         .await;
-        rag.context.extend(extra);
+        rag.context
+            .extend(common::context_chunks(extra, &kinds, ctx.kg_enabled));
     }
 
     // Extraction guard evaluation: runs intent classifier + multi-
@@ -123,7 +113,6 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         ctx.course_id,
         ctx.conversation_id,
         &ctx.history,
-        &ctx.user_content,
         &rag.signals,
         &rag.context,
     )
@@ -166,6 +155,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.custom_prompt,
         &rag.context,
         &rag.signals,
+        super::extraction_guard::practice_attempt_first(&guard_decision),
         ctx.carryover.as_deref(),
     );
     let global_knowledge = common::retrieve_global_knowledge(

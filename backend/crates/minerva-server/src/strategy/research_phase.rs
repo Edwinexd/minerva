@@ -277,6 +277,7 @@ pub async fn run(
     initial_chunks: Vec<RagChunk>,
     per_response_token_cap: i64,
     orphaned_doc_ids: &std::collections::HashSet<String>,
+    kinds: &common::CourseKinds,
     disclosure: ThinkingDisclosure,
     tx: &mpsc::Sender<Result<Event, AppError>>,
 ) -> ResearchOutput {
@@ -309,6 +310,8 @@ pub async fn run(
         course_id: ctx.course_id,
         min_score: ctx.min_score,
         orphaned_doc_ids,
+        kinds,
+        kg_enabled: ctx.kg_enabled,
     };
 
     let catalog = tools::assemble_catalog(catalog_flags);
@@ -570,6 +573,7 @@ pub async fn run(
                     orphaned_doc_ids,
                 )
                 .await;
+                let new_chunks = common::context_chunks(new_chunks, kinds, ctx.kg_enabled);
                 let mut added = 0usize;
                 for c in &new_chunks {
                     if chunk_hashes.insert(chunk_identity_hash(c)) {

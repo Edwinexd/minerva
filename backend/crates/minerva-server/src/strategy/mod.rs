@@ -278,7 +278,7 @@ pub struct GenerationContext {
     /// FALSE, RAG behaviour reverts to the pre-KG baseline:
     ///
     ///   * adversarial chunk filter skipped
-    ///   * `unclassified_doc_ids` lookup skipped (treated as empty)
+    ///   * document-kind lookup (`CourseKinds`) skipped
     ///   * `partition_chunks` puts every chunk into context
     ///   * `build_system_prompt_with_signals` gets no signals (no
     ///     refusal addendum)

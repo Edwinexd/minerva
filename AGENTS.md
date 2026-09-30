@@ -735,6 +735,43 @@ Measured on prod (IDSV, Sep 2026): with the topic banner visible, 59%
 of students kept going in the same chat, against about 80% after
 comparable turns that got no banner.
 
+## Answer Policy (document kinds + extraction guard)
+
+What Minerva will answer depends on the kind of material the question is
+about. The kind is per document (`documents.kind`, classifier-set,
+teacher-overridable) and the chat path reads it from the row each turn
+(`strategy::common::CourseKinds`), not from the `kind` stamped on a
+Qdrant point at ingest, which goes stale when a doc is reclassified.
+
+| Material | Kinds | Behaviour |
+|---|---|---|
+| Examining | `assignment_brief`, `lab_brief`, `exam` (take-home) | Text never enters context; never a full solution, attempt or not |
+| Solution to examining work | `sample_solution` with a `solution_of` edge onto an examining doc | Withheld from context |
+| Practice | `tutorial_exercise`, `old_exam`, any other `sample_solution` | Ordinary context. A published answer is given; otherwise the answer follows an honest attempt |
+
+- `EXAMINING_KINDS` in `minerva-db` is the one definition; the SQL and
+  `types::is_examining_kind` both read it.
+- `old_exam` is a past exam published for practice, with or without
+  answers. `exam` is reserved for one the students are sitting now. The
+  classifier prefers `old_exam` when unsure; a teacher marks a take-home
+  exam by hand if the classifier misses it.
+- Every kind is indexed in Qdrant, sample solutions included. Withholding
+  is a chat-time decision (`partition_chunks`), applied to the seed
+  retrieval, KG expansion, research-tool results and FLARE injections
+  alike. Ingest replaces a document's points, so a requeue is safe.
+- A `sample_solution` the linker has not paired with anything is treated
+  as practice. To keep one out of chat, link it to its assignment or set
+  its kind to `unknown`.
+- The extraction guard (`extraction_guard` flag) classifies intent per
+  turn: a task pasted with a request for its answer and no attempt.
+  With an examining doc matched (or recurring across turns) the
+  constraint goes on: every reply is checked and a complete solution is
+  replaced by a Socratic question. It comes off only when none of those
+  docs appears in the last five turns. Without an examining match the
+  turn gets `PRACTICE_ATTEMPT_ADDENDUM` and nothing is rewritten.
+- The adversarial per-chunk solution filter runs only on turns with an
+  examining signal (`drop_solutions_near_examining`).
+
 ## Terraform
 
 Manages GitHub environment secrets for the `prod` environment. Generates `K8S_SECRETS` manifest from individual secret variables.

@@ -260,13 +260,48 @@ pub async fn applied_in_assignments_for_lectures(
              AND dr.relation = 'applied_in'
              AND dr.rejected_by_teacher = FALSE
              AND dr.src_doc_id = ANY($2)
-             AND d.kind IN ('assignment_brief', 'lab_brief', 'exam')"#,
+             AND d.kind = ANY($3)"#,
         course_id,
         lecture_doc_ids,
+        &examining_kinds(),
     )
     .fetch_all(db)
     .await?;
     Ok(rows)
+}
+
+fn examining_kinds() -> Vec<String> {
+    super::documents::EXAMINING_KINDS
+        .iter()
+        .map(|k| k.to_string())
+        .collect()
+}
+
+/// Sample solutions in a course that solve examining material: the
+/// source side of a `solution_of` edge whose destination is an
+/// examining kind. These are the only solutions the chat path withholds;
+/// a solution to practice material (or one the linker has not paired
+/// with anything) is ordinary context.
+///
+/// Excludes teacher-rejected edges.
+pub async fn solutions_of_examining(
+    db: &PgPool,
+    course_id: Uuid,
+) -> Result<std::collections::HashSet<String>, sqlx::Error> {
+    let rows = sqlx::query_scalar!(
+        r#"SELECT DISTINCT dr.src_doc_id
+           FROM document_relations dr
+           JOIN documents d ON d.id = dr.dst_doc_id
+           WHERE dr.course_id = $1
+             AND dr.relation = 'solution_of'
+             AND dr.rejected_by_teacher = FALSE
+             AND d.kind = ANY($2)"#,
+        course_id,
+        &examining_kinds(),
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|id| id.to_string()).collect())
 }
 
 // ── Per-edge teacher rejection ─────────────────────────────────────

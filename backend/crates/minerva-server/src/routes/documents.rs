@@ -903,9 +903,9 @@ struct SetKindBody {
 }
 
 /// Manually set a document's kind and lock it against future
-/// auto-classification. If the new kind is `sample_solution`, also
-/// purge any embedded chunks from Qdrant; otherwise stale vectors
-/// would still be retrievable even though the doc is now flagged.
+/// auto-classification. Takes effect on the next chat turn: the chat
+/// path partitions retrieved chunks by the document's current kind,
+/// so nothing in Qdrant needs rewriting.
 async fn set_document_kind(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -914,7 +914,7 @@ async fn set_document_kind(
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
     require_kg_enabled(&state, course_id).await?;
-    let doc = load_doc_in_course(&state, course_id, doc_id).await?;
+    let _doc = load_doc_in_course(&state, course_id, doc_id).await?;
 
     // Reject unknown kinds at the API boundary so the user gets a 400
     // instead of a 500 from the DB CHECK constraint.
@@ -927,54 +927,9 @@ async fn set_document_kind(
 
     minerva_db::queries::documents::set_kind_locked(&state.db, doc_id, &body.kind).await?;
 
-    // If the teacher just declared this doc a sample_solution, purge
-    // any Qdrant chunks so retrieval can't surface them. Idempotent --
-    // if the collection or doc has no points, this is a no-op.
-    if body.kind == "sample_solution" && doc.chunk_count.unwrap_or(0) > 0 {
-        // Look up the course's current embedding_version so we hit
-        // the live collection rather than a previous-rotation
-        // orphan. One quick round-trip; this path is only taken on a
-        // teacher's manual lock action so it's not hot.
-        let collection_name =
-            minerva_pipeline::pipeline::collection_name_for_course(&state.db, course_id)
-                .await
-                .map_err(|e| AppError::Internal(format!("course lookup failed: {}", e)))?;
-        if state
-            .qdrant
-            .collection_exists(&collection_name)
-            .await
-            .unwrap_or(false)
-        {
-            let filter =
-                qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
-                    "document_id",
-                    doc_id.to_string(),
-                )]);
-            if let Err(e) = state
-                .qdrant
-                .delete_points(
-                    DeletePointsBuilder::new(&collection_name)
-                        .points(filter)
-                        .wait(true),
-                )
-                .await
-            {
-                tracing::error!(
-                    "set_document_kind: qdrant purge failed for doc {} after sample_solution lock: {}",
-                    doc_id,
-                    e,
-                );
-                // Non-fatal: the kind is already locked in the DB so
-                // partition_chunks will drop these chunks defensively
-                // even if Qdrant still has them.
-            }
-        }
-    }
-
     // A teacher-driven kind change can flip whether a doc participates
-    // in `solution_of` / `part_of_unit` edges (e.g. flipping reading ->
-    // sample_solution removes its embeddings AND should remove edges
-    // pointing at it). Mark the course dirty for the relink sweeper.
+    // in `solution_of` / `part_of_unit` edges. Mark the course dirty for
+    // the relink sweeper.
     state.relink_scheduler.mark_dirty(course_id).await;
 
     Ok(Json(serde_json::json!({

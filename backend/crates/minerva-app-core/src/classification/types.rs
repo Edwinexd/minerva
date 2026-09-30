@@ -14,6 +14,7 @@ pub const ALL_KINDS: &[&str] = &[
     "sample_solution",
     "lab_brief",
     "exam",
+    "old_exam",
     "syllabus",
     "unknown",
 ];
@@ -37,7 +38,11 @@ pub enum DocumentKind {
     AssignmentBrief,
     SampleSolution,
     LabBrief,
+    /// An examining exam the student is sitting now (take-home exam).
     Exam,
+    /// A past or mock exam published for practice, with or without its
+    /// answers. Ordinary course material, unlike `Exam`.
+    OldExam,
     Syllabus,
     Unknown,
 }
@@ -57,6 +62,7 @@ impl DocumentKind {
             DocumentKind::SampleSolution => "sample_solution",
             DocumentKind::LabBrief => "lab_brief",
             DocumentKind::Exam => "exam",
+            DocumentKind::OldExam => "old_exam",
             DocumentKind::Syllabus => "syllabus",
             DocumentKind::Unknown => "unknown",
         }
@@ -79,6 +85,7 @@ impl DocumentKind {
             "sample_solution" => Some(DocumentKind::SampleSolution),
             "lab_brief" => Some(DocumentKind::LabBrief),
             "exam" => Some(DocumentKind::Exam),
+            "old_exam" => Some(DocumentKind::OldExam),
             "syllabus" => Some(DocumentKind::Syllabus),
             "unknown" => Some(DocumentKind::Unknown),
             _ => None,
@@ -86,30 +93,13 @@ impl DocumentKind {
     }
 }
 
-/// Kinds whose chunks must NEVER appear in the prompt context. They may
-/// be embedded into Qdrant for similarity-based detection (so the chat
-/// path can recognise that a student's input matches an assignment), but
-/// the chunk *text* never lands in the system prompt.
-///
-/// `sample_solution` is the strongest case; those docs aren't even
-/// embedded; the worker short-circuits before it gets to the embedder.
-/// This list catches stale data and the assignment-brief signal channel.
-pub fn is_signal_only_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "assignment_brief" | "lab_brief" | "exam" | "sample_solution"
-    )
-}
-
-/// Kinds that should never be embedded into Qdrant in the first place.
-/// Currently just `sample_solution`; the others stay in Qdrant as a
-/// detection signal even though their text never enters the prompt.
-///
-/// This is the contract the ingest pipeline enforces; exposed for tests
-/// and the planned backfill binary so they stay consistent with it.
-#[allow(dead_code)] // referenced by tests below + planned backfill binary
-pub fn skips_embedding(kind: &str) -> bool {
-    kind == "sample_solution"
+/// Kinds that examine the student. Their chunks stay in Qdrant as a
+/// detection signal (so the chat path can recognise that a student's
+/// input matches an assignment), but the chunk *text* never lands in
+/// the system prompt, and the extraction guard never lets a full
+/// solution to them through.
+pub fn is_examining_kind(kind: &str) -> bool {
+    minerva_db::queries::documents::EXAMINING_KINDS.contains(&kind)
 }
 
 #[cfg(test)]
@@ -131,31 +121,10 @@ mod tests {
     }
 
     #[test]
-    fn signal_only_kinds_are_correct() {
-        assert!(is_signal_only_kind("assignment_brief"));
-        assert!(is_signal_only_kind("lab_brief"));
-        assert!(is_signal_only_kind("exam"));
-        assert!(is_signal_only_kind("sample_solution"));
-        assert!(!is_signal_only_kind("lecture"));
-        assert!(!is_signal_only_kind("lecture_transcript"));
-        assert!(!is_signal_only_kind("reading"));
-        // tutorial_exercise is NOT signal-only: it's optional practice
-        // material the chat path is allowed to walk through with the
-        // student, unlike the graded assessment kinds.
-        assert!(!is_signal_only_kind("tutorial_exercise"));
-        assert!(!is_signal_only_kind("syllabus"));
-        assert!(!is_signal_only_kind("unknown"));
-    }
-
-    #[test]
-    fn only_sample_solution_skips_embedding() {
-        assert!(skips_embedding("sample_solution"));
-        for k in ALL_KINDS.iter().filter(|k| **k != "sample_solution") {
-            assert!(
-                !skips_embedding(k),
-                "kind {} unexpectedly skips embedding",
-                k
-            );
+    fn only_graded_kinds_are_examining() {
+        let examining = ["assignment_brief", "lab_brief", "exam"];
+        for k in ALL_KINDS {
+            assert_eq!(is_examining_kind(k), examining.contains(k), "kind {}", k);
         }
     }
 }

@@ -129,20 +129,24 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &orphaned_doc_ids,
     )
     .await;
-    // Adversarial filter is part of the KG bundle (defence in depth on
-    // top of per-doc kind classification). Skip when KG is gated off.
-    let mut initial_chunks = if ctx.kg_enabled {
-        crate::classification::adversarial::filter_solution_chunks(
-            &http_client,
-            &ctx.utility,
-            &ctx.db,
-            ctx.course_id,
-            initial_chunks_raw,
-        )
-        .await
-    } else {
-        initial_chunks_raw
-    };
+    // Kind partition and, on a turn that touches examining material,
+    // the adversarial solution filter. Both are part of the KG bundle
+    // and pass everything through when KG is gated off. The loop
+    // re-partitions its accumulator every iteration, so the signals
+    // stay in the list rather than being split off here.
+    let kinds = common::CourseKinds::load(&ctx.db, ctx.course_id, ctx.kg_enabled).await;
+    let seed = common::partition_chunks(initial_chunks_raw, &kinds, ctx.kg_enabled);
+    let near_examining = !seed.signals.is_empty();
+    let mut initial_chunks = common::drop_solutions_near_examining(
+        &http_client,
+        &ctx.utility,
+        &ctx.db,
+        ctx.course_id,
+        seed,
+        false,
+    )
+    .await
+    .all();
 
     // Graph-aware enrichment: pull representative chunks from each
     // top hit's KG partners (part_of_unit + applied_in dst). Same
@@ -175,13 +179,6 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // drive the outer loop with scripted Cerebras responses + a mocked
     // retrieval callback, without having to bring up a real Postgres,
     // Qdrant, or FastEmbed stack.
-    let unclassified_doc_ids = if ctx.kg_enabled {
-        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
-            .await
-            .unwrap_or_default()
-    } else {
-        std::collections::HashSet::new()
-    };
     // Extraction guard evaluation: runs before we enter the loop.
     // We feed it a *snapshot* partition of the initial chunks --
     // mid-loop FLARE retrievals can drag in more assignment
@@ -193,11 +190,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // completes, so any late-arriving solution material in the
     // reply itself is still caught. None when the feature flag is
     // off; Some(_) otherwise.
-    let guard_partition = common::partition_chunks(
-        initial_chunks.clone(),
-        &unclassified_doc_ids,
-        ctx.kg_enabled,
-    );
+    let guard_partition = common::partition_chunks(initial_chunks.clone(), &kinds, ctx.kg_enabled);
     let guard_decision = super::extraction_guard::evaluate_for_turn(
         &ctx.db,
         &http_client,
@@ -205,7 +198,6 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         ctx.course_id,
         ctx.conversation_id,
         &ctx.history,
-        &ctx.user_content,
         &guard_partition.signals,
         &guard_partition.context,
     )
@@ -248,7 +240,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         chat_api_key: &ctx.chat_api_key,
         max_chunks: ctx.max_chunks,
         daily_token_limit: ctx.daily_token_budget,
-        unclassified_doc_ids,
+        kinds: kinds.clone(),
+        practice_attempt_first: super::extraction_guard::practice_attempt_first(&guard_decision),
         kg_enabled: ctx.kg_enabled,
         global_knowledge,
     };
@@ -274,6 +267,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         let course_id = ctx.course_id;
         let kg_enabled = ctx.kg_enabled;
         let orphaned = orphaned_for_loop.clone();
+        let kinds = kinds.clone();
         async move {
             let raw = flare_retrieve(
                 &http_client,
@@ -292,20 +286,19 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 &orphaned,
             )
             .await;
-            // Mid-stream adversarial filter: same KG gate as the
-            // initial-chunk pass. Disabled courses bypass it.
-            let mut filtered = if kg_enabled {
-                crate::classification::adversarial::filter_solution_chunks(
-                    &http_client,
-                    &utility,
-                    &db,
-                    course_id,
-                    raw,
-                )
-                .await
-            } else {
-                raw
-            };
+            // Mid-stream pass: same partition and filter as the seed.
+            // A turn whose seed matched examining material stays
+            // filtered for every later retrieval.
+            let mut filtered = common::drop_solutions_near_examining(
+                &http_client,
+                &utility,
+                &db,
+                course_id,
+                common::partition_chunks(raw, &kinds, kg_enabled),
+                near_examining,
+            )
+            .await
+            .all();
             // Graph expansion on the mid-stream batch too; a
             // FLARE retrieval is itself a small RAG lookup, so we
             // enrich it the same way as the initial seed. Without
@@ -424,11 +417,14 @@ struct RunLoopConfig<'a> {
     chat_api_key: &'a str,
     max_chunks: i32,
     daily_token_limit: i64,
-    /// Doc IDs whose classifier hasn't run yet. Their chunks are held
-    /// out of context this turn (defensive; better a slightly worse
-    /// answer than risk leaking unclassified material). Tests pass an
-    /// empty set; production looks it up once before run_loop.
-    unclassified_doc_ids: std::collections::HashSet<String>,
+    /// The course's document kinds, which decide where each chunk the
+    /// loop accumulates may go. Tests pass the default, which falls
+    /// back to the kind on the chunk; production loads it once before
+    /// run_loop.
+    kinds: common::CourseKinds,
+    /// The guard saw a practice question pasted without an attempt;
+    /// see `common::policy_addendum`.
+    practice_attempt_first: bool,
     /// Mirror of `GenerationContext::kg_enabled`; forwarded so the
     /// inner loop's `partition_chunks` and adversarial-filter calls
     /// honour the gate without re-resolving the flag mid-stream.
@@ -566,16 +562,13 @@ where
         // Kind-aware partition every iteration: as `all_chunks` grows
         // mid-loop via FLARE retrievals, signal chunks may show up that
         // weren't there at iteration 0. Cheap; pure in-memory work.
-        let rag = common::partition_chunks(
-            all_chunks.clone(),
-            &cfg.unclassified_doc_ids,
-            cfg.kg_enabled,
-        );
+        let rag = common::partition_chunks(all_chunks.clone(), &cfg.kinds, cfg.kg_enabled);
         let mut system = common::build_system_prompt_with_signals(
             cfg.course_name,
             cfg.custom_prompt,
             &rag.context,
             &rag.signals,
+            cfg.practice_attempt_first,
             cfg.carryover,
         );
         common::append_global_knowledge(&mut system, &cfg.global_knowledge);
@@ -2364,7 +2357,8 @@ mod loop_regression_tests {
             chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0, // unlimited, so we don't short-circuit on token cap
-            unclassified_doc_ids: std::collections::HashSet::new(),
+            kinds: common::CourseKinds::default(),
+            practice_attempt_first: false,
             kg_enabled: true,
             global_knowledge: Vec::new(),
         };
@@ -2431,7 +2425,8 @@ mod loop_regression_tests {
             chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 500,
-            unclassified_doc_ids: std::collections::HashSet::new(),
+            kinds: common::CourseKinds::default(),
+            practice_attempt_first: false,
             kg_enabled: true,
             global_knowledge: Vec::new(),
         };
@@ -2498,7 +2493,8 @@ mod loop_regression_tests {
             chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
-            unclassified_doc_ids: std::collections::HashSet::new(),
+            kinds: common::CourseKinds::default(),
+            practice_attempt_first: false,
             kg_enabled: true,
             global_knowledge: Vec::new(),
         };
@@ -2582,7 +2578,8 @@ mod loop_regression_tests {
             chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
-            unclassified_doc_ids: std::collections::HashSet::new(),
+            kinds: common::CourseKinds::default(),
+            practice_attempt_first: false,
             kg_enabled: true,
             global_knowledge: Vec::new(),
         };
@@ -2662,7 +2659,8 @@ mod loop_regression_tests {
             chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
-            unclassified_doc_ids: std::collections::HashSet::new(),
+            kinds: common::CourseKinds::default(),
+            practice_attempt_first: false,
             kg_enabled: true,
             global_knowledge: Vec::new(),
         };
@@ -2737,7 +2735,8 @@ mod loop_regression_tests {
             chat_api_key: &chat_api_key,
             max_chunks: 100, // plenty of room
             daily_token_limit: 0,
-            unclassified_doc_ids: std::collections::HashSet::new(),
+            kinds: common::CourseKinds::default(),
+            practice_attempt_first: false,
             kg_enabled: true,
             global_knowledge: Vec::new(),
         };
@@ -2868,7 +2867,8 @@ mod loop_regression_tests {
             chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
-            unclassified_doc_ids: std::collections::HashSet::new(),
+            kinds: common::CourseKinds::default(),
+            practice_attempt_first: false,
             kg_enabled: true,
             global_knowledge: Vec::new(),
         };
@@ -2957,7 +2957,8 @@ mod loop_regression_tests {
             chat_api_key: &chat_api_key,
             max_chunks: 8,
             daily_token_limit: 0,
-            unclassified_doc_ids: std::collections::HashSet::new(),
+            kinds: common::CourseKinds::default(),
+            practice_attempt_first: false,
             kg_enabled: true,
             global_knowledge: Vec::new(),
         };

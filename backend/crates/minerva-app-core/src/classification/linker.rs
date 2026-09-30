@@ -122,7 +122,7 @@ const EXCERPT_CHARS: usize = 1500;
 const LINKER_SYSTEM_PROMPT: &str = r#"You evaluate ONE pair of course documents and decide if they're related.
 
 You're given Document A and Document B. For each:
-- kind: one of "lecture", "lecture_transcript", "reading", "tutorial_exercise", "assignment_brief", "sample_solution", "lab_brief", "exam", "syllabus", "unknown"
+- kind: one of "lecture", "lecture_transcript", "reading", "tutorial_exercise", "assignment_brief", "sample_solution", "lab_brief", "exam", "old_exam", "syllabus", "unknown"
 - classifier_rationale: short note from the per-document classifier
 - excerpt: the first ~1500 chars of the document text
 
@@ -145,7 +145,8 @@ DIRECTED (the relation has a source and destination, you pick which
 side is "a" and which is "b"):
 - "a_solution_of_b" / "b_solution_of_a": the source side is a
   sample_solution and the dest side is its assignment_brief /
-  lab_brief / exam. The solution's excerpt should plainly answer
+  lab_brief / exam / old_exam / tutorial_exercise. The solution's
+  excerpt should plainly answer
   the problem the assignment poses. Requires kinds to line up
   (one side MUST be sample_solution).
 
@@ -161,10 +162,11 @@ side is "a" and which is "b"):
 - "a_applied_in_b" / "b_applied_in_a": the source is theoretical /
   expository content (lecture, reading, lecture_transcript) and the
   destination applies it in practice (tutorial_exercise,
-  assignment_brief, lab_brief, exam). The destination's excerpt
+  assignment_brief, lab_brief, exam, old_exam). The destination's excerpt
   references concepts / terms the source introduces. Source MUST be
   one of {lecture, reading, lecture_transcript}; destination MUST
-  be one of {tutorial_exercise, assignment_brief, lab_brief, exam}.
+  be one of {tutorial_exercise, assignment_brief, lab_brief, exam,
+  old_exam}.
 
 - "none": no clear relation; the candidate similarity made this
   pair worth checking but the content doesn't actually pair them.
@@ -1300,7 +1302,13 @@ async fn classify_one_pair(
     //     gate; both sides are typically lecture / reading.
     //     Trust the model's a/b pick.
     let theory = ["lecture", "lecture_transcript", "reading"];
-    let practice = ["tutorial_exercise", "assignment_brief", "lab_brief", "exam"];
+    let practice = [
+        "tutorial_exercise",
+        "assignment_brief",
+        "lab_brief",
+        "exam",
+        "old_exam",
+    ];
     let (src, dst) = match canonical_relation {
         "part_of_unit" => pair_key(p.a_id, p.b_id),
         "solution_of" => {

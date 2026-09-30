@@ -2,8 +2,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use qdrant_client::qdrant::{
-    CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, Distance, FieldType, PointStruct,
-    TextIndexParamsBuilder, TokenizerType, UpsertPointsBuilder, VectorParamsBuilder,
+    Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder,
+    Distance, FieldType, Filter, PointStruct, TextIndexParamsBuilder, TokenizerType,
+    UpsertPointsBuilder, VectorParamsBuilder,
 };
 use qdrant_client::Qdrant;
 use sqlx::PgPool;
@@ -15,11 +16,6 @@ use crate::chunker::{self, ChunkerConfig};
 use crate::classifier::Classifier;
 use crate::embedder;
 use crate::pdf;
-
-/// Classifier output kind that triggers the embed-skip short-circuit.
-/// Hard-coded here rather than imported from `minerva-server::classification`
-/// to keep the dependency edge one-way.
-const KIND_SAMPLE_SOLUTION: &str = "sample_solution";
 
 enum TextSource {
     Plain,
@@ -150,14 +146,11 @@ fn local_model_dimensions(model: &str) -> Option<u64> {
 ///    sample_solution, …) via the supplied [`Classifier`]. Persisted
 ///    immediately so the chat-time RAG filter can see it the moment any
 ///    chunks land in Qdrant.
-/// 3. **Short-circuit for `sample_solution`**: do not chunk or embed.
-///    These docs must never appear in retrieval context. We still mark
-///    the doc `ready` so the teacher UI can display it, but with
-///    `chunk_count = 0`.
-/// 4. Otherwise: chunk, embed, upsert (with `kind` baked into each
-///    Qdrant point's payload so the filter is a payload check rather
-///    than a DB roundtrip per retrieved chunk).
-/// 5. Update document status in Postgres.
+/// 3. Chunk, embed, and replace the document's points in Qdrant. Every
+///    kind is indexed, `sample_solution` included: whether a chunk may
+///    enter the prompt is decided at chat time from the document's
+///    current kind and graph edges, not by leaving it out of the index.
+/// 4. Update document status in Postgres.
 ///
 /// `locked_kind` is the already-persisted kind for teacher-locked or
 /// system-generated documents. Supplying it bypasses classification while
@@ -280,11 +273,7 @@ pub async fn process_document(
         }
     };
 
-    // 3. Chunk. We chunk EVEN sample_solution docs (which won't be
-    // indexed in Qdrant); we still need their embedding for the
-    // knowledge-graph linker so a sample_solution can find its
-    // assignment partner via embedding similarity, not just
-    // filenames.
+    // 3. Chunk.
     let chunks = chunker::chunk_text(&text, &ChunkerConfig::default());
     if chunks.is_empty() {
         let msg = "no chunks produced from document".to_string();
@@ -300,81 +289,16 @@ pub async fn process_document(
     // chunks in a fresh collection without colliding with the
     // previous-model vectors.
     let collection_name = collection_name(course_id, embedding_version);
-    let is_sample_solution = kind_str == KIND_SAMPLE_SOLUTION;
-    if is_sample_solution {
-        tracing::info!(
-            "embedding {} for KG only (kind=sample_solution; no Qdrant upsert)",
-            filename
-        );
-    }
-
-    // Capture-by-clone for the closure so it can be called per-chunk.
-    let kind_for_payload = kind_str.clone();
-    let build_payload = |chunk: &chunker::Chunk| -> std::collections::HashMap<String, qdrant_client::qdrant::Value> {
-        let mut payload: std::collections::HashMap<String, qdrant_client::qdrant::Value> = [
-            ("document_id".to_string(), document_id.to_string().into()),
-            ("course_id".to_string(), course_id.to_string().into()),
-            ("chunk_index".to_string(), (chunk.index as i64).into()),
-            ("text".to_string(), chunk.text.clone().into()),
-            ("filename".to_string(), filename.to_string().into()),
-        ]
-        .into_iter()
-        .collect();
-        // Only stamp `kind` when classification succeeded; otherwise the
-        // chunk lacks the field and the chat-time filter falls through
-        // to the DB-side `unclassified_doc_ids` check.
-        if !kind_for_payload.is_empty() {
-            payload.insert("kind".to_string(), kind_for_payload.clone().into());
-        }
-        payload
-    };
-
-    // Compute chunk embeddings under whichever provider this course
-    // uses. We KEEP the embedding vectors in memory after upsert so
-    // we can mean-pool them for the doc-level KG embedding; one
-    // pass over the data instead of re-fetching from Qdrant later.
+    let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
     let (chunk_embeddings, embedding_tokens): (Vec<Vec<f32>>, i64) = match embedding_provider {
         "local" => {
             let dims = local_model_dimensions(embedding_model)
                 .ok_or_else(|| format!("unsupported local embedding model: {}", embedding_model))?;
-            // Only ensure the Qdrant collection exists if we're going
-            // to upsert to it; sample_solution path doesn't.
-            if !is_sample_solution {
-                ensure_collection(qdrant, &collection_name, dims).await?;
-            }
-
-            let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
-            let embeddings = embedder.embed(embedding_model, chunk_texts).await?;
-
-            if !is_sample_solution {
-                let points: Vec<PointStruct> = chunks
-                    .iter()
-                    .zip(embeddings.iter())
-                    .map(|(chunk, embedding)| {
-                        PointStruct::new(
-                            Uuid::new_v4().to_string(),
-                            embedding.clone(),
-                            build_payload(chunk),
-                        )
-                    })
-                    .collect();
-
-                upsert_batched(qdrant, &collection_name, points).await?;
-                tracing::info!(
-                    "upserted {} chunks via fastembed (model: {})",
-                    chunks.len(),
-                    embedding_model,
-                );
-            }
-
-            (embeddings, 0i64)
+            ensure_collection(qdrant, &collection_name, dims).await?;
+            (embedder.embed(embedding_model, chunk_texts).await?, 0i64)
         }
         _ => {
-            if !is_sample_solution {
-                ensure_collection(qdrant, &collection_name, OPENAI_EMBEDDING_DIMENSIONS).await?;
-            }
-
-            let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
+            ensure_collection(qdrant, &collection_name, OPENAI_EMBEDDING_DIMENSIONS).await?;
             let embedding_result = embedder::embed_texts(http_client, openai_api_key, &chunk_texts)
                 .await
                 .map_err(|e| {
@@ -382,32 +306,41 @@ pub async fn process_document(
                     tracing::error!("{}", msg);
                     msg
                 })?;
-
             tracing::info!(
                 "embedded {} chunks using {} tokens",
                 embedding_result.embeddings.len(),
                 embedding_result.total_tokens,
             );
-
-            if !is_sample_solution {
-                let points: Vec<PointStruct> = chunks
-                    .iter()
-                    .zip(embedding_result.embeddings.iter())
-                    .map(|(chunk, embedding)| {
-                        PointStruct::new(
-                            Uuid::new_v4().to_string(),
-                            embedding.clone(),
-                            build_payload(chunk),
-                        )
-                    })
-                    .collect();
-
-                upsert_batched(qdrant, &collection_name, points).await?;
-            }
-
             (embedding_result.embeddings, embedding_result.total_tokens)
         }
     };
+
+    // The vectors stay in memory after the upsert so they can be
+    // mean-pooled for the doc-level KG embedding below; one pass over
+    // the data instead of re-fetching from Qdrant later.
+    let points: Vec<PointStruct> = chunks
+        .iter()
+        .zip(chunk_embeddings.iter())
+        .map(|(chunk, embedding)| {
+            let mut payload: std::collections::HashMap<String, qdrant_client::qdrant::Value> = [
+                ("document_id".to_string(), document_id.to_string().into()),
+                ("course_id".to_string(), course_id.to_string().into()),
+                ("chunk_index".to_string(), (chunk.index as i64).into()),
+                ("text".to_string(), chunk.text.clone().into()),
+                ("filename".to_string(), filename.to_string().into()),
+            ]
+            .into_iter()
+            .collect();
+            // The kind at ingest, for a course without a loadable
+            // kind map. The chat path prefers the document row, which
+            // stays current when the doc is reclassified.
+            if !kind_str.is_empty() {
+                payload.insert("kind".to_string(), kind_str.clone().into());
+            }
+            PointStruct::new(Uuid::new_v4().to_string(), embedding.clone(), payload)
+        })
+        .collect();
+    replace_doc_points(qdrant, &collection_name, document_id, points).await?;
 
     // 5. Mean-pool chunk embeddings into a single doc-level vector,
     // L2-normalize, and persist. The KG linker uses this for
@@ -429,25 +362,15 @@ pub async fn process_document(
         }
     }
 
-    // 6. Update status. sample_solution gets chunk_count=0 since no
-    // chunks landed in Qdrant; the teacher UI / RAG retrieval keys
-    // off this to know there's nothing searchable.
-    let chunk_count = if is_sample_solution {
-        0
-    } else {
-        chunks.len() as i32
-    };
+    // 6. Update status.
+    let chunk_count = chunks.len() as i32;
     set_status_ready(db, document_id, chunk_count).await;
 
     tracing::info!(
-        "document {} processed: {} chunks{}",
+        "document {} processed: {} chunks stored in collection {}",
         document_id,
         chunk_count,
-        if is_sample_solution {
-            " (sample_solution; embedded for KG only, not in Qdrant)".to_string()
-        } else {
-            format!(" stored in collection {}", collection_name)
-        },
+        collection_name,
     );
 
     Ok(ProcessResult {
@@ -503,11 +426,26 @@ pub struct ProcessResult {
     pub embedding_tokens: i64,
 }
 
-async fn upsert_batched(
+/// Make `points` the document's whole presence in the collection.
+///
+/// Deleting first makes ingest idempotent: a document sent through the
+/// worker again (a requeue, a retry after a partial upsert) ends up
+/// with one set of points, not two.
+async fn replace_doc_points(
     qdrant: &Qdrant,
     collection_name: &str,
+    document_id: Uuid,
     points: Vec<PointStruct>,
 ) -> Result<(), String> {
+    let existing = Filter::must([Condition::matches("document_id", document_id.to_string())]);
+    qdrant
+        .delete_points(
+            DeletePointsBuilder::new(collection_name)
+                .points(existing)
+                .wait(true),
+        )
+        .await
+        .map_err(|e| format!("qdrant delete failed: {}", e))?;
     for batch in points.chunks(100) {
         qdrant
             .upsert_points(UpsertPointsBuilder::new(collection_name, batch.to_vec()))

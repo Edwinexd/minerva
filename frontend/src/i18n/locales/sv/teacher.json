@@ -220,7 +220,7 @@
       "extraction_constraint_activated": "Extraktionsskydd aktiverat",
       "extraction_rewrote": "Svaret omskrevs av skyddet",
       "extraction_engagement_refused": "Studenten engagerade sig inte i den sokratiska frågan",
-      "extraction_constraint_lifted": "Studenten engagerade sig; begränsning hävd"
+      "extraction_constraint_lifted": "Extraktionsskydd hävt"
     }
   },
   "kgTokenUsage": {
@@ -286,7 +286,8 @@
       "assignment_brief": "Uppgift",
       "sample_solution": "Lösningsförslag",
       "lab_brief": "Laboration",
-      "exam": "Tenta",
+      "exam": "Hemtenta",
+      "old_exam": "Gammal tenta",
       "syllabus": "Kursplan",
       "unknown": "Okänd",
       "unclassified": "Oklassificerad"

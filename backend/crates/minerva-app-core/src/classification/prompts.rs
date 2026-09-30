@@ -14,11 +14,12 @@ pub const CLASSIFIER_SYSTEM_PROMPT: &str = r#"You classify a single course docum
 - "lecture": slides, lecture notes, instructor-authored expository material teaching a topic. Structured, prepared content.
 - "lecture_transcript": auto-generated speech-to-text transcript of a lecture recording (verbatim spoken language, often with timestamps, filler words, "um/uh", incomplete sentences, no headings). Same teaching purpose as a lecture but the prose is messy and unstructured. Pick this over "lecture" when the text reads like a transcription rather than prepared notes/slides.
 - "reading": textbook chapters, papers, supplementary articles, links to external readings.
-- "tutorial_exercise": Swedish "övning" / English "tutorial" / "exercise" / "practice problems". OPTIONAL practice material that students work through but is NOT graded; typically marked "frivillig", "ej obligatorisk", "voluntary", "for practice", "self-study", or similar. Distinct from assignment_brief (which is graded). When in doubt between tutorial_exercise and assignment_brief, look for grading language, deadlines, submission instructions; those make it an assignment_brief.
+- "tutorial_exercise": Swedish "övning" / "instuderingsfrågor" / English "tutorial" / "exercise" / "practice problems" / "study questions". OPTIONAL practice material that students work through but is NOT graded; typically marked "frivillig", "ej obligatorisk", "voluntary", "for practice", "self-study", or similar. Still tutorial_exercise when the answers are printed alongside the questions ("med svar"). Distinct from assignment_brief (which is graded). When in doubt between tutorial_exercise and assignment_brief, look for grading language, deadlines, submission instructions; those make it an assignment_brief.
 - "assignment_brief": the description of a GRADED assignment students must complete and submit. Numbered steps, "your task", "implement", grading criteria, deliverables, due dates, "submit by".
-- "sample_solution": a worked-out solution, model answer, grading rubric with answers, or any document whose primary purpose is to show students the answer to a graded problem.
+- "sample_solution": a standalone worked-out solution, answer key, model answer, or grading rubric with answers, whose problems are posed in a different document; or a GRADED assignment / lab shown together with its solution.
 - "lab_brief": a practical lab or exercise description, similar to assignment_brief but for hands-on/lab work. If unsure between assignment_brief and lab_brief, prefer assignment_brief.
-- "exam": past exams, mock exams, exam-style problem sets without solutions.
+- "old_exam": a past or mock exam ("tenta", "tentamen", "omtenta") published for practice, with or without its answers. An exam that was sat on a given date in an exam hall is always old_exam once it is in the course materials.
+- "exam": an exam the students are sitting NOW as graded work: a take-home exam ("hemtenta", "hemtentamen") with a submission deadline. Rare. When in doubt between exam and old_exam, pick old_exam.
 - "syllabus": course overview, schedule, policies, admin/logistics, reading list, learning objectives.
 - "unknown": none of the above clearly applies, or the document is genuinely off-topic.
 
@@ -33,7 +34,7 @@ You will reply with a single JSON object, nothing else, matching the schema:
 
 Important guidance:
 - Classify based on the actual content of the document. You are NOT given the filename, because filenames are unreliable: courses routinely contain "F18_OO.pdf" that is actually a solution, "lab.pdf" that's a syllabus, "övning.pdf" that's a graded assignment. The mime_type tells you only the file format.
-- If a document contains both an exercise statement AND its solution, classify as "sample_solution"; the solution-bearing nature dominates.
+- A GRADED assignment or lab that comes with its own solution is "sample_solution"; the solution-bearing nature dominates. Practice material that includes its answers keeps its practice kind: a past exam with answers is "old_exam", exercises or study questions with answers are "tutorial_exercise".
 - If a document is mostly a worked example used for teaching (not the answer to a graded problem), classify as "lecture" or "reading", not "sample_solution".
 - Distinguishing tutorial_exercise from assignment_brief is a CONTENT decision: look for grading language ("graded", "submit by", "deadline", "betyg", "inlämning"), submission instructions, and rubrics. Their absence; combined with explicit "frivillig", "voluntary", "for self-study", "practice problems" framing; points to tutorial_exercise.
 - Be calibrated: confidence should reflect actual uncertainty. If the document is 3 pages of mixed content with no clear signal, that's 0.4--0.6, not 0.95.
@@ -62,13 +63,15 @@ document excerpt (may be truncated):
 Reply with the JSON object only."#;
 
 /// Bullet added to the base system prompt's "What you will not do" list.
-/// Kept short; most of the heavy lifting is the per-turn addendum below
-/// when an actual assignment_brief similarity match is detected.
-pub const PASTED_PROBLEM_RULE: &str = "- Do not produce a complete solution to a problem the student has pasted verbatim from course materials with no work of their own; instead help them reason about it step by step.";
+/// States the practice-material policy for every course: a published
+/// answer is given, anything else waits for an honest attempt. Graded
+/// work is handled by the per-turn addendum below, which overrides this.
+pub const PASTED_PROBLEM_RULE: &str = "- When a student pastes a problem from the course materials with no work of their own, do not hand over a complete solution straight away, unless the course materials you are given include a published answer to that problem; then give that answer and explain it. Otherwise ask what they have tried and help them reason step by step, and answer in full once they have made an honest attempt.";
 
 /// Per-turn addendum, appended at the END of the system prompt for the
 /// turn (after course materials) when retrieval surfaces a high-similarity
-/// match against a doc whose `kind` is `assignment_brief|lab_brief|exam`.
+/// match against a doc of an examining kind (`assignment_brief`,
+/// `lab_brief`, `exam`).
 /// `{filenames}` is replaced with a comma-separated list at call time.
 ///
 /// Placed at the end so the stable prefix (base + custom_prompt + course
@@ -78,4 +81,13 @@ pub const PASTED_PROBLEM_RULE: &str = "- Do not produce a complete solution to a
 pub const ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE: &str = r#"
 
 ## Assignment match for this turn
-The student's input has high similarity to assignment material in this course ({filenames}). Do not produce a complete solution. Instead: ask what they have already tried, clarify the underlying concept, or break the problem into smaller steps. Discussing concepts and giving worked examples on adjacent (not identical) problems is fine."#;
+The student's input has high similarity to graded work in this course ({filenames}). This is examining material, so do not produce a complete solution or final answer to it, even when the student has shown an attempt or asks again. Instead: ask what they have already tried, clarify the underlying concept, or break the problem into smaller steps. Discussing concepts and giving worked examples on adjacent (not identical) problems is fine."#;
+
+/// Per-turn addendum for a practice question pasted without an attempt:
+/// the extraction guard's intent classifier fired, and nothing examining
+/// is near the turn. Restates [`PASTED_PROBLEM_RULE`] at the point where
+/// it applies, so the model does not have to infer that it does.
+pub const PRACTICE_ATTEMPT_ADDENDUM: &str = r#"
+
+## Practice question without an attempt
+The student appears to have pasted a practice question (not graded work) and asked for the answer without showing work of their own. If the course materials above include a published answer or solution to it, give that answer and explain the reasoning behind it. If they do not, hold the full answer back for now: ask for the student's own attempt or reasoning and offer a hint. Once the student has made an honest attempt, in this message or earlier in the conversation, answer in full."#;

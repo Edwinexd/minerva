@@ -355,6 +355,11 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
                               })}
                             </span>
                           )}
+                          {run.warning && (
+                            <span className="basis-full text-amber-700 dark:text-amber-400 break-words">
+                              {run.warning}
+                            </span>
+                          )}
                         </li>
                       ))}
                     </ul>

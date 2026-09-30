@@ -15,6 +15,7 @@ pub mod feature_flags;
 pub mod github_url;
 pub mod llm;
 pub mod lti;
+pub mod lti_identity;
 pub mod lti_nrps;
 pub mod model_capabilities;
 pub mod relink_scheduler;

@@ -1016,15 +1016,9 @@ pub(super) async fn compute_offering_diff(
         }
         let (role, _eligible) = minerva_role_for(&participant.kind, &participant.daisy_roles);
 
-        let mut user_id: Option<Uuid> = None;
-        for eppn in &eppns {
-            if let Some((row, _via_alias)) =
-                minerva_db::queries::users::find_by_eppn_or_alias(&state.db, eppn).await?
-            {
-                user_id = Some(row.id);
-                break;
-            }
-        }
+        let user_id = minerva_db::queries::users::find_by_any_eppn(&state.db, &eppns)
+            .await?
+            .map(|row| row.id);
 
         let change = match user_id.and_then(|uid| members.iter().find(|m| m.user_id == uid)) {
             // Resolved user already a member with this role: no change.
@@ -1307,36 +1301,23 @@ pub(super) async fn apply_one(
         // created users land with role="student"; the auth
         // middleware's rule engine upgrades them on first Shib login
         // based on Shib attributes we don't have here.
-        let mut user_id: Option<Uuid> = None;
-        for eppn in &eppns {
-            if let Some((row, _via_alias)) =
-                minerva_db::queries::users::find_by_eppn_or_alias(&state.db, eppn).await?
-            {
-                user_id = Some(row.id);
-                break;
-            }
+        let (row, created) = minerva_db::queries::users::find_or_create_by_any_eppn(
+            &state.db,
+            &eppns[0],
+            &eppns[1..],
+            participant.display_name.as_deref(),
+            "student",
+            default_owner_cap,
+        )
+        .await?;
+        if created {
+            tracing::info!(
+                eppn = %eppns[0],
+                display_name = ?participant.display_name,
+                "daisy import: created Minerva user for Daisy-resolved staff",
+            );
         }
-        let user_id = match user_id {
-            Some(id) => id,
-            None => {
-                let (row, created) = minerva_db::queries::users::find_or_create_by_eppn(
-                    &state.db,
-                    &eppns[0],
-                    participant.display_name.as_deref(),
-                    "student",
-                    default_owner_cap,
-                )
-                .await?;
-                if created {
-                    tracing::info!(
-                        eppn = %eppns[0],
-                        display_name = ?participant.display_name,
-                        "daisy import: created Minerva user for Daisy-resolved staff",
-                    );
-                }
-                row.id
-            }
-        };
+        let user_id = row.id;
 
         // Register every other eppn as an alias of this user.
         for alias_eppn in eppns.iter().skip(1) {

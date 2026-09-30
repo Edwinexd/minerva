@@ -23,6 +23,7 @@ use jsonwebtoken::{encode, Algorithm, Header};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::lti_identity::LtiIdentity;
 use crate::state::AppState;
 use minerva_db::queries::lti_nrps::NrpsContextRow;
 
@@ -88,7 +89,7 @@ struct Member {
     email: Option<String>,
     /// Moodle's non-standard username field, sent whenever the tool shares
     /// names. Moodle usernames are eppns at DSV, and it is the same value
-    /// the launch path receives via `user_eppn=$User.username`.
+    /// a launch carries as `ext.user_username` and `user_eppn=$User.username`.
     #[serde(default)]
     ext_user_username: Option<String>,
     /// Per-member LTI message payload; carries the custom params (notably
@@ -226,50 +227,23 @@ fn parse_next_link(header: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Identity resolution (mirrors the launch handler)
+// Identity resolution (shared with the launch handler)
 // ---------------------------------------------------------------------------
 
-/// Resolve a member's Minerva eppn so it matches the identity the launch
-/// handler resolves for the same person:
-///   a) custom `user_eppn` param, b) Moodle's `ext_user_username` (the
-///      value the launch's `user_eppn=$User.username` substitutes),
-///   c) email claim, d) synthetic `lti_<source_id>_<sub>`.
-/// Returns `(eppn, is_claimed)` where `is_claimed` is false for the synthetic
-/// fallback (which is trivially distinct from any real eppn and so is exempt
-/// from the platform's eppn-domain allowlist, matching the launch path).
-fn resolve_member_eppn(m: &Member, source_identifier: &str) -> (String, bool) {
-    let claimed = m
-        .message
-        .iter()
-        .find_map(|msg| {
-            msg.custom
-                .as_ref()
-                .and_then(|c| c.get("user_eppn"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        })
-        .or_else(|| m.ext_user_username.clone())
-        .or_else(|| m.email.clone())
-        .filter(|s| !s.is_empty());
-    match claimed {
-        Some(e) => (e.to_lowercase(), true),
-        None => (
-            format!("lti_{}_{}", source_identifier, m.user_id).to_lowercase(),
-            false,
-        ),
-    }
-}
-
-fn eppn_in_allowlist(allowed: &Option<Vec<String>>, eppn: &str) -> bool {
-    let Some(domains) = allowed.as_ref() else {
-        return true;
-    };
-    if domains.is_empty() {
-        return true;
-    }
-    domains
-        .iter()
-        .any(|d| eppn.ends_with(&format!("@{}", d.to_lowercase())))
+fn member_identity(m: &Member, source_identifier: &str) -> LtiIdentity {
+    let user_eppn = m.message.iter().find_map(|msg| {
+        msg.custom
+            .as_ref()
+            .and_then(|c| c.get("user_eppn"))
+            .and_then(|v| v.as_str())
+    });
+    LtiIdentity::new(
+        user_eppn,
+        m.ext_user_username.as_deref(),
+        m.email.as_deref(),
+        source_identifier,
+        &m.user_id,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -362,22 +336,22 @@ pub async fn reconcile_context(
         }
         active_count += 1;
 
-        let (eppn, is_claimed) = resolve_member_eppn(m, &cfg.source_identifier);
-        if !is_claimed {
-            synthetic_count += 1;
-        }
         // A real (claimed) eppn must satisfy the platform's allowlist, same
         // as on launch; the synthetic fallback is exempt.
-        if is_claimed && !eppn_in_allowlist(&cfg.allowed_eppn_domains, &eppn) {
+        let Ok(identity) = member_identity(m, &cfg.source_identifier)
+            .within_scope(cfg.allowed_eppn_domains.as_deref())
+        else {
             out_of_scope_count += 1;
             continue;
+        };
+        if identity.primary_claim().is_none() {
+            synthetic_count += 1;
         }
 
-        let (user, _) = minerva_db::queries::users::find_or_create_by_eppn(
+        let user = crate::lti_identity::resolve_user(
             db,
-            &eppn,
+            &identity,
             m.name.as_deref(),
-            "student",
             crate::system_defaults::owner_daily_cost_limit_usd(db).await,
         )
         .await?;
@@ -606,10 +580,9 @@ mod tests {
 
     #[test]
     fn moodle_roster_resolves_to_username_not_email() {
-        let (eppn, claimed) = resolve_member_eppn(&member(moodle_member()), SOURCE);
-        assert_eq!(eppn, "abcd1234@su.se");
-        assert!(claimed);
-        assert!(eppn_in_allowlist(&Some(vec!["su.se".into()]), &eppn));
+        let identity = member_identity(&member(moodle_member()), SOURCE);
+        let identity = identity.within_scope(Some(&["su.se".to_string()])).unwrap();
+        assert_eq!(identity.primary_claim(), Some("abcd1234@su.se"));
     }
 
     #[test]
@@ -618,27 +591,26 @@ mod tests {
         json["message"] = serde_json::json!([{
             "https://purl.imsglobal.org/spec/lti/claim/custom": { "user_eppn": "efgh5678@su.se" }
         }]);
-        let (eppn, _) = resolve_member_eppn(&member(json), SOURCE);
-        assert_eq!(eppn, "efgh5678@su.se");
+        let identity = member_identity(&member(json), SOURCE);
+        assert_eq!(identity.primary(), "efgh5678@su.se");
     }
 
     #[test]
-    fn email_is_used_without_username() {
+    fn empty_username_falls_back_to_email() {
         let mut json = moodle_member();
-        json.as_object_mut().unwrap().remove("ext_user_username");
-        let (eppn, claimed) = resolve_member_eppn(&member(json), SOURCE);
-        assert_eq!(eppn, "abcd1234@student.su.se");
-        assert!(claimed);
+        json["ext_user_username"] = serde_json::json!("");
+        let identity = member_identity(&member(json), SOURCE);
+        assert_eq!(identity.primary_claim(), Some("abcd1234@student.su.se"));
     }
 
     #[test]
     fn no_identity_falls_back_to_synthetic() {
-        let (eppn, claimed) = resolve_member_eppn(
+        let identity = member_identity(
             &member(serde_json::json!({ "user_id": "9404", "ext_user_username": "" })),
             SOURCE,
         );
-        assert_eq!(eppn, format!("lti_{}_9404", SOURCE));
-        assert!(!claimed);
+        assert_eq!(identity.primary_claim(), None);
+        assert_eq!(identity.primary(), format!("lti_{}_9404", SOURCE));
     }
 
     #[test]

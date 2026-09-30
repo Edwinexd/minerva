@@ -60,6 +60,9 @@ pub struct LtiLaunchClaims {
     #[serde(rename = "https://purl.imsglobal.org/spec/lti/claim/custom", default)]
     pub custom: Option<HashMap<String, serde_json::Value>>,
 
+    #[serde(rename = "https://purl.imsglobal.org/spec/lti/claim/ext", default)]
+    pub ext: Option<LtiExt>,
+
     #[serde(
         rename = "https://purl.imsglobal.org/spec/lti/claim/launch_presentation",
         default
@@ -114,6 +117,15 @@ pub struct LtiLaunchPresentation {
     pub document_target: Option<String>,
     pub return_url: Option<String>,
     pub locale: Option<String>,
+}
+
+/// Platform extensions. Moodle puts the launcher's username here whenever
+/// the tool shares names; the NRPS roster carries the same value as
+/// `ext_user_username`.
+#[derive(Debug, Deserialize)]
+pub struct LtiExt {
+    #[serde(default)]
+    pub user_username: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

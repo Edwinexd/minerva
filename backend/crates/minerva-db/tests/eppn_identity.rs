@@ -104,3 +104,70 @@ async fn aliases_and_primaries_share_one_concurrent_namespace() {
         .await
         .unwrap();
 }
+
+/// One person known under several eppns keeps one account: whichever eppn
+/// already has a user wins over creating a second one under the canonical.
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL DATABASE_URL"]
+async fn any_eppn_resolves_to_the_existing_account() {
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let db = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&database_url)
+        .await
+        .unwrap();
+    sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+
+    let suffix = Uuid::new_v4();
+    let username = format!("any-username-{suffix}@example.invalid");
+    let email = format!("any-email-{suffix}@example.invalid");
+    let unknown = format!("any-unknown-{suffix}@example.invalid");
+
+    // Account first created under the weaker identity (the email).
+    let (by_email, created) =
+        users::find_or_create_by_eppn(&db, &email, None, "student", Decimal::ZERO)
+            .await
+            .unwrap();
+    assert!(created);
+
+    let (resolved, created) = users::find_or_create_by_any_eppn(
+        &db,
+        &username,
+        [&unknown, &email],
+        None,
+        "student",
+        Decimal::ZERO,
+    )
+    .await
+    .unwrap();
+    assert!(!created);
+    assert_eq!(resolved.id, by_email.id);
+    assert!(users::find_by_eppn(&db, &username).await.unwrap().is_none());
+
+    // Once aliased, the canonical eppn alone resolves to the same account.
+    assert!(user_eppn_aliases::register(&db, resolved.id, &username)
+        .await
+        .unwrap());
+    let (via_alias, created) = users::find_or_create_by_any_eppn(
+        &db,
+        &username,
+        std::iter::empty::<&str>(),
+        None,
+        "student",
+        Decimal::ZERO,
+    )
+    .await
+    .unwrap();
+    assert!(!created);
+    assert_eq!(via_alias.id, by_email.id);
+
+    // Nothing known: a single new account under the canonical eppn.
+    let fresh = format!("any-fresh-{suffix}@example.invalid");
+    let (created_user, created) =
+        users::find_or_create_by_any_eppn(&db, &fresh, [&unknown], None, "student", Decimal::ZERO)
+            .await
+            .unwrap();
+    assert!(created);
+    assert_eq!(created_user.eppn, fresh);
+    assert!(users::find_by_eppn(&db, &unknown).await.unwrap().is_none());
+}

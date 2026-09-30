@@ -898,8 +898,8 @@ export interface LtiNrpsStatus {
   last_sync_warning: string | null
   last_sync_added: number | null
   last_sync_removed: number | null
-  /// Runs that changed membership or failed, newest first. Clean no-op runs
-  /// are not recorded.
+  /// Runs that changed membership or whose outcome differs from the run
+  /// before, newest first. Repeats of the same outcome are not recorded.
   history: LtiNrpsRun[]
 }
 

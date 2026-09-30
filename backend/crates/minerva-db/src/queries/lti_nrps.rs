@@ -11,7 +11,8 @@
 //! it finds here, so non-LTI members and the course owner are never touched.
 //!
 //! `lti_nrps_sync_runs` is the history behind the `last_sync_*` columns: one
-//! row per run that changed membership or failed.
+//! row per run that changed membership or whose outcome differs from the
+//! run recorded before it.
 
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -183,8 +184,11 @@ pub async fn list_contexts_for_platform(
 /// (e.g. identity claims missing across the entire roster). Counts are NULL
 /// when the run errored before it could determine them.
 ///
-/// A run that changed membership or failed is also appended to
-/// `lti_nrps_sync_runs`; a clean no-op run only moves `last_sync_at`.
+/// The run is also appended to `lti_nrps_sync_runs` when it changed
+/// membership, or when its outcome (status, error, warning) differs from the
+/// newest recorded run. A repeat of the same outcome only moves
+/// `last_sync_at`, so a context that fails every interval leaves one row,
+/// and the run where it recovers leaves another.
 pub async fn record_sync_result(
     db: &PgPool,
     id: Uuid,
@@ -216,22 +220,36 @@ pub async fn record_sync_result(
     .await?;
 
     let changed = added.unwrap_or(0) + removed.unwrap_or(0) > 0;
-    if status != "ok" || changed {
-        sqlx::query!(
-            r#"INSERT INTO lti_nrps_sync_runs
-                (id, nrps_context_id, status, error, warning, added, removed)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
-            Uuid::new_v4(),
-            id,
-            status,
-            error,
-            warning,
-            added,
-            removed,
+    sqlx::query!(
+        r#"WITH last AS (
+            SELECT status, error, warning
+            FROM lti_nrps_sync_runs
+            WHERE nrps_context_id = $2
+            ORDER BY ran_at DESC
+            LIMIT 1
+        ), prev AS (
+            SELECT status, error, warning FROM last
+            UNION ALL
+            SELECT 'ok', NULL, NULL WHERE NOT EXISTS (SELECT 1 FROM last)
         )
-        .execute(&mut *tx)
-        .await?;
-    }
+        INSERT INTO lti_nrps_sync_runs
+            (id, nrps_context_id, status, error, warning, added, removed)
+        SELECT $1, $2, $3, $4, $5, $6, $7
+        FROM prev
+        WHERE $8::boolean
+           OR (prev.status, prev.error, prev.warning)
+              IS DISTINCT FROM ($3::text, $4::text, $5::text)"#,
+        Uuid::new_v4(),
+        id,
+        status,
+        error,
+        warning,
+        added,
+        removed,
+        changed,
+    )
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await
 }

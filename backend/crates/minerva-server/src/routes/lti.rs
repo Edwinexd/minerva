@@ -34,6 +34,7 @@ use crate::error::{AppError, ErrorParams};
 use crate::lti;
 use crate::routes::guards::{require_course_teacher, require_site_integrator, TeacherScope};
 use crate::state::AppState;
+use minerva_app_core::lti_identity::{self, LtiIdentity};
 use minerva_core::models::User;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -349,44 +350,39 @@ async fn handle_launch(
         }
     }
 
-    // 5. Map user identity. Priority:
-    //    a) Custom param "user_eppn" (Moodle can substitute $User.username)
-    //    b) email claim
-    //    c) Synthetic eppn from LTI sub + source id
-    let claimed_eppn_explicit = claims
-        .custom
-        .as_ref()
-        .and_then(|c| c.get("user_eppn"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .or_else(|| claims.email.clone());
+    // 5. Map user identity. The order of identities (custom `user_eppn`,
+    //    Moodle username, email, synthetic) lives in `lti_identity`, shared
+    //    with the NRPS roster sync so both land on the same account.
+    let identity = LtiIdentity::new(
+        claims
+            .custom
+            .as_ref()
+            .and_then(|c| c.get("user_eppn"))
+            .and_then(|v| v.as_str()),
+        claims.ext.as_ref().and_then(|e| e.user_username.as_deref()),
+        claims.email.as_deref(),
+        &source.identifier(),
+        &claims.sub,
+    );
 
-    // A platform's eppn scope applies to the JWT's claimed identity (the
-    // user_eppn custom param or email claim); the fallback synthetic form
-    // is tagged with the source id and therefore trivially distinguishable
-    // from any real eppn, so it needs no scope check. Enforced BEFORE the
-    // user find/create so a rogue platform admin can't pre-create victim
+    // A platform's eppn scope applies to the JWT's claimed identities; the
+    // synthetic fallback needs no scope check. Enforced BEFORE the user
+    // find/create so a rogue platform admin can't pre-create victim
     // accounts or log in as an existing victim with a forged claim.
-    if let ResolvedSource::Platform(p) = &source {
-        if let Some(ref claimed) = claimed_eppn_explicit {
-            enforce_platform_eppn_domain(p, &claimed.to_lowercase())?;
-        }
-    }
-
-    let eppn = claimed_eppn_explicit
-        .unwrap_or_else(|| format!("lti_{}_{}", source.identifier(), claims.sub))
-        .to_lowercase();
-
-    let display_name = claims.name.as_deref();
+    let identity = match &source {
+        ResolvedSource::Platform(p) => identity
+            .within_scope(p.allowed_eppn_domains.as_deref())
+            .map_err(|claimed| eppn_domain_forbidden(p, &claimed))?,
+        ResolvedSource::Registration(_) => identity,
+    };
 
     // 6. Find or create the user.
     //    Reuses an existing Shib user's record if present; does NOT modify
     //    their role or display name; LTI should not alter existing accounts.
-    let (user, _) = minerva_db::queries::users::find_or_create_by_eppn(
+    let user = lti_identity::resolve_user(
         &state.db,
-        &eppn,
-        display_name,
-        "student",
+        &identity,
+        claims.name.as_deref(),
         crate::system_defaults::owner_daily_cost_limit_usd(&state.db).await,
     )
     .await?;
@@ -1138,12 +1134,14 @@ async fn bind_complete(
 
     // Idempotent-ish: if a binding already exists for this (platform, context),
     // reuse it instead of failing. The UNIQUE index guarantees at most one.
-    let binding = if let Some(existing) =
+    // The picker's sync choice only applies to a binding this request
+    // creates; a stale or second bind link must not flip an existing one.
+    let (binding, sync_choice) = if let Some(existing) =
         minerva_db::queries::lti::find_binding(&state.db, platform.id, &payload.context_id).await?
     {
-        existing
+        (existing, None)
     } else {
-        minerva_db::queries::lti::create_binding(
+        let created = minerva_db::queries::lti::create_binding(
             &state.db,
             Uuid::new_v4(),
             &minerva_db::queries::lti::CreateBinding {
@@ -1155,7 +1153,8 @@ async fn bind_complete(
                 created_by: user.id,
             },
         )
-        .await?
+        .await?;
+        (created, Some(body.sync_members))
     };
 
     // Apply course membership + role suggestion as on a normal launch.
@@ -1177,6 +1176,7 @@ async fn bind_complete(
         context: None,
         resource_link: None,
         custom: None,
+        ext: None,
         launch_presentation: None,
         names_role_service: None,
     };
@@ -1190,7 +1190,7 @@ async fn bind_complete(
         &payload.context_id,
         binding.course_id,
         payload.memberships_url.as_deref(),
-        Some(body.sync_members),
+        sync_choice,
     )
     .await?;
 
@@ -2036,34 +2036,22 @@ fn normalize_eppn_domains(raw: &[String]) -> Result<Vec<String>, AppError> {
     Ok(out)
 }
 
-/// Reject a platform launch when the JWT-claimed eppn sits outside the
-/// platform's allowlist. Helper lives next to `CreatePlatformRequest` so
+/// The error for a platform launch whose claimed identities all sit outside
+/// the platform's allowlist. Helper lives next to `CreatePlatformRequest` so
 /// it stays visually close to the admin ingestion path that sets the
 /// allowlist; matching helper for site integration keys is in
 /// `routes/integration.rs::enforce_eppn_domain`.
-fn enforce_platform_eppn_domain(
-    platform: &minerva_db::queries::lti::PlatformRow,
-    eppn: &str,
-) -> Result<(), AppError> {
-    let Some(domains) = platform.allowed_eppn_domains.as_ref() else {
-        return Ok(());
-    };
-    if domains.is_empty() {
-        return Ok(());
+fn eppn_domain_forbidden(platform: &minerva_db::queries::lti::PlatformRow, eppn: &str) -> AppError {
+    let allowed = platform
+        .allowed_eppn_domains
+        .as_deref()
+        .unwrap_or_default()
+        .join(", ");
+    AppError::ForbiddenWith {
+        code: "lti.eppn_domain_forbidden",
+        message: format!("forbidden: eppn '{eppn}' not in allowed domains [{allowed}]"),
+        params: ErrorParams::from([("eppn", eppn.to_string()), ("allowed_domains", allowed)]),
     }
-    // `@<domain>` suffix, not substring: see enforce_eppn_domain doc.
-    let matches = domains
-        .iter()
-        .any(|d| eppn.ends_with(&format!("@{}", d.to_lowercase())));
-    if !matches {
-        let allowed = domains.join(", ");
-        return Err(AppError::ForbiddenWith {
-            code: "lti.eppn_domain_forbidden",
-            message: format!("forbidden: eppn '{eppn}' not in allowed domains [{allowed}]"),
-            params: ErrorParams::from([("eppn", eppn.to_string()), ("allowed_domains", allowed)]),
-        });
-    }
-    Ok(())
 }
 
 async fn delete_platform(
@@ -2143,8 +2131,8 @@ struct NrpsStatusResponse {
     last_sync_warning: Option<String>,
     last_sync_added: Option<i32>,
     last_sync_removed: Option<i32>,
-    /// Runs that changed membership or failed, newest first. Clean no-op
-    /// runs are not recorded.
+    /// Runs that changed membership or whose outcome differs from the run
+    /// before, newest first. Repeats of the same outcome are not recorded.
     history: Vec<NrpsRunResponse>,
 }
 

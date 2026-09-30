@@ -737,6 +737,23 @@ comparable turns that got no banner.
 
 ## Answer Policy (document kinds + extraction guard)
 
+Three per-course flags, the first the base of the other two:
+
+- `document_kinds`: classify documents at ingest, the teacher's kind
+  controls, and the kind-based handling at chat time described below.
+- `course_kg`: the linker, graph viewer and graph-driven context
+  expansion. Resolves to off without `document_kinds`
+  (`feature_flags::course_kg_enabled`), and `relink_course` is a no-op
+  without it, so a kind change on a classifier-only course links nothing.
+- `extraction_guard`: the reply check and teacher flags. Also resolves
+  to off without `document_kinds`; it does not need the graph. With the
+  graph it additionally counts a lecture that is `applied_in` a graded
+  assignment as "near" that assignment for the proximity rule.
+
+Switching `document_kinds` on for an existing course holds every
+not-yet-classified document out of chat until it is classified, so run
+"reclassify all" right after.
+
 What Minerva will answer depends on the kind of material the question is
 about. The kind is per document (`documents.kind`, classifier-set,
 teacher-overridable) and the chat path reads it from the row each turn
@@ -746,8 +763,8 @@ Qdrant point at ingest, which goes stale when a doc is reclassified.
 | Material | Kinds | Behaviour |
 |---|---|---|
 | Examining | `assignment_brief`, `lab_brief`, `exam` (take-home) | Text is context, so questions about the work are answered; never a full solution, attempt or not |
-| Solution to examining work | `sample_solution` with a `solution_of` edge onto an examining doc | Withheld from context |
-| Practice | `tutorial_exercise`, `old_exam`, any other `sample_solution` | Ordinary context. A published answer is given; otherwise the answer follows an honest attempt |
+| Solution to graded work | `graded_solution` | Withheld from context |
+| Practice | `tutorial_exercise`, `old_exam`, `sample_solution` | Ordinary context. A published answer is given; otherwise the answer follows an honest attempt |
 
 - `EXAMINING_KINDS` in `minerva-db` is the one definition; the SQL and
   `types::is_examining_kind` both read it.
@@ -759,9 +776,11 @@ Qdrant point at ingest, which goes stale when a doc is reclassified.
   is a chat-time decision (`partition_chunks`), applied to the seed
   retrieval, KG expansion, research-tool results and FLARE injections
   alike. Ingest replaces a document's points, so a requeue is safe.
-- A `sample_solution` the linker has not paired with anything is treated
-  as practice. To keep one out of chat, link it to its assignment or set
-  its kind to `unknown`.
+- Whether a solution is withheld is its own kind, not a graph lookup:
+  the classifier picks `graded_solution` for solutions to assignments,
+  labs and take-home exams (and when it cannot tell), `sample_solution`
+  for answers to exercises and old exams. A teacher flips it like any
+  other kind.
 - A turn with examining text in context gets
   `ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE` (answer questions about the work,
   do not solve it), whatever the retrieval score.

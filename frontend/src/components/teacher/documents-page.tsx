@@ -70,6 +70,9 @@ const KIND_BADGE_CLASS: Record<string, string> = {
     "bg-lime-100 text-lime-900 border-lime-200 dark:bg-lime-950 dark:text-lime-100 dark:border-lime-800",
   sample_solution:
     "bg-violet-100 text-violet-900 border-violet-200 dark:bg-violet-950 dark:text-violet-100 dark:border-violet-800",
+  // Withheld from chat: grouped with the examining kinds by warmth.
+  graded_solution:
+    "bg-red-100 text-red-900 border-red-200 dark:bg-red-950 dark:text-red-100 dark:border-red-800",
   syllabus:
     "bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700",
   unknown:
@@ -125,7 +128,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   // edit-kind dialog, the bulk re-classify button, and the locked
   // pencil-icon all collapse out of the row; matches the backend
   // which 404s the KG endpoints in the same case.
-  const kgEnabled = course?.feature_flags?.course_kg === true
+  const kindsEnabled = course?.feature_flags?.document_kinds === true
   const queryClient = useQueryClient()
   const invalidate = () =>
     queryClient.invalidateQueries({
@@ -443,7 +446,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
             <div className="flex items-center gap-2">
               {selected.size > 0 && (
                 <>
-                  {kgEnabled && (
+                  {kindsEnabled && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -522,7 +525,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
                   opening the dialog. When the row can't be mutated
                   (TA, etc.) the badge stays purely informational.
                 */}
-                {kgEnabled && (
+                {kindsEnabled && (
                   <Badge
                     variant="outline"
                     className={`${kindBadgeClass(doc.kind)} ${canMutate ? "cursor-pointer hover:opacity-80" : ""}`}

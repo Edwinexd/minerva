@@ -16,18 +16,23 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Course knowledge graph V1: per-doc kind classification + cross-doc
-/// linker + graph viewer + assignment-refusal addendum + adversarial
-/// chunk filter. All KG behaviour gates on this single flag.
+/// Document classification: every ingested document gets a `kind`
+/// (lecture, assignment_brief, old_exam, graded_solution, ...), which
+/// teachers can override, and the chat path handles each chunk by its
+/// document's kind: graded work may be asked about but not solved,
+/// solutions to graded work are withheld, unclassified documents wait.
+/// The base the two flags below build on.
+pub const FLAG_DOCUMENT_KINDS: &str = "document_kinds";
+
+/// Course knowledge graph: the cross-document linker, the graph
+/// viewer, and graph-driven context expansion. Needs
+/// `document_kinds`, since the linker reads kinds.
 pub const FLAG_COURSE_KG: &str = "course_kg";
 
-/// Extraction guard: pre-generation intent classifier (catches
-/// pasted-assignment-asking-for-implementation), output-side
-/// solution-detection check, Socratic rewriter, multi-turn
-/// proximity tracking via the KG. Independently flagged from
-/// `course_kg` so admins can opt courses into the graph view
-/// without the harder student-facing constraints (or vice versa
-/// once the guard stabilises).
+/// Extraction guard: intent classifier, reply check with Socratic
+/// rewrite on graded work, attempt-first nudge on practice questions,
+/// teacher flags. Needs `document_kinds`, which is how it knows what
+/// is graded; independent of `course_kg`.
 pub const FLAG_EXTRACTION_GUARD: &str = "extraction_guard";
 
 /// Aegis: prompt-coaching feedback panel. When on, every user
@@ -54,6 +59,7 @@ pub const FLAG_CONCEPT_GRAPH: &str = "concept_graph";
 /// uses this to enumerate available toggles per course; new flags
 /// must be added here AND have a `pub const` above.
 pub const ALL_FLAGS: &[&str] = &[
+    FLAG_DOCUMENT_KINDS,
     FLAG_COURSE_KG,
     FLAG_EXTRACTION_GUARD,
     FLAG_AEGIS,
@@ -83,17 +89,25 @@ async fn flag_enabled(db: &PgPool, flag: &'static str, course_id: Uuid) -> bool 
     }
 }
 
-/// True iff the KG bundle is enabled for this course. Failing closed
-/// avoids emitting half-classified state, mark_dirty noise, etc.
-pub async fn course_kg_enabled(db: &PgPool, course_id: Uuid) -> bool {
-    flag_enabled(db, FLAG_COURSE_KG, course_id).await
+/// True iff documents in this course are classified and handled by
+/// kind. Failing closed avoids half-classified state.
+pub async fn document_kinds_enabled(db: &PgPool, course_id: Uuid) -> bool {
+    flag_enabled(db, FLAG_DOCUMENT_KINDS, course_id).await
 }
 
-/// True iff the extraction guard is enabled for this course.
-/// Used by the chat strategies (wired in a follow-up commit).
-#[allow(dead_code)]
+/// True iff the knowledge graph is enabled for this course, which
+/// takes `document_kinds` as well: a graph flag on a course without
+/// classification has nothing to link and resolves to off.
+pub async fn course_kg_enabled(db: &PgPool, course_id: Uuid) -> bool {
+    flag_enabled(db, FLAG_COURSE_KG, course_id).await && document_kinds_enabled(db, course_id).await
+}
+
+/// True iff the extraction guard is enabled for this course, which
+/// takes `document_kinds` as well: without kinds the guard cannot tell
+/// graded work from practice and resolves to off.
 pub async fn extraction_guard_enabled(db: &PgPool, course_id: Uuid) -> bool {
     flag_enabled(db, FLAG_EXTRACTION_GUARD, course_id).await
+        && document_kinds_enabled(db, course_id).await
 }
 
 /// True iff aegis prompt-coaching is enabled for this course at the

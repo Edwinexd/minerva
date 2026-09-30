@@ -274,17 +274,20 @@ pub struct GenerationContext {
     /// model (no re-embed on change).
     pub reranker_model: String,
     pub reranking_enabled: bool,
-    /// Resolved per-request from the `course_kg` feature flag. When
-    /// FALSE, RAG behaviour reverts to the pre-KG baseline:
+    /// Resolved per-request from the `document_kinds` feature flag.
+    /// When FALSE, RAG behaviour reverts to the pre-classification
+    /// baseline:
     ///
-    ///   * adversarial chunk filter skipped
     ///   * document-kind lookup (`CourseKinds`) skipped
     ///   * `partition_chunks` puts every chunk into context
-    ///   * `build_system_prompt_with_signals` gets no signals (no
-    ///     refusal addendum)
+    ///   * no signals, so no refusal addendum and no adversarial
+    ///     chunk filter
     ///
     /// Decided once at the chat-route entry and propagated through
     /// the strategy so each pass sees a stable view.
+    pub kinds_enabled: bool,
+    /// Resolved per-request from the `course_kg` feature flag: graph
+    /// context expansion and the graph-aware research tools.
     pub kg_enabled: bool,
     /// Mirror of `courses.tool_use_enabled`. When TRUE, the strategy
     /// orchestrator splits generation into a hidden-thinking research

@@ -134,8 +134,8 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // and pass everything through when KG is gated off. The loop
     // re-partitions its accumulator every iteration, which is where
     // the signals are read.
-    let kinds = common::CourseKinds::load(&ctx.db, ctx.course_id, ctx.kg_enabled).await;
-    let seed = common::partition_chunks(initial_chunks_raw, &kinds, ctx.kg_enabled);
+    let kinds = common::CourseKinds::load(&ctx.db, ctx.course_id, ctx.kinds_enabled).await;
+    let seed = common::partition_chunks(initial_chunks_raw, &kinds);
     let near_examining = !seed.signals.is_empty();
     let mut initial_chunks = common::drop_solutions_near_examining(
         &http_client,
@@ -190,7 +190,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // completes, so any late-arriving solution material in the
     // reply itself is still caught. None when the feature flag is
     // off; Some(_) otherwise.
-    let guard_partition = common::partition_chunks(initial_chunks.clone(), &kinds, ctx.kg_enabled);
+    let guard_partition = common::partition_chunks(initial_chunks.clone(), &kinds);
     let mut guard_decision = super::extraction_guard::evaluate_for_turn(
         &ctx.db,
         &http_client,
@@ -242,7 +242,6 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         daily_token_limit: ctx.daily_token_budget,
         kinds: kinds.clone(),
         practice_attempt_first: super::extraction_guard::practice_attempt_first(&guard_decision),
-        kg_enabled: ctx.kg_enabled,
         global_knowledge,
     };
     let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
@@ -294,7 +293,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                 &utility,
                 &db,
                 course_id,
-                common::partition_chunks(raw, &kinds, kg_enabled),
+                common::partition_chunks(raw, &kinds),
                 near_examining,
             )
             .await
@@ -430,10 +429,6 @@ struct RunLoopConfig<'a> {
     /// The guard saw a practice question pasted without an attempt;
     /// see `common::policy_addendum`.
     practice_attempt_first: bool,
-    /// Mirror of `GenerationContext::kg_enabled`; forwarded so the
-    /// inner loop's `partition_chunks` and adversarial-filter calls
-    /// honour the gate without re-resolving the flag mid-stream.
-    kg_enabled: bool,
     /// Whether this turn needs the otherwise on-demand disclosure context.
     global_knowledge: Vec<common::GlobalKnowledgeSource>,
 }
@@ -567,7 +562,7 @@ where
         // Kind-aware partition every iteration: as `all_chunks` grows
         // mid-loop via FLARE retrievals, signal chunks may show up that
         // weren't there at iteration 0. Cheap; pure in-memory work.
-        let rag = common::partition_chunks(all_chunks.clone(), &cfg.kinds, cfg.kg_enabled);
+        let rag = common::partition_chunks(all_chunks.clone(), &cfg.kinds);
         let mut system = common::build_system_prompt_with_signals(
             cfg.course_name,
             cfg.custom_prompt,
@@ -2364,7 +2359,6 @@ mod loop_regression_tests {
             daily_token_limit: 0, // unlimited, so we don't short-circuit on token cap
             kinds: common::CourseKinds::default(),
             practice_attempt_first: false,
-            kg_enabled: true,
             global_knowledge: Vec::new(),
         };
 
@@ -2432,7 +2426,6 @@ mod loop_regression_tests {
             daily_token_limit: 500,
             kinds: common::CourseKinds::default(),
             practice_attempt_first: false,
-            kg_enabled: true,
             global_knowledge: Vec::new(),
         };
 
@@ -2500,7 +2493,6 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             kinds: common::CourseKinds::default(),
             practice_attempt_first: false,
-            kg_enabled: true,
             global_knowledge: Vec::new(),
         };
 
@@ -2585,7 +2577,6 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             kinds: common::CourseKinds::default(),
             practice_attempt_first: false,
-            kg_enabled: true,
             global_knowledge: Vec::new(),
         };
 
@@ -2666,7 +2657,6 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             kinds: common::CourseKinds::default(),
             practice_attempt_first: false,
-            kg_enabled: true,
             global_knowledge: Vec::new(),
         };
 
@@ -2742,7 +2732,6 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             kinds: common::CourseKinds::default(),
             practice_attempt_first: false,
-            kg_enabled: true,
             global_knowledge: Vec::new(),
         };
 
@@ -2874,7 +2863,6 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             kinds: common::CourseKinds::default(),
             practice_attempt_first: false,
-            kg_enabled: true,
             global_knowledge: Vec::new(),
         };
 
@@ -2964,7 +2952,6 @@ mod loop_regression_tests {
             daily_token_limit: 0,
             kinds: common::CourseKinds::default(),
             practice_attempt_first: false,
-            kg_enabled: true,
             global_knowledge: Vec::new(),
         };
 

@@ -151,9 +151,14 @@ export interface DaisyOffering {
 
 export interface CourseFeatureFlags {
   /**
-   * Course knowledge graph V1: per-doc kind classification + linker
-   * + graph viewer + assignment-refusal addendum + adversarial
-   * chunk filter. Off by default until an admin opts the course in.
+   * Document classification: each document gets a kind, teachers can
+   * override it, and the chat handles material by kind. The base that
+   * `course_kg` and the extraction guard build on.
+   */
+  document_kinds: boolean
+  /**
+   * Course knowledge graph: linker + graph viewer + graph-driven
+   * context expansion. Only ever true together with `document_kinds`.
    */
   course_kg: boolean
   /**
@@ -1087,6 +1092,7 @@ export type DocumentKind =
   | "tutorial_exercise"
   | "assignment_brief"
   | "sample_solution"
+  | "graded_solution"
   | "lab_brief"
   | "exam"
   | "old_exam"
@@ -1100,6 +1106,7 @@ export const DOCUMENT_KINDS: DocumentKind[] = [
   "tutorial_exercise",
   "assignment_brief",
   "sample_solution",
+  "graded_solution",
   "lab_brief",
   "exam",
   "old_exam",

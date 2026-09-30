@@ -79,6 +79,7 @@ const course: Course = {
   updated_at: "2026-01-01T00:00:00Z",
   my_role: "student",
   feature_flags: {
+    document_kinds: false,
     course_kg: false,
     aegis: true,
     concept_graph: false,

@@ -287,13 +287,13 @@ fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: A
                 let db = state.db.clone();
                 let qdrant = Arc::clone(&state.qdrant);
                 let fastembed = Arc::clone(&state.fastembed);
-                // Per-doc gate: if the course has the KG feature flag
-                // off, swap in the no-op classifier so the ingest
-                // pipeline doesn't burn a Cerebras call AND doesn't
-                // emit a kind into Qdrant. The mark_dirty for the
-                // relink sweeper is also skipped further down.
-                let kg_on = feature_flags::course_kg_enabled(&db, doc.course_id).await;
-                let classifier = if kg_on {
+                // Per-doc gate: if the course has classification off,
+                // swap in the no-op classifier so the ingest pipeline
+                // doesn't burn a Cerebras call AND doesn't emit a kind
+                // into Qdrant, and nothing is queued for the relink
+                // sweeper further down.
+                let kinds_on = feature_flags::document_kinds_enabled(&db, doc.course_id).await;
+                let classifier = if kinds_on {
                     Arc::clone(&kg_classifier)
                 } else {
                     Arc::clone(&noop_classifier)
@@ -472,10 +472,10 @@ fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: A
                             // long sustained burst still fires the
                             // linker within MAX_PENDING_AGE.
                             //
-                            // Skipped entirely when the course has
-                            // KG disabled; nothing classified means
-                            // nothing for the linker to chew on.
-                            if kg_on {
+                            // Skipped when nothing was classified.
+                            // Whether the course has a graph at all
+                            // is `relink_course`'s call.
+                            if kinds_on {
                                 scheduler.mark_dirty(course_id_for_relink).await;
                                 tracing::info!(
                                     "worker: marked course {} dirty after doc {} ingest; linker will fire on next sweep tick",

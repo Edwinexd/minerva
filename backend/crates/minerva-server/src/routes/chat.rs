@@ -1605,10 +1605,11 @@ pub(super) async fn run_chat_message(
 
     let strategy_name = course.strategy.clone();
 
-    // Resolve the KG feature flag once per chat request and pin it
-    // into the strategy context. This both saves a DB lookup per
+    // Resolve the classification and KG feature flags once per chat
+    // request and pin them into the strategy context. This both saves a DB lookup per
     // partition call and guarantees a stable view across the run --
     // an admin flipping the flag mid-conversation won't half-apply.
+    let kinds_enabled = crate::feature_flags::document_kinds_enabled(&state.db, course_id).await;
     let kg_enabled = crate::feature_flags::course_kg_enabled(&state.db, course_id).await;
     let reranking_enabled = crate::system_defaults::reranking_enabled(&state.db).await;
 
@@ -1808,6 +1809,7 @@ pub(super) async fn run_chat_message(
         reranker: Arc::clone(&state.reranker),
         reranker_model: course.reranker_model,
         reranking_enabled,
+        kinds_enabled,
         kg_enabled,
         tool_use_enabled: course.tool_use_enabled,
         viewer_is_teacher,

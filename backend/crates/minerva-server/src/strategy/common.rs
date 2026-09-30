@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::classification::prompts::{
     ASSIGNMENT_MATCH_ADDENDUM_TEMPLATE, PASTED_PROBLEM_RULE, PRACTICE_ATTEMPT_ADDENDUM,
 };
-use crate::classification::types::is_examining_kind;
+use crate::classification::types::{is_examining_kind, is_withheld_kind};
 use crate::error::AppError;
 
 // Primitives shared with the ingest-time classifier live in `crate::llm`
@@ -168,48 +168,45 @@ pub fn scored_point_to_rag_chunk(point: &ScoredPoint) -> Option<RagChunk> {
 /// teacher override changes the row and leaves the payload stale.
 #[derive(Debug, Clone, Default)]
 pub struct CourseKinds {
+    /// The course has no document classification: every chunk is
+    /// plain context and nothing is marked or withheld.
+    disabled: bool,
     /// Current kind per classified doc id. `None` when the lookup
     /// failed; the partition then falls back to the point payload
     /// rather than holding every chunk back as unclassified.
     kinds: Option<HashMap<String, String>>,
-    /// Sample solutions that solve examining material.
-    withheld_solutions: HashSet<String>,
 }
 
 impl CourseKinds {
-    /// Empty (and free) for a course without the KG bundle, whose
-    /// partition passes every chunk through anyway.
-    pub async fn load(db: &sqlx::PgPool, course_id: Uuid, kg_enabled: bool) -> Self {
-        if !kg_enabled {
-            return Self::default();
+    /// `enabled` is the course's `document_kinds` flag. Off costs no
+    /// query and yields a pass-through partition.
+    pub async fn load(db: &sqlx::PgPool, course_id: Uuid, enabled: bool) -> Self {
+        if !enabled {
+            return Self {
+                disabled: true,
+                kinds: None,
+            };
         }
         let kinds = minerva_db::queries::documents::classified_kinds(db, course_id)
             .await
             .map_err(|e| tracing::warn!("rag: kind lookup failed for course {course_id}: {e}"))
             .ok();
-        let withheld_solutions =
-            minerva_db::queries::document_relations::solutions_of_examining(db, course_id)
-                .await
-                .map_err(|e| {
-                    tracing::warn!("rag: solution lookup failed for course {course_id}: {e}")
-                })
-                .unwrap_or_default();
         Self {
+            disabled: false,
             kinds,
-            withheld_solutions,
         }
     }
 
     #[cfg(test)]
-    pub fn for_test(kinds: &[(&str, &str)], withheld_solutions: &[&str]) -> Self {
+    pub fn for_test(kinds: &[(&str, &str)]) -> Self {
         Self {
+            disabled: false,
             kinds: Some(
                 kinds
                     .iter()
                     .map(|(id, kind)| (id.to_string(), kind.to_string()))
                     .collect(),
             ),
-            withheld_solutions: withheld_solutions.iter().map(|s| s.to_string()).collect(),
         }
     }
 }
@@ -219,17 +216,16 @@ impl CourseKinds {
 ///
 /// * examining kinds are context like anything else and are also
 ///   copied into `signals`;
-/// * a sample solution to examining material is dropped outright;
+/// * a solution to graded work (`graded_solution`) is dropped outright;
 /// * `unknown` and not-yet-classified docs are held back this turn
 ///   (we'd rather give a slightly worse answer than risk leaking
 ///   unclassified material);
 /// * everything else is context, practice material and the sample
 ///   solutions to it included.
-pub fn partition_chunks(chunks: Vec<RagChunk>, kinds: &CourseKinds, kg_enabled: bool) -> RagResult {
-    if !kg_enabled {
-        // KG feature flag is off for this course: bypass every
-        // kind-based partition rule and just feed every chunk into
-        // context. No signals (so no refusal addendum gets appended).
+pub fn partition_chunks(chunks: Vec<RagChunk>, kinds: &CourseKinds) -> RagResult {
+    if kinds.disabled {
+        // No classification on this course: every chunk is context and
+        // there are no signals (so no refusal addendum gets appended).
         return RagResult {
             context: chunks,
             signals: Vec::new(),
@@ -265,9 +261,9 @@ pub fn partition_chunks(chunks: Vec<RagChunk>, kinds: &CourseKinds, kg_enabled: 
         if is_examining_kind(kind) {
             signals.push(c.clone());
         }
-        if kinds.withheld_solutions.contains(&c.document_id) {
+        if is_withheld_kind(kind) {
             tracing::debug!(
-                "rag: chunk from doc {} withheld (solution to examining material)",
+                "rag: chunk from doc {} withheld (solution to graded work)",
                 c.document_id
             );
             continue;
@@ -280,12 +276,8 @@ pub fn partition_chunks(chunks: Vec<RagChunk>, kinds: &CourseKinds, kg_enabled: 
 /// The context half of [`partition_chunks`], for retrievals made after
 /// the seed (research tools, FLARE injections). [`examining_chunks`]
 /// recovers the signals from the accumulated set afterwards.
-pub fn context_chunks(
-    chunks: Vec<RagChunk>,
-    kinds: &CourseKinds,
-    kg_enabled: bool,
-) -> Vec<RagChunk> {
-    partition_chunks(chunks, kinds, kg_enabled).context
+pub fn context_chunks(chunks: Vec<RagChunk>, kinds: &CourseKinds) -> Vec<RagChunk> {
+    partition_chunks(chunks, kinds).context
 }
 
 /// The chunks of a partitioned set that come from examining docs.
@@ -301,8 +293,8 @@ pub fn examining_chunks(chunks: &[RagChunk]) -> Vec<RagChunk> {
 /// examining material, i.e. `near_examining` is set or the chunks
 /// themselves carry an examining signal.
 ///
-/// The per-doc kind already keeps a graded assignment's own solution
-/// out. This catches the chunk-level leak: a lecture or an old exam
+/// The `graded_solution` kind already keeps a graded assignment's own
+/// solution out. This catches the chunk-level leak: a lecture or an old exam
 /// that happens to work through the same problem. The graded work's
 /// own chunks pose the task rather than solve it, so they pass. It is scoped to
 /// examining turns because everywhere else a worked solution is exactly
@@ -1779,7 +1771,7 @@ mod tests {
             ),
             chunk("d4", "hemtenta.pdf", "Q1: prove …", Some("exam")),
         ];
-        let r = partition_chunks(chunks, &CourseKinds::default(), true);
+        let r = partition_chunks(chunks, &CourseKinds::default());
         assert_eq!(r.context.len(), 4);
         assert_eq!(examining_chunks(&r.context), r.signals);
         assert_eq!(r.signals.len(), 3);
@@ -1806,24 +1798,45 @@ mod tests {
                 Some("sample_solution"),
             ),
         ];
-        let r = partition_chunks(chunks, &CourseKinds::default(), true);
+        let r = partition_chunks(chunks, &CourseKinds::default());
         assert_eq!(r.context.len(), 3);
         assert!(r.signals.is_empty());
     }
 
     #[test]
-    fn partition_withholds_solutions_to_examining_material() {
+    fn partition_withholds_solutions_to_graded_work() {
         let chunks = vec![
-            chunk("d1", "lab2_solution.pdf", "Here is the answer …", None),
-            chunk("d2", "tenta-losning.pdf", "Answer …", None),
+            chunk(
+                "d1",
+                "lab2_solution.pdf",
+                "Here is the answer …",
+                Some("graded_solution"),
+            ),
+            chunk(
+                "d2",
+                "tenta-losning.pdf",
+                "Answer …",
+                Some("sample_solution"),
+            ),
         ];
-        let kinds = CourseKinds::for_test(
-            &[("d1", "sample_solution"), ("d2", "sample_solution")],
-            &["d1"],
-        );
-        let r = partition_chunks(chunks, &kinds, true);
+        let r = partition_chunks(chunks, &CourseKinds::default());
         assert_eq!(r.context.len(), 1);
         assert_eq!(r.context[0].filename, "tenta-losning.pdf");
+        assert!(r.signals.is_empty());
+    }
+
+    #[test]
+    fn partition_passes_everything_through_without_classification() {
+        let chunks = vec![
+            chunk("d1", "lab2.pdf", "Implement …", Some("lab_brief")),
+            chunk("d2", "fresh-upload.pdf", "Just uploaded …", None),
+        ];
+        let kinds = CourseKinds {
+            disabled: true,
+            kinds: None,
+        };
+        let r = partition_chunks(chunks, &kinds);
+        assert_eq!(r.context.len(), 2);
         assert!(r.signals.is_empty());
     }
 
@@ -1837,8 +1850,8 @@ mod tests {
             "Your task is …",
             Some("lecture"),
         )];
-        let kinds = CourseKinds::for_test(&[("d1", "assignment_brief")], &[]);
-        let r = partition_chunks(chunks, &kinds, true);
+        let kinds = CourseKinds::for_test(&[("d1", "assignment_brief")]);
+        let r = partition_chunks(chunks, &kinds);
         assert_eq!(r.signals.len(), 1);
         assert_eq!(r.signals[0].kind.as_deref(), Some("assignment_brief"));
         assert_eq!(r.context, r.signals);
@@ -1850,8 +1863,8 @@ mod tests {
             chunk("d1", "ready.pdf", "Lecture stuff.", Some("lecture")),
             chunk("d2", "fresh-upload.pdf", "Just uploaded …", None),
         ];
-        let kinds = CourseKinds::for_test(&[("d1", "lecture")], &[]);
-        let r = partition_chunks(chunks, &kinds, true);
+        let kinds = CourseKinds::for_test(&[("d1", "lecture")]);
+        let r = partition_chunks(chunks, &kinds);
         assert_eq!(r.context.len(), 1);
         assert_eq!(r.context[0].filename, "ready.pdf");
         assert!(r.signals.is_empty());
@@ -1995,7 +2008,7 @@ mod tests {
             chunk("d1", "lecture.pdf", "Lecture content", Some("lecture")),
             chunk("d2", "mystery.pdf", "Ambiguous content", Some("unknown")),
         ];
-        let r = partition_chunks(chunks, &CourseKinds::default(), true);
+        let r = partition_chunks(chunks, &CourseKinds::default());
         assert_eq!(r.context.len(), 1);
         assert_eq!(r.context[0].filename, "lecture.pdf");
         assert!(r.signals.is_empty());

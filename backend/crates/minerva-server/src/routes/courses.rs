@@ -229,6 +229,10 @@ impl DaisyOfferingView {
 /// reached the chat. Add new flags here AND in `resolve_course_flags`.
 #[derive(Serialize, Default)]
 pub(crate) struct CourseFeatureFlagsView {
+    /// Document classification: kinds on documents and the teacher's
+    /// kind controls.
+    pub(crate) document_kinds: bool,
+    /// Knowledge graph viewer. Implies `document_kinds`.
     pub(crate) course_kg: bool,
     /// Aegis prompt-coaching feedback panel. When TRUE the chat UI
     /// renders a third right-side column with the per-prompt
@@ -293,6 +297,7 @@ pub(crate) async fn resolve_course_flags(
     course_id: Uuid,
 ) -> CourseFeatureFlagsView {
     CourseFeatureFlagsView {
+        document_kinds: crate::feature_flags::document_kinds_enabled(db, course_id).await,
         course_kg: crate::feature_flags::course_kg_enabled(db, course_id).await,
         aegis: crate::feature_flags::aegis_enabled(db, course_id).await,
         concept_graph: crate::feature_flags::concept_graph_enabled(db, course_id).await,

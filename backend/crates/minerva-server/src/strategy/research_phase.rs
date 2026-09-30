@@ -311,7 +311,6 @@ pub async fn run(
         min_score: ctx.min_score,
         orphaned_doc_ids,
         kinds,
-        kg_enabled: ctx.kg_enabled,
     };
 
     let catalog = tools::assemble_catalog(catalog_flags);
@@ -573,7 +572,7 @@ pub async fn run(
                     orphaned_doc_ids,
                 )
                 .await;
-                let new_chunks = common::context_chunks(new_chunks, kinds, ctx.kg_enabled);
+                let new_chunks = common::context_chunks(new_chunks, kinds);
                 let mut added = 0usize;
                 for c in &new_chunks {
                     if chunk_hashes.insert(chunk_identity_hash(c)) {
@@ -1287,6 +1286,7 @@ mod stream_integration_tests {
             reranker: std::sync::Arc::new(crate::strategy::test_support::NoopRerankerClient),
             reranker_model: minerva_catalog::DEFAULT_RERANK_MODEL.to_string(),
             reranking_enabled: true,
+            kinds_enabled: false,
             kg_enabled: false,
             tool_use_enabled: true,
             viewer_is_teacher: false,

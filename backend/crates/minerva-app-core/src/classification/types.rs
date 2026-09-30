@@ -12,6 +12,7 @@ pub const ALL_KINDS: &[&str] = &[
     "tutorial_exercise",
     "assignment_brief",
     "sample_solution",
+    "graded_solution",
     "lab_brief",
     "exam",
     "old_exam",
@@ -36,7 +37,11 @@ pub enum DocumentKind {
     /// work): the chat path can discuss tutorial exercises freely.
     TutorialExercise,
     AssignmentBrief,
+    /// Answers to practice material (exercises, old exams). Ordinary
+    /// course material.
     SampleSolution,
+    /// A solution to graded work. Never shown to the chat model.
+    GradedSolution,
     LabBrief,
     /// An examining exam the student is sitting now (take-home exam).
     Exam,
@@ -60,6 +65,7 @@ impl DocumentKind {
             DocumentKind::TutorialExercise => "tutorial_exercise",
             DocumentKind::AssignmentBrief => "assignment_brief",
             DocumentKind::SampleSolution => "sample_solution",
+            DocumentKind::GradedSolution => "graded_solution",
             DocumentKind::LabBrief => "lab_brief",
             DocumentKind::Exam => "exam",
             DocumentKind::OldExam => "old_exam",
@@ -83,6 +89,7 @@ impl DocumentKind {
             "tutorial_exercise" => Some(DocumentKind::TutorialExercise),
             "assignment_brief" => Some(DocumentKind::AssignmentBrief),
             "sample_solution" => Some(DocumentKind::SampleSolution),
+            "graded_solution" => Some(DocumentKind::GradedSolution),
             "lab_brief" => Some(DocumentKind::LabBrief),
             "exam" => Some(DocumentKind::Exam),
             "old_exam" => Some(DocumentKind::OldExam),
@@ -99,6 +106,14 @@ impl DocumentKind {
 /// guard never lets a full solution to them through.
 pub fn is_examining_kind(kind: &str) -> bool {
     minerva_db::queries::documents::EXAMINING_KINDS.contains(&kind)
+}
+
+/// Kinds whose text never reaches the chat model: the solutions to
+/// graded work. Indexed like everything else (the linker pairs them
+/// with their assignment) and dropped when a turn's chunks are
+/// partitioned.
+pub fn is_withheld_kind(kind: &str) -> bool {
+    kind == "graded_solution"
 }
 
 #[cfg(test)]
@@ -124,6 +139,13 @@ mod tests {
         let examining = ["assignment_brief", "lab_brief", "exam"];
         for k in ALL_KINDS {
             assert_eq!(is_examining_kind(k), examining.contains(k), "kind {}", k);
+        }
+    }
+
+    #[test]
+    fn only_graded_solutions_are_withheld() {
+        for k in ALL_KINDS {
+            assert_eq!(is_withheld_kind(k), *k == "graded_solution", "kind {}", k);
         }
     }
 }

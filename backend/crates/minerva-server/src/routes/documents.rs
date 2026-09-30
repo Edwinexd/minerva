@@ -775,10 +775,20 @@ pub use minerva_pipeline::pipeline::extension_from_filename;
 
 // ── Course-knowledge-graph V1 endpoints ────────────────────────────
 
-/// Gate every KG-related endpoint on the `course_kg` feature flag.
-/// Returns 404 (not 403) when off so a non-KG course "looks like"
-/// the feature simply doesn't exist; no surface for student or
-/// teacher fishing.
+/// Gate the kind endpoints (reclassify, override, unlock) on the
+/// `document_kinds` feature flag. Returns 404 (not 403) when off so
+/// the course "looks like" the feature simply doesn't exist; no
+/// surface for student or teacher fishing.
+async fn require_kinds_enabled(state: &AppState, course_id: Uuid) -> Result<(), AppError> {
+    if crate::feature_flags::document_kinds_enabled(&state.db, course_id).await {
+        Ok(())
+    } else {
+        Err(AppError::NotFound)
+    }
+}
+
+/// Gate the graph endpoints on the `course_kg` feature flag, same
+/// 404-when-off shape as [`require_kinds_enabled`].
 async fn require_kg_enabled(state: &AppState, course_id: Uuid) -> Result<(), AppError> {
     if crate::feature_flags::course_kg_enabled(&state.db, course_id).await {
         Ok(())
@@ -873,7 +883,7 @@ async fn reclassify_document(
     Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ReclassifyResponse>, AppError> {
     require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
+    require_kinds_enabled(&state, course_id).await?;
     let doc = load_doc_in_course(&state, course_id, doc_id).await?;
 
     match run_classify_one(&state, &doc).await? {
@@ -913,7 +923,7 @@ async fn set_document_kind(
     Json(body): Json<SetKindBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
+    require_kinds_enabled(&state, course_id).await?;
     let _doc = load_doc_in_course(&state, course_id, doc_id).await?;
 
     // Reject unknown kinds at the API boundary so the user gets a 400
@@ -947,7 +957,7 @@ async fn clear_kind_lock(
     Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
+    require_kinds_enabled(&state, course_id).await?;
     let _doc = load_doc_in_course(&state, course_id, doc_id).await?;
     minerva_db::queries::documents::clear_kind_lock(&state.db, doc_id).await?;
     Ok(Json(serde_json::json!({
@@ -970,7 +980,7 @@ async fn reclassify_all_in_course(
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<ReclassifyAllResponse>, AppError> {
     require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
+    require_kinds_enabled(&state, course_id).await?;
 
     let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
     let candidates: Vec<_> = docs

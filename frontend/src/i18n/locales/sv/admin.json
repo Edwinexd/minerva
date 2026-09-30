@@ -341,14 +341,16 @@
     "featureInherited": "standard",
     "featureRevertToDefault": "Återställ till global standard",
     "featureFlagLabel": {
+      "document_kinds": "Dokumentklassificering",
       "course_kg": "Kunskapsgraf för kurs",
       "extraction_guard": "Skydd mot uppgiftslösning",
       "aegis": "Aegis promptcoachning",
       "concept_graph": "Begreppsgraf"
     },
     "featureFlagDescription": {
-      "course_kg": "Klassificering per dokument, tvärdokumentlänkare och grafvisare. Studenter kan ställa frågor om examinerande material (uppgifter, laborationer, hemtentor), men det löses aldrig åt dem, och lösningarna till det hålls utanför chattens kontext. Övningar, gamla tentor och deras lösningar används som vanligt kursmaterial. Avstängd som standard medan vi kalibrerar.",
-      "extraction_guard": "För examinerande material ges aldrig en komplett lösning: varje svar som bygger på det kontrolleras och ersätts med en sokratisk fråga om det löser uppgiften, oavsett hur många försök studenten gör. En student som ber om att få en examinerande uppgift löst flaggas för läraren. För övningsmaterial ges ett publicerat svar direkt, annars ges svaret efter ett ärligt försök. Vilket som gäller avgörs av dokumenttyperna, så skyddet fungerar bäst tillsammans med course_kg.",
+      "document_kinds": "Klassificerar varje dokument i en typ (föreläsning, uppgift, gammal tenta, lösning, ...) som lärare kan ändra, och hanterar material efter typ i chatten: studenter kan ställa frågor om examinerande material (uppgifter, laborationer, hemtentor) men det löses inte åt dem, lösningar till examinerande material hålls utanför chatten, och övningar, gamla tentor och deras lösningar är vanligt kursmaterial. Dokument hålls utanför chatten tills de är klassificerade, så kör en omklassificering på en befintlig kurs när detta slås på.",
+      "course_kg": "Tvärdokumentlänkare, grafvisare och grafdriven kontextutökning. Kräver dokumentklassificering och har ingen effekt utan den.",
+      "extraction_guard": "För examinerande material ges aldrig en komplett lösning: varje svar som bygger på det kontrolleras och ersätts med en sokratisk fråga om det löser uppgiften, oavsett hur många försök studenten gör. En student som ber om att få en examinerande uppgift löst flaggas för läraren. För övningsmaterial ges ett publicerat svar direkt, annars ges svaret efter ett ärligt försök. Kräver dokumentklassificering och har ingen effekt utan den.",
       "aegis": "Sidopanel med promptcoachning. Varje studentprompt poängsätts på fem dimensioner (tydlighet, kontext, ramar, resonemangskrav, kritiskt tänkande) plus tre korta kommentarer (strukturell tydlighet, terminologi, saknad ram). Icke-blockerande: analysen körs parallellt med assistentens svar och studenten kan ignorera återkopplingen fritt.",
       "concept_graph": "Eureka-2 begreppsgraf: LLM-extrahering per dokument av domänbegrepp och riktade relationer, sparat med dokumentnivå-spårning och cosin/strukturell/community-dedup. Skiljer sig från kursens kunskapsgraf (som är på dokumentnivå). När den är på kan admins köra extraktion och visa grafen; avstängning döljer admin-endpointsen men bevarar den sparade grafen."
     },

@@ -172,10 +172,18 @@ pub fn spawn_sweep(state: crate::state::AppState) {
 /// as a string; the route maps them to a 500. Lives here (not in the
 /// axum route module) so the worker can drive it without linking the
 /// route tree.
+///
+/// A no-op for a course without the `course_kg` flag. Kind changes
+/// queue a relink without asking whether the course has a graph, so
+/// this is the one place that decides.
 pub async fn relink_course(
     state: &crate::state::AppState,
     course_id: Uuid,
 ) -> Result<usize, String> {
+    if !crate::feature_flags::course_kg_enabled(&state.db, course_id).await {
+        tracing::debug!("relink: course {course_id} has no knowledge graph, skipping");
+        return Ok(0);
+    }
     let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id)
         .await
         .map_err(|e| e.to_string())?;

@@ -44,6 +44,7 @@ interface EmbedCourse {
    * without redefining the type.
    */
   feature_flags: {
+    document_kinds: boolean
     course_kg: boolean
     aegis: boolean
   }

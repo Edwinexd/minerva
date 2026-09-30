@@ -146,8 +146,8 @@ pub async fn run(
     )
     .await;
 
-    let kinds = common::CourseKinds::load(&ctx.db, ctx.course_id, ctx.kg_enabled).await;
-    let rag = common::partition_chunks(raw_chunks, &kinds, ctx.kg_enabled);
+    let kinds = common::CourseKinds::load(&ctx.db, ctx.course_id, ctx.kinds_enabled).await;
+    let rag = common::partition_chunks(raw_chunks, &kinds);
     let mut rag = common::drop_solutions_near_examining(
         &http_client,
         &ctx.utility,
@@ -199,7 +199,7 @@ pub async fn run(
         // The neighbours are fetched by document, so they get the same
         // kind partition as a search hit: an `applied_in` partner is
         // often the graded assignment itself.
-        let extra = common::context_chunks(extra, &kinds, ctx.kg_enabled);
+        let extra = common::context_chunks(extra, &kinds);
         // Only surface the KG-expansion event when it actually
         // added something ; an empty extras list means the seed
         // chunks already covered the KG neighbourhood and there's

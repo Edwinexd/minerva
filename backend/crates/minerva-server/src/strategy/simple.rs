@@ -59,11 +59,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // Kind-aware partition: examining matches become `signals` (the
     // model gets a refusal addendum but never the chunk text);
     // solutions to examining material are dropped; unclassified docs
-    // are held back for this turn. All gated on `kg_enabled`;
-    // KG-disabled courses bypass the partition and the adversarial
-    // filter entirely.
-    let kinds = common::CourseKinds::load(&ctx.db, ctx.course_id, ctx.kg_enabled).await;
-    let rag = common::partition_chunks(raw_chunks, &kinds, ctx.kg_enabled);
+    // are held back for this turn. All gated on the course's
+    // `document_kinds` flag; without it the partition and the
+    // adversarial filter pass everything through.
+    let kinds = common::CourseKinds::load(&ctx.db, ctx.course_id, ctx.kinds_enabled).await;
+    let rag = common::partition_chunks(raw_chunks, &kinds);
     let mut rag = common::drop_solutions_near_examining(
         &http_client,
         &ctx.utility,
@@ -97,8 +97,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             &orphaned,
         )
         .await;
-        rag.context
-            .extend(common::context_chunks(extra, &kinds, ctx.kg_enabled));
+        rag.context.extend(common::context_chunks(extra, &kinds));
     }
 
     // Extraction guard evaluation: runs intent classifier + multi-

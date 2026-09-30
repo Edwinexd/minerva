@@ -122,7 +122,7 @@ const EXCERPT_CHARS: usize = 1500;
 const LINKER_SYSTEM_PROMPT: &str = r#"You evaluate ONE pair of course documents and decide if they're related.
 
 You're given Document A and Document B. For each:
-- kind: one of "lecture", "lecture_transcript", "reading", "tutorial_exercise", "assignment_brief", "sample_solution", "lab_brief", "exam", "old_exam", "syllabus", "unknown"
+- kind: one of "lecture", "lecture_transcript", "reading", "tutorial_exercise", "assignment_brief", "sample_solution", "graded_solution", "lab_brief", "exam", "old_exam", "syllabus", "unknown"
 - classifier_rationale: short note from the per-document classifier
 - excerpt: the first ~1500 chars of the document text
 
@@ -144,11 +144,11 @@ UNDIRECTED:
 DIRECTED (the relation has a source and destination, you pick which
 side is "a" and which is "b"):
 - "a_solution_of_b" / "b_solution_of_a": the source side is a
-  sample_solution and the dest side is its assignment_brief /
+  sample_solution or graded_solution and the dest side is its assignment_brief /
   lab_brief / exam / old_exam / tutorial_exercise. The solution's
   excerpt should plainly answer
   the problem the assignment poses. Requires kinds to line up
-  (one side MUST be sample_solution).
+  (one side MUST be sample_solution or graded_solution).
 
 - "a_prerequisite_of_b" / "b_prerequisite_of_a": the source doc
   introduces concepts the destination doc builds on. Source is
@@ -1312,13 +1312,14 @@ async fn classify_one_pair(
     let (src, dst) = match canonical_relation {
         "part_of_unit" => pair_key(p.a_id, p.b_id),
         "solution_of" => {
-            if p.a_kind == "sample_solution" {
+            let is_solution = |kind: &str| matches!(kind, "sample_solution" | "graded_solution");
+            if is_solution(&p.a_kind) {
                 (p.a_id, p.b_id)
-            } else if p.b_kind == "sample_solution" {
+            } else if is_solution(&p.b_kind) {
                 (p.b_id, p.a_id)
             } else {
                 tracing::info!(
-                    "linker: dropping solution_of {}<->{}; neither side has kind=sample_solution",
+                    "linker: dropping solution_of {}<->{}; neither side is a solution kind",
                     p.a_id,
                     p.b_id,
                 );

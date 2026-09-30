@@ -60,6 +60,7 @@ import { useApiErrorMessage, useLocalizedMessage } from "@/lib/use-api-error"
 /// + i18n key + bumping the backend list is everything needed for
 /// the admin UI to surface a new toggle.
 const KNOWN_FEATURE_FLAGS = [
+  "document_kinds",
   "course_kg",
   "extraction_guard",
   "aegis",

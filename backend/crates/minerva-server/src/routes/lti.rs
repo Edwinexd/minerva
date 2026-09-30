@@ -83,6 +83,10 @@ pub fn course_router() -> Router<AppState> {
         .route("/lti/setup", get(lti_setup))
         .route("/lti", get(list_registrations).post(create_registration))
         .route("/lti/nrps", get(list_course_nrps_status))
+        .route(
+            "/lti/nrps/{nrps_context_id}/sync-enabled",
+            put(set_course_nrps_sync_enabled),
+        )
         .route("/lti/site-bindings", get(list_course_site_bindings))
         .route(
             "/lti/site-bindings/{binding_id}",
@@ -446,6 +450,7 @@ async fn handle_launch(
             .names_role_service
             .as_ref()
             .map(|n| n.context_memberships_url.as_str()),
+        None,
     )
     .await?;
 
@@ -457,12 +462,16 @@ async fn handle_launch(
 /// `context_memberships_url`. No-op when NRPS isn't enabled for the tool
 /// (the claim is absent) so non-NRPS platforms are unaffected. Shared by
 /// the launch handler and the bind-complete handler.
+///
+/// `sync_enabled` is the teacher's choice from the bind picker; the launch
+/// handler passes `None`, which keeps whatever the context already has.
 async fn capture_nrps_context(
     state: &AppState,
     source: minerva_db::queries::lti_nrps::NrpsSource,
     context_id: &str,
     course_id: Uuid,
     memberships_url: Option<&str>,
+    sync_enabled: Option<bool>,
 ) -> Result<(), AppError> {
     let Some(url) = memberships_url.filter(|u| !u.is_empty()) else {
         return Ok(());
@@ -474,6 +483,7 @@ async fn capture_nrps_context(
         context_id,
         course_id,
         url,
+        sync_enabled,
     )
     .await?;
     Ok(())
@@ -1006,6 +1016,9 @@ struct BindInfoResponse {
     /// Whether the LMS-claimed roles look teacher-ish (used by UI for
     /// messaging; the actual authorization check is on submit).
     is_teacher_role: bool,
+    /// Whether the LMS advertised a roster endpoint on this launch. The
+    /// picker only offers the member-sync choice when it did.
+    roster_sync_available: bool,
     /// Minerva courses the launching user can bind to (owner + teacher/ta).
     /// Non-teachers see this empty and must ask a course teacher to launch.
     courses: Vec<BindInfoCourse>,
@@ -1052,6 +1065,10 @@ async fn bind_info(
         context_label: payload.context_label,
         context_title: payload.context_title,
         is_teacher_role,
+        roster_sync_available: payload
+            .memberships_url
+            .as_deref()
+            .is_some_and(|u| !u.is_empty()),
         courses: courses
             .into_iter()
             .map(|c| BindInfoCourse {
@@ -1066,6 +1083,13 @@ async fn bind_info(
 struct BindCompleteRequest {
     token: String,
     course_id: Uuid,
+    /// Whether to keep this course's members in sync with the LMS roster.
+    #[serde(default = "default_sync_members")]
+    sync_members: bool,
+}
+
+fn default_sync_members() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize)]
@@ -1166,6 +1190,7 @@ async fn bind_complete(
         &payload.context_id,
         binding.course_id,
         payload.memberships_url.as_deref(),
+        Some(body.sync_members),
     )
     .await?;
 
@@ -2091,12 +2116,15 @@ async fn list_platform_bindings(
 }
 
 // ---------------------------------------------------------------------------
-// NRPS roster-sync status (read-only)
+// NRPS roster-sync status
 // ---------------------------------------------------------------------------
 
-/// Read-only view of an NRPS context's last reconcile. There is intentionally
-/// no manual-trigger endpoint: the reconcile runs on the in-process periodic
-/// loop (see `worker::start` / `lti_nrps::reconcile_context`).
+/// How many recorded runs each context's `history` carries.
+const NRPS_HISTORY_LIMIT: i64 = 20;
+
+/// An NRPS context's sync setting, last reconcile and recent history. There
+/// is intentionally no manual-trigger endpoint: the reconcile runs on the
+/// scheduler's periodic loop (see `lti_nrps::reconcile_context`).
 #[derive(Debug, Serialize)]
 struct NrpsStatusResponse {
     id: Uuid,
@@ -2104,6 +2132,7 @@ struct NrpsStatusResponse {
     /// "registration" (per-course) or "platform" (site-level).
     source: &'static str,
     context_id: String,
+    sync_enabled: bool,
     last_sync_at: Option<chrono::DateTime<chrono::Utc>>,
     last_sync_status: Option<String>,
     last_sync_error: Option<String>,
@@ -2114,9 +2143,59 @@ struct NrpsStatusResponse {
     last_sync_warning: Option<String>,
     last_sync_added: Option<i32>,
     last_sync_removed: Option<i32>,
+    /// Runs that changed membership or failed, newest first. Clean no-op
+    /// runs are not recorded.
+    history: Vec<NrpsRunResponse>,
 }
 
-fn nrps_to_response(r: minerva_db::queries::lti_nrps::NrpsContextRow) -> NrpsStatusResponse {
+#[derive(Debug, Serialize)]
+struct NrpsRunResponse {
+    id: Uuid,
+    ran_at: chrono::DateTime<chrono::Utc>,
+    status: String,
+    error: Option<String>,
+    warning: Option<String>,
+    added: Option<i32>,
+    removed: Option<i32>,
+}
+
+/// Attach each context's recent run history and shape the rows for the API.
+async fn nrps_status_responses(
+    state: &AppState,
+    rows: Vec<minerva_db::queries::lti_nrps::NrpsContextRow>,
+) -> Result<Vec<NrpsStatusResponse>, AppError> {
+    let ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+    let mut history: std::collections::HashMap<Uuid, Vec<NrpsRunResponse>> =
+        std::collections::HashMap::new();
+    for run in
+        minerva_db::queries::lti_nrps::list_recent_runs(&state.db, &ids, NRPS_HISTORY_LIMIT).await?
+    {
+        history
+            .entry(run.nrps_context_id)
+            .or_default()
+            .push(NrpsRunResponse {
+                id: run.id,
+                ran_at: run.ran_at,
+                status: run.status,
+                error: run.error,
+                warning: run.warning,
+                added: run.added,
+                removed: run.removed,
+            });
+    }
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let runs = history.remove(&r.id).unwrap_or_default();
+            nrps_to_response(r, runs)
+        })
+        .collect())
+}
+
+fn nrps_to_response(
+    r: minerva_db::queries::lti_nrps::NrpsContextRow,
+    history: Vec<NrpsRunResponse>,
+) -> NrpsStatusResponse {
     NrpsStatusResponse {
         id: r.id,
         course_id: r.course_id,
@@ -2126,12 +2205,14 @@ fn nrps_to_response(r: minerva_db::queries::lti_nrps::NrpsContextRow) -> NrpsSta
             "platform"
         },
         context_id: r.context_id,
+        sync_enabled: r.sync_enabled,
         last_sync_at: r.last_sync_at,
         last_sync_status: r.last_sync_status,
         last_sync_error: r.last_sync_error,
         last_sync_warning: r.last_sync_warning,
         last_sync_added: r.last_sync_added,
         last_sync_removed: r.last_sync_removed,
+        history,
     }
 }
 
@@ -2146,7 +2227,35 @@ async fn list_course_nrps_status(
     require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let rows =
         minerva_db::queries::lti_nrps::list_contexts_for_course(&state.db, course_id).await?;
-    Ok(Json(rows.into_iter().map(nrps_to_response).collect()))
+    Ok(Json(nrps_status_responses(&state, rows).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct SetNrpsSyncEnabledRequest {
+    enabled: bool,
+}
+
+/// PUT /courses/{course_id}/lti/nrps/{nrps_context_id}/sync-enabled; switch
+/// periodic roster sync on or off for one context. Switching it off stops
+/// both adds and removals; members already provisioned stay.
+async fn set_course_nrps_sync_enabled(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, nrps_context_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<SetNrpsSyncEnabledRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    let updated = minerva_db::queries::lti_nrps::set_sync_enabled(
+        &state.db,
+        nrps_context_id,
+        course_id,
+        body.enabled,
+    )
+    .await?;
+    if !updated {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(serde_json::json!({ "sync_enabled": body.enabled })))
 }
 
 /// GET /admin/lti/platforms/{platform_id}/nrps; NRPS sync status for every
@@ -2159,7 +2268,7 @@ async fn list_platform_nrps_status(
     require_site_integrator(&user)?;
     let rows =
         minerva_db::queries::lti_nrps::list_contexts_for_platform(&state.db, platform_id).await?;
-    Ok(Json(rows.into_iter().map(nrps_to_response).collect()))
+    Ok(Json(nrps_status_responses(&state, rows).await?))
 }
 
 async fn delete_platform_binding(

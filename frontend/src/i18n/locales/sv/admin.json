@@ -170,6 +170,7 @@
     "nrpsStatusError": "Fel",
     "nrpsStatusPending": "Väntar",
     "nrpsStatusWarning": "Behöver åtgärdas",
+    "nrpsStatusOff": "Synk av",
     "nrpsNeverSynced": "Inte synkad ännu",
     "nrpsCounts": "{{added}} tillagda, {{removed}} borttagna",
     "nrpsColumns": {

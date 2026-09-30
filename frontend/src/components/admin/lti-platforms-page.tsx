@@ -616,7 +616,9 @@ function PlatformRow({
                         <td className="py-1 pr-3 font-mono text-xs break-all">{ctx.context_id || "-"}</td>
                         <td className="py-1 pr-3">
                           <div className="flex flex-wrap items-center gap-1">
-                            {ctx.last_sync_status === "error" ? (
+                            {!ctx.sync_enabled ? (
+                              <Badge variant="outline">{t("ltiPlatforms.nrpsStatusOff")}</Badge>
+                            ) : ctx.last_sync_status === "error" ? (
                               <Badge variant="destructive">{t("ltiPlatforms.nrpsStatusError")}</Badge>
                             ) : ctx.last_sync_status === "ok" ? (
                               <Badge variant="secondary">{t("ltiPlatforms.nrpsStatusOk")}</Badge>

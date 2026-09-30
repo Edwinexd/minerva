@@ -527,6 +527,21 @@ email, then a synthetic `lti_<source>_<sub>` id. Members skipped by the
 eppn scope are counted into `last_sync_warning` rather than dropped
 silently.
 
+The roster is the whole LMS course, not the LTI activity, so a course
+whose activity is hidden from students still has every enrolled student
+provisioned. `lti_nrps_contexts.sync_enabled` (default TRUE) is the
+opt-out: "Automatically sync course members to Minerva" is a checkbox on
+the bind picker (shown only when the launch advertised a roster URL) and
+on the course's LTI tab. Off means the scheduler skips the context, so
+nobody is added or removed and students join when they first launch.
+Members already provisioned stay. An ordinary launch never changes the
+setting; only the bind picker and the LTI tab do.
+
+`lti_nrps_sync_runs` is the history behind the `last_sync_*` columns.
+`record_sync_result` appends a row only for a run that changed membership
+or failed, so the table grows with events, not with the sync interval.
+The LTI tab shows the newest 20 per context.
+
 ## Role Auto-Promotion Rules
 
 Admin-managed rules at `/admin/rules` auto-promote users to a target role

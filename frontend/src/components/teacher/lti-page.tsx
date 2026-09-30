@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ListRow, ListEmpty } from "@/components/ui/list"
@@ -70,6 +71,12 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
   const unlinkSiteBindingMutation = useMutation({
     mutationFn: (bindingId: string) =>
       api.delete(`/courses/${courseId}/lti/site-bindings/${bindingId}`),
+    onSuccess: invalidateLti,
+  })
+
+  const nrpsSyncMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      api.put(`/courses/${courseId}/lti/nrps/${id}/sync-enabled`, { enabled }),
     onSuccess: invalidateLti,
   })
 
@@ -262,11 +269,29 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
             {nrps.map((ctx) => (
               <div
                 key={ctx.id}
-                className="flex flex-wrap items-center justify-between gap-2 border-b py-2 text-sm last:border-0"
+                className="space-y-2 border-b py-2 text-sm last:border-0"
               >
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    id={`nrps-sync-${ctx.id}`}
+                    checked={ctx.sync_enabled}
+                    disabled={nrpsSyncMutation.isPending}
+                    onCheckedChange={(checked) =>
+                      nrpsSyncMutation.mutate({
+                        id: ctx.id,
+                        enabled: checked === true,
+                      })
+                    }
+                  />
+                  <Label htmlFor={`nrps-sync-${ctx.id}`} className="cursor-pointer">
+                    {t("lti.nrpsSyncLabel", { context: ctx.context_id })}
+                  </Label>
+                </div>
                 <div className="min-w-0 space-y-1">
                   <div className="flex items-center gap-2">
-                    {ctx.last_sync_status === "error" ? (
+                    {!ctx.sync_enabled ? (
+                      <Badge variant="outline">{t("lti.nrpsStatusOff")}</Badge>
+                    ) : ctx.last_sync_status === "error" ? (
                       <Badge variant="destructive">{t("lti.nrpsStatusError")}</Badge>
                     ) : ctx.last_sync_status === "ok" ? (
                       <Badge variant="secondary">{t("lti.nrpsStatusOk")}</Badge>
@@ -307,8 +332,39 @@ export function LtiPage({ useParams }: { useParams: () => { courseId: string } }
                     </div>
                   )}
                 </div>
+                {ctx.history.length > 0 && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-muted-foreground">
+                      {t("lti.nrpsHistoryTitle", { count: ctx.history.length })}
+                    </summary>
+                    <ul className="mt-1 space-y-1">
+                      {ctx.history.map((run) => (
+                        <li key={run.id} className="flex flex-wrap gap-x-2">
+                          <span className="text-muted-foreground">
+                            <RelativeTime date={run.ran_at} />
+                          </span>
+                          {run.status === "error" ? (
+                            <span className="text-destructive break-all">
+                              {run.error ?? t("lti.nrpsStatusError")}
+                            </span>
+                          ) : (
+                            <span>
+                              {t("lti.nrpsCounts", {
+                                added: run.added ?? 0,
+                                removed: run.removed ?? 0,
+                              })}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </div>
             ))}
+            {nrpsSyncMutation.isError && (
+              <ErrorText error={nrpsSyncMutation.error} />
+            )}
           </CardContent>
         </Card>
       )}

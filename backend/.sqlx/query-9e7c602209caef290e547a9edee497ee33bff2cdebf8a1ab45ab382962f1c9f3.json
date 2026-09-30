@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, registration_id, platform_id, context_id, course_id, memberships_url,\n                  last_sync_at, last_sync_status, last_sync_error, last_sync_warning,\n                  last_sync_added, last_sync_removed, created_at, updated_at\n        FROM lti_nrps_contexts\n        WHERE last_sync_at IS NULL\n           OR last_sync_at < NOW() - make_interval(hours => $1)\n        ORDER BY last_sync_at NULLS FIRST",
+  "query": "SELECT id, registration_id, platform_id, context_id, course_id, memberships_url, sync_enabled,\n                  last_sync_at, last_sync_status, last_sync_error, last_sync_warning,\n                  last_sync_added, last_sync_removed, created_at, updated_at\n        FROM lti_nrps_contexts\n        WHERE platform_id = $1\n        ORDER BY created_at",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "sync_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "lti_nrps_contexts",
+            "name": "sync_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "last_sync_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "last_sync_status",
         "type_info": "Text",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "last_sync_error",
         "type_info": "Text",
         "origin": {
@@ -103,7 +114,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "last_sync_warning",
         "type_info": "Text",
         "origin": {
@@ -114,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "last_sync_added",
         "type_info": "Int4",
         "origin": {
@@ -125,7 +136,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "last_sync_removed",
         "type_info": "Int4",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -147,7 +158,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -160,13 +171,14 @@
     ],
     "parameters": {
       "Left": [
-        "Int4"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
       true,
       true,
+      false,
       false,
       false,
       false,
@@ -180,5 +192,5 @@
       false
     ]
   },
-  "hash": "49576d76df9c593cb916dcf2c90c597265a3d3ada16387b3871c478655eebed1"
+  "hash": "9e7c602209caef290e547a9edee497ee33bff2cdebf8a1ab45ab382962f1c9f3"
 }

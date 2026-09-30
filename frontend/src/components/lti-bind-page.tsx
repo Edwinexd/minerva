@@ -163,9 +163,13 @@ export function LtiBindPage() {
                 id="lti-bind-sync-members"
                 checked={syncMembers}
                 onCheckedChange={(checked) => setSyncMembers(checked === true)}
+                disabled={!selectedCourseId}
                 aria-describedby="lti-bind-sync-members-hint"
               />
-              <Label htmlFor="lti-bind-sync-members" className="cursor-pointer">
+              <Label
+                htmlFor="lti-bind-sync-members"
+                className={selectedCourseId ? "cursor-pointer" : undefined}
+              >
                 {t("ltiBind.syncMembersLabel")}
               </Label>
             </div>

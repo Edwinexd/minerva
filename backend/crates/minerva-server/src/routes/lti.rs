@@ -88,6 +88,10 @@ pub fn course_router() -> Router<AppState> {
             "/lti/nrps/{nrps_context_id}/sync-enabled",
             put(set_course_nrps_sync_enabled),
         )
+        .route(
+            "/lti/nrps/{nrps_context_id}/runs",
+            get(list_course_nrps_runs),
+        )
         .route("/lti/site-bindings", get(list_course_site_bindings))
         .route(
             "/lti/site-bindings/{binding_id}",
@@ -2107,7 +2111,8 @@ async fn list_platform_bindings(
 // NRPS roster-sync status
 // ---------------------------------------------------------------------------
 
-/// How many recorded runs each context's `history` carries.
+/// Page size of a context's run history: what `history` carries, and what
+/// each older page returns.
 const NRPS_HISTORY_LIMIT: i64 = 20;
 
 /// An NRPS context's sync setting, last reconcile and recent history. There
@@ -2131,6 +2136,13 @@ struct NrpsStatusResponse {
     last_sync_warning: Option<String>,
     last_sync_added: Option<i32>,
     last_sync_removed: Option<i32>,
+    /// Members added / removed over every recorded run, not just the
+    /// `history` page.
+    total_added: i64,
+    total_removed: i64,
+    /// How many runs are recorded in all; more than `history` holds means
+    /// older pages exist.
+    history_total: i64,
     /// Runs that changed membership or whose outcome differs from the run
     /// before, newest first. Repeats of the same outcome are not recorded.
     history: Vec<NrpsRunResponse>,
@@ -2147,6 +2159,20 @@ struct NrpsRunResponse {
     removed: Option<i32>,
 }
 
+impl From<minerva_db::queries::lti_nrps::NrpsSyncRunRow> for NrpsRunResponse {
+    fn from(run: minerva_db::queries::lti_nrps::NrpsSyncRunRow) -> Self {
+        Self {
+            id: run.id,
+            ran_at: run.ran_at,
+            status: run.status,
+            error: run.error,
+            warning: run.warning,
+            added: run.added,
+            removed: run.removed,
+        }
+    }
+}
+
 /// Attach each context's recent run history and shape the rows for the API.
 async fn nrps_status_responses(
     state: &AppState,
@@ -2161,21 +2187,20 @@ async fn nrps_status_responses(
         history
             .entry(run.nrps_context_id)
             .or_default()
-            .push(NrpsRunResponse {
-                id: run.id,
-                ran_at: run.ran_at,
-                status: run.status,
-                error: run.error,
-                warning: run.warning,
-                added: run.added,
-                removed: run.removed,
-            });
+            .push(run.into());
     }
+    let mut totals: std::collections::HashMap<Uuid, _> =
+        minerva_db::queries::lti_nrps::sync_totals(&state.db, &ids)
+            .await?
+            .into_iter()
+            .map(|t| (t.nrps_context_id, t))
+            .collect();
     Ok(rows
         .into_iter()
         .map(|r| {
             let runs = history.remove(&r.id).unwrap_or_default();
-            nrps_to_response(r, runs)
+            let totals = totals.remove(&r.id);
+            nrps_to_response(r, runs, totals)
         })
         .collect())
 }
@@ -2183,6 +2208,7 @@ async fn nrps_status_responses(
 fn nrps_to_response(
     r: minerva_db::queries::lti_nrps::NrpsContextRow,
     history: Vec<NrpsRunResponse>,
+    totals: Option<minerva_db::queries::lti_nrps::NrpsSyncTotalsRow>,
 ) -> NrpsStatusResponse {
     NrpsStatusResponse {
         id: r.id,
@@ -2200,6 +2226,9 @@ fn nrps_to_response(
         last_sync_warning: r.last_sync_warning,
         last_sync_added: r.last_sync_added,
         last_sync_removed: r.last_sync_removed,
+        total_added: totals.as_ref().map_or(0, |t| t.added),
+        total_removed: totals.as_ref().map_or(0, |t| t.removed),
+        history_total: totals.as_ref().map_or(0, |t| t.runs),
         history,
     }
 }
@@ -2221,6 +2250,33 @@ async fn list_course_nrps_status(
 #[derive(Debug, Deserialize)]
 struct SetNrpsSyncEnabledRequest {
     enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct NrpsRunsQuery {
+    /// `ran_at` of the oldest run the client already has.
+    before: chrono::DateTime<chrono::Utc>,
+}
+
+/// GET /courses/{course_id}/lti/nrps/{nrps_context_id}/runs?before=...; the
+/// next page of a context's run history, older than `before`. Fixed page
+/// size; the client pages by passing the last `ran_at` it received.
+async fn list_course_nrps_runs(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((course_id, nrps_context_id)): Path<(Uuid, Uuid)>,
+    Query(q): Query<NrpsRunsQuery>,
+) -> Result<Json<Vec<NrpsRunResponse>>, AppError> {
+    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    let runs = minerva_db::queries::lti_nrps::list_runs_before(
+        &state.db,
+        nrps_context_id,
+        course_id,
+        q.before,
+        NRPS_HISTORY_LIMIT,
+    )
+    .await?;
+    Ok(Json(runs.into_iter().map(Into::into).collect()))
 }
 
 /// PUT /courses/{course_id}/lti/nrps/{nrps_context_id}/sync-enabled; switch

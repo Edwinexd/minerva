@@ -559,7 +559,12 @@ binding and leaves its setting alone).
 or whose outcome (status, error, warning) differs from the newest recorded
 run, so the table grows with events, not with the sync interval: a context
 that fails every interval leaves one row, and its recovery another. The
-LTI tab shows the newest 20 per context, warnings included.
+LTI tab shows each link's roster sync under the site-level link it belongs
+to (contexts from a per-course registration get a card of their own): the
+totals added and removed over all recorded runs, summed server side, and
+the history 20 runs at a time. Older pages come from
+`GET /courses/{id}/lti/nrps/{context}/runs?before=<ran_at>`, a keyset on
+`ran_at` with a fixed page size.
 
 ## Role Auto-Promotion Rules
 
@@ -674,7 +679,10 @@ course pages keep their own tab bar:
 `scripts/seed-dev.sh` populates five weeks of weekday chat plus pipeline
 spend across the fixture courses (including one archived offering and a
 stretch on a second provider), so the portal and the admin usage tab are
-never empty in dev. The dev-user switcher lists the seeded cast, and
+never empty in dev. It also links three fixture courses to a "Seed Moodle"
+site-level platform, one per roster-sync state (healthy with a failure and
+recovery in its history, syncing with a standing warning, switched off),
+so the LTI tab has history to show. The dev-user switcher lists the seeded cast, and
 admins lead the list because its first entry is what a fresh browser
 writes to localStorage.
 

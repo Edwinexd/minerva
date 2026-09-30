@@ -316,6 +316,66 @@ pub async fn list_recent_runs(
     .await
 }
 
+/// One page of a context's recorded runs older than `before`, newest first.
+/// Keyset on `ran_at`, so a page stays stable while new runs are recorded.
+/// Scoped to `course_id` like `set_sync_enabled`.
+pub async fn list_runs_before(
+    db: &PgPool,
+    nrps_context_id: Uuid,
+    course_id: Uuid,
+    before: chrono::DateTime<chrono::Utc>,
+    limit: i64,
+) -> Result<Vec<NrpsSyncRunRow>, sqlx::Error> {
+    sqlx::query_as!(
+        NrpsSyncRunRow,
+        r#"SELECT r.id, r.nrps_context_id, r.ran_at, r.status, r.error, r.warning,
+                  r.added, r.removed
+        FROM lti_nrps_sync_runs r
+        JOIN lti_nrps_contexts c ON c.id = r.nrps_context_id
+        WHERE r.nrps_context_id = $1
+          AND c.course_id = $2
+          AND r.ran_at < $3
+        ORDER BY r.ran_at DESC
+        LIMIT $4"#,
+        nrps_context_id,
+        course_id,
+        before,
+        limit,
+    )
+    .fetch_all(db)
+    .await
+}
+
+#[derive(Debug, Clone)]
+pub struct NrpsSyncTotalsRow {
+    pub nrps_context_id: Uuid,
+    pub runs: i64,
+    pub added: i64,
+    pub removed: i64,
+}
+
+/// How many runs are recorded for each of `context_ids`, and the members
+/// added and removed over all of them. Complete even though clean no-op
+/// runs are not recorded: those changed nothing.
+pub async fn sync_totals(
+    db: &PgPool,
+    context_ids: &[Uuid],
+) -> Result<Vec<NrpsSyncTotalsRow>, sqlx::Error> {
+    sqlx::query_as!(
+        NrpsSyncTotalsRow,
+        r#"SELECT nrps_context_id,
+                  COUNT(*) AS "runs!",
+                  COALESCE(SUM(added), 0)::bigint AS "added!",
+                  COALESCE(SUM(removed), 0)::bigint AS "removed!"
+        FROM lti_nrps_sync_runs
+        WHERE nrps_context_id = ANY($1)
+        GROUP BY nrps_context_id"#,
+        context_ids,
+    )
+    .fetch_all(db)
+    .await
+}
+
 #[derive(Debug, Clone)]
 pub struct NrpsMembershipRow {
     pub nrps_context_id: Uuid,

@@ -898,6 +898,12 @@ export interface LtiNrpsStatus {
   last_sync_warning: string | null
   last_sync_added: number | null
   last_sync_removed: number | null
+  /// Members added / removed over every recorded run.
+  total_added: number
+  total_removed: number
+  /// How many runs are recorded in all; more than `history` holds means
+  /// older pages exist.
+  history_total: number
   /// Runs that changed membership or whose outcome differs from the run
   /// before, newest first. Repeats of the same outcome are not recorded.
   history: LtiNrpsRun[]

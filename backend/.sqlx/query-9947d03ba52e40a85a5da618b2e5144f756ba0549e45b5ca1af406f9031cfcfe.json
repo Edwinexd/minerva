@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lti_nrps_sync_runs\n                       (id, nrps_context_id, ran_at, status, error, warning, added, removed)\n                   VALUES ($1, $2, NOW() - ($3 || ' days')::interval, $4, $5, $6, $7, $8)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9947d03ba52e40a85a5da618b2e5144f756ba0549e45b5ca1af406f9031cfcfe"
+}

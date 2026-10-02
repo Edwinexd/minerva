@@ -76,7 +76,9 @@ pub struct ResearchConfig {
     /// Wall-clock budget. Protects against a slow model or a stuck
     /// tool dispatch holding up the user-visible thinking stream.
     pub wall_clock_budget: Duration,
-    /// Per-request `max_tokens` on each Cerebras call. Bounded so
+    /// Per-request `max_completion_tokens` on each call. OpenAI's
+    /// newer models reject the legacy `max_tokens`, which would break
+    /// the cross-provider fallback route. Bounded so
     /// every call returns usage statistics in the [DONE] chunk and
     /// the token accounting stays exact.
     pub max_tokens_per_turn: i32,
@@ -829,7 +831,7 @@ async fn stream_research_turn(
         "messages": messages,
         "temperature": ctx.temperature,
         "stream": true,
-        "max_tokens": config.max_tokens_per_turn,
+        "max_completion_tokens": config.max_tokens_per_turn,
         "tools": catalog,
         "tool_choice": "auto",
         "stream_options": { "include_usage": true },
@@ -1525,6 +1527,13 @@ mod stream_integration_tests {
         // Billed to the route that served the round, not the course model.
         assert_eq!(outcome.model, "fallback-model");
         assert_eq!(outcome.provider, "openai");
+
+        // OpenAI's newer models 400 on the legacy `max_tokens`.
+        let requests = fallback.received_requests().await.unwrap();
+        let sent: serde_json::Value = requests[0].body_json().unwrap();
+        assert_eq!(sent["model"], "fallback-model");
+        assert!(sent.get("max_tokens").is_none());
+        assert!(sent["max_completion_tokens"].is_number());
     }
 
     #[tokio::test]

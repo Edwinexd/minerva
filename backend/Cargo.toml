@@ -46,7 +46,7 @@ qdrant-client = "1"
 # That model isn't part of `EmbeddingModel`; it goes through fastembed's
 # separate `Qwen3TextEmbedding` API. See
 # `crates/minerva-embed-engine/src/fastembed_embedder.rs`.
-fastembed = { version = "6", features = ["qwen3"] }
+fastembed = { version = "7", features = ["qwen3"] }
 candle-core = "0.11"
 # Direct hf-hub dep so the custom-ONNX loader (e.g. snowflake-arctic-embed-m-v2.0
 # via fastembed's `UserDefinedEmbeddingModel` API) can fetch model files from

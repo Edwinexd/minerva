@@ -1,0 +1,39 @@
+name: Visual Extraction Fetch
+
+# Stages Play lecture videos into Minerva's bounded staging window for the
+# slide OCR workers on Olympus (see "Visual extraction pipeline" in
+# docs/ARCHITECTURE.md). Minerva grants only as many slots as fit, so a
+# frequent schedule just keeps the window topped up.
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: visual-extraction-fetch
+  cancel-in-progress: false
+
+jobs:
+  fetch-lecture-videos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests git+https://github.com/Edwinexd/dsv-wrapper.git
+
+      - name: Stage lecture videos
+        env:
+          MINERVA_API_URL: https://minerva.dsv.su.se
+          MINERVA_SERVICE_API_KEY: ${{ secrets.MINERVA_SERVICE_API_KEY }}
+          SU_USERNAME: ${{ secrets.SU_USERNAME }}
+          SU_PASSWORD: ${{ secrets.SU_PASSWORD }}
+          # Minerva grants only what the disk can take; asking for more
+          # per run just fills the window sooner.
+          VISUAL_EXTRACTION_SLOTS: "25"
+        run: python scripts/fetch_lecture_videos.py

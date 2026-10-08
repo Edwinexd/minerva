@@ -430,6 +430,30 @@ fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: A
                     let path = std::path::Path::new(&file_path);
                     let client = reqwest::Client::new();
 
+                    // A PDF that has been through visual extraction is chunked
+                    // from its OCR text instead of the extractor's, keeping
+                    // the kind it was classified with on its first pass.
+                    let ocr_text = if ext == "pdf" {
+                        minerva_db::queries::visual_extraction::ocr_text(&db, doc.id)
+                            .await
+                            .unwrap_or_else(|e| {
+                                tracing::warn!(
+                                    "worker: OCR text lookup for {} failed: {e}",
+                                    doc.id
+                                );
+                                None
+                            })
+                    } else {
+                        None
+                    };
+                    let locked_kind = if ocr_text.is_some() {
+                        doc.kind.as_deref()
+                    } else {
+                        doc.kind_locked_by_teacher
+                            .then_some(doc.kind.as_deref())
+                            .flatten()
+                    };
+
                     let ingest_start = std::time::Instant::now();
                     match minerva_pipeline::pipeline::process_document(
                         &db,
@@ -443,12 +467,11 @@ fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: A
                         path,
                         &doc.filename,
                         &doc.mime_type,
-                        doc.kind_locked_by_teacher
-                            .then_some(doc.kind.as_deref())
-                            .flatten(),
+                        locked_kind,
                         &course.embedding_provider,
                         &course.embedding_model,
                         course.embedding_version,
+                        ocr_text.as_deref(),
                     )
                     .await
                     {

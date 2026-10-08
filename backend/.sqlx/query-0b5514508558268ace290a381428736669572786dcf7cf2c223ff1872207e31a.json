@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, document_id, course_id, context, visual_model, visual_vector AS \"visual_vector!: Vec<f32>\"\n        FROM document_figures\n        WHERE indexed_at IS NULL\n        ORDER BY created_at\n        LIMIT $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_figures",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "document_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_figures",
+            "name": "document_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "course_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_figures",
+            "name": "course_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "context",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_figures",
+            "name": "context"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "visual_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_figures",
+            "name": "visual_model"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "visual_vector!: Vec<f32>",
+        "type_info": "Float4Array",
+        "origin": {
+          "Table": {
+            "table": "document_figures",
+            "name": "visual_vector"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0b5514508558268ace290a381428736669572786dcf7cf2c223ff1872207e31a"
+}

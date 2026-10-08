@@ -28,6 +28,8 @@ resource "github_repository_environment" "prod" {
 # =============================================================================
 
 locals {
+  slurm_ssh_private_key = var.slurm_ssh_private_key_path == "" ? "" : file(pathexpand(var.slurm_ssh_private_key_path))
+
   k8s_secrets_yaml = <<-YAML
     apiVersion: v1
     kind: Secret
@@ -44,6 +46,19 @@ locals {
       CEREBRAS_API_KEY: "${var.cerebras_api_key}"
       OPENAI_API_KEY: "${var.openai_api_key}"
       MINERVA_SERVICE_API_KEY: "${var.minerva_service_api_key}"
+    ---
+    # Olympus service account for the visual extraction scheduler loop.
+    # Empty values leave the loop's Slurm part off.
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: minerva-slurm
+      namespace: minerva
+    type: Opaque
+    stringData:
+      ssh_target: "${var.slurm_ssh_target}"
+      id_ed25519: ${jsonencode(local.slurm_ssh_private_key)}
+      known_hosts: ${jsonencode(var.slurm_known_hosts)}
   YAML
 }
 
@@ -77,6 +92,29 @@ resource "github_actions_environment_secret" "prod_ssh_private_key" {
   environment     = github_repository_environment.prod.environment
   secret_name     = "SSH_PRIVATE_KEY"
   plaintext_value = var.ssh_private_key
+}
+
+# Olympus service account: the same key the scheduler uses (minerva-slurm
+# k8s secret), for the deploy-slide-ocr workflow.
+resource "github_actions_environment_secret" "prod_slurm_ssh_target" {
+  repository      = data.github_repository.repo.name
+  environment     = github_repository_environment.prod.environment
+  secret_name     = "SLURM_SSH_TARGET"
+  plaintext_value = var.slurm_ssh_target
+}
+
+resource "github_actions_environment_secret" "prod_slurm_ssh_private_key" {
+  repository      = data.github_repository.repo.name
+  environment     = github_repository_environment.prod.environment
+  secret_name     = "SLURM_SSH_PRIVATE_KEY"
+  plaintext_value = local.slurm_ssh_private_key
+}
+
+resource "github_actions_environment_secret" "prod_slurm_known_hosts" {
+  repository      = data.github_repository.repo.name
+  environment     = github_repository_environment.prod.environment
+  secret_name     = "SLURM_KNOWN_HOSTS"
+  plaintext_value = var.slurm_known_hosts
 }
 
 resource "github_actions_environment_secret" "prod_k8s_secrets" {

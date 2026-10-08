@@ -265,5 +265,10 @@
     "showUncited_other": "Show {{count}} retrieved but not cited",
     "hideUncited_one": "Hide {{count}} retrieved but not cited",
     "hideUncited_other": "Hide {{count}} retrieved but not cited"
+  },
+  "replyFigures": {
+    "heading": "Figures from the course material",
+    "open": "Open {{origin}} full size",
+    "alt": "Figure from {{origin}}"
   }
 }

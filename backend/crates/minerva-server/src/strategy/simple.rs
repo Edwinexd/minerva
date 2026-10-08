@@ -111,6 +111,12 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         rag.context.extend(extra);
     }
 
+    // Figures from slides and PDFs matching the question, by their text and
+    // by what they show; offered beside the reply and described in the
+    // prompt.
+    let figures =
+        super::figures::figure_lookup(&ctx, &http_client, &ctx.user_content, &orphaned).await;
+
     // Extraction guard evaluation: runs intent classifier + multi-
     // turn proximity check, decides whether this turn's generation
     // needs post-output interception. None when the feature flag
@@ -178,6 +184,9 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     )
     .await;
     common::append_global_knowledge(&mut system, &global_knowledge);
+    if let Some(section) = super::figures::prompt_section(&figures) {
+        system.push_str(&section);
+    }
     let messages = common::build_chat_messages(&system, &ctx.history);
 
     let mut full_text = String::new();
@@ -250,6 +259,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         // (via the read-time gate). A teacher chatting keeps the
         // sources on both, same as the read-time gate gives them.
         disclosure,
+        &figures,
     )
     .await;
 }

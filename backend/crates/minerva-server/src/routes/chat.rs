@@ -185,6 +185,10 @@ struct MessageResponse {
     role: String,
     content: String,
     chunks_used: Option<serde_json::Value>,
+    /// Figures from slides and PDFs shown with this reply, each with an
+    /// image URL signed for this reader. Withheld exactly like
+    /// `chunks_used`.
+    figures_used: Option<serde_json::Value>,
     model_used: Option<String>,
     tokens_prompt: Option<i32>,
     tokens_completion: Option<i32>,
@@ -919,6 +923,10 @@ async fn get_conversation(
         })
         .collect();
 
+    let reply_figures =
+        crate::strategy::figures::for_conversation(&state.db, &state.config.hmac_secret, cid)
+            .await?;
+
     Ok(Json(ConversationDetailResponse {
         messages: messages
             .into_iter()
@@ -933,6 +941,11 @@ async fn get_conversation(
                 // Teachers are exempt so audit on this column
                 // survives for them.
                 chunks_used: if withhold(&m.id) { None } else { m.chunks_used },
+                figures_used: if withhold(&m.id) {
+                    None
+                } else {
+                    reply_figures.get(&m.id).cloned()
+                },
                 model_used: m.model_used,
                 tokens_prompt: m.tokens_prompt,
                 tokens_completion: m.tokens_completion,

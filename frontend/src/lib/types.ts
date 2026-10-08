@@ -682,11 +682,26 @@ export interface MessageFeedback {
   acknowledger_display_name?: string | null
 }
 
+/**
+ * A figure from a slide or PDF shown with an assistant reply. `image_url`
+ * is signed for the reader and expires after a day; it is re-minted on
+ * every conversation fetch.
+ */
+export interface ReplyFigure {
+  id: string
+  /** Where it comes from, e.g. "Lecture 3, slide 12" or "notes.pdf, page 4". */
+  origin: string
+  caption: string | null
+  image_url: string
+}
+
 export interface Message {
   id: string
   role: "user" | "assistant"
   content: string
   chunks_used: string[] | null
+  /** Absent on servers without visual extraction; null when withheld. */
+  figures_used?: ReplyFigure[] | null
   model_used: string | null
   tokens_prompt: number | null
   tokens_completion: number | null

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = 'done', worker_id = NULL, lease_expires_at = NULL,\n            staged_path = NULL, staged_bytes = NULL, cues = NULL, error_msg = NULL,\n            completed_at = NOW(), updated_at = NOW()\n        WHERE id = $1 AND status = 'leased' AND attempts = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1b744b5f7872bbe9de09aae66238c77233bde3654132510d00664b61b326c031"
+}

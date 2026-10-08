@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = 'needs_source', staged_bytes = NULL, fetch_reserved_at = NULL, updated_at = NOW()\n        WHERE status = 'fetching'\n          AND fetch_reserved_at < NOW() - make_interval(secs => $1)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4d7f14e6742d6d7af58f694205cbc74fe472c42c462c717820767ba07d7ef15e"
+}

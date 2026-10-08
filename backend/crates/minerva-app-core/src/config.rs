@@ -56,6 +56,8 @@ pub struct Config {
     /// claiming docs from the same queue. The worker binary itself
     /// ignores this flag (it always runs the worker).
     pub run_worker: bool,
+    /// Visual extraction pipeline (slide OCR and figures on Olympus).
+    pub visual_extraction: VisualExtractionConfig,
     //
     // Note: the four fields that used to live here ;
     //   default_course_daily_cost_limit_usd
@@ -128,12 +130,71 @@ impl Config {
             // flips it to `false` on the api once the worker pod is
             // confirmed claiming docs from the same Postgres queue.
             run_worker: parse_bool_env("MINERVA_RUN_WORKER", true),
+            visual_extraction: VisualExtractionConfig::from_env(),
         })
     }
 
     pub fn is_admin(&self, eppn: &str) -> bool {
         let username = eppn.split('@').next().unwrap_or(eppn);
         self.admin_usernames.iter().any(|a| a == username)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VisualExtractionConfig {
+    /// Where staged lecture videos wait for a worker; each is deleted once
+    /// its result lands.
+    pub staging_path: String,
+    /// Staging takes whatever the filesystem has free beyond this, so the
+    /// window grows and shrinks with the disk instead of a fixed size. Covers
+    /// the nightly backup spike and ordinary growth.
+    pub staging_min_free_bytes: i64,
+    /// Olympus access for submitting and monitoring Slurm workers. `None`
+    /// (no `MINERVA_SLURM_SSH_TARGET`) leaves the scheduler loop off, which
+    /// is the default everywhere but the prod scheduler pod.
+    pub slurm: Option<SlurmConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SlurmConfig {
+    /// `user@host` of the Olympus service account.
+    pub ssh_target: String,
+    /// Private key for that account; the account is an ordinary user,
+    /// confined by Slurm.
+    pub ssh_key_path: String,
+    /// Olympus's pinned host key; the connection refuses anything else.
+    pub known_hosts_path: String,
+    /// Workers kept submitted at once. A worker waiting in Slurm's queue
+    /// holds no work (it leases only when it runs), so this can exceed the
+    /// GPU count and let Slurm's priorities decide.
+    pub max_workers: usize,
+}
+
+impl VisualExtractionConfig {
+    fn from_env() -> Self {
+        let slurm = env::var("MINERVA_SLURM_SSH_TARGET")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|ssh_target| SlurmConfig {
+                ssh_target,
+                ssh_key_path: env::var("MINERVA_SLURM_SSH_KEY")
+                    .unwrap_or_else(|_| "/etc/minerva/slurm/id_ed25519".to_string()),
+                known_hosts_path: env::var("MINERVA_SLURM_KNOWN_HOSTS")
+                    .unwrap_or_else(|_| "/etc/minerva/slurm/known_hosts".to_string()),
+                max_workers: env::var("MINERVA_SLURM_MAX_WORKERS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(4),
+            });
+        Self {
+            staging_path: env::var("MINERVA_VISUAL_STAGING_PATH")
+                .unwrap_or_else(|_| "./data/visual-staging".to_string()),
+            staging_min_free_bytes: env::var("MINERVA_VISUAL_STAGING_MIN_FREE_BYTES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10 * 1024 * 1024 * 1024),
+            slurm,
+        }
     }
 }
 

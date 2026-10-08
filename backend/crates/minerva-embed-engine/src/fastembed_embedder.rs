@@ -709,6 +709,11 @@ fn parse_fast_model_name(name: &str) -> Result<EmbeddingModel, String> {
         "Alibaba-NLP/gte-large-en-v1.5" => Ok(EmbeddingModel::GTELargeENV15),
         "snowflake/snowflake-arctic-embed-l" => Ok(EmbeddingModel::SnowflakeArcticEmbedL),
 
+        // CLIP's text encoder: embeds figure-search queries into the space of
+        // the image vectors computed on Olympus. Not a course text model, so
+        // deliberately absent from `VALID_LOCAL_MODELS`.
+        "Qdrant/clip-ViT-B-32-text" => Ok(EmbeddingModel::ClipVitB32),
+
         _ => Err(format!("unsupported fastembed model: {}", name)),
     }
 }

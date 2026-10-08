@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = $2, staged_bytes = NULL, fetch_reserved_at = NULL,\n            error_msg = $3, updated_at = NOW()\n        WHERE id = $1 AND status = 'fetching'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48ccded912825520f0abb611d8a13b4d3ca5c9b1ab60a0f2a8561040046d5ffd"
+}

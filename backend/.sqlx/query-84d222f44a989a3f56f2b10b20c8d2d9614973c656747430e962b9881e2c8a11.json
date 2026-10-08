@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT mf.message_id, f.id AS figure_id, d.filename, f.caption,\n               p.page_number, p.start_seconds\n        FROM message_figures mf\n        JOIN messages m ON m.id = mf.message_id\n        JOIN document_figures f ON f.id = mf.figure_id\n        JOIN documents d ON d.id = f.document_id\n        LEFT JOIN document_visual_pages p\n               ON p.document_id = f.document_id AND p.position = f.page_position\n        WHERE m.conversation_id = $1\n        ORDER BY mf.message_id, mf.position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "message_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "message_figures",
+            "name": "message_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "figure_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_figures",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "filename",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "documents",
+            "name": "filename"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "caption",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_figures",
+            "name": "caption"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "page_number",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "document_visual_pages",
+            "name": "page_number"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "start_seconds",
+        "type_info": "Float4",
+        "origin": {
+          "Table": {
+            "table": "document_visual_pages",
+            "name": "start_seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "84d222f44a989a3f56f2b10b20c8d2d9614973c656747430e962b9881e2c8a11"
+}

@@ -228,6 +228,11 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // bit below is the guard verdict alone.
     let disclosure = super::ThinkingDisclosure::resolve(suppress_thinking, ctx.viewer_is_teacher);
 
+    // Figures matching the question, offered beside the reply.
+    let figures =
+        super::figures::figure_lookup(&ctx, &http_client, &ctx.user_content, &orphaned_doc_ids)
+            .await;
+
     let global_knowledge = common::retrieve_global_knowledge(
         &http_client,
         &ctx.openai_api_key,
@@ -251,6 +256,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         unclassified_doc_ids,
         kg_enabled: ctx.kg_enabled,
         global_knowledge,
+        figures_prompt: super::figures::prompt_section(&figures),
     };
     let flare_threshold = SIMILARITY_THRESHOLD.max(ctx.min_score);
     // Shared with the inner-loop closure: every mid-stream FLARE
@@ -404,6 +410,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         // a teacher chatting keeps them. Mirrors the same gate logic
         // on the tool_use and simple paths.
         disclosure,
+        &figures,
     )
     .await;
 }
@@ -435,6 +442,9 @@ struct RunLoopConfig<'a> {
     kg_enabled: bool,
     /// Whether this turn needs the otherwise on-demand disclosure context.
     global_knowledge: Vec<common::GlobalKnowledgeSource>,
+    /// Prompt section describing the figures shown beside the reply,
+    /// appended to the system prompt rebuilt on every iteration.
+    figures_prompt: Option<String>,
 }
 
 /// Final state of a FLARE run. Returned by `run_loop` so the caller can
@@ -579,6 +589,9 @@ where
             cfg.carryover,
         );
         common::append_global_knowledge(&mut system, &cfg.global_knowledge);
+        if let Some(section) = &cfg.figures_prompt {
+            system.push_str(section);
+        }
         let mut messages = common::build_chat_messages(&system, cfg.history);
 
         if !full_text.is_empty() {
@@ -2367,6 +2380,7 @@ mod loop_regression_tests {
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
             global_knowledge: Vec::new(),
+            figures_prompt: None,
         };
 
         let http = reqwest::Client::new();
@@ -2434,6 +2448,7 @@ mod loop_regression_tests {
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
             global_knowledge: Vec::new(),
+            figures_prompt: None,
         };
 
         let http = reqwest::Client::new();
@@ -2501,6 +2516,7 @@ mod loop_regression_tests {
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
             global_knowledge: Vec::new(),
+            figures_prompt: None,
         };
 
         let http = reqwest::Client::new();
@@ -2585,6 +2601,7 @@ mod loop_regression_tests {
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
             global_knowledge: Vec::new(),
+            figures_prompt: None,
         };
 
         let retrieve_count = StdArc::new(AtomicUsize::new(0));
@@ -2665,6 +2682,7 @@ mod loop_regression_tests {
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
             global_knowledge: Vec::new(),
+            figures_prompt: None,
         };
 
         let retrieve_count = StdArc::new(AtomicUsize::new(0));
@@ -2740,6 +2758,7 @@ mod loop_regression_tests {
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
             global_knowledge: Vec::new(),
+            figures_prompt: None,
         };
 
         let call = StdArc::new(AtomicUsize::new(0));
@@ -2871,6 +2890,7 @@ mod loop_regression_tests {
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
             global_knowledge: Vec::new(),
+            figures_prompt: None,
         };
 
         let http = reqwest::Client::new();
@@ -2960,6 +2980,7 @@ mod loop_regression_tests {
             unclassified_doc_ids: std::collections::HashSet::new(),
             kg_enabled: true,
             global_knowledge: Vec::new(),
+            figures_prompt: None,
         };
 
         let http = reqwest::Client::new();

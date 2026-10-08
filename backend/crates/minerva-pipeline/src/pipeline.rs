@@ -135,9 +135,9 @@ pub use minerva_catalog::VALID_LOCAL_MODELS;
 pub use minerva_catalog::STARTUP_BENCHMARK_MODELS;
 
 pub use minerva_catalog::OPENAI_EMBEDDING_MODEL;
-const OPENAI_EMBEDDING_DIMENSIONS: u64 = 1536;
+pub(crate) const OPENAI_EMBEDDING_DIMENSIONS: u64 = 1536;
 
-fn local_model_dimensions(model: &str) -> Option<u64> {
+pub(crate) fn local_model_dimensions(model: &str) -> Option<u64> {
     VALID_LOCAL_MODELS
         .iter()
         .find(|(name, _)| *name == model)
@@ -179,27 +179,33 @@ pub async fn process_document(
     embedding_provider: &str,
     embedding_model: &str,
     embedding_version: i32,
+    ocr_text: Option<&str>,
 ) -> Result<ProcessResult, String> {
-    // 1. Extract text
-    let text = match text_source(file_path) {
-        TextSource::Plain => std::fs::read_to_string(file_path).map_err(|e| {
-            let msg = format!("failed to read text file: {}", e);
-            tracing::error!("{}", msg);
-            msg
-        })?,
-        TextSource::Html => {
-            let raw = std::fs::read_to_string(file_path).map_err(|e| {
-                let msg = format!("failed to read html file: {}", e);
+    // 1. Extract text. A PDF that has been through visual extraction comes
+    // with its OCR text, which replaces the extractor's: reading order,
+    // tables and scanned pages survive, slide chrome does not.
+    let text = match (ocr_text, text_source(file_path)) {
+        (Some(ocr), _) => ocr.to_string(),
+        (None, source) => match source {
+            TextSource::Plain => std::fs::read_to_string(file_path).map_err(|e| {
+                let msg = format!("failed to read text file: {}", e);
                 tracing::error!("{}", msg);
                 msg
-            })?;
-            html_to_text(&raw)
-        }
-        TextSource::Pdf => pdf::extract_text(file_path).map_err(|e| {
-            let msg = format!("text extraction failed: {}", e);
-            tracing::error!("{}", msg);
-            msg
-        })?,
+            })?,
+            TextSource::Html => {
+                let raw = std::fs::read_to_string(file_path).map_err(|e| {
+                    let msg = format!("failed to read html file: {}", e);
+                    tracing::error!("{}", msg);
+                    msg
+                })?;
+                html_to_text(&raw)
+            }
+            TextSource::Pdf => pdf::extract_text(file_path).map_err(|e| {
+                let msg = format!("text extraction failed: {}", e);
+                tracing::error!("{}", msg);
+                msg
+            })?,
+        },
     };
 
     tracing::info!("extracted {} chars from {}", text.len(), filename);
@@ -301,6 +307,10 @@ pub async fn process_document(
     // previous-model vectors.
     let collection_name = collection_name(course_id, embedding_version);
     let is_sample_solution = kind_str == KIND_SAMPLE_SOLUTION;
+    // Ids for this version's points. A document processed before (a PDF
+    // whose OCR text just replaced its extracted text) keeps its old points
+    // until these are in, so retrieval never sees it empty mid-swap.
+    let point_ids: Vec<String> = chunks.iter().map(|_| Uuid::new_v4().to_string()).collect();
     if is_sample_solution {
         tracing::info!(
             "embedding {} for KG only (kind=sample_solution; no Qdrant upsert)",
@@ -350,12 +360,9 @@ pub async fn process_document(
                 let points: Vec<PointStruct> = chunks
                     .iter()
                     .zip(embeddings.iter())
-                    .map(|(chunk, embedding)| {
-                        PointStruct::new(
-                            Uuid::new_v4().to_string(),
-                            embedding.clone(),
-                            build_payload(chunk),
-                        )
+                    .zip(point_ids.iter())
+                    .map(|((chunk, embedding), id)| {
+                        PointStruct::new(id.clone(), embedding.clone(), build_payload(chunk))
                     })
                     .collect();
 
@@ -393,12 +400,9 @@ pub async fn process_document(
                 let points: Vec<PointStruct> = chunks
                     .iter()
                     .zip(embedding_result.embeddings.iter())
-                    .map(|(chunk, embedding)| {
-                        PointStruct::new(
-                            Uuid::new_v4().to_string(),
-                            embedding.clone(),
-                            build_payload(chunk),
-                        )
+                    .zip(point_ids.iter())
+                    .map(|((chunk, embedding), id)| {
+                        PointStruct::new(id.clone(), embedding.clone(), build_payload(chunk))
                     })
                     .collect();
 
@@ -408,6 +412,11 @@ pub async fn process_document(
             (embedding_result.embeddings, embedding_result.total_tokens)
         }
     };
+
+    // The new version is in; drop whatever this document had before (all of
+    // it for a sample_solution, which is not indexed).
+    let keep: &[String] = if is_sample_solution { &[] } else { &point_ids };
+    remove_previous_points(qdrant, &collection_name, document_id, keep).await?;
 
     // 5. Mean-pool chunk embeddings into a single doc-level vector,
     // L2-normalize, and persist. The KG linker uses this for
@@ -503,7 +512,40 @@ pub struct ProcessResult {
     pub embedding_tokens: i64,
 }
 
-async fn upsert_batched(
+/// Delete a document's points other than `keep`. No-op when the collection
+/// does not exist yet.
+async fn remove_previous_points(
+    qdrant: &Qdrant,
+    collection_name: &str,
+    document_id: Uuid,
+    keep: &[String],
+) -> Result<(), String> {
+    use qdrant_client::qdrant::{Condition, DeletePointsBuilder, Filter, HasIdCondition, PointId};
+
+    if !qdrant
+        .collection_exists(collection_name)
+        .await
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let mut filter = Filter::must([Condition::matches("document_id", document_id.to_string())]);
+    if !keep.is_empty() {
+        let ids: Vec<PointId> = keep.iter().map(|id| id.clone().into()).collect();
+        filter.must_not = vec![HasIdCondition { has_id: ids }.into()];
+    }
+    qdrant
+        .delete_points(
+            DeletePointsBuilder::new(collection_name)
+                .points(filter)
+                .wait(true),
+        )
+        .await
+        .map_err(|e| format!("qdrant delete of previous points failed: {}", e))?;
+    Ok(())
+}
+
+pub(crate) async fn upsert_batched(
     qdrant: &Qdrant,
     collection_name: &str,
     points: Vec<PointStruct>,
@@ -517,7 +559,11 @@ async fn upsert_batched(
     Ok(())
 }
 
-async fn ensure_collection(qdrant: &Qdrant, name: &str, dimensions: u64) -> Result<(), String> {
+pub(crate) async fn ensure_collection(
+    qdrant: &Qdrant,
+    name: &str,
+    dimensions: u64,
+) -> Result<(), String> {
     let exists = qdrant
         .collection_exists(name)
         .await

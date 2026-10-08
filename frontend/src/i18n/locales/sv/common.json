@@ -265,5 +265,10 @@
     "showUncited_other": "Visa {{count}} hämtade men inte citerade",
     "hideUncited_one": "Dölj {{count}} hämtad men inte citerad",
     "hideUncited_other": "Dölj {{count}} hämtade men inte citerade"
+  },
+  "replyFigures": {
+    "heading": "Figurer från kursmaterialet",
+    "open": "Öppna {{origin}} i full storlek",
+    "alt": "Figur från {{origin}}"
   }
 }

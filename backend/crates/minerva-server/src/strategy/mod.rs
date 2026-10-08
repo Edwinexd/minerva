@@ -1,5 +1,6 @@
 pub mod common;
 pub mod extraction_guard;
+pub mod figures;
 pub mod flare;
 pub mod research_phase;
 pub mod simple;

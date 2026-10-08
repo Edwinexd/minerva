@@ -576,19 +576,41 @@ async fn delete_document(
     // know about the cascade. Walk children first so a deleted URL stub
     // doesn't leave orphaned PDF/transcript bytes + vectors behind.
     let children = minerva_db::queries::documents::list_children(&state.db, doc_id).await?;
-    let collection_name =
-        minerva_pipeline::pipeline::collection_name(course_id, course.embedding_version);
-    let collection_exists = state
-        .qdrant
-        .collection_exists(&collection_name)
-        .await
-        .unwrap_or(false);
-
     let mut all_ids: Vec<Uuid> = children.iter().map(|c| c.id).collect();
     all_ids.push(doc_id);
 
-    if collection_exists {
-        for id in &all_ids {
+    purge_document_artifacts(&state, course_id, course.embedding_version, &all_ids).await?;
+    // Delete the parent from DB; FK cascade removes child rows.
+    minerva_db::queries::documents::delete(&state.db, doc_id).await?;
+    remove_document_files(&state, course_id, &all_ids).await;
+
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// Remove everything outside Postgres that belongs to `ids`: their chunk
+/// vectors, their figure vectors, and their visual extraction assets
+/// (slide frames, figure crops). The rows themselves are the caller's.
+pub(crate) async fn purge_document_artifacts(
+    state: &AppState,
+    course_id: Uuid,
+    embedding_version: i32,
+    ids: &[Uuid],
+) -> Result<(), AppError> {
+    let collections = [
+        minerva_pipeline::pipeline::collection_name(course_id, embedding_version),
+        minerva_pipeline::figures::context_collection_name(course_id, embedding_version),
+        minerva_pipeline::figures::COLLECTION.to_string(),
+    ];
+    for collection_name in &collections {
+        if !state
+            .qdrant
+            .collection_exists(collection_name)
+            .await
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        for id in ids {
             let filter =
                 qdrant_client::qdrant::Filter::must([qdrant_client::qdrant::Condition::matches(
                     "document_id",
@@ -597,7 +619,7 @@ async fn delete_document(
             state
                 .qdrant
                 .delete_points(
-                    DeletePointsBuilder::new(&collection_name)
+                    DeletePointsBuilder::new(collection_name)
                         .points(filter)
                         .wait(true),
                 )
@@ -605,14 +627,17 @@ async fn delete_document(
                 .map_err(|e| AppError::Internal(format!("qdrant delete failed: {}", e)))?;
         }
     }
+    for id in ids {
+        let assets = minerva_pipeline::figures::assets_dir(&state.config.docs_path, course_id, *id);
+        let _ = tokio::fs::remove_dir_all(assets).await;
+    }
+    Ok(())
+}
 
-    // Delete the parent from DB; FK cascade removes child rows.
-    minerva_db::queries::documents::delete(&state.db, doc_id).await?;
-
-    // Delete files from disk; try common extensions since we don't store
-    // the ext in DB. Walk every (parent + child) id so the cascade doesn't
-    // leak bytes onto the filesystem.
-    for id in &all_ids {
+/// Delete the stored source file of each document. The extension is not
+/// stored, so try the ones documents are saved under.
+pub(crate) async fn remove_document_files(state: &AppState, course_id: Uuid, ids: &[Uuid]) {
+    for id in ids {
         for ext in &["pdf", "docx", "doc", "pptx", "ppt", "txt", "html", "url"] {
             let file_path = format!("{}/{}/{}.{}", state.config.docs_path, course_id, id, ext);
             if tokio::fs::remove_file(&file_path).await.is_ok() {
@@ -620,8 +645,6 @@ async fn delete_document(
             }
         }
     }
-
-    Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
 #[derive(Serialize)]

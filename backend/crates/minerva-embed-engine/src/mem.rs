@@ -156,6 +156,13 @@ pub(crate) fn estimated_model_rss_bytes(model: &str) -> Option<u64> {
         "Alibaba-NLP/gte-large-en-v1.5" => 1792,
         "snowflake/snowflake-arctic-embed-l" => 1792,
         "Qwen/Qwen3-Embedding-0.6B" => 2560,
+        // Figure-search query encoder. Warmed to 416 MiB (batch 32, inputs
+        // truncated to CLIP's 77 tokens) measured with Python fastembed on
+        // the same ONNX file. Kept tight on purpose: it has to fit beside
+        // arctic-m (3456) in the prod pod's 4 GiB cache budget, or every
+        // chat turn would evict one to load the other. Revisit against the
+        // first prod `fastembed_model_rss_cost_bytes` for it.
+        "Qdrant/clip-ViT-B-32-text" => 512,
 
         // --- Cross-encoder rerankers ---
         // Warmed to 2145 MiB in the 4 GiB reranker pod, over the old

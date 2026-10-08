@@ -69,6 +69,20 @@ pub fn start(state: AppState, max_concurrent: usize) {
 /// binary in the Phase 3.5 topology; also called by [`start`] in the
 /// monolith / api-with-worker path.
 pub fn start_scheduler_loops(state: AppState) {
+    // Visual extraction (slide OCR and figures on Olympus): queue upkeep,
+    // Slurm worker reconcile over SSH, figure indexing. The Slurm part only
+    // runs where `MINERVA_SLURM_SSH_TARGET` is set (the prod scheduler pod).
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = schedule_ticker();
+            loop {
+                ticker.tick().await;
+                crate::visual_extraction::tick(&state).await;
+            }
+        });
+    }
+
     // Canvas auto-sync: periodic re-sync for connections with auto_sync=true
     // whose last_synced_at is older than the configured interval. Runs
     // sequentially across due connections so we don't stampede Canvas.

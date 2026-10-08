@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = 'ready', staged_path = $2, staged_bytes = $3, cues = $4,\n            error_msg = NULL, updated_at = NOW()\n        WHERE id = $1 AND status = 'fetching'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cb72a3be8f1523fcef4a54933303ddfebdd12e5fc4be14fc97b5ab920f3bc3c9"
+}

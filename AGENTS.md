@@ -208,13 +208,13 @@ variable keys cAdvisor, kube-state-metrics, and app metrics alike.
 ├── postgres/         # PostgreSQL data directory
 ├── qdrant/           # Qdrant vector storage
 ├── data/             # Application data (documents)
-└── backups/          # Daily backups (14 days retention each)
+└── backups/          # Daily backups (postgres 14 days, qdrant 7)
     ├── minerva-DATE.sql.gz       # postgres pg_dump
     └── qdrant/
         └── qdrant-DATE.snapshot  # qdrant full-storage snapshot
 ```
 
-**Backup CronJobs** (both daily, 14-day retention, hostPath under `/data0/minerva/backups`):
+**Backup CronJobs** (both daily, hostPath under `/data0/minerva/backups`; postgres keeps 14 days, qdrant 7):
 - `k8s/base/backup.yaml` (`postgres-backup`): 03:00 UTC, gzipped `pg_dump` of
   the `minerva` DB.
 - `k8s/base/qdrant-backup.yaml` (`qdrant-backup`): 03:30 UTC (offset to avoid a
@@ -440,6 +440,57 @@ Indexes video transcripts from DSV Play into Minerva as searchable documents.
 3. **Transcript fetch**: pending `awaiting_transcript` docs get VTT pulled and posted back.
 
 dsv-wrapper methods used: `get_courses_by_tag(tag)`, `get_presentations(designation)`, `get_transcript_text(uuid)`.
+
+## Visual Extraction (slides and figures, Olympus GPU)
+
+Play lectures and PDFs are OCR'd on DSV's Olympus Slurm cluster; the full
+design is "Visual extraction pipeline" in `docs/ARCHITECTURE.md`, the worker
+and Olympus setup in `gpu/slide-ocr/README.md`.
+
+- **Who does what.** GitHub Actions (`visual-extraction.yml`,
+  `scripts/fetch_lecture_videos.py`) stages Play videos into a bounded window
+  on `/data0`; `minerva-scheduler` (`visual_extraction::tick`) enqueues jobs,
+  submits and monitors Slurm workers over SSH and indexes figures; workers
+  pull one item at a time through presigned URLs and upload results to
+  `/api/service/visual-extraction/...`.
+- **Credentials.** SU credentials stay in GitHub Actions (and the
+  operator's machine for local experiments); never put them on Olympus.
+  The Olympus service account (an ordinary user, confined by Slurm) is
+  reached with one key, held in the `minerva-slurm` k8s secret and the
+  `prod` GitHub environment.
+  Workers get nothing but grants signed with `MINERVA_HMAC_SECRET`
+  (`minerva_app_core::visual_extraction`), scoped to one worker, one job
+  attempt, or one figure image.
+- **State.** `visual_extraction_jobs` is the only source of truth; leases
+  expire and stale attempts are rejected, so no other component keeps
+  queue state. Bump `PIPELINE_VERSION` when the model, prompt or
+  thresholds change; done jobs are then re-run a few per minute.
+- **Lectures** get a slides-plus-speech text child that replaces the
+  transcript-only child; speech is aligned at ingest from cues staged with
+  the video. **PDFs** are searchable at once from text extraction; once
+  their OCR result lands they are re-ingested from the OCR text
+  (`visual_extraction::ocr_text`, chunks swapped without a gap) and gain
+  figures. Extraction remains only as that stopgap and as the fallback
+  when OCR fails for good.
+- **Figure search** runs two retrievals per chat turn (course text model
+  over figure context, CLIP over pixels), fused by rank. The model places
+  figures inline with `[Figure N]` markers (`[Figur N]` in Swedish), N
+  being the position in `figures_used`; unplaced ones show under the
+  reply. `scripts/seed-dev.sh` seeds four real figures and one reply using
+  them, so the UI needs no Olympus run in dev. The CLIP query
+  encoder (`Qdrant/clip-ViT-B-32-text`) is loaded by `minerva-embedder`
+  but deliberately not in `VALID_LOCAL_MODELS`.
+- **Deploys.** Minerva's side ships with the normal pipeline. The worker
+  code ships with `deploy-slide-ocr.yml` on every `master` push touching
+  `gpu/slide-ocr/`: a tarball unpacked by `olympus/deploy.sh` (ProxyJump
+  via `ci@minerva`), same key and account as the scheduler. Workers build
+  their venv on first use, named by the requirements hash, so nothing on
+  Olympus is installed by hand beyond putting the key in the account's
+  `authorized_keys`.
+- **vLLM 0.31 workarounds** live in `gpu/slide-ocr/ocr_vllm.py`: the v1
+  model runner for the n-gram logits processor, an in-process engine plus
+  a `tl.constexpr` rebinding for DeepEncoder's `LOG2E`, and the FlashInfer
+  sampler off. Re-check them when bumping vLLM.
 
 ## Daisy Course Period
 

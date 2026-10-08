@@ -53,6 +53,19 @@ spec:
               value: "0"
             - name: MINERVA_DOCS_PATH
               value: "/data/documents"
+            # Visual extraction staging window (lecture videos waiting for
+            # an Olympus worker), on the same hostPath as the documents.
+            - name: MINERVA_VISUAL_STAGING_PATH
+              value: "/data/visual-staging"
+            # Olympus service account for Slurm workers. The secret is
+            # optional: without it (or with an empty target) the Slurm part
+            # of the visual extraction loop stays off.
+            - name: MINERVA_SLURM_SSH_TARGET
+              valueFrom:
+                secretKeyRef:
+                  name: minerva-slurm
+                  key: ssh_target
+                  optional: true
             - name: MINERVA_EMBEDDER_URL
               value: "http://minerva-embedder.minerva.svc.cluster.local:50051"
             - name: MINERVA_RERANKER_URL
@@ -89,6 +102,11 @@ spec:
             # "Service topology".
             - name: app-data
               mountPath: /data
+            # Olympus service-account key and Olympus's pinned host key
+            # (MINERVA_SLURM_SSH_KEY / _KNOWN_HOSTS defaults).
+            - name: slurm-ssh
+              mountPath: /etc/minerva/slurm
+              readOnly: true
           resources:
             # req == lim for Guaranteed QoS; see the comment on
             # minerva-embedder. 256 MiB easily covers the steady
@@ -115,3 +133,13 @@ spec:
           hostPath:
             path: /data0/minerva/data
             type: DirectoryOrCreate
+        - name: slurm-ssh
+          secret:
+            secretName: minerva-slurm
+            optional: true
+            defaultMode: 0400
+            items:
+              - key: id_ed25519
+                path: id_ed25519
+              - key: known_hosts
+                path: known_hosts

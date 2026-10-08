@@ -35,3 +35,4 @@ pub mod system_defaults;
 pub mod usage;
 pub mod user_eppn_aliases;
 pub mod users;
+pub mod visual_extraction;

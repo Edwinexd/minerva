@@ -115,6 +115,98 @@ the old version stays live until rotation finishes. The KG linker reads
 excerpts and embeddings from Qdrant (no PDF re-parsing) and caches per-pair
 decisions.
 
+## Visual extraction pipeline (slides and figures)
+
+Play lectures and PDFs go through an OCR pass on DSV's Olympus Slurm
+cluster (two L40S GPU nodes) that the prod node cannot do itself. It
+produces slide-aligned lecture text, labelled layout blocks with boxes,
+and figure crops with two embeddings each. Worker code, Olympus scripts
+and measurements: `gpu/slide-ocr/`.
+
+Responsibilities and credentials:
+
+| Actor | Holds | Does |
+|---|---|---|
+| GitHub Actions `visual-extraction.yml` (every 20 min) | SU login, `MINERVA_SERVICE_API_KEY` | Play to Minerva (`scripts/fetch_lecture_videos.py`): downloads a lecture's slide track and timed VTT cues, uploads both. Only for slots Minerva grants. |
+| `minerva-scheduler` loop (`minerva_app_core::visual_extraction::tick`, every minute) | Olympus service-account SSH key (secret `minerva-slurm`) | Enqueues jobs, submits and monitors Slurm workers over SSH (`sbatch`, `sacct`, `scancel` through `olympus/slide-ocr-gate`), requeues work from dead workers, pushes figure vectors to Qdrant, exports `visual_extraction_*` metrics. |
+| `minerva-app` routes (`/api/service/visual-extraction/...`) | `MINERVA_HMAC_SECRET` | Fetch slots, staged uploads, worker work queue, presigned source download and result upload, ingest. |
+| GitHub Actions `deploy-slide-ocr.yml` (push to `master` touching `gpu/slide-ocr/`) | The same Olympus key, via `ci@minerva` | Ships the worker code to the service account (`olympus/deploy.sh`). |
+| Slurm worker job (`gpu/slide-ocr/worker.py`, at most 12 h) | One worker-scoped signed URL valid for the job's lifetime | Pulls lectures/PDFs one at a time, detects slides, OCRs with Unlimited-OCR on vLLM, crops figures and embeds them with CLIP ViT-B/32 (FastEmbed), uploads the result. No long-lived secrets and no state. |
+
+Flow and backpressure:
+
+- **One queue, two source kinds.** `visual_extraction_jobs` holds one row
+  per Play `.url` parent (`play_lecture`) and per ingested PDF (`pdf`),
+  enqueued by the scheduler for new and existing documents alike. A `pdf`
+  is leasable at once (its bytes are already on `/data0`); a
+  `play_lecture` waits for GitHub Actions to stage its video.
+- **Staging takes the free disk.** Minerva grants fetch slots while the
+  filesystem under `/data/visual-staging` keeps at least
+  `MINERVA_VISUAL_STAGING_MIN_FREE_BYTES` (default 10 GiB) free, counting
+  slots whose upload has not arrived yet. A staged video is deleted as soon
+  as its result is accepted, so the window shrinks back as workers drain
+  it; a backlog beyond that costs database rows, not disk.
+- **Workers pull, one item at a time.** The scheduler keeps up to
+  `MINERVA_SLURM_MAX_WORKERS` (default 4) submitted while leasable work
+  exists, and Slurm's priorities decide when they run: the service account
+  is low priority, a queued worker holds no work, and its grant allows
+  three days of queueing on top of the 12-hour wall time. A worker asks `next`, gets the item's presigned source GET
+  and result PUT, processes it, and exits when the queue is empty or its
+  wall time is close. Olympus holds one source file per worker at a time.
+- **Leases, not locks.** Each lease carries an expiry and an attempt
+  number signed into the item's URLs. A dead worker (seen in `sacct`)
+  returns its item to the queue at once; an expired lease does the same
+  as a backstop. Results for a stale attempt are rejected. After three
+  failed attempts the item is `failed`.
+- **State lives in Minerva only.** GitHub Actions and Slurm never need to
+  know each other's state, and Minerva decides order (material from the
+  last 14 days before the historical backlog).
+
+Ingest:
+
+- **Play lecture:** speech is aligned to slides at ingest from the timed
+  cues staged with the video (each cue goes to the slide on screen at its
+  midpoint). The slides-plus-speech document replaces the transcript-only
+  child under the `.url` parent and is chunked and embedded through the
+  normal path; the replaced child's vectors and file are purged.
+- **PDF:** text extraction makes a new upload searchable at once; the OCR
+  text then replaces it. An accepted result stores per-page layout
+  (`document_visual_pages`) and sends the PDF back through the ingest
+  worker, which now chunks the OCR text (page-sectioned markdown, tables
+  kept, header/footer/page-number chrome dropped) and keeps the kind from
+  the first pass. The new chunks are upserted before the extraction
+  chunks are deleted, so the document never drops out of retrieval. A PDF
+  whose OCR fails for good keeps its extraction text.
+- **Figures** (`document_figures`): each crop is stored on `/data0` under
+  the document's asset directory with its caption and context (title,
+  page text, and for lectures what was said). Two vectors per figure, both
+  pushed by the scheduler's indexing sweep:
+  - **context vector:** the context embedded with the course's text model
+    (default `Snowflake/snowflake-arctic-embed-m-v2.0`, multilingual) in the
+    per-course `course_<id>[_v<n>]_figures` collection;
+  - **visual vector:** the crop embedded on Olympus with
+    `Qdrant/clip-ViT-B-32-vision`, in the global `figures_clip_vit_b32`
+    collection filtered by `course_id`; queries are embedded in
+    `minerva-embedder` with the paired `Qdrant/clip-ViT-B-32-text`
+    (English-only, 77 tokens; the context vector carries other languages).
+
+Chat: every seed retrieval (simple, FLARE, tool use) runs both figure
+searches, fuses them by reciprocal rank, and drops figures of hidden or
+orphaned documents and, under the course's kind rules, of solution,
+assessment and unclassified material. Up to three figures are listed in
+the system prompt as `[Figure N]` markers with their description, and the
+model places one by writing its marker on a line of its own; the client
+renders the image there (`[Figur N]` too, for Swedish replies), and shows
+the figures it did not place under the reply. Figures are saved in
+`message_figures` in marker order, and replies return them as
+`figures_used` with image URLs signed for the reader
+(`/api/embed/figures/{grant}`, valid a day, re-minted on every
+conversation fetch), so images load in the app and the embed iframe alike.
+The dev seed attaches four real teacher-guide figures (with their CLIP
+vectors, `backend/crates/minerva-server/fixtures/figures/`) to a fixture
+document and one reply, so the figure UI and retrieval work in dev without
+Olympus.
+
 ## Chat / RAG pipeline
 
 ![Chat pipeline](diagrams/chat-pipeline.svg)

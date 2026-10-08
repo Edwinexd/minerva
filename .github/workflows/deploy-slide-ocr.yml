@@ -1,0 +1,64 @@
+name: Deploy Slide OCR Worker
+
+# Ships gpu/slide-ocr to the Olympus service account: uploads a tarball and
+# runs gpu/slide-ocr/olympus/deploy.sh there to put it in place. Workers
+# already running finish on the code they started with; the next one picks
+# up the new files, and builds a fresh venv first if the requirements
+# changed. The first run creates everything.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "gpu/slide-ocr/**"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-slide-ocr
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install WireGuard
+        run: sudo apt-get update && sudo apt-get install -y wireguard
+
+      - name: Setup WireGuard
+        run: |
+          echo "${{ secrets.WIREGUARD_CONFIG }}" | sed "/^\[Interface\]/a PrivateKey = ${{ secrets.WIREGUARD_PRIVATE_KEY }}" | sudo tee /etc/wireguard/wg0.conf > /dev/null
+          sudo chmod 600 /etc/wireguard/wg0.conf
+          sudo wg-quick up wg0
+
+      # Olympus is reached through the Minerva host, which already sees it.
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/minerva_ci
+          echo "${{ secrets.SLURM_SSH_PRIVATE_KEY }}" > ~/.ssh/olympus
+          chmod 600 ~/.ssh/minerva_ci ~/.ssh/olympus
+          ssh-keyscan minerva.dsv.su.se >> ~/.ssh/known_hosts 2>/dev/null
+          echo "${{ secrets.SLURM_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<'EOF'
+          Host minerva.dsv.su.se
+            User ci
+            IdentityFile ~/.ssh/minerva_ci
+            IdentitiesOnly yes
+          EOF
+
+      - name: Deploy
+        env:
+          SLURM_SSH_TARGET: ${{ secrets.SLURM_SSH_TARGET }}
+        run: |
+          tar -czf "$RUNNER_TEMP/slide-ocr.tgz" -C gpu/slide-ocr \
+            --exclude='./runs' --exclude='./venv' --exclude='__pycache__' .
+          olympus() {
+            ssh -i ~/.ssh/olympus -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -J minerva.dsv.su.se "$SLURM_SSH_TARGET" "$@"
+          }
+          olympus 'mkdir -p minerva-slide-ocr && cat > minerva-slide-ocr/.incoming.tgz' \
+            < "$RUNNER_TEMP/slide-ocr.tgz"
+          olympus "bash -s $GITHUB_SHA" < gpu/slide-ocr/olympus/deploy.sh

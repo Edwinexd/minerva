@@ -7,5 +7,6 @@
 pub mod chunker;
 pub mod classifier;
 pub mod embedder;
+pub mod figures;
 pub mod pdf;
 pub mod pipeline;

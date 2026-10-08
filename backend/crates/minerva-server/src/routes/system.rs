@@ -20,11 +20,12 @@ struct SystemMetrics {
 }
 
 #[derive(Serialize)]
-struct DiskInfo {
+pub(crate) struct DiskInfo {
     /// Path used to sample the mounted filesystem.
     path: String,
     total_bytes: u64,
-    free_bytes: u64,
+    /// Also read by visual extraction's staging window.
+    pub(crate) free_bytes: u64,
     used_bytes: u64,
 }
 
@@ -100,7 +101,7 @@ async fn system_metrics(
 
 #[cfg(unix)]
 #[allow(clippy::unnecessary_cast)] // field widths vary by target (u32 vs u64); casts keep this portable
-fn disk_usage(path: &str) -> Option<DiskInfo> {
+pub(crate) fn disk_usage(path: &str) -> Option<DiskInfo> {
     use std::ffi::CString;
     use std::mem::MaybeUninit;
 
@@ -134,7 +135,7 @@ fn disk_usage(path: &str) -> Option<DiskInfo> {
 }
 
 #[cfg(not(unix))]
-fn disk_usage(_path: &str) -> Option<DiskInfo> {
+pub(crate) fn disk_usage(_path: &str) -> Option<DiskInfo> {
     None
 }
 

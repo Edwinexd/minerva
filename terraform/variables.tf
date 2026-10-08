@@ -95,3 +95,21 @@ variable "su_password" {
   type        = string
   sensitive   = true
 }
+
+variable "slurm_ssh_target" {
+  description = "user@host of the Olympus service account the visual extraction scheduler submits Slurm workers as and deploy-slide-ocr deploys to; empty disables the scheduler part"
+  type        = string
+  default     = ""
+}
+
+variable "slurm_ssh_private_key_path" {
+  description = "Path of the private key for that account (e.g. ~/.ssh/minerva_slurm_ed25519), shared by the scheduler and the deploy-slide-ocr workflow; read at apply time so the key never sits in tfvars"
+  type        = string
+  default     = ""
+}
+
+variable "slurm_known_hosts" {
+  description = "known_hosts line(s) pinning Olympus's SSH host key"
+  type        = string
+  default     = ""
+}

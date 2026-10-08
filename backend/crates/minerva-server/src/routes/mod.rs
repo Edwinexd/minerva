@@ -22,6 +22,7 @@ pub(crate) mod suggested_questions;
 mod system;
 mod teacher;
 mod usage;
+mod visual_extraction;
 
 use axum::extract::{Extension, State};
 use axum::middleware;

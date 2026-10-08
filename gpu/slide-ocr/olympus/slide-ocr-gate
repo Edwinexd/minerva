@@ -1,0 +1,65 @@
+#!/bin/bash
+# What minerva-scheduler runs on the Olympus service account over SSH
+# (`ssh <svc>@olympus minerva-slide-ocr/olympus/slide-ocr-gate <verb> <arg>`):
+#
+#   submit <worker-uuid>   reads the worker's signed URL on stdin, stores it
+#                          0600 under grants/, sbatches a worker on it, and
+#                          prints the Slurm job id
+#   status <id>[,<id>...]  sacct state of those jobs, one "id|STATE" per line
+#   cancel <id>            scancel that job
+#
+# The URL travels on stdin so it never appears in process listings that
+# other cluster users can read.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# Slurm account and partition of this service account; site.env (not in
+# git) can override them, e.g. SLURM_ACCOUNT=minerva.
+SLURM_ACCOUNT=slurm-staff
+SLURM_PARTITION=gpu
+if [ -f olympus/site.env ]; then
+    source olympus/site.env
+fi
+
+if [ $# -ne 2 ]; then
+    echo "usage: slide-ocr-gate submit|status|cancel <arg>" >&2
+    exit 2
+fi
+verb=$1
+arg=$2
+
+if [ "$verb" = submit ]; then
+    if ! [[ "$arg" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+        echo "submit needs a worker uuid" >&2
+        exit 2
+    fi
+    umask 077
+    mkdir -p grants logs
+    head -c 4096 > "grants/$arg"
+    if ! grep -qE '^https://[^[:space:]]+/workers/[A-Za-z0-9_.-]+$' "grants/$arg"; then
+        rm -f "grants/$arg"
+        echo "stdin is not a worker URL" >&2
+        exit 2
+    fi
+    # Worker logs and grants of long-finished jobs.
+    find logs grants -type f -mtime +14 -delete
+    sbatch --parsable --job-name="minerva-ve-${arg:0:8}" \
+        --account="$SLURM_ACCOUNT" --partition="$SLURM_PARTITION" \
+        slurm-worker.sh "grants/$arg"
+elif [ "$verb" = status ]; then
+    if ! [[ "$arg" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        echo "status needs job ids" >&2
+        exit 2
+    fi
+    sacct -j "$arg" -X -n -P -o JobID,State
+elif [ "$verb" = cancel ]; then
+    if ! [[ "$arg" =~ ^[0-9]+$ ]]; then
+        echo "cancel needs a job id" >&2
+        exit 2
+    fi
+    scancel "$arg"
+else
+    echo "unknown command" >&2
+    exit 2
+fi

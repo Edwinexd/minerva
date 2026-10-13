@@ -333,10 +333,20 @@ library crates depend only on the facade.
 
 **Dashboards** are git-managed JSON under
 `k8s/base/observability/dashboards/` (memory-oom, services-app, infra,
-models), assembled into the `grafana-dashboards` ConfigMap by
+models, cost, visual-extraction), assembled into the `grafana-dashboards` ConfigMap by
 `configMapGenerator` (no hash suffix) and hot-reloaded by Grafana's file
 provider. Edit = file diff, not a click in a UI whose state lives only in
 Grafana's DB.
+
+`visual-extraction` shows jobs by kind and state, recent completion throughput,
+Slurm worker states and failures, internal download stages and deadline pressure,
+staging disk space, and the figure indexing backlog. The scheduler refreshes
+database aggregates once per pass, including zero-valued empty queues; its
+freshness panel distinguishes missing/stale samples from an empty queue.
+Throughput uses committed completion timestamps over the previous 15 minutes,
+so it survives scheduler restarts. Error backlog and retained failure totals
+are counts of current database rows, not error-event rates. No document IDs,
+course IDs, worker IDs or bearer URLs become metric labels.
 
 `memory-oom` keys every panel on the `container` label (the `$workload`
 variable) instead of `service`, because cAdvisor and kube-state-metrics

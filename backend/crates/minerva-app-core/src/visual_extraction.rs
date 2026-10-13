@@ -417,9 +417,12 @@ async fn index_pending_figures(state: &AppState) -> Result<(), String> {
             Ok(()) => queue::mark_figures_indexed(&state.db, &ids)
                 .await
                 .map_err(|e| e.to_string())?,
-            Err(e) => tracing::warn!(
-                "visual extraction: indexing figures for course {course_id} failed: {e}"
-            ),
+            Err(e) => {
+                metrics::counter!("visual_extraction_figure_index_failures_total").increment(1);
+                tracing::warn!(
+                    "visual extraction: indexing figures for course {course_id} failed: {e}"
+                );
+            }
         }
     }
     Ok(())
@@ -435,16 +438,81 @@ async fn record_metrics(state: &AppState) -> Result<(), sqlx::Error> {
         "failed",
         "unavailable",
     ];
-    let counts: HashMap<String, i64> = queue::count_by_status(&state.db)
-        .await?
-        .into_iter()
-        .collect();
+    // Fetch every aggregate before publishing, so the freshness timestamp
+    // describes a complete pass rather than a partially updated snapshot.
+    let jobs = queue::job_metrics(&state.db).await?;
+    let workers = queue::worker_metrics(&state.db).await?;
+    let downloads = queue::download_metrics(&state.db).await?;
+    let figures = queue::figure_metrics(&state.db).await?;
     for status in STATUSES {
-        metrics::gauge!("visual_extraction_jobs", "status" => *status)
-            .set(counts.get(*status).copied().unwrap_or(0) as f64);
+        let count: i64 = jobs
+            .iter()
+            .filter(|j| j.status == *status)
+            .map(|j| j.count)
+            .sum();
+        metrics::gauge!("visual_extraction_jobs", "status" => *status).set(count as f64);
+        for kind in ["pdf", "play_lecture"] {
+            let row = jobs.iter().find(|j| j.status == *status && j.kind == kind);
+            metrics::gauge!("visual_extraction_jobs_by_kind", "kind" => kind, "status" => *status)
+                .set(row.map_or(0, |j| j.count) as f64);
+            metrics::gauge!("visual_extraction_jobs_with_errors", "kind" => kind, "status" => *status)
+                .set(row.map_or(0, |j| j.with_errors) as f64);
+            if ["needs_source", "ready", "leased"].contains(status) {
+                metrics::gauge!("visual_extraction_oldest_job_seconds", "kind" => kind, "status" => *status)
+                    .set(row.map_or(0.0, |j| j.oldest_age_seconds).max(0.0));
+            }
+        }
     }
-    let workers = queue::list_active_workers(&state.db).await?.len();
-    metrics::gauge!("visual_extraction_workers_active").set(workers as f64);
+    for kind in ["pdf", "play_lecture"] {
+        let completed: i64 = jobs
+            .iter()
+            .filter(|j| j.kind == kind)
+            .map(|j| j.completed_last_15m)
+            .sum();
+        metrics::gauge!("visual_extraction_completed_last_15m", "kind" => kind)
+            .set(completed as f64);
+    }
+    metrics::gauge!("visual_extraction_expired_leases")
+        .set(jobs.iter().map(|j| j.expired_leases).sum::<i64>() as f64);
+    let mut active = 0;
+    for worker_state in ["submitting", "queued", "running", "finished", "failed"] {
+        let count = workers
+            .iter()
+            .find(|w| w.state == worker_state)
+            .map_or(0, |w| w.count);
+        metrics::gauge!("visual_extraction_workers", "state" => worker_state).set(count as f64);
+        if ["submitting", "queued", "running"].contains(&worker_state) {
+            active += count;
+        }
+    }
+    metrics::gauge!("visual_extraction_workers_active").set(active as f64);
+    metrics::gauge!("visual_extraction_workers_failed_last_15m")
+        .set(workers.iter().map(|w| w.failed_last_15m).sum::<i64>() as f64);
+    for (stage, count) in [
+        ("reserved", downloads.reserved),
+        ("queued", downloads.queued),
+        ("downloading", downloads.downloading),
+    ] {
+        metrics::gauge!("visual_extraction_downloads", "stage" => stage).set(count as f64);
+    }
+    metrics::gauge!("visual_extraction_downloads_expired").set(downloads.expired as f64);
+    metrics::gauge!("visual_extraction_download_deadline_timestamp_seconds")
+        .set(downloads.earliest_deadline);
+    metrics::gauge!("visual_extraction_oldest_download_seconds")
+        .set(downloads.oldest_started_seconds.max(0.0));
+    metrics::gauge!("visual_extraction_staging_bytes").set(downloads.staging_bytes as f64);
+    metrics::gauge!("visual_extraction_staging_min_free_bytes")
+        .set(state.config.visual_extraction.staging_min_free_bytes as f64);
+    metrics::gauge!("visual_extraction_figures", "state" => "pending").set(figures.pending as f64);
+    metrics::gauge!("visual_extraction_figures", "state" => "indexed").set(figures.indexed as f64);
+    metrics::gauge!("visual_extraction_oldest_pending_figure_seconds")
+        .set(figures.oldest_pending_seconds.max(0.0));
+    for outcome in ["succeeded", "failed", "stale"] {
+        metrics::counter!("visual_extraction_downloads_total", "outcome" => outcome).increment(0);
+    }
+    metrics::counter!("visual_extraction_figure_index_failures_total").increment(0);
+    metrics::gauge!("visual_extraction_metrics_updated_timestamp_seconds")
+        .set(Utc::now().timestamp() as f64);
     Ok(())
 }
 
@@ -565,6 +633,7 @@ pub async fn download_tick(state: &AppState) -> Result<bool, sqlx::Error> {
     let Some(claim) = queue::claim_download(&state.db).await? else {
         return Ok(false);
     };
+    let started = std::time::Instant::now();
     // Unique per claim: a process returning after its reservation expired
     // cannot overwrite a newer attempt's file.
     let filename = format!("{}.{}.mp4", claim.id, claim.started_at.timestamp_micros());
@@ -647,7 +716,17 @@ pub async fn download_tick(state: &AppState) -> Result<bool, sqlx::Error> {
     if bytes.is_none() || !matches!(published, Ok(true)) {
         let _ = tokio::fs::remove_file(&path).await;
     }
-    published?;
+    let published = published?;
+    let outcome = if !published {
+        "stale"
+    } else if bytes.is_some() {
+        "succeeded"
+    } else {
+        "failed"
+    };
+    metrics::counter!("visual_extraction_downloads_total", "outcome" => outcome).increment(1);
+    metrics::histogram!("visual_extraction_download_duration_seconds", "outcome" => outcome)
+        .record(started.elapsed().as_secs_f64());
     Ok(true)
 }
 

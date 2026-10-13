@@ -1,0 +1,1763 @@
+{
+  "uid": "minerva-visual-extraction",
+  "title": "Minerva - Visual Extraction",
+  "tags": [
+    "minerva",
+    "pipeline",
+    "slurm",
+    "ocr"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "kind",
+        "label": "Document kind",
+        "type": "custom",
+        "query": "pdf,play_lecture",
+        "options": [
+          {
+            "text": "pdf",
+            "value": "pdf",
+            "selected": false
+          },
+          {
+            "text": "play_lecture",
+            "value": "play_lecture",
+            "selected": false
+          }
+        ],
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Ready for GPU",
+      "description": "Current database job count for the selected document kinds. Completed and failed are retained totals, not events in the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max by (kind,status) (visual_extraction_jobs_by_kind{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\",status=\"ready\"}))",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Processing",
+      "description": "Current database job count for the selected document kinds. Completed and failed are retained totals, not events in the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max by (kind,status) (visual_extraction_jobs_by_kind{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\",status=\"leased\"}))",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Completed",
+      "description": "Current database job count for the selected document kinds. Completed and failed are retained totals, not events in the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max by (kind,status) (visual_extraction_jobs_by_kind{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\",status=\"done\"}))",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Failed jobs",
+      "description": "Current database job count for the selected document kinds. Completed and failed are retained totals, not events in the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max by (kind,status) (visual_extraction_jobs_by_kind{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\",status=\"failed\"}))",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Awaiting Play source",
+      "description": "Current database job count for the selected document kinds. Completed and failed are retained totals, not events in the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max by (kind,status) (visual_extraction_jobs_by_kind{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\",status=\"needs_source\"}))",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Figures awaiting indexing",
+      "description": "Global figure backlog across PDFs and lectures; separate from extraction completion.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(visual_extraction_figures{namespace=\"minerva\",service=\"minerva-scheduler\",state=\"pending\"})",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Job queue by kind and status",
+      "description": "Database state sampled once per scheduler pass. needs_source awaits authorization/probing; fetching is reserved or downloading; ready waits for a GPU; leased is processing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (kind,status) (visual_extraction_jobs_by_kind{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\",status=~\"needs_source|fetching|ready|leased\"})",
+          "legendFormat": "{{kind}} / {{status}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Slurm workers",
+      "description": "Global active workers, split by lifecycle. Queued workers count toward the worker limit but do not yet process documents.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (state) (visual_extraction_workers{namespace=\"minerva\",service=\"minerva-scheduler\",state=~\"submitting|queued|running\"})",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Extraction throughput",
+      "description": "Completions in the previous 15 minutes divided by 15, in jobs/minute. Derived from committed completion timestamps, so scheduler restarts do not reset this view.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: jobs/min",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (kind) (visual_extraction_completed_last_15m{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\"}) / 15",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Completed and failed jobs",
+      "description": "Current retained job totals by kind and terminal state. A rising failed line means documents exhausted retries.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (kind,status) (visual_extraction_jobs_by_kind{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\",status=~\"done|failed|unavailable\"})",
+          "legendFormat": "{{kind}} / {{status}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Jobs retaining an error",
+      "description": "Current jobs with an error message, including retryable Play probing errors and worker retries. This is a backlog count, not an error-event rate.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 8,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max by (kind,status) (visual_extraction_jobs_with_errors{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\"}))",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Worker failures in last 15 minutes",
+      "description": "Global count from worker finished_at. Earlier startup failures drop out of this view while remaining visible in retained worker totals.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 20,
+        "w": 8,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(visual_extraction_workers_failed_last_15m{namespace=\"minerva\",service=\"minerva-scheduler\"})",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Metrics freshness",
+      "description": "Time since a complete scheduler metrics pass. Stale or missing metrics must not be interpreted as an empty healthy queue.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 20,
+        "w": 8,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 120
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          },
+          "noValue": "Missing"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(visual_extraction_metrics_updated_timestamp_seconds{namespace=\"minerva\",service=\"minerva-scheduler\"})",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Internal Play download queue",
+      "description": "Global reservations awaiting a signed URL, authorized downloads queued in expiry order, and downloads claimed by the scheduler.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (stage) (visual_extraction_downloads{namespace=\"minerva\",service=\"minerva-scheduler\"})",
+          "legendFormat": "{{stage}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Earliest download deadline",
+      "description": "Seconds until the earliest active authorized download expires, including claimed downloads. Idle when no bearer URL is pending. Negative values indicate expiry.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 25,
+        "w": 6,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 300
+              },
+              {
+                "color": "green",
+                "value": 900
+              }
+            ]
+          },
+          "noValue": "Idle"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "min(visual_extraction_download_deadline_timestamp_seconds{namespace=\"minerva\",service=\"minerva-scheduler\"} > 0) - time()",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Oldest active download",
+      "description": "Global elapsed time since the oldest download claim. Downloads time out after 30 minutes and abandoned claims are recovered after 35 minutes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 25,
+        "w": 6,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1200
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(visual_extraction_oldest_download_seconds{namespace=\"minerva\",service=\"minerva-scheduler\"})",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Expired download authorizations",
+      "description": "Global active fetching jobs whose stored download deadline has passed. The maintenance sweep releases these for renewed authorization.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(visual_extraction_downloads_expired{namespace=\"minerva\",service=\"minerva-scheduler\"})",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Expired extraction leases",
+      "description": "Jobs still leased after their lease expiry. The maintenance sweep retries or fails these; a persistent count means recovery is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 33,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(visual_extraction_expired_leases{namespace=\"minerva\",service=\"minerva-scheduler\"})",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Figure indexing failures (selected range)",
+      "description": "Failed course indexing batches during the selected time range. A batch can contain multiple figures; its backlog remains pending for retry.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 33,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(visual_extraction_figure_index_failures_total{namespace=\"minerva\",service=\"minerva-scheduler\"}[$__range]))",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Figure indexing backlog",
+      "description": "Global pending and indexed figure counts. Extraction may be done while figures still await the scheduler indexing sweep.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (state) (visual_extraction_figures{namespace=\"minerva\",service=\"minerva-scheduler\"})",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Oldest pending figure",
+      "description": "Global age of the oldest unindexed figure. A growing age distinguishes a stalled indexer from a transient burst.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(visual_extraction_oldest_pending_figure_seconds{namespace=\"minerva\",service=\"minerva-scheduler\"})",
+          "legendFormat": "oldest pending"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Queue age",
+      "description": "Age since the oldest job entered its current state (updated_at), by selected kind. needs_source includes the historical backlog; leased age approximates current processing duration.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 45,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (kind,status) (visual_extraction_oldest_job_seconds{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\"})",
+          "legendFormat": "{{kind}} / {{status}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Retry and source error backlog",
+      "description": "Current jobs retaining error messages, split by kind and state. Source probe failures can remain retryable in needs_source without becoming terminal failed jobs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 45,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (kind,status) (visual_extraction_jobs_with_errors{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\"})",
+          "legendFormat": "{{kind}} / {{status}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Staging filesystem available space",
+      "description": "Node-exporter available bytes on /data0, compared with the configured minimum free-space guard. Node-exporter reports filesystem space; the job staging metric includes reservations.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 53,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "min(node_filesystem_avail_bytes{namespace=\"minerva\",mountpoint=\"/data0\",fstype!~\"tmpfs|overlay|squashfs|ramfs\"})",
+          "legendFormat": "available /data0"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(visual_extraction_staging_min_free_bytes{namespace=\"minerva\",service=\"minerva-scheduler\"})",
+          "legendFormat": "minimum free guard"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Staging bytes including reservations",
+      "description": "Global sum of job staged_bytes. Fetching slots reserve the full 1 GiB cap; successfully downloaded files use their actual size. Physical orphan files are reflected in filesystem space instead.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 53,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(visual_extraction_staging_bytes{namespace=\"minerva\",service=\"minerva-scheduler\"})",
+          "legendFormat": "reserved / staged"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Download outcomes per minute",
+      "description": "Global attempt rate by outcome. succeeded committed a staged file; failed releases a failed/expired download; stale could not publish because its claim changed. Counters reset on scheduler restart; rate handles resets.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 61,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: attempts/min",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(visual_extraction_downloads_total{namespace=\"minerva\",service=\"minerva-scheduler\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 27,
+      "type": "logs",
+      "title": "Pipeline warnings and errors",
+      "description": "Scheduler, API and ingest worker warnings/errors involving visual extraction. Slurm worker stdout remains on Olympus; failures reported to Minerva appear in job/worker metrics.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 61,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{namespace=\"minerva\",app=~\"minerva-(scheduler|app|worker)\"} |~ \"(?i)visual extraction|Play download\" |~ \"(?i)error|warn|failed|expired\"",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Retained worker totals",
+      "description": "Global worker lifecycle totals retained in the database. Failed includes historical startup incidents; use the recent-failure stat to watch new incidents.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 69,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (state) (visual_extraction_workers{namespace=\"minerva\",service=\"minerva-scheduler\",state=~\"finished|failed\"})",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "Download duration p95",
+      "description": "Global observed duration for completed download attempts by outcome. Idle until the new scheduler has handled downloads.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 69,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le,outcome) (rate(visual_extraction_download_duration_seconds_bucket{namespace=\"minerva\",service=\"minerva-scheduler\"}[$__rate_interval])))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Pipeline service memory versus limits",
+      "description": "Working set divided by the container memory limit for the embedder, scheduler and ingest worker. Includes model inference pressure that can interrupt indexing even while GPU extraction succeeds.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 77,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * max by (container) (container_memory_working_set_bytes{namespace=\"minerva\",container=~\"minerva-(embedder|scheduler|worker)\"}) / max by (container) (container_spec_memory_limit_bytes{namespace=\"minerva\",container=~\"minerva-(embedder|scheduler|worker)\"} > 0)",
+          "legendFormat": "{{container}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Pipeline service restarts in last hour",
+      "description": "Container restart increases, including replaced pods. Use alongside memory pressure and indexing failures to spot embedder OOMs; ordinary Deployment replacement itself does not increment this counter.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 77,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (container) (increase(kube_pod_container_status_restarts_total{namespace=\"minerva\",container=~\"minerva-(embedder|scheduler|worker)\"}[1h]))",
+          "legendFormat": "{{container}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ]
+}

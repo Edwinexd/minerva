@@ -160,3 +160,29 @@ def test_deploy_rejects_escape_and_links(tmp_path, monkeypatch, bad_name, kind):
     with pytest.raises(ValueError):
         gate.deploy("a" * 40)
     assert not (gate.ROOT / "DEPLOYED").exists()
+
+
+@pytest.mark.parametrize(
+    "launcher,entry", [("run-worker.sh", "worker.py"), ("run-job.sh", "slide_ocr.py")]
+)
+def test_worker_launch_uses_interpreter_after_venv_move(tmp_path, launcher, entry):
+    import os
+    import subprocess
+
+    checkout = tmp_path / "worker checkout"
+    checkout.mkdir()
+    venv = tmp_path / "moved worker venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin/activate").write_text("export PATH=/missing/original-build.tmp/bin\n")
+    (checkout / launcher).write_text((ROOT / "gpu/slide-ocr" / launcher).read_text())
+    (checkout / "ensure-venv.sh").write_text('printf "%s\\n" "$WORKER_TEST_VENV"\n')
+    python = venv / "bin/python"
+    python.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$WORKER_TEST_TRACE"\n')
+    python.chmod(0o700)
+    trace = tmp_path / "argv"
+    env = os.environ.copy()
+    env.update(WORKER_TEST_VENV=str(venv), WORKER_TEST_TRACE=str(trace))
+    subprocess.run(
+        ["/bin/bash", str(checkout / launcher), "grants/test"], env=env, check=True
+    )
+    assert trace.read_text().splitlines() == [entry, "grants/test"]

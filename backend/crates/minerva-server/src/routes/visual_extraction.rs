@@ -36,6 +36,9 @@ use crate::state::AppState;
 /// A result upload: OCR JSON plus slide frames and figure crops.
 const MAX_RESULT_BYTES: usize = 512 * 1024 * 1024;
 const MAX_FETCH_SLOTS: i64 = 50;
+// An individual request is small, but a run can fill the window across many
+// waves. Bound the exclusion payload independently of the wave size.
+const MAX_FETCH_EXCLUSIONS: usize = 10_000;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -73,6 +76,8 @@ async fn leased_job(state: &AppState, grant: &Grant) -> Result<queue::JobRow, Ap
 #[derive(Deserialize)]
 struct FetchSlotsBody {
     limit: Option<i64>,
+    #[serde(default)]
+    exclude_job_ids: Vec<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -90,9 +95,14 @@ async fn fetch_slots(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<FetchSlotsBody>,
-) -> Result<Json<Vec<FetchSlot>>, AppError> {
+) -> Result<impl IntoResponse, AppError> {
     authenticate_service(&state, &headers)?;
     let limit = body.limit.unwrap_or(10).clamp(1, MAX_FETCH_SLOTS);
+    if body.exclude_job_ids.len() > MAX_FETCH_EXCLUSIONS {
+        return Err(AppError::bad_request(
+            "visual_extraction.too_many_exclusions",
+        ));
+    }
     let staging = &state.config.visual_extraction.staging_path;
     tokio::fs::create_dir_all(staging)
         .await
@@ -106,6 +116,7 @@ async fn fetch_slots(
         state.config.visual_extraction.staging_min_free_bytes,
         ve::FETCH_ESTIMATE_BYTES,
         limit,
+        &body.exclude_job_ids,
     )
     .await?;
 
@@ -128,7 +139,7 @@ async fn fetch_slots(
             }
         }
     }
-    Ok(Json(slots))
+    Ok(([("x-minerva-staging-refill", "1")], Json(slots)))
 }
 
 #[derive(Deserialize)]
@@ -149,6 +160,11 @@ async fn offer_download(
     authenticate_service(&state, &headers)?;
     ve::validate_download_url(&body.url, body.download_deadline)
         .map_err(|_| AppError::bad_request("visual_extraction.invalid_download"))?;
+    // Only Minerva contacts the pinned media host for sizing. No MP4 bytes
+    // are carried through Actions, and a missing size keeps the full cap.
+    let size_bytes = ve::inspect_download_size(&body.url)
+        .await
+        .map_err(|_| AppError::bad_request("visual_extraction.invalid_video_size"))?;
     if !queue::offer_download(
         &state.db,
         job_id,
@@ -160,6 +176,7 @@ async fn offer_download(
                 .map(|c| serde_json::json!({"start": c.start, "end": c.end, "text": c.text}))
                 .collect(),
         ),
+        size_bytes,
     )
     .await?
     {

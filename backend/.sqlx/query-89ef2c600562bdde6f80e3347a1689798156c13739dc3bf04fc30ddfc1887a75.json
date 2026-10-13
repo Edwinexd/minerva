@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET download_url = $2, download_deadline = $3, cues = $4,\n            download_size_bytes = $5, staged_bytes = COALESCE($5, staged_bytes),\n            updated_at = NOW()\n        WHERE id = $1 AND status = 'fetching' AND download_url IS NULL\n          AND download_started_at IS NULL AND $3 > NOW()\n          AND ($5::BIGINT IS NULL OR $5 <= staged_bytes)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Jsonb",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "89ef2c600562bdde6f80e3347a1689798156c13739dc3bf04fc30ddfc1887a75"
+}

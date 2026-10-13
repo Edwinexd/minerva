@@ -35,7 +35,4 @@ jobs:
           MINERVA_SERVICE_API_KEY: ${{ secrets.MINERVA_SERVICE_API_KEY }}
           SU_USERNAME: ${{ secrets.SU_USERNAME }}
           SU_PASSWORD: ${{ secrets.SU_PASSWORD }}
-          # Minerva grants only what the disk can take; asking for more
-          # per run just fills the window sooner.
-          VISUAL_EXTRACTION_SLOTS: "25"
         run: python scripts/fetch_lecture_videos.py

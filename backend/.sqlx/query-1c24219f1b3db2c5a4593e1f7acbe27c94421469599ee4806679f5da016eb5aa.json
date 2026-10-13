@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = 'fetching', fetch_reserved_at = NOW(), staged_bytes = $1, updated_at = NOW()\n        WHERE id IN (\n            SELECT id FROM visual_extraction_jobs\n            WHERE status = 'needs_source'\n            ORDER BY priority DESC, created_at\n            LIMIT $2\n            FOR UPDATE SKIP LOCKED\n        )\n        RETURNING id AS job_id, document_id, course_id\n        ",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = 'fetching', fetch_reserved_at = NOW(), staged_bytes = $1, updated_at = NOW()\n        WHERE id IN (\n            SELECT id FROM visual_extraction_jobs\n            WHERE status = 'needs_source'\n              AND NOT (id = ANY($3))\n            ORDER BY priority DESC, created_at\n            LIMIT $2\n            FOR UPDATE SKIP LOCKED\n        )\n        RETURNING id AS job_id, document_id, course_id\n        ",
   "describe": {
     "columns": [
       {
@@ -40,7 +40,8 @@
     "parameters": {
       "Left": [
         "Int8",
-        "Int8"
+        "Int8",
+        "UuidArray"
       ]
     },
     "nullable": [
@@ -49,5 +50,5 @@
       false
     ]
   },
-  "hash": "caf07ae09748d96bcfee47c9a558a5d0c015e1b096ffc7283b1744002ac71804"
+  "hash": "1c24219f1b3db2c5a4593e1f7acbe27c94421469599ee4806679f5da016eb5aa"
 }

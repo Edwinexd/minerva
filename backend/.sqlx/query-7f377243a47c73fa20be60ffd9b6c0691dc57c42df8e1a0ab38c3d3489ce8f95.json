@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE visual_extraction_jobs\n        SET download_started_at = NOW(), updated_at = NOW()\n        WHERE id = (\n            SELECT id FROM visual_extraction_jobs\n            WHERE status = 'fetching' AND download_url IS NOT NULL\n                AND download_deadline > NOW() AND download_started_at IS NULL\n            ORDER BY download_deadline, id LIMIT 1 FOR UPDATE SKIP LOCKED\n        )\n        RETURNING id, download_url AS \"url!\", download_deadline AS \"deadline!\",\n            download_started_at AS \"started_at!\"\n        ",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET download_started_at = NOW(), updated_at = NOW()\n        WHERE id = (\n            SELECT id FROM visual_extraction_jobs\n            WHERE status = 'fetching' AND download_url IS NOT NULL\n                AND download_deadline > NOW() AND download_started_at IS NULL\n            ORDER BY download_deadline, id LIMIT 1 FOR UPDATE SKIP LOCKED\n        )\n        RETURNING id, download_url AS \"url!\", download_deadline AS \"deadline!\",\n            download_started_at AS \"started_at!\", download_size_bytes AS expected_bytes\n        ",
   "describe": {
     "columns": [
       {
@@ -46,6 +46,17 @@
             "name": "download_started_at"
           }
         }
+      },
+      {
+        "ordinal": 4,
+        "name": "expected_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "download_size_bytes"
+          }
+        }
       }
     ],
     "parameters": {
@@ -55,8 +66,9 @@
       false,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "e7ecb56594ba801082c7c871063f0678dd021f7dee0583fdf911b95bd322ac32"
+  "hash": "7f377243a47c73fa20be60ffd9b6c0691dc57c42df8e1a0ab38c3d3489ce8f95"
 }

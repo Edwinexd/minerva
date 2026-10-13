@@ -283,3 +283,88 @@ def test_text_score_prefers_larger_slide_text():
         ).encode()
 
     assert text_score(tsv(30)) == 2 * text_score(tsv(15))
+
+
+@pytest.mark.parametrize("refill,expected", [(True, 37), (False, 4)])
+def test_authorization_fills_bytes_beyond_old_url_count(refill, expected):
+    from unittest.mock import Mock
+
+    import fetch_lecture_videos as fetch
+
+    # Ten GiB available. Each unknown source initially reserves one GiB;
+    # the selected source's headers shrink it to 256 MiB. The final 768 MiB
+    # cannot safely reserve another unknown source.
+    remaining = 10 * 1024
+    next_job = 0
+
+    def reserve(url, json):
+        nonlocal remaining, next_job
+        count = min(json["limit"], remaining // 1024)
+        slots = [{"job_id": str(j)} for j in range(next_job, next_job + count)]
+        next_job += count
+        remaining -= count * 1024
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: slots,
+            headers={fetch.REFILL_HEADER: "1"} if refill else {},
+        )
+
+    def sized(session, client, slot, downloads):
+        nonlocal remaining
+        remaining += 1024 - 256
+
+    session = Mock()
+    session.post.side_effect = reserve
+    with patch.object(fetch, "stage", side_effect=sized):
+        assert fetch.authorize_window(session, Mock()) == expected
+    if refill:
+        assert remaining == 768
+        assert len(session.post.call_args.kwargs["json"]["exclude_job_ids"]) == 37
+
+
+def test_authorization_skips_failed_sources_for_rest_of_run():
+    from unittest.mock import Mock
+
+    import fetch_lecture_videos as fetch
+
+    session = Mock()
+
+    def post(url, json):
+        if url.endswith("/release"):
+            return Mock()
+        available = [j for j in ("bad", "good") if j not in json["exclude_job_ids"]]
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: [{"job_id": j} for j in available],
+            headers={fetch.REFILL_HEADER: "1"},
+        )
+
+    def stage(session, client, slot, downloads):
+        if slot["job_id"] == "bad":
+            raise ValueError("signed URL must not appear in output")
+
+    session.post.side_effect = post
+    with patch.object(fetch, "stage", side_effect=stage) as authorization:
+        assert fetch.authorize_window(session, Mock()) == 2
+    assert authorization.call_count == 2
+    assert session.post.call_args.kwargs["json"]["exclude_job_ids"] == ["bad", "good"]
+
+
+def test_time_budget_releases_unprocessed_reservations():
+    from unittest.mock import Mock
+
+    import fetch_lecture_videos as fetch
+
+    response = Mock()
+    response.json.return_value = [{"job_id": "a"}, {"job_id": "b"}]
+    response.headers = {fetch.REFILL_HEADER: "1"}
+    session = Mock()
+    session.post.return_value = response
+    with (
+        patch.object(fetch.time, "monotonic", side_effect=[0, 0, 0, 2401]),
+        patch.object(fetch, "stage") as stage,
+        patch.object(fetch, "release") as release,
+    ):
+        assert fetch.authorize_window(session, Mock()) == 1
+    stage.assert_called_once()
+    release.assert_called_once_with(session, "b", "fetch run time budget", retry=True)

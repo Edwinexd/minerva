@@ -22,22 +22,33 @@ def release(session: MinervaSession, job_id: str, error: str, retry: bool) -> No
     ).raise_for_status()
 
 
-def stage(session: MinervaSession, client: PlayClient, slot: dict) -> None:
+def stage(
+    session: MinervaSession, client: PlayClient, slot: dict, downloads: dict
+) -> None:
     job_id = slot["job_id"]
     presentation_id = extract_presentation_id(slot["url"])
     if not presentation_id:
         release(session, job_id, "no presentation id", retry=False)
         return
-    try:
-        cues = client.get_transcript(presentation_id)
-    except TranscriptNotReadyError:
-        release(session, job_id, "transcript not generated yet", retry=True)
-        return
-    presentation = client.get_presentation(presentation_id)
-    if not presentation.is_video_ready:
-        release(session, job_id, "presentation has no video track", retry=True)
-        return
-    download = pick_track(presentation)
+    cached = downloads.get(presentation_id)
+    if cached and cached[0].expires_at - datetime.now(timezone.utc).timestamp() < 120:
+        cached = None
+    if cached:
+        download, cues = cached
+    else:
+        try:
+            cues = client.get_transcript(presentation_id)
+        except TranscriptNotReadyError:
+            release(session, job_id, "transcript not generated yet", retry=True)
+            return
+        presentation = client.get_presentation(presentation_id)
+        if not presentation.is_video_ready:
+            release(session, job_id, "presentation has no video track", retry=True)
+            return
+        download = pick_track(presentation)
+        # The same lecture can belong to several courses. Probe it once per
+        # run; refresh expired authorizations instead of repeating the frames.
+        downloads[presentation_id] = (download, cues)
     deadline = datetime.fromtimestamp(download.expires_at, timezone.utc)
     if (deadline - datetime.now(timezone.utc)).total_seconds() < 120:
         raise ValueError("media token too close to expiry")
@@ -72,10 +83,11 @@ def main() -> None:
     print(f"{len(slots)} fetch slot(s) granted")
     if not slots:
         return
+    downloads = {}
     with PlayClient(username, password) as client:
         for slot in slots:
             try:
-                stage(session, client, slot)
+                stage(session, client, slot, downloads)
             except Exception as error:
                 # Third-party HTTP errors can include the signed URL; record
                 # only the error class, never the credential-bearing message.

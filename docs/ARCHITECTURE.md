@@ -158,10 +158,13 @@ Flow and backpressure:
   Bearer URLs are removed after completion/failure and never logged.
 - **Source selection is a guess from pixels.** Play offers no slide-role
   metadata. Actions samples frames at 20%, 50%, and 80% of each source,
-  compares the median amount of confidently recognized text, and selects
+  compares the median amount and size of confidently recognized text, and selects
   1080p of the winning source. Each source's entire probe (including MP4
-  headers/tail reads) is capped at 24 MiB. Audio flags are ignored; tied,
-  blank or failed probes retry rather than silently selecting the camera.
+  headers/tail reads) is capped at 24 MiB. Aligned ranges are cached across
+  samples so MP4 indexes consume the budget once. Readable duplicate slide
+  streams select the clearest text; blank or failed probes retry. Repeated
+  presentation URLs across courses share one authorization/probe per run
+  until its token nears expiry. Audio flags are ignored.
 - **Workers pull, one item at a time.** The scheduler keeps up to
   `MINERVA_SLURM_MAX_WORKERS` (default 4) submitted while leasable work
   exists, and the SU account's Slurm priorities decide when they run: a queued worker holds no work, and its grant allows

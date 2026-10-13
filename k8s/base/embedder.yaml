@@ -11,8 +11,8 @@ spec:
   replicas: 1
   strategy:
     # Recreate (not RollingUpdate) because the node can't fit two
-    # embedder pods at once (3.5 GiB each on an 8 GiB allocatable
-    # node). Brief embed downtime during a deploy is the trade.
+    # embedder pods at once on the single 16 GiB node. Brief embed
+    # downtime during a deploy is the trade.
     type: Recreate
   selector:
     matchLabels:
@@ -46,20 +46,14 @@ spec:
               value: "50051"
             - name: HF_HOME
               value: "/data/hf-cache"
-            # Cache budget MUST exceed the warmed size of the model
-            # every course uses, or that model can never stay resident
-            # and every chat query pays a multi-second cold reload.
-            # Measured at boot: Snowflake/snowflake-arctic-embed-m-v2.0
-            # (146 of 147 active courses) warms to ~3278 MiB. The old
-            # 2560 MiB budget was BELOW that, so arctic churned on the
-            # hot path. 4 GiB (4 * 2^30 = 4294967296) keeps arctic
-            # comfortably resident with ~800 MiB of cache headroom;
-            # baseline (~1 GiB) + arctic (3.3 GiB) sits under the 6 GiB
-            # pod limit. nomic (the 1 remaining course) still cold-
-            # loads on demand and evicts arctic, but that's one course,
-            # not the fleet.
+            # Arctic (3456 MiB), Nomic (3072 MiB), and CLIP text (512 MiB)
+            # have conservative warmed-RSS floors totaling 7040 MiB.
+            # The old 4 GiB cache admitted Arctic alone and permanently
+            # deferred Nomic background jobs. 7 GiB lets this production
+            # working set coexist. Native inference and warmup are capped
+            # at eight texts; ONNX warmup exercises the full token cap.
             - name: MINERVA_FASTEMBED_CACHE_BUDGET_BYTES
-              value: "4294967296"
+              value: "7516192768"
             - name: MALLOC_TRIM_THRESHOLD_
               value: "131072"
             - name: MALLOC_ARENA_MAX
@@ -70,52 +64,23 @@ spec:
             - name: hf-cache
               mountPath: /data
           resources:
-            # req == lim so the pod gets Guaranteed QoS. We handle our
-            # own memory budgeting inside the process (FastEmbedder LRU
-            # with an explicit MINERVA_FASTEMBED_CACHE_BUDGET_BYTES
-            # set above) so the k8s burstable gap buys nothing useful;
-            # equal values give us a stable cgroup limit from startup,
-            # keep the scheduler from over-promising this pod's memory
-            # to a noisy neighbour, and put us at the top of the
-            # eviction order during real node pressure.
+            # Budget review (Oct 2026): dense OCR inference repeatedly
+            # OOM-killed the old 6 GiB pod. Separate resident cache from
+            # transient allocation: 7 GiB cache and request, 8 GiB limit.
+            # The central eight-text bound also applies to benchmarks and
+            # warmup, which previously bypassed dispatcher batching.
             #
-            # 6 GiB = 4 GiB cache budget + ~1 GiB baseline (gRPC server
-            # + tokio + ORT runtime + glibc + tonic connections) + ~1 GiB
-            # of slack.
-            #
-            # History, because the number looks arbitrary otherwise.
-            # This started at 5 GiB and OOM-crashlooped. Raising it was
-            # treating a symptom: the real causes were the cache
-            # recording a model's cost as +0 MiB when an eviction's pages
-            # had not left RSS, and two concurrent callers each loading
-            # the same model. Both are fixed in `model_cache`, and both
-            # had to be fixed regardless of the limit.
-            #
-            # 5 GiB was then tried again on top of those fixes, and put
-            # back:
-            # a memory-capped container survived boot plus concurrent
-            # churn at 5 GiB (peak 3855 MiB), but that harness was
-            # missing what prod does at the same time. Live chat, 4-way
-            # concurrent ingest, admin benchmarks, and arctic/nomic
-            # swapping all land together, and with arctic at 3456 MiB
-            # against nomic at 3072 MiB only one fits the 4 GiB budget,
-            # so a swap under load leaves the outgoing model's pages
-            # resident while the incoming one allocates. That crossed
-            # 5 GiB repeatedly. The extra GiB is for that overlap, not
-            # for the steady state, which sits near 3.7 GiB.
-            # Memory req == lim for Guaranteed QoS; CPU is ranged
-            # because ONNX inference is heavily compute-bound when a
-            # batch arrives but idle between. Low req keeps the
-            # scheduler happy on a 2-CPU node; 2 CPU limit gives the
-            # dispatcher real cores for the bursty embed call.
+            # Live node allocatable memory is 16235 MiB. Other steady-state
+            # requests total 7708 MiB; this 7168 MiB request leaves 1359
+            # MiB, enough for the API's 1024 MiB rolling-deploy surge and
+            # the 192 MiB combined backup requests. An 8 GiB request would
+            # prevent the API surge from scheduling. CPU is burstable too;
+            # this pod is Burstable, not Guaranteed QoS.
             requests:
-              # Steady state is ~3.7 GiB; the headroom is for the window
-              # where an outgoing model's pages have not left RSS yet and
-              # the incoming one is already allocating.
-              memory: "6Gi"
+              memory: "7Gi"
               cpu: "200m"
             limits:
-              memory: "6Gi"
+              memory: "8Gi"
               cpu: "2000m"
           # No HTTP endpoint; rely on the gRPC port being open as a
           # liveness signal. Tonic accepts TCP before model load

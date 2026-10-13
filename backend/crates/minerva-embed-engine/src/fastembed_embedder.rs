@@ -23,9 +23,11 @@ pub struct BenchmarkResult {
     pub corpus_size: usize,
 }
 
-/// Maximum number of chunks passed to a single backend call. Keeps peak
-/// tensor memory predictable regardless of document size.
-const EMBED_BATCH_SIZE: usize = 32;
+/// Maximum number of texts in one native inference call, including warmup
+/// and benchmarks. Batch 32 crossed the production 6 GiB limit on dense
+/// OCR inputs even with only Arctic resident. Keep tensor peaks bounded
+/// independently of the resident model-cache budget.
+const EMBED_BATCH_SIZE: usize = 8;
 
 /// Qwen3 takes a `max_length` at load time; we cap at 4096 tokens. The
 /// model itself supports much more, but every extra token grows the
@@ -83,7 +85,7 @@ enum Priority {
     /// ingest batches at every job boundary.
     High,
     /// Background embed (document ingestion). Yields to any waiting
-    /// `High` job between its 32-chunk batches.
+    /// `High` job between its bounded batches.
     Low,
 }
 
@@ -456,7 +458,7 @@ impl FastEmbedder {
     /// jobs across all callers (every cached model has exactly one
     /// dispatcher task), and the per-batch granularity is what gives
     /// chat embeds their preemption point: an ingest call with N
-    /// chunks submits ceil(N / 32) low jobs, and a high job that
+    /// chunks submits ceil(N / EMBED_BATCH_SIZE) low jobs, and a high job that
     /// arrives mid-ingest only has to wait for the currently-running
     /// batch to finish before its turn.
     async fn embed_with_priority(
@@ -650,8 +652,10 @@ fn run_embed(model: &LoadedModel, texts: Vec<String>) -> Result<Vec<Vec<f32>>, S
             let mut m = m
                 .lock()
                 .map_err(|e| format!("fastembed lock poisoned: {}", e))?;
-            m.embed(texts, None)
-                .map_err(|e| format!("fastembed embed failed: {}", e))
+            embed_bounded(&texts, |batch| {
+                m.embed(batch, Some(EMBED_BATCH_SIZE))
+                    .map_err(|e| format!("fastembed embed failed: {}", e))
+            })
         }
         LoadedModel::Qwen3(m) => {
             // `Qwen3TextEmbedding::embed` takes `&self`, so a Mutex
@@ -661,11 +665,31 @@ fn run_embed(model: &LoadedModel, texts: Vec<String>) -> Result<Vec<Vec<f32>>, S
             let m = m
                 .lock()
                 .map_err(|e| format!("qwen3 lock poisoned: {}", e))?;
-            let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
-            m.embed(&refs)
-                .map_err(|e| format!("qwen3 embed failed: {}", e))
+            embed_bounded(&texts, |batch| {
+                let refs: Vec<&str> = batch.iter().map(String::as_str).collect();
+                m.embed(&refs)
+                    .map_err(|e| format!("qwen3 embed failed: {}", e))
+            })
         }
     }
+}
+
+/// Enforce the native batch bound at the shared inference boundary, so
+/// callers that bypass the priority dispatcher (warmup and benchmarks)
+/// cannot accidentally allocate a larger tensor shape.
+fn embed_bounded(
+    texts: &[String],
+    mut embed: impl FnMut(&[String]) -> Result<Vec<Vec<f32>>, String>,
+) -> Result<Vec<Vec<f32>>, String> {
+    let mut vectors = Vec::with_capacity(texts.len());
+    for batch in texts.chunks(EMBED_BATCH_SIZE) {
+        let part = embed(batch)?;
+        if part.len() != batch.len() {
+            return Err("embedding backend returned an unexpected vector count".into());
+        }
+        vectors.extend(part);
+    }
+    Ok(vectors)
 }
 
 /// Errors from `benchmark_one`. `Busy` is the soft case (another admin
@@ -801,16 +825,13 @@ impl ModelLoader for EmbedderLoader {
     }
 
     async fn warmup(&self, raw: &LoadedModel) {
-        // Warm with a batch matching real operational shape before the
-        // cache measures RSS. ORT's CPU EP lazily allocates an arena on
-        // the first forward pass that's substantially larger than the
-        // bare weights and persists for the session's lifetime; the arena
-        // sizes itself to the largest tensor shape seen, and attention
-        // scratch is O(seq^2), so we pad each corpus sentence to
-        // `WARMUP_CHARS` (the chunker's default chunk size, the largest
-        // chunk a real ingest job submits). A too-small warmup undersizes
-        // the arena and the first real batch grows it -> OOM. Errors are
-        // ignored: a broken model surfaces on the caller's real request.
+        // Measure the operational batch shape before caching the model.
+        // ONNX uses at most 512 tokens (CLIP's custom spec caps at 77).
+        // Character count is not a token bound: dense OCR and multilingual
+        // inputs exceeded the old English warmup's sequence shape. Repeat
+        // a single token to exercise the full tokenizer cap. Qwen keeps
+        // the existing chunk-size warmup. Both paths use run_embed's
+        // native batch bound, including calls outside the dispatcher.
         const WARMUP_CHARS: usize = 2000;
         let loaded_for_warmup = raw.clone();
         let warmup_corpus: Vec<String> = BENCHMARK_CORPUS
@@ -822,7 +843,10 @@ impl ModelLoader for EmbedderLoader {
                     t.push(' ');
                 }
                 t.truncate(WARMUP_CHARS);
-                t
+                match raw {
+                    LoadedModel::Fast(_) => "x ".repeat(512),
+                    LoadedModel::Qwen3(_) => t,
+                }
             })
             .collect();
         let _ = tokio::task::spawn_blocking(move || {
@@ -922,6 +946,48 @@ const BENCHMARK_CORPUS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_batches_bound_direct_warmup_calls_and_preserve_vector_order() {
+        // Direct warmup/benchmark callers can pass more than one dispatcher
+        // batch. Exercise that bypass with an uneven final batch.
+        let texts: Vec<String> = (0..33).map(|n| n.to_string()).collect();
+        let mut sizes = Vec::new();
+        let vectors = embed_bounded(&texts, |batch| {
+            sizes.push(batch.len());
+            Ok(batch
+                .iter()
+                .map(|s| vec![s.parse::<f32>().unwrap()])
+                .collect())
+        })
+        .unwrap();
+        assert_eq!(sizes, vec![8, 8, 8, 8, 1]);
+        assert_eq!(vectors, (0..33).map(|n| vec![n as f32]).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn native_batch_failure_stops_before_later_inputs() {
+        let texts = vec!["input".to_string(); 24];
+        let mut calls = 0;
+        let result = embed_bounded(&texts, |batch| {
+            calls += 1;
+            if calls == 2 {
+                return Err("backend error".into());
+            }
+            Ok(vec![vec![0.0]; batch.len()])
+        });
+        assert_eq!(result.unwrap_err(), "backend error");
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn native_batches_reject_missing_vectors_instead_of_misaligning_figures() {
+        let texts = vec!["input".to_string(); 9];
+        assert!(embed_bounded(&texts, |_| Ok(vec![])).is_err());
+        let empty =
+            embed_bounded(&[], |_| panic!("empty input must not invoke the backend")).unwrap();
+        assert!(empty.is_empty());
+    }
 
     /// The environment is process-global but cargo runs these tests on
     /// threads of one process, so the two budget tests raced: the

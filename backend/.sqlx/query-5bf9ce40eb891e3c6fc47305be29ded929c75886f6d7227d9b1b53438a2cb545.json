@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT state, COUNT(*) AS \"count!\",\n               COUNT(*) FILTER (WHERE state = 'failed' AND finished_at >= NOW() - INTERVAL '15 minutes') AS \"failed_last_15m!\"\n        FROM visual_extraction_workers GROUP BY state\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_workers",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "failed_last_15m!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "5bf9ce40eb891e3c6fc47305be29ded929c75886f6d7227d9b1b53438a2cb545"
+}

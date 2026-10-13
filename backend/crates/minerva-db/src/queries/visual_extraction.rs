@@ -409,6 +409,101 @@ pub async fn count_by_status(db: &PgPool) -> Result<Vec<(String, i64)>, sqlx::Er
     Ok(rows.into_iter().map(|r| (r.status, r.count)).collect())
 }
 
+/// Bounded aggregate labels only: no document, course, worker or bearer URL
+/// becomes a metric label. Recent completions survive scheduler restarts.
+pub struct JobMetrics {
+    pub kind: String,
+    pub status: String,
+    pub count: i64,
+    pub oldest_age_seconds: f64,
+    pub completed_last_15m: i64,
+    pub with_errors: i64,
+    pub expired_leases: i64,
+}
+
+pub async fn job_metrics(db: &PgPool) -> Result<Vec<JobMetrics>, sqlx::Error> {
+    sqlx::query_as!(
+        JobMetrics,
+        r#"
+        SELECT kind, status, COUNT(*) AS "count!",
+               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(updated_at)), 0)::FLOAT8 AS "oldest_age_seconds!",
+               COUNT(*) FILTER (WHERE status = 'done' AND completed_at >= NOW() - INTERVAL '15 minutes') AS "completed_last_15m!",
+               COUNT(*) FILTER (WHERE error_msg IS NOT NULL) AS "with_errors!",
+               COUNT(*) FILTER (WHERE status = 'leased' AND lease_expires_at <= NOW()) AS "expired_leases!"
+        FROM visual_extraction_jobs GROUP BY kind, status
+        "#
+    )
+    .fetch_all(db)
+    .await
+}
+
+pub struct WorkerMetrics {
+    pub state: String,
+    pub count: i64,
+    pub failed_last_15m: i64,
+}
+
+pub async fn worker_metrics(db: &PgPool) -> Result<Vec<WorkerMetrics>, sqlx::Error> {
+    sqlx::query_as!(
+        WorkerMetrics,
+        r#"
+        SELECT state, COUNT(*) AS "count!",
+               COUNT(*) FILTER (WHERE state = 'failed' AND finished_at >= NOW() - INTERVAL '15 minutes') AS "failed_last_15m!"
+        FROM visual_extraction_workers GROUP BY state
+        "#
+    )
+    .fetch_all(db)
+    .await
+}
+
+pub struct DownloadMetrics {
+    pub reserved: i64,
+    pub queued: i64,
+    pub downloading: i64,
+    pub expired: i64,
+    pub earliest_deadline: f64,
+    pub oldest_started_seconds: f64,
+    pub staging_bytes: i64,
+}
+
+pub async fn download_metrics(db: &PgPool) -> Result<DownloadMetrics, sqlx::Error> {
+    sqlx::query_as!(
+        DownloadMetrics,
+        r#"
+        SELECT COUNT(*) FILTER (WHERE status = 'fetching' AND download_url IS NULL) AS "reserved!",
+               COUNT(*) FILTER (WHERE status = 'fetching' AND download_url IS NOT NULL AND download_started_at IS NULL) AS "queued!",
+               COUNT(*) FILTER (WHERE status = 'fetching' AND download_started_at IS NOT NULL) AS "downloading!",
+               COUNT(*) FILTER (WHERE status = 'fetching' AND download_deadline <= NOW()) AS "expired!",
+               COALESCE(EXTRACT(EPOCH FROM MIN(download_deadline) FILTER (WHERE status = 'fetching')), 0)::FLOAT8 AS "earliest_deadline!",
+               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(download_started_at) FILTER (WHERE status = 'fetching')), 0)::FLOAT8 AS "oldest_started_seconds!",
+               COALESCE(SUM(staged_bytes), 0)::BIGINT AS "staging_bytes!"
+        FROM visual_extraction_jobs
+        "#
+    )
+    .fetch_one(db)
+    .await
+}
+
+pub struct FigureMetrics {
+    pub pending: i64,
+    pub indexed: i64,
+    pub oldest_pending_seconds: f64,
+}
+
+pub async fn figure_metrics(db: &PgPool) -> Result<FigureMetrics, sqlx::Error> {
+    sqlx::query_as!(
+        FigureMetrics,
+        r#"
+        SELECT COUNT(*) FILTER (WHERE indexed_at IS NULL) AS "pending!",
+               COUNT(*) FILTER (WHERE indexed_at IS NOT NULL) AS "indexed!",
+               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(created_at) FILTER (WHERE indexed_at IS NULL)), 0)::FLOAT8 AS "oldest_pending_seconds!"
+        FROM document_figures
+        "#
+    )
+    .fetch_one(db)
+    .await
+}
+
 pub async fn count_leasable(db: &PgPool) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!" FROM visual_extraction_jobs WHERE status = 'ready'"#

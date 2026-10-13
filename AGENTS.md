@@ -837,8 +837,7 @@ Bounded model cache keyed by HuggingFace model id. Three things make
 the LRU actually bound RSS, learned the hard way:
 
 1. **Warm before measuring cost.** `FastEmbedder::acquire` runs a
-   warmup inference with `BENCHMARK_CORPUS` padded to 2000 chars
-   (the chunker's default `chunk_size`) at batch-32 *before* recording
+   warmup inference at the native eight-text batch bound *before* recording
    the per-model `rss_cost_bytes`. ORT's CPU EP lazily allocates an
    "arena" scratch pool sized to the largest tensor shape it has seen;
    measuring right after `try_new` only captures weights, not arena.
@@ -846,10 +845,14 @@ the LRU actually bound RSS, learned the hard way:
    ~2.7 GiB warmed vs ~550 MiB cold), and getting it wrong silently
    lets the cache footprint blow through the budget.
    - Warmup input shape must match operational shape on both axes:
-     batch (= `EMBED_BATCH_SIZE`) and sequence length (= chunk size).
-     A batch-1 single-token warmup is essentially useless. A
-     batch-32 short-sentence warmup undersizes by ~10x because
-     attention scratch is O(seq^2).
+     batch (= `EMBED_BATCH_SIZE`) and sequence length (= tokenizer cap).
+     ONNX warmup repeats a token to exercise the full 512-token cap
+     (the CLIP custom model truncates at 77), rather than guessing token
+     count from English character length. Qwen retains its chunk-size
+     warmup. `run_embed` enforces the native bound even when warmup or
+     benchmarks bypass the priority dispatcher. Attention scratch grows
+     with the square of sequence length; dense OCR exposed that the old
+     batch-32 character-based warmup underestimated inference peaks.
 
 2. **Sync eviction.** `cache.remove(idx)` only drops the cache's
    `Arc<ModelDispatcher>`; the dispatcher task and any in-flight
@@ -882,11 +885,23 @@ startup-benchmarked models fit). Tunable via
 `MINERVA_FASTEMBED_CACHE_BUDGET_BYTES` (raw bytes, overrides the
 fraction).
 
-`STARTUP_BENCHMARK_MODELS` in `pipeline.rs` is the boot-time warmup
-set. Loading any model in it costs ~1 GiB resident (weights +
-warmed arena); the four-model startup set with sync eviction lands
-at ~3.5 GiB steady-state holding only the last (arctic-m, the
-default). If you add a model here, factor that into the budget.
+Production explicitly uses a **7 GiB cache**, **7 GiB memory request** and
+**8 GiB limit**. Arctic, Nomic and CLIP text have conservative warmed-RSS
+floors totaling 7040 MiB and can coexist within the 7168 MiB cache. The old
+4 GiB cache permanently deferred Nomic background work while Arctic was
+resident. The node has 16235 MiB allocatable; with 7708 MiB of other steady
+requests, the embedder's 7168 MiB request leaves 1359 MiB for the API's
+1024 MiB rollout surge and the 192 MiB combined backup requests. An 8 GiB
+request would block the API surge. This pod remains Burstable QoS.
+
+After a budget change, run the synthetic `embedding_memory_probe` example
+in `minerva-rpc` through an operator SSH tunnel and watch RSS, cgroup peak,
+model residency, restarts and indexing progress. It exercises long synthetic
+inputs across Arctic, Nomic and CLIP without submitting course content.
+
+`STARTUP_BENCHMARK_MODELS` in the catalog is the boot-time warmup set;
+production currently warms Arctic only. Other models load on demand.
+If you add a model here, factor its measured memory into the budget.
 
 ### MemBudget (`backend/crates/minerva-embed-engine/src/mem_budget.rs`)
 

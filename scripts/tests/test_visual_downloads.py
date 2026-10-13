@@ -46,8 +46,8 @@ def test_selection_ignores_audio_and_uses_observed_text():
         assert pick_track(p).index == 2
 
 
-def test_blank_or_tied_probes_do_not_guess_camera():
-    for scores in ({"a": 0, "b": 0}, {"a": 100, "b": 99}, {"a": 10, "b": 2}):
+def test_blank_probes_do_not_guess_camera():
+    for scores in ({"a": 0, "b": 0}, {"a": 10, "b": 2}):
         with pytest.raises(ValueError):
             choose_source(scores)
     assert choose_source({"a": 200, "b": 50}) == "a"
@@ -99,10 +99,13 @@ def test_probe_cannot_read_past_byte_budget():
 
     class Response:
         status_code = 206
-        headers = {
-            "Content-Length": str(32 * 1024 * 1024),
-            "Content-Range": "bytes 0-33554431/33554432",
-        }
+
+        def __init__(self, start, end):
+            self.size = end - start + 1
+            self.headers = {
+                "Content-Length": str(self.size),
+                "Content-Range": f"bytes {start}-{end}/33554432",
+            }
 
         def __enter__(self):
             return self
@@ -111,15 +114,23 @@ def test_probe_cannot_read_past_byte_budget():
             pass
 
         def iter_content(self, chunk_size):
-            for _ in range(512):
-                read_chunks.append(chunk_size)
-                yield b"x" * chunk_size
+            read_chunks.append(self.size)
+            yield b"x" * self.size
 
-    with patch("_play_tracks.requests.get", return_value=Response()):
+    class Session:
+        def get(self, url, headers, **kwargs):
+            start, end = map(int, headers["Range"].removeprefix("bytes=").split("-"))
+            return Response(start, end)
+
+        def close(self):
+            pass
+
+    with patch("_play_tracks.requests.Session", return_value=Session()):
         with probe_url(SimpleNamespace(url="https://example.invalid/video")) as url:
             with urlopen(url) as response:
                 while response.read(64 * 1024):
                     pass
+
     assert sum(read_chunks) <= _play_tracks.PROBE_BYTES
 
 
@@ -186,3 +197,89 @@ def test_worker_launch_uses_interpreter_after_venv_move(tmp_path, launcher, entr
         ["/bin/bash", str(checkout / launcher), "grants/test"], env=env, check=True
     )
     assert trace.read_text().splitlines() == [entry, "grants/test"]
+
+
+def test_probe_reuses_header_ranges_across_clients():
+    from urllib.request import Request, urlopen
+
+    reads = []
+
+    class Response:
+        status_code = 206
+        headers = {"Content-Range": "bytes 0-262143/33554432"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def iter_content(self, chunk_size):
+            reads.append(chunk_size)
+            yield b"x" * chunk_size
+
+    class Session:
+        def get(self, url, **kwargs):
+            return Response()
+
+        def close(self):
+            pass
+
+    with patch("_play_tracks.requests.Session", return_value=Session()):
+        with probe_url(SimpleNamespace(url="https://example.invalid/video")) as url:
+            for _ in range(4):
+                with urlopen(
+                    Request(url, headers={"Range": "bytes=0-1023"})
+                ) as response:
+                    assert response.read() == b"x" * 1024
+    assert reads == [256 * 1024]
+
+
+def test_shared_presentations_are_probed_once_per_batch():
+    import time
+    from unittest.mock import Mock
+
+    import fetch_lecture_videos
+    from dsv_wrapper.models.play import TrackDownload
+
+    client = Mock()
+    client.get_transcript.return_value = []
+    client.get_presentation.return_value = SimpleNamespace(is_video_ready=True)
+    session = Mock()
+    downloads = {}
+    download = TrackDownload(
+        url="https://example.invalid/video.mp4",
+        expires_at=int(time.time()) + 3600,
+        source_name="slides",
+    )
+    with patch("fetch_lecture_videos.pick_track", return_value=download) as pick:
+        for job in ("first-course", "second-course"):
+            fetch_lecture_videos.stage(
+                session,
+                client,
+                {"job_id": job, "url": "https://play.dsv.su.se/presentation/shared"},
+                downloads,
+            )
+    pick.assert_called_once()
+    client.get_transcript.assert_called_once()
+    assert session.post.call_count == 2
+    assert (
+        session.post.call_args_list[0].args[0].endswith("/jobs/first-course/download")
+    )
+    assert (
+        session.post.call_args_list[1].args[0].endswith("/jobs/second-course/download")
+    )
+
+
+def test_readable_duplicate_slide_sources_do_not_retry_forever():
+    assert choose_source({"left": 445, "main": 449, "camera": 0}) == "main"
+    assert choose_source({"left": 445, "main": 445, "camera": 0}) == "left"
+
+
+def test_text_score_prefers_larger_slide_text():
+    def tsv(height):
+        return (
+            f"level\theight\ttext\tconf\n1\t720\t\t-1\n5\t{height}\tslides\t95\n"
+        ).encode()
+
+    assert text_score(tsv(30)) == 2 * text_score(tsv(15))

@@ -8,6 +8,7 @@ Bearer URLs never appear in subprocess arguments or diagnostics.
 import csv
 import io
 import json
+import re
 import statistics
 import subprocess
 import threading
@@ -20,71 +21,117 @@ from dsv_wrapper.parsers.play import enumerate_track_descriptors, resolve_track_
 PROBE_BYTES = 24 * 1024 * 1024
 
 
+BLOCK_BYTES = 256 * 1024
+
+
 @contextmanager
 def probe_url(download):
+    # ffprobe and each ffmpeg process reread the MP4's index. Cache aligned
+    # ranges across all samples so large moov atoms count only once against
+    # the 24 MiB network budget. Each upstream request is bounded as well.
     remaining = PROBE_BYTES
-    budget_lock = threading.Lock()
+    blocks = {}
+    total_bytes = None
+    stopped = False
+    lock = threading.Lock()
+    client = requests.Session()
+
+    def block_at(index):
+        nonlocal remaining, total_bytes
+        with lock:
+            if stopped:
+                raise ValueError("probe closed")
+            if index in blocks:
+                return blocks[index]
+            if remaining < BLOCK_BYTES:
+                raise ValueError("probe byte budget exhausted")
+            remaining -= BLOCK_BYTES
+            start = index * BLOCK_BYTES
+            end = start + BLOCK_BYTES - 1
+            headers = {"Range": f"bytes={start}-{end}", "Accept-Encoding": "identity"}
+            with client.get(
+                download.url,
+                headers=headers,
+                stream=True,
+                timeout=(10, 15),
+                allow_redirects=False,
+            ) as response:
+                span = re.fullmatch(
+                    r"bytes (\d+)-(\d+)/(\d+)",
+                    response.headers.get("Content-Range", ""),
+                )
+                if response.status_code != 206 or not span:
+                    raise ValueError("media host did not return a byte range")
+                first, last, size = map(int, span.groups())
+                if first != start or last != min(end, size - 1) or size <= last:
+                    raise ValueError("invalid media byte range")
+                if total_bytes is not None and total_bytes != size:
+                    raise ValueError("media changed during probe")
+                total_bytes = size
+                data = bytearray()
+                for chunk in response.iter_content(BLOCK_BYTES):
+                    if len(data) + len(chunk) > last - first + 1:
+                        raise ValueError("oversized media byte range")
+                    data.extend(chunk)
+                if len(data) != last - first + 1:
+                    raise ValueError("truncated media byte range")
+                blocks[index] = bytes(data)
+                return blocks[index]
 
     class Proxy(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
 
         def do_GET(self):
-            nonlocal remaining
-            if self.path != "/video" or remaining <= 0:
-                self.send_error(413)
-                return
             self.connection.settimeout(10)
-            headers = {
-                "Range": self.headers.get("Range", "bytes=0-"),
-                "Accept-Encoding": "identity",
-            }
+            span = re.fullmatch(
+                r"bytes=(\d+)-(\d*)", self.headers.get("Range", "bytes=0-")
+            )
+            if self.path != "/video" or not span:
+                self.send_error(400)
+                return
             try:
-                with requests.get(
-                    download.url,
-                    headers=headers,
-                    stream=True,
-                    timeout=(10, 15),
-                    allow_redirects=False,
-                ) as response:
-                    if response.status_code != 206:
-                        # No ranges means probing might transfer an entire video.
-                        self.send_error(502)
-                        return
-                    self.send_response(206)
-                    for name in (
-                        "Content-Length",
-                        "Content-Range",
-                        "Content-Type",
-                        "Accept-Ranges",
-                    ):
-                        if name in response.headers:
-                            self.send_header(name, response.headers[name])
-                    self.end_headers()
-                    chunks = response.iter_content(64 * 1024)
-                    while True:
-                        with budget_lock:
-                            if remaining < 64 * 1024:
-                                return
-                            # Reserve before reading so concurrent seeks cannot
-                            # exceed the network cap. Short reads count in full.
-                            remaining -= 64 * 1024
-                        chunk = next(chunks, None)
-                        if chunk is None:
-                            return
-                        self.wfile.write(chunk)
-            except (requests.RequestException, OSError):
+                start = int(span[1])
+                end = min(int(span[2]) if span[2] else total_bytes - 1, total_bytes - 1)
+                if start > end:
+                    self.send_error(416)
+                    return
+                # Check the initial block before sending a successful status.
+                block_at(start // BLOCK_BYTES)
+                self.send_response(206)
+                self.send_header("Content-Length", str(end - start + 1))
+                self.send_header("Content-Range", f"bytes {start}-{end}/{total_bytes}")
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+                while start <= end:
+                    data = block_at(start // BLOCK_BYTES)
+                    offset = start % BLOCK_BYTES
+                    data = data[
+                        offset : offset + min(len(data) - offset, end - start + 1)
+                    ]
+                    self.wfile.write(data)
+                    start += len(data)
+            except (requests.RequestException, OSError, ValueError):
+                # Closing a partial response makes ffmpeg fail safely; neither
+                # errors nor subprocess arguments contain the signed URL.
                 return
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Proxy)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    server = None
+    thread = None
     try:
+        block_at(0)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Proxy)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
         yield f"http://127.0.0.1:{server.server_port}/video"
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
+        stopped = True
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+        client.close()
 
 
 def run(*args, body=None):
@@ -103,10 +150,17 @@ def run(*args, body=None):
 
 
 def text_score(tsv):
-    words = csv.DictReader(io.StringIO(tsv.decode()), delimiter="\t")
+    rows = list(csv.DictReader(io.StringIO(tsv.decode()), delimiter="\t"))
+    image_height = next(
+        (float(w["height"]) for w in rows if w.get("level") == "1" and w.get("height")),
+        0,
+    )
+    # Prefer a full-screen slide over the same slide rendered smaller inside
+    # a composite: characters alone would give both streams the same score.
     return sum(
         len(w.get("text", "").strip())
-        for w in words
+        * (100 * float(w.get("height", 0)) / image_height if image_height else 1)
+        for w in rows
         if len(w.get("text", "").strip()) >= 3 and float(w.get("conf", -1)) >= 50
     )
 
@@ -162,11 +216,9 @@ def choose_source(scores):
     ranked = sorted(scores, key=scores.get, reverse=True)
     if len(ranked) == 1:
         return ranked[0]
-    best, second = ranked[:2]
-    if scores[best] < 20 or scores[best] <= scores[second] * 1.1:
-        raise ValueError(
-            "slide source ambiguous after frame probes; retry with fresh samples"
-        )
+    best = ranked[0]
+    if scores[best] < 20:
+        raise ValueError("no readable slide source found after frame probes")
     return best
 
 

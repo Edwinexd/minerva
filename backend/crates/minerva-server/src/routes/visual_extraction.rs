@@ -5,7 +5,7 @@
 //! Two kinds of caller:
 //!
 //! - **GitHub Actions** (service API key): asks for fetch slots, uploads a
-//!   lecture's video and timed cues into the bounded staging window, or
+//!   lecture's signed download URL and timed cues into the bounded window, or
 //!   releases a slot it could not fill.
 //! - **Slurm workers** (signed grants in the path, no other credential): ask
 //!   for their next item, download its source, upload the result or report
@@ -20,13 +20,11 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use chrono::{Duration, Utc};
-use futures::StreamExt;
 use minerva_app_core::visual_extraction::{self as ve, Grant, Scope};
 use minerva_db::queries::visual_extraction as queue;
 use minerva_pipeline::figures::{self, Cue, Timed};
 use qdrant_client::qdrant::{DeletePointsBuilder, PointsIdsList};
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 use uuid::Uuid;
@@ -35,9 +33,6 @@ use super::service::{authenticate_service, read_url_stub};
 use crate::error::AppError;
 use crate::state::AppState;
 
-/// A lecture video upload. Matches Apache's default `LimitRequestBody`
-/// (1 GiB) in front of the api; a three-hour 1080p lecture is about 470 MB.
-const MAX_VIDEO_BYTES: u64 = 1024 * 1024 * 1024;
 /// A result upload: OCR JSON plus slide frames and figure crops.
 const MAX_RESULT_BYTES: usize = 512 * 1024 * 1024;
 const MAX_FETCH_SLOTS: i64 = 50;
@@ -45,11 +40,7 @@ const MAX_FETCH_SLOTS: i64 = 50;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/fetch-slots", post(fetch_slots))
-        .route(
-            "/jobs/{job_id}/video",
-            put(upload_video).layer(DefaultBodyLimit::disable()),
-        )
-        .route("/jobs/{job_id}/staged", post(mark_staged))
+        .route("/jobs/{job_id}/download", post(offer_download))
         .route("/jobs/{job_id}/release", post(release_fetch))
         .route("/workers/{grant}/next", post(next_item))
         .route("/workers/{grant}/exit", post(worker_exit))
@@ -59,13 +50,6 @@ pub fn router() -> Router<AppState> {
             put(upload_result).layer(DefaultBodyLimit::max(MAX_RESULT_BYTES)),
         )
         .route("/fail/{grant}", post(report_failure))
-}
-
-fn staged_video_path(state: &AppState, job_id: Uuid) -> String {
-    format!(
-        "{}/{job_id}.mp4",
-        state.config.visual_extraction.staging_path
-    )
 }
 
 fn verify_grant(state: &AppState, token: &str, scope: Scope) -> Result<Grant, AppError> {
@@ -147,109 +131,41 @@ async fn fetch_slots(
     Ok(Json(slots))
 }
 
-/// Stream a lecture's video into staging. Written under a temporary name
-/// and renamed only once complete, so a dropped upload never looks staged.
-async fn upload_video(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(job_id): Path<Uuid>,
-    body: Body,
-) -> Result<Json<serde_json::Value>, AppError> {
-    authenticate_service(&state, &headers)?;
-    let job = queue::find_job(&state.db, job_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if job.status != "fetching" {
-        return Err(AppError::bad_request("visual_extraction.not_fetching"));
-    }
-
-    let staging = &state.config.visual_extraction.staging_path;
-    tokio::fs::create_dir_all(staging)
-        .await
-        .map_err(|e| AppError::Internal(format!("staging dir: {e}")))?;
-    let final_path = staged_video_path(&state, job_id);
-    let partial_path = format!("{final_path}.part");
-    let mut file = tokio::fs::File::create(&partial_path)
-        .await
-        .map_err(|e| AppError::Internal(format!("staging write: {e}")))?;
-
-    let mut written: u64 = 0;
-    let mut stream = body.into_data_stream();
-    while let Some(chunk) = stream.next().await {
-        let outcome = match chunk {
-            Ok(bytes) => {
-                written += bytes.len() as u64;
-                if written > MAX_VIDEO_BYTES {
-                    Err(AppError::bad_request("visual_extraction.video_too_large"))
-                } else {
-                    file.write_all(&bytes)
-                        .await
-                        .map_err(|e| AppError::Internal(format!("staging write: {e}")))
-                }
-            }
-            Err(e) => Err(AppError::Internal(format!("upload interrupted: {e}"))),
-        };
-        if let Err(e) = outcome {
-            drop(file);
-            let _ = tokio::fs::remove_file(&partial_path).await;
-            return Err(e);
-        }
-    }
-    file.flush()
-        .await
-        .map_err(|e| AppError::Internal(format!("staging write: {e}")))?;
-    drop(file);
-    tokio::fs::rename(&partial_path, &final_path)
-        .await
-        .map_err(|e| AppError::Internal(format!("staging rename: {e}")))?;
-    Ok(Json(serde_json::json!({ "bytes": written })))
-}
-
 #[derive(Deserialize)]
-struct StagedBody {
+struct DownloadBody {
+    url: String,
+    download_deadline: chrono::DateTime<Utc>,
     cues: Vec<Cue>,
 }
 
-/// Finish staging: record the uploaded video's real size and the timed
-/// cues, and make the lecture leasable.
-async fn mark_staged(
+/// Store the bearer URL and deadline; the scheduler downloads directly from
+/// Play in expiry order. Only small JSON crosses GitHub Actions.
+async fn offer_download(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(job_id): Path<Uuid>,
-    Json(body): Json<StagedBody>,
+    Json(body): Json<DownloadBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     authenticate_service(&state, &headers)?;
-    let path = staged_video_path(&state, job_id);
-    let bytes = tokio::fs::metadata(&path)
-        .await
-        .map_err(|_| AppError::bad_request("visual_extraction.video_missing"))?
-        .len() as i64;
-    let cues: Vec<serde_json::Value> = body
-        .cues
-        .iter()
-        .map(|c| serde_json::json!({ "start": c.start, "end": c.end, "text": c.text }))
-        .collect();
-    let staged = queue::mark_staged(
+    ve::validate_download_url(&body.url, body.download_deadline)
+        .map_err(|_| AppError::bad_request("visual_extraction.invalid_download"))?;
+    if !queue::offer_download(
         &state.db,
         job_id,
-        &format!("{job_id}.mp4"),
-        bytes,
-        &serde_json::Value::Array(cues),
+        &body.url,
+        body.download_deadline,
+        &serde_json::Value::Array(
+            body.cues
+                .iter()
+                .map(|c| serde_json::json!({"start": c.start, "end": c.end, "text": c.text}))
+                .collect(),
+        ),
     )
-    .await?;
-    if !staged {
-        // A repeated call for a job that is already staged must keep its
-        // video; only an upload no job points at (its reservation expired
-        // or was released mid-upload) is litter.
-        let job = queue::find_job(&state.db, job_id).await?;
-        if job.and_then(|j| j.staged_path).is_none() {
-            let _ = tokio::fs::remove_file(&path).await;
-        }
+    .await?
+    {
         return Err(AppError::bad_request("visual_extraction.not_fetching"));
     }
-    Ok(Json(
-        serde_json::json!({ "status": "ready", "bytes": bytes }),
-    ))
+    Ok(Json(serde_json::json!({"status": "queued"})))
 }
 
 #[derive(Deserialize)]
@@ -268,13 +184,6 @@ async fn release_fetch(
 ) -> Result<Json<serde_json::Value>, AppError> {
     authenticate_service(&state, &headers)?;
     let released = queue::release_fetch(&state.db, job_id, &body.error, body.retry).await?;
-    // Only a reservation that was still fetching owns these files; a late
-    // release for a job that has since been staged must not touch its video.
-    if released {
-        let path = staged_video_path(&state, job_id);
-        let _ = tokio::fs::remove_file(format!("{path}.part")).await;
-        let _ = tokio::fs::remove_file(&path).await;
-    }
     Ok(Json(serde_json::json!({ "released": released })))
 }
 

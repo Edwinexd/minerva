@@ -15,27 +15,57 @@ SSH; the job itself holds nothing but one signed URL.
 | `extract.py` | Model-independent half: slide detection, PDF rendering, parsing grounded OCR output, page numbers, captions, same-slide merging, figure crops. |
 | `ocr_vllm.py` | Unlimited-OCR on vLLM, with the two workarounds vLLM 0.31 needs (see its comments). |
 | `olympus/slide-ocr-gate` | What the scheduler runs over SSH: `submit`, `status`, `cancel`. |
-| `olympus/deploy.sh` | What the deploy workflow runs over SSH to put a new version in place. |
+| `olympus/ssh-gate` | Trusted forced command for the scheduler/deploy keys, installed outside the worker tree. |
 | `slurm-worker.sh`, `run-worker.sh` | What the gate submits. |
 | `ensure-venv.sh` | Builds `venv/worker-<requirements hash>/` on the first worker that needs it. |
 | `fetch.py`, `submit.sh`, `slide_ocr.py`, `slurm-run.sh`, `run-job.sh`, `viewer.py`, `bench_vllm.py` | Local experiments on one lecture; see below. |
 
-## Olympus setup (service account)
+## Rollout order
 
-An ordinary user, confined by Slurm (low priority). One SSH key, shared by
-`minerva-scheduler` (submitting and watching workers) and the
-`deploy-slide-ocr` GitHub workflow (shipping this directory). Once:
+Publish the `dsv-wrapper` change exposing `resolve_track_download` /
+`TrackDownload` before enabling the updated Actions workflow (it installs
+that repository from GitHub). Apply the additive Minerva migration and
+backend first, then enable the URL handoff workflow. Bootstrap the trusted
+SSH gate and restricted keys before running the new deploy workflow.
 
-1. Put the public key in the account's `~/.ssh/authorized_keys`.
-2. Only if the account's Slurm account or partition differ from
-   `slurm-staff` / `gpu`: put them in `~/minerva-slide-ocr/olympus/site.env`
-   (`SLURM_ACCOUNT=...`, `SLURM_PARTITION=...`).
+## Olympus setup (existing SU account)
 
-Then set `slurm_ssh_target`, `slurm_ssh_private_key_path` and
-`slurm_known_hosts` in Terraform and apply: that fills the scheduler's
-`minerva-slurm` k8s secret and the `prod` environment secrets of the deploy
-workflow. Run the workflow once (`gh workflow run deploy-slide-ocr.yml`);
-after that every push to `master` touching `gpu/slide-ocr/` deploys itself.
+Use your existing SU account (`edsu8469@olympus`), with new keys dedicated
+only to Minerva. Keep your normal personal login key separate. The scheduler
+key permits only `submit`, `status`, and `cancel`; cancellation and status
+are limited to that user's `minerva-ve-*` Slurm jobs. It cannot open a shell,
+forward ports, use SFTP/scp, or deploy code. A second forced-command key is
+for the code deployment workflow, because uploading executable worker code
+necessarily gives more authority than scheduling it.
+
+One-time bootstrap, through your normal SU login:
+
+1. Install `olympus/ssh-gate` at `~/.local/lib/minerva/ssh-gate` (mode 700).
+   It deliberately lives outside the deployable worker directory. Create
+   `~/minerva-slide-ocr/olympus/` and install `olympus/slide-ocr-gate` there.
+2. Add the dedicated public keys to `~/.ssh/authorized_keys`, replacing
+   `<home>` with the account's absolute home directory:
+
+   ```text
+   restrict,command="<home>/.local/lib/minerva/ssh-gate scheduler" ssh-ed25519 <scheduler-public-key>
+   restrict,command="<home>/.local/lib/minerva/ssh-gate deploy" ssh-ed25519 <deploy-public-key>
+   ```
+
+3. If your Slurm account or partition differs from `slurm-staff` / `gpu`,
+   put `SLURM_ACCOUNT=...` / `SLURM_PARTITION=...` in
+   `~/minerva-slide-ocr/olympus/site.env`. Deployments preserve this file.
+4. Set Terraform's `slurm_ssh_target` to your SU `user@host`,
+   `slurm_ssh_private_key_path` to the **scheduler** key,
+   `slurm_deploy_ssh_private_key_path` to the **deploy** key, and
+   `slurm_known_hosts` to Olympus's verified host key. Apply Terraform:
+   the scheduler gets `minerva-slurm`, and the workflow gets
+   `SLURM_DEPLOY_SSH_PRIVATE_KEY`. Run `deploy-slide-ocr.yml` once.
+
+The deploy gate accepts only `minerva-slide-ocr-deploy <40-character sha>`
+and a bounded tar archive containing the explicit production file list.
+It rejects links, unexpected paths and files; it cannot replace the trusted
+SSH gate, personal dotfiles, worker state, or `site.env`. Later pushes to
+`master` touching `gpu/slide-ocr/` deploy through this same command.
 
 Nothing else is installed by hand. The first worker builds its venv (about
 5 minutes, 8.6 GB) and downloads the model weights (6.3 GB); a deploy that

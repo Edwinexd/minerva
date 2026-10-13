@@ -57,7 +57,7 @@ spec:
             # an Olympus worker), on the same hostPath as the documents.
             - name: MINERVA_VISUAL_STAGING_PATH
               value: "/data/visual-staging"
-            # Olympus service account for Slurm workers. The secret is
+            # existing SU account on Olympus for Slurm workers. The secret is
             # optional: without it (or with an empty target) the Slurm part
             # of the visual extraction loop stays off.
             - name: MINERVA_SLURM_SSH_TARGET
@@ -102,7 +102,7 @@ spec:
             # "Service topology".
             - name: app-data
               mountPath: /data
-            # Olympus service-account key and Olympus's pinned host key
+            # restricted Olympus scheduler key and Olympus's pinned host key
             # (MINERVA_SLURM_SSH_KEY / _KNOWN_HOSTS defaults).
             - name: slurm-ssh
               mountPath: /etc/minerva/slurm

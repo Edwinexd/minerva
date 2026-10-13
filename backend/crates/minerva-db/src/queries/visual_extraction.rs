@@ -5,7 +5,8 @@
 //!
 //! - `needs_source` -> `fetching`: GitHub Actions reserves a staging slot
 //!   ([`reserve_fetch_slots`]), only for Play lectures.
-//! - `fetching` -> `ready`: the staged video and cues arrive ([`mark_staged`]).
+//! - `fetching` -> `ready`: Actions offers a URL/deadline/cues; the scheduler
+//!   downloads it and commits its claim ([`finish_download`]).
 //!   PDFs are enqueued straight into `ready`.
 //! - `ready` -> `leased`: a worker takes it ([`lease_next`]).
 //! - `leased` -> `done` / back to `ready` / `failed`: the result is accepted
@@ -163,32 +164,6 @@ pub async fn reserve_fetch_slots(
     Ok(rows)
 }
 
-/// Record a staged lecture video and its cues; the job becomes leasable.
-pub async fn mark_staged(
-    db: &PgPool,
-    job_id: Uuid,
-    staged_path: &str,
-    staged_bytes: i64,
-    cues: &serde_json::Value,
-) -> Result<bool, sqlx::Error> {
-    let done = sqlx::query!(
-        r#"
-        UPDATE visual_extraction_jobs
-        SET status = 'ready', staged_path = $2, staged_bytes = $3, cues = $4,
-            error_msg = NULL, updated_at = NOW()
-        WHERE id = $1 AND status = 'fetching'
-        "#,
-        job_id,
-        staged_path,
-        staged_bytes,
-        cues,
-    )
-    .execute(db)
-    .await?
-    .rows_affected();
-    Ok(done > 0)
-}
-
 /// GitHub Actions could not get this lecture (no video, no transcript yet,
 /// Play error). `retry` puts it back for a later run; otherwise it is
 /// parked as `unavailable`.
@@ -203,8 +178,9 @@ pub async fn release_fetch(
         r#"
         UPDATE visual_extraction_jobs
         SET status = $2, staged_bytes = NULL, fetch_reserved_at = NULL,
+            download_url = NULL, download_deadline = NULL, download_started_at = NULL,
             error_msg = $3, updated_at = NOW()
-        WHERE id = $1 AND status = 'fetching'
+        WHERE id = $1 AND status = 'fetching' AND download_started_at IS NULL
         "#,
         job_id,
         status,
@@ -221,9 +197,14 @@ pub async fn release_stale_fetches(db: &PgPool, older_than_secs: i64) -> Result<
     Ok(sqlx::query!(
         r#"
         UPDATE visual_extraction_jobs
-        SET status = 'needs_source', staged_bytes = NULL, fetch_reserved_at = NULL, updated_at = NOW()
+        SET status = 'needs_source', staged_bytes = NULL, fetch_reserved_at = NULL,
+            download_url = NULL, download_deadline = NULL, download_started_at = NULL,
+            updated_at = NOW()
         WHERE status = 'fetching'
-          AND fetch_reserved_at < NOW() - make_interval(secs => $1)
+          AND ((download_started_at IS NULL AND (
+                fetch_reserved_at < NOW() - make_interval(secs => $1)
+                OR download_deadline <= NOW()))
+              OR download_started_at < NOW() - INTERVAL '35 minutes')
         "#,
         older_than_secs as f64,
     )
@@ -848,4 +829,88 @@ pub async fn course_has_indexed_figures(db: &PgPool, course_id: Uuid) -> Result<
     )
     .fetch_one(db)
     .await
+}
+
+/// Small authenticated handoff from Actions. Do not expose bearer URLs in logs.
+pub async fn offer_download(
+    db: &PgPool,
+    id: Uuid,
+    url: &str,
+    deadline: DateTime<Utc>,
+    cues: &serde_json::Value,
+) -> Result<bool, sqlx::Error> {
+    Ok(sqlx::query!(
+        r#"
+        UPDATE visual_extraction_jobs
+        SET download_url = $2, download_deadline = $3, cues = $4, updated_at = NOW()
+        WHERE id = $1 AND status = 'fetching' AND download_url IS NULL
+          AND download_started_at IS NULL AND $3 > NOW()
+        "#,
+        id,
+        url,
+        deadline,
+        cues
+    )
+    .execute(db)
+    .await?
+    .rows_affected()
+        == 1)
+}
+
+pub struct Download {
+    pub id: Uuid,
+    pub url: String,
+    pub deadline: DateTime<Utc>,
+    pub started_at: DateTime<Utc>,
+}
+
+/// Atomically claim the earliest expiry; multiple scheduler instances cannot
+/// download the same reservation. Crashed claims are recovered by queue upkeep.
+pub async fn claim_download(db: &PgPool) -> Result<Option<Download>, sqlx::Error> {
+    sqlx::query_as!(
+        Download,
+        r#"
+        UPDATE visual_extraction_jobs
+        SET download_started_at = NOW(), updated_at = NOW()
+        WHERE id = (
+            SELECT id FROM visual_extraction_jobs
+            WHERE status = 'fetching' AND download_url IS NOT NULL
+                AND download_deadline > NOW() AND download_started_at IS NULL
+            ORDER BY download_deadline, id LIMIT 1 FOR UPDATE SKIP LOCKED
+        )
+        RETURNING id, download_url AS "url!", download_deadline AS "deadline!",
+            download_started_at AS "started_at!"
+        "#
+    )
+    .fetch_optional(db)
+    .await
+}
+
+/// Only the current claim can publish or fail. A stale downloader cannot
+/// overwrite a refreshed URL or a replacement downloader's state.
+pub async fn finish_download(
+    db: &PgPool,
+    claim: &Download,
+    path: Option<&str>,
+    bytes: i64,
+) -> Result<bool, sqlx::Error> {
+    Ok(sqlx::query!(r#"
+        UPDATE visual_extraction_jobs
+        SET status = CASE WHEN $3::TEXT IS NULL THEN 'needs_source' ELSE 'ready' END,
+            staged_path = $3, staged_bytes = CASE WHEN $3::TEXT IS NULL THEN NULL ELSE $4::BIGINT END,
+            error_msg = CASE WHEN $3::TEXT IS NULL THEN 'Play download failed or expired' ELSE NULL END,
+            download_url = NULL, download_deadline = NULL, download_started_at = NULL,
+            fetch_reserved_at = NULL, updated_at = NOW()
+        WHERE id = $1 AND status = 'fetching' AND download_started_at = $2
+        "#, claim.id, claim.started_at, path, bytes).execute(db).await?.rows_affected() == 1)
+}
+
+/// Used to remove abandoned staging files after a downloader process dies.
+pub async fn retained_staging_paths(db: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar!(r#"
+        SELECT staged_path AS "path!" FROM visual_extraction_jobs WHERE staged_path IS NOT NULL
+        UNION ALL
+        SELECT id::TEXT || '.' || (EXTRACT(EPOCH FROM download_started_at) * 1000000)::BIGINT::TEXT || '.mp4'
+        FROM visual_extraction_jobs WHERE download_started_at IS NOT NULL
+        "#).fetch_all(db).await
 }

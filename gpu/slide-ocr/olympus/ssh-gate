@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Trusted forced command installed OUTSIDE the deployable worker directory.
+
+authorized_keys uses restrict plus the absolute gate path and scheduler role.
+Use a separate deployment key with the same command and role `deploy`.
+Never eval SSH_ORIGINAL_COMMAND or allow an interactive shell/SFTP/scp.
+"""
+
+import gzip
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+from pathlib import Path
+
+ROOT = Path.home().resolve() / "minerva-slide-ocr"
+PREFIX = "minerva-slide-ocr/olympus/slide-ocr-gate"
+# Production code only; no dotfiles, state, site.env, trusted SSH gate or
+# arbitrary paths can be installed by a deployment archive.
+FILES = {
+    "worker.py",
+    "extract.py",
+    "ocr_vllm.py",
+    "ensure-venv.sh",
+    "run-worker.sh",
+    "slurm-worker.sh",
+    "requirements-worker.txt",
+    "requirements-common.txt",
+    "olympus/slide-ocr-gate",
+}
+MAX_ARCHIVE = 4 * 1024 * 1024
+
+
+def deploy(sha):
+    ROOT.mkdir(mode=0o700, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".deploy-", dir=ROOT) as temp:
+        archive = Path(temp) / "incoming.tgz"
+        with archive.open("wb") as output:
+            size = 0
+            while chunk := sys.stdin.buffer.read(64 * 1024):
+                size += len(chunk)
+                if size > MAX_ARCHIVE:
+                    raise ValueError("archive too large")
+                output.write(chunk)
+        # Bound decompression before tarfile parses members as well.
+        unpacked = Path(temp) / "incoming.tar"
+        with gzip.open(archive, "rb") as src, unpacked.open("wb") as out:
+            expanded = src.read(2 * MAX_ARCHIVE + 1)
+            if len(expanded) > 2 * MAX_ARCHIVE:
+                raise ValueError("expanded archive too large")
+            out.write(expanded)
+        with tarfile.open(unpacked, "r:") as bundle:
+            members = bundle.getmembers()
+            if len(members) != len(FILES) or {m.name for m in members} != FILES:
+                raise ValueError("archive must contain exactly the production files")
+            if any(not m.isfile() or m.size > MAX_ARCHIVE for m in members):
+                raise ValueError("archive must contain bounded regular files")
+            if sum(m.size for m in members) > MAX_ARCHIVE:
+                raise ValueError("expanded archive too large")
+            for member in members:
+                dest = ROOT / member.name
+                # Reject a symlink in the destination or any parent, too.
+                if any(
+                    p.is_symlink() for p in [dest, *dest.parents] if p != ROOT.parent
+                ):
+                    raise ValueError("symlink destination")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                staged = Path(temp) / member.name
+                staged.parent.mkdir(parents=True, exist_ok=True)
+                with bundle.extractfile(member) as src, staged.open("wb") as out:
+                    shutil.copyfileobj(src, out)
+                staged.chmod(
+                    0o700
+                    if member.name.endswith(".sh") or member.name.endswith("gate")
+                    else 0o600
+                )
+                staged.replace(dest)
+        (ROOT / "DEPLOYED").write_text(sha + "\n")
+    print(f"deployed {sha}")
+
+
+def dispatch(role, command):
+    if role == "deploy":
+        match = re.fullmatch(r"minerva-slide-ocr-deploy ([0-9a-f]{40})", command)
+        if not match:
+            raise ValueError("deployment command required")
+        deploy(match[1])
+        return
+    if role != "scheduler":
+        raise ValueError("unknown role")
+    match = re.fullmatch(
+        re.escape(PREFIX) + r" (submit|status|cancel) ([0-9a-f,-]+)", command
+    )
+    if not match:
+        raise ValueError("scheduler command required")
+    # The production gate validates each argument and enforces job ownership.
+    subprocess.run(
+        ["/bin/bash", str(ROOT / "olympus/slide-ocr-gate"), match[1], match[2]],
+        check=True,
+    )
+
+
+if __name__ == "__main__":
+    try:
+        if len(sys.argv) != 2:
+            raise ValueError("role required")
+        dispatch(sys.argv[1], os.environ.get("SSH_ORIGINAL_COMMAND", ""))
+    except (ValueError, OSError, tarfile.TarError, subprocess.SubprocessError):
+        print("restricted Minerva command rejected or failed", file=sys.stderr)
+        sys.exit(1)

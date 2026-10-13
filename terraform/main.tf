@@ -47,7 +47,7 @@ locals {
       OPENAI_API_KEY: "${var.openai_api_key}"
       MINERVA_SERVICE_API_KEY: "${var.minerva_service_api_key}"
     ---
-    # Olympus service account for the visual extraction scheduler loop.
+    # existing SU account on Olympus for the visual extraction scheduler loop.
     # Empty values leave the loop's Slurm part off.
     apiVersion: v1
     kind: Secret
@@ -94,20 +94,13 @@ resource "github_actions_environment_secret" "prod_ssh_private_key" {
   plaintext_value = var.ssh_private_key
 }
 
-# Olympus service account: the same key the scheduler uses (minerva-slurm
-# k8s secret), for the deploy-slide-ocr workflow.
+# Existing SU account on Olympus. The scheduler key stays in k8s;
+# GitHub Actions receives only the separately restricted deployment key.
 resource "github_actions_environment_secret" "prod_slurm_ssh_target" {
   repository      = data.github_repository.repo.name
   environment     = github_repository_environment.prod.environment
   secret_name     = "SLURM_SSH_TARGET"
   plaintext_value = var.slurm_ssh_target
-}
-
-resource "github_actions_environment_secret" "prod_slurm_ssh_private_key" {
-  repository      = data.github_repository.repo.name
-  environment     = github_repository_environment.prod.environment
-  secret_name     = "SLURM_SSH_PRIVATE_KEY"
-  plaintext_value = local.slurm_ssh_private_key
 }
 
 resource "github_actions_environment_secret" "prod_slurm_known_hosts" {
@@ -144,4 +137,12 @@ resource "github_actions_secret" "su_password" {
   repository      = data.github_repository.repo.name
   secret_name     = "SU_PASSWORD"
   plaintext_value = var.su_password
+}
+
+resource "github_actions_environment_secret" "slurm_deploy_ssh_private_key" {
+  count           = var.slurm_deploy_ssh_private_key_path != "" ? 1 : 0
+  repository      = data.github_repository.repo.name
+  environment     = github_repository_environment.prod.environment
+  secret_name     = "SLURM_DEPLOY_SSH_PRIVATE_KEY"
+  plaintext_value = file(pathexpand(var.slurm_deploy_ssh_private_key_path))
 }

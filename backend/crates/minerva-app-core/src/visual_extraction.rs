@@ -40,13 +40,13 @@ pub const MAX_ATTEMPTS: i32 = 3;
 /// 150-minute lecture or a 300-page PDF fits comfortably.
 pub const LEASE_SECS: i64 = 2 * 3600;
 /// Slurm wall time of one worker job, and how long it may wait queued on
-/// top of that before its grant expires. The service account runs at low
-/// priority, so a worker can sit in the queue for a long time.
+/// top of that before its grant expires. Slurm workers may remain queued
+/// for a long time before a GPU becomes available.
 pub const WORKER_WALL_SECS: i64 = 12 * 3600;
 pub const WORKER_QUEUE_GRACE_SECS: i64 = 3 * 24 * 3600;
-/// Size a fetch slot reserves until the real video size is known; a long
-/// 1080p lecture.
-pub const FETCH_ESTIMATE_BYTES: i64 = 400 * 1024 * 1024;
+/// Reserve the full download cap per slot until its real size is known,
+/// so several large lectures cannot oversubscribe the staging window.
+pub const FETCH_ESTIMATE_BYTES: i64 = 1024 * 1024 * 1024;
 /// A reserved slot whose upload never arrived is released after this.
 pub const FETCH_RESERVATION_SECS: i64 = 2 * 3600;
 /// Lifetime of a figure image URL handed out with a reply.
@@ -194,6 +194,7 @@ async fn maintain_queue(state: &AppState) -> Result<(), sqlx::Error> {
         tracing::info!("visual extraction: enqueued {created} new jobs");
     }
     queue::release_stale_fetches(&state.db, FETCH_RESERVATION_SECS).await?;
+    cleanup_download_files(state).await?;
     let terminal = queue::requeue_expired(&state.db, MAX_ATTEMPTS).await?;
     remove_staged(state, &terminal).await;
     queue::reenqueue_outdated(&state.db, PIPELINE_VERSION, REENQUEUE_PER_TICK).await?;
@@ -518,5 +519,194 @@ mod tests {
             verify(SECRET, &token, Scope::Worker),
             Err(GrantError::BadSignature)
         );
+    }
+}
+
+/// Only Play's media host may receive internal download requests. Decode exp
+/// as a scheduling hint; Play verifies the token's signature on the download.
+pub fn validate_download_url(url: &str, deadline: DateTime<Utc>) -> Result<(), &'static str> {
+    if url.len() > 8192 {
+        return Err("media URL too long");
+    }
+    let url = reqwest::Url::parse(url).map_err(|_| "invalid URL")?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("play-store-prod.dsv.su.se")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || !url.path().ends_with(".mp4")
+    {
+        return Err("invalid media host or path");
+    }
+    let tokens: Vec<_> = url.query_pairs().filter(|(k, _)| k == "token").collect();
+    if tokens.len() != 1 {
+        return Err("missing or duplicate token");
+    }
+    let parts: Vec<_> = tokens[0].1.split('.').collect();
+    if parts.len() != 3 {
+        return Err("invalid token");
+    }
+    let payload = URL_SAFE_NO_PAD
+        .decode(parts[1])
+        .map_err(|_| "invalid token")?;
+    let payload: serde_json::Value =
+        serde_json::from_slice(&payload).map_err(|_| "invalid token")?;
+    if payload["exp"].as_i64() != Some(deadline.timestamp()) || deadline <= Utc::now() {
+        return Err("invalid or expired deadline");
+    }
+    Ok(())
+}
+
+const MAX_VIDEO_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// A separate loop so a slow download never delays Slurm reconciliation.
+pub async fn download_tick(state: &AppState) -> Result<bool, sqlx::Error> {
+    let Some(claim) = queue::claim_download(&state.db).await? else {
+        return Ok(false);
+    };
+    // Unique per claim: a process returning after its reservation expired
+    // cannot overwrite a newer attempt's file.
+    let filename = format!("{}.{}.mp4", claim.id, claim.started_at.timestamp_micros());
+    let path = format!(
+        "{}/{}",
+        state.config.visual_extraction.staging_path, filename
+    );
+    let partial = format!("{path}.part");
+    let seconds = (claim.deadline - Utc::now()).num_seconds().clamp(0, 1800) as u64;
+    let result = tokio::time::timeout(std::time::Duration::from_secs(seconds), async {
+        use futures::StreamExt;
+        validate_download_url(&claim.url, claim.deadline).map_err(str::to_string)?;
+        tokio::fs::create_dir_all(&state.config.visual_extraction.staging_path)
+            .await
+            .map_err(|_| "staging directory")?;
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|_| "download client")?;
+        // Never format reqwest errors: their Display can contain the bearer URL.
+        let response = client
+            .get(&claim.url)
+            .send()
+            .await
+            .map_err(|_| "Play request")?;
+        if response.status() != reqwest::StatusCode::OK {
+            return Err("Play response".into());
+        }
+        if response
+            .content_length()
+            .is_some_and(|n| n > MAX_VIDEO_BYTES)
+        {
+            return Err("video too large".into());
+        }
+        let expected = response.content_length();
+        let mut stream = response.bytes_stream();
+        let mut file = tokio::fs::File::create(&partial)
+            .await
+            .map_err(|_| "staging write")?;
+        let mut bytes = 0u64;
+        let mut header = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|_| "Play stream")?;
+            bytes += chunk.len() as u64;
+            if bytes > MAX_VIDEO_BYTES {
+                return Err("video too large".into());
+            }
+            if header.len() < 12 {
+                header.extend(chunk.iter().take(12 - header.len()));
+            }
+            file.write_all(&chunk).await.map_err(|_| "staging write")?;
+        }
+        if header.get(4..8) != Some(b"ftyp") || expected.is_some_and(|n| n != bytes) {
+            return Err("invalid or truncated MP4".into());
+        }
+        file.flush().await.map_err(|_| "staging flush")?;
+        drop(file);
+        tokio::fs::rename(&partial, &path)
+            .await
+            .map_err(|_| "staging rename")?;
+        Ok::<u64, String>(bytes)
+    })
+    .await;
+    let bytes = match result {
+        Ok(Ok(bytes)) => Some(bytes),
+        _ => {
+            tracing::warn!(job_id = %claim.id, "Play download failed or expired");
+            None
+        }
+    };
+    let published = queue::finish_download(
+        &state.db,
+        &claim,
+        bytes.map(|_| filename.as_str()),
+        bytes.unwrap_or(0) as i64,
+    )
+    .await;
+    let _ = tokio::fs::remove_file(&partial).await;
+    if bytes.is_none() || !matches!(published, Ok(true)) {
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+    published?;
+    Ok(true)
+}
+
+async fn cleanup_download_files(state: &AppState) -> Result<(), sqlx::Error> {
+    let retained: std::collections::HashSet<_> = queue::retained_staging_paths(&state.db)
+        .await?
+        .into_iter()
+        .collect();
+    let Ok(mut files) = tokio::fs::read_dir(&state.config.visual_extraction.staging_path).await
+    else {
+        return Ok(());
+    };
+    while let Ok(Some(file)) = files.next_entry().await {
+        let name = file.file_name().to_string_lossy().into_owned();
+        let final_name = name.strip_suffix(".part").unwrap_or(&name);
+        // Only pipeline-owned MP4s, and only well past the 30-minute download
+        // timeout. Preserve every active claim and published source.
+        if !final_name.ends_with(".mp4") || retained.contains(final_name) {
+            continue;
+        }
+        if let Ok(metadata) = file.metadata().await {
+            if metadata.is_file()
+                && metadata
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age.as_secs() > 2400)
+            {
+                let _ = tokio::fs::remove_file(file.path()).await;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+
+    #[test]
+    fn download_host_and_token_deadline_must_match() {
+        let deadline = Utc::now() + chrono::Duration::minutes(10);
+        let payload = URL_SAFE_NO_PAD.encode(format!("{{\"exp\":{}}}", deadline.timestamp()));
+        let url =
+            format!("https://play-store-prod.dsv.su.se/media/video.mp4?token=e30.{payload}.sig");
+        assert!(validate_download_url(&url, deadline).is_ok());
+        assert!(validate_download_url(&url, deadline + chrono::Duration::seconds(1)).is_err());
+        for bad in [
+            url.replace("https://", "http://"),
+            url.replace("play-store-prod.dsv.su.se", "localhost"),
+            url.replace(
+                "play-store-prod.dsv.su.se",
+                "play-store-prod.dsv.su.se.evil.invalid",
+            ),
+            url.replace("https://", "https://user@"),
+            format!("{url}&token=another"),
+            format!("{url}#fragment"),
+        ] {
+            assert!(validate_download_url(&bad, deadline).is_err());
+        }
     }
 }

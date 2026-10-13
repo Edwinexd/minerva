@@ -1,5 +1,5 @@
 #!/bin/bash
-# What minerva-scheduler runs on the Olympus service account over SSH
+# What minerva-scheduler runs on the existing SU account over SSH
 # (`ssh <svc>@olympus minerva-slide-ocr/olympus/slide-ocr-gate <verb> <arg>`):
 #
 #   submit <worker-uuid>   reads the worker's signed URL on stdin, stores it
@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Slurm account and partition of this service account; site.env (not in
+# Slurm account and partition of this SU account; site.env (not in
 # git) can override them, e.g. SLURM_ACCOUNT=minerva.
 SLURM_ACCOUNT=slurm-staff
 SLURM_PARTITION=gpu
@@ -29,6 +29,24 @@ fi
 verb=$1
 arg=$2
 
+# scancel on a personal account must never cancel unrelated SU work.
+check_minerva_jobs() {
+    local record owner name job
+    local current_user
+    current_user=$(id -un)
+    for job in ${arg//,/ }; do
+        record=$(sacct -j "$job" -X -n -P -o User%64,JobName%64 | head -n 1)
+        if [ -z "$record" ] && [ "$verb" = status ]; then
+            continue
+        fi
+        IFS='|' read -r owner name _ <<< "$record"
+        if [ "$owner" != "$current_user" ] || ! [[ "$name" =~ ^minerva-ve-[0-9a-f]{8}$ ]]; then
+            echo "not a Minerva worker owned by this account" >&2
+            exit 2
+        fi
+    done
+}
+
 if [ "$verb" = submit ]; then
     if ! [[ "$arg" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
         echo "submit needs a worker uuid" >&2
@@ -37,7 +55,7 @@ if [ "$verb" = submit ]; then
     umask 077
     mkdir -p grants logs
     head -c 4096 > "grants/$arg"
-    if ! grep -qE '^https://[^[:space:]]+/workers/[A-Za-z0-9_.-]+$' "grants/$arg"; then
+    if ! grep -qE '^https://minerva\.dsv\.su\.se/api/service/visual-extraction/workers/[A-Za-z0-9_.-]+$' "grants/$arg"; then
         rm -f "grants/$arg"
         echo "stdin is not a worker URL" >&2
         exit 2
@@ -52,12 +70,14 @@ elif [ "$verb" = status ]; then
         echo "status needs job ids" >&2
         exit 2
     fi
+    check_minerva_jobs
     sacct -j "$arg" -X -n -P -o JobID,State
 elif [ "$verb" = cancel ]; then
     if ! [[ "$arg" =~ ^[0-9]+$ ]]; then
         echo "cancel needs a job id" >&2
         exit 2
     fi
+    check_minerva_jobs
     scancel "$arg"
 else
     echo "unknown command" >&2

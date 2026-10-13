@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET download_url = $2, download_deadline = $3, cues = $4, updated_at = NOW()\n        WHERE id = $1 AND status = 'fetching' AND download_url IS NULL\n          AND download_started_at IS NULL AND $3 > NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "40f3d5a6c6e79821a99f03d18949a21d2c37d839a842f25071916a2c7ee52102"
+}

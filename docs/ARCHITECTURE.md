@@ -127,10 +127,10 @@ Responsibilities and credentials:
 
 | Actor | Holds | Does |
 |---|---|---|
-| GitHub Actions `visual-extraction.yml` (every 20 min) | SU login, `MINERVA_SERVICE_API_KEY` | Play to Minerva (`scripts/fetch_lecture_videos.py`): downloads a lecture's slide track and timed VTT cues, uploads both. Only for slots Minerva grants. |
-| `minerva-scheduler` loop (`minerva_app_core::visual_extraction::tick`, every minute) | Olympus service-account SSH key (secret `minerva-slurm`) | Enqueues jobs, submits and monitors Slurm workers over SSH (`sbatch`, `sacct`, `scancel` through `olympus/slide-ocr-gate`), requeues work from dead workers, pushes figure vectors to Qdrant, exports `visual_extraction_*` metrics. |
-| `minerva-app` routes (`/api/service/visual-extraction/...`) | `MINERVA_HMAC_SECRET` | Fetch slots, staged uploads, worker work queue, presigned source download and result upload, ingest. |
-| GitHub Actions `deploy-slide-ocr.yml` (push to `master` touching `gpu/slide-ocr/`) | The same Olympus key, via `ci@minerva` | Ships the worker code to the service account (`olympus/deploy.sh`). |
+| GitHub Actions `visual-extraction.yml` (every 20 min) | SU login, `MINERVA_SERVICE_API_KEY` | Play to Minerva (`scripts/fetch_lecture_videos.py`): probes small frame samples to guess the slide source, sends only its signed URL, JWT expiry as `download_deadline`, and timed VTT cues. Only for slots Minerva grants. |
+| `minerva-scheduler` loop (`minerva_app_core::visual_extraction::tick`, every minute) | Restricted scheduler SSH key for the existing SU account (secret `minerva-slurm`) | Enqueues jobs, submits and monitors Slurm workers over SSH (`sbatch`, `sacct`, `scancel` through `olympus/slide-ocr-gate`), requeues work from dead workers, pushes figure vectors to Qdrant, exports `visual_extraction_*` metrics. |
+| `minerva-app` routes (`/api/service/visual-extraction/...`) | `MINERVA_HMAC_SECRET` | Fetch slots, URL/deadline handoff, worker work queue, presigned source download and result upload, ingest. |
+| GitHub Actions `deploy-slide-ocr.yml` (push to `master` touching `gpu/slide-ocr/`) | Separate restricted deploy key for the same SU account, via `ci@minerva` | Streams the worker code to the forced-command deployment gate (`olympus/ssh-gate`). |
 | Slurm worker job (`gpu/slide-ocr/worker.py`, at most 12 h) | One worker-scoped signed URL valid for the job's lifetime | Pulls lectures/PDFs one at a time, detects slides, OCRs with Unlimited-OCR on vLLM, crops figures and embeds them with CLIP ViT-B/32 (FastEmbed), uploads the result. No long-lived secrets and no state. |
 
 Flow and backpressure:
@@ -139,17 +139,32 @@ Flow and backpressure:
   per Play `.url` parent (`play_lecture`) and per ingested PDF (`pdf`),
   enqueued by the scheduler for new and existing documents alike. A `pdf`
   is leasable at once (its bytes are already on `/data0`); a
-  `play_lecture` waits for GitHub Actions to stage its video.
+  `play_lecture` waits for Actions to authorize a URL and for Minerva to download it directly from Play.
 - **Staging takes the free disk.** Minerva grants fetch slots while the
   filesystem under `/data/visual-staging` keeps at least
   `MINERVA_VISUAL_STAGING_MIN_FREE_BYTES` (default 10 GiB) free, counting
-  slots whose upload has not arrived yet. A staged video is deleted as soon
+  slots whose download has not finished yet (each reserves the full 1 GiB download cap). A staged video is deleted as soon
   as its result is accepted, so the window shrinks back as workers drain
   it; a backlog beyond that costs database rows, not disk.
+- **Download deadlines are database state.** `download_url`,
+  `download_deadline` (TIMESTAMPTZ from the Play JWT's `exp`), and
+  `download_started_at` live on `visual_extraction_jobs`. An independent
+  scheduler loop atomically claims pending downloads with
+  `ORDER BY download_deadline, id`, earliest expiry first. It streams from
+  the pinned Play media host without redirects, enforces the expiry and a
+  30-minute/1-GiB cap, validates MP4 bytes, and only then makes the job
+  `ready`. Expired URLs and crashed downloads return to `needs_source` for
+  fresh authorization; stale claims cannot publish over newer claims.
+  Bearer URLs are removed after completion/failure and never logged.
+- **Source selection is a guess from pixels.** Play offers no slide-role
+  metadata. Actions samples frames at 20%, 50%, and 80% of each source,
+  compares the median amount of confidently recognized text, and selects
+  1080p of the winning source. Each source's entire probe (including MP4
+  headers/tail reads) is capped at 24 MiB. Audio flags are ignored; tied,
+  blank or failed probes retry rather than silently selecting the camera.
 - **Workers pull, one item at a time.** The scheduler keeps up to
   `MINERVA_SLURM_MAX_WORKERS` (default 4) submitted while leasable work
-  exists, and Slurm's priorities decide when they run: the service account
-  is low priority, a queued worker holds no work, and its grant allows
+  exists, and the SU account's Slurm priorities decide when they run: a queued worker holds no work, and its grant allows
   three days of queueing on top of the 12-hour wall time. A worker asks `next`, gets the item's presigned source GET
   and result PUT, processes it, and exits when the queue is empty or its
   wall time is close. Olympus holds one source file per worker at a time.

@@ -1,6 +1,6 @@
 name: Visual Extraction Fetch
 
-# Stages Play lecture videos into Minerva's bounded staging window for the
+# Authorizes direct Play downloads into Minerva's bounded staging window for the
 # slide OCR workers on Olympus (see "Visual extraction pipeline" in
 # docs/ARCHITECTURE.md). Minerva grants only as many slots as fit, so a
 # frequent schedule just keeps the window topped up.
@@ -25,9 +25,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install requests git+https://github.com/Edwinexd/dsv-wrapper.git
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg tesseract-ocr
+          pip install requests git+https://github.com/Edwinexd/dsv-wrapper.git@d8d9f44e9730d5a4055018efd5a45846b3e21523
 
-      - name: Stage lecture videos
+      - name: Authorize internal lecture downloads
         env:
           MINERVA_API_URL: https://minerva.dsv.su.se
           MINERVA_SERVICE_API_KEY: ${{ secrets.MINERVA_SERVICE_API_KEY }}

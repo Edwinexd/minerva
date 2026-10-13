@@ -448,16 +448,17 @@ design is "Visual extraction pipeline" in `docs/ARCHITECTURE.md`, the worker
 and Olympus setup in `gpu/slide-ocr/README.md`.
 
 - **Who does what.** GitHub Actions (`visual-extraction.yml`,
-  `scripts/fetch_lecture_videos.py`) stages Play videos into a bounded window
-  on `/data0`; `minerva-scheduler` (`visual_extraction::tick`) enqueues jobs,
+  `scripts/fetch_lecture_videos.py`) sends Play signed URLs, JWT expiry
+  deadlines and cues. The scheduler downloads directly into a bounded window
+  on `/data0` in deadline order. Its `visual_extraction::tick` enqueues jobs,
   submits and monitors Slurm workers over SSH and indexes figures; workers
   pull one item at a time through presigned URLs and upload results to
   `/api/service/visual-extraction/...`.
 - **Credentials.** SU credentials stay in GitHub Actions (and the
   operator's machine for local experiments); never put them on Olympus.
-  The Olympus service account (an ordinary user, confined by Slurm) is
-  reached with one key, held in the `minerva-slurm` k8s secret and the
-  `prod` GitHub environment.
+  The existing SU account on Olympus is reached with a dedicated
+  forced-command scheduler key held only in the `minerva-slurm` k8s secret.
+  The `prod` GitHub environment holds a separate forced-command deploy key.
   Workers get nothing but grants signed with `MINERVA_HMAC_SECRET`
   (`minerva_app_core::visual_extraction`), scoped to one worker, one job
   attempt, or one figure image.
@@ -482,8 +483,8 @@ and Olympus setup in `gpu/slide-ocr/README.md`.
   but deliberately not in `VALID_LOCAL_MODELS`.
 - **Deploys.** Minerva's side ships with the normal pipeline. The worker
   code ships with `deploy-slide-ocr.yml` on every `master` push touching
-  `gpu/slide-ocr/`: a tarball unpacked by `olympus/deploy.sh` (ProxyJump
-  via `ci@minerva`), same key and account as the scheduler. Workers build
+  `gpu/slide-ocr/`: a tarball validated and installed by `olympus/ssh-gate` (ProxyJump
+  via `ci@minerva`), same SU account, with a separate forced-command deployment key. Workers build
   their venv on first use, named by the requirements hash, so nothing on
   Olympus is installed by hand beyond putting the key in the account's
   `authorized_keys`.

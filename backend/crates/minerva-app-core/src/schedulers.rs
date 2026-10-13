@@ -83,6 +83,20 @@ pub fn start_scheduler_loops(state: AppState) {
         });
     }
 
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            loop {
+                match crate::visual_extraction::download_tick(&state).await {
+                    Ok(true) => continue,
+                    Err(error) => tracing::warn!(%error, "visual download queue"),
+                    Ok(false) => {}
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        });
+    }
+
     // Canvas auto-sync: periodic re-sync for connections with auto_sync=true
     // whose last_synced_at is older than the configured interval. Runs
     // sequentially across due connections so we don't stampede Canvas.

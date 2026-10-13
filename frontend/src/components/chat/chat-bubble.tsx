@@ -18,6 +18,7 @@ import Markdown, { defaultUrlTransform } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { ClampedText } from "@/components/clamped-text"
+import type { ReplyFigure } from "@/lib/types"
 
 /**
  * Citation markers the writeup phase emits inline. The model is
@@ -118,6 +119,34 @@ function parseChunk(
 const CITATION_HREF_PREFIX = "minerva-cite:"
 
 /**
+ * Figure markers the model writes to place a figure inside its reply:
+ * `[Figure N]`, or `[Figur N]` when it answers in Swedish. N is the
+ * figure's 1-based position in the message's `figures_used`.
+ */
+const FIGURE_MARKER_RE = /\[(?:Figure|Figur)\s+(\d+)\]/gi
+const FIGURE_SRC_PREFIX = "minerva-figure:"
+
+/**
+ * Turn each figure marker into a standalone markdown image with the
+ * `minerva-figure:N` scheme. The surrounding blank lines make it a
+ * paragraph of its own, which the `p` renderer then replaces with the
+ * figure (a `<figure>` may not sit inside a `<p>`).
+ */
+function rewriteFigureMarkers(content: string): string {
+  return content.replace(FIGURE_MARKER_RE, (_m, n) => `\n\n![](${FIGURE_SRC_PREFIX}${n})\n\n`)
+}
+
+/** 1-based figure numbers the reply placed inline. */
+function placedFigureNumbers(content: string): Set<number> {
+  const placed = new Set<number>()
+  for (const m of content.matchAll(FIGURE_MARKER_RE)) {
+    const n = parseInt(m[1], 10)
+    if (Number.isFinite(n)) placed.add(n)
+  }
+  return placed
+}
+
+/**
  * Rewrite each `[#N]` in the writeup into a markdown link that the
  * custom `<a>` renderer in `MarkdownContent` will intercept.
  * Consecutive markers `[#1][#3]` get a thin separator inserted so
@@ -179,6 +208,7 @@ export interface ChatBubbleMessage {
   role: "user" | "assistant"
   content: string
   chunks_used: string[] | null
+  figures_used?: ReplyFigure[] | null
   tokens_prompt?: number | null
   tokens_completion?: number | null
   /**
@@ -231,11 +261,61 @@ export interface ChatBubbleLabels {
   }
 }
 
+/**
+ * Figures from the course's slides and PDFs that match the question,
+ * shown under the reply. Each opens full size in a new tab.
+ */
+function ReplyFigures({ figures }: { figures: ReplyFigure[] }) {
+  const { t } = useTranslation("common")
+  return (
+    <section aria-label={t("replyFigures.heading")} className="mt-3 border-t pt-2">
+      <h3 className="text-xs font-medium text-muted-foreground mb-2">
+        {t("replyFigures.heading")}
+      </h3>
+      <div className="flex flex-wrap gap-3">
+        {figures.map((figure) => (
+          <FigureView key={figure.id} figure={figure} size="thumbnail" />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * One figure: the image, linked to its full-size version, with where it
+ * comes from (and its caption, inline) underneath.
+ */
+function FigureView({ figure, size }: { figure: ReplyFigure; size: "inline" | "thumbnail" }) {
+  const { t } = useTranslation("common")
+  const inline = size === "inline"
+  return (
+    <figure className={inline ? "not-prose my-3" : "max-w-[14rem]"}>
+      <a
+        href={figure.image_url}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={t("replyFigures.open", { origin: figure.origin })}
+      >
+        <img
+          src={figure.image_url}
+          alt={figure.caption || t("replyFigures.alt", { origin: figure.origin })}
+          loading="lazy"
+          className={`${inline ? "max-h-80" : "max-h-40"} w-auto rounded border bg-background`}
+        />
+      </a>
+      <figcaption className="mt-1 text-[11px] text-muted-foreground">
+        {inline && figure.caption ? `${figure.caption} (${figure.origin})` : figure.origin}
+      </figcaption>
+    </figure>
+  )
+}
+
 export function MarkdownContent({
   content,
   className,
   onCitationClick,
   chunks,
+  figures,
 }: {
   content: string
   className?: string
@@ -255,15 +335,21 @@ export function MarkdownContent({
    * render as plain bracketed text until the final message lands.
    */
   chunks?: string[] | null
+  /**
+   * The message's `figures_used`. `[Figure N]` markers render as figure
+   * N in place; a marker without a matching figure (still streaming, or
+   * withheld) renders as nothing.
+   */
+  figures?: ReplyFigure[] | null
 }) {
   const { t } = useTranslation("common")
   const filenameIndex = useMemo(
     () => buildFilenameIndex(chunks ?? null),
     [chunks],
   )
-  const rewritten = onCitationClick
-    ? rewriteCitationsForMarkdown(content, filenameIndex)
-    : content
+  const rewritten = rewriteFigureMarkers(
+    onCitationClick ? rewriteCitationsForMarkdown(content, filenameIndex) : content,
+  )
   return (
     <div className={`prose prose-sm dark:prose-invert max-w-none ${className || ""}`}>
       <Markdown
@@ -276,11 +362,23 @@ export function MarkdownContent({
         // Override to let `minerva-cite:` through verbatim while
         // preserving the default sanitisation for everything else.
         urlTransform={(url) =>
-          typeof url === "string" && url.startsWith(CITATION_HREF_PREFIX)
+          typeof url === "string" &&
+          (url.startsWith(CITATION_HREF_PREFIX) || url.startsWith(FIGURE_SRC_PREFIX))
             ? url
             : defaultUrlTransform(url)
         }
         components={{
+          // A paragraph holding only a figure marker becomes the figure.
+          p: ({ node, children, ...rest }) => {
+            const only = node?.children.length === 1 ? node.children[0] : undefined
+            const src =
+              only?.type === "element" && only.tagName === "img" ? String(only.properties?.src ?? "") : ""
+            if (src.startsWith(FIGURE_SRC_PREFIX)) {
+              const figure = figures?.[parseInt(src.slice(FIGURE_SRC_PREFIX.length), 10) - 1]
+              return figure ? <FigureView figure={figure} size="inline" /> : null
+            }
+            return <p {...rest}>{children}</p>
+          },
           a: ({ href, children, ...rest }) => {
             if (
               onCitationClick &&
@@ -332,6 +430,11 @@ export function ChatBubble({
   const isUser = message.role === "user"
   const [showSources, setShowSources] = useState(false)
   const chunks = message.chunks_used
+  // Figures the reply placed inline render there; the rest go below it.
+  const unplacedFigures = useMemo(() => {
+    const placed = placedFigureNumbers(message.content)
+    return (message.figures_used ?? []).filter((_f, i) => !placed.has(i + 1))
+  }, [message.content, message.figures_used])
   const filenameIndex = useMemo(
     () => buildFilenameIndex(chunks ?? null),
     [chunks],
@@ -415,8 +518,10 @@ export function ChatBubble({
             content={message.content}
             onCitationClick={handleCitationClick}
             chunks={chunks}
+            figures={message.figures_used}
           />
         )}
+        {!isUser && unplacedFigures.length > 0 && <ReplyFigures figures={unplacedFigures} />}
         {!isUser && (
           <div className="flex items-center gap-1 mt-2 text-xs text-muted-foreground flex-wrap">
             {labels.stats && message.tokens_prompt != null && (

@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH hit AS (\n            SELECT id, staged_path AS old_path, attempts >= $3 AS terminal\n            FROM visual_extraction_jobs\n            WHERE status = 'leased'\n              AND (($1::UUID IS NOT NULL AND worker_id = $1)\n                   OR ($1::UUID IS NULL AND lease_expires_at < NOW()))\n            FOR UPDATE\n        )\n        UPDATE visual_extraction_jobs j\n        SET status = CASE WHEN hit.terminal THEN 'failed' ELSE 'ready' END,\n            worker_id = NULL, lease_expires_at = NULL, error_msg = $2, updated_at = NOW(),\n            staged_bytes = CASE WHEN hit.terminal THEN NULL ELSE j.staged_bytes END,\n            staged_path = CASE WHEN hit.terminal THEN NULL ELSE j.staged_path END\n        FROM hit\n        WHERE j.id = hit.id\n        RETURNING hit.terminal AS \"terminal!\", hit.old_path\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "terminal!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "old_path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "staged_path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      true
+    ]
+  },
+  "hash": "994258ee5cb0f7545fd4eb34e35399516190df697a7a14c4b7573babfcdf0328"
+}

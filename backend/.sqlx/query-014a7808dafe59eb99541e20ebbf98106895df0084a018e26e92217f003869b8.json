@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs j\n        SET status = CASE WHEN j.attempts >= $4 THEN 'failed' ELSE 'ready' END,\n            worker_id = NULL, lease_expires_at = NULL, error_msg = $3, updated_at = NOW(),\n            staged_bytes = CASE WHEN j.attempts >= $4 THEN NULL ELSE j.staged_bytes END,\n            staged_path = CASE WHEN j.attempts >= $4 THEN NULL ELSE j.staged_path END\n        FROM (SELECT staged_path AS old_path FROM visual_extraction_jobs WHERE id = $1) old\n        WHERE j.id = $1 AND j.status = 'leased' AND j.attempts = $2\n        RETURNING j.status, old.old_path\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "old_path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "staged_path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "014a7808dafe59eb99541e20ebbf98106895df0084a018e26e92217f003869b8"
+}

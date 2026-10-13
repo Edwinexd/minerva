@@ -1,0 +1,9 @@
+-r requirements-common.txt
+# First wheel line with the unlimited_ocr architecture. Pins its own torch
+# (2.13), so setup-env.sh builds this venv isolated from the system torch.
+vllm==0.31.0
+# CLIP image encoder for figures; Minerva embeds queries with the paired
+# text encoder through fastembed-rs, so both sides load the same ONNX files.
+fastembed==0.9.0
+pymupdf==1.28.2
+requests

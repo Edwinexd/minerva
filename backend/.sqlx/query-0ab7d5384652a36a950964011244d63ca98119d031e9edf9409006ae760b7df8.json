@@ -1,0 +1,125 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = 'leased', worker_id = $1, attempts = attempts + 1,\n            lease_expires_at = NOW() + make_interval(secs => $2), updated_at = NOW()\n        WHERE id = (\n            SELECT id FROM visual_extraction_jobs\n            WHERE status = 'ready'\n            ORDER BY priority DESC, created_at\n            LIMIT 1\n            FOR UPDATE SKIP LOCKED\n        )\n        RETURNING id, document_id, course_id, kind, status, attempts, staged_path, worker_id, cues\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "document_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "document_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "course_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "course_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "staged_path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "staged_path"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "worker_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "worker_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "cues",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "cues"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "0ab7d5384652a36a950964011244d63ca98119d031e9edf9409006ae760b7df8"
+}

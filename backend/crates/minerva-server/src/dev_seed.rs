@@ -53,6 +53,9 @@ pub struct SeedReport {
     pub documents: usize,
     pub conversations: usize,
     pub messages: usize,
+    /// Figures attached to the teacher-guide fixture document, shown on
+    /// one seeded reply and indexed by the scheduler's figure sweep.
+    pub figures: usize,
     pub external_invites: usize,
     /// Rows in the student-chat ledger (`usage_daily`), one per
     /// (student, course, day, model).
@@ -362,6 +365,29 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
         doc_count += 1;
     }
 
+    // ---- Figures -----------------------------------------------------
+    //
+    // Real figures from the teacher guide as the Olympus worker extracts
+    // them (crop, caption, context, CLIP vector), attached to a fixture
+    // document, so the reply-figures UI and figure retrieval work in dev
+    // without a GPU. The scheduler's indexing sweep pushes them to Qdrant
+    // on its next tick, like any freshly ingested figure.
+    let guide = upload_or_dedup(
+        state,
+        intro,
+        "minerva-teacher-guide.txt",
+        "text/plain",
+        FIXTURE_DOC_TEACHER_GUIDE.as_bytes(),
+        admin_id,
+        None,
+        Some("dev_seed"),
+        Some("minerva-teacher-guide.txt"),
+    )
+    .await?;
+    track(state, "documents", guide.id).await?;
+    doc_count += 1;
+    let figure_ids = seed_figures(state, intro, guide.id).await?;
+
     // ---- Conversations + messages -----------------------------------
     //
     // A handful of conversations spread across users so the teacher
@@ -377,7 +403,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
     // a11y pass.
     let mut convo_count = 0usize;
     let mut msg_count = 0usize;
-    for (course_id, user_id, user_msg, assistant_msg, chunks) in [
+    for (course_id, user_id, user_msg, assistant_msg, chunks, with_figures) in [
         // Admin gets one conversation per course they participate in, so
         // switching courses doesn't always greet them with an empty
         // sidebar. They own intro + algos and are enrolled in web; db_sys
@@ -388,6 +414,17 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             "Show me the late submission policy.",
             "Late submissions lose 10% per day, capped at 50% off [#1]. Resubmissions are allowed up to one week after the original deadline [#2].",
             FIXTURE_CHUNKS_INTRO,
+            false,
+        ),
+        // The one reply with figures: what the reply-figures strip under
+        // an answer looks like, without an LLM or Olympus in dev.
+        (
+            intro,
+            admin_id,
+            "How do I add Minerva to my Moodle course?",
+            "First activate Minerva under LTI External tools so it shows in the activity chooser:\n\n[Figure 1]\n\nThen turn editing on and pick Minerva from the activity chooser:\n\n[Figure 2]\n\nOpen it once and pick the Minerva course to link. Students then use the same assistant inside the activity.",
+            &[],
+            true,
         ),
         (
             algos,
@@ -395,6 +432,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             "What's the grading breakdown?",
             "40% weekly problem sets, 25% midterm, 35% final exam. Problem sets due each Sunday at 23:59.",
             &[],
+            false,
         ),
         (
             web,
@@ -402,6 +440,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             "Which router does this course use?",
             "Tanstack Router on the frontend.",
             &[],
+            false,
         ),
         // Plus a few seed-student conversations so the teacher
         // dashboard for those courses has cross-user data to show.
@@ -411,6 +450,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             "What does the syllabus say about late submissions?",
             "Late submissions lose 10% per day. See the syllabus document.",
             &[],
+            false,
         ),
         (
             intro,
@@ -418,6 +458,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             "When is the first assignment due?",
             "Week 2, Friday at 23:59. The full schedule is in the syllabus.",
             &[],
+            false,
         ),
         (
             algos,
@@ -425,6 +466,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             "Can you summarise the algorithms covered in week 1?",
             "Week 1 covers asymptotic analysis, master theorem, and divide-and-conquer.",
             &[],
+            false,
         ),
         (
             web,
@@ -432,6 +474,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
             "Is this course taught in English?",
             "Yes - all materials and lectures are in English.",
             &[],
+            false,
         ),
     ] {
         let chunks_json = (!chunks.is_empty()).then(|| serde_json::json!(chunks));
@@ -487,6 +530,14 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
         .await?;
         track(state, "messages", asst_msg_id).await?;
         msg_count += 1;
+        if with_figures {
+            minerva_db::queries::visual_extraction::insert_message_figures(
+                &state.db,
+                asst_msg_id,
+                &figure_ids,
+            )
+            .await?;
+        }
     }
 
     // ---- AI spend ledger ---------------------------------------------
@@ -586,6 +637,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
         documents: doc_count,
         conversations: convo_count,
         messages: msg_count,
+        figures: figure_ids.len(),
         external_invites: 1,
         usage_rows,
         pipeline_usage_rows,
@@ -637,6 +689,99 @@ struct UsagePlan {
 /// rows priced against it resolve. Inserted *disabled*: it exists to be
 /// priced, not to be selectable in a course whose provider key the dev
 /// shell doesn't have.
+#[derive(serde::Deserialize)]
+struct FigureFixtures {
+    figures: Vec<FigureFixture>,
+}
+
+#[derive(serde::Deserialize)]
+struct FigureFixture {
+    image: String,
+    page_number: i32,
+    bbox: Vec<f32>,
+    caption: String,
+    context: String,
+    visual_vector: Vec<f32>,
+}
+
+/// Write the fixture crops into the document's asset directory and insert
+/// one page and one figure per fixture, as an accepted worker result
+/// would. Figures cascade with the document, and their files go with the
+/// course directory, so the wipe needs nothing extra for them here.
+async fn seed_figures(
+    state: &AppState,
+    course_id: Uuid,
+    document_id: Uuid,
+) -> Result<Vec<Uuid>, AppError> {
+    use minerva_db::queries::visual_extraction::{self as queue, NewFigure, NewPage};
+
+    let fixtures: FigureFixtures = serde_json::from_str(FIXTURE_FIGURES_JSON)
+        .map_err(|e| AppError::Internal(format!("figure fixtures: {e}")))?;
+    let version_dir = "seed";
+    let dir = format!(
+        "{}/{version_dir}/figures",
+        minerva_pipeline::figures::assets_dir(&state.config.docs_path, course_id, document_id)
+    );
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Internal(format!("figure fixture dir: {e}")))?;
+    for (name, bytes) in FIXTURE_FIGURE_IMAGES {
+        tokio::fs::write(format!("{dir}/{name}"), bytes)
+            .await
+            .map_err(|e| AppError::Internal(format!("figure fixture write: {e}")))?;
+    }
+
+    let blocks: Vec<serde_json::Value> = fixtures
+        .figures
+        .iter()
+        .map(|f| serde_json::json!([{ "label": "image", "boxes": [f.bbox], "text": "" }]))
+        .collect();
+    let paths: Vec<String> = fixtures
+        .figures
+        .iter()
+        .map(|f| format!("{version_dir}/figures/{}", f.image))
+        .collect();
+    let pages: Vec<NewPage> = fixtures
+        .figures
+        .iter()
+        .enumerate()
+        .map(|(position, f)| NewPage {
+            position: position as i32,
+            page_number: Some(f.page_number),
+            start_seconds: None,
+            end_seconds: None,
+            image_path: None,
+            blocks: &blocks[position],
+            text: &f.context,
+        })
+        .collect();
+    let figures: Vec<NewFigure> = fixtures
+        .figures
+        .iter()
+        .enumerate()
+        .map(|(position, f)| NewFigure {
+            page_position: position as i32,
+            bbox: &f.bbox,
+            image_path: &paths[position],
+            caption: Some(&f.caption),
+            context: &f.context,
+            visual_model: minerva_pipeline::figures::VISUAL_MODEL,
+            visual_vector: &f.visual_vector,
+        })
+        .collect();
+
+    let mut tx = state.db.begin().await?;
+    queue::replace_layout_in(&mut tx, document_id, course_id, &pages, &figures).await?;
+    tx.commit().await?;
+    let ids = sqlx::query_scalar!(
+        "SELECT id FROM document_figures WHERE document_id = $1 ORDER BY page_position",
+        document_id,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(ids)
+}
+
 async fn seed_alt_chat_model(state: &AppState) -> Result<(), AppError> {
     let (model, provider) = USAGE_ALT_MODEL;
     sqlx::query!(
@@ -1141,6 +1286,30 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
             } else {
                 format!("course_{course_id}_v{}", row.embedding_version)
             };
+            let figures_collection = format!("{collection}_figures");
+            if state
+                .qdrant
+                .delete_collection(&figures_collection)
+                .await
+                .is_ok()
+            {
+                report.qdrant_collections_removed += 1;
+            }
+            let _ = state
+                .qdrant
+                .delete_points(
+                    qdrant_client::qdrant::DeletePointsBuilder::new(
+                        minerva_pipeline::figures::COLLECTION,
+                    )
+                    .points(qdrant_client::qdrant::Filter::must([
+                        qdrant_client::qdrant::Condition::matches(
+                            "course_id",
+                            course_id.to_string(),
+                        ),
+                    ]))
+                    .wait(true),
+                )
+                .await;
             match state.qdrant.delete_collection(&collection).await {
                 Ok(_) => report.qdrant_collections_removed += 1,
                 Err(e) => {
@@ -1323,6 +1492,24 @@ async fn delete_course_members(db: &sqlx::PgPool, pks: &[String]) -> Result<u64,
 // batching warmup), so keeping each doc under ~800 chars means a
 // fresh seed run finishes embedding in seconds rather than minutes.
 // -----------------------------------------------------------------
+
+/// Figures extracted from `docs/teacher-guide/teacher-guide.pdf` by the
+/// Olympus worker, with their CLIP vectors; see `fixtures/figures/`.
+const FIXTURE_FIGURES_JSON: &str = include_str!("../fixtures/figures/figures.json");
+const FIXTURE_FIGURE_IMAGES: &[(&str, &[u8])] = &[
+    ("0.jpg", include_bytes!("../fixtures/figures/0.jpg")),
+    ("1.jpg", include_bytes!("../fixtures/figures/1.jpg")),
+    ("2.jpg", include_bytes!("../fixtures/figures/2.jpg")),
+    ("3.jpg", include_bytes!("../fixtures/figures/3.jpg")),
+];
+
+const FIXTURE_DOC_TEACHER_GUIDE: &str = "Minerva teacher guide - Adding Minerva to Moodle
+
+1. Activate the tool. Under Course -> More -> LTI External tools, turn on Minerva and show it in the activity chooser.
+2. Add the activity. Turn editing on, add an activity, and pick Minerva from the activity chooser; it carries the Minerva logo.
+3. Open it once and pick the course. The Minerva activity is now in your course; the first launch asks which Minerva course to link.
+4. Students then use the same assistant embedded inside the Moodle activity.
+";
 
 const FIXTURE_DOC_INTRO: &str = "Intro Programming - Syllabus
 

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = CASE WHEN kind = 'pdf' THEN 'ready' ELSE 'needs_source' END,\n            pipeline_version = $1, attempts = 0, error_msg = NULL, updated_at = NOW()\n        WHERE id IN (\n            SELECT id FROM visual_extraction_jobs\n            WHERE status = 'done' AND pipeline_version < $1\n            ORDER BY completed_at\n            LIMIT $2\n        )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ed6c1b01fe3808e0609c4c7ad2f90bbf5f8b3e07be3ccef9eb34573204a67201"
+}

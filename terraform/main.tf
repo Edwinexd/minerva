@@ -28,6 +28,8 @@ resource "github_repository_environment" "prod" {
 # =============================================================================
 
 locals {
+  slurm_ssh_private_key = var.slurm_ssh_private_key_path == "" ? "" : file(pathexpand(var.slurm_ssh_private_key_path))
+
   k8s_secrets_yaml = <<-YAML
     apiVersion: v1
     kind: Secret
@@ -44,6 +46,19 @@ locals {
       CEREBRAS_API_KEY: "${var.cerebras_api_key}"
       OPENAI_API_KEY: "${var.openai_api_key}"
       MINERVA_SERVICE_API_KEY: "${var.minerva_service_api_key}"
+    ---
+    # existing SU account on Olympus for the visual extraction scheduler loop.
+    # Empty values leave the loop's Slurm part off.
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: minerva-slurm
+      namespace: minerva
+    type: Opaque
+    stringData:
+      ssh_target: "${var.slurm_ssh_target}"
+      id_ed25519: ${jsonencode(local.slurm_ssh_private_key)}
+      known_hosts: ${jsonencode(var.slurm_known_hosts)}
   YAML
 }
 
@@ -79,6 +94,22 @@ resource "github_actions_environment_secret" "prod_ssh_private_key" {
   plaintext_value = var.ssh_private_key
 }
 
+# Existing SU account on Olympus. The scheduler key stays in k8s;
+# GitHub Actions receives only the separately restricted deployment key.
+resource "github_actions_environment_secret" "prod_slurm_ssh_target" {
+  repository      = data.github_repository.repo.name
+  environment     = github_repository_environment.prod.environment
+  secret_name     = "SLURM_SSH_TARGET"
+  plaintext_value = var.slurm_ssh_target
+}
+
+resource "github_actions_environment_secret" "prod_slurm_known_hosts" {
+  repository      = data.github_repository.repo.name
+  environment     = github_repository_environment.prod.environment
+  secret_name     = "SLURM_KNOWN_HOSTS"
+  plaintext_value = var.slurm_known_hosts
+}
+
 resource "github_actions_environment_secret" "prod_k8s_secrets" {
   repository      = data.github_repository.repo.name
   environment     = github_repository_environment.prod.environment
@@ -106,4 +137,12 @@ resource "github_actions_secret" "su_password" {
   repository      = data.github_repository.repo.name
   secret_name     = "SU_PASSWORD"
   plaintext_value = var.su_password
+}
+
+resource "github_actions_environment_secret" "slurm_deploy_ssh_private_key" {
+  count           = var.slurm_deploy_ssh_private_key_path != "" ? 1 : 0
+  repository      = data.github_repository.repo.name
+  environment     = github_repository_environment.prod.environment
+  secret_name     = "SLURM_DEPLOY_SSH_PRIVATE_KEY"
+  plaintext_value = file(pathexpand(var.slurm_deploy_ssh_private_key_path))
 }

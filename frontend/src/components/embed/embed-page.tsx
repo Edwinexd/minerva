@@ -5,6 +5,7 @@ import { ExternalLink, Menu, X } from "lucide-react"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import { useEmbedNav } from "@/lib/embed-nav"
 import type { CourseRole } from "@/lib/roles"
+import type { ReplyFigure } from "@/lib/types"
 import type { ChatBubbleLabels } from "@/components/chat/chat-bubble"
 import { ConversationList } from "@/components/chat/conversation-list"
 import {
@@ -83,6 +84,7 @@ interface EmbedMessage {
   role: "user" | "assistant"
   content: string
   chunks_used: string[] | null
+  figures_used?: ReplyFigure[] | null
   model_used: string | null
   thinking_transcript: string | null
   tool_events: PersistedToolEvent[] | null

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO visual_extraction_jobs\n            (document_id, course_id, kind, status, priority, pipeline_version)\n        SELECT d.id, d.course_id, 'pdf', 'ready',\n               CASE WHEN d.created_at > NOW() - make_interval(days => $2) THEN 50 ELSE 0 END,\n               $1\n        FROM documents d\n        WHERE d.mime_type = 'application/pdf'\n          AND d.orphaned_at IS NULL\n          AND d.status = 'ready'\n        ON CONFLICT (document_id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7ae1082adb4ec6fafe60abab66651d876b99fad95e9da87757592c3e48f8a482"
+}

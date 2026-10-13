@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_workers\n        SET state = $2, error_msg = COALESCE($3, error_msg),\n            finished_at = CASE WHEN $2 IN ('finished', 'failed') THEN NOW() ELSE finished_at END\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8937eafcacc39ee99dd4e1cd6bb799889019ec1bf0e905abbb98eb3838944985"
+}

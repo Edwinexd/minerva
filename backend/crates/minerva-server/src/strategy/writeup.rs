@@ -126,6 +126,7 @@ pub async fn run(
     chunks: &[RagChunk],
     research_transcript: &str,
     tool_log: &str,
+    figures: &[super::figures::FigureHit],
     tx: &mpsc::Sender<Result<Event, AppError>>,
     usage: &mut super::TurnUsage,
 ) -> Result<String, AppError> {
@@ -147,6 +148,9 @@ pub async fn run(
     )
     .await;
     common::append_global_knowledge(&mut system, &global_knowledge);
+    if let Some(section) = super::figures::prompt_section(figures) {
+        system.push_str(&section);
+    }
     let messages = compose_messages(&system, ctx);
 
     let mut full_text = String::new();

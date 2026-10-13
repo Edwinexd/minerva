@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(SUM(staged_bytes), 0)::BIGINT AS \"pending!\"\n        FROM visual_extraction_jobs\n        WHERE status = 'fetching'\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fd4b19915a0653031bb736db2421f8ff31806f5660d12eb77f9ae0893ab9502a"
+}

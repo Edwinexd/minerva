@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT position, page_number, text\n        FROM document_visual_pages\n        WHERE document_id = $1\n        ORDER BY position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "position",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "document_visual_pages",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "page_number",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "document_visual_pages",
+            "name": "page_number"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_visual_pages",
+            "name": "text"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "a006e5ade636ac1c67c64cdd96cfa5459a651f613e5fea49c7ba0030bfc4242b"
+}

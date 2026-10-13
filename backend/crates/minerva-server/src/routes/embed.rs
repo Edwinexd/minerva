@@ -33,6 +33,12 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        // Figure images of chat replies, for the app and the embed alike;
+        // authorised by the signed URL itself.
+        .route(
+            "/figures/{grant}",
+            get(super::visual_extraction::figure_image),
+        )
         .route("/course/{course_id}", get(get_course))
         .route(
             "/course/{course_id}/conversations",
@@ -146,6 +152,10 @@ struct MessageResponse {
     role: String,
     content: String,
     chunks_used: Option<serde_json::Value>,
+    /// Figures from slides and PDFs shown with this reply, each with an
+    /// image URL signed for this reader. Withheld exactly like
+    /// `chunks_used`.
+    figures_used: Option<serde_json::Value>,
     model_used: Option<String>,
     /// Research-phase thinking transcript persisted on the message
     /// (populated only for `tool_use_enabled` courses).
@@ -430,6 +440,10 @@ async fn get_conversation(
         ids
     };
 
+    let reply_figures =
+        crate::strategy::figures::for_conversation(&state.db, &state.config.hmac_secret, cid)
+            .await?;
+
     Ok(Json(ConversationDetailResponse {
         messages: messages
             .into_iter()
@@ -445,6 +459,11 @@ async fn get_conversation(
                     None
                 } else {
                     m.chunks_used
+                },
+                figures_used: if suppress_thinking_ids.contains(&m.id) {
+                    None
+                } else {
+                    reply_figures.get(&m.id).cloned()
                 },
                 model_used: m.model_used,
                 thinking_transcript: if suppress_thinking_ids.contains(&m.id) {

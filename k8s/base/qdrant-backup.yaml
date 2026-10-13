@@ -46,8 +46,9 @@ spec:
                   # Drop the in-qdrant copy so it does not fill the pod's ephemeral layer
                   echo "Deleting in-qdrant snapshot ${NAME}..."
                   curl -fsS -X DELETE "${QDRANT_URL}/snapshots/${NAME}" >/dev/null || true
-                  # Keep only the last 14 daily snapshots
-                  ls -t /backups/qdrant-*.snapshot 2>/dev/null | tail -n +15 | xargs -r rm -f
+                  # Keep only the last 7 daily snapshots: each is a full copy
+                  # of the store (~1.1 GB), and /data0 is the tight resource.
+                  ls -t /backups/qdrant-*.snapshot 2>/dev/null | tail -n +8 | xargs -r rm -f
                   echo "Cleanup completed. Current qdrant backups:"
                   ls -lh /backups/
               volumeMounts:

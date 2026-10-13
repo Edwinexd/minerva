@@ -1528,11 +1528,12 @@ pub async fn finalize(
     tool_events: Option<&serde_json::Value>,
     thinking_ms: Option<i32>,
     disclosure: super::ThinkingDisclosure,
+    figures: &[super::figures::FigureHit],
 ) {
     let prompt_tokens = usage.prompt_tokens();
     let completion_tokens = usage.completion_tokens();
     let assistant_msg_id = uuid::Uuid::new_v4();
-    let _ = minerva_db::queries::conversations::insert_message(
+    let inserted = minerva_db::queries::conversations::insert_message(
         &ctx.db,
         assistant_msg_id,
         ctx.conversation_id,
@@ -1556,6 +1557,21 @@ pub async fn finalize(
         disclosure.guarded(),
     )
     .await;
+
+    // The reply's figures; image URLs are minted when the reply is read,
+    // behind the same guarded-turn gate as `chunks_used`.
+    if inserted.is_ok() && !figures.is_empty() {
+        let ids: Vec<uuid::Uuid> = figures.iter().map(|f| f.row.id).collect();
+        if let Err(e) = minerva_db::queries::visual_extraction::insert_message_figures(
+            &ctx.db,
+            assistant_msg_id,
+            &ids,
+        )
+        .await
+        {
+            tracing::warn!("figures: saving reply figures failed: {e}");
+        }
+    }
 
     if ctx.is_first_message {
         let title: String = ctx.user_content.chars().take(60).collect();

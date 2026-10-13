@@ -51,6 +51,7 @@ pub fn router() -> Router<AppState> {
             "/daisy-course-schedules/{momenttillf_id}",
             put(reconcile_daisy_schedule),
         )
+        .nest("/visual-extraction", super::visual_extraction::router())
 }
 
 #[derive(Deserialize)]
@@ -237,8 +238,24 @@ mod schedule_document_tests {
     }
 }
 
+/// The URL a `.url` stub document points at, read from its file on disk.
+pub(crate) async fn read_url_stub(
+    state: &AppState,
+    course_id: Uuid,
+    document_id: Uuid,
+    filename: &str,
+) -> Option<String> {
+    let ext = super::documents::extension_from_filename(filename);
+    let file_path = format!(
+        "{}/{}/{}.{}",
+        state.config.docs_path, course_id, document_id, ext
+    );
+    let content = tokio::fs::read_to_string(&file_path).await.ok()?;
+    Some(content.trim().to_string())
+}
+
 /// Authenticate using the global service API key (MINERVA_SERVICE_API_KEY).
-fn authenticate_service(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+pub(crate) fn authenticate_service(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
     let configured_key = state
         .config
         .service_api_key
@@ -336,14 +353,8 @@ async fn pending_transcripts(
     let mut result = Vec::new();
 
     for doc in docs {
-        let ext = super::documents::extension_from_filename(&doc.filename);
-        let file_path = format!(
-            "{}/{}/{}.{}",
-            state.config.docs_path, doc.course_id, doc.id, ext
-        );
-        let url = match tokio::fs::read_to_string(&file_path).await {
-            Ok(content) => content.trim().to_string(),
-            Err(_) => continue,
+        let Some(url) = read_url_stub(&state, doc.course_id, doc.id, &doc.filename).await else {
+            continue;
         };
         result.push(PendingTranscriptInfo {
             id: doc.id,

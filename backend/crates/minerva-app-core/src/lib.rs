@@ -23,4 +23,5 @@ pub mod rules;
 pub mod schedulers;
 pub mod state;
 pub mod system_defaults;
+pub mod visual_extraction;
 pub mod worker;

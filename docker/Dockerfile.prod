@@ -112,9 +112,10 @@ FROM debian:trixie-slim AS runtime-svc
 # poppler-utils is only used by the api / worker for PDF text
 # extraction; the embedder / reranker / scheduler don't strictly need
 # it but the package is small and a single base layer keeps the prod
-# operational surface uniform.
+# operational surface uniform. openssh-client is the scheduler's: it
+# submits and monitors visual extraction workers on Olympus over SSH.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        poppler-utils ca-certificates libssl3 \
+        poppler-utils ca-certificates libssl3 openssh-client \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 ARG TARGET_BIN
 COPY --from=backend-builder /app/backend/target/release/${TARGET_BIN} /usr/local/bin/app

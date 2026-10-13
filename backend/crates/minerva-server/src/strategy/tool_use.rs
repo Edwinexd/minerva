@@ -146,6 +146,11 @@ pub async fn run(
     )
     .await;
 
+    // Figures matching the question, offered beside the reply and
+    // described in the writeup prompt.
+    let figures =
+        super::figures::figure_lookup(&ctx, &http_client, &ctx.user_content, &orphaned).await;
+
     let unclassified = if ctx.kg_enabled {
         minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
             .await
@@ -364,6 +369,7 @@ pub async fn run(
         &research.chunks,
         writeup_transcript,
         &research.research_summary,
+        &figures,
         &tx,
         &mut usage,
     )
@@ -471,6 +477,7 @@ pub async fn run(
         // closed), `withheld()` decides whether this viewer's `done`
         // event carries `chunks_used`.
         disclosure,
+        &figures,
     )
     .await;
 }

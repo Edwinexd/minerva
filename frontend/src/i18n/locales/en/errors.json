@@ -125,5 +125,13 @@
     "invalid_domain": "\"{{domain}}\" is not a valid eppn domain. Use bare hostnames like dsv.su.se.",
     "user_not_found": "No Minerva user with eppn \"{{eppn}}\"; they must log into Minerva at least once before being linked.",
     "eppn_domain_forbidden": "The eppn \"{{eppn}}\" is outside this key's allowed domains ({{allowed_domains}})."
+  },
+  "visual_extraction": {
+    "not_fetching": "This job is not waiting for a video upload.",
+    "video_too_large": "The video is larger than the upload limit.",
+    "video_missing": "No staged video was found for this job.",
+    "stale_attempt": "This attempt no longer holds the job.",
+    "invalid_result": "The result could not be accepted: {{reason}}",
+    "parent_unavailable": "The lecture's document is no longer in a state that accepts slides."
   }
 }

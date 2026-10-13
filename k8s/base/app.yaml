@@ -60,6 +60,10 @@ spec:
               value: "3000"
             - name: MINERVA_DOCS_PATH
               value: "/data/documents"
+            # Visual extraction staging window (lecture videos waiting for
+            # an Olympus worker), on the same hostPath as the documents.
+            - name: MINERVA_VISUAL_STAGING_PATH
+              value: "/data/visual-staging"
             # Post-split: api routes embed + rerank to the dedicated
             # pods via gRPC. No local FastEmbedder / FastReranker
             # cache is constructed, no model weights resident in this

@@ -26,3 +26,10 @@ minerva_hmac_secret = "generate with: openssl rand -base64 32"
 minerva_admins      = "edsu8469"
 cerebras_api_key    = "csk-..."
 openai_api_key      = "sk-proj-..."
+
+# Visual extraction: existing SU account, with distinct forced-command keys.
+slurm_ssh_target = "edsu8469@olympus"
+slurm_ssh_private_key_path = "/path/to/minerva-scheduler-key"
+slurm_deploy_ssh_private_key_path = "/path/to/minerva-deploy-key"
+# Verify the actual host key out of band before configuring it.
+slurm_known_hosts = ""

@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET download_started_at = NOW(), updated_at = NOW()\n        WHERE id = (\n            SELECT id FROM visual_extraction_jobs\n            WHERE status = 'fetching' AND download_url IS NOT NULL\n                AND download_deadline > NOW() AND download_started_at IS NULL\n            ORDER BY download_deadline, id LIMIT 1 FOR UPDATE SKIP LOCKED\n        )\n        RETURNING id, download_url AS \"url!\", download_deadline AS \"deadline!\",\n            download_started_at AS \"started_at!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "url!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "download_url"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "deadline!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "download_deadline"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "started_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "download_started_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e7ecb56594ba801082c7c871063f0678dd021f7dee0583fdf911b95bd322ac32"
+}

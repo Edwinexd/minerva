@@ -667,19 +667,37 @@ pub async fn insert_tracked_child(
     new_doc: NewDocument<'_>,
 ) -> Result<DocumentRow, sqlx::Error> {
     let mut tx = db.begin().await?;
+    let child =
+        insert_tracked_child_in(&mut tx, parent_id, &[expected_parent_status], new_doc).await?;
+    tx.commit().await?;
+    Ok(child)
+}
 
+/// [`insert_tracked_child`] inside the caller's transaction, accepting any
+/// of `expected_parent_statuses`. The visual extraction ingest uses it to
+/// swap a lecture's text child together with its pages and figures.
+pub async fn insert_tracked_child_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    parent_id: Uuid,
+    expected_parent_statuses: &[&str],
+    new_doc: NewDocument<'_>,
+) -> Result<DocumentRow, sqlx::Error> {
+    let statuses: Vec<String> = expected_parent_statuses
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let updated = sqlx::query!(
-        "UPDATE documents SET status = 'tracked', error_msg = NULL, processing_started_at = NULL, processed_at = NOW() WHERE id = $1 AND status = $2",
+        "UPDATE documents SET status = 'tracked', error_msg = NULL, processing_started_at = NULL, processed_at = NOW() WHERE id = $1 AND status = ANY($2)",
         parent_id,
-        expected_parent_status,
+        &statuses,
     )
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
     if updated.rows_affected() == 0 {
         return Err(sqlx::Error::RowNotFound);
     }
 
-    let child = sqlx::query_as!(
+    sqlx::query_as!(
         DocumentRow,
         r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url, content_hash, source_system, source_ref, parent_document_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -696,11 +714,23 @@ pub async fn insert_tracked_child(
         new_doc.source_ref,
         new_doc.parent_document_id,
     )
-    .fetch_one(&mut *tx)
-    .await?;
+    .fetch_one(&mut **tx)
+    .await
+}
 
-    tx.commit().await?;
-    Ok(child)
+/// Soft-orphan a parent's active child inside a transaction, freeing the
+/// one-active-child slot for its replacement. Returns the orphaned ids so
+/// the caller can purge their vectors and files after commit.
+pub async fn orphan_active_children_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    parent_id: Uuid,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar!(
+        "UPDATE documents SET orphaned_at = NOW() WHERE parent_document_id = $1 AND orphaned_at IS NULL RETURNING id",
+        parent_id,
+    )
+    .fetch_all(&mut **tx)
+    .await
 }
 
 /// Reset documents stuck in 'processing' back to 'pending'.

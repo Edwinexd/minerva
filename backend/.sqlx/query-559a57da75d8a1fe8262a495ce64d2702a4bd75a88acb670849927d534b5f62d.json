@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO document_visual_pages\n                (document_id, position, page_number, start_seconds, end_seconds, image_path, blocks, text)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Float4",
+        "Float4",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "559a57da75d8a1fe8262a495ce64d2702a4bd75a88acb670849927d534b5f62d"
+}

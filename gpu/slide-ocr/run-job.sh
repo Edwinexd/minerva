@@ -4,6 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-source "$(bash ensure-venv.sh)/bin/activate"
+# The venv is built under .tmp and renamed, and Olympus mounts home under
+# different paths on login/GPU nodes. Activation scripts retain the build
+# path; invoke the interpreter from the current mount directly.
+worker_venv=$(bash ensure-venv.sh)
 export PYTHONUNBUFFERED=1
-python3 slide_ocr.py "$@"
+"$worker_venv/bin/python" slide_ocr.py "$@"

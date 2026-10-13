@@ -112,7 +112,8 @@ pub async fn enqueue_missing(
 
 /// Hand out up to `limit` lectures to fetch, as many as fit the disk:
 /// `free_bytes` (measured on the staging filesystem) minus `min_free_bytes`
-/// minus what reserved slots will still write, at `estimate_bytes` each.
+/// minus what fetching slots will still write. New unknown slots reserve
+/// `estimate_bytes` each; offered sources can reserve their header size.
 /// Staged videos are already on disk and so already out of `free_bytes`.
 pub async fn reserve_fetch_slots(
     db: &PgPool,
@@ -120,6 +121,7 @@ pub async fn reserve_fetch_slots(
     min_free_bytes: i64,
     estimate_bytes: i64,
     limit: i64,
+    exclude_job_ids: &[Uuid],
 ) -> Result<Vec<FetchSlot>, sqlx::Error> {
     let mut tx = db.begin().await?;
     // Serialise reservations so two concurrent callers cannot both see the
@@ -149,6 +151,7 @@ pub async fn reserve_fetch_slots(
         WHERE id IN (
             SELECT id FROM visual_extraction_jobs
             WHERE status = 'needs_source'
+              AND NOT (id = ANY($3))
             ORDER BY priority DESC, created_at
             LIMIT $2
             FOR UPDATE SKIP LOCKED
@@ -157,6 +160,7 @@ pub async fn reserve_fetch_slots(
         "#,
         estimate_bytes,
         slots,
+        exclude_job_ids,
     )
     .fetch_all(&mut *tx)
     .await?;
@@ -179,6 +183,7 @@ pub async fn release_fetch(
         UPDATE visual_extraction_jobs
         SET status = $2, staged_bytes = NULL, fetch_reserved_at = NULL,
             download_url = NULL, download_deadline = NULL, download_started_at = NULL,
+            download_size_bytes = NULL,
             error_msg = $3, updated_at = NOW()
         WHERE id = $1 AND status = 'fetching' AND download_started_at IS NULL
         "#,
@@ -199,6 +204,7 @@ pub async fn release_stale_fetches(db: &PgPool, older_than_secs: i64) -> Result<
         UPDATE visual_extraction_jobs
         SET status = 'needs_source', staged_bytes = NULL, fetch_reserved_at = NULL,
             download_url = NULL, download_deadline = NULL, download_started_at = NULL,
+            download_size_bytes = NULL,
             updated_at = NOW()
         WHERE status = 'fetching'
           AND ((download_started_at IS NULL AND (
@@ -927,24 +933,30 @@ pub async fn course_has_indexed_figures(db: &PgPool, course_id: Uuid) -> Result<
 }
 
 /// Small authenticated handoff from Actions. Do not expose bearer URLs in logs.
+/// A trusted size may shrink the existing reservation, never grow it.
 pub async fn offer_download(
     db: &PgPool,
     id: Uuid,
     url: &str,
     deadline: DateTime<Utc>,
     cues: &serde_json::Value,
+    size_bytes: Option<i64>,
 ) -> Result<bool, sqlx::Error> {
     Ok(sqlx::query!(
         r#"
         UPDATE visual_extraction_jobs
-        SET download_url = $2, download_deadline = $3, cues = $4, updated_at = NOW()
+        SET download_url = $2, download_deadline = $3, cues = $4,
+            download_size_bytes = $5, staged_bytes = COALESCE($5, staged_bytes),
+            updated_at = NOW()
         WHERE id = $1 AND status = 'fetching' AND download_url IS NULL
           AND download_started_at IS NULL AND $3 > NOW()
+          AND ($5::BIGINT IS NULL OR $5 <= staged_bytes)
         "#,
         id,
         url,
         deadline,
-        cues
+        cues,
+        size_bytes,
     )
     .execute(db)
     .await?
@@ -957,6 +969,7 @@ pub struct Download {
     pub url: String,
     pub deadline: DateTime<Utc>,
     pub started_at: DateTime<Utc>,
+    pub expected_bytes: Option<i64>,
 }
 
 /// Atomically claim the earliest expiry; multiple scheduler instances cannot
@@ -974,7 +987,7 @@ pub async fn claim_download(db: &PgPool) -> Result<Option<Download>, sqlx::Error
             ORDER BY download_deadline, id LIMIT 1 FOR UPDATE SKIP LOCKED
         )
         RETURNING id, download_url AS "url!", download_deadline AS "deadline!",
-            download_started_at AS "started_at!"
+            download_started_at AS "started_at!", download_size_bytes AS expected_bytes
         "#
     )
     .fetch_optional(db)
@@ -995,6 +1008,7 @@ pub async fn finish_download(
             staged_path = $3, staged_bytes = CASE WHEN $3::TEXT IS NULL THEN NULL ELSE $4::BIGINT END,
             error_msg = CASE WHEN $3::TEXT IS NULL THEN 'Play download failed or expired' ELSE NULL END,
             download_url = NULL, download_deadline = NULL, download_started_at = NULL,
+            download_size_bytes = NULL,
             fetch_reserved_at = NULL, updated_at = NOW()
         WHERE id = $1 AND status = 'fetching' AND download_started_at = $2
         "#, claim.id, claim.started_at, path, bytes).execute(db).await?.rows_affected() == 1)

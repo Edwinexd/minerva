@@ -143,16 +143,25 @@ Flow and backpressure:
 - **Staging takes the free disk.** Minerva grants fetch slots while the
   filesystem under `/data/visual-staging` keeps at least
   `MINERVA_VISUAL_STAGING_MIN_FREE_BYTES` (default 10 GiB) free, counting
-  slots whose download has not finished yet (each reserves the full 1 GiB download cap). A staged video is deleted as soon
+  slots whose download has not finished yet. A slot initially reserves the
+  full 1 GiB download cap. After Actions selects a source, Minerva reads
+  its HEAD `Content-Length` (or one-byte `Content-Range`) and shrinks the
+  reservation to that size; missing headers retain the full cap. Actions
+  asks for another small wave until the staging budget or its 40-minute
+  authorization budget is exhausted, rather than imposing a URL count
+  per run. Failed sources are excluded for the rest of that run. Unknown
+  sources still require 1 GiB of remaining budget before probing, so up
+  to 1 GiB can remain unused. A staged video is deleted as soon
   as its result is accepted, so the window shrinks back as workers drain
   it; a backlog beyond that costs database rows, not disk.
 - **Download deadlines are database state.** `download_url`,
   `download_deadline` (TIMESTAMPTZ from the Play JWT's `exp`), and
-  `download_started_at` live on `visual_extraction_jobs`. An independent
+  `download_started_at` and `download_size_bytes` live on
+  `visual_extraction_jobs`. An independent
   scheduler loop atomically claims pending downloads with
   `ORDER BY download_deadline, id`, earliest expiry first. It streams from
   the pinned Play media host without redirects, enforces the expiry and a
-  30-minute/1-GiB cap, validates MP4 bytes, and only then makes the job
+  30-minute/1-GiB cap and the reserved size, validates MP4 bytes, and only then makes the job
   `ready`. Expired URLs and crashed downloads return to `needs_source` for
   fresh authorization; stale claims cannot publish over newer claims.
   Bearer URLs are removed after completion/failure and never logged.

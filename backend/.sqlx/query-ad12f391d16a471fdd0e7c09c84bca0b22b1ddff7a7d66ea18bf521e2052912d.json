@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT model FROM chat_models WHERE is_figure_description_default = TRUE LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "model"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ad12f391d16a471fdd0e7c09c84bca0b22b1ddff7a7d66ea18bf521e2052912d"
+}

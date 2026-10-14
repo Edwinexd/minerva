@@ -1,0 +1,196 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE chat_models\n                   SET is_utility_default = TRUE, updated_at = NOW()\n                   WHERE model = $1\n                   RETURNING model, provider, display_name, enabled, is_default,\n                             is_utility_default, is_figure_description_default, input_usd_per_mtok, output_usd_per_mtok,\n                             supports_logprobs, supports_tool_use, price_source_url,\n                             price_updated_at, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "is_default",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "is_default"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "is_utility_default",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "is_utility_default"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "is_figure_description_default",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "is_figure_description_default"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "input_usd_per_mtok",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "input_usd_per_mtok"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "output_usd_per_mtok",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "output_usd_per_mtok"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "supports_logprobs",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "supports_logprobs"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "supports_tool_use",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "supports_tool_use"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "price_source_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "price_source_url"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "price_updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "price_updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "3dcce3c9c265afd1e4570a94ade83ecc9ceeeb8d73ff58be2c4d9f2d37eddb81"
+}

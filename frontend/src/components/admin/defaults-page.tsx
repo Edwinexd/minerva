@@ -47,7 +47,6 @@ type KnobKind =
   | { type: "text"; multiline: boolean; max_len: number; nullable: boolean }
   | { type: "enum"; options: string[] }
   | { type: "chat_model" }
-  | { type: "optional_chat_model" }
 
 interface SystemDefaultEntry {
   key: string
@@ -348,14 +347,13 @@ function ValueEditor({
   value: unknown
   onChange: (v: unknown) => void
 }) {
-  const { t } = useTranslation("admin")
   // Chat-model picker: source the dropdown from the live Cerebras
   // catalog (same feed the teacher config page uses). Free-text
   // fallback if the API failed; an admin should still be able to
   // pin a model that's temporarily missing from the listing.
   const { data: modelsData } = useQuery({
     ...modelsQuery,
-    enabled: kind.type === "chat_model" || kind.type === "optional_chat_model",
+    enabled: kind.type === "chat_model",
   })
 
   if (kind.type === "bool") {
@@ -444,8 +442,7 @@ function ValueEditor({
     )
   }
 
-  if (kind.type === "chat_model" || kind.type === "optional_chat_model") {
-    const optional = kind.type === "optional_chat_model"
+  if (kind.type === "chat_model") {
     const current = typeof value === "string" ? value : ""
     const apiModels = modelsData?.models ?? []
     // Patch in the current pinned value if Cerebras's listing
@@ -458,13 +455,11 @@ function ValueEditor({
         ? [{ id: current, name: current }, ...apiModels]
         : apiModels
     return (
-      <Select value={optional && !current ? "__disabled__" : current}
-        onValueChange={(v) => v && onChange(v === "__disabled__" ? "" : v)}>
+      <Select value={current} onValueChange={(v) => v && onChange(v)}>
         <SelectTrigger id={id} className="w-full max-w-md truncate">
           <SelectValue placeholder={current} />
         </SelectTrigger>
         <SelectContent>
-          {optional && <SelectItem value="__disabled__">{t("defaults.disabled")}</SelectItem>}
           {options.map((m) => (
             <SelectItem key={m.id} value={m.id}>
               {m.name}

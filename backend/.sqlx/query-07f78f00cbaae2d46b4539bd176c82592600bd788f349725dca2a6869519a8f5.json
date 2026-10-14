@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE chat_models SET is_figure_description_default = FALSE, updated_at = NOW() WHERE is_figure_description_default = TRUE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "07f78f00cbaae2d46b4539bd176c82592600bd788f349725dca2a6869519a8f5"
+}

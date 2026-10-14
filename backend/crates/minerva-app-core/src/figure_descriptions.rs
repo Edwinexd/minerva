@@ -2,7 +2,7 @@
 //! Changing the chosen model or VERSION only re-describes existing crops.
 use base64::Engine;
 use minerva_db::queries::{
-    chat_models, course_token_usage, figure_descriptions as queue, system_defaults, usage, users,
+    chat_models, course_token_usage, figure_descriptions as queue, usage, users,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -74,16 +74,12 @@ fn request(model: &str, image: &[u8], context: &str) -> Value {
 }
 
 pub async fn tick(state: &AppState) -> Result<(), String> {
-    let model: String = system_defaults::get(
-        &state.db,
-        crate::system_defaults::keys::FIGURE_DESCRIPTION_MODEL,
-    )
-    .await
-    .map_err(|e| e.to_string())?
-    .unwrap_or_default();
-    if model.is_empty() {
+    let Some(model) = chat_models::current_figure_description_default(&state.db)
+        .await
+        .map_err(|e| e.to_string())?
+    else {
         return Ok(());
-    }
+    };
     let mut row = chat_models::find(&state.db, &model)
         .await
         .map_err(|e| e.to_string())?

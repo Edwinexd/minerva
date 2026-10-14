@@ -123,6 +123,8 @@ const authenticated = [
   "/admin/courses",
   "/admin/users",
   "/admin/rules",
+  // Catalog role controls and the horizontally scrolling model tables.
+  "/admin/defaults",
   // The per-account spend drill-down, which renders the same panels as
   // the teacher's own page against another user's id.
   `/admin/usage/${adminUserId}`,

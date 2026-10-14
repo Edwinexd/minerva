@@ -525,7 +525,7 @@
   "system": {
     "chatModels": {
       "title": "Chat models",
-      "description": "Catalog of chat / utility LLM models. A model can only be enabled once its provider key is configured and both USD prices are entered (0 is allowed for on-prem / free models). The 'Default' radio is the model new courses are created with; the 'Utility' radio is the model used for classification, knowledge-graph linking, and the price-scrape helper. Prices are USD per 1,000,000 tokens; spend is computed from token usage at these rates. 'Scrape' fetches the provider's public pricing page and asks the utility model to suggest rates for review; nothing is saved until you click Save. OpenAI Flex variants have their own prices and enabled state; confirm Flex support before enabling one. Enter Standard and Flex prices separately.",
+      "description": "Catalog of chat / utility LLM models. A model can only be enabled once its provider key is configured and both USD prices are entered (0 is allowed for on-prem / free models). The 'Default' radio is the model new courses are created with; the 'Utility' radio is the model used for classification, knowledge-graph linking, and the price-scrape helper. Prices are USD per 1,000,000 tokens; spend is computed from token usage at these rates. 'Scrape' fetches the provider's public pricing page and asks the utility model to suggest rates for review; nothing is saved until you click Save. OpenAI Flex variants have their own prices and enabled state; confirm Flex support before enabling one. Enter Standard and Flex prices separately. The Figure descriptions column selects an enabled vision model for describing figure crops; no selection leaves that step disabled.",
       "loadError": "Could not load chat models.",
       "refresh": "Refresh from providers",
       "refreshing": "Refreshing...",
@@ -536,7 +536,8 @@
         "utility": "Utility",
         "inputPrice": "Input $/Mtok",
         "outputPrice": "Output $/Mtok",
-        "courses": "Courses"
+        "courses": "Courses",
+        "figures": "Figure descriptions"
       },
       "enableLabel": "Enable {{model}}",
       "defaultLabel": "Make {{model}} the default course model",
@@ -545,7 +546,10 @@
       "outputPriceLabel": "Output price per million tokens for {{model}}",
       "unpriced": "unpriced",
       "providerUnavailable": "no provider key",
-      "savePrice": "Save"
+      "savePrice": "Save",
+      "figuresLabel": "Use {{model}} for figure descriptions",
+      "disableFigures": "Disable figure descriptions",
+      "tableLabel": "Model catalog"
     },
     "unavailableTitle": "System metrics unavailable",
     "storage": {
@@ -780,13 +784,8 @@
       "rerankingUnavailableReason": {
         "label": "Re-ranking unavailability message",
         "description": "Message shown to teachers while re-ranking is disabled. Leave blank to use the default explanation."
-      },
-      "figureDescriptionModel": {
-        "label": "Figure description model",
-        "description": "Choose an enabled vision model from the catalog. Describes existing and new figure crops in the background for search and inline replies. Disabled until selected. Changing the model re-describes all figures and incurs new usage. Prefers an enabled, priced Flex variant. Switching tiers keeps cached descriptions."
       }
-    },
-    "disabled": "Disabled"
+    }
   },
   "daisyImports": {
     "autoApplyTitle": "Auto-apply Daisy imports",

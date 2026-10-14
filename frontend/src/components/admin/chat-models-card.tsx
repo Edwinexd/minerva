@@ -29,6 +29,7 @@ const PICKER_KEY = ["chat-models"] as const
 export function ChatModelsCard() {
   const { t } = useTranslation("admin")
   const queryClient = useQueryClient()
+  const formatError = useApiErrorMessage()
   const { data, isLoading, error } = useQuery(adminChatModelsQuery)
 
   const refreshMut = useMutation({
@@ -38,6 +39,10 @@ export function ChatModelsCard() {
       queryClient.invalidateQueries({ queryKey: PICKER_KEY })
       queryClient.invalidateQueries({ queryKey: ["models"] })
     },
+  })
+  const disableFiguresMut = useMutation({
+    mutationFn: () => api.put("/admin/chat-models/figure-description-default", { model: null }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ADMIN_KEY }),
   })
 
   return (
@@ -59,6 +64,7 @@ export function ChatModelsCard() {
         <CardDescription>{t("system.chatModels.description")}</CardDescription>
       </CardHeader>
       <CardContent>
+        {disableFiguresMut.error && <p role="alert" className="text-sm text-destructive">{formatError(disableFiguresMut.error)}</p>}
         {isLoading ? (
           <div className="space-y-2">
             <Skeleton className="h-8 w-full" />
@@ -69,7 +75,8 @@ export function ChatModelsCard() {
             {t("system.chatModels.loadError")}
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+          <section className="overflow-x-auto" tabIndex={0} aria-label={t("system.chatModels.tableLabel")}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-xs text-muted-foreground">
@@ -84,6 +91,15 @@ export function ChatModelsCard() {
                   </th>
                   <th scope="col" className="py-2 pr-3">
                     {t("system.chatModels.col.utility")}
+                  </th>
+                  <th scope="col" className="py-2 pr-3">
+                    {t("system.chatModels.col.figures")}
+                    <Button variant="ghost" size="sm" className="mt-1 block"
+                      disabled={!data?.models.some((m) => m.is_figure_description_default) || disableFiguresMut.isPending}
+                      onClick={() => disableFiguresMut.mutate()}
+                      aria-label={t("system.chatModels.disableFigures")}>
+                      {t("system.chatModels.disableFigures")}
+                    </Button>
                   </th>
                   <th scope="col" className="py-2 pr-3">
                     {t("system.chatModels.col.inputPrice")}
@@ -102,7 +118,7 @@ export function ChatModelsCard() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </section>
         )}
       </CardContent>
     </Card>
@@ -144,6 +160,11 @@ function ChatModelRow({ model }: { model: AdminChatModel }) {
   const utilityMut = useMutation({
     mutationFn: () =>
       api.put("/admin/chat-models/utility-default", { model: model.model }),
+    onSuccess: invalidate,
+    onError,
+  })
+  const figuresMut = useMutation({
+    mutationFn: () => api.put("/admin/chat-models/figure-description-default", { model: model.model }),
     onSuccess: invalidate,
     onError,
   })
@@ -221,6 +242,14 @@ function ChatModelRow({ model }: { model: AdminChatModel }) {
           aria-label={t("system.chatModels.utilityLabel", {
             model: model.display_name,
           })}
+        />
+      </td>
+      <td className="py-2 pr-3">
+        <input type="radio" name="chat-figure-description-model"
+          checked={model.is_figure_description_default}
+          disabled={!model.enabled || !model.figure_description_provider_available || figuresMut.isPending}
+          onChange={() => figuresMut.mutate()}
+          aria-label={t("system.chatModels.figuresLabel", { model: model.display_name })}
         />
       </td>
       <td className="py-2 pr-3">

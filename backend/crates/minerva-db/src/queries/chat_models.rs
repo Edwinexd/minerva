@@ -1,13 +1,13 @@
 //! Admin-managed catalog of chat / utility LLM models. Mirrors
 //! `embedding_models` / `reranker_models` but adds the provider
 //! reference and per-model USD pricing. See migration
-//! `20260610000001_chat_models.sql` for the schema, the two
-//! single-default partial-unique indexes, and the
+//! `20260610000001_chat_models.sql` for the base schema and
 //! enabled-requires-price CHECK.
 //!
-//! Two "default" roles share one catalog so the admin manages a single
+//! Three model roles share one catalog so the admin manages a single
 //! list: `is_default` (the course-chat default) and `is_utility_default`
-//! (classification / KG / aegis / suggested-questions).
+//! (classification / KG / aegis / suggested-questions), plus
+//! `is_figure_description_default` for post-extraction image descriptions.
 //!
 //! Price NULL vs 0 is load-bearing: NULL = unknown (model unusable),
 //! 0 = genuinely free (on-prem, usable). `rates_of` collapses an
@@ -30,6 +30,8 @@ pub struct ChatModelRow {
     /// suggested-questions (zero or one row). Set via
     /// `set_utility_default`.
     pub is_utility_default: bool,
+    /// The independently selected vision model for crop descriptions.
+    pub is_figure_description_default: bool,
     /// USD per 1M input tokens. NULL = unknown (unusable); 0 = free.
     pub input_usd_per_mtok: Option<Decimal>,
     /// USD per 1M output tokens. NULL = unknown (unusable); 0 = free.
@@ -47,7 +49,7 @@ pub async fn list_all(db: &PgPool) -> Result<Vec<ChatModelRow>, sqlx::Error> {
     sqlx::query_as!(
         ChatModelRow,
         r#"SELECT model, provider, display_name, enabled, is_default,
-                  is_utility_default, input_usd_per_mtok, output_usd_per_mtok,
+                  is_utility_default, is_figure_description_default, input_usd_per_mtok, output_usd_per_mtok,
                   supports_logprobs, supports_tool_use, price_source_url,
                   price_updated_at, created_at, updated_at
            FROM chat_models
@@ -62,7 +64,7 @@ pub async fn find(db: &PgPool, model: &str) -> Result<Option<ChatModelRow>, sqlx
     sqlx::query_as!(
         ChatModelRow,
         r#"SELECT model, provider, display_name, enabled, is_default,
-                  is_utility_default, input_usd_per_mtok, output_usd_per_mtok,
+                  is_utility_default, is_figure_description_default, input_usd_per_mtok, output_usd_per_mtok,
                   supports_logprobs, supports_tool_use, price_source_url,
                   price_updated_at, created_at, updated_at
            FROM chat_models
@@ -125,7 +127,7 @@ pub async fn set_enabled(
            SET enabled = $2, updated_at = NOW()
            WHERE model = $1
            RETURNING model, provider, display_name, enabled, is_default,
-                     is_utility_default, input_usd_per_mtok, output_usd_per_mtok,
+                     is_utility_default, is_figure_description_default, input_usd_per_mtok, output_usd_per_mtok,
                      supports_logprobs, supports_tool_use, price_source_url,
                      price_updated_at, created_at, updated_at"#,
         model,
@@ -151,7 +153,7 @@ pub async fn set_price(
                price_source_url = $4, price_updated_at = NOW(), updated_at = NOW()
            WHERE model = $1
            RETURNING model, provider, display_name, enabled, is_default,
-                     is_utility_default, input_usd_per_mtok, output_usd_per_mtok,
+                     is_utility_default, is_figure_description_default, input_usd_per_mtok, output_usd_per_mtok,
                      supports_logprobs, supports_tool_use, price_source_url,
                      price_updated_at, created_at, updated_at"#,
         model,
@@ -177,6 +179,22 @@ pub async fn current_utility_default(db: &PgPool) -> Result<Option<String>, sqlx
         .await
 }
 
+pub async fn current_figure_description_default(
+    db: &PgPool,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar!(
+        "SELECT model FROM chat_models WHERE is_figure_description_default = TRUE LIMIT 1"
+    )
+    .fetch_optional(db)
+    .await
+}
+
+pub async fn clear_figure_description_default(db: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query!("UPDATE chat_models SET is_figure_description_default = FALSE, updated_at = NOW() WHERE is_figure_description_default = TRUE")
+        .execute(db).await?;
+    Ok(())
+}
+
 crate::queries::model_catalog::define_set_default_error!(
     not_found: "chat model not in catalog",
     disabled: "chat model is disabled and cannot be a default",
@@ -197,10 +215,18 @@ pub async fn set_utility_default(
     set_one_default(db, model, DefaultKind::Utility).await
 }
 
+pub async fn set_figure_description_default(
+    db: &PgPool,
+    model: &str,
+) -> Result<ChatModelRow, SetDefaultError> {
+    set_one_default(db, model, DefaultKind::FigureDescription).await
+}
+
 #[derive(Clone, Copy)]
 enum DefaultKind {
     Course,
     Utility,
+    FigureDescription,
 }
 
 async fn set_one_default(
@@ -238,7 +264,7 @@ async fn set_one_default(
                    SET is_default = TRUE, updated_at = NOW()
                    WHERE model = $1
                    RETURNING model, provider, display_name, enabled, is_default,
-                             is_utility_default, input_usd_per_mtok, output_usd_per_mtok,
+                             is_utility_default, is_figure_description_default, input_usd_per_mtok, output_usd_per_mtok,
                              supports_logprobs, supports_tool_use, price_source_url,
                              price_updated_at, created_at, updated_at"#,
                 model,
@@ -260,7 +286,29 @@ async fn set_one_default(
                    SET is_utility_default = TRUE, updated_at = NOW()
                    WHERE model = $1
                    RETURNING model, provider, display_name, enabled, is_default,
-                             is_utility_default, input_usd_per_mtok, output_usd_per_mtok,
+                             is_utility_default, is_figure_description_default, input_usd_per_mtok, output_usd_per_mtok,
+                             supports_logprobs, supports_tool_use, price_source_url,
+                             price_updated_at, created_at, updated_at"#,
+                model,
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(SetDefaultError::Db)?
+        }
+        DefaultKind::FigureDescription => {
+            sqlx::query!(
+                "UPDATE chat_models SET is_figure_description_default = FALSE, updated_at = NOW() WHERE is_figure_description_default = TRUE",
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(SetDefaultError::Db)?;
+            sqlx::query_as!(
+                ChatModelRow,
+                r#"UPDATE chat_models
+                   SET is_figure_description_default = TRUE, updated_at = NOW()
+                   WHERE model = $1
+                   RETURNING model, provider, display_name, enabled, is_default,
+                             is_utility_default, is_figure_description_default, input_usd_per_mtok, output_usd_per_mtok,
                              supports_logprobs, supports_tool_use, price_source_url,
                              price_updated_at, created_at, updated_at"#,
                 model,

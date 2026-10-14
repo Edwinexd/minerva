@@ -227,6 +227,8 @@ export interface AdminChatModel {
   enabled: boolean
   is_default: boolean
   is_utility_default: boolean
+  is_figure_description_default: boolean
+  figure_description_provider_available: boolean
   /// USD per 1M tokens. `null` = unknown (model is unusable until
   /// priced); `0` = genuinely free (on-prem).
   input_usd_per_mtok: number | null

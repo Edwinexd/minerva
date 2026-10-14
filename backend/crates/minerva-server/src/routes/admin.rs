@@ -81,6 +81,10 @@ pub fn router() -> Router<AppState> {
             "/chat-models/utility-default",
             put(set_utility_default_chat_model),
         )
+        .route(
+            "/chat-models/figure-description-default",
+            put(set_figure_description_default_chat_model),
+        )
         .route("/chat-models/price", put(set_chat_model_price))
         .route("/chat-models/refresh", post(refresh_chat_models))
         .route(
@@ -1803,6 +1807,8 @@ struct ChatModelEntry {
     enabled: bool,
     is_default: bool,
     is_utility_default: bool,
+    is_figure_description_default: bool,
+    figure_description_provider_available: bool,
     /// USD per 1M tokens. `null` = unknown (unusable; cannot be enabled);
     /// `0.0` = genuinely free (on-prem, usable).
     input_usd_per_mtok: Option<f64>,
@@ -1849,6 +1855,10 @@ async fn list_chat_models(
     let models = rows
         .into_iter()
         .map(|r| ChatModelEntry {
+            figure_description_provider_available: figure_description_provider_available(
+                &state,
+                &r.provider,
+            ),
             provider_available: state.llm.has(&r.provider),
             courses_using: usage.get(&r.model).copied().unwrap_or(0),
             input_usd_per_mtok: rate_to_f64(r.input_usd_per_mtok),
@@ -1859,6 +1869,7 @@ async fn list_chat_models(
             enabled: r.enabled,
             is_default: r.is_default,
             is_utility_default: r.is_utility_default,
+            is_figure_description_default: r.is_figure_description_default,
             supports_logprobs: r.supports_logprobs,
             supports_tool_use: r.supports_tool_use,
             price_updated_at: r.price_updated_at,
@@ -1937,6 +1948,44 @@ struct SetChatModelDefaultRequest {
 #[derive(Serialize)]
 struct SetChatModelDefaultResponse {
     model: String,
+}
+
+fn figure_description_provider_available(state: &AppState, provider_id: &str) -> bool {
+    state.llm.get(provider_id).is_some_and(|provider| {
+        provider.id() != minerva_app_core::llm::provider::PROVIDER_CEREBRAS
+            && provider.openai_endpoint().is_some()
+    })
+}
+
+#[derive(Deserialize, Serialize)]
+struct FigureDescriptionModelSelection {
+    model: Option<String>,
+}
+
+async fn set_figure_description_default_chat_model(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<FigureDescriptionModelSelection>,
+) -> Result<Json<FigureDescriptionModelSelection>, AppError> {
+    require_admin(&user)?;
+    if let Some(model) = body.model.as_deref() {
+        let row = minerva_db::queries::chat_models::find(&state.db, model)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if !figure_description_provider_available(&state, &row.provider) {
+            return Err(AppError::bad_request(
+                "Choose a vision model with a configured image-capable provider",
+            ));
+        }
+        map_set_default(
+            minerva_db::queries::chat_models::set_figure_description_default(&state.db, model)
+                .await,
+            model,
+        )?;
+    } else {
+        minerva_db::queries::chat_models::clear_figure_description_default(&state.db).await?;
+    }
+    Ok(Json(body))
 }
 
 /// Promote one chat model to the course-chat default for new courses.
@@ -2446,26 +2495,6 @@ async fn update_system_default(
 
     let def = crate::system_defaults::find(&body.key).ok_or(AppError::NotFound)?;
     crate::system_defaults::validate(&def, &body.value).map_err(AppError::bad_request)?;
-
-    if body.key == crate::system_defaults::keys::FIGURE_DESCRIPTION_MODEL {
-        let model = body.value.as_str().unwrap_or_default();
-        if !model.is_empty() {
-            let row = minerva_db::queries::chat_models::find(&state.db, model)
-                .await?
-                .ok_or_else(|| AppError::bad_request("Choose a model from the model catalog"))?;
-            let provider = state.llm.get(&row.provider);
-            if !row.enabled
-                || provider
-                    .as_ref()
-                    .and_then(|p| p.openai_endpoint())
-                    .is_none()
-            {
-                return Err(AppError::bad_request(
-                    "Choose an enabled vision model with a configured OpenAI-compatible provider",
-                ));
-            }
-        }
-    }
 
     let row = minerva_db::queries::system_defaults::set(&state.db, &body.key, &body.value).await?;
 

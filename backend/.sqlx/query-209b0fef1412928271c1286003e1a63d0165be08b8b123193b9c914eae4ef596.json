@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT model, provider, display_name, enabled, is_default,\n                  is_utility_default, input_usd_per_mtok, output_usd_per_mtok,\n                  supports_logprobs, supports_tool_use, price_source_url,\n                  price_updated_at, created_at, updated_at\n           FROM chat_models\n           WHERE model = $1",
+  "query": "UPDATE chat_models\n                   SET is_default = TRUE, updated_at = NOW()\n                   WHERE model = $1\n                   RETURNING model, provider, display_name, enabled, is_default,\n                             is_utility_default, is_figure_description_default, input_usd_per_mtok, output_usd_per_mtok,\n                             supports_logprobs, supports_tool_use, price_source_url,\n                             price_updated_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "is_figure_description_default",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "chat_models",
+            "name": "is_figure_description_default"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "input_usd_per_mtok",
         "type_info": "Numeric",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "output_usd_per_mtok",
         "type_info": "Numeric",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "supports_logprobs",
         "type_info": "Bool",
         "origin": {
@@ -103,7 +114,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "supports_tool_use",
         "type_info": "Bool",
         "origin": {
@@ -114,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "price_source_url",
         "type_info": "Text",
         "origin": {
@@ -125,7 +136,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "price_updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -147,7 +158,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -170,6 +181,7 @@
       false,
       false,
       false,
+      false,
       true,
       true,
       false,
@@ -180,5 +192,5 @@
       false
     ]
   },
-  "hash": "d059b2b77fa503bdde74244fad7d1bf9607728e1292ca1a75eb9f73663cd6c95"
+  "hash": "209b0fef1412928271c1286003e1a63d0165be08b8b123193b9c914eae4ef596"
 }

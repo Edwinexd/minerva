@@ -252,8 +252,9 @@ Ingest:
   describes the actual crop with the admin-selected vision model. Its
   cache, model/prompt version, leases, backoff and failures live in
   `figure_descriptions`; it never reruns or delays Olympus extraction.
-  The stage starts disabled. Choose a vision model under **Admin / System
-  defaults / Figure description model**. Existing crops are backfilled in
+  The stage starts disabled. Select the dot for a vision model in the
+  **Figure descriptions** column of the admin model catalog. Existing crops
+  are backfilled in
   batches of at most 16 per pass, with five attempts per model/version.
   Owner spending caps defer work until the next day; Flex capacity shortages
   defer it for five minutes without consuming attempts. Descriptions and

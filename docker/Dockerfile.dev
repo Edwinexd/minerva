@@ -32,6 +32,7 @@ COPY backend/crates/minerva-rpc-local/Cargo.toml crates/minerva-rpc-local/Cargo.
 COPY backend/crates/minerva-server/Cargo.toml crates/minerva-server/Cargo.toml
 COPY backend/crates/minerva-worker/Cargo.toml crates/minerva-worker/Cargo.toml
 COPY backend/crates/minerva-scheduler/Cargo.toml crates/minerva-scheduler/Cargo.toml
+COPY backend/crates/minerva-fetcher/Cargo.toml crates/minerva-fetcher/Cargo.toml
 COPY backend/crates/minerva-embedder/Cargo.toml crates/minerva-embedder/Cargo.toml
 COPY backend/crates/minerva-reranker/Cargo.toml crates/minerva-reranker/Cargo.toml
 RUN mkdir -p \
@@ -40,11 +41,12 @@ RUN mkdir -p \
         crates/minerva-embed-engine/src crates/minerva-mbz/src \
         crates/minerva-pipeline/src crates/minerva-rpc/src crates/minerva-rpc-local/src \
         crates/minerva-server/src \
-        crates/minerva-worker/src crates/minerva-scheduler/src \
+        crates/minerva-worker/src crates/minerva-scheduler/src crates/minerva-fetcher/src \
         crates/minerva-embedder/src crates/minerva-reranker/src && \
     echo "fn main() {}" > crates/minerva-server/src/main.rs && \
     echo "fn main() {}" > crates/minerva-worker/src/main.rs && \
     echo "fn main() {}" > crates/minerva-scheduler/src/main.rs && \
+    echo "fn main() {}" > crates/minerva-fetcher/src/main.rs && \
     echo "fn main() {}" > crates/minerva-embedder/src/main.rs && \
     echo "fn main() {}" > crates/minerva-reranker/src/main.rs && \
     touch crates/minerva-core/src/lib.rs crates/minerva-catalog/src/lib.rs \

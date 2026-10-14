@@ -1,11 +1,11 @@
-# Multi-target Rust build: one Dockerfile produces five images, one
+# Multi-target Rust build: one Dockerfile produces six images, one
 # per workspace binary. The `TARGET_BIN` arg picks which crate to
 # compile in the backend stage; everything before that (cargo fetch,
 # dep build) is identical across targets and gets cached by BuildKit.
 #
 # CI / docker.yml builds the matrix
 #   [minerva, minerva-embedder, minerva-reranker, minerva-worker,
-#    minerva-scheduler]
+#    minerva-scheduler, minerva-fetcher]
 # but only `minerva` (the api binary) carries the frontend bundle.
 #
 # Two runtime stages handle that split:
@@ -60,11 +60,12 @@ COPY backend/crates/minerva-rpc-local/Cargo.toml crates/minerva-rpc-local/Cargo.
 COPY backend/crates/minerva-server/Cargo.toml crates/minerva-server/Cargo.toml
 COPY backend/crates/minerva-worker/Cargo.toml crates/minerva-worker/Cargo.toml
 COPY backend/crates/minerva-scheduler/Cargo.toml crates/minerva-scheduler/Cargo.toml
+COPY backend/crates/minerva-fetcher/Cargo.toml crates/minerva-fetcher/Cargo.toml
 COPY backend/crates/minerva-embedder/Cargo.toml crates/minerva-embedder/Cargo.toml
 COPY backend/crates/minerva-reranker/Cargo.toml crates/minerva-reranker/Cargo.toml
 COPY backend/crates/minerva-metrics/Cargo.toml crates/minerva-metrics/Cargo.toml
 # minerva-server is a lib + the `minerva` (api) bin; minerva-worker /
-# minerva-scheduler / minerva-embedder / minerva-reranker are their own
+# minerva-scheduler / minerva-fetcher / minerva-embedder / minerva-reranker are their own
 # bin crates. Stub every crate's lib/main so cargo resolves the graph
 # regardless of which TARGET_BIN is selected.
 RUN mkdir -p \
@@ -73,12 +74,13 @@ RUN mkdir -p \
         crates/minerva-embed-engine/src crates/minerva-mbz/src \
         crates/minerva-pipeline/src crates/minerva-rpc/src crates/minerva-rpc-local/src \
         crates/minerva-server/src \
-        crates/minerva-worker/src crates/minerva-scheduler/src \
+        crates/minerva-worker/src crates/minerva-scheduler/src crates/minerva-fetcher/src \
         crates/minerva-embedder/src crates/minerva-reranker/src \
         crates/minerva-metrics/src && \
     echo "fn main() {}" > crates/minerva-server/src/main.rs && \
     echo "fn main() {}" > crates/minerva-worker/src/main.rs && \
     echo "fn main() {}" > crates/minerva-scheduler/src/main.rs && \
+    echo "fn main() {}" > crates/minerva-fetcher/src/main.rs && \
     echo "fn main() {}" > crates/minerva-embedder/src/main.rs && \
     echo "fn main() {}" > crates/minerva-reranker/src/main.rs && \
     touch crates/minerva-core/src/lib.rs crates/minerva-catalog/src/lib.rs \
@@ -93,6 +95,7 @@ RUN mkdir -p \
            crates/minerva-embed-engine/src crates/minerva-mbz/src \
            crates/minerva-pipeline/src crates/minerva-rpc/src crates/minerva-rpc-local/src \
            crates/minerva-server/src crates/minerva-worker/src crates/minerva-scheduler/src \
+           crates/minerva-fetcher/src \
            crates/minerva-embedder/src crates/minerva-reranker/src \
            crates/minerva-metrics/src
 

@@ -4,10 +4,10 @@ The figures here are rendered from [`docs/diagrams/build.py`](diagrams/build.py)
 (graphviz under the hood). To regenerate after editing:
 
 ```bash
-sudo apt-get install graphviz
-python3 -m venv /tmp/diags
-/tmp/diags/bin/pip install graphviz diagrams
-/tmp/diags/bin/python docs/diagrams/build.py
+sudo apt-get install graphviz   # or: brew install graphviz
+python3 -m venv venv
+venv/bin/pip install -r docs/diagrams/requirements.txt
+venv/bin/python docs/diagrams/build.py
 ```
 
 ## System overview
@@ -43,7 +43,7 @@ catalog prices at 0 rather than dropping its rows out of the sum.
 
 ## Service topology
 
-The backend is five Rust binaries built from one Cargo workspace, split by
+The backend is six Rust binaries built from one Cargo workspace, split by
 what each process must link so a fat ingest OOM can't take down the API and
 the API can scale without carrying model weights:
 
@@ -56,7 +56,8 @@ the API can scale without carrying model weights:
   (`process_document`), the classifier, the MBZ parser, and the stale-doc +
   relink sweepers. Axum-free.
 - **minerva-scheduler** runs only the periodic pollers: Canvas auto-sync, LTI
-  NRPS reconcile, LTI platform-health probe, and pending-platform cleanup. One
+  NRPS reconcile, LTI platform-health probe, pending-platform cleanup, and
+  the visual extraction tick (Slurm submission over SSH, figure indexing). One
   replica (so it needs no advisory locks), axum-free, tiny. Kept off the
   worker's restart lifecycle so an ingest OOM or a worker roll never pauses
   NRPS or resets the scheduler clocks. It is the sole owner of these loops (the
@@ -64,6 +65,10 @@ the API can scale without carrying model weights:
   pause and resume on recovery, which is acceptable because every loop is a
   DB-driven "find what's due" query and the 30-day platform-orphan grace dwarfs
   any normal outage window.
+- **minerva-fetcher** probes Play lectures for their slide source and
+  downloads the chosen video into the visual extraction staging window.
+  Database and staging volume only; its image alone carries ffmpeg and
+  tesseract. See "Visual extraction pipeline" below.
 - **minerva-embedder** and **minerva-reranker** are stateless gRPC (tonic)
   model servers, each owning its own FastEmbed / cross-encoder LRU and
   HuggingFace cache. They are internal-only (ClusterIP, no ingress). Caller
@@ -100,7 +105,7 @@ Key invariants:
   second replica doubles resident model memory; scale out only if the
   embedder's Status RPC reports queue contention.
 
-All five images come from one `docker/Dockerfile.prod`; a `TARGET_BIN`
+All six images come from one `docker/Dockerfile.prod`; a `TARGET_BIN`
 build-arg picks the binary and only the api image bundles the frontend.
 
 ## Document ingest pipeline
@@ -122,6 +127,12 @@ cluster (two L40S GPU nodes) that the prod node cannot do itself. It
 produces slide-aligned lecture text, labelled layout blocks with boxes,
 and figure crops with two embeddings each. Worker code, Olympus scripts
 and measurements: `gpu/slide-ocr/`.
+
+![Visual extraction](diagrams/visual-extraction.svg)
+
+Minerva is the hub: GitHub Actions, `minerva-fetcher`, the scheduler and
+the Slurm workers each talk only to Minerva's database or service API,
+never to one another.
 
 Responsibilities and credentials:
 

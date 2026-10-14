@@ -18,6 +18,7 @@ RAG platform for educational use at DSV, Stockholm University. Teachers upload c
 - **Conversations UX**: theme toggle (light/dark/system) in the header, fresh new-chat as default landing, LLM-grounded suggested questions on the empty state (drawn from the three latest sources), bidirectional unread + explicit acknowledgements, frozen pins for owners, sticky teacher unreviewed-tab list.
 - **LMS integration**: Moodle local plugin (iframe + enrolment sync + MBZ import), site-level Moodle/Canvas LTI 1.3 with first-launch course binding, Canvas REST sync.
 - **DSV Play transcript pipeline**: hourly VTT fetch + index for play.dsv.su.se URLs; teacher-configurable Play designation codes drive automatic discovery of new lecture recordings.
+- **Slides and figures**: Play lectures and PDFs are OCR'd on DSV's Olympus GPU cluster (Slurm). Lectures become slides-plus-speech documents, PDFs are re-indexed from their OCR text, and extracted figures are retrieved per turn (course text model + CLIP, rank-fused) and placed inline in replies.
 - **Auth**: Shibboleth (SAML) primary; HMAC-signed external-auth invites validated entirely inside Apache via `mod_lua`; attribute-based role auto-promotion rules.
 - **Privacy & i18n**: pseudonymisation for `ext:` users, in-app data-handling ack, English + Swedish, WCAG 2.1 AA fixes.
 
@@ -25,7 +26,7 @@ RAG platform for educational use at DSV, Stockholm University. Teachers upload c
 
 ![System overview](docs/diagrams/system-overview.svg)
 
-Detail figures for the document-ingest and chat/RAG pipelines (including the FLARE multi-turn loop): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Detail figures for the document-ingest, visual extraction (Olympus) and chat/RAG pipelines (including the FLARE multi-turn loop): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Screenshots
 

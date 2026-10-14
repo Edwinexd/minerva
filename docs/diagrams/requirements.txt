@@ -1,0 +1,2 @@
+diagrams==0.25.1
+graphviz==0.20.3

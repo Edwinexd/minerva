@@ -59,6 +59,7 @@ pub mod keys {
     pub const OBSERVATION_TTL_DAYS: &str = "platform.observation_ttl_days";
     pub const RERANKING_ENABLED: &str = "platform.reranking_enabled";
     pub const RERANKING_UNAVAILABLE_REASON: &str = "platform.reranking_unavailable_reason";
+    pub const FIGURE_DESCRIPTION_MODEL: &str = "platform.figure_description_model";
 }
 
 /// Per-knob discipline. The admin route uses this to reject malformed
@@ -87,6 +88,8 @@ pub enum KnobKind {
     /// frontend renders a dropdown sourced from `GET /models`; the
     /// backend just enforces non-empty.
     ChatModel,
+    /// Catalog model selection with an empty string to disable the stage.
+    OptionalChatModel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -120,6 +123,15 @@ pub struct KnobDef {
 pub fn registry() -> Vec<KnobDef> {
     use Category::*;
     vec![
+        KnobDef {
+            key: keys::FIGURE_DESCRIPTION_MODEL,
+            category: Platform,
+            label_key: "defaults.platform.figureDescriptionModel.label",
+            description_key: "defaults.platform.figureDescriptionModel.description",
+            kind: KnobKind::OptionalChatModel,
+            env_var: None,
+            fallback: json!(""),
+        },
         // ---------- Course AI defaults ----------
         KnobDef {
             key: keys::COURSE_MODEL,
@@ -426,6 +438,12 @@ pub fn validate(def: &KnobDef, value: &Value) -> Result<(), &'static str> {
                 return Err("defaults.invalid_string");
             }
         }
+        KnobKind::OptionalChatModel => {
+            let s = value.as_str().ok_or("defaults.invalid_string")?;
+            if s.len() > 200 || s.trim() != s {
+                return Err("defaults.invalid_string");
+            }
+        }
     }
     Ok(())
 }
@@ -482,9 +500,10 @@ fn parse_env_value(def: &KnobDef, raw: &str) -> Option<Value> {
         },
         KnobKind::Int { .. } => raw.parse::<i64>().ok().map(|n| json!(n)),
         KnobKind::Float { .. } => raw.parse::<f64>().ok().map(|n| json!(n)),
-        KnobKind::Text { .. } | KnobKind::Enum { .. } | KnobKind::ChatModel => {
-            Some(Value::String(raw.to_string()))
-        }
+        KnobKind::Text { .. }
+        | KnobKind::Enum { .. }
+        | KnobKind::ChatModel
+        | KnobKind::OptionalChatModel => Some(Value::String(raw.to_string())),
     }
 }
 

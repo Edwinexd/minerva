@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE figure_descriptions SET lease = NULL, lease_expires_at = NULL,\n            attempts = GREATEST(0, attempts - 1), retry_at = NOW() + INTERVAL '5 minutes',\n            error_msg = 'Provider temporarily unavailable'\n           WHERE figure_id = $1 AND lease = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a3e57c5f37fc42e0ccbd19dce249437b686c30d57d7c91e2f1bf4213e210493e"
+}

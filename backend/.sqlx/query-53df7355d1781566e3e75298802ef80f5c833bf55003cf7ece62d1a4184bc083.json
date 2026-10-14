@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT mf.message_id, f.id AS figure_id, d.filename, f.caption,\n               p.page_number, p.start_seconds\n        FROM message_figures mf\n        JOIN messages m ON m.id = mf.message_id\n        JOIN document_figures f ON f.id = mf.figure_id\n        JOIN documents d ON d.id = f.document_id\n        LEFT JOIN document_visual_pages p\n               ON p.document_id = f.document_id AND p.position = f.page_position\n        WHERE m.conversation_id = $1\n        ORDER BY mf.message_id, mf.position\n        ",
+  "query": "\n        SELECT mf.message_id, f.id AS figure_id, d.filename,\n               COALESCE(fd.caption, f.caption) AS caption,\n               p.page_number, p.start_seconds\n        FROM message_figures mf\n        JOIN messages m ON m.id = mf.message_id\n        JOIN document_figures f ON f.id = mf.figure_id\n        LEFT JOIN figure_descriptions fd ON fd.figure_id = f.id\n        JOIN documents d ON d.id = f.document_id\n        LEFT JOIN document_visual_pages p\n               ON p.document_id = f.document_id AND p.position = f.page_position\n        WHERE m.conversation_id = $1\n        ORDER BY mf.message_id, mf.position\n        ",
   "describe": {
     "columns": [
       {
@@ -40,12 +40,7 @@
         "ordinal": 3,
         "name": "caption",
         "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "document_figures",
-            "name": "caption"
-          }
-        }
+        "origin": "Expression"
       },
       {
         "ordinal": 4,
@@ -79,10 +74,10 @@
       false,
       false,
       false,
-      true,
+      null,
       true,
       true
     ]
   },
-  "hash": "84d222f44a989a3f56f2b10b20c8d2d9614973c656747430e962b9881e2c8a11"
+  "hash": "53df7355d1781566e3e75298802ef80f5c833bf55003cf7ece62d1a4184bc083"
 }

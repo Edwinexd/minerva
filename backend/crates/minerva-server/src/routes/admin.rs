@@ -2447,6 +2447,26 @@ async fn update_system_default(
     let def = crate::system_defaults::find(&body.key).ok_or(AppError::NotFound)?;
     crate::system_defaults::validate(&def, &body.value).map_err(AppError::bad_request)?;
 
+    if body.key == crate::system_defaults::keys::FIGURE_DESCRIPTION_MODEL {
+        let model = body.value.as_str().unwrap_or_default();
+        if !model.is_empty() {
+            let row = minerva_db::queries::chat_models::find(&state.db, model)
+                .await?
+                .ok_or_else(|| AppError::bad_request("Choose a model from the model catalog"))?;
+            let provider = state.llm.get(&row.provider);
+            if !row.enabled
+                || provider
+                    .as_ref()
+                    .and_then(|p| p.openai_endpoint())
+                    .is_none()
+            {
+                return Err(AppError::bad_request(
+                    "Choose an enabled vision model with a configured OpenAI-compatible provider",
+                ));
+            }
+        }
+    }
+
     let row = minerva_db::queries::system_defaults::set(&state.db, &body.key, &body.value).await?;
 
     tracing::info!(

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT f.id, f.document_id, d.filename, f.caption, f.context,\n               p.page_number, p.start_seconds\n        FROM document_figures f\n        JOIN documents d ON d.id = f.document_id\n        LEFT JOIN document_visual_pages p\n               ON p.document_id = f.document_id AND p.position = f.page_position\n        LEFT JOIN documents child\n               ON child.parent_document_id = d.id AND child.orphaned_at IS NULL\n        WHERE f.id = ANY($2)\n          AND f.course_id = $1\n          AND d.displayable\n          AND d.orphaned_at IS NULL\n          AND (\n              NOT $3\n              OR COALESCE(child.kind, d.kind) NOT IN\n                 ('assignment_brief', 'lab_brief', 'exam', 'sample_solution', 'unknown')\n          )\n          AND (NOT $3 OR COALESCE(child.kind, d.kind) IS NOT NULL)\n        ",
+  "query": "\n        SELECT f.id, f.document_id, d.filename,\n               COALESCE(fd.caption, f.caption) AS caption,\n               fd.description AS \"context!\",\n               p.page_number, p.start_seconds\n        FROM document_figures f\n        JOIN figure_descriptions fd ON fd.figure_id = f.id\n        JOIN documents d ON d.id = f.document_id\n        LEFT JOIN document_visual_pages p\n               ON p.document_id = f.document_id AND p.position = f.page_position\n        LEFT JOIN documents child\n               ON child.parent_document_id = d.id AND child.orphaned_at IS NULL\n        WHERE f.id = ANY($2)\n          AND f.course_id = $1\n          AND fd.described_at IS NOT NULL AND fd.is_decorative = FALSE\n          AND d.displayable\n          AND d.orphaned_at IS NULL\n          AND (\n              NOT $3\n              OR COALESCE(child.kind, d.kind) NOT IN\n                 ('assignment_brief', 'lab_brief', 'exam', 'sample_solution', 'unknown')\n          )\n          AND (NOT $3 OR COALESCE(child.kind, d.kind) IS NOT NULL)\n        ",
   "describe": {
     "columns": [
       {
@@ -40,21 +40,16 @@
         "ordinal": 3,
         "name": "caption",
         "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "document_figures",
-            "name": "caption"
-          }
-        }
+        "origin": "Expression"
       },
       {
         "ordinal": 4,
-        "name": "context",
+        "name": "context!",
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "document_figures",
-            "name": "context"
+            "table": "figure_descriptions",
+            "name": "description"
           }
         }
       },
@@ -92,11 +87,11 @@
       false,
       false,
       false,
+      null,
       true,
-      false,
       true,
       true
     ]
   },
-  "hash": "90a35e3b6317d41abf599f2b8a41e31af89084dfa4adfcefc400c57a6d8f6e20"
+  "hash": "91bdc2fd74088af373830973a3991d2ce5e23c309152308d827ec056cc26b6b2"
 }

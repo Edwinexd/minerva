@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE figure_descriptions SET lease = NULL, lease_expires_at = NULL,\n            attempts = GREATEST(0, attempts - 1),\n            retry_at = CURRENT_DATE + INTERVAL '1 day', error_msg = 'Owner daily spending cap reached'\n           WHERE figure_id = $1 AND lease = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "165106ea41204cd74f08134905efced87e79ee98b726850cef96f1f136f5282c"
+}

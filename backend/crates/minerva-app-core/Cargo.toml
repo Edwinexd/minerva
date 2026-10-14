@@ -62,3 +62,6 @@ base64 = "0.23"
 anyhow = "1"
 async-trait = "0.1"
 tempfile.workspace = true
+
+[dev-dependencies]
+wiremock = "0.6"

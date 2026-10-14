@@ -663,6 +663,8 @@ pub struct UnindexedFigure {
     pub context: String,
     pub visual_model: String,
     pub visual_vector: Vec<f32>,
+    pub described_at: chrono::DateTime<chrono::Utc>,
+    pub is_decorative: bool,
 }
 
 /// Replace a document's pages and figures with a fresh OCR result, inside
@@ -739,10 +741,14 @@ pub async fn list_unindexed_figures(
     sqlx::query_as!(
         UnindexedFigure,
         r#"
-        SELECT id, document_id, course_id, context, visual_model, visual_vector AS "visual_vector!: Vec<f32>"
-        FROM document_figures
-        WHERE indexed_at IS NULL
-        ORDER BY created_at
+        SELECT f.id, f.document_id, f.course_id,
+               fd.description AS "context!", f.visual_model,
+               f.visual_vector AS "visual_vector!: Vec<f32>",
+               fd.described_at AS "described_at!", fd.is_decorative AS "is_decorative!"
+        FROM document_figures f
+        JOIN figure_descriptions fd ON fd.figure_id = f.id
+        WHERE f.indexed_at IS NULL AND fd.described_at IS NOT NULL
+        ORDER BY f.created_at
         LIMIT $1
         "#,
         limit,
@@ -751,10 +757,19 @@ pub async fn list_unindexed_figures(
     .await
 }
 
-pub async fn mark_figures_indexed(db: &PgPool, ids: &[Uuid]) -> Result<(), sqlx::Error> {
+pub async fn mark_figures_indexed(
+    db: &PgPool,
+    ids: &[Uuid],
+    described_at: &[chrono::DateTime<chrono::Utc>],
+) -> Result<(), sqlx::Error> {
     sqlx::query!(
-        "UPDATE document_figures SET indexed_at = NOW() WHERE id = ANY($1)",
-        ids
+        r#"UPDATE document_figures f SET indexed_at = NOW()
+           FROM UNNEST($1::uuid[], $2::timestamptz[]) AS expected(id, described_at),
+                figure_descriptions fd
+           WHERE f.id = expected.id AND fd.figure_id = f.id
+             AND fd.described_at = expected.described_at"#,
+        ids,
+        described_at,
     )
     .execute(db)
     .await?;
@@ -809,9 +824,12 @@ pub async fn find_chat_figures(
     let rows = sqlx::query_as!(
         ChatFigureRow,
         r#"
-        SELECT f.id, f.document_id, d.filename, f.caption, f.context,
+        SELECT f.id, f.document_id, d.filename,
+               COALESCE(fd.caption, f.caption) AS caption,
+               fd.description AS "context!",
                p.page_number, p.start_seconds
         FROM document_figures f
+        JOIN figure_descriptions fd ON fd.figure_id = f.id
         JOIN documents d ON d.id = f.document_id
         LEFT JOIN document_visual_pages p
                ON p.document_id = f.document_id AND p.position = f.page_position
@@ -819,6 +837,7 @@ pub async fn find_chat_figures(
                ON child.parent_document_id = d.id AND child.orphaned_at IS NULL
         WHERE f.id = ANY($2)
           AND f.course_id = $1
+          AND fd.described_at IS NOT NULL AND fd.is_decorative = FALSE
           AND d.displayable
           AND d.orphaned_at IS NULL
           AND (
@@ -875,11 +894,13 @@ pub async fn list_conversation_figures(
     sqlx::query_as!(
         MessageFigureRow,
         r#"
-        SELECT mf.message_id, f.id AS figure_id, d.filename, f.caption,
+        SELECT mf.message_id, f.id AS figure_id, d.filename,
+               COALESCE(fd.caption, f.caption) AS caption,
                p.page_number, p.start_seconds
         FROM message_figures mf
         JOIN messages m ON m.id = mf.message_id
         JOIN document_figures f ON f.id = mf.figure_id
+        LEFT JOIN figure_descriptions fd ON fd.figure_id = f.id
         JOIN documents d ON d.id = f.document_id
         LEFT JOIN document_visual_pages p
                ON p.document_id = f.document_id AND p.position = f.page_position
@@ -958,7 +979,12 @@ pub async fn requeue_for_reingest(db: &PgPool, document_id: Uuid) -> Result<bool
 /// retrieval (and so never loads the CLIP query encoder) until one has.
 pub async fn course_has_indexed_figures(db: &PgPool, course_id: Uuid) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar!(
-        r#"SELECT EXISTS (SELECT 1 FROM document_figures WHERE course_id = $1 AND indexed_at IS NOT NULL) AS "exists!""#,
+        r#"SELECT EXISTS (
+            SELECT 1 FROM document_figures f
+            JOIN figure_descriptions fd ON fd.figure_id = f.id
+            WHERE f.course_id = $1 AND f.indexed_at IS NOT NULL
+              AND fd.described_at IS NOT NULL AND fd.is_decorative = FALSE
+        ) AS "exists!""#,
         course_id,
     )
     .fetch_one(db)

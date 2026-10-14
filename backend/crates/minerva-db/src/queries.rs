@@ -16,6 +16,7 @@ pub mod documents;
 pub mod embedding_models;
 pub mod external_auth;
 pub mod feature_flags;
+pub mod figure_descriptions;
 pub mod linker_decisions;
 pub mod lti;
 pub mod lti_nrps;

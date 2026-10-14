@@ -248,9 +248,20 @@ Ingest:
   whose OCR fails for good keeps its extraction text.
 - **Figures** (`document_figures`): each crop is stored on `/data0` under
   the document's asset directory with its caption and context (title,
-  page text, and for lectures what was said). Two vectors per figure, both
+  page text, and for lectures what was said). A separate scheduler loop
+  describes the actual crop with the admin-selected vision model. Its
+  cache, model/prompt version, leases, backoff and failures live in
+  `figure_descriptions`; it never reruns or delays Olympus extraction.
+  The stage starts disabled. Choose a vision model under **Admin / System
+  defaults / Figure description model**. Existing crops are backfilled in
+  batches of at most 16 per pass, with five attempts per model/version.
+  Owner spending caps defer work until the next day; Flex capacity shortages
+  defer it for five minutes without consuming attempts. Descriptions and
+  short captions identify visible labels and relationships; decorative
+  question marks, logos and ornaments are excluded from new chat retrieval.
+  Only successfully described, substantive crops are indexed. Two vectors per figure, both
   pushed by the scheduler's indexing sweep:
-  - **context vector:** the context embedded with the course's text model
+  - **context vector:** the crop's description embedded with the course's text model
     (default `Snowflake/snowflake-arctic-embed-m-v2.0`, multilingual) in the
     per-course `course_<id>[_v<n>]_figures` collection;
   - **visual vector:** the crop embedded on Olympus with
@@ -265,8 +276,8 @@ orphaned documents and, under the course's kind rules, of solution,
 assessment and unclassified material. Up to three figures are listed in
 the system prompt as `[Figure N]` markers with their description, and the
 model places one by writing its marker on a line of its own; the client
-renders the image there (`[Figur N]` too, for Swedish replies), and shows
-the figures it did not place under the reply. Figures are saved in
+renders the image there (`[Figur N]` too, for Swedish replies). Unselected
+candidates stay hidden. Figures are saved in
 `message_figures` in marker order, and replies return them as
 `figures_used` with image URLs signed for the reader
 (`/api/embed/figures/{grant}`, valid a day, re-minted on every
@@ -275,6 +286,21 @@ The dev seed attaches four real teacher-guide figures (with their CLIP
 vectors, `backend/crates/minerva-server/fixtures/figures/`) to a fixture
 document and one reply, so the figure UI and retrieval work in dev without
 Olympus.
+
+OpenAI discovery also registers `model@flex` catalog candidates, disabled
+and unpriced just like newly discovered standard models. Admins confirm
+Flex support, set each variant's independent price, and enable it. The
+provider sends the base upstream model id with `service_tier=flex` or
+`default`; usage records retain the catalog variant so existing price
+joins and owner caps work without a special discount formula. Figure
+description prefers an enabled, priced Flex variant, waits on capacity
+shortages, and falls back to an enabled Standard variant only when the
+API explicitly rejects Flex support. Its returned tier chooses the usage
+variant (missing tier conservatively uses Standard). Standard must also
+be priced to account for such responses. Changing only tiers preserves
+cached descriptions; changing the underlying model or description prompt
+version re-describes crops and resets their indexing state. This cache
+version is independent of the Olympus `PIPELINE_VERSION`.
 
 ## Chat / RAG pipeline
 

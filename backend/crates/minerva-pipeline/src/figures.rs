@@ -3,8 +3,8 @@
 //!
 //! Each figure is searchable two ways, and every query runs both:
 //!
-//! - its **context** (caption, title, nearby text, and for lectures what was
-//!   said) embedded with the course's text model, in a per-course collection
+//! - its **description** (a separate post-extraction model describes the
+//!   actual crop) embedded with the course's text model, in a per-course collection
 //!   because the dimension follows the course's model;
 //! - its **pixels** embedded with CLIP on Olympus, in one global collection
 //!   filtered by course, searched with the paired CLIP text encoder.
@@ -12,7 +12,9 @@
 use std::collections::HashMap;
 
 use minerva_core::rpc::EmbedderClient;
-use qdrant_client::qdrant::{CreateFieldIndexCollectionBuilder, FieldType, PointStruct};
+use qdrant_client::qdrant::{
+    CreateFieldIndexCollectionBuilder, DeletePointsBuilder, FieldType, PointStruct, PointsIdsList,
+};
 use qdrant_client::Qdrant;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -30,6 +32,42 @@ pub const VISUAL_MODEL: &str = "Qdrant/clip-ViT-B-32-vision";
 /// `minerva-embedder`.
 pub const VISUAL_QUERY_MODEL: &str = "Qdrant/clip-ViT-B-32-text";
 pub const VISUAL_DIMENSIONS: u64 = 512;
+
+/// Remove decorative crops from both indexes, including legacy vectors.
+pub async fn delete_figure_points(
+    qdrant: &Qdrant,
+    course_id: Uuid,
+    version: i32,
+    ids: &[Uuid],
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let points = PointsIdsList {
+        ids: ids.iter().map(|id| id.to_string().into()).collect(),
+    };
+    for collection in [
+        COLLECTION.to_string(),
+        context_collection_name(course_id, version),
+    ] {
+        if !qdrant
+            .collection_exists(&collection)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            continue;
+        }
+        qdrant
+            .delete_points(
+                DeletePointsBuilder::new(&collection)
+                    .points(points.clone())
+                    .wait(true),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 /// Per-course collection of figure context vectors, alongside (and
 /// versioned with) the course's chunk collection.

@@ -33,6 +33,7 @@ use uuid::Uuid;
 // raw string.
 
 pub const CATEGORY_DOCUMENT_CLASSIFIER: &str = "document_classifier";
+pub const CATEGORY_FIGURE_DESCRIPTION: &str = "figure_description";
 pub const CATEGORY_LINKER: &str = "linker";
 pub const CATEGORY_ADVERSARIAL_FILTER: &str = "adversarial_filter";
 pub const CATEGORY_EXTRACTION_GUARD: &str = "extraction_guard";

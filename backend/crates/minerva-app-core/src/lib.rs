@@ -12,6 +12,7 @@ pub mod classification;
 pub mod config;
 pub mod error;
 pub mod feature_flags;
+pub mod figure_descriptions;
 pub mod github_url;
 pub mod llm;
 pub mod lti;

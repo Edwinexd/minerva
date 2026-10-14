@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE figure_descriptions SET description = $3, caption = $4,\n            is_decorative = $5, described_at = NOW(), lease = NULL,\n            lease_expires_at = NULL, error_msg = NULL\n           WHERE figure_id = $1 AND lease = $2 AND lease_expires_at > NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "14ee03b733b6417416cf3c90628c7b2361fc7692e27f1af59627c619468b8a9b"
+}

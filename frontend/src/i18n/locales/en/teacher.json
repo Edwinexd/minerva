@@ -243,7 +243,8 @@
       "extraction_guard": "Extraction guard",
       "aegis": "Prompt coach",
       "suggested_questions": "Suggested questions",
-      "conversation_topics": "Student question themes"
+      "conversation_topics": "Student question themes",
+      "figure_description": "Figure descriptions"
     }
   },
   "documents": {

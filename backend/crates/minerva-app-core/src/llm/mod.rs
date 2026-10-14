@@ -89,6 +89,16 @@ pub async fn openai_chat_request(
     api_key: &str,
     body: &serde_json::Value,
 ) -> Result<Response, String> {
+    // Raw research/FLARE calls share this transport with the provider
+    // abstraction. Catalog-only Flex ids must never reach the upstream API.
+    let mut variant_body;
+    let body = if body["model"].as_str().is_some_and(|m| m.ends_with("@flex")) {
+        variant_body = body.clone();
+        provider::apply_model_variant(&mut variant_body, provider::PROVIDER_OPENAI);
+        &variant_body
+    } else {
+        body
+    };
     let mut last_err = String::new();
 
     for attempt in 0..=MAX_RETRIES {

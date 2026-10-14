@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE figure_descriptions SET lease = NULL, lease_expires_at = NULL,\n            error_msg = $3,\n            retry_at = NOW() + make_interval(secs => LEAST(3600, 60 * power(2, attempts - 1))::double precision)\n           WHERE figure_id = $1 AND lease = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8d93cb10f7bd2fc00f02c05cfb879fdc5081952e6067c33485686178bef37c43"
+}

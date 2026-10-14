@@ -389,8 +389,29 @@ async fn index_pending_figures(state: &AppState) -> Result<(), String> {
             continue;
         };
         let ids: Vec<Uuid> = course_figures.iter().map(|f| f.id).collect();
+        let described_at: Vec<_> = course_figures.iter().map(|f| f.described_at).collect();
+        let decorative_ids: Vec<_> = course_figures
+            .iter()
+            .filter(|f| f.is_decorative)
+            .map(|f| f.id)
+            .collect();
+        // Old CLIP/context points can otherwise crowd out meaningful hits
+        // before the database filters decorations. Cleanup shares the
+        // durable indexing queue, so a Qdrant failure is retried next pass.
+        if let Err(e) = minerva_pipeline::figures::delete_figure_points(
+            &state.qdrant,
+            course_id,
+            course.embedding_version,
+            &decorative_ids,
+        )
+        .await
+        {
+            tracing::warn!("figure decoration cleanup failed: {e}");
+            continue;
+        }
         let to_index: Vec<minerva_pipeline::figures::FigureToIndex> = course_figures
             .into_iter()
+            .filter(|f| !f.is_decorative)
             .map(|f| minerva_pipeline::figures::FigureToIndex {
                 id: f.id,
                 document_id: f.document_id,
@@ -414,7 +435,7 @@ async fn index_pending_figures(state: &AppState) -> Result<(), String> {
         )
         .await
         {
-            Ok(()) => queue::mark_figures_indexed(&state.db, &ids)
+            Ok(()) => queue::mark_figures_indexed(&state.db, &ids, &described_at)
                 .await
                 .map_err(|e| e.to_string())?,
             Err(e) => {

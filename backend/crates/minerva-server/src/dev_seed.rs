@@ -779,6 +779,20 @@ async fn seed_figures(
     )
     .fetch_all(&state.db)
     .await?;
+    // Reviewed fixture captions describe the actual screenshots. Seed the
+    // independent description cache so local retrieval needs no provider call.
+    for (id, fixture) in ids.iter().zip(&fixtures.figures) {
+        sqlx::query!(
+            r#"INSERT INTO figure_descriptions
+                (figure_id, model, version, description, caption, is_decorative, described_at)
+               VALUES ($1, 'seed-fixture', $2, $3, $3, FALSE, NOW())"#,
+            id,
+            minerva_app_core::figure_descriptions::VERSION,
+            fixture.caption,
+        )
+        .execute(&state.db)
+        .await?;
+    }
     Ok(ids)
 }
 

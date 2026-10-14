@@ -285,6 +285,7 @@ def system_overview() -> graphviz.Digraph:
     g.edge("cron", "slurm", label="sbatch / sacct (SSH)")
     g.edge("cron", "embedder", label="figure context")
     g.edge("cron", "qd", label="figure vectors")
+    g.edge("cron", "llm", dir="both", label="crop descriptions (separate loop)")
 
     # Play is only reached from Actions (login) and the fetcher (signed
     # URLs Actions handed over); both report to Minerva, never to each other.
@@ -342,7 +343,9 @@ def ingest_pipeline() -> graphviz.Digraph:
         c.attr(label="Outputs", **CLUSTER_BASE)
         _box(c, "qd", "Qdrant", icon="qdrant", subtitle="per-course collections")
         _box(c, "figs", "document_figures", icon="qdrant",
-             subtitle="context + CLIP vectors")
+             subtitle="crop descriptions + CLIP vectors")
+        _box(c, "describe", "figure_descriptions", icon="postgres",
+             subtitle="separate loop: vision model,<BR/>cached descriptions, decoration filter")
         _box(c, "linker_db", "linker_decisions", icon="postgres", subtitle="kg_state")
         _box(c, "ready", "status = ready", shape="stadium")
 
@@ -373,6 +376,7 @@ def ingest_pipeline() -> graphviz.Digraph:
     g.edge("ocr", "queue", label="OCR text /\nslides + speech", style="dashed",
            constraint="false")
     g.edge("ocr", "figs", label="figures")
+    g.edge("figs", "describe", dir="both", label="post-extraction enrichment")
 
     return g
 
@@ -418,7 +422,7 @@ def chat_pipeline() -> graphviz.Digraph:
         _box(c, "kg", "KG expansion",
              subtitle="part_of_unit / applied_in")
         _box(c, "figsearch", "figure search",
-             subtitle="text model + CLIP, rank-fused")
+             subtitle="crop descriptions + CLIP,<BR/>selected figures inline")
         c.edge("retrieve", "kg")
         c.edge("retrieve", "figsearch")
 
@@ -531,6 +535,16 @@ def visual_extraction() -> graphviz.Digraph:
         c.attr(label="minerva-scheduler", **CLUSTER_BASE)
         _box(c, "tick", "visual_extraction::tick", icon="rust",
              subtitle="every minute: enqueue, Slurm,<BR/>figure index, metrics")
+        _box(c, "describe", "figure_descriptions::tick", icon="rust",
+             subtitle="independent loop: vision model,<BR/>Flex when enabled, cached descriptions")
+
+    _box(g, "descriptions", "figure_descriptions", icon="postgres",
+         subtitle="leases, retries, descriptions,<BR/>decorative crops excluded")
+    _box(g, "vision", "catalog vision model",
+         subtitle="Standard / Flex variants")
+    g.edge("describe", "descriptions", dir="both", label="claim / cache")
+    g.edge("describe", "vision", dir="both", label="crop + context / description")
+    g.edge("descriptions", "tick", label="ready to index")
 
     with g.subgraph(name="cluster_olympus") as c:
         c.attr(label="Olympus (Slurm, L40S GPUs)", **CLUSTER_BASE)

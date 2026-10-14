@@ -203,8 +203,7 @@ pub async fn figure_lookup(
 
 /// The prompt section describing the figures available to the reply. The
 /// model places one by writing its marker, `[Figure N]`, on a line of its
-/// own; the client renders the image there. Figures it does not place are
-/// still shown under the reply.
+/// own; the client renders the image there. Unselected candidates stay hidden.
 pub fn prompt_section(figures: &[FigureHit]) -> Option<String> {
     if figures.is_empty() {
         return None;
@@ -215,7 +214,10 @@ pub fn prompt_section(figures: &[FigureHit]) -> Option<String> {
          answer. To show one, write its marker, for example [Figure 1], on a \
          line of its own where the image helps the explanation; refer to it in \
          the surrounding text by what it shows. Use only the markers listed \
-         here, each at most once, and only when the figure is relevant. You \
+         here, each at most once, and only when the figure directly supports \
+         the explanation. Place useful figures beside the paragraph that \
+         explains them, rather than collecting them at the end. Omit images \
+         that add no information; unselected images are not displayed. You \
          cannot see the images: rely on the description below and do not claim \
          details beyond it.\n",
     );

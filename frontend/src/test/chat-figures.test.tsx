@@ -1,5 +1,5 @@
 /**
- * Figures shown under an assistant reply: images from the course's slides
+ * Figures selected inline in an assistant reply: images from the course's slides
  * and PDFs, each a link to the full-size image with alt text from its
  * caption (or its origin when OCR found no caption).
  */
@@ -41,8 +41,10 @@ const message: ChatBubbleMessage = {
 }
 
 describe("reply figures", () => {
-  it("shows each figure as a captioned link to the full image", async () => {
-    const { container } = renderWithProviders(<ChatBubble message={message} labels={labels} />)
+  it("shows selected figures as captioned links to the full image", async () => {
+    const { container } = renderWithProviders(<ChatBubble message={{ ...message,
+      content: "The transformer stacks attention layers.\n\n[Figure 1]\n\n[Figure 2]",
+    }} labels={labels} />)
 
     const captioned = screen.getByRole("img", { name: "The 2017 architecture" })
     expect(captioned.getAttribute("src")).toBe("/api/embed/figures/signed-1")
@@ -88,13 +90,18 @@ describe("reply figures", () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it("keeps unplaced figures in the strip under the reply", () => {
+  it("hides unselected candidates instead of appending them", () => {
     renderWithProviders(
       <ChatBubble message={{ ...message, content: "See this:\n\n[Figure 1]" }} labels={labels} />,
     )
-    const strip = screen.getByRole("region", { name: "Figures from the course material" })
-    const stripAlts = Array.from(strip.querySelectorAll("img")).map((img) => img.getAttribute("alt"))
-    expect(stripAlts).toEqual(["Figure from teacher-guide.pdf, page 5"])
+    expect(screen.queryByRole("region", { name: "Figures from the course material" })).toBeNull()
+    expect(screen.getAllByRole("img")).toHaveLength(1)
+    expect(screen.queryByRole("img", { name: "Figure from teacher-guide.pdf, page 5" })).toBeNull()
+  })
+
+  it("does not show candidates when the reply selects none", () => {
+    renderWithProviders(<ChatBubble message={message} labels={labels} />)
+    expect(screen.queryByRole("img")).toBeNull()
   })
 
   it("renders nothing extra without figures", () => {

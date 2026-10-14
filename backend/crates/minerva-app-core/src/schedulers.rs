@@ -69,6 +69,20 @@ pub fn start(state: AppState, max_concurrent: usize) {
 /// binary in the Phase 3.5 topology; also called by [`start`] in the
 /// monolith / api-with-worker path.
 pub fn start_scheduler_loops(state: AppState) {
+    // Independent post-extraction enrichment. Slow provider requests never
+    // delay Slurm reconciliation, source downloads or figure indexing.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = schedule_ticker();
+            loop {
+                ticker.tick().await;
+                if let Err(e) = crate::figure_descriptions::tick(&state).await {
+                    tracing::warn!("figure descriptions: {e}");
+                }
+            }
+        });
+    }
     // Visual extraction (slide OCR and figures on Olympus): queue upkeep,
     // Slurm worker reconcile over SSH, figure indexing. The Slurm part only
     // runs where `MINERVA_SLURM_SSH_TARGET` is set (the prod scheduler pod).

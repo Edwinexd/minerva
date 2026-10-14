@@ -36,6 +36,7 @@ export function ChatModelsCard() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ADMIN_KEY })
       queryClient.invalidateQueries({ queryKey: PICKER_KEY })
+      queryClient.invalidateQueries({ queryKey: ["models"] })
     },
   })
 
@@ -124,6 +125,7 @@ function ChatModelRow({ model }: { model: AdminChatModel }) {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ADMIN_KEY })
     queryClient.invalidateQueries({ queryKey: PICKER_KEY })
+    queryClient.invalidateQueries({ queryKey: ["models"] })
   }
   const onError = (e: unknown) => setActionError(formatError(e))
 

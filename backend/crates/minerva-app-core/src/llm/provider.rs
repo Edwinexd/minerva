@@ -109,6 +109,32 @@ pub const PROVIDER_ANTHROPIC: &str = "anthropic";
 pub const PROVIDER_GROQ: &str = "groq";
 pub const PROVIDER_GEMINI: &str = "gemini";
 
+/// Catalog identity for a processing variant. The upstream model id remains
+/// unchanged; prices, enabled state and usage belong to the catalog entry.
+pub fn flex_model_id(model: &str) -> String {
+    format!("{}@flex", api_model_id(model))
+}
+
+pub fn api_model_id(model: &str) -> &str {
+    model.strip_suffix("@flex").unwrap_or(model)
+}
+
+pub fn apply_model_variant(body: &mut Value, provider_id: &str) {
+    if provider_id != PROVIDER_OPENAI {
+        return;
+    }
+    let model = body["model"].as_str().unwrap_or_default().to_string();
+    body["model"] = Value::String(api_model_id(&model).to_string());
+    body["service_tier"] = Value::String(
+        if model.ends_with("@flex") {
+            "flex"
+        } else {
+            "default"
+        }
+        .to_string(),
+    );
+}
+
 /// Name of the single forced tool the Anthropic provider uses to emulate
 /// OpenAI `response_format` structured output.
 const ANTHROPIC_STRUCTURED_TOOL: &str = "structured_output";
@@ -181,8 +207,10 @@ pub async fn util_request(
 ) -> Option<Result<(String, ChatUsage), String>> {
     let provider = util.provider.as_ref()?;
     if let Some((url, key)) = provider.openai_endpoint() {
+        let mut body = body.clone();
+        apply_model_variant(&mut body, provider.id());
         let result = async {
-            let resp = super::openai_chat_request(http, url, key, body).await?;
+            let resp = super::openai_chat_request(http, url, key, &body).await?;
             let payload: Value = resp.json().await.map_err(|e| e.to_string())?;
             if let Some(err) = payload.get("error") {
                 return Err(err
@@ -420,6 +448,26 @@ pub async fn sync_chat_models(registry: &LlmRegistry, db: &sqlx::PgPool) -> usiz
                         continue;
                     }
                     let display = m.display_name.unwrap_or_else(|| m.id.clone());
+                    // /models lists upstream ids, not processing tiers. Add
+                    // a separately priced Flex candidate for OpenAI. Like
+                    // every discovered model it stays disabled/unpriced
+                    // until the operator confirms support and enables it.
+                    if id == PROVIDER_OPENAI {
+                        match minerva_db::queries::chat_models::seed_if_missing(
+                            db,
+                            &flex_model_id(&m.id),
+                            &id,
+                            &format!("{display} (Flex)"),
+                            logprobs,
+                            true,
+                        )
+                        .await
+                        {
+                            Ok(true) => seeded += 1,
+                            Ok(false) => {}
+                            Err(e) => tracing::warn!("chat_models: Flex variant seed failed: {e}"),
+                        }
+                    }
                     match minerva_db::queries::chat_models::seed_if_missing(
                         db, &m.id, &id, &display, logprobs, true,
                     )
@@ -504,6 +552,7 @@ impl OpenAiCompatibleProvider {
                 body[k.as_str()] = v.clone();
             }
         }
+        apply_model_variant(&mut body, &self.id);
         body
     }
 }
@@ -1035,6 +1084,22 @@ fn base_url_override(id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_variants_preserve_upstream_ids_and_choose_the_processing_tier() {
+        let mut body = serde_json::json!({"model":"vision@flex", "service_tier":"default"});
+        apply_model_variant(&mut body, PROVIDER_OPENAI);
+        assert_eq!(body["model"], "vision");
+        assert_eq!(body["service_tier"], "flex");
+        let mut body = serde_json::json!({"model":"vision"});
+        apply_model_variant(&mut body, PROVIDER_OPENAI);
+        assert_eq!(body["service_tier"], "default");
+        assert_eq!(api_model_id("vision@flex"), "vision");
+        assert_eq!(flex_model_id("vision@flex"), "vision@flex");
+        let mut body = serde_json::json!({"model":"vision"});
+        apply_model_variant(&mut body, PROVIDER_GROQ);
+        assert!(body.get("service_tier").is_none());
+    }
 
     /// Feed the framer fixed chunks, collecting every line it yields.
     async fn frame_all(chunks: Vec<&[u8]>) -> Vec<String> {

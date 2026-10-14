@@ -502,10 +502,15 @@ and Olympus setup in `gpu/slide-ocr/README.md`.
   figures. Extraction remains only as that stopgap and as the fallback
   when OCR fails for good.
 - **Figure search** runs two retrievals per chat turn (course text model
-  over figure context, CLIP over pixels), fused by rank. The model places
+  over cached crop descriptions, CLIP over pixels), fused by rank. A
+  separate scheduler loop describes crops after extraction, with its own
+  `figure_descriptions` cache and leases. Select its vision model in admin
+  defaults; it prefers an enabled/priced `@flex` catalog variant and never
+  reruns Olympus for a description change. Decorative crops are excluded.
+  The model places
   figures inline with `[Figure N]` markers (`[Figur N]` in Swedish), N
-  being the position in `figures_used`; unplaced ones show under the
-  reply. `scripts/seed-dev.sh` seeds four real figures and one reply using
+  being the position in `figures_used`; unselected candidates stay hidden.
+  `scripts/seed-dev.sh` seeds four real figures and one reply using
   them, so the UI needs no Olympus run in dev. The CLIP query
   encoder (`Qdrant/clip-ViT-B-32-text`) is loaded by `minerva-embedder`
   but deliberately not in `VALID_LOCAL_MODELS`.

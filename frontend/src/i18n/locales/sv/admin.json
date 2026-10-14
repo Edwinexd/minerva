@@ -523,7 +523,7 @@
   "system": {
     "chatModels": {
       "title": "Chattmodeller",
-      "description": "Katalog över chatt- och hjälpmodeller (LLM). En modell kan aktiveras först när leverantörsnyckeln är konfigurerad och bägge USD-priserna är angivna (0 tillåts för lokala/gratis modeller). Radioknappen 'Standard' är modellen nya kurser skapas med; 'Hjälp' är modellen som används för klassificering, kunskapsgraf och prishämtning. Priser anges i USD per 1 000 000 tokens; kostnaden beräknas från tokenanvändning till dessa priser. 'Hämta' laddar leverantörens publika prissida och låter hjälpmodellen föreslå priser för granskning; inget sparas förrän du klickar Spara.",
+      "description": "Katalog över chatt- och hjälpmodeller (LLM). En modell kan aktiveras först när leverantörsnyckeln är konfigurerad och bägge USD-priserna är angivna (0 tillåts för lokala/gratis modeller). Radioknappen 'Standard' är modellen nya kurser skapas med; 'Hjälp' är modellen som används för klassificering, kunskapsgraf och prishämtning. Priser anges i USD per 1 000 000 tokens; kostnaden beräknas från tokenanvändning till dessa priser. 'Hämta' laddar leverantörens publika prissida och låter hjälpmodellen föreslå priser för granskning; inget sparas förrän du klickar Spara. OpenAI-varianter för Flex har egna priser och aktiveringar; kontrollera att Flex stöds innan en variant aktiveras. Ange priser för Standard och Flex separat.",
       "loadError": "Kunde inte ladda chattmodeller.",
       "refresh": "Hämta från leverantörer",
       "refreshing": "Hämtar...",
@@ -778,8 +778,13 @@
       "rerankingUnavailableReason": {
         "label": "Meddelande om otillgänglig omrangordning",
         "description": "Meddelande som visas för lärare när omrangordning är inaktiverad. Lämna tomt för standardförklaringen."
+      },
+      "figureDescriptionModel": {
+        "label": "Modell för figurbeskrivningar",
+        "description": "Välj en aktiverad bildmodell från katalogen. Beskriver befintliga och nya figurer i bakgrunden för sökning och infogade bilder i svar. Avstängd tills en modell har valts. Ett modellbyte beskriver alla figurer på nytt och medför ny användning. Föredrar en aktiverad, prissatt Flex-variant. Ett byte av prisnivå behåller sparade beskrivningar."
       }
-    }
+    },
+    "disabled": "Avstängd"
   },
   "daisyImports": {
     "autoApplyTitle": "Auto-applicera Daisy-importer",

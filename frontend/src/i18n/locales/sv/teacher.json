@@ -241,7 +241,8 @@
       "extraction_guard": "Extraktionsskydd",
       "aegis": "Promptcoach",
       "suggested_questions": "Föreslagna frågor",
-      "conversation_topics": "Teman i studentfrågor"
+      "conversation_topics": "Teman i studentfrågor",
+      "figure_description": "Figurbeskrivningar"
     }
   },
   "documents": {

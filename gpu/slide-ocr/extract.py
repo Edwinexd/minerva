@@ -153,8 +153,21 @@ def render_pdf(pdf_path):
     return pages
 
 
+def is_box(box):
+    return (
+        isinstance(box, (list, tuple))
+        and len(box) == 4
+        and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in box)
+    )
+
+
 def parse_blocks(raw):
-    """Grounded OCR output as [{label, boxes, text}], boxes as frame fractions."""
+    """Grounded OCR output as [{label, boxes, text}], boxes as frame fractions.
+
+    The model's box syntax is not guaranteed: anything that is not four
+    numbers is dropped and the block keeps its text, so one malformed box
+    cannot fail the whole lecture.
+    """
     tags = list(BLOCK_TAG.finditer(raw))
     blocks = []
     lead = raw[: tags[0].start() if tags else len(raw)].strip()
@@ -163,14 +176,16 @@ def parse_blocks(raw):
     for tag, following in zip(tags, tags[1:] + [None]):
         try:
             boxes = ast.literal_eval((tag["ref_box"] or tag["det_box"]).strip())
-        except (ValueError, SyntaxError):
+        except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
             boxes = []
-        if boxes and isinstance(boxes[0], (int, float)):
+        if is_box(boxes):
             boxes = [boxes]
+        if not isinstance(boxes, (list, tuple)):
+            boxes = []
         blocks.append(
             {
                 "label": (tag["ref"] or tag["det"]).strip(),
-                "boxes": [[round(v / GRID, 4) for v in b] for b in boxes if len(b) == 4],
+                "boxes": [[round(v / GRID, 4) for v in b] for b in boxes if is_box(b)],
                 "text": raw[tag.end() : following.start() if following else len(raw)].strip(),
             }
         )

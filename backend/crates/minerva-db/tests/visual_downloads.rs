@@ -1,6 +1,38 @@
 use chrono::{Duration, Utc};
-use minerva_db::queries::visual_extraction as queue;
+use minerva_db::queries::visual_extraction::{self as queue, OfferOutcome};
 use uuid::Uuid;
+
+/// Offers with an unbounded staging window: these tests are about claims
+/// and deadlines; `probed_candidates_shrink_to_the_chosen_source` covers
+/// the window.
+async fn offer(
+    db: &sqlx::PgPool,
+    id: Uuid,
+    url: &str,
+    deadline: chrono::DateTime<Utc>,
+    cues: &serde_json::Value,
+    size_bytes: Option<i64>,
+) -> Result<bool, sqlx::Error> {
+    Ok(
+        queue::offer_download(db, id, url, deadline, cues, size_bytes, i64::MAX).await?
+            == OfferOutcome::Offered,
+    )
+}
+
+async fn offer_many(
+    db: &sqlx::PgPool,
+    id: Uuid,
+    candidates: &serde_json::Value,
+    deadline: chrono::DateTime<Utc>,
+    cues: &serde_json::Value,
+    reserve_bytes: Option<i64>,
+) -> Result<bool, sqlx::Error> {
+    Ok(
+        queue::offer_candidates(db, id, candidates, deadline, cues, reserve_bytes, i64::MAX)
+            .await?
+            == OfferOutcome::Offered,
+    )
+}
 
 #[sqlx::test(migrations = "../../migrations")]
 #[ignore = "requires an isolated PostgreSQL DATABASE_URL"]
@@ -31,7 +63,7 @@ async fn downloads_follow_deadlines_and_reject_stale_claims(db: sqlx::PgPool) {
     }
     let cues = serde_json::json!([]);
     let now = Utc::now();
-    assert!(queue::offer_download(
+    assert!(offer(
         &db,
         jobs[0],
         "late",
@@ -41,7 +73,7 @@ async fn downloads_follow_deadlines_and_reject_stale_claims(db: sqlx::PgPool) {
     )
     .await
     .unwrap());
-    assert!(queue::offer_download(
+    assert!(offer(
         &db,
         jobs[1],
         "early",
@@ -51,7 +83,7 @@ async fn downloads_follow_deadlines_and_reject_stale_claims(db: sqlx::PgPool) {
     )
     .await
     .unwrap());
-    assert!(!queue::offer_download(
+    assert!(!offer(
         &db,
         jobs[2],
         "expired",
@@ -61,7 +93,7 @@ async fn downloads_follow_deadlines_and_reject_stale_claims(db: sqlx::PgPool) {
     )
     .await
     .unwrap());
-    assert!(!queue::offer_download(
+    assert!(!offer(
         &db,
         jobs[1],
         "duplicate",
@@ -97,7 +129,7 @@ async fn downloads_follow_deadlines_and_reject_stale_claims(db: sqlx::PgPool) {
     .await
     .unwrap();
     assert!(
-        queue::offer_download(&db, a.id, "fresh", now + Duration::minutes(15), &cues, None)
+        offer(&db, a.id, "fresh", now + Duration::minutes(15), &cues, None)
             .await
             .unwrap()
     );
@@ -119,11 +151,11 @@ async fn downloads_follow_deadlines_and_reject_stale_claims(db: sqlx::PgPool) {
     .await
     .unwrap();
     assert!(
-        queue::offer_download(&db, b.id, "soon", now + Duration::minutes(5), &cues, None)
+        offer(&db, b.id, "soon", now + Duration::minutes(5), &cues, None)
             .await
             .unwrap()
     );
-    assert!(queue::offer_download(
+    assert!(offer(
         &db,
         jobs[2],
         "later",
@@ -195,15 +227,13 @@ async fn sized_reservations_refill_space_and_exclude_failed_sources(db: sqlx::Pg
     let deadline = Utc::now() + Duration::minutes(30);
     let cues = serde_json::json!([]);
     assert!(
-        queue::offer_download(&db, attempted[0], "sized", deadline, &cues, Some(GIB / 4))
+        offer(&db, attempted[0], "sized", deadline, &cues, Some(GIB / 4))
             .await
             .unwrap()
     );
-    assert!(
-        queue::offer_download(&db, attempted[1], "unknown", deadline, &cues, None)
-            .await
-            .unwrap()
-    );
+    assert!(offer(&db, attempted[1], "unknown", deadline, &cues, None)
+        .await
+        .unwrap());
     assert!(
         queue::release_fetch(&db, attempted[2], "probe failed", true)
             .await
@@ -220,16 +250,11 @@ async fn sized_reservations_refill_space_and_exclude_failed_sources(db: sqlx::Pg
         for slot in slots {
             assert!(!attempted.contains(&slot.job_id));
             attempted.push(slot.job_id);
-            assert!(queue::offer_download(
-                &db,
-                slot.job_id,
-                "sized",
-                deadline,
-                &cues,
-                Some(GIB / 4)
-            )
-            .await
-            .unwrap());
+            assert!(
+                offer(&db, slot.job_id, "sized", deadline, &cues, Some(GIB / 4))
+                    .await
+                    .unwrap()
+            );
             accepted += 1;
         }
     }
@@ -288,18 +313,46 @@ async fn probed_candidates_shrink_to_the_chosen_source(db: sqlx::PgPool) {
     let cues = serde_json::json!([]);
     let candidates = serde_json::json!([{"source": "a"}, {"source": "b"}]);
     let now = Utc::now();
-    // The largest candidate is reserved; one over the slot is refused.
-    assert!(!queue::offer_candidates(
-        &db,
-        jobs[0],
-        &candidates,
-        now + Duration::minutes(30),
-        &cues,
-        Some(GIB + 1)
-    )
-    .await
-    .unwrap());
-    assert!(queue::offer_candidates(
+    // Growing past the 1 GiB placeholder needs room in the window: with
+    // both placeholders pending (2 GiB) and 2.5 GiB to spare, 1.5 GiB fits
+    // but 2 GiB does not.
+    let deadline = now + Duration::minutes(30);
+    assert_eq!(
+        queue::offer_candidates(
+            &db,
+            jobs[0],
+            &candidates,
+            deadline,
+            &cues,
+            Some(2 * GIB),
+            5 * GIB / 2
+        )
+        .await
+        .unwrap(),
+        OfferOutcome::NoSpace
+    );
+    assert_eq!(
+        queue::offer_candidates(
+            &db,
+            jobs[0],
+            &candidates,
+            deadline,
+            &cues,
+            Some(3 * GIB / 2),
+            5 * GIB / 2
+        )
+        .await
+        .unwrap(),
+        OfferOutcome::Offered
+    );
+    // Reset for the deadline-ordering checks below.
+    sqlx::query("UPDATE visual_extraction_jobs SET download_candidates=NULL, download_deadline=NULL, staged_bytes=$2 WHERE id=$1")
+        .bind(jobs[0])
+        .bind(GIB)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(offer_many(
         &db,
         jobs[0],
         &candidates,
@@ -309,7 +362,7 @@ async fn probed_candidates_shrink_to_the_chosen_source(db: sqlx::PgPool) {
     )
     .await
     .unwrap());
-    assert!(queue::offer_candidates(
+    assert!(offer_many(
         &db,
         jobs[1],
         &candidates,

@@ -19,7 +19,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::serve::ListenerExt;
 use chrono::Utc;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use minerva_app_core::visual_extraction::{self as ve, Candidate};
 use minerva_db::queries::visual_extraction as queue;
 use sqlx::PgPool;
@@ -36,7 +36,7 @@ const BLOCK_BYTES: u64 = 256 * 1024;
 const SOCKET_BUFFER_BYTES: usize = 64 * 1024;
 const SOCKET_BUFFER_ARG: &str = "65536";
 const FRAME_FRACTIONS: [f64; 3] = [0.2, 0.5, 0.8];
-/// Sources of one lecture probed at once; Play lectures have up to three.
+/// Sources of one lecture probed at once; Play lectures have up to four.
 const SOURCE_PROBES: usize = 3;
 /// Below this no source is taken to show slides, so none is guessed.
 const MIN_SLIDE_SCORE: f64 = 20.0;
@@ -51,8 +51,9 @@ const PROBE_STALE_SECS: i64 = 15 * 60;
 
 type Reason = &'static str;
 
-/// The slide source exists but can never be staged; retrying cannot help.
-const TOO_LARGE: Reason = "slide source larger than the staging cap";
+/// Every source was read and none shows slides: a camera or whiteboard
+/// recording. Retrying cannot change that, so the lecture is parked.
+const NO_SLIDES: Reason = "no readable slide source found after frame probes";
 const BUDGET_EXHAUSTED: Reason = "probe byte budget exhausted";
 
 /// Probe the earliest-expiring undecided lecture and queue its slide
@@ -77,7 +78,7 @@ pub async fn probe_tick(db: &PgPool) -> Result<bool, sqlx::Error> {
         Err(reason) => {
             tracing::warn!(job_id = %claim.id, reason, "slide source probe failed");
             let error = format!("slide source probe failed ({reason})");
-            if queue::fail_probe(db, &claim, &error, reason != TOO_LARGE).await? {
+            if queue::fail_probe(db, &claim, &error, reason != NO_SLIDES).await? {
                 "failed"
             } else {
                 "stale"
@@ -105,41 +106,40 @@ async fn pick(
         .to_std()
         .unwrap_or_default()
         .min(LECTURE_TIMEOUT);
-    // Every source must be scored: a failed slide probe must not make the
-    // camera the winner by default.
     let urls: Vec<String> = candidates.iter().map(|c| c.probe_url.clone()).collect();
-    let scores: Vec<f64> = tokio::time::timeout(
+    let scores: Vec<Result<f64, Reason>> = tokio::time::timeout(
         budget,
         futures::stream::iter(urls)
             .map(|url| async move { score_source(&url).await })
             .buffered(SOURCE_PROBES)
-            .try_collect(),
+            .collect(),
     )
     .await
-    .map_err(|_| "probe timed out")??;
+    .map_err(|_| "probe timed out")?;
     let best = choose(&scores)?;
-    let chosen = candidates
+    Ok(candidates
         .into_iter()
         .nth(best)
-        .expect("one score per candidate");
-    if chosen.size_bytes > Some(ve::FETCH_ESTIMATE_BYTES) {
-        return Err(TOO_LARGE);
-    }
-    Ok(chosen)
+        .expect("one score per candidate"))
 }
 
-/// Index of the source to stage.
-fn choose(scores: &[f64]) -> Result<usize, Reason> {
-    let (best, score) = scores
+/// Index of the source to stage: the best one showing slides, even when
+/// another source could not be read. Without one, a failed source may be
+/// the slides, so its failure is returned for a retry; only when every
+/// source was read is the lecture known to have none.
+fn choose(scores: &[Result<f64, Reason>]) -> Result<usize, Reason> {
+    let best = scores
         .iter()
-        .copied()
         .enumerate()
-        .max_by(|a, b| a.1.total_cmp(&b.1))
-        .ok_or("no candidates")?;
-    if scores.len() > 1 && score < MIN_SLIDE_SCORE {
-        return Err("no readable slide source found after frame probes");
+        .filter_map(|(index, score)| Some((index, *score.as_ref().ok()?)))
+        .max_by(|a, b| a.1.total_cmp(&b.1));
+    match best {
+        Some((index, score)) if score >= MIN_SLIDE_SCORE => Ok(index),
+        _ => Err(scores
+            .iter()
+            .find_map(|score| score.err())
+            .unwrap_or(NO_SLIDES)),
     }
-    Ok(best)
 }
 
 async fn score_source(url: &str) -> Result<f64, Reason> {
@@ -153,7 +153,7 @@ async fn score_source(url: &str) -> Result<f64, Reason> {
         }
     };
     let info = run(
-        "ffprobe",
+        Tool::Ffprobe,
         &[
             "-v",
             "error",
@@ -173,7 +173,7 @@ async fn score_source(url: &str) -> Result<f64, Reason> {
         .ok()
         .and_then(|info| info["format"]["duration"].as_str()?.parse::<f64>().ok())
         .filter(|d| *d > 0.0 && *d < 24.0 * 3600.0)
-        .ok_or("invalid video duration")?;
+        .ok_or_else(|| budget("invalid video duration"))?;
     let mut scores: Vec<f64> = futures::future::try_join_all(
         FRAME_FRACTIONS.map(|fraction| frame_score(&proxy.url, duration * fraction)),
     )
@@ -186,7 +186,7 @@ async fn score_source(url: &str) -> Result<f64, Reason> {
 async fn frame_score(url: &str, seconds: f64) -> Result<f64, Reason> {
     let seconds = seconds.to_string();
     let frame = run(
-        "ffmpeg",
+        Tool::Ffmpeg,
         &[
             "-v",
             "error",
@@ -210,7 +210,7 @@ async fn frame_score(url: &str, seconds: f64) -> Result<f64, Reason> {
     )
     .await?;
     let tsv = run(
-        "tesseract",
+        Tool::Tesseract,
         &["stdin", "stdout", "--psm", "11", "tsv"],
         Some(frame),
     )
@@ -260,10 +260,39 @@ fn text_score(tsv: &str) -> f64 {
 
 /// Run a probe tool with no stderr and no OpenMP threads: frames are OCR'd
 /// side by side, so tesseract's own threads would only oversubscribe.
-async fn run(program: &str, args: &[&str], input: Option<Vec<u8>>) -> Result<Vec<u8>, Reason> {
-    const FAILED: Reason = "video frame probe failed";
-    let _slot = TOOL_SLOTS.acquire().await.map_err(|_| FAILED)?;
-    let mut child = Command::new(program)
+#[derive(Clone, Copy)]
+enum Tool {
+    Ffprobe,
+    Ffmpeg,
+    Tesseract,
+}
+
+impl Tool {
+    fn program(self) -> &'static str {
+        match self {
+            Tool::Ffprobe => "ffprobe",
+            Tool::Ffmpeg => "ffmpeg",
+            Tool::Tesseract => "tesseract",
+        }
+    }
+
+    /// Which tool failed and how, as fixed text: stderr is discarded since
+    /// it can quote the input URL.
+    fn failed(self, timed_out: bool) -> Reason {
+        match (self, timed_out) {
+            (Tool::Ffprobe, false) => "ffprobe failed",
+            (Tool::Ffprobe, true) => "ffprobe timed out",
+            (Tool::Ffmpeg, false) => "ffmpeg frame grab failed",
+            (Tool::Ffmpeg, true) => "ffmpeg frame grab timed out",
+            (Tool::Tesseract, false) => "tesseract failed",
+            (Tool::Tesseract, true) => "tesseract timed out",
+        }
+    }
+}
+
+async fn run(tool: Tool, args: &[&str], input: Option<Vec<u8>>) -> Result<Vec<u8>, Reason> {
+    let _slot = TOOL_SLOTS.acquire().await.map_err(|_| tool.failed(false))?;
+    let mut child = Command::new(tool.program())
         .args(args)
         .env("OMP_THREAD_LIMIT", "1")
         .stdin(if input.is_some() {
@@ -275,7 +304,7 @@ async fn run(program: &str, args: &[&str], input: Option<Vec<u8>>) -> Result<Vec
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|_| FAILED)?;
+        .map_err(|_| tool.failed(false))?;
     if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
         tokio::spawn(async move {
             use tokio::io::AsyncWriteExt;
@@ -284,10 +313,10 @@ async fn run(program: &str, args: &[&str], input: Option<Vec<u8>>) -> Result<Vec
     }
     let output = tokio::time::timeout(PROCESS_TIMEOUT, child.wait_with_output())
         .await
-        .map_err(|_| FAILED)?
-        .map_err(|_| FAILED)?;
+        .map_err(|_| tool.failed(true))?
+        .map_err(|_| tool.failed(false))?;
     if !output.status.success() {
-        return Err(FAILED);
+        return Err(tool.failed(false));
     }
     Ok(output.stdout)
 }
@@ -520,11 +549,22 @@ mod tests {
     }
 
     #[test]
-    fn blank_probes_do_not_guess_camera() {
-        assert!(choose(&[0.0, 0.0]).is_err());
-        assert!(choose(&[10.0, 2.0]).is_err());
-        assert_eq!(choose(&[50.0, 200.0]), Ok(1));
-        assert_eq!(choose(&[0.0]), Ok(0));
+    fn readable_slides_win_even_when_another_source_failed() {
+        assert_eq!(choose(&[Ok(50.0), Ok(200.0)]), Ok(1));
+        assert_eq!(choose(&[Err("ffprobe failed"), Ok(90.0)]), Ok(1));
+        assert_eq!(choose(&[Ok(90.0), Err("ffprobe failed")]), Ok(0));
+    }
+
+    #[test]
+    fn no_slides_parks_only_when_every_source_was_read() {
+        // Blank everywhere: a camera-only recording, never guessed.
+        assert_eq!(choose(&[Ok(0.0), Ok(10.0)]), Err(NO_SLIDES));
+        // The unreadable source may be the slides: retry, never the camera.
+        assert_eq!(
+            choose(&[Ok(10.0), Err("ffmpeg frame grab failed")]),
+            Err("ffmpeg frame grab failed")
+        );
+        assert_eq!(choose(&[Err(BUDGET_EXHAUSTED)]), Err(BUDGET_EXHAUSTED));
     }
 
     #[test]

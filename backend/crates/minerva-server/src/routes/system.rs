@@ -23,8 +23,8 @@ struct SystemMetrics {
 pub(crate) struct DiskInfo {
     /// Path used to sample the mounted filesystem.
     path: String,
-    total_bytes: u64,
-    /// Also read by visual extraction's staging window.
+    pub(crate) total_bytes: u64,
+    /// Free and total are also read by visual extraction's staging window.
     pub(crate) free_bytes: u64,
     used_bytes: u64,
 }

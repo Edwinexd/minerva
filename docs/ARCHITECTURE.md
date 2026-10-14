@@ -144,15 +144,17 @@ Flow and backpressure:
 - **Staging takes the free disk.** Minerva grants fetch slots while the
   filesystem under `/data/visual-staging` keeps at least
   `MINERVA_VISUAL_STAGING_MIN_FREE_BYTES` (default 10 GiB) free, counting
-  slots whose download has not finished yet. A slot initially reserves the
-  full 1 GiB download cap. Actions reads each source's HEAD
-  `Content-Length` (or one-byte `Content-Range`) and Minerva shrinks the
-  reservation to the largest candidate, so whichever source wins fits;
-  once the fetcher has chosen, it shrinks again to that source. A source
-  over the 1 GiB cap is still probed but reserves only the cap; if it wins
-  (or is the only source) the lecture is parked as `unavailable`. A missing
-  size retains the full cap, and every download is still capped at its
-  reservation, since an announced size is only a claim. Actions keeps 8
+  slots whose download has not finished yet. A granted slot reserves a
+  1 GiB placeholder. Actions reads each source's HEAD `Content-Length` (or
+  one-byte `Content-Range`) and the offer replaces the placeholder with the
+  largest candidate's size, so whichever source wins fits: shrinking it,
+  or growing it if the window has room (otherwise the slot is released
+  with `no_staging_space` and retried later). There is no per-video cap;
+  only a video larger than the whole window (the filesystem less its
+  guard) is parked as `unavailable`. Once the fetcher has chosen, the
+  reservation shrinks to that source. A missing size keeps the
+  placeholder, and every download is capped at its reservation, since an
+  announced size is only a claim. Actions keeps 8
   lectures in flight (the load on Play) with up to 8 more granted slots
   queued, asking for more as the queue drains, until Minerva grants none
   with nothing in flight or its 40-minute authorization budget is
@@ -166,8 +168,8 @@ Flow and backpressure:
   `probe_started_at` while a multi-source lecture is undecided.
   `minerva-fetcher` atomically claims pending downloads with
   `ORDER BY download_deadline, id`, earliest expiry first. It streams from
-  the pinned Play media host without redirects, enforces the expiry and a
-  30-minute/1-GiB cap and the reserved size, validates MP4 bytes, and only then makes the job
+  the pinned Play media host without redirects, enforces the expiry, a
+  30-minute limit and the reserved size, validates MP4 bytes, and only then makes the job
   `ready`. Expired URLs and crashed downloads return to `needs_source` for
   fresh authorization; stale claims cannot publish over newer claims. The
   fetcher is a single `Recreate` replica, so on startup it releases every
@@ -189,8 +191,12 @@ Flow and backpressure:
   its frame, and with Play a LAN hop away, default (megabyte) buffers
   filled with unread blocks before it did and exhausted the budget. Failures store a fixed reason
   (`slide source probe failed (...)`), never a third-party message.
-  Readable duplicate slide streams select the clearest text; blank or
-  failed probes return the lecture for a later authorization. Repeated
+  The best source showing slides wins even if another source could not be
+  read, and readable duplicate slide streams select the clearest text.
+  Without a source showing slides, a source that failed may be the slides,
+  so the lecture returns for a later authorization; only when every source
+  was read and none shows slides (a camera or whiteboard recording) is it
+  parked as `unavailable`. Repeated
   presentation URLs across courses share one authorization per Actions
   run until its token nears expiry. Audio flags are ignored.
 - **Workers pull, one item at a time.** The scheduler keeps up to

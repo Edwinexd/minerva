@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET download_candidates = $2, download_deadline = $3, cues = $4,\n            staged_bytes = COALESCE($5, staged_bytes), updated_at = NOW()\n        WHERE id = $1 AND $3 > NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Timestamptz",
+        "Jsonb",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c54e3e1925aef66881d7fc5a15317031ddef3370c3af5f95d5e648a29cd7e071"
+}

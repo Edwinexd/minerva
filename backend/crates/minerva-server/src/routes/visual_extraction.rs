@@ -152,7 +152,8 @@ struct DownloadBody {
 /// Store a lecture's sources and deadline; `minerva-fetcher` picks the
 /// slide source (if there is a choice) and downloads it directly from Play
 /// in expiry order. Only small JSON crosses GitHub Actions. The largest
-/// announced size is reserved, so whichever source wins fits.
+/// announced size is reserved, growing the slot's placeholder if the
+/// staging window has room.
 async fn offer_download(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -183,11 +184,24 @@ async fn offer_download(
             .map(|c| serde_json::json!({"start": c.start, "end": c.end, "text": c.text}))
             .collect(),
     );
-    let offered = match body.candidates.as_slice() {
-        // Over the cap it can never be staged; Actions parks the lecture.
-        [only] if only.size_bytes > Some(ve::FETCH_ESTIMATE_BYTES) => {
-            return Err(AppError::bad_request("visual_extraction.video_too_large"));
-        }
+    // Whichever source wins must fit, so the largest is reserved; an
+    // unknown size keeps the placeholder.
+    let reserve = body
+        .candidates
+        .iter()
+        .map(|c| c.size_bytes)
+        .collect::<Option<Vec<_>>>()
+        .and_then(|sizes| sizes.into_iter().max());
+    let staging = &state.config.visual_extraction.staging_path;
+    let min_free = state.config.visual_extraction.staging_min_free_bytes;
+    let disk = super::system::disk_usage(staging);
+    // Larger than the whole window (the filesystem less its guard) it can
+    // never be staged, however much drains; Actions parks the lecture.
+    if reserve.is_some_and(|n| n > disk.as_ref().map_or(0, |d| d.total_bytes as i64) - min_free) {
+        return Err(AppError::bad_request("visual_extraction.video_too_large"));
+    }
+    let budget = disk.map_or(0, |d| d.free_bytes as i64) - min_free;
+    let outcome = match body.candidates.as_slice() {
         [only] => {
             queue::offer_download(
                 &state.db,
@@ -196,26 +210,34 @@ async fn offer_download(
                 deadline,
                 &cues,
                 only.size_bytes,
+                budget,
             )
             .await?
         }
         candidates => {
-            // A source over the cap is still probed (it may be the camera
-            // the slides must beat) but cannot win, so it reserves only the
-            // cap.
-            let reserve = candidates
-                .iter()
-                .map(|c| c.size_bytes.map(|n| n.min(ve::FETCH_ESTIMATE_BYTES)))
-                .collect::<Option<Vec<_>>>()
-                .and_then(|sizes| sizes.into_iter().max());
             let candidates = serde_json::to_value(candidates)
                 .map_err(|e| AppError::Internal(format!("candidates: {e}")))?;
-            queue::offer_candidates(&state.db, job_id, &candidates, deadline, &cues, reserve)
-                .await?
+            queue::offer_candidates(
+                &state.db,
+                job_id,
+                &candidates,
+                deadline,
+                &cues,
+                reserve,
+                budget,
+            )
+            .await?
         }
     };
-    if !offered {
-        return Err(AppError::bad_request("visual_extraction.not_fetching"));
+    match outcome {
+        queue::OfferOutcome::Offered => {}
+        queue::OfferOutcome::NotFetching => {
+            return Err(AppError::bad_request("visual_extraction.not_fetching"))
+        }
+        // Retried once workers drain the window.
+        queue::OfferOutcome::NoSpace => {
+            return Err(AppError::bad_request("visual_extraction.no_staging_space"))
+        }
     }
     Ok(Json(serde_json::json!({"status": "queued"})))
 }

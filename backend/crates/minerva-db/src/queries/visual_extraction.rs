@@ -149,7 +149,8 @@ pub async fn reserve_fetch_slots(
         FetchSlot,
         r#"
         UPDATE visual_extraction_jobs
-        SET status = 'fetching', fetch_reserved_at = NOW(), staged_bytes = $1, updated_at = NOW()
+        SET status = 'fetching', fetch_reserved_at = NOW(), staged_bytes = $1,
+            error_msg = NULL, updated_at = NOW()
         WHERE id IN (
             SELECT id FROM visual_extraction_jobs
             WHERE status = 'needs_source'
@@ -938,8 +939,59 @@ pub async fn course_has_indexed_figures(db: &PgPool, course_id: Uuid) -> Result<
     .await
 }
 
-/// Small authenticated handoff from Actions. Do not expose bearer URLs in logs.
-/// A trusted size may shrink the existing reservation, never grow it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OfferOutcome {
+    Offered,
+    /// No longer a fetching reservation awaiting its offer (released,
+    /// expired, or already offered).
+    NotFetching,
+    /// The announced size needs more than the reservation and the staging
+    /// window has no room for the difference right now.
+    NoSpace,
+}
+
+/// Lock the staging window and check that `id` awaits its offer and that
+/// `size_bytes` fits: within its reservation, or growing it by what the
+/// window still has (`budget_bytes`, free disk minus the guard). `None`
+/// means go ahead, holding the lock until the caller's transaction ends.
+async fn check_room(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: Uuid,
+    size_bytes: Option<i64>,
+    budget_bytes: i64,
+) -> Result<Option<OfferOutcome>, sqlx::Error> {
+    sqlx::query!("SELECT pg_advisory_xact_lock(hashtext('visual_extraction_staging'))")
+        .execute(&mut **tx)
+        .await?;
+    let row = sqlx::query!(
+        r#"
+        SELECT staged_bytes,
+            (SELECT COALESCE(SUM(staged_bytes), 0) FROM visual_extraction_jobs
+             WHERE status = 'fetching')::BIGINT AS "pending!"
+        FROM visual_extraction_jobs
+        WHERE id = $1 AND status = 'fetching' AND download_url IS NULL
+          AND download_candidates IS NULL AND download_started_at IS NULL
+        FOR UPDATE
+        "#,
+        id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(row) = row else {
+        return Ok(Some(OfferOutcome::NotFetching));
+    };
+    let reserved = row.staged_bytes.unwrap_or(0);
+    if size_bytes
+        .is_some_and(|size| size > reserved && row.pending - reserved + size > budget_bytes)
+    {
+        return Ok(Some(OfferOutcome::NoSpace));
+    }
+    Ok(None)
+}
+
+/// Small authenticated handoff from Actions. Do not expose bearer URLs in
+/// logs. A size replaces the reservation, shrinking it or growing it into
+/// free staging space; None keeps the placeholder.
 pub async fn offer_download(
     db: &PgPool,
     id: Uuid,
@@ -947,16 +999,19 @@ pub async fn offer_download(
     deadline: DateTime<Utc>,
     cues: &serde_json::Value,
     size_bytes: Option<i64>,
-) -> Result<bool, sqlx::Error> {
-    Ok(sqlx::query!(
+    budget_bytes: i64,
+) -> Result<OfferOutcome, sqlx::Error> {
+    let mut tx = db.begin().await?;
+    if let Some(outcome) = check_room(&mut tx, id, size_bytes, budget_bytes).await? {
+        return Ok(outcome);
+    }
+    let offered = sqlx::query!(
         r#"
         UPDATE visual_extraction_jobs
         SET download_url = $2, download_deadline = $3, cues = $4,
             download_size_bytes = $5, staged_bytes = COALESCE($5, staged_bytes),
             updated_at = NOW()
-        WHERE id = $1 AND status = 'fetching' AND download_url IS NULL
-          AND download_started_at IS NULL AND $3 > NOW()
-          AND ($5::BIGINT IS NULL OR $5 <= staged_bytes)
+        WHERE id = $1 AND $3 > NOW()
         "#,
         id,
         url,
@@ -964,15 +1019,21 @@ pub async fn offer_download(
         cues,
         size_bytes,
     )
-    .execute(db)
+    .execute(&mut *tx)
     .await?
     .rows_affected()
-        == 1)
+        == 1;
+    tx.commit().await?;
+    Ok(if offered {
+        OfferOutcome::Offered
+    } else {
+        OfferOutcome::NotFetching
+    })
 }
 
 /// Several sources, none chosen yet. `reserve_bytes` is the largest
-/// candidate's size (None keeps the full reservation), so whichever source
-/// wins fits what was reserved.
+/// candidate's size (None keeps the placeholder), so whichever source wins
+/// fits what was reserved.
 pub async fn offer_candidates(
     db: &PgPool,
     id: Uuid,
@@ -980,15 +1041,18 @@ pub async fn offer_candidates(
     deadline: DateTime<Utc>,
     cues: &serde_json::Value,
     reserve_bytes: Option<i64>,
-) -> Result<bool, sqlx::Error> {
-    Ok(sqlx::query!(
+    budget_bytes: i64,
+) -> Result<OfferOutcome, sqlx::Error> {
+    let mut tx = db.begin().await?;
+    if let Some(outcome) = check_room(&mut tx, id, reserve_bytes, budget_bytes).await? {
+        return Ok(outcome);
+    }
+    let offered = sqlx::query!(
         r#"
         UPDATE visual_extraction_jobs
         SET download_candidates = $2, download_deadline = $3, cues = $4,
             staged_bytes = COALESCE($5, staged_bytes), updated_at = NOW()
-        WHERE id = $1 AND status = 'fetching' AND download_url IS NULL
-          AND download_candidates IS NULL AND download_started_at IS NULL
-          AND $3 > NOW() AND ($5::BIGINT IS NULL OR $5 <= staged_bytes)
+        WHERE id = $1 AND $3 > NOW()
         "#,
         id,
         candidates,
@@ -996,10 +1060,16 @@ pub async fn offer_candidates(
         cues,
         reserve_bytes,
     )
-    .execute(db)
+    .execute(&mut *tx)
     .await?
     .rows_affected()
-        == 1)
+        == 1;
+    tx.commit().await?;
+    Ok(if offered {
+        OfferOutcome::Offered
+    } else {
+        OfferOutcome::NotFetching
+    })
 }
 
 pub struct ProbeClaim {

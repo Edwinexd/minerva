@@ -44,9 +44,9 @@ pub const LEASE_SECS: i64 = 2 * 3600;
 /// for a long time before a GPU becomes available.
 pub const WORKER_WALL_SECS: i64 = 12 * 3600;
 pub const WORKER_QUEUE_GRACE_SECS: i64 = 3 * 24 * 3600;
-/// The largest lecture video Minerva stages. Also the reservation per slot
-/// until the offered sources' sizes let Minerva shrink it, so large
-/// lectures cannot oversubscribe the window.
+/// Placeholder reservation per granted slot until its offer announces real
+/// sizes, which replace it (shrinking it, or growing it if the window has
+/// room). Also the download cap for a source whose size stayed unknown.
 pub const FETCH_ESTIMATE_BYTES: i64 = 1024 * 1024 * 1024;
 /// A reserved slot whose upload never arrived is released after this.
 pub const FETCH_RESERVATION_SECS: i64 = 2 * 3600;
@@ -591,7 +591,7 @@ mod tests {
     }
 }
 
-/// Most sources a lecture may offer; Play lectures have one to three.
+/// Most sources a lecture may offer; Play lectures have one to four.
 pub const MAX_CANDIDATES: usize = 8;
 
 /// One Play source of a lecture, as offered by GitHub Actions. Both URLs

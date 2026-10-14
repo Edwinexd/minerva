@@ -223,6 +223,50 @@ def test_authorization_skips_failed_sources_for_rest_of_run():
     assert session.post.call_args.kwargs["json"]["exclude_job_ids"] == ["bad", "good"]
 
 
+def test_permanent_rejections_park_the_lecture():
+    from unittest.mock import Mock
+
+    import fetch_lecture_videos as fetch
+
+    with (
+        patch.object(
+            fetch,
+            "stage",
+            side_effect=fetch.OfferRejected("visual_extraction.video_too_large"),
+        ),
+        patch.object(fetch, "release") as release,
+    ):
+        fetch.attempt(Mock(), Mock(), {"job_id": "a"}, {})
+    release.assert_called_once()
+    assert release.call_args.args[2] == (
+        "Play authorization failed (visual_extraction.video_too_large)"
+    )
+    assert release.call_args.kwargs["retry"] is False
+
+
+def test_waves_after_login_run_in_parallel():
+    import threading
+    from unittest.mock import Mock
+
+    import fetch_lecture_videos as fetch
+
+    response = Mock()
+    response.headers = {}
+    response.json.return_value = [{"job_id": j} for j in "abcde"]
+    session = Mock()
+    session.post.return_value = response
+    # a logs in alone; b-e only finish if they run at the same time.
+    barrier = threading.Barrier(4, timeout=5)
+
+    def stage(session, client, slot, downloads):
+        if slot["job_id"] != "a":
+            barrier.wait()
+
+    with patch.object(fetch, "stage", side_effect=stage) as staged:
+        assert fetch.authorize_window(session, Mock()) == 5
+    assert staged.call_args_list[0].args[2]["job_id"] == "a"
+
+
 def test_track_failures_record_their_fixed_reason():
     from unittest.mock import Mock
 
@@ -260,14 +304,20 @@ def test_time_budget_releases_unprocessed_reservations():
     response.headers = {fetch.REFILL_HEADER: "1"}
     session = Mock()
     session.post.return_value = response
+    # The budget runs out while the second wave is being granted.
     with (
-        patch.object(fetch.time, "monotonic", side_effect=[0, 0, 0, 2401]),
+        patch.object(fetch.time, "monotonic", side_effect=[0, 0, 0, 0, 2401, 2401]),
         patch.object(fetch, "stage") as stage,
         patch.object(fetch, "release") as release,
     ):
-        assert fetch.authorize_window(session, Mock()) == 1
-    stage.assert_called_once()
-    release.assert_called_once_with(session, "b", "fetch run time budget", retry=True)
+        response.json.side_effect = [
+            [{"job_id": "a"}, {"job_id": "b"}],
+            [{"job_id": "c"}, {"job_id": "d"}],
+        ]
+        assert fetch.authorize_window(session, Mock()) == 2
+    assert stage.call_count == 2
+    assert [c.args[1] for c in release.call_args_list] == ["c", "d"]
+    assert all(c.args[2] == "fetch run time budget" for c in release.call_args_list)
 
 
 def test_sources_offer_low_res_probe_and_1080p_download():

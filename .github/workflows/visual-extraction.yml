@@ -27,7 +27,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests git+https://github.com/Edwinexd/dsv-wrapper.git@d8d9f44e9730d5a4055018efd5a45846b3e21523
+          pip install requests git+https://github.com/Edwinexd/dsv-wrapper.git
 
       - name: Authorize internal lecture downloads
         env:

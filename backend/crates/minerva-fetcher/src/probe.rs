@@ -17,6 +17,7 @@ use axum::body::{Body, Bytes};
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::serve::ListenerExt;
 use chrono::Utc;
 use futures::{StreamExt, TryStreamExt};
 use minerva_app_core::visual_extraction::{self as ve, Candidate};
@@ -27,6 +28,13 @@ use tokio::sync::{OnceCell, Semaphore};
 
 const PROBE_BYTES: u64 = 24 * 1024 * 1024;
 const BLOCK_BYTES: u64 = 256 * 1024;
+/// Loopback socket buffers on both ends of the proxy. ffmpeg reads open
+/// ranges and hangs up once it has its frame; every byte buffered by then
+/// was fetched from Play for nothing. Default buffers grow to megabytes, and
+/// with Play a LAN hop away they fill before ffmpeg hangs up, exhausting
+/// the budget. Small buffers keep each connection about a block ahead.
+const SOCKET_BUFFER_BYTES: usize = 64 * 1024;
+const SOCKET_BUFFER_ARG: &str = "65536";
 const FRAME_FRACTIONS: [f64; 3] = [0.2, 0.5, 0.8];
 /// Sources of one lecture probed at once; Play lectures have up to three.
 const SOURCE_PROBES: usize = 3;
@@ -42,6 +50,10 @@ const LECTURE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const PROBE_STALE_SECS: i64 = 15 * 60;
 
 type Reason = &'static str;
+
+/// The slide source exists but can never be staged; retrying cannot help.
+const TOO_LARGE: Reason = "slide source larger than the staging cap";
+const BUDGET_EXHAUSTED: Reason = "probe byte budget exhausted";
 
 /// Probe the earliest-expiring undecided lecture and queue its slide
 /// source for download. False when there is nothing to probe.
@@ -65,7 +77,7 @@ pub async fn probe_tick(db: &PgPool) -> Result<bool, sqlx::Error> {
         Err(reason) => {
             tracing::warn!(job_id = %claim.id, reason, "slide source probe failed");
             let error = format!("slide source probe failed ({reason})");
-            if queue::fail_probe(db, &claim, &error).await? {
+            if queue::fail_probe(db, &claim, &error, reason != TOO_LARGE).await? {
                 "failed"
             } else {
                 "stale"
@@ -106,10 +118,14 @@ async fn pick(
     .await
     .map_err(|_| "probe timed out")??;
     let best = choose(&scores)?;
-    Ok(candidates
+    let chosen = candidates
         .into_iter()
         .nth(best)
-        .expect("one score per candidate"))
+        .expect("one score per candidate");
+    if chosen.size_bytes > Some(ve::FETCH_ESTIMATE_BYTES) {
+        return Err(TOO_LARGE);
+    }
+    Ok(chosen)
 }
 
 /// Index of the source to stage.
@@ -128,11 +144,21 @@ fn choose(scores: &[f64]) -> Result<usize, Reason> {
 
 async fn score_source(url: &str) -> Result<f64, Reason> {
     let proxy = Proxy::start(url).await?;
+    // A tool cut off by the byte budget only reports that it failed.
+    let budget = |reason| {
+        if proxy.blocks.exhausted() {
+            BUDGET_EXHAUSTED
+        } else {
+            reason
+        }
+    };
     let info = run(
         "ffprobe",
         &[
             "-v",
             "error",
+            "-recv_buffer_size",
+            SOCKET_BUFFER_ARG,
             "-show_entries",
             "format=duration",
             "-of",
@@ -141,7 +167,8 @@ async fn score_source(url: &str) -> Result<f64, Reason> {
         ],
         None,
     )
-    .await?;
+    .await
+    .map_err(budget)?;
     let duration = serde_json::from_slice::<serde_json::Value>(&info)
         .ok()
         .and_then(|info| info["format"]["duration"].as_str()?.parse::<f64>().ok())
@@ -150,7 +177,8 @@ async fn score_source(url: &str) -> Result<f64, Reason> {
     let mut scores: Vec<f64> = futures::future::try_join_all(
         FRAME_FRACTIONS.map(|fraction| frame_score(&proxy.url, duration * fraction)),
     )
-    .await?;
+    .await
+    .map_err(budget)?;
     scores.sort_by(f64::total_cmp);
     Ok(scores[scores.len() / 2])
 }
@@ -162,6 +190,8 @@ async fn frame_score(url: &str, seconds: f64) -> Result<f64, Reason> {
         &[
             "-v",
             "error",
+            "-recv_buffer_size",
+            SOCKET_BUFFER_ARG,
             "-ss",
             &seconds,
             "-i",
@@ -294,7 +324,7 @@ impl Blocks {
         {
             let mut state = self.state.lock().unwrap();
             if state.remaining < BLOCK_BYTES {
-                return Err("probe byte budget exhausted");
+                return Err(BUDGET_EXHAUSTED);
             }
             state.remaining -= BLOCK_BYTES;
         }
@@ -341,6 +371,10 @@ impl Blocks {
         }
         state.total = Some(size);
         Ok(Bytes::from(data))
+    }
+
+    fn exhausted(&self) -> bool {
+        self.state.lock().unwrap().remaining < BLOCK_BYTES
     }
 
     fn total(&self) -> u64 {
@@ -390,6 +424,9 @@ impl Proxy {
             .await
             .map_err(|_| "probe proxy")?;
         let port = listener.local_addr().map_err(|_| "probe proxy")?.port();
+        let listener = listener.tap_io(|stream| {
+            let _ = socket2::SockRef::from(&*stream).set_send_buffer_size(SOCKET_BUFFER_BYTES);
+        });
         let app = axum::Router::new()
             .route("/video", axum::routing::get(serve_range))
             .with_state(blocks.clone());
@@ -566,6 +603,33 @@ mod tests {
         // Block 0 at start, then blocks 1-4 once each, concurrently.
         assert_eq!(requests.load(Ordering::SeqCst), 5);
         assert!(peak.load(Ordering::SeqCst) > 1);
+    }
+
+    #[tokio::test]
+    async fn stalled_open_range_reads_stay_near_the_reader() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (url, _, _) = media_host(64 * 1024 * 1024).await;
+        let proxy = Proxy::start(&url).await.unwrap();
+        let address = proxy
+            .url
+            .trim_start_matches("http://")
+            .trim_end_matches("/video");
+        // What ffmpeg does: an open range, a small receive buffer, a few
+        // bytes read, then nothing until it hangs up.
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket
+            .set_recv_buffer_size(SOCKET_BUFFER_BYTES as u32)
+            .unwrap();
+        let mut stream = socket.connect(address.parse().unwrap()).await.unwrap();
+        stream
+            .write_all(b"GET /video HTTP/1.1\r\nHost: x\r\nRange: bytes=0-\r\n\r\n")
+            .await
+            .unwrap();
+        let mut head = [0; 1024];
+        stream.read_exact(&mut head).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let charged = PROBE_BYTES - proxy.blocks.state.lock().unwrap().remaining;
+        assert!(charged <= 6 * BLOCK_BYTES, "charged {charged} bytes");
     }
 
     #[tokio::test]

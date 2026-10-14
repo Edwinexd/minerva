@@ -3302,6 +3302,7 @@ dependencies = [
  "minerva-metrics",
  "reqwest 0.13.5",
  "serde_json",
+ "socket2",
  "sqlx",
  "tempfile",
  "tokio",

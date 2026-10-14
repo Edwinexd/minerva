@@ -354,7 +354,7 @@ async fn probed_candidates_shrink_to_the_chosen_source(db: sqlx::PgPool) {
     assert_eq!(download.expected_bytes, Some(GIB / 4));
     // A failed probe returns the lecture for a fresh authorization.
     assert!(
-        queue::fail_probe(&db, &early, "slide source probe failed (x)")
+        queue::fail_probe(&db, &early, "slide source probe failed (x)", true)
             .await
             .unwrap()
     );

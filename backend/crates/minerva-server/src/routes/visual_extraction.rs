@@ -171,10 +171,7 @@ async fn offer_download(
         {
             return Err(AppError::bad_request("visual_extraction.invalid_download"));
         }
-        if candidate
-            .size_bytes
-            .is_some_and(|n| !(12..=ve::FETCH_ESTIMATE_BYTES).contains(&n))
-        {
+        if candidate.size_bytes.is_some_and(|n| n < 12) {
             return Err(AppError::bad_request(
                 "visual_extraction.invalid_video_size",
             ));
@@ -187,6 +184,10 @@ async fn offer_download(
             .collect(),
     );
     let offered = match body.candidates.as_slice() {
+        // Over the cap it can never be staged; Actions parks the lecture.
+        [only] if only.size_bytes > Some(ve::FETCH_ESTIMATE_BYTES) => {
+            return Err(AppError::bad_request("visual_extraction.video_too_large"));
+        }
         [only] => {
             queue::offer_download(
                 &state.db,
@@ -199,9 +200,12 @@ async fn offer_download(
             .await?
         }
         candidates => {
+            // A source over the cap is still probed (it may be the camera
+            // the slides must beat) but cannot win, so it reserves only the
+            // cap.
             let reserve = candidates
                 .iter()
-                .map(|c| c.size_bytes)
+                .map(|c| c.size_bytes.map(|n| n.min(ve::FETCH_ESTIMATE_BYTES)))
                 .collect::<Option<Vec<_>>>()
                 .and_then(|sizes| sizes.into_iter().max());
             let candidates = serde_json::to_value(candidates)

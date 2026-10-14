@@ -148,7 +148,9 @@ Flow and backpressure:
   full 1 GiB download cap. Actions reads each source's HEAD
   `Content-Length` (or one-byte `Content-Range`) and Minerva shrinks the
   reservation to the largest candidate, so whichever source wins fits;
-  once the fetcher has chosen, it shrinks again to that source. A missing
+  once the fetcher has chosen, it shrinks again to that source. A source
+  over the 1 GiB cap is still probed but reserves only the cap; if it wins
+  (or is the only source) the lecture is parked as `unavailable`. A missing
   size retains the full cap, and every download is still capped at its
   reservation, since an announced size is only a claim. Actions asks for
   another small wave until the staging budget or its 40-minute
@@ -181,7 +183,10 @@ Flow and backpressure:
   loopback proxy that caches aligned blocks, so MP4 indexes consume the
   budget once; sources and samples run concurrently, a block already in
   flight is shared rather than refetched, and at most four
-  ffmpeg/tesseract processes run at once. Failures store a fixed reason
+  ffmpeg/tesseract processes run at once. Both ends of the loopback use
+  64 KiB socket buffers: ffmpeg reads open ranges and hangs up once it has
+  its frame, and with Play a LAN hop away, default (megabyte) buffers
+  filled with unread blocks before it did and exhausted the budget. Failures store a fixed reason
   (`slide source probe failed (...)`), never a third-party message.
   Readable duplicate slide streams select the clearest text; blank or
   failed probes return the lecture for a later authorization. Repeated

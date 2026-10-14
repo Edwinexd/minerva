@@ -7,6 +7,7 @@ it in deadline order. SU login credentials never leave this process.
 """
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from _minerva_api import MinervaSession, minerva_session, su_credentials
@@ -18,6 +19,12 @@ API = "/api/service/visual-extraction"
 FETCH_WAVE_SLOTS = 4
 FETCH_RUN_SECONDS = 40 * 60
 REFILL_HEADER = "X-Minerva-Staging-Refill"
+# Minerva's codes for lectures that can never be staged.
+PERMANENT_REJECTIONS = {"visual_extraction.video_too_large"}
+
+
+class OfferRejected(Exception):
+    """Minerva refused an offer; the message is its error code."""
 
 
 def release(session: MinervaSession, job_id: str, error: str, retry: bool) -> None:
@@ -29,6 +36,7 @@ def release(session: MinervaSession, job_id: str, error: str, retry: bool) -> No
 def stage(
     session: MinervaSession, client: PlayClient, slot: dict, downloads: dict
 ) -> None:
+    started = time.monotonic()
     job_id = slot["job_id"]
     presentation_id = extract_presentation_id(slot["url"])
     if not presentation_id:
@@ -56,7 +64,7 @@ def stage(
     deadline = datetime.fromtimestamp(expires_at, timezone.utc)
     if (deadline - datetime.now(timezone.utc)).total_seconds() < 120:
         raise TrackError("media token too close to expiry")
-    session.post(
+    response = session.post(
         f"{API}/jobs/{job_id}/download",
         json={
             "candidates": candidates,
@@ -66,10 +74,17 @@ def stage(
                 for c in cues
             ],
         },
-    ).raise_for_status()
+    )
+    if response.status_code == 400:
+        try:
+            code = response.json().get("code", "")
+        except ValueError:
+            code = ""
+        raise OfferRejected(code or "HTTP 400")
+    response.raise_for_status()
     print(
         f"  queued {presentation_id} sources={len(candidates)} "
-        f"deadline={deadline.isoformat()}",
+        f"deadline={deadline.isoformat()} in {time.monotonic() - started:.1f}s",
         flush=True,
     )
 
@@ -86,49 +101,62 @@ def fetch_slots(session: MinervaSession, attempted: set[str]) -> tuple[list, boo
     return response.json(), response.headers.get(REFILL_HEADER) == "1"
 
 
+def attempt(session: MinervaSession, client: PlayClient, slot: dict, downloads: dict):
+    try:
+        stage(session, client, slot, downloads)
+    except Exception as error:
+        # Third-party HTTP errors can include the signed URL; record only the
+        # error class, never the credential-bearing message. TrackError and
+        # OfferRejected messages are fixed text and say why it failed.
+        safe = type(error) in (TrackError, OfferRejected)
+        detail = str(error) if safe else type(error).__name__
+        reason = f"Play authorization failed ({detail})"
+        print(f"  {slot['job_id']}: {reason}", flush=True)
+        try:
+            release(
+                session,
+                slot["job_id"],
+                reason,
+                retry=str(error) not in PERMANENT_REJECTIONS,
+            )
+        except Exception:
+            print(f"  {slot['job_id']}: release failed; reservation will expire")
+
+
 def authorize_window(session: MinervaSession, client: PlayClient) -> int:
     attempted = set()
     downloads = {}
     until = time.monotonic() + FETCH_RUN_SECONDS
-    while time.monotonic() < until:
-        # Once Minerva reads the selected source's headers, its reservation
-        # shrinks to the actual size. Refill those released bytes in this run
-        # instead of waiting for the next GitHub schedule. Do not retry a
-        # failed source repeatedly just because it released its slot.
-        slots, can_refill = fetch_slots(session, attempted)
-        print(f"{len(slots)} fetch slot(s) granted", flush=True)
-        if not slots:
-            break
-        for index, slot in enumerate(slots):
+    with ThreadPoolExecutor(FETCH_WAVE_SLOTS) as pool:
+        while time.monotonic() < until:
+            # Once Minerva has the sources' sizes, the reservation shrinks to
+            # the largest. Refill those released bytes in this run instead of
+            # waiting for the next GitHub schedule. Do not retry a failed
+            # source repeatedly just because it released its slot.
+            slots, can_refill = fetch_slots(session, attempted)
+            print(f"{len(slots)} fetch slot(s) granted", flush=True)
+            if not slots:
+                break
             if time.monotonic() >= until:
-                for unused in slots[index:]:
+                for unused in slots:
                     release(session, unused["job_id"], "fetch run time budget", retry=True)
-                return len(attempted)
-            if slot["job_id"] in attempted:
-                raise ValueError("duplicate fetch reservation")
-            attempted.add(slot["job_id"])
-            try:
-                stage(session, client, slot, downloads)
-            except Exception as error:
-                # Third-party HTTP errors can include the signed URL; record
-                # only the error class, never the credential-bearing message.
-                # TrackError messages are fixed text and say why it failed.
-                detail = (
-                    str(error) if type(error) is TrackError else type(error).__name__
-                )
-                reason = f"Play authorization failed ({detail})"
-                print(f"  {slot['job_id']}: {reason}", flush=True)
-                try:
-                    release(session, slot["job_id"], reason, retry=True)
-                except Exception:
-                    print(
-                        f"  {slot['job_id']}: release failed; reservation will expire"
-                    )
-        # During CD the new Actions script may reach the old API. Only refill
-        # when the server supports header sizing and exclusions; otherwise
-        # retries could reclaim the same failed source in this run.
-        if not can_refill:
-            break
+                break
+            first_wave = not attempted
+            for slot in slots:
+                if slot["job_id"] in attempted:
+                    raise ValueError("duplicate fetch reservation")
+                attempted.add(slot["job_id"])
+            # Play logs in on first use, so one lecture goes alone; the rest
+            # share the session in parallel.
+            if first_wave:
+                attempt(session, client, slots[0], downloads)
+                slots = slots[1:]
+            list(pool.map(lambda slot: attempt(session, client, slot, downloads), slots))
+            # During CD the new Actions script may reach the old API. Only
+            # refill when the server supports sizing and exclusions; otherwise
+            # retries could reclaim the same failed source in this run.
+            if not can_refill:
+                break
     return len(attempted)
 
 

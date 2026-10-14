@@ -1063,16 +1063,19 @@ pub async fn choose_download(
         == 1)
 }
 
-/// A failed probe returns the lecture for a fresh authorization later.
+/// A failed probe returns the lecture for a fresh authorization later, or
+/// with `retry` false parks it as `unavailable`.
 pub async fn fail_probe(
     db: &PgPool,
     claim: &ProbeClaim,
     error_msg: &str,
+    retry: bool,
 ) -> Result<bool, sqlx::Error> {
     Ok(sqlx::query!(
         r#"
         UPDATE visual_extraction_jobs
-        SET status = 'needs_source', staged_bytes = NULL, fetch_reserved_at = NULL,
+        SET status = CASE WHEN $4 THEN 'needs_source' ELSE 'unavailable' END,
+            staged_bytes = NULL, fetch_reserved_at = NULL,
             download_url = NULL, download_deadline = NULL, download_started_at = NULL,
             download_candidates = NULL, probe_started_at = NULL,
             download_size_bytes = NULL,
@@ -1082,6 +1085,7 @@ pub async fn fail_probe(
         claim.id,
         claim.started_at,
         error_msg,
+        retry,
     )
     .execute(db)
     .await?

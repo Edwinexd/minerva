@@ -158,7 +158,13 @@ Flow and backpressure:
   lectures in flight (the load on Play) with up to 8 more granted slots
   queued, asking for more as the queue drains, until Minerva grants none
   with nothing in flight or its 40-minute authorization budget is
-  exhausted, rather than imposing a URL count per run. Failed sources are excluded for the rest of that run. A staged video is deleted as soon
+  exhausted, rather than imposing a URL count per run. Failed sources are excluded for the rest of that run. A
+  lecture Play cannot serve yet (transcript not generated, no video track)
+  is released with `not_ready` and held back by `retry_after`: 1 hour,
+  doubling with each such release (`not_ready_releases`) up to 7 days,
+  and reset once Play serves it. New lectures usually get their transcript
+  within hours, so they are rechecked soon; old ones Play may never serve
+  settle at a weekly check instead of a Play round trip every run. A staged video is deleted as soon
   as its result is accepted, so the window shrinks back as workers drain
   it; a backlog beyond that costs database rows, not disk.
 - **Download deadlines are database state.** `download_url`,

@@ -135,7 +135,8 @@ async fn fetch_slots(
                 url,
             }),
             None => {
-                queue::release_fetch(&state.db, slot.job_id, "URL stub unreadable", false).await?;
+                queue::release_fetch(&state.db, slot.job_id, "URL stub unreadable", false, false)
+                    .await?;
             }
         }
     }
@@ -248,6 +249,10 @@ struct ReleaseBody {
     /// True for a passing problem (Play error, transcript not generated
     /// yet); false parks the lecture as `unavailable`.
     retry: bool,
+    /// With `retry`: Play has no transcript or video yet, so back off
+    /// before offering the lecture again.
+    #[serde(default)]
+    not_ready: bool,
 }
 
 async fn release_fetch(
@@ -257,7 +262,8 @@ async fn release_fetch(
     Json(body): Json<ReleaseBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     authenticate_service(&state, &headers)?;
-    let released = queue::release_fetch(&state.db, job_id, &body.error, body.retry).await?;
+    let released =
+        queue::release_fetch(&state.db, job_id, &body.error, body.retry, body.not_ready).await?;
     Ok(Json(serde_json::json!({ "released": released })))
 }
 

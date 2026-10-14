@@ -150,10 +150,11 @@ pub async fn reserve_fetch_slots(
         r#"
         UPDATE visual_extraction_jobs
         SET status = 'fetching', fetch_reserved_at = NOW(), staged_bytes = $1,
-            error_msg = NULL, updated_at = NOW()
+            error_msg = NULL, retry_after = NULL, updated_at = NOW()
         WHERE id IN (
             SELECT id FROM visual_extraction_jobs
             WHERE status = 'needs_source'
+              AND (retry_after IS NULL OR retry_after <= NOW())
               AND NOT (id = ANY($3))
             ORDER BY priority DESC, created_at
             LIMIT $2
@@ -171,16 +172,25 @@ pub async fn reserve_fetch_slots(
     Ok(rows)
 }
 
+/// First wait after Play reports a lecture not ready; doubles per release.
+pub const NOT_READY_BACKOFF_BASE_SECS: i64 = 3600;
+/// Longest wait, so a lecture Play never serves is still checked weekly.
+pub const NOT_READY_BACKOFF_MAX_SECS: i64 = 7 * 24 * 3600;
+
 /// GitHub Actions could not get this lecture (no video, no transcript yet,
-/// Play error). `retry` puts it back for a later run; otherwise it is
-/// parked as `unavailable`.
+/// Play error). `retry` puts it back for a later run; otherwise it is parked
+/// as `unavailable`. `not_ready` (Play has no transcript or video yet) also
+/// holds it back for a wait that doubles with each such release, capped at
+/// [`NOT_READY_BACKOFF_MAX_SECS`].
 pub async fn release_fetch(
     db: &PgPool,
     job_id: Uuid,
     error_msg: &str,
     retry: bool,
+    not_ready: bool,
 ) -> Result<bool, sqlx::Error> {
     let status = if retry { "needs_source" } else { "unavailable" };
+    let not_ready = retry && not_ready;
     let done = sqlx::query!(
         r#"
         UPDATE visual_extraction_jobs
@@ -188,12 +198,19 @@ pub async fn release_fetch(
             download_url = NULL, download_deadline = NULL, download_started_at = NULL,
             download_candidates = NULL, probe_started_at = NULL,
             download_size_bytes = NULL,
+            retry_after = CASE WHEN $4 THEN NOW() + make_interval(secs => LEAST(
+                $5::FLOAT8 * POWER(2, LEAST(not_ready_releases, 30)), $6::FLOAT8))
+            END,
+            not_ready_releases = not_ready_releases + CASE WHEN $4 THEN 1 ELSE 0 END,
             error_msg = $3, updated_at = NOW()
         WHERE id = $1 AND status = 'fetching' AND download_started_at IS NULL
         "#,
         job_id,
         status,
         error_msg,
+        not_ready,
+        NOT_READY_BACKOFF_BASE_SECS as f64,
+        NOT_READY_BACKOFF_MAX_SECS as f64,
     )
     .execute(db)
     .await?
@@ -1010,7 +1027,7 @@ pub async fn offer_download(
         UPDATE visual_extraction_jobs
         SET download_url = $2, download_deadline = $3, cues = $4,
             download_size_bytes = $5, staged_bytes = COALESCE($5, staged_bytes),
-            updated_at = NOW()
+            not_ready_releases = 0, updated_at = NOW()
         WHERE id = $1 AND $3 > NOW()
         "#,
         id,
@@ -1051,7 +1068,8 @@ pub async fn offer_candidates(
         r#"
         UPDATE visual_extraction_jobs
         SET download_candidates = $2, download_deadline = $3, cues = $4,
-            staged_bytes = COALESCE($5, staged_bytes), updated_at = NOW()
+            staged_bytes = COALESCE($5, staged_bytes), not_ready_releases = 0,
+            updated_at = NOW()
         WHERE id = $1 AND $3 > NOW()
         "#,
         id,

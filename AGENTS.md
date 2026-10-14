@@ -467,7 +467,9 @@ and Olympus setup in `gpu/slide-ocr/README.md`.
   the largest candidate's size. `minerva-fetcher` OCRs a few frames of
   each source to pick the slide track (skipped for single-source
   lectures), shrinks the reservation to the winner and downloads it into
-  a bounded window on `/data0` in deadline order. The scheduler's
+  a bounded window on `/data0` in deadline order. A lecture Play cannot serve yet
+  (no transcript, no video) waits before it is offered again: 1 hour,
+  doubling per not-ready release up to 7 days. The scheduler's
   `visual_extraction::tick` enqueues jobs, submits and monitors Slurm
   workers over SSH and indexes figures; workers pull one item at a time
   through presigned URLs and upload results to

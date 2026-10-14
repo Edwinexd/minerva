@@ -32,9 +32,18 @@ class OfferRejected(Exception):
     """Minerva refused an offer; the message is its error code."""
 
 
-def release(session: MinervaSession, job_id: str, error: str, retry: bool) -> None:
+def release(
+    session: MinervaSession,
+    job_id: str,
+    error: str,
+    retry: bool,
+    not_ready: bool = False,
+) -> None:
+    # not_ready: Play has no transcript or video yet. Minerva then holds the
+    # lecture back for a wait that doubles each time.
     session.post(
-        f"{API}/jobs/{job_id}/release", json={"error": error, "retry": retry}
+        f"{API}/jobs/{job_id}/release",
+        json={"error": error, "retry": retry, "not_ready": not_ready},
     ).raise_for_status()
 
 
@@ -56,11 +65,23 @@ def stage(
         try:
             cues = client.get_transcript(presentation_id)
         except TranscriptNotReadyError:
-            release(session, job_id, "transcript not generated yet", retry=True)
+            release(
+                session,
+                job_id,
+                "transcript not generated yet",
+                retry=True,
+                not_ready=True,
+            )
             return
         presentation = client.get_presentation(presentation_id)
         if not presentation.is_video_ready:
-            release(session, job_id, "presentation has no video track", retry=True)
+            release(
+                session,
+                job_id,
+                "presentation has no video track",
+                retry=True,
+                not_ready=True,
+            )
             return
         candidates, expires_at = describe_sources(presentation)
         # The same lecture can belong to several courses. Describe it once

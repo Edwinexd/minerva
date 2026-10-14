@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = $2, staged_bytes = NULL, fetch_reserved_at = NULL,\n            download_url = NULL, download_deadline = NULL, download_started_at = NULL,\n            download_candidates = NULL, probe_started_at = NULL,\n            download_size_bytes = NULL,\n            retry_after = CASE WHEN $4 THEN NOW() + make_interval(secs => LEAST(\n                $5::FLOAT8 * POWER(2, LEAST(not_ready_releases, 30)), $6::FLOAT8))\n            END,\n            not_ready_releases = not_ready_releases + CASE WHEN $4 THEN 1 ELSE 0 END,\n            error_msg = $3, updated_at = NOW()\n        WHERE id = $1 AND status = 'fetching' AND download_started_at IS NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "74de0d64501e8d87569026331e7c5eefcc7250a07dd305aa784865eabfd2dba0"
+}

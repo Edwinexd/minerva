@@ -114,9 +114,11 @@ async fn downloads_follow_deadlines_and_reject_stale_claims(db: sqlx::PgPool) {
         [jobs[0], jobs[1]].into_iter().collect()
     );
     assert!(queue::claim_download(&db).await.unwrap().is_none());
-    assert!(!queue::release_fetch(&db, a.id, "late Actions retry", true)
-        .await
-        .unwrap());
+    assert!(
+        !queue::release_fetch(&db, a.id, "late Actions retry", true, false)
+            .await
+            .unwrap()
+    );
     // Simulate a downloader crash, recover it, and authorize a fresh URL.
     sqlx::query("UPDATE visual_extraction_jobs SET download_started_at=NOW()-INTERVAL '40 minutes' WHERE id=$1")
         .bind(a.id).execute(&db).await.unwrap();
@@ -235,7 +237,7 @@ async fn sized_reservations_refill_space_and_exclude_failed_sources(db: sqlx::Pg
         .await
         .unwrap());
     assert!(
-        queue::release_fetch(&db, attempted[2], "probe failed", true)
+        queue::release_fetch(&db, attempted[2], "probe failed", true, false)
             .await
             .unwrap()
     );
@@ -431,4 +433,101 @@ async fn probed_candidates_shrink_to_the_chosen_source(db: sqlx::PgPool) {
         .execute(&db)
         .await
         .unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "requires an isolated PostgreSQL DATABASE_URL"]
+async fn not_ready_releases_back_off_exponentially(db: sqlx::PgPool) {
+    const GIB: i64 = 1024 * 1024 * 1024;
+    let user = Uuid::new_v4();
+    let course = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id,eppn) VALUES ($1,$2)")
+        .bind(user)
+        .bind(format!("backoff-test-{user}@example.invalid"))
+        .execute(&db)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO courses (id,name,owner_id) VALUES ($1,'backoff-test',$2)")
+        .bind(course)
+        .bind(user)
+        .execute(&db)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        let doc = Uuid::new_v4();
+        sqlx::query("INSERT INTO documents (id,course_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.url','text/x-url',0,$3)")
+            .bind(doc).bind(course).bind(user).execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO visual_extraction_jobs (id,document_id,course_id,kind,status,pipeline_version) VALUES ($1,$2,$3,'play_lecture','needs_source',1)")
+            .bind(Uuid::new_v4()).bind(doc).bind(course).execute(&db).await.unwrap();
+    }
+    let reserve = || queue::reserve_fetch_slots(&db, i64::MAX, 0, GIB, 10, &[]);
+    let wait_secs = |id: Uuid| {
+        sqlx::query_scalar::<_, f64>(
+            "SELECT EXTRACT(EPOCH FROM retry_after - NOW())::FLOAT8 FROM visual_extraction_jobs WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(&db)
+    };
+    let expire = |id: Uuid| {
+        sqlx::query("UPDATE visual_extraction_jobs SET retry_after = NOW() WHERE id = $1")
+            .bind(id)
+            .execute(&db)
+    };
+    let slots = reserve().await.unwrap();
+    assert_eq!(slots.len(), 2);
+    let (waiting, plain) = (slots[0].job_id, slots[1].job_id);
+    assert!(queue::release_fetch(&db, plain, "Play error", true, false)
+        .await
+        .unwrap());
+
+    // Each not-ready release doubles the wait, up to the cap.
+    let mut expected = queue::NOT_READY_BACKOFF_BASE_SECS;
+    for round in 0..12 {
+        if round > 0 {
+            expire(waiting).await.unwrap();
+            let slots = reserve().await.unwrap();
+            assert!(slots.iter().any(|s| s.job_id == waiting));
+            assert!(queue::release_fetch(&db, plain, "Play error", true, false)
+                .await
+                .unwrap());
+        }
+        assert!(
+            queue::release_fetch(&db, waiting, "transcript not generated yet", true, true)
+                .await
+                .unwrap()
+        );
+        let wait = wait_secs(waiting).await.unwrap();
+        assert!(
+            (wait - expected as f64).abs() < 60.0,
+            "round {round}: {wait}"
+        );
+        // Held back while the plain release is offered again.
+        let slots = reserve().await.unwrap();
+        assert_eq!(
+            slots.iter().map(|s| s.job_id).collect::<Vec<_>>(),
+            vec![plain]
+        );
+        assert!(queue::release_fetch(&db, plain, "Play error", true, false)
+            .await
+            .unwrap());
+        expected = (expected * 2).min(queue::NOT_READY_BACKOFF_MAX_SECS);
+    }
+    assert_eq!(expected, queue::NOT_READY_BACKOFF_MAX_SECS);
+
+    // Once Play serves it, the next not-ready release starts over.
+    expire(waiting).await.unwrap();
+    assert_eq!(reserve().await.unwrap().len(), 2);
+    let deadline = Utc::now() + Duration::minutes(30);
+    assert!(
+        offer(&db, waiting, "u", deadline, &serde_json::json!([]), None)
+            .await
+            .unwrap()
+    );
+    assert!(
+        queue::release_fetch(&db, waiting, "transcript not generated yet", true, true)
+            .await
+            .unwrap()
+    );
+    let wait = wait_secs(waiting).await.unwrap();
+    assert!((wait - queue::NOT_READY_BACKOFF_BASE_SECS as f64).abs() < 60.0);
 }

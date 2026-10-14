@@ -5,8 +5,10 @@
 //!
 //! - `needs_source` -> `fetching`: GitHub Actions reserves a staging slot
 //!   ([`reserve_fetch_slots`]), only for Play lectures.
-//! - `fetching` -> `ready`: Actions offers a URL/deadline/cues; the scheduler
-//!   downloads it and commits its claim ([`finish_download`]).
+//! - `fetching` -> `ready`: Actions offers a URL/deadline/cues, or several
+//!   candidate sources that `minerva-fetcher` probes for the slide track
+//!   ([`offer_candidates`], [`choose_download`]); the fetcher downloads the
+//!   URL and commits its claim ([`finish_download`]).
 //!   PDFs are enqueued straight into `ready`.
 //! - `ready` -> `leased`: a worker takes it ([`lease_next`]).
 //! - `leased` -> `done` / back to `ready` / `failed`: the result is accepted
@@ -183,6 +185,7 @@ pub async fn release_fetch(
         UPDATE visual_extraction_jobs
         SET status = $2, staged_bytes = NULL, fetch_reserved_at = NULL,
             download_url = NULL, download_deadline = NULL, download_started_at = NULL,
+            download_candidates = NULL, probe_started_at = NULL,
             download_size_bytes = NULL,
             error_msg = $3, updated_at = NOW()
         WHERE id = $1 AND status = 'fetching' AND download_started_at IS NULL
@@ -204,6 +207,7 @@ pub async fn release_stale_fetches(db: &PgPool, older_than_secs: i64) -> Result<
         UPDATE visual_extraction_jobs
         SET status = 'needs_source', staged_bytes = NULL, fetch_reserved_at = NULL,
             download_url = NULL, download_deadline = NULL, download_started_at = NULL,
+            download_candidates = NULL, probe_started_at = NULL,
             download_size_bytes = NULL,
             updated_at = NOW()
         WHERE status = 'fetching'
@@ -464,6 +468,7 @@ pub async fn worker_metrics(db: &PgPool) -> Result<Vec<WorkerMetrics>, sqlx::Err
 
 pub struct DownloadMetrics {
     pub reserved: i64,
+    pub probing: i64,
     pub queued: i64,
     pub downloading: i64,
     pub expired: i64,
@@ -476,7 +481,8 @@ pub async fn download_metrics(db: &PgPool) -> Result<DownloadMetrics, sqlx::Erro
     sqlx::query_as!(
         DownloadMetrics,
         r#"
-        SELECT COUNT(*) FILTER (WHERE status = 'fetching' AND download_url IS NULL) AS "reserved!",
+        SELECT COUNT(*) FILTER (WHERE status = 'fetching' AND download_url IS NULL AND download_candidates IS NULL) AS "reserved!",
+               COUNT(*) FILTER (WHERE status = 'fetching' AND download_candidates IS NOT NULL) AS "probing!",
                COUNT(*) FILTER (WHERE status = 'fetching' AND download_url IS NOT NULL AND download_started_at IS NULL) AS "queued!",
                COUNT(*) FILTER (WHERE status = 'fetching' AND download_started_at IS NOT NULL) AS "downloading!",
                COUNT(*) FILTER (WHERE status = 'fetching' AND download_deadline <= NOW()) AS "expired!",
@@ -964,6 +970,142 @@ pub async fn offer_download(
         == 1)
 }
 
+/// Several sources, none chosen yet. `reserve_bytes` is the largest
+/// candidate's size (None keeps the full reservation), so whichever source
+/// wins fits what was reserved.
+pub async fn offer_candidates(
+    db: &PgPool,
+    id: Uuid,
+    candidates: &serde_json::Value,
+    deadline: DateTime<Utc>,
+    cues: &serde_json::Value,
+    reserve_bytes: Option<i64>,
+) -> Result<bool, sqlx::Error> {
+    Ok(sqlx::query!(
+        r#"
+        UPDATE visual_extraction_jobs
+        SET download_candidates = $2, download_deadline = $3, cues = $4,
+            staged_bytes = COALESCE($5, staged_bytes), updated_at = NOW()
+        WHERE id = $1 AND status = 'fetching' AND download_url IS NULL
+          AND download_candidates IS NULL AND download_started_at IS NULL
+          AND $3 > NOW() AND ($5::BIGINT IS NULL OR $5 <= staged_bytes)
+        "#,
+        id,
+        candidates,
+        deadline,
+        cues,
+        reserve_bytes,
+    )
+    .execute(db)
+    .await?
+    .rows_affected()
+        == 1)
+}
+
+pub struct ProbeClaim {
+    pub id: Uuid,
+    pub candidates: serde_json::Value,
+    pub deadline: DateTime<Utc>,
+    pub started_at: DateTime<Utc>,
+}
+
+/// Claim the earliest-expiring lecture whose source is still undecided.
+/// A claim older than `stale_secs` belonged to a probe that died and is
+/// taken over.
+pub async fn claim_probe(db: &PgPool, stale_secs: i64) -> Result<Option<ProbeClaim>, sqlx::Error> {
+    sqlx::query_as!(
+        ProbeClaim,
+        r#"
+        UPDATE visual_extraction_jobs
+        SET probe_started_at = NOW(), updated_at = NOW()
+        WHERE id = (
+            SELECT id FROM visual_extraction_jobs
+            WHERE status = 'fetching' AND download_candidates IS NOT NULL
+                AND download_deadline > NOW()
+                AND (probe_started_at IS NULL
+                    OR probe_started_at < NOW() - make_interval(secs => $1))
+            ORDER BY download_deadline, id LIMIT 1 FOR UPDATE SKIP LOCKED
+        )
+        RETURNING id, download_candidates AS "candidates!", download_deadline AS "deadline!",
+            probe_started_at AS "started_at!"
+        "#,
+        stale_secs as f64,
+    )
+    .fetch_optional(db)
+    .await
+}
+
+/// Promote the probed slide source to the download queue and shrink the
+/// reservation to its size. Only the current probe claim can choose.
+pub async fn choose_download(
+    db: &PgPool,
+    claim: &ProbeClaim,
+    url: &str,
+    size_bytes: Option<i64>,
+) -> Result<bool, sqlx::Error> {
+    Ok(sqlx::query!(
+        r#"
+        UPDATE visual_extraction_jobs
+        SET download_url = $3, download_size_bytes = $4,
+            staged_bytes = COALESCE($4, staged_bytes),
+            download_candidates = NULL, probe_started_at = NULL, updated_at = NOW()
+        WHERE id = $1 AND status = 'fetching' AND probe_started_at = $2
+          AND ($4::BIGINT IS NULL OR $4 <= staged_bytes)
+        "#,
+        claim.id,
+        claim.started_at,
+        url,
+        size_bytes,
+    )
+    .execute(db)
+    .await?
+    .rows_affected()
+        == 1)
+}
+
+/// A failed probe returns the lecture for a fresh authorization later.
+pub async fn fail_probe(
+    db: &PgPool,
+    claim: &ProbeClaim,
+    error_msg: &str,
+) -> Result<bool, sqlx::Error> {
+    Ok(sqlx::query!(
+        r#"
+        UPDATE visual_extraction_jobs
+        SET status = 'needs_source', staged_bytes = NULL, fetch_reserved_at = NULL,
+            download_url = NULL, download_deadline = NULL, download_started_at = NULL,
+            download_candidates = NULL, probe_started_at = NULL,
+            download_size_bytes = NULL,
+            error_msg = $3, updated_at = NOW()
+        WHERE id = $1 AND status = 'fetching' AND probe_started_at = $2
+        "#,
+        claim.id,
+        claim.started_at,
+        error_msg,
+    )
+    .execute(db)
+    .await?
+    .rows_affected()
+        == 1)
+}
+
+/// At fetcher startup. It runs as a single `Recreate` replica, so any
+/// probe or download claim belongs to a process that is gone. Unclaim
+/// them so they are picked up at once instead of after the stale timeout.
+pub async fn reset_fetch_claims(db: &PgPool) -> Result<u64, sqlx::Error> {
+    Ok(sqlx::query!(
+        r#"
+        UPDATE visual_extraction_jobs
+        SET probe_started_at = NULL, download_started_at = NULL, updated_at = NOW()
+        WHERE status = 'fetching'
+          AND (probe_started_at IS NOT NULL OR download_started_at IS NOT NULL)
+        "#
+    )
+    .execute(db)
+    .await?
+    .rows_affected())
+}
+
 pub struct Download {
     pub id: Uuid,
     pub url: String,
@@ -1008,6 +1150,7 @@ pub async fn finish_download(
             staged_path = $3, staged_bytes = CASE WHEN $3::TEXT IS NULL THEN NULL ELSE $4::BIGINT END,
             error_msg = CASE WHEN $3::TEXT IS NULL THEN 'Play download failed or expired' ELSE NULL END,
             download_url = NULL, download_deadline = NULL, download_started_at = NULL,
+            download_candidates = NULL, probe_started_at = NULL,
             download_size_bytes = NULL,
             fetch_reserved_at = NULL, updated_at = NOW()
         WHERE id = $1 AND status = 'fetching' AND download_started_at = $2

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = 'needs_source', staged_bytes = NULL, fetch_reserved_at = NULL,\n            download_url = NULL, download_deadline = NULL, download_started_at = NULL,\n            download_candidates = NULL, probe_started_at = NULL,\n            download_size_bytes = NULL,\n            updated_at = NOW()\n        WHERE status = 'fetching'\n          AND ((download_started_at IS NULL AND (\n                fetch_reserved_at < NOW() - make_interval(secs => $1)\n                OR download_deadline <= NOW()))\n              OR download_started_at < NOW() - INTERVAL '35 minutes')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "030364a06c892a51921c6ad0535e33b10d3605f374ad3ec4659ee7e1fa8b38ae"
+}

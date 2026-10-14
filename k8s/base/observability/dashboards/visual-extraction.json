@@ -1478,7 +1478,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (outcome) (rate(visual_extraction_downloads_total{namespace=\"minerva\",service=\"minerva-scheduler\"}[$__rate_interval])) * 60",
+          "expr": "sum by (outcome) (rate(visual_extraction_downloads_total{namespace=\"minerva\",service=\"minerva-fetcher\"}[$__rate_interval])) * 60",
           "legendFormat": "{{outcome}}"
         }
       ],
@@ -1518,7 +1518,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{namespace=\"minerva\",app=~\"minerva-(scheduler|app|worker)\"} |~ \"(?i)visual extraction|Play download\" |~ \"(?i)error|warn|failed|expired\"",
+          "expr": "{namespace=\"minerva\",app=~\"minerva-(scheduler|app|worker|fetcher)\"} |~ \"(?i)visual extraction|Play download|slide source probe\" |~ \"(?i)error|warn|failed|expired\"",
           "legendFormat": ""
         }
       ],
@@ -1618,7 +1618,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le,outcome) (rate(visual_extraction_download_duration_seconds_bucket{namespace=\"minerva\",service=\"minerva-scheduler\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le,outcome) (rate(visual_extraction_download_duration_seconds_bucket{namespace=\"minerva\",service=\"minerva-fetcher\"}[$__rate_interval])))",
           "legendFormat": "{{outcome}}"
         }
       ],
@@ -1743,6 +1743,112 @@
           },
           "expr": "sum by (container) (increase(kube_pod_container_status_restarts_total{namespace=\"minerva\",container=~\"minerva-(embedder|scheduler|worker)\"}[1h]))",
           "legendFormat": "{{container}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Slide source probe outcomes per minute",
+      "description": "Multi-source lectures only: chosen, failed (fixed reason in the job's error), or stale (claim taken over).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 85,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: attempts/min",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(visual_extraction_probes_total{namespace=\"minerva\",service=\"minerva-fetcher\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "Slide source probe duration p95",
+      "description": "Multi-source lectures only: chosen, failed (fixed reason in the job's error), or stale (claim taken over).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 85,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le,outcome) (rate(visual_extraction_probe_duration_seconds_bucket{namespace=\"minerva\",service=\"minerva-fetcher\"}[$__rate_interval])))",
+          "legendFormat": "{{outcome}}"
         }
       ],
       "options": {

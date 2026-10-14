@@ -10,7 +10,7 @@ env:
   REGISTRY: ghcr.io
   # IMAGE_BASE is the GHCR repo prefix. The api binary keeps the bare
   # `${{ github.repository }}` name (ghcr.io/edwinexd/minerva) for
-  # backward compat; the four new binaries get suffix repos
+  # backward compat; the service binaries get suffix repos
   # (ghcr.io/edwinexd/minerva-embedder, -reranker, -worker, -scheduler).
   # See the matrix below.
   IMAGE_BASE: ${{ github.repository }}
@@ -24,14 +24,14 @@ jobs:
       packages: write
     strategy:
       # One image's build failing shouldn't gate the others; we'd rather
-      # see all four failures at once than retry-iterate one at a time.
+      # see every failure at once than retry-iterate one at a time.
       fail-fast: false
       matrix:
         include:
           # Api binary: keeps the bare repo name from the pre-split
           # world so existing tags / manifests / prod overlays don't
           # need a global rename. Uses the `runtime-api` stage which
-          # bundles the React frontend; the four service targets use
+          # bundles the React frontend; the service targets use
           # `runtime-svc` and skip the frontend-builder stage entirely
           # (saves ~3 min of `npm ci` + build per matrix run).
           - target: minerva
@@ -49,6 +49,10 @@ jobs:
           - target: minerva-scheduler
             image_suffix: "-scheduler"
             runtime_stage: runtime-svc
+          - target: minerva-fetcher
+            image_suffix: "-fetcher"
+            runtime_stage: runtime-svc
+            extra_packages: ffmpeg tesseract-ocr
     steps:
       - uses: actions/checkout@v7
 
@@ -89,6 +93,7 @@ jobs:
           # for the matrix of supported values.
           build-args: |
             TARGET_BIN=${{ matrix.target }}
+            EXTRA_PACKAGES=${{ matrix.extra_packages }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Per-target cache scope so each target builds against its

@@ -3,7 +3,8 @@ name: Visual Extraction Fetch
 # Authorizes direct Play downloads into Minerva's bounded staging window for the
 # slide OCR workers on Olympus (see "Visual extraction pipeline" in
 # docs/ARCHITECTURE.md). Minerva grants only as many slots as fit, so a
-# frequent schedule just keeps the window topped up.
+# frequent schedule just keeps the window topped up. This job only logs in and
+# reads headers; minerva-fetcher probes and downloads inside Minerva.
 on:
   schedule:
     - cron: "*/20 * * * *"
@@ -26,7 +27,6 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg tesseract-ocr
           pip install requests git+https://github.com/Edwinexd/dsv-wrapper.git@d8d9f44e9730d5a4055018efd5a45846b3e21523
 
       - name: Authorize internal lecture downloads

@@ -181,7 +181,7 @@ Two consequences worth knowing:
 
 **Namespace:** `minerva`
 
-**Deployments** (the backend is split into five single-replica services;
+**Deployments** (the backend is split into six single-replica services;
 see "Memory Budgeting" for why each is isolated):
 - `minerva-app`: HTTP/auth/CRUD API (port 3000, NodePort 30090), health:
   `/api/health`. Holds gRPC clients to the embedder/reranker.
@@ -191,12 +191,15 @@ see "Memory Budgeting" for why each is isolated):
   9464). The other OOM-prone pod.
 - `minerva-worker`: drains the ingest doc queue, calls embedder/reranker.
 - `minerva-scheduler`: periodic loops (Canvas auto-sync, backfills).
+- `minerva-fetcher`: probes Play lectures for the slide source and
+  downloads them into the visual extraction staging window. Database and
+  staging volume only; the only image with ffmpeg and tesseract.
 - `postgres`: PostgreSQL (port 5432, ClusterIP)
 - `qdrant`: Vector DB (ports 6333/6334, ClusterIP)
 
 For each workload the container name, metrics `service=` label, `app` pod
 label, and Deployment name are all the same string
-(`minerva-{app,embedder,reranker,worker,scheduler}`), so one dashboard
+(`minerva-{app,embedder,reranker,worker,scheduler,fetcher}`), so one dashboard
 variable keys cAdvisor, kube-state-metrics, and app metrics alike.
 
 **Layout:** Kustomize base + prod overlay (`k8s/base/`, `k8s/overlays/prod/`)
@@ -287,8 +290,8 @@ transformer scopes everything to `minerva`.
 - `alloy` (DaemonSet): the log shipper (Promtail's replacement; Promtail is
   winding down). Tails each pod's CRI logs off the node, attaches
   namespace/pod/container/app labels, pushes to Loki. Deliberately
-  format-agnostic: ships the raw line, no JSON parsing. The five services
-  are mixed JSON (embedder/reranker) and text (app/worker/scheduler);
+  format-agnostic: ships the raw line, no JSON parsing. The services
+  are mixed JSON (embedder/reranker) and text (app/worker/scheduler/fetcher);
   structure is extracted at query time (`| json | level="ERROR"`), so
   local-dev log formatting is untouched.
 - `grafana`: dashboards + Explore. Auth-proxy mode, NO password (see
@@ -298,10 +301,10 @@ transformer scopes everything to `minerva`.
 `minerva_metrics::init("<service>")` once in `main`, which installs a
 process-wide Prometheus recorder and an HTTP listener on
 `MINERVA_METRICS_PORT` (default `9464`; set `0` to disable, e.g. local
-dev). The `service="..."` global label distinguishes the five pods and is
+dev). The `service="..."` global label distinguishes the pods and is
 kept byte-identical to each pod's container name, `app` pod label, and
 Deployment name (`minerva-app`, `minerva-embedder`, `minerva-reranker`,
-`minerva-worker`, `minerva-scheduler`), so one dashboard variable can cross
+`minerva-worker`, `minerva-scheduler`, `minerva-fetcher`), so one dashboard variable can cross
 cAdvisor, kube-state-metrics, and app metrics. Code
 emits via the lightweight `metrics` facade (`counter!`/`gauge!`/
 `histogram!`), which is a no-op until a binary installs the recorder, so
@@ -458,12 +461,22 @@ design is "Visual extraction pipeline" in `docs/ARCHITECTURE.md`, the worker
 and Olympus setup in `gpu/slide-ocr/README.md`.
 
 - **Who does what.** GitHub Actions (`visual-extraction.yml`,
-  `scripts/fetch_lecture_videos.py`) sends Play signed URLs, JWT expiry
-  deadlines and cues. The scheduler downloads directly into a bounded window
-  on `/data0` in deadline order. Its `visual_extraction::tick` enqueues jobs,
-  submits and monitors Slurm workers over SSH and indexes figures; workers
-  pull one item at a time through presigned URLs and upload results to
+  `scripts/fetch_lecture_videos.py`) only logs in to Play and offers each
+  lecture's sources: signed probe and download URLs, the download
+  variant's HEAD size, the JWT expiry deadline and cues. Minerva reserves
+  the largest candidate's size. `minerva-fetcher` OCRs a few frames of
+  each source to pick the slide track (skipped for single-source
+  lectures), shrinks the reservation to the winner and downloads it into
+  a bounded window on `/data0` in deadline order. The scheduler's
+  `visual_extraction::tick` enqueues jobs, submits and monitors Slurm
+  workers over SSH and indexes figures; workers pull one item at a time
+  through presigned URLs and upload results to
   `/api/service/visual-extraction/...`.
+- **Fetcher sizing.** The node's memory requests sit near allocatable,
+  with the headroom kept for the api's rollout surge, so the fetcher is
+  Burstable (128 Mi request, 768 Mi limit). One probe loop, and at most
+  four ffmpeg/tesseract processes at once (measured ~70-115 MiB per
+  ffmpeg frame grab, ~45 MiB per tesseract). Raise those together.
 - **Credentials.** SU credentials stay in GitHub Actions (and the
   operator's machine for local experiments); never put them on Olympus.
   The existing SU account on Olympus is reached with a dedicated

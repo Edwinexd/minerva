@@ -9,6 +9,7 @@ members = [
     "crates/minerva-pipeline",
     "crates/minerva-worker",
     "crates/minerva-scheduler",
+    "crates/minerva-fetcher",
     "crates/minerva-db",
     "crates/minerva-rpc",
     "crates/minerva-rpc-local",

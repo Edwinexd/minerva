@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*) FILTER (WHERE status = 'fetching' AND download_url IS NULL AND download_candidates IS NULL) AS \"reserved!\",\n               COUNT(*) FILTER (WHERE status = 'fetching' AND download_candidates IS NOT NULL) AS \"probing!\",\n               COUNT(*) FILTER (WHERE status = 'fetching' AND download_url IS NOT NULL AND download_started_at IS NULL) AS \"queued!\",\n               COUNT(*) FILTER (WHERE status = 'fetching' AND download_started_at IS NOT NULL) AS \"downloading!\",\n               COUNT(*) FILTER (WHERE status = 'fetching' AND download_deadline <= NOW()) AS \"expired!\",\n               COALESCE(EXTRACT(EPOCH FROM MIN(download_deadline) FILTER (WHERE status = 'fetching')), 0)::FLOAT8 AS \"earliest_deadline!\",\n               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(download_started_at) FILTER (WHERE status = 'fetching')), 0)::FLOAT8 AS \"oldest_started_seconds!\",\n               COALESCE(SUM(staged_bytes), 0)::BIGINT AS \"staging_bytes!\"\n        FROM visual_extraction_jobs\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reserved!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "probing!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "queued!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "downloading!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "expired!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "earliest_deadline!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "oldest_started_seconds!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "staging_bytes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "8a820e8aefcb334cd23da0a7e361a5729713014caabe181b6b9fe26dc4761a49"
+}

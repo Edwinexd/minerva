@@ -9,13 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-from _play_tracks import (  # noqa: E402
-    ProbeError,
-    choose_source,
-    pick_track,
-    probe_url,
-    text_score,
-)
+from _play_tracks import TrackError, describe_sources, media_size  # noqa: E402
 from dsv_wrapper.models.play import Presentation, VideoSource  # noqa: E402
 
 loader = importlib.machinery.SourceFileLoader(
@@ -24,75 +18,6 @@ loader = importlib.machinery.SourceFileLoader(
 spec = importlib.util.spec_from_loader(loader.name, loader)
 gate = importlib.util.module_from_spec(spec)
 loader.exec_module(gate)
-
-
-def test_selection_ignores_audio_and_uses_observed_text():
-    p = Presentation(
-        id="x",
-        title="x",
-        sources={
-            "camera": VideoSource(url_720p="camera", play_audio=False),
-            "capture": VideoSource(
-                url_720p="slides-low", url_1080p="slides-high", play_audio=True
-            ),
-        },
-    )
-
-    def resolve(p, index):
-        name = ["camera", "capture", "capture"][index]
-        return SimpleNamespace(source_name=name, index=index)
-
-    with (
-        patch("_play_tracks.resolve_track_download", side_effect=resolve),
-        patch(
-            "_play_tracks.score_source",
-            side_effect=lambda d: 8 if d.source_name == "camera" else 90,
-        ),
-    ):
-        assert pick_track(p).index == 2
-
-
-def test_sources_are_probed_concurrently_and_all_must_succeed():
-    import threading
-
-    p = Presentation(
-        id="x",
-        title="x",
-        sources={
-            name: VideoSource(url_720p=name, play_audio=False)
-            for name in ("left", "right", "main")
-        },
-    )
-    barrier = threading.Barrier(3, timeout=5)
-
-    def score(download):
-        barrier.wait()
-        if download.source_name == "right":
-            raise ProbeError("video frame probe failed")
-        return 90
-
-    with (
-        patch(
-            "_play_tracks.resolve_track_download",
-            side_effect=lambda p, index: SimpleNamespace(
-                source_name=["left", "right", "main"][index]
-            ),
-        ),
-        patch("_play_tracks.score_source", side_effect=score),
-        pytest.raises(ProbeError),
-    ):
-        pick_track(p)
-
-
-def test_blank_probes_do_not_guess_camera():
-    for scores in ({"a": 0, "b": 0}, {"a": 10, "b": 2}):
-        with pytest.raises(ValueError):
-            choose_source(scores)
-    assert choose_source({"a": 200, "b": 50}) == "a"
-
-
-def test_ocr_rejects_low_confidence_noise():
-    assert text_score(b"text\tconf\nslide\t95\ngarbage\t20\n\t-1\n") == 5
 
 
 @pytest.mark.parametrize(
@@ -126,50 +51,6 @@ def test_scheduler_dispatch_has_no_shell():
 def test_deploy_key_cannot_schedule():
     with pytest.raises(ValueError):
         gate.dispatch("deploy", "minerva-slide-ocr/olympus/slide-ocr-gate cancel 1")
-
-
-def test_probe_cannot_read_past_byte_budget():
-    from urllib.request import urlopen
-
-    import _play_tracks
-
-    read_chunks = []
-
-    class Response:
-        status_code = 206
-
-        def __init__(self, start, end):
-            self.size = end - start + 1
-            self.headers = {
-                "Content-Length": str(self.size),
-                "Content-Range": f"bytes {start}-{end}/33554432",
-            }
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def iter_content(self, chunk_size):
-            read_chunks.append(self.size)
-            yield b"x" * self.size
-
-    class Session:
-        def get(self, url, headers, **kwargs):
-            start, end = map(int, headers["Range"].removeprefix("bytes=").split("-"))
-            return Response(start, end)
-
-        def close(self):
-            pass
-
-    with patch("_play_tracks.requests.Session", return_value=Session()):
-        with probe_url(SimpleNamespace(url="https://example.invalid/video")) as url:
-            with urlopen(url) as response:
-                while response.read(64 * 1024):
-                    pass
-
-    assert sum(read_chunks) <= _play_tracks.PROBE_BYTES
 
 
 def archive(members):
@@ -237,111 +118,22 @@ def test_worker_launch_uses_interpreter_after_venv_move(tmp_path, launcher, entr
     assert trace.read_text().splitlines() == [entry, "grants/test"]
 
 
-def test_probe_reuses_header_ranges_across_clients():
-    from urllib.request import Request, urlopen
-
-    reads = []
-
-    class Response:
-        status_code = 206
-        headers = {"Content-Range": "bytes 0-262143/33554432"}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def iter_content(self, chunk_size):
-            reads.append(chunk_size)
-            yield b"x" * chunk_size
-
-    class Session:
-        def get(self, url, **kwargs):
-            return Response()
-
-        def close(self):
-            pass
-
-    with patch("_play_tracks.requests.Session", return_value=Session()):
-        with probe_url(SimpleNamespace(url="https://example.invalid/video")) as url:
-            for _ in range(4):
-                with urlopen(
-                    Request(url, headers={"Range": "bytes=0-1023"})
-                ) as response:
-                    assert response.read() == b"x" * 1024
-    assert reads == [256 * 1024]
-
-
-def test_probe_fetches_blocks_in_parallel_and_shares_inflight_blocks():
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
-    from urllib.request import Request, urlopen
-
-    fetched = []
-    started = threading.Barrier(2, timeout=5)
-
-    class Response:
-        status_code = 206
-
-        def __init__(self, start):
-            self.start = start
-            self.headers = {
-                "Content-Range": f"bytes {start}-{start + 262143}/33554432"
-            }
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def iter_content(self, chunk_size):
-            fetched.append(self.start)
-            if self.start:
-                # Blocks 1 and 2 only finish if both are in flight at once.
-                started.wait()
-            yield b"x" * chunk_size
-
-    class Session:
-        def get(self, url, headers, **kwargs):
-            return Response(int(headers["Range"].removeprefix("bytes=").split("-")[0]))
-
-        def close(self):
-            pass
-
-    def read(block):
-        start = block * 256 * 1024
-        with urlopen(
-            Request(url, headers={"Range": f"bytes={start}-{start + 1023}"})
-        ) as response:
-            return response.read()
-
-    with patch("_play_tracks.requests.Session", return_value=Session()):
-        with probe_url(SimpleNamespace(url="https://example.invalid/video")) as url:
-            with ThreadPoolExecutor(6) as pool:
-                assert all(r == b"x" * 1024 for r in pool.map(read, [1, 2, 1, 2, 1, 2]))
-    assert sorted(fetched) == [0, 256 * 1024, 512 * 1024]
-
-
-def test_shared_presentations_are_probed_once_per_batch():
+def test_shared_presentations_are_described_once_per_batch():
     import time
     from unittest.mock import Mock
 
     import fetch_lecture_videos
-    from dsv_wrapper.models.play import TrackDownload
 
     client = Mock()
     client.get_transcript.return_value = []
     client.get_presentation.return_value = SimpleNamespace(is_video_ready=True)
     session = Mock()
     downloads = {}
-    download = TrackDownload(
-        url="https://example.invalid/video.mp4",
-        expires_at=int(time.time()) + 3600,
-        source_name="slides",
-    )
-    with patch("fetch_lecture_videos.pick_track", return_value=download) as pick:
+    candidates = [{"source": "slides", "download_url": "https://example.invalid/v.mp4"}]
+    described = (candidates, int(time.time()) + 3600)
+    with patch(
+        "fetch_lecture_videos.describe_sources", return_value=described
+    ) as pick:
         for job in ("first-course", "second-course"):
             fetch_lecture_videos.stage(
                 session,
@@ -358,20 +150,6 @@ def test_shared_presentations_are_probed_once_per_batch():
     assert (
         session.post.call_args_list[1].args[0].endswith("/jobs/second-course/download")
     )
-
-
-def test_readable_duplicate_slide_sources_do_not_retry_forever():
-    assert choose_source({"left": 445, "main": 449, "camera": 0}) == "main"
-    assert choose_source({"left": 445, "main": 445, "camera": 0}) == "left"
-
-
-def test_text_score_prefers_larger_slide_text():
-    def tsv(height):
-        return (
-            f"level\theight\ttext\tconf\n1\t720\t\t-1\n5\t{height}\tslides\t95\n"
-        ).encode()
-
-    assert text_score(tsv(30)) == 2 * text_score(tsv(15))
 
 
 @pytest.mark.parametrize("refill,expected", [(True, 37), (False, 4)])
@@ -440,12 +218,12 @@ def test_authorization_skips_failed_sources_for_rest_of_run():
         assert fetch.authorize_window(session, Mock()) == 2
     assert authorization.call_count == 2
     release.assert_called_once_with(
-        session, "bad", "Play authorization/probe failed (ValueError)", retry=True
+        session, "bad", "Play authorization failed (ValueError)", retry=True
     )
     assert session.post.call_args.kwargs["json"]["exclude_job_ids"] == ["bad", "good"]
 
 
-def test_probe_failures_record_their_fixed_reason():
+def test_track_failures_record_their_fixed_reason():
     from unittest.mock import Mock
 
     import fetch_lecture_videos as fetch
@@ -459,7 +237,7 @@ def test_probe_failures_record_their_fixed_reason():
         patch.object(
             fetch,
             "stage",
-            side_effect=ProbeError("no readable slide source found after frame probes"),
+            side_effect=TrackError("presentation has no video track"),
         ),
         patch.object(fetch, "release") as release,
     ):
@@ -467,8 +245,7 @@ def test_probe_failures_record_their_fixed_reason():
     release.assert_called_once_with(
         session,
         "a",
-        "Play authorization/probe failed "
-        "(no readable slide source found after frame probes)",
+        "Play authorization failed (presentation has no video track)",
         retry=True,
     )
 
@@ -491,3 +268,102 @@ def test_time_budget_releases_unprocessed_reservations():
         assert fetch.authorize_window(session, Mock()) == 1
     stage.assert_called_once()
     release.assert_called_once_with(session, "b", "fetch run time budget", retry=True)
+
+
+def test_sources_offer_low_res_probe_and_1080p_download():
+    p = Presentation(
+        id="x",
+        title="x",
+        token="h.eyJleHAiOjQxMDI0NDQ4MDB9.s",
+        sources={
+            "camera": VideoSource(url_720p="https://m/cam720.mp4", play_audio=True),
+            "slides": VideoSource(
+                url_720p="https://m/sl720.mp4",
+                url_1080p="https://m/sl1080.mp4",
+                play_audio=False,
+            ),
+        },
+    )
+    sized = []
+
+    def size(client, url):
+        sized.append(url)
+        return 1000 if "cam" in url else None
+
+    with patch("_play_tracks.media_size", side_effect=size):
+        candidates, expires_at = describe_sources(p)
+    assert expires_at == 4102444800
+    assert [c["source"] for c in candidates] == ["camera", "slides"]
+    assert "sl720" in candidates[1]["probe_url"]
+    assert "sl1080" in candidates[1]["download_url"]
+    assert [c["size_bytes"] for c in candidates] == [1000, None]
+    # Only the download variants are sized.
+    assert sorted(u.split("?")[0] for u in sized) == [
+        "https://m/cam720.mp4",
+        "https://m/sl1080.mp4",
+    ]
+
+
+def test_presentation_without_video_is_a_fixed_reason():
+    with pytest.raises(TrackError, match="no video track"):
+        describe_sources(Presentation(id="x", title="x", sources={}))
+
+
+class _Response:
+    def __init__(self, status, headers):
+        self.status_code = status
+        self.headers = headers
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def iter_content(self, *args):
+        raise AssertionError("media bytes must not be read")
+
+
+class _Client:
+    def __init__(self, head, ranged):
+        self.head_response, self.range_response = head, ranged
+        self.requests = []
+
+    def head(self, url, **kwargs):
+        self.requests.append(("HEAD", kwargs["headers"]))
+        return self.head_response
+
+    def get(self, url, **kwargs):
+        self.requests.append(("GET", kwargs["headers"]))
+        assert kwargs["stream"]
+        return self.range_response
+
+
+@pytest.mark.parametrize(
+    "head, ranged, expected",
+    [
+        (_Response(200, {"Content-Length": "482474067"}), None, 482474067),
+        (
+            _Response(405, {}),
+            _Response(
+                206, {"Content-Length": "1", "Content-Range": "bytes 0-0/482474067"}
+            ),
+            482474067,
+        ),
+        (
+            _Response(200, {"Content-Length": "512", "Content-Encoding": "gzip"}),
+            _Response(206, {"Content-Range": "bytes 0-0/*"}),
+            None,
+        ),
+        (
+            _Response(405, {}),
+            _Response(206, {"Content-Length": "10", "Content-Range": "bytes 0-0/512"}),
+            None,
+        ),
+        (_Response(405, {}), _Response(200, {"Content-Length": "512"}), None),
+    ],
+)
+def test_sizes_come_from_headers_only(head, ranged, expected):
+    client = _Client(head, ranged)
+    assert media_size(client, "https://m/v.mp4") == expected
+    assert all(h["Accept-Encoding"] == "identity" for _, h in client.requests)

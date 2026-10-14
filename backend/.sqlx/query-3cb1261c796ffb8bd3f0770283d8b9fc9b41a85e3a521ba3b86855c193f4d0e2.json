@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = 'needs_source', staged_bytes = NULL, fetch_reserved_at = NULL,\n            download_url = NULL, download_deadline = NULL, download_started_at = NULL,\n            download_candidates = NULL, probe_started_at = NULL,\n            download_size_bytes = NULL,\n            error_msg = $3, updated_at = NOW()\n        WHERE id = $1 AND status = 'fetching' AND probe_started_at = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3cb1261c796ffb8bd3f0770283d8b9fc9b41a85e3a521ba3b86855c193f4d0e2"
+}

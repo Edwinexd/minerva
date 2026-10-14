@@ -127,9 +127,10 @@ Responsibilities and credentials:
 
 | Actor | Holds | Does |
 |---|---|---|
-| GitHub Actions `visual-extraction.yml` (every 20 min) | SU login, `MINERVA_SERVICE_API_KEY` | Play to Minerva (`scripts/fetch_lecture_videos.py`): probes small frame samples to guess the slide source, sends only its signed URL, JWT expiry as `download_deadline`, and timed VTT cues. Only for slots Minerva grants. |
+| GitHub Actions `visual-extraction.yml` (every 20 min) | SU login, `MINERVA_SERVICE_API_KEY` | Play to Minerva (`scripts/fetch_lecture_videos.py`): offers every source's signed URLs (low-resolution probe variant, ~1080p download variant) with the download variant's HEAD size, JWT expiry as `download_deadline`, and timed VTT cues. Reads headers only, never media bytes. Only for slots Minerva grants. |
+| `minerva-fetcher` (`backend/crates/minerva-fetcher`) | Database and the staging volume only | Probes multi-source lectures for the slide source, downloads the chosen MP4 into staging in deadline order, removes orphaned staging files. Its image alone carries ffmpeg and tesseract. |
 | `minerva-scheduler` loop (`minerva_app_core::visual_extraction::tick`, every minute) | Restricted scheduler SSH key for the existing SU account (secret `minerva-slurm`) | Enqueues jobs, submits and monitors Slurm workers over SSH (`sbatch`, `sacct`, `scancel` through `olympus/slide-ocr-gate`), requeues work from dead workers, pushes figure vectors to Qdrant, exports `visual_extraction_*` metrics. |
-| `minerva-app` routes (`/api/service/visual-extraction/...`) | `MINERVA_HMAC_SECRET` | Fetch slots, URL/deadline handoff, worker work queue, presigned source download and result upload, ingest. |
+| `minerva-app` routes (`/api/service/visual-extraction/...`) | `MINERVA_HMAC_SECRET` | Fetch slots, source/deadline handoff, worker work queue, presigned source download and result upload, ingest. |
 | GitHub Actions `deploy-slide-ocr.yml` (push to `master` touching `gpu/slide-ocr/`) | Separate restricted deploy key for the same SU account, via `ci@minerva` | Streams the worker code to the forced-command deployment gate (`olympus/ssh-gate`). |
 | Slurm worker job (`gpu/slide-ocr/worker.py`, at most 12 h) | One worker-scoped signed URL valid for the job's lifetime | Pulls lectures/PDFs one at a time, detects slides, OCRs with Unlimited-OCR on vLLM, crops figures and embeds them with CLIP ViT-B/32 (FastEmbed), uploads the result. No long-lived secrets and no state. |
 
@@ -144,39 +145,48 @@ Flow and backpressure:
   filesystem under `/data/visual-staging` keeps at least
   `MINERVA_VISUAL_STAGING_MIN_FREE_BYTES` (default 10 GiB) free, counting
   slots whose download has not finished yet. A slot initially reserves the
-  full 1 GiB download cap. After Actions selects a source, Minerva reads
-  its HEAD `Content-Length` (or one-byte `Content-Range`) and shrinks the
-  reservation to that size; missing headers retain the full cap. Actions
-  asks for another small wave until the staging budget or its 40-minute
+  full 1 GiB download cap. Actions reads each source's HEAD
+  `Content-Length` (or one-byte `Content-Range`) and Minerva shrinks the
+  reservation to the largest candidate, so whichever source wins fits;
+  once the fetcher has chosen, it shrinks again to that source. A missing
+  size retains the full cap, and every download is still capped at its
+  reservation, since an announced size is only a claim. Actions asks for
+  another small wave until the staging budget or its 40-minute
   authorization budget is exhausted, rather than imposing a URL count
-  per run. Failed sources are excluded for the rest of that run. Unknown
-  sources still require 1 GiB of remaining budget before probing, so up
-  to 1 GiB can remain unused. A staged video is deleted as soon
+  per run. Failed sources are excluded for the rest of that run. A staged video is deleted as soon
   as its result is accepted, so the window shrinks back as workers drain
   it; a backlog beyond that costs database rows, not disk.
 - **Download deadlines are database state.** `download_url`,
   `download_deadline` (TIMESTAMPTZ from the Play JWT's `exp`), and
   `download_started_at` and `download_size_bytes` live on
-  `visual_extraction_jobs`. An independent
-  scheduler loop atomically claims pending downloads with
+  `visual_extraction_jobs`, plus `download_candidates` and
+  `probe_started_at` while a multi-source lecture is undecided.
+  `minerva-fetcher` atomically claims pending downloads with
   `ORDER BY download_deadline, id`, earliest expiry first. It streams from
   the pinned Play media host without redirects, enforces the expiry and a
   30-minute/1-GiB cap and the reserved size, validates MP4 bytes, and only then makes the job
   `ready`. Expired URLs and crashed downloads return to `needs_source` for
-  fresh authorization; stale claims cannot publish over newer claims.
+  fresh authorization; stale claims cannot publish over newer claims. The
+  fetcher is a single `Recreate` replica, so on startup it releases every
+  probe and download claim at once rather than waiting for them to go
+  stale.
   Bearer URLs are removed after completion/failure and never logged.
 - **Source selection is a guess from pixels.** Play offers no slide-role
-  metadata. Actions samples frames at 20%, 50%, and 80% of each source,
-  compares the median amount and size of confidently recognized text, and selects
-  1080p of the winning source. Each source's entire probe (including MP4
-  headers/tail reads) is capped at 24 MiB. Aligned ranges are cached across
-  samples so MP4 indexes consume the budget once. Sources and their samples
-  are probed concurrently (a block already in flight is shared, not
-  refetched), since a probe is mostly round trips. Failures log a fixed
-  reason, never the third-party message. Readable duplicate slide
-  streams select the clearest text; blank or failed probes retry. Repeated
-  presentation URLs across courses share one authorization/probe per run
-  until its token nears expiry. Audio flags are ignored.
+  metadata. For a lecture with several sources, `minerva-fetcher` samples
+  frames at 20%, 50%, and 80% of each source's low-resolution variant,
+  compares the median amount and size of confidently recognized text, and
+  promotes the winner's ~1080p variant to the download queue. A
+  single-source lecture skips the probe. Each source's entire probe
+  (including MP4 headers/tail reads) is capped at 24 MiB through a
+  loopback proxy that caches aligned blocks, so MP4 indexes consume the
+  budget once; sources and samples run concurrently, a block already in
+  flight is shared rather than refetched, and at most four
+  ffmpeg/tesseract processes run at once. Failures store a fixed reason
+  (`slide source probe failed (...)`), never a third-party message.
+  Readable duplicate slide streams select the clearest text; blank or
+  failed probes return the lecture for a later authorization. Repeated
+  presentation URLs across courses share one authorization per Actions
+  run until its token nears expiry. Audio flags are ignored.
 - **Workers pull, one item at a time.** The scheduler keeps up to
   `MINERVA_SLURM_MAX_WORKERS` (default 4) submitted while leasable work
   exists, and the SU account's Slurm priorities decide when they run: a queued worker holds no work, and its grant allows

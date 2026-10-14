@@ -4,9 +4,9 @@
 //!
 //! Two kinds of caller:
 //!
-//! - **GitHub Actions** (service API key): asks for fetch slots, uploads a
-//!   lecture's signed download URL and timed cues into the bounded window, or
-//!   releases a slot it could not fill.
+//! - **GitHub Actions** (service API key): asks for fetch slots, offers a
+//!   lecture's signed source URLs, their sizes and timed cues into the
+//!   bounded window, or releases a slot it could not fill.
 //! - **Slurm workers** (signed grants in the path, no other credential): ask
 //!   for their next item, download its source, upload the result or report
 //!   a failure, and say when they exit.
@@ -144,13 +144,15 @@ async fn fetch_slots(
 
 #[derive(Deserialize)]
 struct DownloadBody {
-    url: String,
+    candidates: Vec<ve::Candidate>,
     download_deadline: chrono::DateTime<Utc>,
     cues: Vec<Cue>,
 }
 
-/// Store the bearer URL and deadline; the scheduler downloads directly from
-/// Play in expiry order. Only small JSON crosses GitHub Actions.
+/// Store a lecture's sources and deadline; `minerva-fetcher` picks the
+/// slide source (if there is a choice) and downloads it directly from Play
+/// in expiry order. Only small JSON crosses GitHub Actions. The largest
+/// announced size is reserved, so whichever source wins fits.
 async fn offer_download(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -158,28 +160,57 @@ async fn offer_download(
     Json(body): Json<DownloadBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     authenticate_service(&state, &headers)?;
-    ve::validate_download_url(&body.url, body.download_deadline)
-        .map_err(|_| AppError::bad_request("visual_extraction.invalid_download"))?;
-    // Only Minerva contacts the pinned media host for sizing. No MP4 bytes
-    // are carried through Actions, and a missing size keeps the full cap.
-    let size_bytes = ve::inspect_download_size(&body.url)
-        .await
-        .map_err(|_| AppError::bad_request("visual_extraction.invalid_video_size"))?;
-    if !queue::offer_download(
-        &state.db,
-        job_id,
-        &body.url,
-        body.download_deadline,
-        &serde_json::Value::Array(
-            body.cues
+    let deadline = body.download_deadline;
+    if body.candidates.is_empty() || body.candidates.len() > ve::MAX_CANDIDATES {
+        return Err(AppError::bad_request("visual_extraction.invalid_download"));
+    }
+    for candidate in &body.candidates {
+        if candidate.source.len() > 64
+            || ve::validate_download_url(&candidate.probe_url, deadline).is_err()
+            || ve::validate_download_url(&candidate.download_url, deadline).is_err()
+        {
+            return Err(AppError::bad_request("visual_extraction.invalid_download"));
+        }
+        if candidate
+            .size_bytes
+            .is_some_and(|n| !(12..=ve::FETCH_ESTIMATE_BYTES).contains(&n))
+        {
+            return Err(AppError::bad_request(
+                "visual_extraction.invalid_video_size",
+            ));
+        }
+    }
+    let cues = serde_json::Value::Array(
+        body.cues
+            .iter()
+            .map(|c| serde_json::json!({"start": c.start, "end": c.end, "text": c.text}))
+            .collect(),
+    );
+    let offered = match body.candidates.as_slice() {
+        [only] => {
+            queue::offer_download(
+                &state.db,
+                job_id,
+                &only.download_url,
+                deadline,
+                &cues,
+                only.size_bytes,
+            )
+            .await?
+        }
+        candidates => {
+            let reserve = candidates
                 .iter()
-                .map(|c| serde_json::json!({"start": c.start, "end": c.end, "text": c.text}))
-                .collect(),
-        ),
-        size_bytes,
-    )
-    .await?
-    {
+                .map(|c| c.size_bytes)
+                .collect::<Option<Vec<_>>>()
+                .and_then(|sizes| sizes.into_iter().max());
+            let candidates = serde_json::to_value(candidates)
+                .map_err(|e| AppError::Internal(format!("candidates: {e}")))?;
+            queue::offer_candidates(&state.db, job_id, &candidates, deadline, &cues, reserve)
+                .await?
+        }
+    };
+    if !offered {
         return Err(AppError::bad_request("visual_extraction.not_fetching"));
     }
     Ok(Json(serde_json::json!({"status": "queued"})))

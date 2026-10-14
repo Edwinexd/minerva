@@ -171,7 +171,7 @@ pub struct SlurmConfig {
 }
 
 impl VisualExtractionConfig {
-    fn from_env() -> Self {
+    pub fn from_env() -> Self {
         let slurm = env::var("MINERVA_SLURM_SSH_TARGET")
             .ok()
             .filter(|s| !s.is_empty())

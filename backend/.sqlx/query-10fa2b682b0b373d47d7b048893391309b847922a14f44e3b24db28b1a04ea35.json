@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET probe_started_at = NULL, download_started_at = NULL, updated_at = NOW()\n        WHERE status = 'fetching'\n          AND (probe_started_at IS NOT NULL OR download_started_at IS NOT NULL)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "10fa2b682b0b373d47d7b048893391309b847922a14f44e3b24db28b1a04ea35"
+}

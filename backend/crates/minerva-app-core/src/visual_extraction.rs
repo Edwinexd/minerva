@@ -44,8 +44,9 @@ pub const LEASE_SECS: i64 = 2 * 3600;
 /// for a long time before a GPU becomes available.
 pub const WORKER_WALL_SECS: i64 = 12 * 3600;
 pub const WORKER_QUEUE_GRACE_SECS: i64 = 3 * 24 * 3600;
-/// Reserve the full download cap per slot until trusted media headers let
-/// Minerva shrink it, so large lectures cannot oversubscribe the window.
+/// The largest lecture video Minerva stages. Also the reservation per slot
+/// until the offered sources' sizes let Minerva shrink it, so large
+/// lectures cannot oversubscribe the window.
 pub const FETCH_ESTIMATE_BYTES: i64 = 1024 * 1024 * 1024;
 /// A reserved slot whose upload never arrived is released after this.
 pub const FETCH_RESERVATION_SECS: i64 = 2 * 3600;
@@ -194,7 +195,6 @@ async fn maintain_queue(state: &AppState) -> Result<(), sqlx::Error> {
         tracing::info!("visual extraction: enqueued {created} new jobs");
     }
     queue::release_stale_fetches(&state.db, FETCH_RESERVATION_SECS).await?;
-    cleanup_download_files(state).await?;
     let terminal = queue::requeue_expired(&state.db, MAX_ATTEMPTS).await?;
     remove_staged(state, &terminal).await;
     queue::reenqueue_outdated(&state.db, PIPELINE_VERSION, REENQUEUE_PER_TICK).await?;
@@ -490,6 +490,7 @@ async fn record_metrics(state: &AppState) -> Result<(), sqlx::Error> {
         .set(workers.iter().map(|w| w.failed_last_15m).sum::<i64>() as f64);
     for (stage, count) in [
         ("reserved", downloads.reserved),
+        ("probing", downloads.probing),
         ("queued", downloads.queued),
         ("downloading", downloads.downloading),
     ] {
@@ -522,18 +523,6 @@ mod tests {
     use chrono::Duration;
 
     const SECRET: &str = "test-secret";
-
-    async fn read_request(stream: &mut tokio::net::TcpStream) -> String {
-        use tokio::io::AsyncReadExt;
-        let mut request = Vec::new();
-        while !request.ends_with(b"\r\n\r\n") {
-            let mut byte = [0];
-            stream.read_exact(&mut byte).await.unwrap();
-            request.push(byte[0]);
-            assert!(request.len() < 4096);
-        }
-        String::from_utf8(request).unwrap()
-    }
 
     fn grant(scope: Scope, offset: Duration) -> Grant {
         Grant::new(scope, Uuid::new_v4(), 2, Utc::now() + offset)
@@ -600,136 +589,22 @@ mod tests {
             Err(GrantError::BadSignature)
         );
     }
+}
 
-    #[test]
-    fn sizing_uses_total_video_length_not_range_body_length() {
-        use reqwest::header::{HeaderMap, CONTENT_LENGTH, CONTENT_RANGE};
-        let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_LENGTH, "482474067".parse().unwrap());
-        assert_eq!(size_from_headers(&headers, false), Ok(Some(482474067)));
-        headers.insert(CONTENT_LENGTH, "1".parse().unwrap());
-        headers.insert(CONTENT_RANGE, "bytes 0-0/482474067".parse().unwrap());
-        assert_eq!(size_from_headers(&headers, true), Ok(Some(482474067)));
-    }
+/// Most sources a lecture may offer; Play lectures have one to three.
+pub const MAX_CANDIDATES: usize = 8;
 
-    #[test]
-    fn unknown_or_ambiguous_headers_keep_full_reservation() {
-        use reqwest::header::{HeaderMap, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE};
-        let mut headers = HeaderMap::new();
-        assert_eq!(size_from_headers(&headers, false), Ok(None));
-        headers.insert(CONTENT_LENGTH, "invalid".parse().unwrap());
-        assert_eq!(size_from_headers(&headers, false), Ok(None));
-        headers.insert(CONTENT_LENGTH, "512".parse().unwrap());
-        headers.insert(CONTENT_ENCODING, "gzip".parse().unwrap());
-        assert_eq!(size_from_headers(&headers, false), Ok(None));
-        headers.remove(CONTENT_ENCODING);
-        headers.insert(CONTENT_LENGTH, "1".parse().unwrap());
-        for range in ["bytes 0-0/*", "bytes 0-9/512", "bytes 1-1/512", "invalid"] {
-            headers.insert(CONTENT_RANGE, range.parse().unwrap());
-            assert_eq!(size_from_headers(&headers, true), Ok(None));
-        }
-        headers.insert(CONTENT_RANGE, "bytes 0-0/512".parse().unwrap());
-        headers.insert(CONTENT_LENGTH, "512".parse().unwrap());
-        assert_eq!(size_from_headers(&headers, true), Ok(None));
-    }
-
-    #[test]
-    fn sizing_rejects_known_oversized_or_empty_videos() {
-        use reqwest::header::{HeaderMap, CONTENT_LENGTH};
-        let mut headers = HeaderMap::new();
-        for size in [0, 11, MAX_VIDEO_BYTES + 1] {
-            headers.insert(CONTENT_LENGTH, size.to_string().parse().unwrap());
-            assert!(size_from_headers(&headers, false).is_err());
-        }
-        headers.insert(CONTENT_LENGTH, MAX_VIDEO_BYTES.to_string().parse().unwrap());
-        assert_eq!(
-            size_from_headers(&headers, false),
-            Ok(Some(MAX_VIDEO_BYTES as i64))
-        );
-    }
-
-    #[tokio::test]
-    async fn sizing_does_not_wait_for_a_media_body() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            for reply in [
-                "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                "HTTP/1.1 206 Partial Content\r\nContent-Length: 1\r\nContent-Range: bytes 0-0/482474067\r\n\r\n",
-            ] {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                let request = read_request(&mut stream).await;
-                assert!(request.contains("accept-encoding: identity"));
-                if reply.contains("206") {
-                    assert!(request.contains("range: bytes=0-0"));
-                } else {
-                    assert!(request.starts_with("HEAD "));
-                }
-                stream.write_all(reply.as_bytes()).await.unwrap();
-                if reply.contains("206") {
-                    // No body is sent. The client must finish from headers.
-                    std::future::pending::<()>().await;
-                }
-            }
-        });
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            inspect_download_size(&format!("http://{address}/media.mp4")),
-        )
-        .await;
-        server.abort();
-        assert_eq!(result.unwrap(), Ok(Some(482474067)));
-    }
-
-    #[tokio::test]
-    async fn streams_cannot_outgrow_or_undershoot_the_reserved_size() {
-        let mp4 = b"\0\0\0\x20ftypisom01234567890123456789";
-        assert_eq!(mp4.len(), 32);
-        for (length, chunked, expected, success) in [
-            (32, false, Some(32), true),
-            (32, true, None, true),
-            (32, true, Some(32), true),
-            (32, false, Some(24), false),
-            (32, true, Some(24), false),
-            (24, true, Some(32), false),
-            (24, false, Some(32), false),
-        ] {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let address = listener.local_addr().unwrap();
-            let server = tokio::spawn(async move {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                read_request(&mut stream).await;
-                let body = &mp4[..length];
-                let reply = if chunked {
-                    format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{length:x}\r\n{}\r\n0\r\n\r\n", String::from_utf8_lossy(body))
-                } else {
-                    format!("HTTP/1.1 200 OK\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n{}", String::from_utf8_lossy(body))
-                };
-                stream.write_all(reply.as_bytes()).await.unwrap();
-            });
-            let response = media_client()
-                .unwrap()
-                .get(format!("http://{address}/video.mp4"))
-                .send()
-                .await
-                .unwrap();
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("video.part");
-            let result = write_video(response, path.to_str().unwrap(), expected).await;
-            assert_eq!(
-                result.is_ok(),
-                success,
-                "length={length} chunked={chunked} expected={expected:?}"
-            );
-            if success {
-                assert_eq!(result.unwrap(), 32);
-            }
-            if let Ok(metadata) = tokio::fs::metadata(path).await {
-                assert!(metadata.len() <= expected.unwrap_or(32) as u64);
-            }
-            server.await.unwrap();
-        }
-    }
+/// One Play source of a lecture, as offered by GitHub Actions. Both URLs
+/// are bearer URLs: the low-resolution variant for frame probes, the one
+/// to stage if this source carries the slides. `size_bytes` is what Play
+/// announced for `download_url`, and only a claim: the download is still
+/// capped at it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Candidate {
+    pub source: String,
+    pub probe_url: String,
+    pub download_url: String,
+    pub size_bytes: Option<i64>,
 }
 
 /// Only Play's media host may receive internal download requests. Decode exp
@@ -764,243 +639,6 @@ pub fn validate_download_url(url: &str, deadline: DateTime<Utc>) -> Result<(), &
         serde_json::from_slice(&payload).map_err(|_| "invalid token")?;
     if payload["exp"].as_i64() != Some(deadline.timestamp()) || deadline <= Utc::now() {
         return Err("invalid or expired deadline");
-    }
-    Ok(())
-}
-
-const MAX_VIDEO_BYTES: u64 = 1024 * 1024 * 1024;
-
-fn media_client() -> Result<reqwest::Client, &'static str> {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|_| "download client")
-}
-
-fn media_size(value: &str) -> Result<Option<i64>, &'static str> {
-    let Ok(size) = value.parse::<u64>() else {
-        return Ok(None);
-    };
-    if !(12..=MAX_VIDEO_BYTES).contains(&size) {
-        return Err("invalid video size");
-    }
-    Ok(Some(size as i64))
-}
-
-fn size_from_headers(
-    headers: &reqwest::header::HeaderMap,
-    range: bool,
-) -> Result<Option<i64>, &'static str> {
-    use reqwest::header::{CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE};
-    if headers
-        .get(CONTENT_ENCODING)
-        .is_some_and(|v| v != "identity")
-    {
-        return Ok(None);
-    }
-    let value = if range {
-        // Content-Length here is just the one-byte body, not the MP4 size.
-        // Reject a range that the host ignored or expanded.
-        if headers.get(CONTENT_LENGTH).is_some_and(|v| v != "1") {
-            return Ok(None);
-        }
-        headers
-            .get(CONTENT_RANGE)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("bytes 0-0/"))
-    } else {
-        headers.get(CONTENT_LENGTH).and_then(|v| v.to_str().ok())
-    };
-    value.map_or(Ok(None), media_size)
-}
-
-/// Caller validates the URL and JWT deadline first. Read metadata only;
-/// missing/unsupported headers keep the existing worst-case reservation.
-pub async fn inspect_download_size(url: &str) -> Result<Option<i64>, &'static str> {
-    let client = media_client()?;
-    let head = client
-        .head(url)
-        .header(reqwest::header::ACCEPT_ENCODING, "identity")
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await;
-    if let Ok(response) = head {
-        if response.status() == reqwest::StatusCode::OK {
-            if let Some(size) = size_from_headers(response.headers(), false)? {
-                return Ok(Some(size));
-            }
-        }
-    }
-    // Some media servers lack HEAD. A valid one-byte Content-Range gives
-    // the same total without reading the response body. Drop it immediately,
-    // including when the host ignores Range and returns the full resource.
-    let range = client
-        .get(url)
-        .header(reqwest::header::RANGE, "bytes=0-0")
-        .header(reqwest::header::ACCEPT_ENCODING, "identity")
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await;
-    if let Ok(response) = range {
-        if response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
-            return size_from_headers(response.headers(), true);
-        }
-    }
-    Ok(None)
-}
-
-/// Enforce the reservation before writing each chunk, including when GET
-/// omits Content-Length. A changed or truncated source cannot be published.
-async fn write_video(
-    response: reqwest::Response,
-    partial: &str,
-    expected_bytes: Option<i64>,
-) -> Result<u64, &'static str> {
-    use futures::StreamExt;
-    let byte_limit = expected_bytes.map_or(MAX_VIDEO_BYTES, |n| n as u64);
-    if response.status() != reqwest::StatusCode::OK {
-        return Err("Play response");
-    }
-    if response
-        .headers()
-        .get(reqwest::header::CONTENT_ENCODING)
-        .is_some_and(|v| v != "identity")
-    {
-        return Err("encoded media response");
-    }
-    if response.content_length().is_some_and(|n| n > byte_limit) {
-        return Err("video too large");
-    }
-    let expected = response.content_length();
-    if expected_bytes.is_some_and(|n| expected.is_some_and(|m| m != n as u64)) {
-        return Err("media changed after sizing");
-    }
-    let mut stream = response.bytes_stream();
-    let mut file = tokio::fs::File::create(partial)
-        .await
-        .map_err(|_| "staging write")?;
-    let mut bytes = 0u64;
-    let mut header = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| "Play stream")?;
-        bytes += chunk.len() as u64;
-        if bytes > byte_limit {
-            return Err("video exceeded reservation");
-        }
-        if header.len() < 12 {
-            header.extend(chunk.iter().take(12 - header.len()));
-        }
-        file.write_all(&chunk).await.map_err(|_| "staging write")?;
-    }
-    if header.get(4..8) != Some(b"ftyp")
-        || expected.is_some_and(|n| n != bytes)
-        || expected_bytes.is_some_and(|n| n as u64 != bytes)
-    {
-        return Err("invalid or truncated MP4");
-    }
-    file.flush().await.map_err(|_| "staging flush")?;
-    drop(file);
-    Ok(bytes)
-}
-
-/// A separate loop so a slow download never delays Slurm reconciliation.
-pub async fn download_tick(state: &AppState) -> Result<bool, sqlx::Error> {
-    let Some(claim) = queue::claim_download(&state.db).await? else {
-        return Ok(false);
-    };
-    let started = std::time::Instant::now();
-    // Unique per claim: a process returning after its reservation expired
-    // cannot overwrite a newer attempt's file.
-    let filename = format!("{}.{}.mp4", claim.id, claim.started_at.timestamp_micros());
-    let path = format!(
-        "{}/{}",
-        state.config.visual_extraction.staging_path, filename
-    );
-    let partial = format!("{path}.part");
-    let seconds = (claim.deadline - Utc::now()).num_seconds().clamp(0, 1800) as u64;
-    let result = tokio::time::timeout(std::time::Duration::from_secs(seconds), async {
-        validate_download_url(&claim.url, claim.deadline).map_err(str::to_string)?;
-        tokio::fs::create_dir_all(&state.config.visual_extraction.staging_path)
-            .await
-            .map_err(|_| "staging directory")?;
-        let client = media_client()?;
-        // Never format reqwest errors: their Display can contain the bearer URL.
-        let response = client
-            .get(&claim.url)
-            .header(reqwest::header::ACCEPT_ENCODING, "identity")
-            .send()
-            .await
-            .map_err(|_| "Play request")?;
-        let bytes = write_video(response, &partial, claim.expected_bytes)
-            .await
-            .map_err(str::to_string)?;
-        tokio::fs::rename(&partial, &path)
-            .await
-            .map_err(|_| "staging rename")?;
-        Ok::<u64, String>(bytes)
-    })
-    .await;
-    let bytes = match result {
-        Ok(Ok(bytes)) => Some(bytes),
-        _ => {
-            tracing::warn!(job_id = %claim.id, "Play download failed or expired");
-            None
-        }
-    };
-    let published = queue::finish_download(
-        &state.db,
-        &claim,
-        bytes.map(|_| filename.as_str()),
-        bytes.unwrap_or(0) as i64,
-    )
-    .await;
-    let _ = tokio::fs::remove_file(&partial).await;
-    if bytes.is_none() || !matches!(published, Ok(true)) {
-        let _ = tokio::fs::remove_file(&path).await;
-    }
-    let published = published?;
-    let outcome = if !published {
-        "stale"
-    } else if bytes.is_some() {
-        "succeeded"
-    } else {
-        "failed"
-    };
-    metrics::counter!("visual_extraction_downloads_total", "outcome" => outcome).increment(1);
-    metrics::histogram!("visual_extraction_download_duration_seconds", "outcome" => outcome)
-        .record(started.elapsed().as_secs_f64());
-    Ok(true)
-}
-
-async fn cleanup_download_files(state: &AppState) -> Result<(), sqlx::Error> {
-    let retained: std::collections::HashSet<_> = queue::retained_staging_paths(&state.db)
-        .await?
-        .into_iter()
-        .collect();
-    let Ok(mut files) = tokio::fs::read_dir(&state.config.visual_extraction.staging_path).await
-    else {
-        return Ok(());
-    };
-    while let Ok(Some(file)) = files.next_entry().await {
-        let name = file.file_name().to_string_lossy().into_owned();
-        let final_name = name.strip_suffix(".part").unwrap_or(&name);
-        // Only pipeline-owned MP4s, and only well past the 30-minute download
-        // timeout. Preserve every active claim and published source.
-        if !final_name.ends_with(".mp4") || retained.contains(final_name) {
-            continue;
-        }
-        if let Ok(metadata) = file.metadata().await {
-            if metadata.is_file()
-                && metadata
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.elapsed().ok())
-                    .is_some_and(|age| age.as_secs() > 2400)
-            {
-                let _ = tokio::fs::remove_file(file.path()).await;
-            }
-        }
     }
     Ok(())
 }

@@ -17,6 +17,7 @@ resources:
   - reranker-svc.yaml
   - worker.yaml
   - scheduler.yaml
+  - fetcher.yaml
   - backup.yaml
   - qdrant-backup.yaml
   - image-prune.yaml

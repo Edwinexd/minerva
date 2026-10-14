@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET probe_started_at = NOW(), updated_at = NOW()\n        WHERE id = (\n            SELECT id FROM visual_extraction_jobs\n            WHERE status = 'fetching' AND download_candidates IS NOT NULL\n                AND download_deadline > NOW()\n                AND (probe_started_at IS NULL\n                    OR probe_started_at < NOW() - make_interval(secs => $1))\n            ORDER BY download_deadline, id LIMIT 1 FOR UPDATE SKIP LOCKED\n        )\n        RETURNING id, download_candidates AS \"candidates!\", download_deadline AS \"deadline!\",\n            probe_started_at AS \"started_at!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "candidates!",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "download_candidates"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "deadline!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "download_deadline"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "started_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "probe_started_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "41cc937803566d19f580e6a970934c7cda5faabc292ba7f7793963a76a201195"
+}

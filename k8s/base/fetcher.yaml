@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minerva-fetcher
+  namespace: minerva
+spec:
+  # Single replica by design: on startup the fetcher releases every probe
+  # and download claim as belonging to a dead process, which is only true
+  # when no other fetcher can be running. Recreate guarantees the old pod
+  # is gone first. See "Visual Extraction" in AGENTS.md.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: minerva-fetcher
+  template:
+    metadata:
+      annotations:
+        # Prometheus pod-SD scrape config (see k8s/base/observability/).
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9464"
+        prometheus.io/path: "/metrics"
+      labels:
+        app: minerva-fetcher
+    spec:
+      containers:
+        - name: minerva-fetcher
+          image: ghcr.io/edwinexd/minerva-fetcher:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9464
+              name: metrics
+          # Only the database and the staging volume: no model clients, no
+          # LLM keys. The Play bearer URLs it handles come from the queue.
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: minerva-secrets
+                  key: DATABASE_URL
+            - name: MINERVA_VISUAL_STAGING_PATH
+              value: "/data/visual-staging"
+          volumeMounts:
+            - name: app-data
+              mountPath: /data
+          resources:
+            # Burstable on purpose. The node's memory requests are near
+            # allocatable and the headroom is the api's rollout surge, so
+            # the request is the idle footprint (~30 MiB, bounded probe
+            # caches) and the limit covers four concurrent probe tools
+            # (measured ~70-115 MiB per ffmpeg frame grab, ~45 MiB per
+            # tesseract) plus 24 MiB block caches per source.
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "768Mi"
+              cpu: "1000m"
+      # Nothing to drain: claims are released when the next pod starts,
+      # and a cut-off download leaves only a `.part` file for cleanup.
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: app-data
+          hostPath:
+            path: /data0/minerva/data
+            type: DirectoryOrCreate

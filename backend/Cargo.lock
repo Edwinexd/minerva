@@ -3288,6 +3288,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "minerva-fetcher"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "dotenvy",
+ "futures",
+ "metrics",
+ "minerva-app-core",
+ "minerva-db",
+ "minerva-metrics",
+ "reqwest 0.13.5",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "minerva-mbz"
 version = "0.1.0"
 dependencies = [

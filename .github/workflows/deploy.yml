@@ -65,11 +65,11 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set image tag in kustomization
-        # Rewrites every `newTag:` line in the prod overlay so all five
+        # Rewrites every `newTag:` line in the prod overlay so all the
         # service images (minerva, minerva-embedder, minerva-reranker,
-        # minerva-worker, minerva-scheduler) roll forward together to
-        # the same tag. Pre-split this only had one tag to set; now
-        # the `sed` matches all of them.
+        # minerva-worker, minerva-scheduler, minerva-fetcher) roll forward
+        # together to the same tag. Pre-split this only had one tag to
+        # set; now the `sed` matches all of them.
         run: |
           cd k8s/overlays/prod
           sed -i "s/newTag: .*/newTag: ${{ env.IMAGE_TAG }}/" kustomization.yaml
@@ -142,6 +142,11 @@ jobs:
           kubectl rollout restart deployment/minerva-scheduler -n minerva
           kubectl rollout status deployment/minerva-worker -n minerva --timeout=600s
           kubectl rollout status deployment/minerva-scheduler -n minerva --timeout=300s
+
+          # The fetcher only needs the database (migrated above by the
+          # worker / scheduler) and the staging volume.
+          kubectl rollout restart deployment/minerva-fetcher -n minerva
+          kubectl rollout status deployment/minerva-fetcher -n minerva --timeout=300s
 
           # Api last so user traffic never hits an under-warm
           # retrieval path. The chat path goes

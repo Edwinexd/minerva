@@ -72,6 +72,7 @@ pub fn start_scheduler_loops(state: AppState) {
     // Visual extraction (slide OCR and figures on Olympus): queue upkeep,
     // Slurm worker reconcile over SSH, figure indexing. The Slurm part only
     // runs where `MINERVA_SLURM_SSH_TARGET` is set (the prod scheduler pod).
+    // Probing and downloading lecture videos is `minerva-fetcher`'s.
     {
         let state = state.clone();
         tokio::spawn(async move {
@@ -79,20 +80,6 @@ pub fn start_scheduler_loops(state: AppState) {
             loop {
                 ticker.tick().await;
                 crate::visual_extraction::tick(&state).await;
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        tokio::spawn(async move {
-            loop {
-                match crate::visual_extraction::download_tick(&state).await {
-                    Ok(true) => continue,
-                    Err(error) => tracing::warn!(%error, "visual download queue"),
-                    Ok(false) => {}
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         });
     }

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = CASE WHEN $3::TEXT IS NULL THEN 'needs_source' ELSE 'ready' END,\n            staged_path = $3, staged_bytes = CASE WHEN $3::TEXT IS NULL THEN NULL ELSE $4::BIGINT END,\n            error_msg = CASE WHEN $3::TEXT IS NULL THEN 'Play download failed or expired' ELSE NULL END,\n            download_url = NULL, download_deadline = NULL, download_started_at = NULL,\n            download_candidates = NULL, probe_started_at = NULL,\n            download_size_bytes = NULL,\n            fetch_reserved_at = NULL, updated_at = NOW()\n        WHERE id = $1 AND status = 'fetching' AND download_started_at = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "27e8a2415b192f11a669130463e096bc9a264387dc2f1d02f3534a9a5b69760d"
+}

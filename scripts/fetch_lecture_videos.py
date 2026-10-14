@@ -1,8 +1,9 @@
-"""Authorize direct Play downloads. Only bounded probes and JSON use Actions.
+"""Authorize direct Play downloads. Only headers and JSON use Actions.
 
 Requires SU_USERNAME, SU_PASSWORD, MINERVA_API_URL, MINERVA_SERVICE_API_KEY.
-Minerva stores the signed URL, expiry deadline and cues, then downloads
-internally in deadline order. SU login credentials never leave this process.
+Minerva stores each lecture's signed source URLs and sizes, the expiry
+deadline and the cues; minerva-fetcher picks the slide source and downloads
+it in deadline order. SU login credentials never leave this process.
 """
 
 import time
@@ -10,7 +11,7 @@ from datetime import datetime, timezone
 
 from _minerva_api import MinervaSession, minerva_session, su_credentials
 from _play import extract_presentation_id
-from _play_tracks import ProbeError, pick_track
+from _play_tracks import TrackError, describe_sources
 from dsv_wrapper import PlayClient, TranscriptNotReadyError
 
 API = "/api/service/visual-extraction"
@@ -34,10 +35,10 @@ def stage(
         release(session, job_id, "no presentation id", retry=False)
         return
     cached = downloads.get(presentation_id)
-    if cached and cached[0].expires_at - datetime.now(timezone.utc).timestamp() < 120:
+    if cached and cached[1] - datetime.now(timezone.utc).timestamp() < 120:
         cached = None
     if cached:
-        download, cues = cached
+        candidates, expires_at, cues = cached
     else:
         try:
             cues = client.get_transcript(presentation_id)
@@ -48,22 +49,17 @@ def stage(
         if not presentation.is_video_ready:
             release(session, job_id, "presentation has no video track", retry=True)
             return
-        started = time.monotonic()
-        download = pick_track(presentation)
-        print(
-            f"  probed {presentation_id} in {time.monotonic() - started:.1f}s",
-            flush=True,
-        )
-        # The same lecture can belong to several courses. Probe it once per
-        # run; refresh expired authorizations instead of repeating the frames.
-        downloads[presentation_id] = (download, cues)
-    deadline = datetime.fromtimestamp(download.expires_at, timezone.utc)
+        candidates, expires_at = describe_sources(presentation)
+        # The same lecture can belong to several courses. Describe it once
+        # per run; refresh expired authorizations.
+        downloads[presentation_id] = (candidates, expires_at, cues)
+    deadline = datetime.fromtimestamp(expires_at, timezone.utc)
     if (deadline - datetime.now(timezone.utc)).total_seconds() < 120:
-        raise ValueError("media token too close to expiry")
+        raise TrackError("media token too close to expiry")
     session.post(
         f"{API}/jobs/{job_id}/download",
         json={
-            "url": download.url,
+            "candidates": candidates,
             "download_deadline": deadline.isoformat(),
             "cues": [
                 {"start": c.start_seconds, "end": c.end_seconds, "text": c.text}
@@ -72,7 +68,7 @@ def stage(
         },
     ).raise_for_status()
     print(
-        f"  queued {presentation_id} source={download.source_name} "
+        f"  queued {presentation_id} sources={len(candidates)} "
         f"deadline={deadline.isoformat()}",
         flush=True,
     )
@@ -116,11 +112,11 @@ def authorize_window(session: MinervaSession, client: PlayClient) -> int:
             except Exception as error:
                 # Third-party HTTP errors can include the signed URL; record
                 # only the error class, never the credential-bearing message.
-                # ProbeError messages are fixed text and say why it failed.
+                # TrackError messages are fixed text and say why it failed.
                 detail = (
-                    str(error) if type(error) is ProbeError else type(error).__name__
+                    str(error) if type(error) is TrackError else type(error).__name__
                 )
-                reason = f"Play authorization/probe failed ({detail})"
+                reason = f"Play authorization failed ({detail})"
                 print(f"  {slot['job_id']}: {reason}", flush=True)
                 try:
                     release(session, slot["job_id"], reason, retry=True)

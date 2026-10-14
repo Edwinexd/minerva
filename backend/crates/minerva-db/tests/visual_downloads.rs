@@ -256,3 +256,126 @@ async fn sized_reservations_refill_space_and_exclude_failed_sources(db: sqlx::Pg
     }
     assert_eq!((sized_claims, unknown_claims), (5, 1));
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "requires an isolated PostgreSQL DATABASE_URL"]
+async fn probed_candidates_shrink_to_the_chosen_source(db: sqlx::PgPool) {
+    const GIB: i64 = 1024 * 1024 * 1024;
+    let user = Uuid::new_v4();
+    let course = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id,eppn) VALUES ($1,$2)")
+        .bind(user)
+        .bind(format!("probe-test-{user}@example.invalid"))
+        .execute(&db)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO courses (id,name,owner_id) VALUES ($1,'probe-test',$2)")
+        .bind(course)
+        .bind(user)
+        .execute(&db)
+        .await
+        .unwrap();
+    let mut jobs = Vec::new();
+    for _ in 0..2 {
+        let doc = Uuid::new_v4();
+        let job = Uuid::new_v4();
+        sqlx::query("INSERT INTO documents (id,course_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.url','text/x-url',0,$3)")
+            .bind(doc).bind(course).bind(user).execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO visual_extraction_jobs (id,document_id,course_id,kind,status,pipeline_version,fetch_reserved_at,staged_bytes) VALUES ($1,$2,$3,'play_lecture','fetching',1,NOW(),$4)")
+            .bind(job).bind(doc).bind(course).bind(GIB).execute(&db).await.unwrap();
+        jobs.push(job);
+    }
+    let cues = serde_json::json!([]);
+    let candidates = serde_json::json!([{"source": "a"}, {"source": "b"}]);
+    let now = Utc::now();
+    // The largest candidate is reserved; one over the slot is refused.
+    assert!(!queue::offer_candidates(
+        &db,
+        jobs[0],
+        &candidates,
+        now + Duration::minutes(30),
+        &cues,
+        Some(GIB + 1)
+    )
+    .await
+    .unwrap());
+    assert!(queue::offer_candidates(
+        &db,
+        jobs[0],
+        &candidates,
+        now + Duration::minutes(30),
+        &cues,
+        Some(GIB / 2)
+    )
+    .await
+    .unwrap());
+    assert!(queue::offer_candidates(
+        &db,
+        jobs[1],
+        &candidates,
+        now + Duration::minutes(10),
+        &cues,
+        None
+    )
+    .await
+    .unwrap());
+    let staged = |id| {
+        sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT staged_bytes FROM visual_extraction_jobs WHERE id=$1",
+        )
+        .bind(id)
+        .fetch_one(&db)
+    };
+    assert_eq!(staged(jobs[0]).await.unwrap(), Some(GIB / 2));
+    // Undecided lectures are probed, never downloaded, earliest expiry first.
+    assert!(queue::claim_download(&db).await.unwrap().is_none());
+    let early = queue::claim_probe(&db, 900).await.unwrap().unwrap();
+    let late = queue::claim_probe(&db, 900).await.unwrap().unwrap();
+    assert_eq!((early.id, late.id), (jobs[1], jobs[0]));
+    assert!(queue::claim_probe(&db, 900).await.unwrap().is_none());
+    // A restarted fetcher takes over its own claims at once.
+    assert_eq!(queue::reset_fetch_claims(&db).await.unwrap(), 2);
+    assert!(!queue::choose_download(&db, &late, "stale", Some(GIB / 4))
+        .await
+        .unwrap());
+    let early = queue::claim_probe(&db, 900).await.unwrap().unwrap();
+    let late = queue::claim_probe(&db, 900).await.unwrap().unwrap();
+    assert_eq!((early.id, late.id), (jobs[1], jobs[0]));
+    // The winner cannot be larger than what was reserved for the lecture.
+    assert!(!queue::choose_download(&db, &late, "slides", Some(GIB))
+        .await
+        .unwrap());
+    assert!(queue::choose_download(&db, &late, "slides", Some(GIB / 4))
+        .await
+        .unwrap());
+    assert_eq!(staged(jobs[0]).await.unwrap(), Some(GIB / 4));
+    let download = queue::claim_download(&db).await.unwrap().unwrap();
+    assert_eq!((download.id, download.url.as_str()), (jobs[0], "slides"));
+    assert_eq!(download.expected_bytes, Some(GIB / 4));
+    // A failed probe returns the lecture for a fresh authorization.
+    assert!(
+        queue::fail_probe(&db, &early, "slide source probe failed (x)")
+            .await
+            .unwrap()
+    );
+    let failed = queue::find_job(&db, jobs[1]).await.unwrap().unwrap();
+    assert_eq!(failed.status, "needs_source");
+    let leftover: (Option<serde_json::Value>, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
+        "SELECT download_candidates, download_deadline FROM visual_extraction_jobs WHERE id=$1",
+    )
+    .bind(jobs[1])
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(leftover, (None, None));
+    sqlx::query("DELETE FROM courses WHERE id=$1")
+        .bind(course)
+        .execute(&db)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE id=$1")
+        .bind(user)
+        .execute(&db)
+        .await
+        .unwrap();
+}

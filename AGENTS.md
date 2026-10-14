@@ -348,7 +348,10 @@ database aggregates once per pass, including zero-valued empty queues; its
 freshness panel distinguishes missing/stale samples from an empty queue.
 Throughput uses committed completion timestamps over the previous 15 minutes,
 so it survives scheduler restarts. Error backlog and retained failure totals
-are counts of current database rows, not error-event rates. No document IDs,
+are counts of current database rows, not error-event rates. Lectures
+backing off because Play had no transcript or video yet are their own
+`visual_extraction_jobs_waiting_on_play` series, left out of queue age and
+the error backlog. No document IDs,
 course IDs, worker IDs or bearer URLs become metric labels.
 
 `memory-oom` keys every panel on the `container` label (the `$workload`

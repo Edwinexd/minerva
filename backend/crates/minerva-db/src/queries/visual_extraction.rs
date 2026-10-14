@@ -447,6 +447,10 @@ pub struct JobMetrics {
     pub completed_last_15m: i64,
     pub with_errors: i64,
     pub expired_leases: i64,
+    /// `needs_source` lectures Play could not serve yet, held back until
+    /// `retry_after`. Left out of the age and error figures: waiting on Play
+    /// is not a stuck queue or a failure.
+    pub waiting_on_play: i64,
 }
 
 pub async fn job_metrics(db: &PgPool) -> Result<Vec<JobMetrics>, sqlx::Error> {
@@ -454,11 +458,16 @@ pub async fn job_metrics(db: &PgPool) -> Result<Vec<JobMetrics>, sqlx::Error> {
         JobMetrics,
         r#"
         SELECT kind, status, COUNT(*) AS "count!",
-               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(updated_at)), 0)::FLOAT8 AS "oldest_age_seconds!",
+               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(updated_at) FILTER (WHERE NOT waiting)), 0)::FLOAT8 AS "oldest_age_seconds!",
                COUNT(*) FILTER (WHERE status = 'done' AND completed_at >= NOW() - INTERVAL '15 minutes') AS "completed_last_15m!",
-               COUNT(*) FILTER (WHERE error_msg IS NOT NULL) AS "with_errors!",
-               COUNT(*) FILTER (WHERE status = 'leased' AND lease_expires_at <= NOW()) AS "expired_leases!"
-        FROM visual_extraction_jobs GROUP BY kind, status
+               COUNT(*) FILTER (WHERE error_msg IS NOT NULL AND NOT waiting) AS "with_errors!",
+               COUNT(*) FILTER (WHERE status = 'leased' AND lease_expires_at <= NOW()) AS "expired_leases!",
+               COUNT(*) FILTER (WHERE waiting) AS "waiting_on_play!"
+        FROM (
+            SELECT *, COALESCE(status = 'needs_source' AND retry_after > NOW(), FALSE) AS waiting
+            FROM visual_extraction_jobs
+        ) j
+        GROUP BY kind, status
         "#
     )
     .fetch_all(db)

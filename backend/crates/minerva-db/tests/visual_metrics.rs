@@ -41,6 +41,8 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
         ("pdf", "leased"),
         ("pdf", "done"),
         ("pdf", "done"),
+        ("play_lecture", "needs_source"),
+        ("play_lecture", "needs_source"),
     ] {
         let doc = Uuid::new_v4();
         sqlx::query("INSERT INTO documents (id,course_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.pdf','application/pdf',0,$3)")
@@ -63,6 +65,12 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
     .execute(&db)
     .await
     .unwrap();
+    // Both lectures were released with an error; the older one is backing
+    // off until Play serves it, so only the other is a stuck backlog.
+    sqlx::query("UPDATE visual_extraction_jobs SET error_msg='transcript not generated yet' WHERE status='needs_source'")
+        .execute(&db).await.unwrap();
+    sqlx::query("UPDATE visual_extraction_jobs SET retry_after=NOW()+INTERVAL '1 hour',updated_at=NOW()-INTERVAL '2 days' WHERE document_id=$1")
+        .bind(documents[7]).execute(&db).await.unwrap();
     sqlx::query("UPDATE visual_extraction_jobs SET lease_expires_at=NOW()-INTERVAL '1 minute' WHERE status='leased'").execute(&db).await.unwrap();
     for (doc, age) in [(documents[5], 5), (documents[6], 30)] {
         sqlx::query("UPDATE visual_extraction_jobs SET completed_at=NOW()-make_interval(mins=>$2) WHERE document_id=$1")
@@ -94,6 +102,13 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
     let ready = jobs.iter().find(|j| j.status == "ready").unwrap();
     assert_eq!((ready.count, ready.with_errors), (1, 1));
     assert!((600.0..610.0).contains(&ready.oldest_age_seconds));
+    assert_eq!(ready.waiting_on_play, 0);
+    let needs = jobs.iter().find(|j| j.status == "needs_source").unwrap();
+    assert_eq!(
+        (needs.count, needs.waiting_on_play, needs.with_errors),
+        (2, 1, 1)
+    );
+    assert!((600.0..610.0).contains(&needs.oldest_age_seconds));
     assert_eq!(jobs.iter().map(|j| j.completed_last_15m).sum::<i64>(), 1);
     assert_eq!(jobs.iter().map(|j| j.expired_leases).sum::<i64>(), 1);
     let workers = queue::worker_metrics(&db).await.unwrap();

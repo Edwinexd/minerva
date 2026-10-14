@@ -136,7 +136,8 @@
         "courses": "Courses are imported from Daisy every night, so yours is already in Minerva.",
         "link": "A Moodle course whose Course ID number holds its Daisy offering id is linked to the matching Minerva course automatically, usually within the hour.",
         "materials": "Linked material is re-synced twice an hour, so new files and pages are picked up without you doing anything.",
-        "play": "Recorded lectures from DSV Play are pulled in from the course's Play designation, transcripts and all."
+        "play": "Recorded lectures from DSV Play are pulled in from the course's Play designation, with both what was said and what was on the slides.",
+        "visual": "Lecture slides and PDFs are also read visually, so text in figures and scanned pages becomes searchable, and Minerva can show a relevant figure in its answer."
       },
       "alt": "Minerva dashboard showing the teacher's courses"
     },
@@ -217,7 +218,7 @@
       "canvas": "<strong>Canvas:</strong> Minerva pulls course files and page content only (no submissions, rosters, or grades). Your Canvas API token is stored in the Minerva database in plaintext; revoke it in Minerva or Canvas to disconnect.",
       "moodle": "<strong>Moodle plugin:</strong> pushes course materials (files, page/book/label HTML, URLs) to Minerva. If forum sync is switched on both for the Moodle site and for the course, discussion threads that a teacher has replied to are pushed too, with student names removed from the post text on a best-effort basis. No enrolment list is sent.",
       "lti": "<strong>LTI launches:</strong> when Moodle or Canvas launches Minerva in an iframe, the platform passes the student's identifier and, if configured, display name and email address. Minerva uses the email address as the account identifier when the platform sends no separate username. A user row is created on first launch. Where the platform allows it, Minerva also fetches the course roster to keep membership current, adding students who join and removing those who leave.",
-      "play": "<strong>Play (play.dsv.su.se):</strong> when a `.url` document points at Play, the VTT transcript is fetched and stored as searchable text inside the course. The fetch runs as a scheduled job on GitHub-hosted infrastructure, which then posts the transcript to Minerva.",
+      "play": "<strong>Play (play.dsv.su.se):</strong> when a `.url` document points at Play, the VTT transcript is fetched and stored as searchable text inside the course. The lecture video is then downloaded to the Minerva server, and the slides and figures in it are read on Olympus, DSV's own GPU cluster, and stored in the course. Course PDFs are read the same way. Olympus keeps a file only while it is being processed. The fetches run as scheduled jobs on GitHub-hosted infrastructure, which log in to Play and post the transcript and the video's download link to Minerva.",
       "daisy": "<strong>Daisy (daisy.dsv.su.se):</strong> a nightly job lists DSV course offerings for the current and next semester and creates the matching Minerva courses. For each course it pulls the public list of teaching staff (name and the SU/DSV logins Daisy publishes for them) and adds those people as course teachers, matched on the login they already sign in with; logins outside SU's own domains are skipped. Daisy lists multiple historical logins per person; secondary ones are stored as eppn aliases so a future login under any of them resolves to the same Minerva user. No student rosters or grades are read. The job also pulls each offering's public schedule and stores the individual sessions as searchable text in the course. It runs on GitHub-hosted infrastructure."
     },
     "contact": {

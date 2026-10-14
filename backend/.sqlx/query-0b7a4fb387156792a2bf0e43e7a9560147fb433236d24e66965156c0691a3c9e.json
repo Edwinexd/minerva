@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT kind, status, COUNT(*) AS \"count!\",\n               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(updated_at)), 0)::FLOAT8 AS \"oldest_age_seconds!\",\n               COUNT(*) FILTER (WHERE status = 'done' AND completed_at >= NOW() - INTERVAL '15 minutes') AS \"completed_last_15m!\",\n               COUNT(*) FILTER (WHERE error_msg IS NOT NULL) AS \"with_errors!\",\n               COUNT(*) FILTER (WHERE status = 'leased' AND lease_expires_at <= NOW()) AS \"expired_leases!\"\n        FROM visual_extraction_jobs GROUP BY kind, status\n        ",
+  "query": "\n        SELECT kind, status, COUNT(*) AS \"count!\",\n               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(updated_at) FILTER (WHERE NOT waiting)), 0)::FLOAT8 AS \"oldest_age_seconds!\",\n               COUNT(*) FILTER (WHERE status = 'done' AND completed_at >= NOW() - INTERVAL '15 minutes') AS \"completed_last_15m!\",\n               COUNT(*) FILTER (WHERE error_msg IS NOT NULL AND NOT waiting) AS \"with_errors!\",\n               COUNT(*) FILTER (WHERE status = 'leased' AND lease_expires_at <= NOW()) AS \"expired_leases!\",\n               COUNT(*) FILTER (WHERE waiting) AS \"waiting_on_play!\"\n        FROM (\n            SELECT *, COALESCE(status = 'needs_source' AND retry_after > NOW(), FALSE) AS waiting\n            FROM visual_extraction_jobs\n        ) j\n        GROUP BY kind, status\n        ",
   "describe": {
     "columns": [
       {
@@ -54,6 +54,12 @@
         "name": "expired_leases!",
         "type_info": "Int8",
         "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "waiting_on_play!",
+        "type_info": "Int8",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -66,8 +72,9 @@
       null,
       null,
       null,
+      null,
       null
     ]
   },
-  "hash": "be07c15ebc00dc8a05d27473313b2580ffbe6060e3f84c060a711f00648ed607"
+  "hash": "0b7a4fb387156792a2bf0e43e7a9560147fb433236d24e66965156c0691a3c9e"
 }

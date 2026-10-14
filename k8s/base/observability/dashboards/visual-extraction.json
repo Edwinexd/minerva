@@ -258,7 +258,7 @@
       "id": 5,
       "type": "stat",
       "title": "Awaiting Play source",
-      "description": "Current database job count for the selected document kinds. Completed and failed are retained totals, not events in the selected time range.",
+      "description": "Lectures in needs_source. Eligible: Actions may offer them on its next run. Waiting on Play: Play had no transcript or video yet, so the lecture is held back for 1 hour, doubling per release up to 7 days.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -283,8 +283,17 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(max by (kind,status) (visual_extraction_jobs_by_kind{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\",status=\"needs_source\"}))",
-          "legendFormat": ""
+          "expr": "sum(max by (kind,status) (visual_extraction_jobs_by_kind{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\",status=\"needs_source\"})) - (sum(max by (kind) (visual_extraction_jobs_waiting_on_play{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\"})) or vector(0))",
+          "legendFormat": "Eligible"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(max by (kind) (visual_extraction_jobs_waiting_on_play{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\"}))",
+          "legendFormat": "Waiting on Play"
         }
       ],
       "options": {
@@ -296,7 +305,7 @@
         },
         "colorMode": "value",
         "graphMode": "area",
-        "textMode": "auto",
+        "textMode": "value_and_name",
         "orientation": "auto"
       }
     },
@@ -350,7 +359,7 @@
       "id": 7,
       "type": "timeseries",
       "title": "Job queue by kind and status",
-      "description": "Database state sampled once per scheduler pass. needs_source awaits authorization/probing; fetching is reserved or downloading; ready waits for a GPU; leased is processing.",
+      "description": "Database state sampled once per scheduler pass. needs_source awaits authorization/probing; fetching is reserved or downloading; ready waits for a GPU; leased is processing. waiting on Play is the part of needs_source held back because Play had no transcript or video yet.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -383,6 +392,15 @@
           },
           "expr": "max by (kind,status) (visual_extraction_jobs_by_kind{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\",status=~\"needs_source|fetching|ready|leased\"})",
           "legendFormat": "{{kind}} / {{status}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (kind) (visual_extraction_jobs_waiting_on_play{namespace=\"minerva\",service=\"minerva-scheduler\",kind=~\"$kind\"})",
+          "legendFormat": "{{kind}} / waiting on Play"
         }
       ],
       "options": {
@@ -562,7 +580,7 @@
       "id": 11,
       "type": "stat",
       "title": "Jobs retaining an error",
-      "description": "Current jobs with an error message, including retryable Play probing errors and worker retries. This is a backlog count, not an error-event rate.",
+      "description": "Current jobs with an error message, including retryable Play probing errors and worker retries. This is a backlog count, not an error-event rate. Lectures waiting on Play are left out: their message only says Play is not ready.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1226,7 +1244,7 @@
       "id": 22,
       "type": "timeseries",
       "title": "Queue age",
-      "description": "Age since the oldest job entered its current state (updated_at), by selected kind. needs_source includes the historical backlog; leased age approximates current processing duration.",
+      "description": "Age since the oldest job entered its current state (updated_at), by selected kind. needs_source includes the historical backlog; leased age approximates current processing duration. Lectures waiting on Play are left out.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1279,7 +1297,7 @@
       "id": 23,
       "type": "timeseries",
       "title": "Retry and source error backlog",
-      "description": "Current jobs retaining error messages, split by kind and state. Source probe failures can remain retryable in needs_source without becoming terminal failed jobs.",
+      "description": "Current jobs retaining error messages, split by kind and state. Source probe failures can remain retryable in needs_source without becoming terminal failed jobs. Lectures waiting on Play are left out.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

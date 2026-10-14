@@ -59,6 +59,7 @@ export function TeacherHelpPage({ embedded = false }: { embedded?: boolean }) {
           <li>{t("teacherGuide.automatic.items.link")}</li>
           <li>{t("teacherGuide.automatic.items.materials")}</li>
           <li>{t("teacherGuide.automatic.items.play")}</li>
+          <li>{t("teacherGuide.automatic.items.visual")}</li>
         </ul>
         <Shot
           src="/help/minerva-dashboard.png"

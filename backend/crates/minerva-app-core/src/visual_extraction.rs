@@ -457,6 +457,10 @@ async fn record_metrics(state: &AppState) -> Result<(), sqlx::Error> {
                 .set(row.map_or(0, |j| j.count) as f64);
             metrics::gauge!("visual_extraction_jobs_with_errors", "kind" => kind, "status" => *status)
                 .set(row.map_or(0, |j| j.with_errors) as f64);
+            if *status == "needs_source" {
+                metrics::gauge!("visual_extraction_jobs_waiting_on_play", "kind" => kind)
+                    .set(row.map_or(0, |j| j.waiting_on_play) as f64);
+            }
             if ["needs_source", "ready", "leased"].contains(status) {
                 metrics::gauge!("visual_extraction_oldest_job_seconds", "kind" => kind, "status" => *status)
                     .set(row.map_or(0.0, |j| j.oldest_age_seconds).max(0.0));

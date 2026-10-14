@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from _minerva_api import MinervaSession, minerva_session, su_credentials
 from _play import extract_presentation_id
-from _play_tracks import pick_track
+from _play_tracks import ProbeError, pick_track
 from dsv_wrapper import PlayClient, TranscriptNotReadyError
 
 API = "/api/service/visual-extraction"
@@ -48,7 +48,12 @@ def stage(
         if not presentation.is_video_ready:
             release(session, job_id, "presentation has no video track", retry=True)
             return
+        started = time.monotonic()
         download = pick_track(presentation)
+        print(
+            f"  probed {presentation_id} in {time.monotonic() - started:.1f}s",
+            flush=True,
+        )
         # The same lecture can belong to several courses. Probe it once per
         # run; refresh expired authorizations instead of repeating the frames.
         downloads[presentation_id] = (download, cues)
@@ -68,7 +73,8 @@ def stage(
     ).raise_for_status()
     print(
         f"  queued {presentation_id} source={download.source_name} "
-        f"deadline={deadline.isoformat()}"
+        f"deadline={deadline.isoformat()}",
+        flush=True,
     )
 
 
@@ -110,8 +116,12 @@ def authorize_window(session: MinervaSession, client: PlayClient) -> int:
             except Exception as error:
                 # Third-party HTTP errors can include the signed URL; record
                 # only the error class, never the credential-bearing message.
-                reason = f"Play authorization/probe failed ({type(error).__name__})"
-                print(f"  {slot['job_id']}: {reason}")
+                # ProbeError messages are fixed text and say why it failed.
+                detail = (
+                    str(error) if type(error) is ProbeError else type(error).__name__
+                )
+                reason = f"Play authorization/probe failed ({detail})"
+                print(f"  {slot['job_id']}: {reason}", flush=True)
                 try:
                     release(session, slot["job_id"], reason, retry=True)
                 except Exception:

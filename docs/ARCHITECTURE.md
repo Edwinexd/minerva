@@ -170,7 +170,10 @@ Flow and backpressure:
   compares the median amount and size of confidently recognized text, and selects
   1080p of the winning source. Each source's entire probe (including MP4
   headers/tail reads) is capped at 24 MiB. Aligned ranges are cached across
-  samples so MP4 indexes consume the budget once. Readable duplicate slide
+  samples so MP4 indexes consume the budget once. Sources and their samples
+  are probed concurrently (a block already in flight is shared, not
+  refetched), since a probe is mostly round trips. Failures log a fixed
+  reason, never the third-party message. Readable duplicate slide
   streams select the clearest text; blank or failed probes retry. Repeated
   presentation URLs across courses share one authorization/probe per run
   until its token nears expiry. Audio flags are ignored.

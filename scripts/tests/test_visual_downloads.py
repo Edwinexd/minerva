@@ -9,7 +9,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-from _play_tracks import choose_source, pick_track, probe_url, text_score  # noqa: E402
+from _play_tracks import (  # noqa: E402
+    ProbeError,
+    choose_source,
+    pick_track,
+    probe_url,
+    text_score,
+)
 from dsv_wrapper.models.play import Presentation, VideoSource  # noqa: E402
 
 loader = importlib.machinery.SourceFileLoader(
@@ -44,6 +50,38 @@ def test_selection_ignores_audio_and_uses_observed_text():
         ),
     ):
         assert pick_track(p).index == 2
+
+
+def test_sources_are_probed_concurrently_and_all_must_succeed():
+    import threading
+
+    p = Presentation(
+        id="x",
+        title="x",
+        sources={
+            name: VideoSource(url_720p=name, play_audio=False)
+            for name in ("left", "right", "main")
+        },
+    )
+    barrier = threading.Barrier(3, timeout=5)
+
+    def score(download):
+        barrier.wait()
+        if download.source_name == "right":
+            raise ProbeError("video frame probe failed")
+        return 90
+
+    with (
+        patch(
+            "_play_tracks.resolve_track_download",
+            side_effect=lambda p, index: SimpleNamespace(
+                source_name=["left", "right", "main"][index]
+            ),
+        ),
+        patch("_play_tracks.score_source", side_effect=score),
+        pytest.raises(ProbeError),
+    ):
+        pick_track(p)
 
 
 def test_blank_probes_do_not_guess_camera():
@@ -235,6 +273,57 @@ def test_probe_reuses_header_ranges_across_clients():
     assert reads == [256 * 1024]
 
 
+def test_probe_fetches_blocks_in_parallel_and_shares_inflight_blocks():
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from urllib.request import Request, urlopen
+
+    fetched = []
+    started = threading.Barrier(2, timeout=5)
+
+    class Response:
+        status_code = 206
+
+        def __init__(self, start):
+            self.start = start
+            self.headers = {
+                "Content-Range": f"bytes {start}-{start + 262143}/33554432"
+            }
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def iter_content(self, chunk_size):
+            fetched.append(self.start)
+            if self.start:
+                # Blocks 1 and 2 only finish if both are in flight at once.
+                started.wait()
+            yield b"x" * chunk_size
+
+    class Session:
+        def get(self, url, headers, **kwargs):
+            return Response(int(headers["Range"].removeprefix("bytes=").split("-")[0]))
+
+        def close(self):
+            pass
+
+    def read(block):
+        start = block * 256 * 1024
+        with urlopen(
+            Request(url, headers={"Range": f"bytes={start}-{start + 1023}"})
+        ) as response:
+            return response.read()
+
+    with patch("_play_tracks.requests.Session", return_value=Session()):
+        with probe_url(SimpleNamespace(url="https://example.invalid/video")) as url:
+            with ThreadPoolExecutor(6) as pool:
+                assert all(r == b"x" * 1024 for r in pool.map(read, [1, 2, 1, 2, 1, 2]))
+    assert sorted(fetched) == [0, 256 * 1024, 512 * 1024]
+
+
 def test_shared_presentations_are_probed_once_per_batch():
     import time
     from unittest.mock import Mock
@@ -344,10 +433,44 @@ def test_authorization_skips_failed_sources_for_rest_of_run():
             raise ValueError("signed URL must not appear in output")
 
     session.post.side_effect = post
-    with patch.object(fetch, "stage", side_effect=stage) as authorization:
+    with (
+        patch.object(fetch, "stage", side_effect=stage) as authorization,
+        patch.object(fetch, "release") as release,
+    ):
         assert fetch.authorize_window(session, Mock()) == 2
     assert authorization.call_count == 2
+    release.assert_called_once_with(
+        session, "bad", "Play authorization/probe failed (ValueError)", retry=True
+    )
     assert session.post.call_args.kwargs["json"]["exclude_job_ids"] == ["bad", "good"]
+
+
+def test_probe_failures_record_their_fixed_reason():
+    from unittest.mock import Mock
+
+    import fetch_lecture_videos as fetch
+
+    response = Mock()
+    response.json.return_value = [{"job_id": "a"}]
+    response.headers = {}
+    session = Mock()
+    session.post.return_value = response
+    with (
+        patch.object(
+            fetch,
+            "stage",
+            side_effect=ProbeError("no readable slide source found after frame probes"),
+        ),
+        patch.object(fetch, "release") as release,
+    ):
+        fetch.authorize_window(session, Mock())
+    release.assert_called_once_with(
+        session,
+        "a",
+        "Play authorization/probe failed "
+        "(no readable slide source found after frame probes)",
+        retry=True,
+    )
 
 
 def test_time_budget_releases_unprocessed_reservations():

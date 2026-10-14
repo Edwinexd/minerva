@@ -3,15 +3,20 @@
 Never use playAudio or source names as slide labels. A loopback proxy caps
 all ffprobe/ffmpeg reads (including moov/tail probes) at 24 MiB per source.
 Bearer URLs never appear in subprocess arguments or diagnostics.
+
+Sources and each source's frame samples are probed concurrently: almost all
+of a probe is round trips to Play and tesseract, not local CPU.
 """
 
 import csv
 import io
 import json
+import os
 import re
 import statistics
 import subprocess
 import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -19,9 +24,13 @@ import requests
 from dsv_wrapper.parsers.play import enumerate_track_descriptors, resolve_track_download
 
 PROBE_BYTES = 24 * 1024 * 1024
-
-
 BLOCK_BYTES = 256 * 1024
+FRAME_FRACTIONS = (0.2, 0.5, 0.8)
+SOURCE_PROBE_WORKERS = 3
+
+
+class ProbeError(ValueError):
+    """A probe failure whose message is fixed text, safe to log and store."""
 
 
 @contextmanager
@@ -36,47 +45,65 @@ def probe_url(download):
     lock = threading.Lock()
     client = requests.Session()
 
+    def fetch(index):
+        start = index * BLOCK_BYTES
+        end = start + BLOCK_BYTES - 1
+        headers = {"Range": f"bytes={start}-{end}", "Accept-Encoding": "identity"}
+        with client.get(
+            download.url,
+            headers=headers,
+            stream=True,
+            timeout=(10, 15),
+            allow_redirects=False,
+        ) as response:
+            span = re.fullmatch(
+                r"bytes (\d+)-(\d+)/(\d+)",
+                response.headers.get("Content-Range", ""),
+            )
+            if response.status_code != 206 or not span:
+                raise ProbeError("media host did not return a byte range")
+            first, last, size = map(int, span.groups())
+            if first != start or last != min(end, size - 1) or size <= last:
+                raise ProbeError("invalid media byte range")
+            data = bytearray()
+            for chunk in response.iter_content(BLOCK_BYTES):
+                if len(data) + len(chunk) > last - first + 1:
+                    raise ProbeError("oversized media byte range")
+                data.extend(chunk)
+            if len(data) != last - first + 1:
+                raise ProbeError("truncated media byte range")
+        return size, bytes(data)
+
     def block_at(index):
+        # Concurrent readers fetch different blocks in parallel; a block
+        # already in flight is awaited, never fetched or charged twice.
         nonlocal remaining, total_bytes
         with lock:
             if stopped:
-                raise ValueError("probe closed")
-            if index in blocks:
-                return blocks[index]
-            if remaining < BLOCK_BYTES:
-                raise ValueError("probe byte budget exhausted")
-            remaining -= BLOCK_BYTES
-            start = index * BLOCK_BYTES
-            end = start + BLOCK_BYTES - 1
-            headers = {"Range": f"bytes={start}-{end}", "Accept-Encoding": "identity"}
-            with client.get(
-                download.url,
-                headers=headers,
-                stream=True,
-                timeout=(10, 15),
-                allow_redirects=False,
-            ) as response:
-                span = re.fullmatch(
-                    r"bytes (\d+)-(\d+)/(\d+)",
-                    response.headers.get("Content-Range", ""),
-                )
-                if response.status_code != 206 or not span:
-                    raise ValueError("media host did not return a byte range")
-                first, last, size = map(int, span.groups())
-                if first != start or last != min(end, size - 1) or size <= last:
-                    raise ValueError("invalid media byte range")
-                if total_bytes is not None and total_bytes != size:
-                    raise ValueError("media changed during probe")
-                total_bytes = size
-                data = bytearray()
-                for chunk in response.iter_content(BLOCK_BYTES):
-                    if len(data) + len(chunk) > last - first + 1:
-                        raise ValueError("oversized media byte range")
-                    data.extend(chunk)
-                if len(data) != last - first + 1:
-                    raise ValueError("truncated media byte range")
-                blocks[index] = bytes(data)
-                return blocks[index]
+                raise ProbeError("probe closed")
+            pending = blocks.get(index)
+            owner = pending is None
+            if owner:
+                if remaining < BLOCK_BYTES:
+                    raise ProbeError("probe byte budget exhausted")
+                remaining -= BLOCK_BYTES
+                pending = blocks[index] = Future()
+        if owner:
+            try:
+                size, data = fetch(index)
+                with lock:
+                    if total_bytes is not None and total_bytes != size:
+                        raise ProbeError("media changed during probe")
+                    total_bytes = size
+            except BaseException as exc:
+                # Readers already waiting see the failure; later ones retry,
+                # charged against the budget again.
+                with lock:
+                    blocks.pop(index, None)
+                pending.set_exception(exc)
+                raise
+            pending.set_result(data)
+        return pending.result()
 
     class Proxy(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -134,18 +161,19 @@ def probe_url(download):
         client.close()
 
 
-def run(*args, body=None):
+def run(*args, body=None, env=None):
     try:
         result = subprocess.run(
             args,
             input=body,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=45,
             check=True,
         )
     except (subprocess.SubprocessError, OSError) as exc:
-        raise ValueError("video frame probe failed") from exc
+        raise ProbeError("video frame probe failed") from exc
     return result.stdout
 
 
@@ -165,6 +193,41 @@ def text_score(tsv):
     )
 
 
+def frame_score(url, seconds):
+    frame = run(
+        "ffmpeg",
+        "-v",
+        "error",
+        "-ss",
+        str(seconds),
+        "-i",
+        url,
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale=1280:-1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "png",
+        "pipe:1",
+    )
+    # Frames are OCR'd side by side; tesseract's own OpenMP threads would
+    # only oversubscribe the runner's cores.
+    return text_score(
+        run(
+            "tesseract",
+            "stdin",
+            "stdout",
+            "--psm",
+            "11",
+            "tsv",
+            body=frame,
+            env={**os.environ, "OMP_THREAD_LIMIT": "1"},
+        )
+    )
+
+
 def score_source(download):
     with probe_url(download) as url:
         info = json.loads(
@@ -181,32 +244,12 @@ def score_source(download):
         )
         duration = float(info["format"]["duration"])
         if not 0 < duration < 24 * 3600:
-            raise ValueError("invalid video duration")
-        scores = []
-        for fraction in (0.2, 0.5, 0.8):
-            frame = run(
-                "ffmpeg",
-                "-v",
-                "error",
-                "-ss",
-                str(duration * fraction),
-                "-i",
-                url,
-                "-frames:v",
-                "1",
-                "-vf",
-                "scale=1280:-1",
-                "-f",
-                "image2pipe",
-                "-vcodec",
-                "png",
-                "pipe:1",
-            )
-            scores.append(
-                text_score(
-                    run(
-                        "tesseract", "stdin", "stdout", "--psm", "11", "tsv", body=frame
-                    )
+            raise ProbeError("invalid video duration")
+        with ThreadPoolExecutor(len(FRAME_FRACTIONS)) as pool:
+            scores = list(
+                pool.map(
+                    lambda fraction: frame_score(url, duration * fraction),
+                    FRAME_FRACTIONS,
                 )
             )
         return statistics.median(scores)
@@ -218,7 +261,7 @@ def choose_source(scores):
         return ranked[0]
     best = ranked[0]
     if scores[best] < 20:
-        raise ValueError("no readable slide source found after frame probes")
+        raise ProbeError("no readable slide source found after frame probes")
     return best
 
 
@@ -228,16 +271,24 @@ def pick_track(presentation):
     for index, (_, name, height) in enumerate(descriptors):
         sources.setdefault(name, []).append((index, height))
     if not sources:
-        raise ValueError("presentation has no video track")
+        raise ProbeError("presentation has no video track")
     if len(sources) == 1:
         name = next(iter(sources))
     else:
         # All sources must be probed successfully; a failed slide probe
         # cannot silently make the camera the winning source.
-        scores = {}
-        for name, variants in sources.items():
-            index, _ = min(variants, key=lambda variant: variant[1] or 0)
-            scores[name] = score_source(resolve_track_download(presentation, index))
+        with ThreadPoolExecutor(SOURCE_PROBE_WORKERS) as pool:
+            probes = {
+                name: pool.submit(
+                    score_source,
+                    resolve_track_download(
+                        presentation,
+                        min(variants, key=lambda variant: variant[1] or 0)[0],
+                    ),
+                )
+                for name, variants in sources.items()
+            }
+            scores = {name: probe.result() for name, probe in probes.items()}
         name = choose_source(scores)
     index, _ = min(sources[name], key=lambda variant: abs((variant[1] or 0) - 1080))
     return resolve_track_download(presentation, index)

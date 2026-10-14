@@ -7,7 +7,8 @@ it in deadline order. SU login credentials never leave this process.
 """
 
 import time
-from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 
 from _minerva_api import MinervaSession, minerva_session, su_credentials
@@ -16,7 +17,11 @@ from _play_tracks import TrackError, describe_sources
 from dsv_wrapper import PlayClient, TranscriptNotReadyError
 
 API = "/api/service/visual-extraction"
-FETCH_WAVE_SLOTS = 4
+# Lectures being described at once: each is about three Play page calls,
+# so this is the load on Play. Granted slots beyond those wait in a queue so
+# a finished lecture is replaced at once, without a round trip to Minerva.
+FETCH_CONCURRENCY = 8
+FETCH_PREFETCH = 8
 FETCH_RUN_SECONDS = 40 * 60
 REFILL_HEADER = "X-Minerva-Staging-Refill"
 # Minerva's codes for lectures that can never be staged.
@@ -89,11 +94,13 @@ def stage(
     )
 
 
-def fetch_slots(session: MinervaSession, attempted: set[str]) -> tuple[list, bool]:
+def fetch_slots(
+    session: MinervaSession, attempted: set[str], limit: int
+) -> tuple[list, bool]:
     response = session.post(
         f"{API}/fetch-slots",
         json={
-            "limit": FETCH_WAVE_SLOTS,
+            "limit": limit,
             "exclude_job_ids": sorted(attempted),
         },
     )
@@ -126,37 +133,57 @@ def attempt(session: MinervaSession, client: PlayClient, slot: dict, downloads: 
 def authorize_window(session: MinervaSession, client: PlayClient) -> int:
     attempted = set()
     downloads = {}
+    queued = deque()
+    running = set()
+    can_refill = True
     until = time.monotonic() + FETCH_RUN_SECONDS
-    with ThreadPoolExecutor(FETCH_WAVE_SLOTS) as pool:
-        while time.monotonic() < until:
-            # Once Minerva has the sources' sizes, the reservation shrinks to
-            # the largest. Refill those released bytes in this run instead of
-            # waiting for the next GitHub schedule. Do not retry a failed
-            # source repeatedly just because it released its slot.
-            slots, can_refill = fetch_slots(session, attempted)
-            print(f"{len(slots)} fetch slot(s) granted", flush=True)
-            if not slots:
+
+    def run(slot):
+        return pool.submit(attempt, session, client, slot, downloads)
+
+    with ThreadPoolExecutor(FETCH_CONCURRENCY) as pool:
+        while True:
+            out_of_time = time.monotonic() >= until
+            # Top the queue up. An offer shrinks its reservation from the
+            # 1 GiB placeholder to the sources' size, so space Minerva could
+            # not grant a moment ago may be free once a lecture finishes.
+            if can_refill and not out_of_time and len(queued) < FETCH_PREFETCH:
+                slots, can_refill = fetch_slots(
+                    session,
+                    attempted,
+                    FETCH_CONCURRENCY + FETCH_PREFETCH - len(queued) - len(running),
+                )
+                print(f"{len(slots)} fetch slot(s) granted", flush=True)
+                for slot in slots:
+                    if slot["job_id"] in attempted:
+                        raise ValueError("duplicate fetch reservation")
+                    attempted.add(slot["job_id"])
+                    queued.append(slot)
+                # During CD the new Actions script may reach the old API.
+                # Only refill when the server supports sizing and
+                # exclusions; otherwise retries could reclaim the same failed
+                # source in this run.
+                if not slots and not running:
+                    can_refill = False
+            # Play logs in on first use, so the first lecture goes alone.
+            if queued and len(attempted) == len(queued) and not running:
+                attempt(session, client, queued.popleft(), downloads)
+            out_of_time = time.monotonic() >= until
+            if out_of_time:
+                while queued:
+                    release(
+                        session,
+                        queued.popleft()["job_id"],
+                        "fetch run time budget",
+                        retry=True,
+                    )
+            while queued and len(running) < FETCH_CONCURRENCY:
+                running.add(run(queued.popleft()))
+            if not running:
+                if queued or (can_refill and not out_of_time):
+                    continue
                 break
-            if time.monotonic() >= until:
-                for unused in slots:
-                    release(session, unused["job_id"], "fetch run time budget", retry=True)
-                break
-            first_wave = not attempted
-            for slot in slots:
-                if slot["job_id"] in attempted:
-                    raise ValueError("duplicate fetch reservation")
-                attempted.add(slot["job_id"])
-            # Play logs in on first use, so one lecture goes alone; the rest
-            # share the session in parallel.
-            if first_wave:
-                attempt(session, client, slots[0], downloads)
-                slots = slots[1:]
-            list(pool.map(lambda slot: attempt(session, client, slot, downloads), slots))
-            # During CD the new Actions script may reach the old API. Only
-            # refill when the server supports sizing and exclusions; otherwise
-            # retries could reclaim the same failed source in this run.
-            if not can_refill:
-                break
+            _, running = wait(running, return_when=FIRST_COMPLETED)
     return len(attempted)
 
 

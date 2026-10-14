@@ -152,10 +152,11 @@ Flow and backpressure:
   over the 1 GiB cap is still probed but reserves only the cap; if it wins
   (or is the only source) the lecture is parked as `unavailable`. A missing
   size retains the full cap, and every download is still capped at its
-  reservation, since an announced size is only a claim. Actions asks for
-  another small wave until the staging budget or its 40-minute
-  authorization budget is exhausted, rather than imposing a URL count
-  per run. Failed sources are excluded for the rest of that run. A staged video is deleted as soon
+  reservation, since an announced size is only a claim. Actions keeps 8
+  lectures in flight (the load on Play) with up to 8 more granted slots
+  queued, asking for more as the queue drains, until Minerva grants none
+  with nothing in flight or its 40-minute authorization budget is
+  exhausted, rather than imposing a URL count per run. Failed sources are excluded for the rest of that run. A staged video is deleted as soon
   as its result is accepted, so the window shrinks back as workers drain
   it; a backlog beyond that costs database rows, not disk.
 - **Download deadlines are database state.** `download_url`,

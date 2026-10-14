@@ -152,24 +152,29 @@ def test_shared_presentations_are_described_once_per_batch():
     )
 
 
-@pytest.mark.parametrize("refill,expected", [(True, 37), (False, 4)])
+@pytest.mark.parametrize("refill,expected", [(True, 37), (False, 10)])
 def test_authorization_fills_bytes_beyond_old_url_count(refill, expected):
     from unittest.mock import Mock
 
     import fetch_lecture_videos as fetch
 
+    import threading
+
     # Ten GiB available. Each unknown source initially reserves one GiB;
-    # the selected source's headers shrink it to 256 MiB. The final 768 MiB
-    # cannot safely reserve another unknown source.
+    # the offered sizes shrink it to 256 MiB. The final 768 MiB cannot
+    # safely reserve another unknown source. Without the refill header (an
+    # old API) only the first grant is used.
     remaining = 10 * 1024
     next_job = 0
+    lock = threading.Lock()
 
     def reserve(url, json):
         nonlocal remaining, next_job
-        count = min(json["limit"], remaining // 1024)
-        slots = [{"job_id": str(j)} for j in range(next_job, next_job + count)]
-        next_job += count
-        remaining -= count * 1024
+        with lock:
+            count = min(json["limit"], remaining // 1024)
+            slots = [{"job_id": str(j)} for j in range(next_job, next_job + count)]
+            next_job += count
+            remaining -= count * 1024
         return SimpleNamespace(
             raise_for_status=lambda: None,
             json=lambda: slots,
@@ -178,7 +183,8 @@ def test_authorization_fills_bytes_beyond_old_url_count(refill, expected):
 
     def sized(session, client, slot, downloads):
         nonlocal remaining
-        remaining += 1024 - 256
+        with lock:
+            remaining += 1024 - 256
 
     session = Mock()
     session.post.side_effect = reserve
@@ -244,7 +250,7 @@ def test_permanent_rejections_park_the_lecture():
     assert release.call_args.kwargs["retry"] is False
 
 
-def test_waves_after_login_run_in_parallel():
+def test_lectures_after_login_run_in_parallel():
     import threading
     from unittest.mock import Mock
 
@@ -304,20 +310,22 @@ def test_time_budget_releases_unprocessed_reservations():
     response.headers = {fetch.REFILL_HEADER: "1"}
     session = Mock()
     session.post.return_value = response
-    # The budget runs out while the second wave is being granted.
+    clock = [0]
+
+    def stage(session, client, slot, downloads):
+        # The budget runs out while the first lecture is described.
+        clock[0] = fetch.FETCH_RUN_SECONDS + 1
+
     with (
-        patch.object(fetch.time, "monotonic", side_effect=[0, 0, 0, 0, 2401, 2401]),
-        patch.object(fetch, "stage") as stage,
+        patch.object(fetch.time, "monotonic", side_effect=lambda: clock[0]),
+        patch.object(fetch, "stage", side_effect=stage) as staged,
         patch.object(fetch, "release") as release,
     ):
-        response.json.side_effect = [
-            [{"job_id": "a"}, {"job_id": "b"}],
-            [{"job_id": "c"}, {"job_id": "d"}],
-        ]
         assert fetch.authorize_window(session, Mock()) == 2
-    assert stage.call_count == 2
-    assert [c.args[1] for c in release.call_args_list] == ["c", "d"]
-    assert all(c.args[2] == "fetch run time budget" for c in release.call_args_list)
+    staged.assert_called_once()
+    release.assert_called_once_with(session, "b", "fetch run time budget", retry=True)
+    # No further slots are requested once the budget is spent.
+    assert session.post.call_count == 1
 
 
 def test_sources_offer_low_res_probe_and_1080p_download():

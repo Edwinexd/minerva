@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        WITH candidate AS (\n            SELECT fd.figure_id FROM figure_descriptions fd\n            JOIN document_figures f ON f.id = fd.figure_id\n            JOIN documents d ON d.id = f.document_id\n            JOIN courses c ON c.id = f.course_id\n            WHERE fd.model = $1 AND fd.version = $2 AND fd.described_at IS NULL\n              AND fd.attempts < 5 AND fd.retry_at <= NOW()\n              AND (fd.lease_expires_at IS NULL OR fd.lease_expires_at < NOW())\n              AND d.orphaned_at IS NULL AND c.active\n            ORDER BY fd.retry_at, fd.created_at, fd.figure_id\n            FOR UPDATE OF fd SKIP LOCKED LIMIT 1\n        ), claimed AS (\n            UPDATE figure_descriptions fd SET attempts = attempts + 1,\n                lease = gen_random_uuid(), lease_expires_at = NOW() + INTERVAL '20 minutes'\n            FROM candidate WHERE fd.figure_id = candidate.figure_id\n            RETURNING fd.figure_id, fd.lease\n        )\n        SELECT f.id AS \"figure_id!\", f.course_id, f.document_id, f.image_path,\n               f.context, claimed.lease AS \"lease!\"\n        FROM claimed JOIN document_figures f ON f.id = claimed.figure_id\n        ",
+  "query": "\n        WITH candidate AS (\n            SELECT fd.figure_id FROM figure_descriptions fd\n            JOIN document_figures f ON f.id = fd.figure_id\n            JOIN documents d ON d.id = f.document_id\n            JOIN courses c ON c.id = f.course_id\n            WHERE fd.model = $1 AND fd.version = $2 AND fd.described_at IS NULL\n              AND fd.attempts < 5 AND fd.retry_at <= NOW()\n              AND (fd.lease_expires_at IS NULL OR fd.lease_expires_at < NOW())\n              AND d.orphaned_at IS NULL AND c.active AND f.shows_person = FALSE\n            ORDER BY fd.retry_at, fd.created_at, fd.figure_id\n            FOR UPDATE OF fd SKIP LOCKED LIMIT 1\n        ), claimed AS (\n            UPDATE figure_descriptions fd SET attempts = attempts + 1,\n                lease = gen_random_uuid(), lease_expires_at = NOW() + INTERVAL '20 minutes'\n            FROM candidate WHERE fd.figure_id = candidate.figure_id\n            RETURNING fd.figure_id, fd.lease\n        )\n        SELECT f.id AS \"figure_id!\", f.course_id, f.document_id, f.image_path,\n               f.context, claimed.lease AS \"lease!\"\n        FROM claimed JOIN document_figures f ON f.id = claimed.figure_id\n        ",
   "describe": {
     "columns": [
       {
@@ -85,5 +85,5 @@
       true
     ]
   },
-  "hash": "ba3f2ed621cf6b119f873efb55721dfb1bdf91b8448119ae1acef55139d163f0"
+  "hash": "4b1220d87ca4874a4887201f4c13d457296c76cb67aef0cebf5503a21a034de3"
 }

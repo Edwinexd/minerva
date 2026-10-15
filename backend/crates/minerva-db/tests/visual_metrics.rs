@@ -81,7 +81,7 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
             .bind(Uuid::new_v4()).bind(state).bind(age).execute(&db).await.unwrap();
     }
     for indexed in [false, true] {
-        sqlx::query("INSERT INTO document_figures (document_id,course_id,page_position,box,image_path,context,visual_model,visual_vector,created_at,indexed_at) VALUES ($1,$2,0,ARRAY[0,0,1,1]::REAL[],'test.png','test','test',ARRAY[0]::REAL[],NOW()-INTERVAL '3 minutes',CASE WHEN $3 THEN NOW() ELSE NULL END)")
+        sqlx::query("INSERT INTO document_figures (document_id,course_id,page_position,box,image_path,context,visual_model,visual_vector,created_at,indexed_at,shows_person) VALUES ($1,$2,0,ARRAY[0,0,1,1]::REAL[],'test.png','test','test',ARRAY[0]::REAL[],NOW()-INTERVAL '3 minutes',CASE WHEN $3 THEN NOW() ELSE NULL END,FALSE)")
             .bind(documents[5]).bind(course).bind(indexed).execute(&db).await.unwrap();
     }
 

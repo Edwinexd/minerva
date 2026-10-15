@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT f.id, f.document_id, d.filename,\n               COALESCE(fd.caption, f.caption) AS caption,\n               fd.description AS \"context!\",\n               p.page_number, p.start_seconds\n        FROM document_figures f\n        JOIN figure_descriptions fd ON fd.figure_id = f.id\n        JOIN documents d ON d.id = f.document_id\n        LEFT JOIN document_visual_pages p\n               ON p.document_id = f.document_id AND p.position = f.page_position\n        LEFT JOIN documents child\n               ON child.parent_document_id = d.id AND child.orphaned_at IS NULL\n        WHERE f.id = ANY($2)\n          AND f.course_id = $1\n          AND fd.described_at IS NOT NULL AND fd.is_decorative = FALSE\n          AND d.displayable\n          AND d.orphaned_at IS NULL\n          AND (\n              NOT $3\n              OR COALESCE(child.kind, d.kind) NOT IN\n                 ('assignment_brief', 'lab_brief', 'exam', 'sample_solution', 'unknown')\n          )\n          AND (NOT $3 OR COALESCE(child.kind, d.kind) IS NOT NULL)\n        ",
+  "query": "\n        SELECT f.id, f.document_id, d.filename,\n               COALESCE(fd.caption, f.caption) AS caption,\n               fd.description AS \"context!\",\n               p.page_number, p.start_seconds\n        FROM document_figures f\n        JOIN figure_descriptions fd ON fd.figure_id = f.id\n        JOIN documents d ON d.id = f.document_id\n        LEFT JOIN document_visual_pages p\n               ON p.document_id = f.document_id AND p.position = f.page_position\n        LEFT JOIN documents child\n               ON child.parent_document_id = d.id AND child.orphaned_at IS NULL\n        WHERE f.id = ANY($2)\n          AND f.course_id = $1\n          AND fd.described_at IS NOT NULL AND fd.is_decorative = FALSE\n          AND f.shows_person = FALSE\n          AND d.displayable\n          AND d.orphaned_at IS NULL\n          AND (\n              NOT $3\n              OR COALESCE(child.kind, d.kind) NOT IN\n                 ('assignment_brief', 'lab_brief', 'exam', 'sample_solution', 'unknown')\n          )\n          AND (NOT $3 OR COALESCE(child.kind, d.kind) IS NOT NULL)\n        ",
   "describe": {
     "columns": [
       {
@@ -93,5 +93,5 @@
       true
     ]
   },
-  "hash": "91bdc2fd74088af373830973a3991d2ce5e23c309152308d827ec056cc26b6b2"
+  "hash": "21140302bc79047d92ac7f914eb6775014c17304ab5d85fea3e2bfd110335082"
 }

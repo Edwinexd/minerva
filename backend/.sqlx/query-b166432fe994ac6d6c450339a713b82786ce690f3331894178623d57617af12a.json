@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE document_figures SET shows_person = NULL\n               WHERE document_id = $1 AND shows_person = FALSE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b166432fe994ac6d6c450339a713b82786ce690f3331894178623d57617af12a"
+}

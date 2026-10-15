@@ -254,12 +254,27 @@ Ingest:
   `figure_descriptions`; it never reruns or delays Olympus extraction.
   The stage starts disabled. Select the dot for a vision model in the
   **Figure descriptions** column of the admin model catalog. Existing crops
-  are backfilled in
-  batches of at most 16 per pass, with five attempts per model/version.
+  are backfilled with 16 concurrent calls and at most 128 crops per pass,
+  with five attempts per model/version.
   Owner spending caps defer work until the next day; Flex capacity shortages
   defer it for five minutes without consuming attempts. Descriptions and
   short captions identify visible labels and relationships; decorative
   question marks, logos and ornaments are excluded from new chat retrieval.
+  **People screen.** Recorded lectures are full of webcam and video-call
+  tiles, participant name tiles and portraits. Before a crop is described
+  or indexed, the scheduler scores its stored CLIP vector against people
+  and teaching-content prompts (`figures::people_score`, CLIP text vectors
+  from `minerva-embedder`), so nothing leaves the cluster to decide. Crops
+  at `PEOPLE_THRESHOLD` (0.4) or above, or within cosine 0.92 of a crop the
+  vision model reported as a person, get `shows_person`: they are never
+  sent to the vision model, their cached description (which could name
+  someone) is deleted, their Qdrant points are removed, and chat retrieval
+  filters them out. Unscreened crops are neither described nor indexed.
+  The vision model's schema also returns `shows_person`; a person the
+  screen missed is logged as a warning, withheld the same way, and its
+  document's other crops are screened again with it as an exemplar.
+  Threshold and prompts were measured on 464 description-labelled crops
+  (99% of people caught, one content crop wrongly withheld).
   Only successfully described, substantive crops are indexed. Two vectors per figure, both
   pushed by the scheduler's indexing sweep:
   - **context vector:** the crop's description embedded with the course's text model

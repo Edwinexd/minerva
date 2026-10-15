@@ -345,7 +345,7 @@ def ingest_pipeline() -> graphviz.Digraph:
         _box(c, "figs", "document_figures", icon="qdrant",
              subtitle="crop descriptions + CLIP vectors")
         _box(c, "describe", "figure_descriptions", icon="postgres",
-             subtitle="separate loop: vision model,<BR/>cached descriptions, decoration filter")
+             subtitle="separate loop: CLIP people screen,<BR/>vision model, cached descriptions,<BR/>decoration filter")
         _box(c, "linker_db", "linker_decisions", icon="postgres", subtitle="kg_state")
         _box(c, "ready", "status = ready", shape="stadium")
 

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM figure_descriptions\n           WHERE figure_id = $1 AND lease = $2 AND lease_expires_at > NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ff178a39409f9b9ec5423f41ff9076ad7acb7e4c571db60c72b46b4a188303aa"
+}

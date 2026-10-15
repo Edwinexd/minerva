@@ -26,7 +26,7 @@ pub async fn enqueue(
         JOIN documents d ON d.id = f.document_id
         JOIN courses c ON c.id = f.course_id
         LEFT JOIN figure_descriptions fd ON fd.figure_id = f.id
-        WHERE d.orphaned_at IS NULL AND c.active
+        WHERE d.orphaned_at IS NULL AND c.active AND f.shows_person = FALSE
           AND (fd.figure_id IS NULL OR fd.model <> $1 OR fd.version <> $2)
           AND (fd.lease_expires_at IS NULL OR fd.lease_expires_at < NOW())
         ORDER BY f.created_at, f.id LIMIT $3
@@ -66,7 +66,7 @@ pub async fn claim(
             WHERE fd.model = $1 AND fd.version = $2 AND fd.described_at IS NULL
               AND fd.attempts < 5 AND fd.retry_at <= NOW()
               AND (fd.lease_expires_at IS NULL OR fd.lease_expires_at < NOW())
-              AND d.orphaned_at IS NULL AND c.active
+              AND d.orphaned_at IS NULL AND c.active AND f.shows_person = FALSE
             ORDER BY fd.retry_at, fd.created_at, fd.figure_id
             FOR UPDATE OF fd SKIP LOCKED LIMIT 1
         ), claimed AS (
@@ -121,6 +121,41 @@ pub async fn complete(
     }
     tx.commit().await?;
     Ok(updated)
+}
+
+/// The description model saw a person the CLIP screen missed. Drop the
+/// cached row (nothing naming them is kept), withhold the crop from search,
+/// and send its document's other crops back through the screen, where this
+/// crop now counts as an exemplar for its near-duplicates.
+pub async fn withhold_person(db: &PgPool, job: &DescriptionJob) -> Result<bool, sqlx::Error> {
+    let mut tx = db.begin().await?;
+    let deleted = sqlx::query!(
+        r#"DELETE FROM figure_descriptions
+           WHERE figure_id = $1 AND lease = $2 AND lease_expires_at > NOW()"#,
+        job.figure_id,
+        job.lease,
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        > 0;
+    if deleted {
+        sqlx::query!(
+            "UPDATE document_figures SET shows_person = TRUE, indexed_at = NULL WHERE id = $1",
+            job.figure_id,
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query!(
+            r#"UPDATE document_figures SET shows_person = NULL
+               WHERE document_id = $1 AND shows_person = FALSE"#,
+            job.document_id,
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(deleted)
 }
 
 pub async fn fail(db: &PgPool, job: &DescriptionJob, error: &str) -> Result<(), sqlx::Error> {

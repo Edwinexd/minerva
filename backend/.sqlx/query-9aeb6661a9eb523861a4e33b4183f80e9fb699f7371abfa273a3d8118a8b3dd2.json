@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH screened AS (\n            UPDATE document_figures f SET people_score = s.score, shows_person = s.person,\n                indexed_at = CASE WHEN s.person THEN NULL ELSE f.indexed_at END\n            FROM UNNEST($1::uuid[], $2::real[], $3::bool[]) AS s(id, score, person)\n            WHERE f.id = s.id AND f.shows_person IS NULL\n            RETURNING f.id, s.person\n        )\n        DELETE FROM figure_descriptions fd USING screened\n        WHERE fd.figure_id = screened.id AND screened.person\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Float4Array",
+        "BoolArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9aeb6661a9eb523861a4e33b4183f80e9fb699f7371abfa273a3d8118a8b3dd2"
+}

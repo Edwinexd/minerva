@@ -27,7 +27,9 @@ const PROMPT: &str = "Describe the attached figure crop for a university course 
     and the caption to a short sentence suitable as image alt text. Set is_decorative to true \
     for generic question marks, logos, ornaments or stock decoration without substantive \
     teaching content; a real diagram, chart, instructional screenshot or relevant photo is \
-    not decorative. Return only the requested JSON.";
+    not decorative. Set shows_person to true when a real person is a main subject: a webcam \
+    or video-call tile, a participant's name tile, a portrait or a photo of people; then do not \
+    name or describe them. Return only the requested JSON.";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -35,6 +37,7 @@ struct Description {
     description: String,
     caption: String,
     is_decorative: bool,
+    shows_person: bool,
 }
 
 fn parse_description(content: &str) -> Result<Description, String> {
@@ -42,6 +45,10 @@ fn parse_description(content: &str) -> Result<Description, String> {
         serde_json::from_str(content).map_err(|_| "Invalid figure description JSON".to_string())?;
     result.description = result.description.trim().to_string();
     result.caption = result.caption.trim().to_string();
+    // A person verdict is acted on without its text, which is never stored.
+    if result.shows_person {
+        return Ok(result);
+    }
     if result.description.is_empty()
         || result.description.len() > 4000
         || result.caption.is_empty()
@@ -70,8 +77,9 @@ fn request(model: &str, image: &[u8], context: &str) -> Value {
                 "properties": {
                     "description": {"type": "string"},
                     "caption": {"type": "string"},
-                    "is_decorative": {"type": "boolean"}
-                }, "required": ["description", "caption", "is_decorative"]}
+                    "is_decorative": {"type": "boolean"},
+                    "shows_person": {"type": "boolean"}
+                }, "required": ["description", "caption", "is_decorative", "shows_person"]}
         }}
     })
 }
@@ -181,6 +189,20 @@ async fn process(
     allow_standard_fallback: bool,
 ) -> Result<(), String> {
     match describe(state, http, util, job, allow_standard_fallback).await {
+        Ok(Some(description)) if description.shows_person => {
+            if queue::withhold_person(&state.db, job)
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                metrics::counter!("figure_descriptions_people_missed_by_screen_total").increment(1);
+                tracing::warn!(
+                    figure_id = %job.figure_id,
+                    document_id = %job.document_id,
+                    "description model reported a person the CLIP screen missed; \
+                     withheld from search and its document rescreened against it"
+                );
+            }
+        }
         Ok(Some(description)) => {
             if queue::complete(
                 &state.db,
@@ -440,11 +462,19 @@ mod tests {
     }
     #[test]
     fn validates_description_including_decorations() {
-        let d = parse_description(r#"{"description":" A question mark. ","caption":"Question mark","is_decorative":true}"#).unwrap();
+        let d = parse_description(r#"{"description":" A question mark. ","caption":"Question mark","is_decorative":true,"shows_person":false}"#).unwrap();
         assert!(d.is_decorative);
         assert_eq!(d.description, "A question mark.");
+        assert!(parse_description(
+            r#"{"description":"","caption":"x","is_decorative":false,"shows_person":false}"#
+        )
+        .is_err());
         assert!(
-            parse_description(r#"{"description":"","caption":"x","is_decorative":false}"#).is_err()
+            parse_description(
+                r#"{"description":"","caption":"","is_decorative":false,"shows_person":true}"#
+            )
+            .unwrap()
+            .shows_person
         );
         assert!(parse_description("refused").is_err());
         assert!(parse_description(r#"{"description":"x","caption":"x"}"#).is_err());

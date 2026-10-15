@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n            SELECT 1 FROM document_figures f\n            JOIN figure_descriptions fd ON fd.figure_id = f.id\n            WHERE f.course_id = $1 AND f.indexed_at IS NOT NULL\n              AND fd.described_at IS NOT NULL AND fd.is_decorative = FALSE\n              AND f.shows_person = FALSE\n        ) AS \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bf9f138d03c7e48019a740cd80f116a2c3e579ffff1547c80ab270ba2e28517c"
+}

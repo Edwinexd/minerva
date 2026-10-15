@@ -773,6 +773,14 @@ async fn seed_figures(
     let mut tx = state.db.begin().await?;
     queue::replace_layout_in(&mut tx, document_id, course_id, &pages, &figures).await?;
     tx.commit().await?;
+    // The fixtures are reviewed screenshots without people, so they skip
+    // the CLIP screen and local dev needs no CLIP model.
+    sqlx::query!(
+        "UPDATE document_figures SET shows_person = FALSE WHERE document_id = $1",
+        document_id,
+    )
+    .execute(&state.db)
+    .await?;
     let ids = sqlx::query_scalar!(
         "SELECT id FROM document_figures WHERE document_id = $1 ORDER BY page_position",
         document_id,

@@ -58,6 +58,9 @@ pub const RECENT_DAYS: i32 = 14;
 const REENQUEUE_PER_TICK: i64 = 5;
 /// Figures pushed to Qdrant per tick.
 const INDEX_PER_TICK: i64 = 200;
+/// Scoring is a few dot products per crop; this clears a full backfill of
+/// about seventy thousand crops in under half an hour.
+const SCREEN_PER_TICK: i64 = 3000;
 /// A submit that never got a Slurm job id, or a job sacct no longer knows,
 /// is written off after this.
 const SUBMIT_GRACE_SECS: i64 = 10 * 60;
@@ -173,6 +176,12 @@ pub async fn tick(state: &AppState) {
         if let Err(e) = reconcile_workers(state, slurm).await {
             tracing::error!("visual extraction: worker reconcile failed: {e}");
         }
+    }
+    if let Err(e) = screen_people(state).await {
+        tracing::error!("visual extraction: people screen failed: {e}");
+    }
+    if let Err(e) = remove_people_from_search(state).await {
+        tracing::error!("visual extraction: removing people from search failed: {e}");
     }
     if let Err(e) = index_pending_figures(state).await {
         tracing::error!("visual extraction: figure indexing failed: {e}");
@@ -372,6 +381,109 @@ async fn submit_worker(state: &AppState, slurm: &SlurmConfig) -> Result<(), Stri
     }
 }
 
+/// CLIP text vectors for the people screen's prompts, from the embedder.
+struct PromptVectors {
+    people: Vec<Vec<f32>>,
+    content: Vec<Vec<f32>>,
+}
+
+static PEOPLE_PROMPT_VECTORS: tokio::sync::OnceCell<PromptVectors> =
+    tokio::sync::OnceCell::const_new();
+
+/// Score unscreened crops for people before anything describes or indexes
+/// them, using their stored CLIP vectors: nothing leaves the cluster.
+async fn screen_people(state: &AppState) -> Result<(), String> {
+    use minerva_pipeline::figures::{
+        matches_exemplar, people_score, CONTENT_PROMPTS, PEOPLE_PROMPTS, PEOPLE_THRESHOLD,
+        VISUAL_QUERY_MODEL,
+    };
+    let pending = queue::list_unscreened_figures(&state.db, SCREEN_PER_TICK)
+        .await
+        .map_err(|e| e.to_string())?;
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let prompts = PEOPLE_PROMPT_VECTORS
+        .get_or_try_init(|| async {
+            let prompts: Vec<String> = PEOPLE_PROMPTS
+                .iter()
+                .chain(CONTENT_PROMPTS)
+                .map(|p| p.to_string())
+                .collect();
+            let mut vectors = state
+                .fastembed
+                .embed_query(VISUAL_QUERY_MODEL, prompts)
+                .await?;
+            let content = vectors.split_off(PEOPLE_PROMPTS.len());
+            Ok::<_, String>(PromptVectors {
+                people: vectors,
+                content,
+            })
+        })
+        .await?;
+    let exemplars = queue::person_exemplars(&state.db, PEOPLE_THRESHOLD)
+        .await
+        .map_err(|e| e.to_string())?;
+    let ids: Vec<Uuid> = pending.iter().map(|f| f.id).collect();
+    let scores: Vec<f32> = pending
+        .iter()
+        .map(|f| people_score(&f.visual_vector, &prompts.people, &prompts.content))
+        .collect();
+    let flags: Vec<bool> = pending
+        .iter()
+        .zip(&scores)
+        .map(|(f, &score)| {
+            score >= PEOPLE_THRESHOLD || matches_exemplar(&f.visual_vector, &exemplars)
+        })
+        .collect();
+    queue::record_screening(&state.db, &ids, &scores, &flags)
+        .await
+        .map_err(|e| e.to_string())?;
+    let flagged = flags.iter().filter(|&&f| f).count();
+    metrics::counter!("visual_extraction_figures_screened_total", "result" => "person")
+        .increment(flagged as u64);
+    metrics::counter!("visual_extraction_figures_screened_total", "result" => "content")
+        .increment((flags.len() - flagged) as u64);
+    Ok(())
+}
+
+/// Delete person crops' points from both collections, course by course.
+async fn remove_people_from_search(state: &AppState) -> Result<(), String> {
+    let pending = queue::list_people_to_remove(&state.db, SCREEN_PER_TICK)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut by_course: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for person in pending {
+        by_course
+            .entry(person.course_id)
+            .or_default()
+            .push(person.id);
+    }
+    for (course_id, ids) in by_course {
+        let Some(course) = queue::course_embedding(&state.db, course_id)
+            .await
+            .map_err(|e| e.to_string())?
+        else {
+            continue;
+        };
+        if let Err(e) = minerva_pipeline::figures::delete_figure_points(
+            &state.qdrant,
+            course_id,
+            course.embedding_version,
+            &ids,
+        )
+        .await
+        {
+            tracing::warn!("removing people from search for course {course_id} failed: {e}");
+            continue;
+        }
+        queue::mark_people_removed(&state.db, &ids)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Push figures whose vectors are not in Qdrant yet, course by course.
 async fn index_pending_figures(state: &AppState) -> Result<(), String> {
     let pending = queue::list_unindexed_figures(&state.db, INDEX_PER_TICK)
@@ -531,6 +643,7 @@ async fn record_metrics(state: &AppState) -> Result<(), sqlx::Error> {
         .set(state.config.visual_extraction.staging_min_free_bytes as f64);
     metrics::gauge!("visual_extraction_figures", "state" => "pending").set(figures.pending as f64);
     metrics::gauge!("visual_extraction_figures", "state" => "indexed").set(figures.indexed as f64);
+    metrics::gauge!("visual_extraction_figures", "state" => "people").set(figures.people as f64);
     metrics::gauge!("visual_extraction_oldest_pending_figure_seconds")
         .set(figures.oldest_pending_seconds.max(0.0));
     for outcome in ["succeeded", "failed", "stale"] {

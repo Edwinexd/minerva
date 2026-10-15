@@ -526,6 +526,7 @@ pub async fn download_metrics(db: &PgPool) -> Result<DownloadMetrics, sqlx::Erro
 pub struct FigureMetrics {
     pub pending: i64,
     pub indexed: i64,
+    pub people: i64,
     pub oldest_pending_seconds: f64,
 }
 
@@ -534,7 +535,8 @@ pub async fn figure_metrics(db: &PgPool) -> Result<FigureMetrics, sqlx::Error> {
         FigureMetrics,
         r#"
         SELECT COUNT(*) FILTER (WHERE indexed_at IS NULL) AS "pending!",
-               COUNT(*) FILTER (WHERE indexed_at IS NOT NULL) AS "indexed!",
+               COUNT(*) FILTER (WHERE indexed_at IS NOT NULL AND shows_person = FALSE) AS "indexed!",
+               COUNT(*) FILTER (WHERE indexed_at IS NOT NULL AND shows_person) AS "people!",
                COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(created_at) FILTER (WHERE indexed_at IS NULL)), 0)::FLOAT8 AS "oldest_pending_seconds!"
         FROM document_figures
         "#
@@ -748,6 +750,7 @@ pub async fn list_unindexed_figures(
         FROM document_figures f
         JOIN figure_descriptions fd ON fd.figure_id = f.id
         WHERE f.indexed_at IS NULL AND fd.described_at IS NOT NULL
+          AND f.shows_person = FALSE
         ORDER BY f.created_at
         LIMIT $1
         "#,
@@ -755,6 +758,113 @@ pub async fn list_unindexed_figures(
     )
     .fetch_all(db)
     .await
+}
+
+pub struct UnscreenedFigure {
+    pub id: Uuid,
+    pub visual_vector: Vec<f32>,
+}
+
+/// Crops the people screen has not scored yet, oldest first.
+pub async fn list_unscreened_figures(
+    db: &PgPool,
+    limit: i64,
+) -> Result<Vec<UnscreenedFigure>, sqlx::Error> {
+    sqlx::query_as!(
+        UnscreenedFigure,
+        r#"
+        SELECT id, visual_vector AS "visual_vector!: Vec<f32>"
+        FROM document_figures
+        WHERE shows_person IS NULL
+        ORDER BY created_at
+        LIMIT $1
+        "#,
+        limit,
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// CLIP vectors of crops the description model reported as people although
+/// the screen scored them below `threshold`: the screen's known misses.
+pub async fn person_exemplars(db: &PgPool, threshold: f32) -> Result<Vec<Vec<f32>>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT visual_vector AS "visual_vector!: Vec<f32>"
+        FROM document_figures
+        WHERE shows_person AND people_score < $1
+        ORDER BY created_at DESC
+        LIMIT 1000
+        "#,
+        threshold,
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// Store screen results. A crop found to show a person loses any cached
+/// description (which may name them) and is queued for removal from
+/// search; one the description model already flagged keeps its verdict.
+pub async fn record_screening(
+    db: &PgPool,
+    ids: &[Uuid],
+    scores: &[f32],
+    people: &[bool],
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"
+        WITH screened AS (
+            UPDATE document_figures f SET people_score = s.score, shows_person = s.person,
+                indexed_at = CASE WHEN s.person THEN NULL ELSE f.indexed_at END
+            FROM UNNEST($1::uuid[], $2::real[], $3::bool[]) AS s(id, score, person)
+            WHERE f.id = s.id AND f.shows_person IS NULL
+            RETURNING f.id, s.person
+        )
+        DELETE FROM figure_descriptions fd USING screened
+        WHERE fd.figure_id = screened.id AND screened.person
+        "#,
+        ids,
+        scores,
+        people,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+pub struct PersonToRemove {
+    pub id: Uuid,
+    pub course_id: Uuid,
+}
+
+/// Person crops whose removal from both Qdrant collections is not yet
+/// confirmed. They reuse `indexed_at` as "search is up to date".
+pub async fn list_people_to_remove(
+    db: &PgPool,
+    limit: i64,
+) -> Result<Vec<PersonToRemove>, sqlx::Error> {
+    sqlx::query_as!(
+        PersonToRemove,
+        r#"
+        SELECT id, course_id FROM document_figures
+        WHERE indexed_at IS NULL AND shows_person
+        ORDER BY created_at
+        LIMIT $1
+        "#,
+        limit,
+    )
+    .fetch_all(db)
+    .await
+}
+
+pub async fn mark_people_removed(db: &PgPool, ids: &[Uuid]) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE document_figures SET indexed_at = NOW() WHERE id = ANY($1) AND shows_person",
+        ids,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
 }
 
 pub async fn mark_figures_indexed(
@@ -767,7 +877,8 @@ pub async fn mark_figures_indexed(
            FROM UNNEST($1::uuid[], $2::timestamptz[]) AS expected(id, described_at),
                 figure_descriptions fd
            WHERE f.id = expected.id AND fd.figure_id = f.id
-             AND fd.described_at = expected.described_at"#,
+             AND fd.described_at = expected.described_at
+             AND f.shows_person = FALSE"#,
         ids,
         described_at,
     )
@@ -838,6 +949,7 @@ pub async fn find_chat_figures(
         WHERE f.id = ANY($2)
           AND f.course_id = $1
           AND fd.described_at IS NOT NULL AND fd.is_decorative = FALSE
+          AND f.shows_person = FALSE
           AND d.displayable
           AND d.orphaned_at IS NULL
           AND (
@@ -984,6 +1096,7 @@ pub async fn course_has_indexed_figures(db: &PgPool, course_id: Uuid) -> Result<
             JOIN figure_descriptions fd ON fd.figure_id = f.id
             WHERE f.course_id = $1 AND f.indexed_at IS NOT NULL
               AND fd.described_at IS NOT NULL AND fd.is_decorative = FALSE
+              AND f.shows_person = FALSE
         ) AS "exists!""#,
         course_id,
     )

@@ -33,7 +33,79 @@ pub const VISUAL_MODEL: &str = "Qdrant/clip-ViT-B-32-vision";
 pub const VISUAL_QUERY_MODEL: &str = "Qdrant/clip-ViT-B-32-text";
 pub const VISUAL_DIMENSIONS: u64 = 512;
 
-/// Remove decorative crops from both indexes, including legacy vectors.
+/// CLIP prompts for the people screen. Recorded lectures are full of
+/// webcam tiles and participant name tiles, which must never be described
+/// by an external model or shown to other students.
+pub const PEOPLE_PROMPTS: &[&str] = &[
+    "a person on a video call",
+    "a webcam video of a person",
+    "a photo of a person's face",
+    "a portrait photo of a man",
+    "a portrait photo of a woman",
+    "a participant name in white text on a black screen",
+    "a zoom meeting participant tile",
+];
+pub const CONTENT_PROMPTS: &[&str] = &[
+    "a diagram",
+    "a chart or graph",
+    "a slide with text and bullet points",
+    "a screenshot of code",
+    "a table of data",
+    "a mathematical formula",
+    "a flowchart",
+    "a screenshot of a software user interface",
+    "an illustration",
+    "a logo",
+];
+/// Measured against 464 crops labelled by their descriptions: 99% of
+/// people and name tiles flagged, one content crop wrongly flagged, and
+/// webcam tiles scoring down to 0.43.
+pub const PEOPLE_THRESHOLD: f32 = 0.4;
+/// Cosine at which a crop is a near-duplicate of one the description model
+/// reported as a person (the same tile later in a lecture). Measured on the
+/// same set: 88% of people crops have such a duplicate, and no content crop
+/// besides unlabelled name tiles reaches it.
+pub const PERSON_EXEMPLAR_SIMILARITY: f32 = 0.92;
+
+fn unit(v: &[f32]) -> Vec<f32> {
+    let norm = v
+        .iter()
+        .map(|x| x * x)
+        .sum::<f32>()
+        .sqrt()
+        .max(f32::EPSILON);
+    v.iter().map(|x| x / norm).collect()
+}
+
+fn dot(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+/// Zero-shot share of a crop that CLIP assigns to the people prompts, at
+/// CLIP's trained logit scale of 100. `people` and `content` are the text
+/// vectors of [`PEOPLE_PROMPTS`] and [`CONTENT_PROMPTS`].
+pub fn people_score(image: &[f32], people: &[Vec<f32>], content: &[Vec<f32>]) -> f32 {
+    let image = unit(image);
+    let logits: Vec<f32> = people
+        .iter()
+        .chain(content)
+        .map(|prompt| 100.0 * dot(&image, &unit(prompt)))
+        .collect();
+    let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let weights: Vec<f32> = logits.iter().map(|l| (l - max).exp()).collect();
+    weights[..people.len()].iter().sum::<f32>() / weights.iter().sum::<f32>()
+}
+
+/// Whether a crop is a near-duplicate of any reported person crop.
+pub fn matches_exemplar(image: &[f32], exemplars: &[Vec<f32>]) -> bool {
+    let image = unit(image);
+    exemplars
+        .iter()
+        .any(|e| dot(&image, &unit(e)) >= PERSON_EXEMPLAR_SIMILARITY)
+}
+
+/// Remove decorative and person crops from both indexes, including legacy
+/// vectors.
 pub async fn delete_figure_points(
     qdrant: &Qdrant,
     course_id: Uuid,
@@ -251,6 +323,24 @@ pub async fn index_figures(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn people_score_follows_the_closest_prompt_group() {
+        let people = vec![vec![1.0, 0.0, 0.0]];
+        let content = vec![vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0]];
+        assert!(people_score(&[2.0, 0.1, 0.0], &people, &content) > 0.99);
+        assert!(people_score(&[0.1, 3.0, 0.0], &people, &content) < 0.01);
+        let tied = people_score(&[1.0, 1.0, 0.0], &people, &content);
+        assert!((tied - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn exemplars_match_only_near_duplicates() {
+        let exemplars = vec![vec![1.0, 0.0]];
+        assert!(matches_exemplar(&[10.0, 1.0], &exemplars));
+        assert!(!matches_exemplar(&[1.0, 1.0], &exemplars));
+        assert!(!matches_exemplar(&[1.0, 0.0], &[]));
+    }
 
     struct Slide(f32);
     impl Timed for Slide {

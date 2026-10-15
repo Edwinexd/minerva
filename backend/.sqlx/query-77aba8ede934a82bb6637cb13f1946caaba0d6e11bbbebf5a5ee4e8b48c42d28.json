@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT visual_vector AS \"visual_vector!: Vec<f32>\"\n        FROM document_figures\n        WHERE shows_person AND people_score < $1\n        ORDER BY created_at DESC\n        LIMIT 1000\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "visual_vector!: Vec<f32>",
+        "type_info": "Float4Array",
+        "origin": {
+          "Table": {
+            "table": "document_figures",
+            "name": "visual_vector"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "77aba8ede934a82bb6637cb13f1946caaba0d6e11bbbebf5a5ee4e8b48c42d28"
+}

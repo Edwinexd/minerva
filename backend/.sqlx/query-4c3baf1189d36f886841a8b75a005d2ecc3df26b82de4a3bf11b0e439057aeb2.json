@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*) FILTER (WHERE indexed_at IS NULL) AS \"pending!\",\n               COUNT(*) FILTER (WHERE indexed_at IS NOT NULL AND shows_person = FALSE) AS \"indexed!\",\n               COUNT(*) FILTER (WHERE indexed_at IS NOT NULL AND shows_person) AS \"people!\",\n               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(created_at) FILTER (WHERE indexed_at IS NULL)), 0)::FLOAT8 AS \"oldest_pending_seconds!\"\n        FROM document_figures\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "indexed!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "people!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "oldest_pending_seconds!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "4c3baf1189d36f886841a8b75a005d2ecc3df26b82de4a3bf11b0e439057aeb2"
+}

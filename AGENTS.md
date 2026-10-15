@@ -507,7 +507,13 @@ and Olympus setup in `gpu/slide-ocr/README.md`.
   `figure_descriptions` cache and leases (16 concurrent calls per tick;
   sequential calls fell behind Olympus). Indexing waits on a description,
   so with no model selected new figures never reach search and nothing
-  logs an error. Select its vision model with the
+  logs an error. A CLIP **people screen** runs first, on the stored
+  vectors: webcam and call tiles, participant name tiles and portraits
+  (`shows_person`) are never sent to the vision model, never indexed, and
+  lose any cached description. A person the vision model reports anyway
+  logs a WARN and becomes a near-duplicate exemplar. Threshold and
+  prompts live in `minerva_pipeline::figures`; re-measure them before
+  changing either. Select its vision model with the
   Figure descriptions dot in the admin
   model catalog; it prefers an enabled/priced `@flex` catalog variant and never
   reruns Olympus for a description change. Decorative crops are excluded.

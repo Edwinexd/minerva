@@ -20,7 +20,7 @@ async fn fixture(db: &sqlx::PgPool) -> (Uuid, Uuid, Uuid) {
     sqlx::query("INSERT INTO documents (id,course_id,filename,mime_type,size_bytes,status,uploaded_by) VALUES ($1,$2,'slides.pdf','application/pdf',100,'ready',$3)")
         .bind(doc).bind(course).bind(user).execute(db).await.unwrap();
     for position in 0..2 {
-        sqlx::query("INSERT INTO document_figures (document_id,course_id,page_position,box,image_path,context,visual_model,visual_vector,indexed_at) VALUES ($1,$2,$3,ARRAY[0,0,1,1]::real[],'crop.jpg','Whole page text','clip',ARRAY[0.1,0.2]::real[],NOW())")
+        sqlx::query("INSERT INTO document_figures (document_id,course_id,page_position,box,image_path,context,visual_model,visual_vector,indexed_at,shows_person) VALUES ($1,$2,$3,ARRAY[0,0,1,1]::real[],'crop.jpg','Whole page text','clip',ARRAY[0.1,0.2]::real[],NOW(),FALSE)")
             .bind(doc).bind(course).bind(position).execute(db).await.unwrap();
     }
     (user, course, doc)
@@ -176,4 +176,71 @@ async fn flex_variant_prices_drive_owner_cost_without_discount_logic(db: sqlx::P
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].cost_usd, cost);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "requires an isolated PostgreSQL DATABASE_URL"]
+async fn people_are_never_described_or_searchable(db: sqlx::PgPool) {
+    let (_, course, _) = fixture(&db).await;
+    let ids: Vec<Uuid> =
+        sqlx::query_scalar("SELECT id FROM document_figures ORDER BY page_position")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+    queue::enqueue(&db, "vision", 1, 64).await.unwrap();
+    let job = queue::claim(&db, "vision", 1).await.unwrap().unwrap();
+    assert!(
+        queue::complete(&db, &job, "A webcam tile of a student", "Student", false)
+            .await
+            .unwrap()
+    );
+
+    // The model reports a person: the cached text goes, the crop leaves
+    // search, and its sibling is sent back through the screen.
+    let other = queue::claim(&db, "vision", 1).await.unwrap().unwrap();
+    sqlx::query("UPDATE document_figures SET people_score = 0.1 WHERE id = $1")
+        .bind(other.figure_id)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(queue::withhold_person(&db, &other).await.unwrap());
+    let cached: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM figure_descriptions WHERE figure_id = $1")
+            .bind(other.figure_id)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(cached, 0);
+    assert_eq!(figures::person_exemplars(&db, 0.4).await.unwrap().len(), 1);
+    let unscreened = figures::list_unscreened_figures(&db, 10).await.unwrap();
+    assert_eq!(unscreened.len(), 1);
+    assert_eq!(unscreened[0].id, job.figure_id);
+    let removals = figures::list_people_to_remove(&db, 10).await.unwrap();
+    assert_eq!(removals.len(), 1);
+    assert_eq!(removals[0].id, other.figure_id);
+
+    // Rescreened as a near-duplicate: its description is dropped too, and
+    // nothing about either crop is offered to chat or the describer again.
+    figures::record_screening(&db, &[job.figure_id], &[0.2], &[true])
+        .await
+        .unwrap();
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM figure_descriptions")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(remaining, 0);
+    figures::mark_people_removed(&db, &ids).await.unwrap();
+    assert!(figures::list_people_to_remove(&db, 10)
+        .await
+        .unwrap()
+        .is_empty());
+    queue::enqueue(&db, "vision", 1, 64).await.unwrap();
+    assert!(queue::claim(&db, "vision", 1).await.unwrap().is_none());
+    assert!(figures::find_chat_figures(&db, course, &ids, false)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(!figures::course_has_indexed_figures(&db, course)
+        .await
+        .unwrap());
 }

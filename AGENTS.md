@@ -504,7 +504,10 @@ and Olympus setup in `gpu/slide-ocr/README.md`.
 - **Figure search** runs two retrievals per chat turn (course text model
   over cached crop descriptions, CLIP over pixels), fused by rank. A
   separate scheduler loop describes crops after extraction, with its own
-  `figure_descriptions` cache and leases. Select its vision model with the
+  `figure_descriptions` cache and leases (16 concurrent calls per tick;
+  sequential calls fell behind Olympus). Indexing waits on a description,
+  so with no model selected new figures never reach search and nothing
+  logs an error. Select its vision model with the
   Figure descriptions dot in the admin
   model catalog; it prefers an enabled/priced `@flex` catalog variant and never
   reruns Olympus for a description change. Decorative crops are excluded.

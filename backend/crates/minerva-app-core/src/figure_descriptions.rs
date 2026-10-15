@@ -13,7 +13,10 @@ use crate::{
 };
 
 pub const VERSION: i32 = 1;
-const PER_TICK: usize = 16;
+/// Concurrent provider calls per tick. Sequential calls topped out near
+/// 960 crops an hour, below what Olympus extracts while lectures process.
+const CONCURRENCY: usize = 16;
+const PER_WORKER: usize = 8;
 const MAX_IMAGE_BYTES: u64 = 5 * 1024 * 1024;
 
 const PROMPT: &str = "Describe the attached figure crop for a university course assistant. \
@@ -142,47 +145,71 @@ pub async fn tick(state: &AppState) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     // Switching the processing tier changes cost, not image understanding;
     // it must not invalidate forty-six thousand cached descriptions.
-    queue::enqueue(&state.db, &api_model, VERSION)
-        .await
-        .map_err(|e| e.to_string())?;
-    for _ in 0..PER_TICK {
-        let Some(job) = queue::claim(&state.db, &api_model, VERSION)
-            .await
-            .map_err(|e| e.to_string())?
-        else {
-            break;
-        };
-        match describe(state, &http, &util, &job, allow_standard_fallback).await {
-            Ok(Some(description)) => {
-                if queue::complete(
-                    &state.db,
-                    &job,
-                    &description.description,
-                    &description.caption,
-                    description.is_decorative,
-                )
+    queue::enqueue(
+        &state.db,
+        &api_model,
+        VERSION,
+        (CONCURRENCY * PER_WORKER) as i64,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    // Each worker claims one crop at a time, so a slow Flex call holds up
+    // only its own worker; the claim's SKIP LOCKED keeps them disjoint.
+    let workers = (0..CONCURRENCY).map(|_| async {
+        for _ in 0..PER_WORKER {
+            let Some(job) = queue::claim(&state.db, &api_model, VERSION)
                 .await
                 .map_err(|e| e.to_string())?
-                {
-                    metrics::counter!("figure_descriptions_completed_total").increment(1);
-                }
+            else {
+                break;
+            };
+            process(state, &http, &util, &job, allow_standard_fallback).await?;
+        }
+        Ok::<(), String>(())
+    });
+    futures::future::join_all(workers)
+        .await
+        .into_iter()
+        .collect()
+}
+
+async fn process(
+    state: &AppState,
+    http: &reqwest::Client,
+    util: &UtilityModel,
+    job: &queue::DescriptionJob,
+    allow_standard_fallback: bool,
+) -> Result<(), String> {
+    match describe(state, http, util, job, allow_standard_fallback).await {
+        Ok(Some(description)) => {
+            if queue::complete(
+                &state.db,
+                job,
+                &description.description,
+                &description.caption,
+                description.is_decorative,
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            {
+                metrics::counter!("figure_descriptions_completed_total").increment(1);
             }
-            Ok(None) => queue::defer_for_budget(&state.db, &job)
+        }
+        Ok(None) => queue::defer_for_budget(&state.db, job)
+            .await
+            .map_err(|e| e.to_string())?,
+        Err(e) if e == "Provider temporarily unavailable" => {
+            queue::defer_for_capacity(&state.db, job)
                 .await
-                .map_err(|e| e.to_string())?,
-            Err(e) if e == "Provider temporarily unavailable" => {
-                queue::defer_for_capacity(&state.db, &job)
-                    .await
-                    .map_err(|e| e.to_string())?;
-            }
-            Err(e) => {
-                metrics::counter!("figure_descriptions_failures_total").increment(1);
-                // Never persist provider bodies which may echo the base64 crop.
-                tracing::warn!(figure_id = %job.figure_id, "figure description failed: {e}");
-                queue::fail(&state.db, &job, &e)
-                    .await
-                    .map_err(|e| e.to_string())?;
-            }
+                .map_err(|e| e.to_string())?;
+        }
+        Err(e) => {
+            metrics::counter!("figure_descriptions_failures_total").increment(1);
+            // Never persist provider bodies which may echo the base64 crop.
+            tracing::warn!(figure_id = %job.figure_id, "figure description failed: {e}");
+            queue::fail(&state.db, job, &e)
+                .await
+                .map_err(|e| e.to_string())?;
         }
     }
     Ok(())

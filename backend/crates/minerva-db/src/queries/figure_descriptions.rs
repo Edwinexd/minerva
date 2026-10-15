@@ -13,7 +13,12 @@ pub struct DescriptionJob {
 }
 
 /// Bounded backfill, also invalidating only this cache when model/version changes.
-pub async fn enqueue(db: &PgPool, model: &str, version: i32) -> Result<(), sqlx::Error> {
+pub async fn enqueue(
+    db: &PgPool,
+    model: &str,
+    version: i32,
+    limit: i64,
+) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"
         INSERT INTO figure_descriptions (figure_id, model, version)
@@ -24,7 +29,7 @@ pub async fn enqueue(db: &PgPool, model: &str, version: i32) -> Result<(), sqlx:
         WHERE d.orphaned_at IS NULL AND c.active
           AND (fd.figure_id IS NULL OR fd.model <> $1 OR fd.version <> $2)
           AND (fd.lease_expires_at IS NULL OR fd.lease_expires_at < NOW())
-        ORDER BY f.created_at, f.id LIMIT 64
+        ORDER BY f.created_at, f.id LIMIT $3
         ON CONFLICT (figure_id) DO UPDATE SET
             model = EXCLUDED.model, version = EXCLUDED.version,
             description = NULL, caption = NULL, is_decorative = NULL,
@@ -35,6 +40,7 @@ pub async fn enqueue(db: &PgPool, model: &str, version: i32) -> Result<(), sqlx:
         "#,
         model,
         version,
+        limit,
     )
     .execute(db)
     .await?;

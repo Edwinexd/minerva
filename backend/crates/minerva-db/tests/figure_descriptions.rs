@@ -30,7 +30,7 @@ async fn fixture(db: &sqlx::PgPool) -> (Uuid, Uuid, Uuid) {
 #[ignore = "requires an isolated PostgreSQL DATABASE_URL"]
 async fn descriptions_have_independent_leases_and_filter_decorations(db: sqlx::PgPool) {
     let (_, course, doc) = fixture(&db).await;
-    queue::enqueue(&db, "vision", 1).await.unwrap();
+    queue::enqueue(&db, "vision", 1, 64).await.unwrap();
     let a = queue::claim(&db, "vision", 1).await.unwrap().unwrap();
     let b = queue::claim(&db, "vision", 1).await.unwrap().unwrap();
     assert_ne!(a.figure_id, b.figure_id);
@@ -79,7 +79,7 @@ async fn descriptions_have_independent_leases_and_filter_decorations(db: sqlx::P
     let old_description_time = substantive.described_at;
     // Re-running enrichment leaves extraction intact; deleting the source
     // cascades through both crops and their cache/queue records.
-    queue::enqueue(&db, "new-vision", 2).await.unwrap();
+    queue::enqueue(&db, "new-vision", 2, 64).await.unwrap();
     assert!(queue::claim(&db, "vision", 1).await.unwrap().is_none());
     let first = queue::claim(&db, "new-vision", 2).await.unwrap().unwrap();
     let second = queue::claim(&db, "new-vision", 2).await.unwrap().unwrap();
@@ -125,7 +125,7 @@ async fn descriptions_have_independent_leases_and_filter_decorations(db: sqlx::P
 #[ignore = "requires an isolated PostgreSQL DATABASE_URL"]
 async fn capacity_and_spending_caps_defer_without_exhausting_retries(db: sqlx::PgPool) {
     fixture(&db).await;
-    queue::enqueue(&db, "vision", 1).await.unwrap();
+    queue::enqueue(&db, "vision", 1, 64).await.unwrap();
     let a = queue::claim(&db, "vision", 1).await.unwrap().unwrap();
     queue::defer_for_capacity(&db, &a).await.unwrap();
     let b = queue::claim(&db, "vision", 1).await.unwrap().unwrap();

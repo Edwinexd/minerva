@@ -343,7 +343,10 @@ Grafana's DB.
 
 `visual-extraction` shows jobs by kind and state, recent completion throughput,
 Slurm worker states and failures, internal download stages and deadline pressure,
-staging disk space, and the figure indexing backlog. The scheduler refreshes
+staging disk space, and the figure indexing backlog. That backlog counts
+only figures the pipeline will still move (live documents in active
+courses, plus people crops awaiting removal from search), so a replaced
+document's undescribed figures never age on it. The scheduler refreshes
 database aggregates once per pass, including zero-valued empty queues; its
 freshness panel distinguishes missing/stale samples from an empty queue.
 Throughput uses committed completion timestamps over the previous 15 minutes,

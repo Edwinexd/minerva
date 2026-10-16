@@ -85,6 +85,27 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
             .bind(documents[5]).bind(course).bind(indexed).execute(&db).await.unwrap();
     }
 
+    // Older figures the pipeline has dropped: one of a replaced document,
+    // never described, and one of an inactive course. Neither is pending.
+    let inactive = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO courses (id,name,owner_id,active) VALUES ($1,'metrics-inactive',$2,FALSE)",
+    )
+    .bind(inactive)
+    .bind(user)
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE documents SET orphaned_at=NOW() WHERE id=$1")
+        .bind(documents[6])
+        .execute(&db)
+        .await
+        .unwrap();
+    for (doc, figure_course) in [(documents[6], course), (documents[4], inactive)] {
+        sqlx::query("INSERT INTO document_figures (document_id,course_id,page_position,box,image_path,context,visual_model,visual_vector,created_at,shows_person) VALUES ($1,$2,0,ARRAY[0,0,1,1]::REAL[],'test.png','test','test',ARRAY[0]::REAL[],NOW()-INTERVAL '1 hour',FALSE)")
+            .bind(doc).bind(figure_course).execute(&db).await.unwrap();
+    }
+
     let downloads = queue::download_metrics(&db).await.unwrap();
     assert_eq!(
         (

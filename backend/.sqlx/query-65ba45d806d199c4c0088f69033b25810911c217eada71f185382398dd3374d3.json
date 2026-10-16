@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH figures AS (\n            SELECT f.indexed_at, f.shows_person, f.created_at,\n                   f.indexed_at IS NULL\n                       AND (f.shows_person IS TRUE OR (d.orphaned_at IS NULL AND c.active))\n                       AS pending\n            FROM document_figures f\n            JOIN documents d ON d.id = f.document_id\n            JOIN courses c ON c.id = f.course_id\n        )\n        SELECT COUNT(*) FILTER (WHERE pending) AS \"pending!\",\n               COUNT(*) FILTER (WHERE indexed_at IS NOT NULL AND shows_person = FALSE) AS \"indexed!\",\n               COUNT(*) FILTER (WHERE indexed_at IS NOT NULL AND shows_person) AS \"people!\",\n               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(created_at) FILTER (WHERE pending)), 0)::FLOAT8 AS \"oldest_pending_seconds!\"\n        FROM figures\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "indexed!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "people!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "oldest_pending_seconds!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "65ba45d806d199c4c0088f69033b25810911c217eada71f185382398dd3374d3"
+}

@@ -533,15 +533,28 @@ pub struct FigureMetrics {
     pub oldest_pending_seconds: f64,
 }
 
+/// Pending counts only figures the pipeline will still move: those of live
+/// documents in active courses, which description skips otherwise, and
+/// people crops awaiting removal from search, which runs regardless. A
+/// replaced document's undescribed figures would otherwise age forever.
 pub async fn figure_metrics(db: &PgPool) -> Result<FigureMetrics, sqlx::Error> {
     sqlx::query_as!(
         FigureMetrics,
         r#"
-        SELECT COUNT(*) FILTER (WHERE indexed_at IS NULL) AS "pending!",
+        WITH figures AS (
+            SELECT f.indexed_at, f.shows_person, f.created_at,
+                   f.indexed_at IS NULL
+                       AND (f.shows_person IS TRUE OR (d.orphaned_at IS NULL AND c.active))
+                       AS pending
+            FROM document_figures f
+            JOIN documents d ON d.id = f.document_id
+            JOIN courses c ON c.id = f.course_id
+        )
+        SELECT COUNT(*) FILTER (WHERE pending) AS "pending!",
                COUNT(*) FILTER (WHERE indexed_at IS NOT NULL AND shows_person = FALSE) AS "indexed!",
                COUNT(*) FILTER (WHERE indexed_at IS NOT NULL AND shows_person) AS "people!",
-               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(created_at) FILTER (WHERE indexed_at IS NULL)), 0)::FLOAT8 AS "oldest_pending_seconds!"
-        FROM document_figures
+               COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(created_at) FILTER (WHERE pending)), 0)::FLOAT8 AS "oldest_pending_seconds!"
+        FROM figures
         "#
     )
     .fetch_one(db)

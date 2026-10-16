@@ -86,6 +86,7 @@ struct FetchSlot {
     document_id: Uuid,
     course_id: Uuid,
     url: String,
+    not_ready_releases: i32,
 }
 
 /// Reserve up to `limit` lectures to fetch, as many as the disk holds while
@@ -133,6 +134,7 @@ async fn fetch_slots(
                 document_id: slot.document_id,
                 course_id: slot.course_id,
                 url,
+                not_ready_releases: slot.not_ready_releases,
             }),
             None => {
                 queue::release_fetch(&state.db, slot.job_id, "URL stub unreadable", false, false)

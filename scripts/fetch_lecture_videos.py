@@ -26,6 +26,11 @@ FETCH_RUN_SECONDS = 40 * 60
 REFILL_HEADER = "X-Minerva-Staging-Refill"
 # Minerva's codes for lectures that can never be staged.
 PERMANENT_REJECTIONS = {"visual_extraction.video_too_large"}
+# Not-ready releases (1h doubling, about 31 hours in all) before a lecture
+# whose video is ready but has no subtitles is staged without speech. Play
+# captions new recordings within hours; one still without them by then
+# most likely never gets any, and its slides are worth having anyway.
+CAPTION_WAIT_RELEASES = 5
 
 
 class OfferRejected(Exception):
@@ -39,8 +44,9 @@ def release(
     retry: bool,
     not_ready: bool = False,
 ) -> None:
-    # not_ready: Play has no transcript or video yet. Minerva then holds the
-    # lecture back for a wait that doubles each time.
+    # not_ready: Play has no video, or no transcript within the caption
+    # wait, yet. Minerva then holds the lecture back for a wait that doubles
+    # each time.
     session.post(
         f"{API}/jobs/{job_id}/release",
         json={"error": error, "retry": retry, "not_ready": not_ready},
@@ -59,20 +65,27 @@ def stage(
     cached = downloads.get(presentation_id)
     if cached and cached[1] - datetime.now(timezone.utc).timestamp() < 120:
         cached = None
+
+    def awaiting_captions(cues) -> bool:
+        # cues is None when Play has no subtitles, which may still be
+        # generating; after the wait the lecture goes ahead without speech.
+        waited = slot.get("not_ready_releases", 0) >= CAPTION_WAIT_RELEASES
+        if cues is not None or waited:
+            return False
+        release(
+            session,
+            job_id,
+            "transcript not generated yet",
+            retry=True,
+            not_ready=True,
+        )
+        return True
+
     if cached:
         candidates, expires_at, cues = cached
-    else:
-        try:
-            cues = client.get_transcript(presentation_id)
-        except TranscriptNotReadyError:
-            release(
-                session,
-                job_id,
-                "transcript not generated yet",
-                retry=True,
-                not_ready=True,
-            )
+        if awaiting_captions(cues):
             return
+    else:
         presentation = client.get_presentation(presentation_id)
         if not presentation.is_video_ready:
             release(
@@ -82,6 +95,15 @@ def stage(
                 retry=True,
                 not_ready=True,
             )
+            return
+        cues = None
+        if presentation.has_subtitles:
+            try:
+                cues = client.get_transcript(presentation_id)
+            except TranscriptNotReadyError:
+                pass
+        # Before describing, which sizes every source on Play.
+        if awaiting_captions(cues):
             return
         candidates, expires_at = describe_sources(presentation)
         # The same lecture can belong to several courses. Describe it once
@@ -97,7 +119,7 @@ def stage(
             "download_deadline": deadline.isoformat(),
             "cues": [
                 {"start": c.start_seconds, "end": c.end_seconds, "text": c.text}
-                for c in cues
+                for c in cues or []
             ],
         },
     )

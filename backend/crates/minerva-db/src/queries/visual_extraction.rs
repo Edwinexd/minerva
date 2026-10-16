@@ -27,6 +27,9 @@ pub struct FetchSlot {
     pub job_id: Uuid,
     pub document_id: Uuid,
     pub course_id: Uuid,
+    /// Consecutive not-ready releases, so Actions can stop waiting for a
+    /// transcript Play may never generate.
+    pub not_ready_releases: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -160,7 +163,7 @@ pub async fn reserve_fetch_slots(
             LIMIT $2
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id AS job_id, document_id, course_id
+        RETURNING id AS job_id, document_id, course_id, not_ready_releases
         "#,
         estimate_bytes,
         slots,

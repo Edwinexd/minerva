@@ -486,7 +486,10 @@ async fn not_ready_releases_back_off_exponentially(db: sqlx::PgPool) {
         if round > 0 {
             expire(waiting).await.unwrap();
             let slots = reserve().await.unwrap();
-            assert!(slots.iter().any(|s| s.job_id == waiting));
+            // Offered with its count, so Actions can stop waiting for a
+            // transcript.
+            let slot = slots.iter().find(|s| s.job_id == waiting).unwrap();
+            assert_eq!(slot.not_ready_releases, round);
             assert!(queue::release_fetch(&db, plain, "Play error", true, false)
                 .await
                 .unwrap());

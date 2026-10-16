@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE visual_extraction_jobs\n        SET status = 'fetching', fetch_reserved_at = NOW(), staged_bytes = $1,\n            error_msg = NULL, retry_after = NULL, updated_at = NOW()\n        WHERE id IN (\n            SELECT id FROM visual_extraction_jobs\n            WHERE status = 'needs_source'\n              AND (retry_after IS NULL OR retry_after <= NOW())\n              AND NOT (id = ANY($3))\n            ORDER BY priority DESC, created_at\n            LIMIT $2\n            FOR UPDATE SKIP LOCKED\n        )\n        RETURNING id AS job_id, document_id, course_id, not_ready_releases\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "document_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "document_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "course_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "course_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "not_ready_releases",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "visual_extraction_jobs",
+            "name": "not_ready_releases"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "189d186e118d8af8e2513bf843c02b9bf23dbf779e556cd8e529dcfd372d5a2f"
+}

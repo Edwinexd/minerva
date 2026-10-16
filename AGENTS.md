@@ -471,8 +471,12 @@ and Olympus setup in `gpu/slide-ocr/README.md`.
   each source to pick the slide track (skipped for single-source
   lectures), shrinks the reservation to the winner and downloads it into
   a bounded window on `/data0` in deadline order. A lecture Play cannot serve yet
-  (no transcript, no video) waits before it is offered again: 1 hour,
-  doubling per not-ready release up to 7 days. The scheduler's
+  (no video, or no transcript yet) waits before it is offered again: 1 hour,
+  doubling per not-ready release up to 7 days. A lecture whose video is
+  ready but still has no subtitles after 5 such releases (about 31 hours,
+  `CAPTION_WAIT_RELEASES`) is staged with no cues: slides and figures,
+  no speech. Its parent then counts as tracked, so captions Play adds
+  later are not picked up. The scheduler's
   `visual_extraction::tick` enqueues jobs, submits and monitors Slurm
   workers over SSH and indexes figures; workers pull one item at a time
   through presigned URLs and upload results to

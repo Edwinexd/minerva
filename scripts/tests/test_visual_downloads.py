@@ -126,7 +126,9 @@ def test_shared_presentations_are_described_once_per_batch():
 
     client = Mock()
     client.get_transcript.return_value = []
-    client.get_presentation.return_value = SimpleNamespace(is_video_ready=True)
+    client.get_presentation.return_value = SimpleNamespace(
+        is_video_ready=True, has_subtitles=True
+    )
     session = Mock()
     downloads = {}
     candidates = [{"source": "slides", "download_url": "https://example.invalid/v.mp4"}]
@@ -150,6 +152,103 @@ def test_shared_presentations_are_described_once_per_batch():
     assert (
         session.post.call_args_list[1].args[0].endswith("/jobs/second-course/download")
     )
+
+
+def stage_lecture(presentation, not_ready_releases=0):
+    import time
+    from unittest.mock import Mock
+
+    import fetch_lecture_videos as fetch
+
+    client = Mock()
+    client.get_presentation.return_value = presentation
+    client.get_transcript.return_value = [
+        SimpleNamespace(start_seconds=1.0, end_seconds=2.0, text="hello")
+    ]
+    session = Mock()
+    described = ([{"source": "slides"}], int(time.time()) + 3600)
+    slot = {
+        "job_id": "job",
+        "url": "https://play.dsv.su.se/presentation/p",
+        "not_ready_releases": not_ready_releases,
+    }
+    with (
+        patch.object(fetch, "describe_sources", return_value=described) as pick,
+        patch.object(fetch, "release") as release,
+    ):
+        fetch.stage(session, client, slot, {})
+    return client, session, pick, release
+
+
+def offered_cues(session):
+    (path,), kwargs = session.post.call_args
+    assert path.endswith("/jobs/job/download")
+    return kwargs["json"]["cues"]
+
+
+def test_missing_video_is_not_ready_before_any_transcript_call():
+    client, session, pick, release = stage_lecture(
+        SimpleNamespace(is_video_ready=False, has_subtitles=True)
+    )
+    release.assert_called_once_with(
+        session, "job", "presentation has no video track", retry=True, not_ready=True
+    )
+    client.get_transcript.assert_not_called()
+    pick.assert_not_called()
+
+
+def test_uncaptioned_lecture_waits_without_sizing_sources():
+    import fetch_lecture_videos as fetch
+
+    client, session, pick, release = stage_lecture(
+        SimpleNamespace(is_video_ready=True, has_subtitles=False),
+        not_ready_releases=fetch.CAPTION_WAIT_RELEASES - 1,
+    )
+    release.assert_called_once_with(
+        session, "job", "transcript not generated yet", retry=True, not_ready=True
+    )
+    client.get_transcript.assert_not_called()
+    pick.assert_not_called()
+    session.post.assert_not_called()
+
+
+def test_uncaptioned_lecture_is_staged_without_speech_after_the_wait():
+    import fetch_lecture_videos as fetch
+
+    client, session, pick, release = stage_lecture(
+        SimpleNamespace(is_video_ready=True, has_subtitles=False),
+        not_ready_releases=fetch.CAPTION_WAIT_RELEASES,
+    )
+    release.assert_not_called()
+    pick.assert_called_once()
+    assert offered_cues(session) == []
+
+
+def test_captioned_lecture_is_staged_with_its_cues():
+    client, session, pick, release = stage_lecture(
+        SimpleNamespace(is_video_ready=True, has_subtitles=True)
+    )
+    release.assert_not_called()
+    assert offered_cues(session) == [{"start": 1.0, "end": 2.0, "text": "hello"}]
+
+
+def test_cached_uncaptioned_lecture_still_waits_per_course():
+    import time
+    from unittest.mock import Mock
+
+    import fetch_lecture_videos as fetch
+
+    client = Mock()
+    session = Mock()
+    url = "https://play.dsv.su.se/presentation/p"
+    downloads = {"p": ([{"source": "slides"}], int(time.time()) + 3600, None)}
+    with patch.object(fetch, "release") as release:
+        fetch.stage(session, client, {"job_id": "fresh", "url": url}, downloads)
+    release.assert_called_once_with(
+        session, "fresh", "transcript not generated yet", retry=True, not_ready=True
+    )
+    client.get_presentation.assert_not_called()
+    session.post.assert_not_called()
 
 
 @pytest.mark.parametrize("refill,expected", [(True, 37), (False, 10)])

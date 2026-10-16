@@ -170,12 +170,21 @@ Flow and backpressure:
   queued, asking for more as the queue drains, until Minerva grants none
   with nothing in flight or its 40-minute authorization budget is
   exhausted, rather than imposing a URL count per run. Failed sources are excluded for the rest of that run. A
-  lecture Play cannot serve yet (transcript not generated, no video track)
+  lecture Play cannot serve yet (no video track, transcript not generated)
   is released with `not_ready` and held back by `retry_after`: 1 hour,
   doubling with each such release (`not_ready_releases`) up to 7 days,
-  and reset once Play serves it. New lectures usually get their transcript
-  within hours, so they are rechecked soon; old ones Play may never serve
-  settle at a weekly check instead of a Play round trip every run. A staged video is deleted as soon
+  and reset once Play serves it. Play reports a missing transcript the
+  same way whether captioning is still running or will never run (older
+  recordings, captioning off or failed), so the transcript wait is
+  bounded: fetch slots carry `not_ready_releases`, and once a lecture
+  with a ready video has been released 5 times for missing subtitles
+  (about 31 hours, `CAPTION_WAIT_RELEASES` in
+  `scripts/fetch_lecture_videos.py`) Actions offers it with no cues. It
+  then yields slides and figures without speech; captions Play adds
+  later are not picked up, since the slides document makes the parent
+  `tracked`. The video is checked before the transcript, and sources are
+  sized only for a lecture that will be offered. Lectures with no video
+  track keep the weekly check instead of a Play round trip every run. A staged video is deleted as soon
   as its result is accepted, so the window shrinks back as workers drain
   it; a backlog beyond that costs database rows, not disk.
 - **Download deadlines are database state.** `download_url`,

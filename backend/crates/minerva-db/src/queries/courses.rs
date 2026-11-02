@@ -879,14 +879,18 @@ pub struct MergeOutcome {
 ///     `pending` so the worker re-embeds them into the survivor's
 ///     Qdrant collection. URL parent stubs stay as they are.
 ///   * Members: union, keeping the higher role (teacher > ta > student).
-///   * usage_daily: summed per (user, day).
+///   * usage_daily: summed per (user, day, model), so spend stays priced at
+///     the model that served it.
 ///   * Course-scoped config carrying a uniqueness constraint
 ///     (play designations, canvas connections, role suggestions,
 ///     feature flags, relink queue, suggested questions): survivor wins;
 ///     non-colliding source rows move, the rest are dropped.
 ///   * Everything else with a plain course_id (conversations, api keys,
-///     signed urls, LTI links, KG caches, token usage, Daisy offerings):
-///     re-pointed at the survivor.
+///     signed urls, LTI links, KG caches, token usage, Daisy offerings,
+///     visual extraction jobs and figures): re-pointed at the survivor.
+///   * Moved figures lose `indexed_at`, so the indexing sweep rewrites their
+///     Qdrant points with the survivor's id and text model. Person crops
+///     are never indexed and keep theirs.
 pub async fn merge_courses(
     db: &PgPool,
     survivor_id: Uuid,
@@ -932,6 +936,21 @@ pub async fn merge_courses(
     .fetch_one(&mut *tx)
     .await?
     .unwrap_or(0);
+
+    // The source_url index ignores orphaned_at, so an already-orphaned
+    // source doc can collide too.
+    sqlx::query!(
+        r#"UPDATE documents s SET source_url = NULL
+           WHERE s.course_id = $1
+             AND s.orphaned_at IS NOT NULL
+             AND s.source_url IS NOT NULL
+             AND EXISTS (SELECT 1 FROM documents t
+                         WHERE t.course_id = $2 AND t.source_url = s.source_url)"#,
+        source_id,
+        survivor_id,
+    )
+    .execute(&mut *tx)
+    .await?;
 
     // Re-point every source document at the survivor.
     let moved_ids: Vec<Uuid> = sqlx::query_scalar!(
@@ -1007,15 +1026,15 @@ pub async fn merge_courses(
         .execute(&mut *tx)
         .await?;
 
-    // usage_daily: sum per (user, day) so spend caps stay accurate.
+    // usage_daily: sum per (user, day, model) so spend caps stay accurate.
     sqlx::query!(
         r#"INSERT INTO usage_daily
-               (user_id, course_id, date, prompt_tokens, completion_tokens,
+               (user_id, course_id, date, model, provider, prompt_tokens, completion_tokens,
                 embedding_tokens, research_prompt_tokens, research_completion_tokens, request_count)
-           SELECT user_id, $1, date, prompt_tokens, completion_tokens,
+           SELECT user_id, $1, date, model, provider, prompt_tokens, completion_tokens,
                   embedding_tokens, research_prompt_tokens, research_completion_tokens, request_count
            FROM usage_daily WHERE course_id = $2
-           ON CONFLICT (user_id, course_id, date) DO UPDATE SET
+           ON CONFLICT (user_id, course_id, date, model) DO UPDATE SET
                prompt_tokens = usage_daily.prompt_tokens + EXCLUDED.prompt_tokens,
                completion_tokens = usage_daily.completion_tokens + EXCLUDED.completion_tokens,
                embedding_tokens = usage_daily.embedding_tokens + EXCLUDED.embedding_tokens,
@@ -1187,6 +1206,23 @@ pub async fn merge_courses(
     .await?;
     sqlx::query!(
         "UPDATE course_token_usage SET course_id = $1 WHERE course_id = $2",
+        survivor_id,
+        source_id,
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        "UPDATE visual_extraction_jobs SET course_id = $1 WHERE course_id = $2",
+        survivor_id,
+        source_id,
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        r#"UPDATE document_figures
+           SET course_id = $1,
+               indexed_at = CASE WHEN shows_person THEN indexed_at END
+           WHERE course_id = $2"#,
         survivor_id,
         source_id,
     )

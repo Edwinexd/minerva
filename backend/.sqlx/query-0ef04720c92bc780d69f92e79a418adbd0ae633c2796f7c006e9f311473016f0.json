@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO role_rule_attribute_observations (attribute, value, user_id)\n           SELECT DISTINCT a.attribute, a.value, $3::UUID\n           FROM UNNEST($1::TEXT[], $2::TEXT[]) AS a(attribute, value)\n           ON CONFLICT (attribute, value, user_id) DO UPDATE SET last_seen = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0ef04720c92bc780d69f92e79a418adbd0ae633c2796f7c006e9f311473016f0"
+}

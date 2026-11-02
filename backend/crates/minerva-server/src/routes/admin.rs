@@ -125,11 +125,11 @@ struct MergeCoursesRequest {
     source_id: Uuid,
 }
 
-/// Relocate a source course's document bytes on disk into the
-/// survivor's directory. Documents live at
-/// `{docs_path}/{course_id}/{doc_id}.{ext}`, so a merge that re-points
-/// `course_id` in the DB must also move the files or the worker (which
-/// rebuilds the path from `course_id`) can't find them.
+/// Relocate a source course's files on disk into the survivor's directory.
+/// Documents live at `{docs_path}/{course_id}/{doc_id}.{ext}` and their
+/// slide frames and figure crops under `{course_id}/visual/{doc_id}/`, so a
+/// merge that re-points `course_id` in the DB must also move the whole tree
+/// or nothing can find them.
 ///
 /// We COPY (not move) so the bytes exist under both course-ids for the
 /// duration of the merge transaction: before commit the docs still read
@@ -142,37 +142,43 @@ async fn relocate_course_docs(
     source_id: Uuid,
     survivor_id: Uuid,
 ) -> Result<(), AppError> {
-    let src_dir = format!("{}/{}", docs_path, source_id);
-    let dst_dir = format!("{}/{}", docs_path, survivor_id);
-    let mut entries = match tokio::fs::read_dir(&src_dir).await {
-        Ok(rd) => rd,
-        // Source course never had any uploads; nothing to relocate.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => {
-            return Err(AppError::Internal(format!(
-                "merge: read source docs dir: {e}"
-            )))
-        }
-    };
-    tokio::fs::create_dir_all(&dst_dir)
-        .await
-        .map_err(|e| AppError::Internal(format!("merge: create survivor docs dir: {e}")))?;
-    while let Some(entry) = entries
-        .next_entry()
-        .await
-        .map_err(|e| AppError::Internal(format!("merge: iterate source docs: {e}")))?
-    {
-        let file_type = entry
-            .file_type()
+    let root = std::path::Path::new(docs_path);
+    let mut dirs = vec![(
+        root.join(source_id.to_string()),
+        root.join(survivor_id.to_string()),
+    )];
+    while let Some((src_dir, dst_dir)) = dirs.pop() {
+        let mut entries = match tokio::fs::read_dir(&src_dir).await {
+            Ok(rd) => rd,
+            // Source course never had any uploads; nothing to relocate.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return Err(AppError::Internal(format!(
+                    "merge: read source docs dir: {e}"
+                )))
+            }
+        };
+        tokio::fs::create_dir_all(&dst_dir)
             .await
-            .map_err(|e| AppError::Internal(format!("merge: stat source doc: {e}")))?;
-        if !file_type.is_file() {
-            continue;
-        }
-        let dst = std::path::Path::new(&dst_dir).join(entry.file_name());
-        tokio::fs::copy(entry.path(), &dst)
+            .map_err(|e| AppError::Internal(format!("merge: create survivor docs dir: {e}")))?;
+        while let Some(entry) = entries
+            .next_entry()
             .await
-            .map_err(|e| AppError::Internal(format!("merge: copy doc file: {e}")))?;
+            .map_err(|e| AppError::Internal(format!("merge: iterate source docs: {e}")))?
+        {
+            let file_type = entry
+                .file_type()
+                .await
+                .map_err(|e| AppError::Internal(format!("merge: stat source doc: {e}")))?;
+            let dst = dst_dir.join(entry.file_name());
+            if file_type.is_dir() {
+                dirs.push((entry.path(), dst));
+            } else if file_type.is_file() {
+                tokio::fs::copy(entry.path(), &dst)
+                    .await
+                    .map_err(|e| AppError::Internal(format!("merge: copy doc file: {e}")))?;
+            }
+        }
     }
     Ok(())
 }
@@ -420,6 +426,46 @@ async fn merge_suggestions(
     });
 
     Ok(Json(out))
+}
+
+#[cfg(test)]
+mod relocate_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn relocation_carries_visual_assets_with_the_documents() {
+        let root = tempfile::tempdir().unwrap();
+        let docs_path = root.path().to_str().unwrap();
+        let (source, survivor, document) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let assets = root.path().join(format!("{source}/visual/{document}"));
+        std::fs::create_dir_all(&assets).unwrap();
+        std::fs::write(root.path().join(format!("{source}/{document}.pdf")), b"pdf").unwrap();
+        std::fs::write(assets.join("figure-0.png"), b"png").unwrap();
+
+        relocate_course_docs(docs_path, source, survivor)
+            .await
+            .unwrap();
+
+        let target = root.path().join(survivor.to_string());
+        assert_eq!(
+            std::fs::read(target.join(format!("{document}.pdf"))).unwrap(),
+            b"pdf"
+        );
+        assert_eq!(
+            std::fs::read(target.join(format!("visual/{document}/figure-0.png"))).unwrap(),
+            b"png"
+        );
+    }
+
+    #[tokio::test]
+    async fn relocation_without_a_source_dir_is_a_no_op() {
+        let root = tempfile::tempdir().unwrap();
+        let (source, survivor) = (Uuid::new_v4(), Uuid::new_v4());
+        relocate_course_docs(root.path().to_str().unwrap(), source, survivor)
+            .await
+            .unwrap();
+        assert!(!root.path().join(survivor.to_string()).exists());
+    }
 }
 
 #[cfg(test)]

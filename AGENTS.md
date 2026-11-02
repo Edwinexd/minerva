@@ -29,6 +29,16 @@ git add .sqlx/
 Pre-commit runs `cargo check`/`clippy` with `SQLX_OFFLINE=true`, so forgetting
 this step fails locally before the commit lands.
 
+`query!` catches missing tables and columns, but it only PREPAREs, and
+Postgres matches `ON CONFLICT` targets in the planner. Re-keying a table
+therefore compiles while every statement still naming the old key fails at
+runtime with `42P10`. `crates/minerva-db/tests/query_plans.rs` plans every
+cached query with `EXPLAIN (GENERIC_PLAN)` to catch that class, and the other
+`#[ignore]`d tests there run real statements. CI's `Test against Postgres`
+step runs them all; locally, run that step's command with `DATABASE_URL` set.
+Neither sees errors that depend on the rows: an `ON CONFLICT DO UPDATE` batch
+must not repeat a key, so dedupe in the `SELECT`.
+
 ### Per-branch dev databases
 
 A migration on branch A used to leave branch B's `minerva` DB half-applied

@@ -17,7 +17,8 @@ pub async fn list_all(db: &PgPool) -> Result<Vec<PlayCourseCatalogRow>, sqlx::Er
 }
 
 /// Upsert a batch of (code, name) pairs. Existing entries are updated,
-/// new ones are inserted. Returns the number of rows touched.
+/// new ones are inserted. A code repeated in the batch keeps one of its
+/// names. Returns the number of rows touched.
 pub async fn upsert_many(db: &PgPool, entries: &[(String, String)]) -> Result<u64, sqlx::Error> {
     if entries.is_empty() {
         return Ok(0);
@@ -26,7 +27,8 @@ pub async fn upsert_many(db: &PgPool, entries: &[(String, String)]) -> Result<u6
     let names: Vec<&str> = entries.iter().map(|(_, n)| n.as_str()).collect();
     let result = sqlx::query!(
         r#"INSERT INTO play_course_catalog (code, name)
-        SELECT * FROM UNNEST($1::text[], $2::text[])
+        SELECT DISTINCT ON (e.code) e.code, e.name
+        FROM UNNEST($1::text[], $2::text[]) AS e(code, name)
         ON CONFLICT (code) DO UPDATE
             SET name = EXCLUDED.name,
                 updated_at = NOW()"#,

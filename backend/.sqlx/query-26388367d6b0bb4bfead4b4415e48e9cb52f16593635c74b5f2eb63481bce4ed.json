@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents s SET source_url = NULL\n           WHERE s.course_id = $1\n             AND s.orphaned_at IS NOT NULL\n             AND s.source_url IS NOT NULL\n             AND EXISTS (SELECT 1 FROM documents t\n                         WHERE t.course_id = $2 AND t.source_url = s.source_url)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "26388367d6b0bb4bfead4b4415e48e9cb52f16593635c74b5f2eb63481bce4ed"
+}

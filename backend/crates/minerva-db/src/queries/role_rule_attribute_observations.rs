@@ -43,7 +43,7 @@ pub async fn observe_for_user(
     let values: Vec<String> = pairs.iter().map(|(_, v)| v.clone()).collect();
     sqlx::query!(
         r#"INSERT INTO role_rule_attribute_observations (attribute, value, user_id)
-           SELECT a.attribute, a.value, $3
+           SELECT DISTINCT a.attribute, a.value, $3::UUID
            FROM UNNEST($1::TEXT[], $2::TEXT[]) AS a(attribute, value)
            ON CONFLICT (attribute, value, user_id) DO UPDATE SET last_seen = NOW()"#,
         &attributes,

@@ -18,6 +18,21 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # Same major version as prod. Each sqlx::test gets its own database.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: minerva
+          POSTGRES_PASSWORD: minerva
+          POSTGRES_DB: minerva
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U minerva"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
 
@@ -47,6 +62,14 @@ jobs:
       # microservices split (crates/minerva-rpc/tests/grpc_roundtrip.rs).
       - name: Test
         run: cargo test --workspace
+
+      # Executes SQL against the migrated schema. The sqlx macros only
+      # PREPARE, which never reaches the planner, so a statement that fails
+      # there (an ON CONFLICT target with no matching index) compiles fine.
+      - name: Test against Postgres
+        run: cargo test -p minerva-db -- --ignored
+        env:
+          DATABASE_URL: postgres://minerva:minerva@localhost:5432/minerva
 
       # Handed to `frontend-a11y`, which needs a real backend to render the
       # authenticated pages. Reusing this build keeps that job on Node only.

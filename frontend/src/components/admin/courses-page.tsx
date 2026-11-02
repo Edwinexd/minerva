@@ -878,8 +878,11 @@ function SuggestedMergesCard() {
         <CardDescription>{t("courses.suggestions.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {groups.map((group, i) => (
-          <SuggestedMergeGroup key={i} group={group} />
+        {groups.map((group) => (
+          <SuggestedMergeGroup
+            key={`${group.semester_label ?? ""}|${group.code}`}
+            group={group}
+          />
         ))}
       </CardContent>
     </Card>
@@ -894,7 +897,11 @@ function SuggestedMergeGroup({ group }: { group: MergeSuggestionGroup }) {
   // otherwise the first listed course.
   const defaultSurvivor =
     group.courses.find((c) => c.auto_managed)?.id ?? group.courses[0].id
-  const [survivorId, setSurvivorId] = useState(defaultSurvivor)
+  const [pickedSurvivorId, setSurvivorId] = useState(defaultSurvivor)
+  // A pick that left the group must never receive a merge.
+  const survivorId = group.courses.some((c) => c.id === pickedSurvivorId)
+    ? pickedSurvivorId
+    : defaultSurvivor
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const mergeMutation = useMutation({

@@ -10,7 +10,7 @@
 //!
 //! Both spend axes the cap enforces are reported: student chat
 //! (`usage_daily`) and pipeline / classification work
-//! (`course_token_usage`). Cost is derived on read from tokens x each
+//! (`workspace_token_usage`). Cost is derived on read from tokens x each
 //! model's current rate, identical to `usage::get_owner_daily_cost`, so
 //! the figure a teacher reads is the figure the cap tests.
 
@@ -200,8 +200,11 @@ async fn owner_usage(
     user: &User,
     days: i32,
 ) -> Result<OwnerUsageResponse, AppError> {
-    let owned = minerva_db::queries::courses::list_by_owner(&state.db, user.id).await?;
-    let student_counts = minerva_db::queries::courses::count_students_by_course(&state.db).await?;
+    let owned = minerva_db::queries::workspaces::list_by_owner(&state.db, user.id).await?;
+    let owned_ids: Vec<Uuid> = owned.iter().map(|c| c.id).collect();
+    let mut course_facts = minerva_db::queries::courses::find_many(&state.db, &owned_ids).await?;
+    let student_counts =
+        minerva_db::queries::workspaces::count_students_by_course(&state.db).await?;
     let chat_rows =
         minerva_db::queries::usage::get_owner_chat_usage(&state.db, user.id, days).await?;
     let pipeline_rows =
@@ -223,12 +226,13 @@ async fn owner_usage(
         .into_iter()
         .map(|c| {
             let student_count = student_counts.get(&c.id).copied().unwrap_or(0);
+            let course = course_facts.remove(&c.id);
             (
                 c.id,
                 CourseAgg {
                     name: c.name,
-                    course_code: c.course_code,
-                    semester_label: c.semester_label,
+                    course_code: course.as_ref().and_then(|f| f.course_code.clone()),
+                    semester_label: course.and_then(|f| f.semester_label),
                     active: c.active,
                     model: Some(c.model),
                     student_daily_cost_limit_usd: c.daily_cost_limit_usd,
@@ -243,13 +247,15 @@ async fn owner_usage(
     let mut daily: BTreeMap<chrono::NaiveDate, DailyAgg> = BTreeMap::new();
 
     for row in chat_rows {
-        let course = courses.entry(row.course_id).or_insert_with(|| CourseAgg {
-            name: row.course_name.clone(),
-            course_code: row.course_code.clone(),
-            semester_label: row.course_semester_label.clone(),
-            active: row.course_active,
-            ..Default::default()
-        });
+        let course = courses
+            .entry(row.workspace_id)
+            .or_insert_with(|| CourseAgg {
+                name: row.course_name.clone(),
+                course_code: row.course_code.clone(),
+                semester_label: row.course_semester_label.clone(),
+                active: row.course_active,
+                ..Default::default()
+            });
         course.chat_spend += row.cost_usd;
         course.requests += row.request_count;
         course.prompt_tokens += row.prompt_tokens;
@@ -269,13 +275,15 @@ async fn owner_usage(
     }
 
     for row in pipeline_rows {
-        let course = courses.entry(row.course_id).or_insert_with(|| CourseAgg {
-            name: row.course_name.clone(),
-            course_code: row.course_code.clone(),
-            semester_label: row.course_semester_label.clone(),
-            active: row.course_active,
-            ..Default::default()
-        });
+        let course = courses
+            .entry(row.workspace_id)
+            .or_insert_with(|| CourseAgg {
+                name: row.course_name.clone(),
+                course_code: row.course_code.clone(),
+                semester_label: row.course_semester_label.clone(),
+                active: row.course_active,
+                ..Default::default()
+            });
         course.pipeline_spend += row.cost_usd;
         course.prompt_tokens += row.prompt_tokens;
         course.completion_tokens += row.completion_tokens;
@@ -293,7 +301,7 @@ async fn owner_usage(
 
     let active_by_course: HashMap<Uuid, i64> = active_students
         .into_iter()
-        .map(|r| (r.course_id, r.active_students))
+        .map(|r| (r.workspace_id, r.active_students))
         .collect();
 
     let mut course_rows: Vec<OwnerCourseUsage> = courses

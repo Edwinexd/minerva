@@ -45,7 +45,7 @@ async fn downloads_follow_deadlines_and_reject_stale_claims(db: sqlx::PgPool) {
         .execute(&db)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO courses (id,name,owner_id) VALUES ($1,'download-test',$2)")
+    sqlx::query("INSERT INTO workspaces (id,name,owner_id) VALUES ($1,'download-test',$2)")
         .bind(course)
         .bind(user)
         .execute(&db)
@@ -55,9 +55,9 @@ async fn downloads_follow_deadlines_and_reject_stale_claims(db: sqlx::PgPool) {
     for _ in 0..3 {
         let doc = Uuid::new_v4();
         let job = Uuid::new_v4();
-        sqlx::query("INSERT INTO documents (id,course_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.url','text/x-url',0,$3)")
+        sqlx::query("INSERT INTO documents (id,workspace_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.url','text/x-url',0,$3)")
             .bind(doc).bind(course).bind(user).execute(&db).await.unwrap();
-        sqlx::query("INSERT INTO visual_extraction_jobs (id,document_id,course_id,kind,status,pipeline_version,fetch_reserved_at,staged_bytes) VALUES ($1,$2,$3,'play_lecture','fetching',1,NOW(),1073741824)")
+        sqlx::query("INSERT INTO visual_extraction_jobs (id,document_id,workspace_id,kind,status,pipeline_version,fetch_reserved_at,staged_bytes) VALUES ($1,$2,$3,'play_lecture','fetching',1,NOW(),1073741824)")
             .bind(job).bind(doc).bind(course).execute(&db).await.unwrap();
         jobs.push(job);
     }
@@ -181,7 +181,7 @@ async fn downloads_follow_deadlines_and_reject_stale_claims(db: sqlx::PgPool) {
         queue::find_job(&db, jobs[2]).await.unwrap().unwrap().status,
         "needs_source"
     );
-    sqlx::query("DELETE FROM courses WHERE id=$1")
+    sqlx::query("DELETE FROM workspaces WHERE id=$1")
         .bind(course)
         .execute(&db)
         .await
@@ -205,7 +205,7 @@ async fn sized_reservations_refill_space_and_exclude_failed_sources(db: sqlx::Pg
         .execute(&db)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO courses (id,name,owner_id) VALUES ($1,'sizing-test',$2)")
+    sqlx::query("INSERT INTO workspaces (id,name,owner_id) VALUES ($1,'sizing-test',$2)")
         .bind(course)
         .bind(user)
         .execute(&db)
@@ -213,9 +213,9 @@ async fn sized_reservations_refill_space_and_exclude_failed_sources(db: sqlx::Pg
         .unwrap();
     for _ in 0..12 {
         let doc = Uuid::new_v4();
-        sqlx::query("INSERT INTO documents (id,course_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.url','text/x-url',0,$3)")
+        sqlx::query("INSERT INTO documents (id,workspace_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.url','text/x-url',0,$3)")
             .bind(doc).bind(course).bind(user).execute(&db).await.unwrap();
-        sqlx::query("INSERT INTO visual_extraction_jobs (id,document_id,course_id,kind,status,pipeline_version) VALUES ($1,$2,$3,'play_lecture','needs_source',1)")
+        sqlx::query("INSERT INTO visual_extraction_jobs (id,document_id,workspace_id,kind,status,pipeline_version) VALUES ($1,$2,$3,'play_lecture','needs_source',1)")
             .bind(Uuid::new_v4()).bind(doc).bind(course).execute(&db).await.unwrap();
     }
     // Thirteen GiB free, ten GiB guard: only three unknown videos fit.
@@ -296,7 +296,7 @@ async fn probed_candidates_shrink_to_the_chosen_source(db: sqlx::PgPool) {
         .execute(&db)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO courses (id,name,owner_id) VALUES ($1,'probe-test',$2)")
+    sqlx::query("INSERT INTO workspaces (id,name,owner_id) VALUES ($1,'probe-test',$2)")
         .bind(course)
         .bind(user)
         .execute(&db)
@@ -306,9 +306,9 @@ async fn probed_candidates_shrink_to_the_chosen_source(db: sqlx::PgPool) {
     for _ in 0..2 {
         let doc = Uuid::new_v4();
         let job = Uuid::new_v4();
-        sqlx::query("INSERT INTO documents (id,course_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.url','text/x-url',0,$3)")
+        sqlx::query("INSERT INTO documents (id,workspace_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.url','text/x-url',0,$3)")
             .bind(doc).bind(course).bind(user).execute(&db).await.unwrap();
-        sqlx::query("INSERT INTO visual_extraction_jobs (id,document_id,course_id,kind,status,pipeline_version,fetch_reserved_at,staged_bytes) VALUES ($1,$2,$3,'play_lecture','fetching',1,NOW(),$4)")
+        sqlx::query("INSERT INTO visual_extraction_jobs (id,document_id,workspace_id,kind,status,pipeline_version,fetch_reserved_at,staged_bytes) VALUES ($1,$2,$3,'play_lecture','fetching',1,NOW(),$4)")
             .bind(job).bind(doc).bind(course).bind(GIB).execute(&db).await.unwrap();
         jobs.push(job);
     }
@@ -423,7 +423,7 @@ async fn probed_candidates_shrink_to_the_chosen_source(db: sqlx::PgPool) {
     .await
     .unwrap();
     assert_eq!(leftover, (None, None));
-    sqlx::query("DELETE FROM courses WHERE id=$1")
+    sqlx::query("DELETE FROM workspaces WHERE id=$1")
         .bind(course)
         .execute(&db)
         .await
@@ -447,7 +447,7 @@ async fn not_ready_releases_back_off_exponentially(db: sqlx::PgPool) {
         .execute(&db)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO courses (id,name,owner_id) VALUES ($1,'backoff-test',$2)")
+    sqlx::query("INSERT INTO workspaces (id,name,owner_id) VALUES ($1,'backoff-test',$2)")
         .bind(course)
         .bind(user)
         .execute(&db)
@@ -455,9 +455,9 @@ async fn not_ready_releases_back_off_exponentially(db: sqlx::PgPool) {
         .unwrap();
     for _ in 0..2 {
         let doc = Uuid::new_v4();
-        sqlx::query("INSERT INTO documents (id,course_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.url','text/x-url',0,$3)")
+        sqlx::query("INSERT INTO documents (id,workspace_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.url','text/x-url',0,$3)")
             .bind(doc).bind(course).bind(user).execute(&db).await.unwrap();
-        sqlx::query("INSERT INTO visual_extraction_jobs (id,document_id,course_id,kind,status,pipeline_version) VALUES ($1,$2,$3,'play_lecture','needs_source',1)")
+        sqlx::query("INSERT INTO visual_extraction_jobs (id,document_id,workspace_id,kind,status,pipeline_version) VALUES ($1,$2,$3,'play_lecture','needs_source',1)")
             .bind(Uuid::new_v4()).bind(doc).bind(course).execute(&db).await.unwrap();
     }
     let reserve = || queue::reserve_fetch_slots(&db, i64::MAX, 0, GIB, 10, &[]);

@@ -292,7 +292,7 @@ fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: A
                 // pipeline doesn't burn a Cerebras call AND doesn't
                 // emit a kind into Qdrant. The mark_dirty for the
                 // relink sweeper is also skipped further down.
-                let kg_on = feature_flags::course_kg_enabled(&db, doc.course_id).await;
+                let kg_on = feature_flags::course_kg_enabled(&db, doc.workspace_id).await;
                 let classifier = if kg_on {
                     Arc::clone(&kg_classifier)
                 } else {
@@ -301,7 +301,7 @@ fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: A
                 let openai_api_key = state.config.openai_api_key.clone();
                 let docs_path = state.config.docs_path.clone();
                 let doc_id = doc.id;
-                let course_id_for_relink = doc.course_id;
+                let course_id_for_relink = doc.workspace_id;
                 let scheduler = state.relink_scheduler.clone();
 
                 // Inner task does the work. Outer task awaits its JoinHandle
@@ -313,12 +313,14 @@ fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: A
 
                     // Look up course to get embedding config.
                     let course =
-                        match minerva_db::queries::courses::find_by_id(&db, doc.course_id).await {
+                        match minerva_db::queries::workspaces::find_by_id(&db, doc.workspace_id)
+                            .await
+                        {
                             Ok(Some(c)) => c,
                             Ok(None) => {
                                 tracing::error!(
                                     "worker: course {} not found for doc {}",
-                                    doc.course_id,
+                                    doc.workspace_id,
                                     doc.id
                                 );
                                 set_failed(&db, doc.id, "course not found").await;
@@ -342,7 +344,7 @@ fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: A
                     // else is parked as `unsupported`.
                     if ext == "url" {
                         let file_path =
-                            format!("{}/{}/{}.{}", docs_path, doc.course_id, doc.id, ext);
+                            format!("{}/{}/{}.{}", docs_path, doc.workspace_id, doc.id, ext);
                         let raw_url = tokio::fs::read_to_string(&file_path)
                             .await
                             .unwrap_or_default();
@@ -426,7 +428,8 @@ fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: A
                         return;
                     }
 
-                    let file_path = format!("{}/{}/{}.{}", docs_path, doc.course_id, doc.id, ext);
+                    let file_path =
+                        format!("{}/{}/{}.{}", docs_path, doc.workspace_id, doc.id, ext);
                     let path = std::path::Path::new(&file_path);
                     let client = reqwest::Client::new();
 
@@ -463,7 +466,7 @@ fn spawn_main_claim_loop(state: AppState, semaphore: Arc<Semaphore>, shutdown: A
                         &fastembed,
                         &classifier,
                         doc.id,
-                        doc.course_id,
+                        doc.workspace_id,
                         path,
                         &doc.filename,
                         &doc.mime_type,
@@ -654,7 +657,7 @@ async fn download_github_pdf(
             .await?;
 
     let child_id = uuid::Uuid::new_v4();
-    let dir = format!("{}/{}", docs_path, parent.course_id);
+    let dir = format!("{}/{}", docs_path, parent.workspace_id);
     let pdf_path = format!("{}/{}.pdf", dir, child_id);
     tokio::fs::write(&pdf_path, &buf)
         .await
@@ -670,7 +673,7 @@ async fn download_github_pdf(
         "processing",
         minerva_db::queries::documents::NewDocument {
             id: child_id,
-            course_id: parent.course_id,
+            workspace_id: parent.workspace_id,
             filename: &child_filename,
             mime_type: "application/pdf",
             size_bytes,

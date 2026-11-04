@@ -34,7 +34,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::llm::{util_request, RagChunk};
-use minerva_db::queries::course_token_usage::CATEGORY_ADVERSARIAL_FILTER;
+use minerva_db::queries::workspace_token_usage::CATEGORY_ADVERSARIAL_FILTER;
 
 /// Atomic counters bumped by every filter invocation. Surfaced via a
 /// dedicated read API so the admin/telemetry dashboard can show how

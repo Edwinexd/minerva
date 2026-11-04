@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT workspace_id,\n            SUM(prompt_tokens)::bigint as total_prompt_tokens,\n            SUM(completion_tokens)::bigint as total_completion_tokens,\n            SUM(embedding_tokens)::bigint as total_embedding_tokens,\n            SUM(request_count)::bigint as total_requests\n        FROM usage_daily WHERE workspace_id = $1 GROUP BY workspace_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "workspace_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "usage_daily",
+            "name": "workspace_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "total_prompt_tokens",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_completion_tokens",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "total_embedding_tokens",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "total_requests",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "741e5fe4064027372235af59f7997d3655762a5ffb6bfc44613ffffbf1c9dd2a"
+}

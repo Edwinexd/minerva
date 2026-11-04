@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE feature_flags f SET workspace_id = $1\n           WHERE f.workspace_id = $2\n             AND NOT EXISTS (SELECT 1 FROM feature_flags q\n                             WHERE q.workspace_id = $1 AND q.flag = f.flag)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "39d61f3d4339046cae0653578219deb195362c8ea73297c37e7c5984b56f54b9"
+}

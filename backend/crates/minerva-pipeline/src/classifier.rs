@@ -33,7 +33,7 @@ pub trait Classifier: Send + Sync {
     ///
     /// `course_id` is passed through so implementations that talk
     /// to a paid LLM API can attribute their token spend to the
-    /// owning course (`course_token_usage` table). Tests / no-op
+    /// owning course (`workspace_token_usage` table). Tests / no-op
     /// implementations may ignore it.
     async fn classify(
         &self,

@@ -133,7 +133,8 @@ pub async fn conversation_themes(
     hasher.update(course.embedding_model.as_bytes());
     hasher.update(source_json.as_bytes());
     let source_hash = hex::encode(hasher.finalize());
-    let cached = minerva_db::queries::course_conversation_topics::get(&state.db, course_id).await?;
+    let cached =
+        minerva_db::queries::workspace_conversation_topics::get(&state.db, course_id).await?;
     let utility = state.utility_model().await;
 
     if let Some(row) = cached.as_ref() {
@@ -183,7 +184,7 @@ pub async fn conversation_themes(
             crate::llm::record_pipeline_usage(
                 &state.db,
                 course_id,
-                minerva_db::queries::course_token_usage::CATEGORY_CONVERSATION_TOPICS,
+                minerva_db::queries::workspace_token_usage::CATEGORY_CONVERSATION_TOPICS,
                 &utility.model,
                 &usage,
             )
@@ -309,7 +310,7 @@ fn build_source(
 
 async fn embed_conversations(
     state: &AppState,
-    course: &minerva_db::queries::courses::CourseRow,
+    course: &minerva_db::queries::workspaces::WorkspaceRow,
     texts: Vec<String>,
 ) -> Result<Vec<Vec<f32>>, String> {
     if course.embedding_provider == "local" {
@@ -563,7 +564,7 @@ fn parse_cache(value: &serde_json::Value) -> Option<Vec<TopicResponse>> {
 /// A run that cannot produce fresh themes keeps showing the last successful
 /// generation; an empty list means nothing has been generated yet.
 fn cached_topics(
-    cached: Option<&minerva_db::queries::course_conversation_topics::ConversationTopicsCacheRow>,
+    cached: Option<&minerva_db::queries::workspace_conversation_topics::ConversationTopicsCacheRow>,
 ) -> Vec<TopicResponse> {
     cached
         .and_then(|row| parse_cache(&row.topics))
@@ -579,7 +580,7 @@ async fn cache_and_return(
 ) -> Result<Json<Vec<TopicResponse>>, AppError> {
     let value = serde_json::to_value(&topics)
         .map_err(|error| AppError::Internal(format!("serialize conversation themes: {error}")))?;
-    minerva_db::queries::course_conversation_topics::upsert(
+    minerva_db::queries::workspace_conversation_topics::upsert(
         &state.db,
         course_id,
         &value,

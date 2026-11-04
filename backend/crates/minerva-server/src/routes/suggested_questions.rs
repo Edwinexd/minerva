@@ -8,7 +8,7 @@
 //!      `last_checked_at`, return cached. No LLM work.
 //!   3. Row stale AND drift detected (or no row): LLM regen,
 //!      tokens billed under `suggested_questions` in
-//!      `course_token_usage`. Courses with 0 ready docs persist
+//!      `workspace_token_usage`. Courses with 0 ready docs persist
 //!      `questions = []` and skip the LLM entirely.
 //!
 //! Concurrency: when we regen, the three per-doc Qdrant scrolls
@@ -21,8 +21,8 @@ use axum::{Json, Router};
 use chrono::Duration;
 use futures::future::join_all;
 use minerva_core::models::User;
-use minerva_db::queries::course_token_usage::CATEGORY_SUGGESTED_QUESTIONS;
 use minerva_db::queries::documents::ReadyDocSummary;
+use minerva_db::queries::workspace_token_usage::CATEGORY_SUGGESTED_QUESTIONS;
 use serde::Serialize;
 use std::fmt::Write;
 use uuid::Uuid;
@@ -61,11 +61,11 @@ async fn handler_shib(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<SuggestedQuestionsResponse>, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
     if course.owner_id != user.id
-        && !minerva_db::queries::courses::is_member(&state.db, course_id, user.id).await?
+        && !minerva_db::queries::workspaces::is_member(&state.db, course_id, user.id).await?
     {
         return Err(AppError::Forbidden);
     }
@@ -78,7 +78,8 @@ async fn handler_shib(
 /// embed mirror. Caller is responsible for proving the user has
 /// access to `course_id`.
 pub async fn get_or_refresh(state: &AppState, course_id: Uuid) -> Result<Vec<String>, AppError> {
-    let cached = minerva_db::queries::course_suggested_questions::get(&state.db, course_id).await?;
+    let cached =
+        minerva_db::queries::workspace_suggested_questions::get(&state.db, course_id).await?;
     if let Some(row) = cached.as_ref() {
         if chrono::Utc::now() - row.last_checked_at < STALENESS {
             return Ok(row.questions.0.clone());
@@ -95,7 +96,7 @@ pub async fn get_or_refresh(state: &AppState, course_id: Uuid) -> Result<Vec<Str
 
     if let Some(row) = cached.as_ref() {
         if row.source_doc_ids == current_ids {
-            minerva_db::queries::course_suggested_questions::touch_checked(&state.db, course_id)
+            minerva_db::queries::workspace_suggested_questions::touch_checked(&state.db, course_id)
                 .await?;
             return Ok(row.questions.0.clone());
         }
@@ -103,7 +104,7 @@ pub async fn get_or_refresh(state: &AppState, course_id: Uuid) -> Result<Vec<Str
 
     let util = state.utility_model().await;
     let questions = regenerate(state, &util, course_id, &docs).await?;
-    minerva_db::queries::course_suggested_questions::upsert(
+    minerva_db::queries::workspace_suggested_questions::upsert(
         &state.db,
         course_id,
         &questions,

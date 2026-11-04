@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::state::AppState;
 use minerva_core::models::User;
-use minerva_db::queries::courses::CourseRow;
+use minerva_db::queries::workspaces::WorkspaceRow;
 
 /// Site administrator only.
 pub(crate) fn require_admin(user: &User) -> Result<(), AppError> {
@@ -41,8 +41,11 @@ pub(crate) enum TeacherScope {
 }
 
 /// Load a course, 404ing when it does not exist.
-pub(crate) async fn load_course(state: &AppState, course_id: Uuid) -> Result<CourseRow, AppError> {
-    minerva_db::queries::courses::find_by_id(&state.db, course_id)
+pub(crate) async fn load_course(
+    state: &AppState,
+    course_id: Uuid,
+) -> Result<WorkspaceRow, AppError> {
+    minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)
 }
@@ -57,7 +60,7 @@ pub(crate) async fn require_course_teacher(
     course_id: Uuid,
     user: &User,
     scope: TeacherScope,
-) -> Result<CourseRow, AppError> {
+) -> Result<WorkspaceRow, AppError> {
     let course = load_course(state, course_id).await?;
     if is_teacher_of(state, &course, user, scope).await? {
         Ok(course)
@@ -85,7 +88,7 @@ pub(crate) async fn is_course_teacher(
 /// turn just to answer one bool.
 pub(crate) async fn is_teacher_of(
     state: &AppState,
-    course: &CourseRow,
+    course: &WorkspaceRow,
     user: &User,
     scope: TeacherScope,
 ) -> Result<bool, AppError> {
@@ -94,10 +97,11 @@ pub(crate) async fn is_teacher_of(
     }
     Ok(match scope {
         TeacherScope::WithAssistants => {
-            minerva_db::queries::courses::is_course_teacher(&state.db, course.id, user.id).await?
+            minerva_db::queries::workspaces::is_course_teacher(&state.db, course.id, user.id)
+                .await?
         }
         TeacherScope::Strict => {
-            minerva_db::queries::courses::is_course_teacher_strict(&state.db, course.id, user.id)
+            minerva_db::queries::workspaces::is_course_teacher_strict(&state.db, course.id, user.id)
                 .await?
         }
     })
@@ -110,7 +114,7 @@ pub(crate) async fn require_course_owner(
     state: &AppState,
     course_id: Uuid,
     user: &User,
-) -> Result<CourseRow, AppError> {
+) -> Result<WorkspaceRow, AppError> {
     let course = load_course(state, course_id).await?;
     if course.owner_id != user.id && !user.role.is_admin() {
         return Err(AppError::Forbidden);

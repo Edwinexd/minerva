@@ -244,7 +244,7 @@ async fn get_me(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
     let course_role = if course.owner_id == user.id
@@ -252,7 +252,7 @@ async fn get_me(
     {
         "teacher".to_string()
     } else {
-        minerva_db::queries::courses::get_member_role(&state.db, course_id, user.id)
+        minerva_db::queries::workspaces::get_member_role(&state.db, course_id, user.id)
             .await?
             .unwrap_or_else(|| "student".to_string())
     };
@@ -289,7 +289,7 @@ async fn get_course(
 ) -> Result<Json<CourseResponse>, AppError> {
     authenticate(&state, course_id, &query)?;
 
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -328,7 +328,7 @@ async fn list_conversations(
         rows.into_iter()
             .map(|r| ConversationResponse {
                 id: r.id,
-                course_id: r.course_id,
+                course_id: r.workspace_id,
                 title: r.title,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
@@ -376,7 +376,7 @@ async fn get_conversation(
     );
     let (conv, _is_teacher) = fetch_conversation_for_view(&state, course_id, cid, &viewer).await?;
 
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
     let token_state =
@@ -520,7 +520,7 @@ async fn continue_conversation(
     Query(query): Query<TokenQuery>,
 ) -> Result<Json<crate::routes::conversation_continuation::ContinuationResponse>, AppError> {
     let (_, user_id) = authenticate(&state, course_id, &query)?;
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
     Ok(Json(
@@ -537,7 +537,7 @@ async fn branch_conversation(
     Query(query): Query<TokenQuery>,
 ) -> Result<Json<crate::routes::conversation_continuation::ContinuationResponse>, AppError> {
     let (_, user_id) = authenticate(&state, course_id, &query)?;
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
     Ok(Json(
@@ -594,7 +594,7 @@ async fn mark_read(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
     if conv.user_id != user_id {
@@ -706,7 +706,7 @@ async fn authenticate_for_message(
     token: &str,
 ) -> Result<
     (
-        minerva_db::queries::courses::CourseRow,
+        minerva_db::queries::workspaces::WorkspaceRow,
         Uuid,
         Option<chrono::DateTime<chrono::Utc>>,
     ),
@@ -718,7 +718,7 @@ async fn authenticate_for_message(
         return Err(AppError::Forbidden);
     }
 
-    let course = minerva_db::queries::courses::find_by_id(&state.db, path_course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, path_course_id)
         .await?
         .ok_or(AppError::NotFound)?;
     let user = minerva_db::queries::users::find_by_id(&state.db, user_id)

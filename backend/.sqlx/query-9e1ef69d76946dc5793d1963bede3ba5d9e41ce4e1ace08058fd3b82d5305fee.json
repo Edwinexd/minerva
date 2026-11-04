@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM feature_flags WHERE flag = $1 AND workspace_id IS NULL AND user_id IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9e1ef69d76946dc5793d1963bede3ba5d9e41ce4e1ace08058fd3b82d5305fee"
+}

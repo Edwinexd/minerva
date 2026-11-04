@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id AS conversation_id, c.workspace_id\n        FROM conversations c\n        WHERE c.user_id = $1\n          AND EXISTS (\n              SELECT 1 FROM teacher_notes tn\n              WHERE tn.conversation_id = c.id\n                AND (\n                    c.student_last_viewed_at IS NULL\n                    OR tn.created_at > c.student_last_viewed_at\n                )\n          )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conversation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "workspace_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "workspace_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "4feb88afedbbf77fef6554db12a06752bd21dc6ef5a499fc36701820c465f4d2"
+}

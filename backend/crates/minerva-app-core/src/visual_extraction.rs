@@ -455,7 +455,7 @@ async fn remove_people_from_search(state: &AppState) -> Result<(), String> {
     let mut by_course: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
     for person in pending {
         by_course
-            .entry(person.course_id)
+            .entry(person.workspace_id)
             .or_default()
             .push(person.id);
     }
@@ -491,7 +491,10 @@ async fn index_pending_figures(state: &AppState) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let mut by_course: HashMap<Uuid, Vec<queue::UnindexedFigure>> = HashMap::new();
     for figure in pending {
-        by_course.entry(figure.course_id).or_default().push(figure);
+        by_course
+            .entry(figure.workspace_id)
+            .or_default()
+            .push(figure);
     }
     for (course_id, course_figures) in by_course {
         let Some(course) = queue::course_embedding(&state.db, course_id)

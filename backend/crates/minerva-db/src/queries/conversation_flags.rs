@@ -112,14 +112,14 @@ pub async fn list_for_conversation(
 /// each list row.
 pub async fn flag_kinds_by_conversation(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<std::collections::HashMap<Uuid, Vec<String>>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"SELECT DISTINCT cf.conversation_id, cf.flag
            FROM conversation_flags cf
            JOIN conversations c ON c.id = cf.conversation_id
-           WHERE c.course_id = $1 AND cf.acknowledged_at IS NULL"#,
-        course_id,
+           WHERE c.workspace_id = $1 AND cf.acknowledged_at IS NULL"#,
+        workspace_id,
     )
     .fetch_all(db)
     .await?;

@@ -595,7 +595,7 @@ pub async fn find_overscoped_registrations(
             MIN(nc.created_at) AS "first_observed_at!"
         FROM lti_registrations r
         JOIN lti_nrps_contexts nc ON nc.registration_id = r.id
-        JOIN courses c ON c.id = r.course_id
+        JOIN workspaces c ON c.id = r.course_id
         GROUP BY r.id, r.name, r.issuer, r.client_id, r.course_id, c.name
         HAVING COUNT(DISTINCT nc.context_id) > 1
         ORDER BY MIN(nc.created_at)"#,

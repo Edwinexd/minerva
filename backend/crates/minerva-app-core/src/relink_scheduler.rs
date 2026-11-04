@@ -106,7 +106,7 @@ impl RelinkScheduler {
     /// Drain courses whose due time has passed.
     pub async fn take_due(&self) -> Vec<Uuid> {
         match minerva_db::queries::relink_queue::take_due(&self.db).await {
-            Ok(rows) => rows.into_iter().map(|r| r.course_id).collect(),
+            Ok(rows) => rows.into_iter().map(|r| r.workspace_id).collect(),
             Err(e) => {
                 tracing::warn!("relink_scheduler: take_due failed: {}", e);
                 Vec::new()

@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT reranker_model, COUNT(*)::BIGINT AS \"count!\"\n           FROM workspaces\n           WHERE active = true\n           GROUP BY reranker_model",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reranker_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "reranker_model"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "ff94d52c9b021456253bfcc394c237dfce5a35a766bd723055a99538eb4b22d2"
+}

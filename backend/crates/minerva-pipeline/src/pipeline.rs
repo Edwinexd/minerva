@@ -120,7 +120,7 @@ pub async fn collection_name_for_course(
     course_id: uuid::Uuid,
 ) -> Result<String, sqlx::Error> {
     let version: Option<i32> = sqlx::query_scalar!(
-        "SELECT embedding_version FROM courses WHERE id = $1",
+        "SELECT embedding_version FROM workspaces WHERE id = $1",
         course_id,
     )
     .fetch_optional(db)
@@ -323,6 +323,8 @@ pub async fn process_document(
     let build_payload = |chunk: &chunker::Chunk| -> std::collections::HashMap<String, qdrant_client::qdrant::Value> {
         let mut payload: std::collections::HashMap<String, qdrant_client::qdrant::Value> = [
             ("document_id".to_string(), document_id.to_string().into()),
+            // Stored payload key: points written before courses became
+            // workspaces carry "course_id", so the key stays.
             ("course_id".to_string(), course_id.to_string().into()),
             ("chunk_index".to_string(), (chunk.index as i64).into()),
             ("text".to_string(), chunk.text.clone().into()),

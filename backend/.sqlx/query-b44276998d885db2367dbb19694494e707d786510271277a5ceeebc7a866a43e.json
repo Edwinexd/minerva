@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n              workspace_id,\n              questions       AS \"questions: Json<Vec<String>>\",\n              source_doc_ids,\n              model,\n              generated_at,\n              last_checked_at\n           FROM workspace_suggested_questions\n           WHERE workspace_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "workspace_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "workspace_suggested_questions",
+            "name": "workspace_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "questions: Json<Vec<String>>",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "workspace_suggested_questions",
+            "name": "questions"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "source_doc_ids",
+        "type_info": "UuidArray",
+        "origin": {
+          "Table": {
+            "table": "workspace_suggested_questions",
+            "name": "source_doc_ids"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_suggested_questions",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "generated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "workspace_suggested_questions",
+            "name": "generated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "last_checked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "workspace_suggested_questions",
+            "name": "last_checked_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b44276998d885db2367dbb19694494e707d786510271277a5ceeebc7a866a43e"
+}

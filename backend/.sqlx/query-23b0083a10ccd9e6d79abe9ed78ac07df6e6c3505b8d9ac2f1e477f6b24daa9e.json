@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE workspace_suggested_questions\n           SET last_checked_at = NOW()\n           WHERE workspace_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "23b0083a10ccd9e6d79abe9ed78ac07df6e6c3505b8d9ac2f1e477f6b24daa9e"
+}

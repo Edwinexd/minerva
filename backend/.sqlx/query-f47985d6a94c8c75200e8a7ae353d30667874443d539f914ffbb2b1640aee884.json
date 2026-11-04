@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(SUM(u.prompt_tokens + u.completion_tokens), 0)::bigint AS \"total!\"\n           FROM usage_daily u\n           JOIN workspaces c ON c.id = u.workspace_id\n           WHERE c.owner_id = $1 AND u.date = CURRENT_DATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f47985d6a94c8c75200e8a7ae353d30667874443d539f914ffbb2b1640aee884"
+}

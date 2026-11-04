@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH colliding AS (\n               SELECT s.id\n               FROM documents s\n               WHERE s.workspace_id = $1\n                 AND s.orphaned_at IS NULL\n                 AND (\n                   (s.parent_document_id IS NULL AND s.content_hash IS NOT NULL AND EXISTS (\n                       SELECT 1 FROM documents t\n                       WHERE t.workspace_id = $2 AND t.parent_document_id IS NULL\n                         AND t.orphaned_at IS NULL AND t.content_hash = s.content_hash))\n                   OR (s.source_ref IS NOT NULL AND EXISTS (\n                       SELECT 1 FROM documents t\n                       WHERE t.workspace_id = $2 AND t.orphaned_at IS NULL\n                         AND t.source_ref = s.source_ref\n                         AND t.source_system IS NOT DISTINCT FROM s.source_system))\n                   OR (s.source_url IS NOT NULL AND EXISTS (\n                       SELECT 1 FROM documents t\n                       WHERE t.workspace_id = $2 AND t.source_url = s.source_url))\n                 )\n           ),\n           updated AS (\n               UPDATE documents\n               SET orphaned_at = NOW(), source_url = NULL\n               WHERE orphaned_at IS NULL\n                 AND (id IN (SELECT id FROM colliding)\n                      OR parent_document_id IN (SELECT id FROM colliding))\n               RETURNING 1\n           )\n           SELECT COUNT(*) FROM updated",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "188936dfb751cf3ff95e48f5f60f366a296251c38f8bed28f471eba18df491bf"
+}

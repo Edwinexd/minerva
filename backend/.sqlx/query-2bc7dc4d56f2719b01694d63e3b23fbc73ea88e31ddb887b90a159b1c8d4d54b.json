@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT embedding_version FROM workspaces WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "embedding_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "embedding_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2bc7dc4d56f2719b01694d63e3b23fbc73ea88e31ddb887b90a159b1c8d4d54b"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM workspace_members\n         WHERE (workspace_id, user_id) IN (\n             SELECT * FROM UNNEST($1::UUID[], $2::UUID[])\n         )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a31747f697d329f4f82422fce8d0a782929019ce4505b283a603479cafad355c"
+}

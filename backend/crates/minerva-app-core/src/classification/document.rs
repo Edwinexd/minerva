@@ -9,7 +9,7 @@ use uuid::Uuid;
 use super::prompts::{CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_TEMPLATE};
 use super::types::{DocumentKind, ALL_KINDS};
 use crate::llm::util_request;
-use minerva_db::queries::course_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
+use minerva_db::queries::workspace_token_usage::CATEGORY_DOCUMENT_CLASSIFIER;
 
 /// Soft cap on excerpt length sent to the model. Head/tail split so
 /// the model sees both the introductory framing and any "submit /
@@ -36,7 +36,7 @@ pub struct LlmClassifier {
     /// id plus a handle to its provider, whatever that provider is.
     util: crate::llm::UtilityModel,
     /// DB handle so each call can record its token spend to
-    /// `course_token_usage`. Cloned cheaply per ingest call.
+    /// `workspace_token_usage`. Cloned cheaply per ingest call.
     db: PgPool,
 }
 

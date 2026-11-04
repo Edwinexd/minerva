@@ -26,7 +26,7 @@ use uuid::Uuid;
 pub struct FetchSlot {
     pub job_id: Uuid,
     pub document_id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     /// Consecutive not-ready releases, so Actions can stop waiting for a
     /// transcript Play may never generate.
     pub not_ready_releases: i32,
@@ -36,7 +36,7 @@ pub struct FetchSlot {
 pub struct JobRow {
     pub id: Uuid,
     pub document_id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub kind: String,
     pub status: String,
     pub attempts: i32,
@@ -67,8 +67,8 @@ pub async fn enqueue_missing(
     let lectures = sqlx::query!(
         r#"
         INSERT INTO visual_extraction_jobs
-            (document_id, course_id, kind, status, priority, pipeline_version)
-        SELECT d.id, d.course_id, 'play_lecture', 'needs_source',
+            (document_id, workspace_id, kind, status, priority, pipeline_version)
+        SELECT d.id, d.workspace_id, 'play_lecture', 'needs_source',
                CASE WHEN d.created_at > NOW() - make_interval(days => $2) THEN 100 ELSE 0 END,
                $1
         FROM documents d
@@ -95,8 +95,8 @@ pub async fn enqueue_missing(
     let pdfs = sqlx::query!(
         r#"
         INSERT INTO visual_extraction_jobs
-            (document_id, course_id, kind, status, priority, pipeline_version)
-        SELECT d.id, d.course_id, 'pdf', 'ready',
+            (document_id, workspace_id, kind, status, priority, pipeline_version)
+        SELECT d.id, d.workspace_id, 'pdf', 'ready',
                CASE WHEN d.created_at > NOW() - make_interval(days => $2) THEN 50 ELSE 0 END,
                $1
         FROM documents d
@@ -163,7 +163,7 @@ pub async fn reserve_fetch_slots(
             LIMIT $2
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id AS job_id, document_id, course_id, not_ready_releases
+        RETURNING id AS job_id, document_id, workspace_id, not_ready_releases
         "#,
         estimate_bytes,
         slots,
@@ -248,7 +248,7 @@ pub async fn find_job(db: &PgPool, job_id: Uuid) -> Result<Option<JobRow>, sqlx:
     sqlx::query_as!(
         JobRow,
         r#"
-        SELECT id, document_id, course_id, kind, status, attempts, staged_path, worker_id, cues
+        SELECT id, document_id, workspace_id, kind, status, attempts, staged_path, worker_id, cues
         FROM visual_extraction_jobs WHERE id = $1
         "#,
         job_id,
@@ -277,7 +277,7 @@ pub async fn lease_next(
             LIMIT 1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, document_id, course_id, kind, status, attempts, staged_path, worker_id, cues
+        RETURNING id, document_id, workspace_id, kind, status, attempts, staged_path, worker_id, cues
         "#,
         worker_id,
         lease_secs as f64,
@@ -548,7 +548,7 @@ pub async fn figure_metrics(db: &PgPool) -> Result<FigureMetrics, sqlx::Error> {
                        AS pending
             FROM document_figures f
             JOIN documents d ON d.id = f.document_id
-            JOIN courses c ON c.id = f.course_id
+            JOIN workspaces c ON c.id = f.workspace_id
         )
         SELECT COUNT(*) FILTER (WHERE pending) AS "pending!",
                COUNT(*) FILTER (WHERE indexed_at IS NOT NULL AND shows_person = FALSE) AS "indexed!",
@@ -677,7 +677,7 @@ pub struct NewFigure<'a> {
 pub struct UnindexedFigure {
     pub id: Uuid,
     pub document_id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub context: String,
     pub visual_model: String,
     pub visual_vector: Vec<f32>,
@@ -692,7 +692,7 @@ pub struct UnindexedFigure {
 pub async fn replace_layout_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     document_id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
     pages: &[NewPage<'_>],
     figures: &[NewFigure<'_>],
 ) -> Result<Vec<Uuid>, sqlx::Error> {
@@ -731,12 +731,12 @@ pub async fn replace_layout_in(
         sqlx::query!(
             r#"
             INSERT INTO document_figures
-                (document_id, course_id, page_position, box, image_path, caption, context,
+                (document_id, workspace_id, page_position, box, image_path, caption, context,
                  visual_model, visual_vector)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             "#,
             document_id,
-            course_id,
+            workspace_id,
             figure.page_position,
             figure.bbox,
             figure.image_path,
@@ -759,7 +759,7 @@ pub async fn list_unindexed_figures(
     sqlx::query_as!(
         UnindexedFigure,
         r#"
-        SELECT f.id, f.document_id, f.course_id,
+        SELECT f.id, f.document_id, f.workspace_id,
                fd.description AS "context!", f.visual_model,
                f.visual_vector AS "visual_vector!: Vec<f32>",
                fd.described_at AS "described_at!", fd.is_decorative AS "is_decorative!"
@@ -850,7 +850,7 @@ pub async fn record_screening(
 
 pub struct PersonToRemove {
     pub id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
 }
 
 /// Person crops whose removal from both Qdrant collections is not yet
@@ -862,7 +862,7 @@ pub async fn list_people_to_remove(
     sqlx::query_as!(
         PersonToRemove,
         r#"
-        SELECT id, course_id FROM document_figures
+        SELECT id, workspace_id FROM document_figures
         WHERE indexed_at IS NULL AND shows_person
         ORDER BY created_at
         LIMIT $1
@@ -913,12 +913,12 @@ pub struct CourseEmbeddingRow {
 /// courses included: their figures are indexed like their chunks were.
 pub async fn course_embedding(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<Option<CourseEmbeddingRow>, sqlx::Error> {
     sqlx::query_as!(
         CourseEmbeddingRow,
-        "SELECT embedding_provider, embedding_model, embedding_version FROM courses WHERE id = $1",
-        course_id,
+        "SELECT embedding_provider, embedding_model, embedding_version FROM workspaces WHERE id = $1",
+        workspace_id,
     )
     .fetch_optional(db)
     .await
@@ -944,7 +944,7 @@ pub struct ChatFigureRow {
 /// the kind is read from its active text child. Returned in `ids` order.
 pub async fn find_chat_figures(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     ids: &[Uuid],
     exclude_withheld_kinds: bool,
 ) -> Result<Vec<ChatFigureRow>, sqlx::Error> {
@@ -963,7 +963,7 @@ pub async fn find_chat_figures(
         LEFT JOIN documents child
                ON child.parent_document_id = d.id AND child.orphaned_at IS NULL
         WHERE f.id = ANY($2)
-          AND f.course_id = $1
+          AND f.workspace_id = $1
           AND fd.described_at IS NOT NULL AND fd.is_decorative = FALSE
           AND f.shows_person = FALSE
           AND d.displayable
@@ -975,7 +975,7 @@ pub async fn find_chat_figures(
           )
           AND (NOT $3 OR COALESCE(child.kind, d.kind) IS NOT NULL)
         "#,
-        course_id,
+        workspace_id,
         ids,
         exclude_withheld_kinds,
     )
@@ -1047,12 +1047,12 @@ pub async fn figure_image(
     figure_id: Uuid,
 ) -> Result<Option<(Uuid, Uuid, String)>, sqlx::Error> {
     Ok(sqlx::query!(
-        "SELECT course_id, document_id, image_path FROM document_figures WHERE id = $1",
+        "SELECT workspace_id, document_id, image_path FROM document_figures WHERE id = $1",
         figure_id,
     )
     .fetch_optional(db)
     .await?
-    .map(|r| (r.course_id, r.document_id, r.image_path)))
+    .map(|r| (r.workspace_id, r.document_id, r.image_path)))
 }
 
 /// A document's OCR text, page by page under `## Page N` headings, for the
@@ -1105,16 +1105,19 @@ pub async fn requeue_for_reingest(db: &PgPool, document_id: Uuid) -> Result<bool
 
 /// Whether any of a course's figures have reached Qdrant. Chat skips figure
 /// retrieval (and so never loads the CLIP query encoder) until one has.
-pub async fn course_has_indexed_figures(db: &PgPool, course_id: Uuid) -> Result<bool, sqlx::Error> {
+pub async fn course_has_indexed_figures(
+    db: &PgPool,
+    workspace_id: Uuid,
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar!(
         r#"SELECT EXISTS (
             SELECT 1 FROM document_figures f
             JOIN figure_descriptions fd ON fd.figure_id = f.id
-            WHERE f.course_id = $1 AND f.indexed_at IS NOT NULL
+            WHERE f.workspace_id = $1 AND f.indexed_at IS NOT NULL
               AND fd.described_at IS NOT NULL AND fd.is_decorative = FALSE
               AND f.shows_person = FALSE
         ) AS "exists!""#,
-        course_id,
+        workspace_id,
     )
     .fetch_one(db)
     .await

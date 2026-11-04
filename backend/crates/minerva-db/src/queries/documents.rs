@@ -4,7 +4,7 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct DocumentRow {
     pub id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub filename: String,
     pub mime_type: String,
     pub size_bytes: i64,
@@ -77,7 +77,7 @@ pub struct DocumentRow {
 /// pushed it to 10 and made every call site harder to read.
 pub struct NewDocument<'a> {
     pub id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub filename: &'a str,
     pub mime_type: &'a str,
     pub size_bytes: i64,
@@ -106,11 +106,11 @@ pub struct NewDocument<'a> {
 pub async fn insert(db: &PgPool, doc: NewDocument<'_>) -> Result<DocumentRow, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url, content_hash, source_system, source_ref, parent_document_id)
+        r#"INSERT INTO documents (id, workspace_id, filename, mime_type, size_bytes, uploaded_by, source_url, content_hash, source_system, source_ref, parent_document_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id"#,
+        RETURNING id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id"#,
         doc.id,
-        doc.course_id,
+        doc.workspace_id,
         doc.filename,
         doc.mime_type,
         doc.size_bytes,
@@ -136,18 +136,18 @@ pub async fn insert(db: &PgPool, doc: NewDocument<'_>) -> Result<DocumentRow, sq
 /// being silently linked to the URL's child.
 pub async fn find_active_by_content_hash(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     content_hash: &str,
 ) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        r#"SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id
+        r#"SELECT id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id
            FROM documents
-           WHERE course_id = $1
+           WHERE workspace_id = $1
              AND content_hash = $2
              AND orphaned_at IS NULL
              AND parent_document_id IS NULL"#,
-        course_id,
+        workspace_id,
         content_hash,
     )
     .fetch_optional(db)
@@ -159,19 +159,19 @@ pub async fn find_active_by_content_hash(
 /// orphan before inserting the new one with the same `source_ref`.
 pub async fn find_active_by_source_ref(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     source_system: &str,
     source_ref: &str,
 ) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        r#"SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id
+        r#"SELECT id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id
            FROM documents
-           WHERE course_id = $1
+           WHERE workspace_id = $1
              AND source_system = $2
              AND source_ref = $3
              AND orphaned_at IS NULL"#,
-        course_id,
+        workspace_id,
         source_system,
         source_ref,
     )
@@ -200,7 +200,7 @@ pub async fn orphan(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
 /// killed). Returns the number of rows flipped.
 pub async fn orphan_by_source_refs(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     source_system: &str,
     source_refs: &[String],
 ) -> Result<u64, sqlx::Error> {
@@ -210,11 +210,11 @@ pub async fn orphan_by_source_refs(
     let result = sqlx::query!(
         r#"UPDATE documents
            SET orphaned_at = NOW()
-           WHERE course_id = $1
+           WHERE workspace_id = $1
              AND source_system = $2
              AND source_ref = ANY($3)
              AND orphaned_at IS NULL"#,
-        course_id,
+        workspace_id,
         source_system,
         source_refs,
     )
@@ -233,7 +233,7 @@ pub async fn orphan_by_source_refs(
 /// Canvas-sourced or hand-uploaded docs.
 pub async fn reconcile_active_source_refs(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     source_system: &str,
     keep_source_refs: &[String],
 ) -> Result<Vec<Uuid>, sqlx::Error> {
@@ -245,12 +245,12 @@ pub async fn reconcile_active_source_refs(
     let rows = sqlx::query!(
         r#"UPDATE documents
            SET orphaned_at = NOW()
-           WHERE course_id = $1
+           WHERE workspace_id = $1
              AND source_system = $2
              AND orphaned_at IS NULL
              AND NOT (source_ref = ANY($3))
            RETURNING id"#,
-        course_id,
+        workspace_id,
         source_system,
         keep_source_refs,
     )
@@ -266,11 +266,11 @@ pub async fn reconcile_active_source_refs(
 /// from Qdrant.
 pub async fn orphaned_doc_ids(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<std::collections::HashSet<String>, sqlx::Error> {
     let rows = sqlx::query_scalar!(
-        "SELECT id FROM documents WHERE course_id = $1 AND orphaned_at IS NOT NULL",
-        course_id,
+        "SELECT id FROM documents WHERE workspace_id = $1 AND orphaned_at IS NOT NULL",
+        workspace_id,
     )
     .fetch_all(db)
     .await?;
@@ -348,7 +348,7 @@ pub async fn list_active_missing_content_hash(
         None => (None, None),
     };
     let rows = sqlx::query!(
-        r#"SELECT id, course_id, filename, mime_type, created_at
+        r#"SELECT id, workspace_id, filename, mime_type, created_at
            FROM documents
            WHERE content_hash IS NULL
              AND orphaned_at IS NULL
@@ -363,7 +363,7 @@ pub async fn list_active_missing_content_hash(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|r| (r.id, r.course_id, r.filename, r.mime_type, r.created_at))
+        .map(|r| (r.id, r.workspace_id, r.filename, r.mime_type, r.created_at))
         .collect())
 }
 
@@ -385,28 +385,31 @@ pub struct ReadyDocSummary {
 /// decide whether the latest-N source set has drifted.
 pub async fn list_latest_ready_by_course(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     limit: i64,
 ) -> Result<Vec<ReadyDocSummary>, sqlx::Error> {
     sqlx::query_as!(
         ReadyDocSummary,
         r#"SELECT id, filename, kind
            FROM documents
-           WHERE course_id = $1 AND status = 'ready'
+           WHERE workspace_id = $1 AND status = 'ready'
            ORDER BY created_at DESC
            LIMIT $2"#,
-        course_id,
+        workspace_id,
         limit,
     )
     .fetch_all(db)
     .await
 }
 
-pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<DocumentRow>, sqlx::Error> {
+pub async fn list_by_course(
+    db: &PgPool,
+    workspace_id: Uuid,
+) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE course_id = $1 ORDER BY created_at DESC",
-        course_id,
+        "SELECT id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE workspace_id = $1 ORDER BY created_at DESC",
+        workspace_id,
     )
     .fetch_all(db)
     .await
@@ -415,7 +418,7 @@ pub async fn list_by_course(db: &PgPool, course_id: Uuid) -> Result<Vec<Document
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE id = $1",
+        "SELECT id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -426,13 +429,13 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<DocumentRow>, sq
 /// in the URL-document creation flow.
 pub async fn find_by_course_source_url(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     source_url: &str,
 ) -> Result<Option<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE course_id = $1 AND source_url = $2",
-        course_id,
+        "SELECT id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE workspace_id = $1 AND source_url = $2",
+        workspace_id,
         source_url,
     )
     .fetch_optional(db)
@@ -457,11 +460,11 @@ pub async fn update_displayable(
 /// Returns the set of document IDs in a course that are NOT displayable.
 pub async fn hidden_document_ids(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<std::collections::HashSet<String>, sqlx::Error> {
     let rows = sqlx::query_scalar!(
-        "SELECT id FROM documents WHERE course_id = $1 AND displayable = FALSE",
-        course_id,
+        "SELECT id FROM documents WHERE workspace_id = $1 AND displayable = FALSE",
+        workspace_id,
     )
     .fetch_all(db)
     .await?;
@@ -482,7 +485,7 @@ pub async fn delete(db: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
 pub async fn list_children(db: &PgPool, parent_id: Uuid) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE parent_document_id = $1 ORDER BY created_at ASC",
+        "SELECT id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE parent_document_id = $1 ORDER BY created_at ASC",
         parent_id,
     )
     .fetch_all(db)
@@ -509,7 +512,7 @@ pub async fn claim_pending(db: &PgPool, limit: i32) -> Result<Vec<DocumentRow>, 
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id"#,
+        RETURNING id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id"#,
         limit as i64,
     )
     .fetch_all(db)
@@ -585,7 +588,7 @@ pub async fn list_awaiting_transcripts_page(
     };
     sqlx::query_as!(
         DocumentRow,
-        r#"SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id
+        r#"SELECT id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id
         FROM documents
         WHERE status = 'awaiting_transcript'
           AND ($1::timestamptz IS NULL OR (created_at, id) > ($1, $2))
@@ -699,11 +702,11 @@ pub async fn insert_tracked_child_in(
 
     sqlx::query_as!(
         DocumentRow,
-        r#"INSERT INTO documents (id, course_id, filename, mime_type, size_bytes, uploaded_by, source_url, content_hash, source_system, source_ref, parent_document_id)
+        r#"INSERT INTO documents (id, workspace_id, filename, mime_type, size_bytes, uploaded_by, source_url, content_hash, source_system, source_ref, parent_document_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-           RETURNING id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id"#,
+           RETURNING id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id"#,
         new_doc.id,
-        new_doc.course_id,
+        new_doc.workspace_id,
         new_doc.filename,
         new_doc.mime_type,
         new_doc.size_bytes,
@@ -839,13 +842,13 @@ pub async fn clear_kind_lock(db: &PgPool, doc_id: Uuid) -> Result<bool, sqlx::Er
 /// sample_solution as defense-in-depth in case stale vectors exist).
 pub async fn doc_ids_with_kind(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     kinds: &[&str],
 ) -> Result<std::collections::HashSet<String>, sqlx::Error> {
     let kinds_owned: Vec<String> = kinds.iter().map(|s| s.to_string()).collect();
     let rows = sqlx::query_scalar!(
-        "SELECT id FROM documents WHERE course_id = $1 AND kind = ANY($2)",
-        course_id,
+        "SELECT id FROM documents WHERE workspace_id = $1 AND kind = ANY($2)",
+        workspace_id,
         &kinds_owned,
     )
     .fetch_all(db)
@@ -860,11 +863,11 @@ pub async fn doc_ids_with_kind(
 /// sample-solution into context.
 pub async fn unclassified_doc_ids(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<std::collections::HashSet<String>, sqlx::Error> {
     let rows = sqlx::query_scalar!(
-        "SELECT id FROM documents WHERE course_id = $1 AND classified_at IS NULL",
-        course_id,
+        "SELECT id FROM documents WHERE workspace_id = $1 AND classified_at IS NULL",
+        workspace_id,
     )
     .fetch_all(db)
     .await?;
@@ -880,7 +883,7 @@ pub async fn list_needing_classification(
 ) -> Result<Vec<DocumentRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRow,
-        "SELECT id, course_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE classified_at IS NULL AND kind_locked_by_teacher = FALSE AND status = 'ready' ORDER BY created_at ASC LIMIT $1",
+        "SELECT id, workspace_id, filename, mime_type, size_bytes, status, chunk_count, error_msg, uploaded_by, displayable, created_at, processed_at, source_url, kind, kind_confidence, kind_rationale, kind_locked_by_teacher, classified_at, pooled_embedding, content_hash, source_system, source_ref, orphaned_at, parent_document_id FROM documents WHERE classified_at IS NULL AND kind_locked_by_teacher = FALSE AND status = 'ready' ORDER BY created_at ASC LIMIT $1",
         limit,
     )
     .fetch_all(db)

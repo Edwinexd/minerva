@@ -47,7 +47,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::llm::{payload_int, payload_string, util_request};
-use minerva_db::queries::course_token_usage::CATEGORY_LINKER;
+use minerva_db::queries::workspace_token_usage::CATEGORY_LINKER;
 
 // The per-pair link decision runs on the admin-selected utility model
 // (resolved per relink). A structured output (single enum + confidence +
@@ -1390,7 +1390,7 @@ mod tests {
         fn mk(id: u8) -> DocumentRow {
             DocumentRow {
                 id: Uuid::from_bytes([id; 16]),
-                course_id: Uuid::nil(),
+                workspace_id: Uuid::nil(),
                 filename: format!("doc{}.pdf", id),
                 mime_type: "application/pdf".into(),
                 size_bytes: 0,

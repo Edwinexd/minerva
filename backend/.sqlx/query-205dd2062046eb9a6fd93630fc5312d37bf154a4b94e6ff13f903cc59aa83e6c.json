@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT src_doc_id, dst_doc_id, relation\n           FROM rejected_edge_pairs\n           WHERE workspace_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "src_doc_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "rejected_edge_pairs",
+            "name": "src_doc_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "dst_doc_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "rejected_edge_pairs",
+            "name": "dst_doc_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "relation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rejected_edge_pairs",
+            "name": "relation"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "205dd2062046eb9a6fd93630fc5312d37bf154a4b94e6ff13f903cc59aa83e6c"
+}

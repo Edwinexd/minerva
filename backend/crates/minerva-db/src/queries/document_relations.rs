@@ -23,7 +23,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct DocumentRelationRow {
     pub id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub src_doc_id: Uuid,
     pub dst_doc_id: Uuid,
     /// One of: `solution_of`, `part_of_unit`. The DB CHECK enforces the
@@ -43,7 +43,7 @@ pub struct DocumentRelationRow {
 /// refreshes confidence/rationale rather than duplicating rows.
 pub async fn upsert(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     src_doc_id: Uuid,
     dst_doc_id: Uuid,
     relation: &str,
@@ -53,15 +53,15 @@ pub async fn upsert(
     sqlx::query_as!(
         DocumentRelationRow,
         r#"INSERT INTO document_relations
-            (course_id, src_doc_id, dst_doc_id, relation, confidence, rationale)
+            (workspace_id, src_doc_id, dst_doc_id, relation, confidence, rationale)
         VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (src_doc_id, dst_doc_id, relation)
         DO UPDATE SET
             confidence = EXCLUDED.confidence,
             rationale = EXCLUDED.rationale,
             updated_at = NOW()
-        RETURNING id, course_id, src_doc_id, dst_doc_id, relation, confidence, rationale, rejected_by_teacher, rejected_at, rejected_by, created_at, updated_at"#,
-        course_id,
+        RETURNING id, workspace_id, src_doc_id, dst_doc_id, relation, confidence, rationale, rejected_by_teacher, rejected_at, rejected_by, created_at, updated_at"#,
+        workspace_id,
         src_doc_id,
         dst_doc_id,
         relation,
@@ -76,7 +76,7 @@ pub async fn upsert(
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<DocumentRelationRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRelationRow,
-        "SELECT id, course_id, src_doc_id, dst_doc_id, relation, confidence, rationale, rejected_by_teacher, rejected_at, rejected_by, created_at, updated_at FROM document_relations WHERE id = $1",
+        "SELECT id, workspace_id, src_doc_id, dst_doc_id, relation, confidence, rationale, rejected_by_teacher, rejected_at, rejected_by, created_at, updated_at FROM document_relations WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -85,12 +85,12 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<DocumentRelation
 
 pub async fn list_by_course(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<Vec<DocumentRelationRow>, sqlx::Error> {
     sqlx::query_as!(
         DocumentRelationRow,
-        "SELECT id, course_id, src_doc_id, dst_doc_id, relation, confidence, rationale, rejected_by_teacher, rejected_at, rejected_by, created_at, updated_at FROM document_relations WHERE course_id = $1 ORDER BY relation, created_at",
-        course_id,
+        "SELECT id, workspace_id, src_doc_id, dst_doc_id, relation, confidence, rationale, rejected_by_teacher, rejected_at, rejected_by, created_at, updated_at FROM document_relations WHERE workspace_id = $1 ORDER BY relation, created_at",
+        workspace_id,
     )
     .fetch_all(db)
     .await
@@ -104,10 +104,10 @@ pub async fn list_by_course(
 /// must survive a relink; otherwise the next pass would re-propose
 /// every rejected edge.
 #[allow(dead_code)]
-pub async fn delete_by_course(db: &PgPool, course_id: Uuid) -> Result<u64, sqlx::Error> {
+pub async fn delete_by_course(db: &PgPool, workspace_id: Uuid) -> Result<u64, sqlx::Error> {
     let result = sqlx::query!(
-        "DELETE FROM document_relations WHERE course_id = $1",
-        course_id,
+        "DELETE FROM document_relations WHERE workspace_id = $1",
+        workspace_id,
     )
     .execute(db)
     .await?;
@@ -137,12 +137,12 @@ pub async fn delete_relations_for_pair(db: &PgPool, a: Uuid, b: Uuid) -> Result<
 #[allow(dead_code)]
 pub async fn delete_below_confidence(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     min_confidence: f32,
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query!(
-        "DELETE FROM document_relations WHERE course_id = $1 AND confidence < $2",
-        course_id,
+        "DELETE FROM document_relations WHERE workspace_id = $1 AND confidence < $2",
+        workspace_id,
         min_confidence,
     )
     .execute(db)
@@ -181,7 +181,7 @@ pub async fn delete_below_confidence(
 /// partners).
 pub async fn unit_partners_for_docs(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     source_doc_ids: &[Uuid],
 ) -> Result<std::collections::HashMap<Uuid, Vec<Uuid>>, sqlx::Error> {
     if source_doc_ids.is_empty() {
@@ -190,7 +190,7 @@ pub async fn unit_partners_for_docs(
     let rows = sqlx::query!(
         r#"SELECT src_doc_id, dst_doc_id, relation
            FROM document_relations
-           WHERE course_id = $1
+           WHERE workspace_id = $1
              AND rejected_by_teacher = FALSE
              AND (
                  (relation = 'part_of_unit'
@@ -198,7 +198,7 @@ pub async fn unit_partners_for_docs(
                  OR
                  (relation = 'applied_in' AND src_doc_id = ANY($2))
              )"#,
-        course_id,
+        workspace_id,
         source_doc_ids,
     )
     .fetch_all(db)
@@ -246,7 +246,7 @@ pub async fn unit_partners_for_docs(
 /// Excludes teacher-rejected edges. Returns deduped doc ids.
 pub async fn applied_in_assignments_for_lectures(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     lecture_doc_ids: &[Uuid],
 ) -> Result<Vec<Uuid>, sqlx::Error> {
     if lecture_doc_ids.is_empty() {
@@ -256,12 +256,12 @@ pub async fn applied_in_assignments_for_lectures(
         r#"SELECT DISTINCT dr.dst_doc_id
            FROM document_relations dr
            JOIN documents d ON d.id = dr.dst_doc_id
-           WHERE dr.course_id = $1
+           WHERE dr.workspace_id = $1
              AND dr.relation = 'applied_in'
              AND dr.rejected_by_teacher = FALSE
              AND dr.src_doc_id = ANY($2)
              AND d.kind IN ('assignment_brief', 'lab_brief', 'exam')"#,
-        course_id,
+        workspace_id,
         lecture_doc_ids,
     )
     .fetch_all(db)
@@ -288,7 +288,7 @@ pub async fn reject_edge(
                rejected_by = $2,
                updated_at = NOW()
            WHERE id = $1
-           RETURNING course_id, src_doc_id, dst_doc_id, relation"#,
+           RETURNING workspace_id, src_doc_id, dst_doc_id, relation"#,
         edge_id,
         rejected_by,
     )
@@ -302,12 +302,12 @@ pub async fn reject_edge(
 
     sqlx::query!(
         r#"INSERT INTO rejected_edge_pairs
-            (course_id, src_doc_id, dst_doc_id, relation, rejected_by)
+            (workspace_id, src_doc_id, dst_doc_id, relation, rejected_by)
         VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (src_doc_id, dst_doc_id, relation) DO UPDATE
             SET rejected_at = NOW(),
                 rejected_by = EXCLUDED.rejected_by"#,
-        edge.course_id,
+        edge.workspace_id,
         edge.src_doc_id,
         edge.dst_doc_id,
         edge.relation,
@@ -369,13 +369,13 @@ pub struct RejectedPairKey {
 /// Returns a HashSet for O(1) membership tests.
 pub async fn rejected_pairs_for_course(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<HashSet<RejectedPairKey>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"SELECT src_doc_id, dst_doc_id, relation
            FROM rejected_edge_pairs
-           WHERE course_id = $1"#,
-        course_id,
+           WHERE workspace_id = $1"#,
+        workspace_id,
     )
     .fetch_all(db)
     .await?;

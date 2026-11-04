@@ -52,7 +52,7 @@ async fn student_unread_counts(
         .await?;
     let mut by_course: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     for r in rows {
-        *by_course.entry(r.course_id.to_string()).or_insert(0) += 1;
+        *by_course.entry(r.workspace_id.to_string()).or_insert(0) += 1;
     }
     Ok(Json(by_course))
 }
@@ -61,12 +61,10 @@ async fn student_unread_counts(
 struct CreateCourseRequest {
     name: String,
     description: Option<String>,
-    /// Required: which semester this course is delivered in (e.g.
-    /// `VT2026`). Mandatory for every new course so the My Courses
-    /// page can group meaningfully even when the course wasn't
-    /// auto-imported from Daisy. Historical rows from before this
-    /// requirement remain NULL and admins backfill via PUT.
-    semester_label: String,
+    /// Which semester this course is delivered in (e.g. `VT2026`).
+    /// Blank or absent creates an ad-hoc course with no term.
+    #[serde(default)]
+    semester_label: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -155,6 +153,10 @@ pub(crate) struct CourseResponse {
     active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
+    /// Workspace kind: `course` or `credit_transfer`. The course-only
+    /// fields below (`semester_label`, `course_code`, `auto_managed`,
+    /// `daisy_offerings`) are empty for every other kind.
+    kind: String,
     /// Viewer's course_member role ("teacher"|"ta"|"student"), or None if
     /// viewer is admin-only / not a member. Lets the frontend gate UI tabs.
     my_role: Option<String>,
@@ -244,7 +246,8 @@ pub(crate) struct CourseFeatureFlagsView {
 
 impl CourseResponse {
     fn from_row(
-        row: minerva_db::queries::courses::CourseRow,
+        row: minerva_db::queries::workspaces::WorkspaceRow,
+        course: Option<minerva_db::queries::courses::CourseRow>,
         my_role: Option<String>,
         feature_flags: CourseFeatureFlagsView,
         daisy_offerings: Vec<DaisyOfferingView>,
@@ -273,12 +276,13 @@ impl CourseResponse {
             active: row.active,
             created_at: row.created_at,
             updated_at: row.updated_at,
+            kind: row.kind,
             my_role,
             feature_flags,
-            semester_label: row.semester_label,
+            semester_label: course.as_ref().and_then(|c| c.semester_label.clone()),
             daisy_offerings,
-            auto_managed: row.auto_managed,
-            course_code: row.course_code,
+            auto_managed: course.as_ref().is_some_and(|c| c.auto_managed),
+            course_code: course.and_then(|c| c.course_code),
             student_count,
         }
     }
@@ -317,12 +321,15 @@ async fn resolve_course_offerings(db: &sqlx::PgPool, course_id: Uuid) -> Vec<Dai
 /// membership the way the teacher/student views do.
 pub(crate) async fn admin_course_response(
     db: &sqlx::PgPool,
-    row: minerva_db::queries::courses::CourseRow,
+    row: minerva_db::queries::workspaces::WorkspaceRow,
     student_count: i64,
 ) -> CourseResponse {
     let flags = resolve_course_flags(db, row.id).await;
     let offerings = resolve_course_offerings(db, row.id).await;
-    CourseResponse::from_row(row, None, flags, offerings, student_count)
+    let course = minerva_db::queries::courses::find(db, row.id)
+        .await
+        .unwrap_or_default();
+    CourseResponse::from_row(row, course, None, flags, offerings, student_count)
 }
 
 async fn list_courses(
@@ -330,27 +337,32 @@ async fn list_courses(
     Extension(user): Extension<User>,
 ) -> Result<Json<Vec<CourseResponse>>, AppError> {
     let rows = if user.role.is_admin() {
-        minerva_db::queries::courses::list_all(&state.db).await?
+        minerva_db::queries::workspaces::list_all(&state.db).await?
     } else if user.role.is_teacher_or_above() {
         // Teachers see courses they own + courses they teach/TA on
-        minerva_db::queries::courses::list_for_teacher(&state.db, user.id).await?
+        minerva_db::queries::workspaces::list_for_teacher(&state.db, user.id).await?
     } else {
         // Students see courses they're a member of
-        minerva_db::queries::courses::list_by_member(&state.db, user.id).await?
+        minerva_db::queries::workspaces::list_by_member(&state.db, user.id).await?
     };
 
     // One grouped query for every course's student count, rather than a
     // per-course COUNT inside the loop below.
-    let student_counts = minerva_db::queries::courses::count_students_by_course(&state.db).await?;
+    let student_counts =
+        minerva_db::queries::workspaces::count_students_by_course(&state.db).await?;
+    let ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+    let mut courses = minerva_db::queries::courses::find_many(&state.db, &ids).await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let my_role =
-            minerva_db::queries::courses::get_member_role(&state.db, row.id, user.id).await?;
+            minerva_db::queries::workspaces::get_member_role(&state.db, row.id, user.id).await?;
         let flags = resolve_course_flags(&state.db, row.id).await;
         let offerings = resolve_course_offerings(&state.db, row.id).await;
         let student_count = student_counts.get(&row.id).copied().unwrap_or(0);
+        let course = courses.remove(&row.id);
         out.push(CourseResponse::from_row(
             row,
+            course,
             my_role,
             flags,
             offerings,
@@ -369,7 +381,10 @@ async fn create_course(
         return Err(AppError::Forbidden);
     }
 
-    let semester_label = validate_semester_label(&body.semester_label)?;
+    let semester_label = match body.semester_label.as_deref().map(str::trim) {
+        Some(raw) if !raw.is_empty() => Some(validate_semester_label(raw)?),
+        _ => None,
+    };
 
     let id = Uuid::new_v4();
     // Snapshot every admin-tunable course default into the new row.
@@ -378,7 +393,7 @@ async fn create_course(
     // the table admins actually edit on the System tab. If no row is
     // marked default (shouldn't happen post-startup-sync), we fall
     // through to the SQL column DEFAULT via the COALESCE in
-    // `queries::courses::create`. Every other knob is read straight
+    // `queries::workspaces::create`. Every other knob is read straight
     // from `system_defaults`; teachers can override per-course via
     // PUT /courses/{id} afterwards.
     let default_embedding_model =
@@ -388,11 +403,11 @@ async fn create_course(
     let default_reranker_model =
         minerva_db::queries::reranker_models::current_default(&state.db).await?;
 
-    let input = minerva_db::queries::courses::CreateCourse {
+    let input = minerva_db::queries::workspaces::CreateWorkspace {
         name: body.name,
         description: body.description,
         owner_id: user.id,
-        semester_label,
+        kind: minerva_core::models::WorkspaceKind::Course.as_str(),
         daily_cost_limit_usd: crate::system_defaults::course_daily_cost_limit_usd(&state.db).await,
         conversation_soft_token_limit: Some(
             crate::system_defaults::course_conversation_soft_token_limit(&state.db).await,
@@ -415,16 +430,24 @@ async fn create_course(
         system_prompt: crate::system_defaults::course_system_prompt(&state.db).await,
     };
 
-    let row = minerva_db::queries::courses::create(&state.db, id, &input).await?;
+    let row = minerva_db::queries::workspaces::create_course(
+        &state.db,
+        id,
+        &input,
+        semester_label.as_deref(),
+    )
+    .await?;
+    let course = minerva_db::queries::courses::find(&state.db, id).await?;
 
     // Auto-add owner as teacher member
-    minerva_db::queries::courses::add_member(&state.db, id, user.id, "teacher").await?;
+    minerva_db::queries::workspaces::add_member(&state.db, id, user.id, "teacher").await?;
 
     let flags = resolve_course_flags(&state.db, row.id).await;
     // A just-created course has only its owner (added as a teacher
     // above), so there are no student members yet.
     Ok(Json(CourseResponse::from_row(
         row,
+        course,
         Some("teacher".into()),
         flags,
         Vec::new(),
@@ -437,21 +460,23 @@ async fn get_course(
     Extension(user): Extension<User>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<CourseResponse>, AppError> {
-    let row = minerva_db::queries::courses::find_by_id(&state.db, id)
+    let row = minerva_db::queries::workspaces::find_by_id(&state.db, id)
         .await?
         .ok_or(AppError::NotFound)?;
 
     // Check access: owner, admin, or member
-    let my_role = minerva_db::queries::courses::get_member_role(&state.db, id, user.id).await?;
+    let my_role = minerva_db::queries::workspaces::get_member_role(&state.db, id, user.id).await?;
     if row.owner_id != user.id && !user.role.is_admin() && my_role.is_none() {
         return Err(AppError::Forbidden);
     }
 
     let flags = resolve_course_flags(&state.db, row.id).await;
     let offerings = resolve_course_offerings(&state.db, row.id).await;
-    let student_count = minerva_db::queries::courses::count_students(&state.db, row.id).await?;
+    let student_count = minerva_db::queries::workspaces::count_students(&state.db, row.id).await?;
+    let course = minerva_db::queries::courses::find(&state.db, row.id).await?;
     Ok(Json(CourseResponse::from_row(
         row,
+        course,
         my_role,
         flags,
         offerings,
@@ -503,10 +528,10 @@ pub(crate) struct CourseUpdateFields {
 /// helper assumes the caller already proved they may edit the course.
 pub(crate) async fn apply_course_update(
     state: &AppState,
-    existing: &minerva_db::queries::courses::CourseRow,
+    existing: &minerva_db::queries::workspaces::WorkspaceRow,
     body: CourseUpdateFields,
     is_admin: bool,
-) -> Result<minerva_db::queries::courses::CourseRow, AppError> {
+) -> Result<minerva_db::queries::workspaces::WorkspaceRow, AppError> {
     let id = existing.id;
 
     // Threshold is a magnitude (we filter on abs(score)), so a negative
@@ -760,7 +785,7 @@ pub(crate) async fn apply_course_update(
         // team. The rotation runs in a transaction (see
         // `rotate_embedding`) so the version bump and the document
         // re-queue cannot be observed in a partial state.
-        let outcome = minerva_db::queries::courses::rotate_embedding(
+        let outcome = minerva_db::queries::workspaces::rotate_embedding(
             &state.db,
             id,
             new_provider_value,
@@ -789,7 +814,7 @@ pub(crate) async fn apply_course_update(
     // Apply the rest of the update. Provider/model are intentionally
     // omitted; if a rotation just ran they're already persisted; if
     // it didn't, COALESCE on `None` is a no-op anyway.
-    let input = minerva_db::queries::courses::UpdateCourse {
+    let input = minerva_db::queries::workspaces::UpdateWorkspace {
         name: body.name,
         description: body.description,
         context_ratio: body.context_ratio,
@@ -806,12 +831,16 @@ pub(crate) async fn apply_course_update(
         daily_cost_limit_usd: body.daily_cost_limit_usd,
         conversation_soft_token_limit: body.conversation_soft_token_limit,
         conversation_hard_token_limit: body.conversation_hard_token_limit,
-        semester_label: validated_semester_label,
     };
 
-    minerva_db::queries::courses::update(&state.db, id, &input)
+    let row = minerva_db::queries::workspaces::update(&state.db, id, &input)
         .await?
-        .ok_or(AppError::NotFound)
+        .ok_or(AppError::NotFound)?;
+    if let Some(label) = validated_semester_label {
+        // Only a course has a term; relabelling another kind is a no-op.
+        minerva_db::queries::courses::set_semester_label(&state.db, id, &label).await?;
+    }
+    Ok(row)
 }
 
 async fn update_course(
@@ -844,12 +873,14 @@ async fn update_course(
 
     let row = apply_course_update(&state, &existing, fields, user.role.is_admin()).await?;
 
-    let my_role = minerva_db::queries::courses::get_member_role(&state.db, id, user.id).await?;
+    let my_role = minerva_db::queries::workspaces::get_member_role(&state.db, id, user.id).await?;
     let flags = resolve_course_flags(&state.db, row.id).await;
     let offerings = resolve_course_offerings(&state.db, row.id).await;
-    let student_count = minerva_db::queries::courses::count_students(&state.db, row.id).await?;
+    let student_count = minerva_db::queries::workspaces::count_students(&state.db, row.id).await?;
+    let course = minerva_db::queries::courses::find(&state.db, row.id).await?;
     Ok(Json(CourseResponse::from_row(
         row,
+        course,
         my_role,
         flags,
         offerings,
@@ -864,7 +895,7 @@ async fn archive_course(
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_course_owner(&state, id, &user).await?;
 
-    minerva_db::queries::courses::archive(&state.db, id).await?;
+    minerva_db::queries::workspaces::archive(&state.db, id).await?;
     Ok(Json(serde_json::json!({ "archived": true })))
 }
 
@@ -885,7 +916,7 @@ async fn list_members(
     // Owner, admin, teacher, and TA can all view the member list (read-only).
     require_course_teacher(&state, id, &user, TeacherScope::WithAssistants).await?;
 
-    let rows = minerva_db::queries::courses::list_members(&state.db, id).await?;
+    let rows = minerva_db::queries::workspaces::list_members(&state.db, id).await?;
     let ps = crate::ext_obfuscate::Pseudonymizer::for_viewer(
         &state.db,
         &user,
@@ -938,7 +969,7 @@ async fn add_member(
     let target_id = target.id;
 
     let role = body.role.as_deref().unwrap_or("student");
-    minerva_db::queries::courses::add_member(&state.db, id, target_id, role).await?;
+    minerva_db::queries::workspaces::add_member(&state.db, id, target_id, role).await?;
 
     Ok(Json(
         serde_json::json!({ "added": true, "user_id": target_id }),
@@ -952,7 +983,7 @@ async fn remove_member(
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_course_owner(&state, id, &user).await?;
 
-    let removed = minerva_db::queries::courses::remove_member(&state.db, id, user_id).await?;
+    let removed = minerva_db::queries::workspaces::remove_member(&state.db, id, user_id).await?;
     Ok(Json(serde_json::json!({ "removed": removed })))
 }
 
@@ -1025,7 +1056,7 @@ async fn approve_role_suggestion(
         return Err(AppError::NotFound);
     }
 
-    minerva_db::queries::courses::add_member(
+    minerva_db::queries::workspaces::add_member(
         &state.db,
         suggestion.course_id,
         suggestion.user_id,

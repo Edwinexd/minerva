@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO visual_extraction_jobs\n            (document_id, workspace_id, kind, status, priority, pipeline_version)\n        SELECT d.id, d.workspace_id, 'play_lecture', 'needs_source',\n               CASE WHEN d.created_at > NOW() - make_interval(days => $2) THEN 100 ELSE 0 END,\n               $1\n        FROM documents d\n        WHERE d.mime_type = 'text/x-url'\n          AND d.orphaned_at IS NULL\n          AND (\n              d.status = 'awaiting_transcript'\n              OR EXISTS (\n                  SELECT 1 FROM documents c\n                  WHERE c.parent_document_id = d.id\n                    AND c.orphaned_at IS NULL\n                    AND c.mime_type = 'text/plain'\n              )\n          )\n        ON CONFLICT (document_id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a070b14a39f14461bded47ef38bd30e7ad1a644a892daf58707d79fb117871b"
+}

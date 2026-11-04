@@ -26,7 +26,7 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
         .execute(&db)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO courses (id,name,owner_id) VALUES ($1,'metrics-test',$2)")
+    sqlx::query("INSERT INTO workspaces (id,name,owner_id) VALUES ($1,'metrics-test',$2)")
         .bind(course)
         .bind(user)
         .execute(&db)
@@ -45,9 +45,9 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
         ("play_lecture", "needs_source"),
     ] {
         let doc = Uuid::new_v4();
-        sqlx::query("INSERT INTO documents (id,course_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.pdf','application/pdf',0,$3)")
+        sqlx::query("INSERT INTO documents (id,workspace_id,filename,mime_type,size_bytes,uploaded_by) VALUES ($1,$2,'test.pdf','application/pdf',0,$3)")
             .bind(doc).bind(course).bind(user).execute(&db).await.unwrap();
-        sqlx::query("INSERT INTO visual_extraction_jobs (document_id,course_id,kind,status,pipeline_version,updated_at) VALUES ($1,$2,$3,$4,1,NOW()-INTERVAL '10 minutes')")
+        sqlx::query("INSERT INTO visual_extraction_jobs (document_id,workspace_id,kind,status,pipeline_version,updated_at) VALUES ($1,$2,$3,$4,1,NOW()-INTERVAL '10 minutes')")
             .bind(doc).bind(course).bind(kind).bind(status).execute(&db).await.unwrap();
         documents.push(doc);
     }
@@ -81,7 +81,7 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
             .bind(Uuid::new_v4()).bind(state).bind(age).execute(&db).await.unwrap();
     }
     for indexed in [false, true] {
-        sqlx::query("INSERT INTO document_figures (document_id,course_id,page_position,box,image_path,context,visual_model,visual_vector,created_at,indexed_at,shows_person) VALUES ($1,$2,0,ARRAY[0,0,1,1]::REAL[],'test.png','test','test',ARRAY[0]::REAL[],NOW()-INTERVAL '3 minutes',CASE WHEN $3 THEN NOW() ELSE NULL END,FALSE)")
+        sqlx::query("INSERT INTO document_figures (document_id,workspace_id,page_position,box,image_path,context,visual_model,visual_vector,created_at,indexed_at,shows_person) VALUES ($1,$2,0,ARRAY[0,0,1,1]::REAL[],'test.png','test','test',ARRAY[0]::REAL[],NOW()-INTERVAL '3 minutes',CASE WHEN $3 THEN NOW() ELSE NULL END,FALSE)")
             .bind(documents[5]).bind(course).bind(indexed).execute(&db).await.unwrap();
     }
 
@@ -89,7 +89,7 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
     // never described, and one of an inactive course. Neither is pending.
     let inactive = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO courses (id,name,owner_id,active) VALUES ($1,'metrics-inactive',$2,FALSE)",
+        "INSERT INTO workspaces (id,name,owner_id,active) VALUES ($1,'metrics-inactive',$2,FALSE)",
     )
     .bind(inactive)
     .bind(user)
@@ -102,7 +102,7 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
         .await
         .unwrap();
     for (doc, figure_course) in [(documents[6], course), (documents[4], inactive)] {
-        sqlx::query("INSERT INTO document_figures (document_id,course_id,page_position,box,image_path,context,visual_model,visual_vector,created_at,shows_person) VALUES ($1,$2,0,ARRAY[0,0,1,1]::REAL[],'test.png','test','test',ARRAY[0]::REAL[],NOW()-INTERVAL '1 hour',FALSE)")
+        sqlx::query("INSERT INTO document_figures (document_id,workspace_id,page_position,box,image_path,context,visual_model,visual_vector,created_at,shows_person) VALUES ($1,$2,0,ARRAY[0,0,1,1]::REAL[],'test.png','test','test',ARRAY[0]::REAL[],NOW()-INTERVAL '1 hour',FALSE)")
             .bind(doc).bind(figure_course).execute(&db).await.unwrap();
     }
 
@@ -140,7 +140,7 @@ async fn metrics_distinguish_backlogs_expiry_and_recent_failures(db: sqlx::PgPoo
     assert!((180.0..190.0).contains(&figures.oldest_pending_seconds));
 
     // Empty queues must reset to zero after draining, including deadlines.
-    sqlx::query("DELETE FROM courses WHERE id=$1")
+    sqlx::query("DELETE FROM workspaces WHERE id=$1")
         .bind(course)
         .execute(&db)
         .await

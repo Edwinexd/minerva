@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE document_figures\n           SET workspace_id = $1,\n               indexed_at = CASE WHEN shows_person THEN indexed_at END\n           WHERE workspace_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0c4ea76652bb52ea3341895e7c2f84d1bb77ed6ed4a2be3869811b0355ed4f79"
+}

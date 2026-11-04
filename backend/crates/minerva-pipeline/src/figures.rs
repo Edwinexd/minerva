@@ -276,6 +276,7 @@ pub async fn index_figures(
 
     let payload = |figure: &FigureToIndex| -> HashMap<String, qdrant_client::qdrant::Value> {
         HashMap::from([
+            // Stored payload key (predates workspaces); see pipeline.rs.
             ("course_id".to_string(), course.course_id.to_string().into()),
             (
                 "document_id".to_string(),

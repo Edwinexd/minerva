@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.id, s.course_id, s.user_id,\n                  u.eppn, u.display_name,\n                  cm.role AS current_role,\n                  s.suggested_role, s.source, s.source_detail,\n                  s.created_at\n           FROM course_member_role_suggestions s\n           JOIN users u ON u.id = s.user_id\n           LEFT JOIN workspace_members cm\n             ON cm.workspace_id = s.course_id AND cm.user_id = s.user_id\n           WHERE s.course_id = $1 AND s.resolution IS NULL\n           ORDER BY s.created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "course_member_role_suggestions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "course_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "course_member_role_suggestions",
+            "name": "course_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "course_member_role_suggestions",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "eppn",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "eppn"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "current_role",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_members",
+            "name": "role"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "suggested_role",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_member_role_suggestions",
+            "name": "suggested_role"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_member_role_suggestions",
+            "name": "source"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "source_detail",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "course_member_role_suggestions",
+            "name": "source_detail"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "course_member_role_suggestions",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "5755ba9c45b9f170894b556269db80c8eb66f902a332a18796f2628c103ab584"
+}

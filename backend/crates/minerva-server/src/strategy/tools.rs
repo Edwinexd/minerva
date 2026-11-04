@@ -406,7 +406,7 @@ async fn run_get_document_chunks(
             reason: format!("no document with id {}", doc_id),
         });
     };
-    if doc.course_id != ctx.course_id {
+    if doc.workspace_id != ctx.course_id {
         return Err(ToolError::BadArgs {
             tool: "get_document_chunks",
             reason: format!("document {} does not belong to this course", doc_id),

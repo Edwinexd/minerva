@@ -2,7 +2,7 @@
 //! Changing the chosen model or VERSION only re-describes existing crops.
 use base64::Engine;
 use minerva_db::queries::{
-    chat_models, course_token_usage, figure_descriptions as queue, usage, users,
+    chat_models, figure_descriptions as queue, usage, users, workspace_token_usage,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -244,7 +244,7 @@ async fn describe(
     job: &queue::DescriptionJob,
     allow_standard_fallback: bool,
 ) -> Result<Option<Description>, String> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, job.course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, job.workspace_id)
         .await
         .map_err(|_| "Cannot load figure's course")?
         .ok_or("Figure's course is inactive")?;
@@ -262,7 +262,7 @@ async fn describe(
     }
     let path = std::path::PathBuf::from(minerva_pipeline::figures::assets_dir(
         &state.config.docs_path,
-        job.course_id,
+        job.workspace_id,
         job.document_id,
     ))
     .join(&job.image_path);
@@ -290,10 +290,10 @@ async fn describe(
     // Even malformed/refused outputs cost tokens. Record before validating.
     if let Some(tokens) = llm::extract_openai_usage(&payload) {
         let billed_model = billed_model(&util.model, provider.id(), &payload);
-        if let Err(e) = course_token_usage::record(
+        if let Err(e) = workspace_token_usage::record(
             &state.db,
-            job.course_id,
-            course_token_usage::CATEGORY_FIGURE_DESCRIPTION,
+            job.workspace_id,
+            workspace_token_usage::CATEGORY_FIGURE_DESCRIPTION,
             &billed_model,
             tokens.0,
             tokens.1,

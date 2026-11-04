@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct RelinkEntry {
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub first_marked_at: chrono::DateTime<chrono::Utc>,
     pub due_at: chrono::DateTime<chrono::Utc>,
 }
@@ -28,27 +28,27 @@ pub struct RelinkEntry {
 /// indefinitely defer the linker.
 pub async fn mark_dirty(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     debounce_seconds: i64,
     max_pending_age_seconds: i64,
 ) -> Result<RelinkEntry, sqlx::Error> {
     sqlx::query_as!(
         RelinkEntry,
         r#"
-        INSERT INTO relink_queue (course_id, first_marked_at, due_at)
+        INSERT INTO relink_queue (workspace_id, first_marked_at, due_at)
         VALUES (
             $1,
             NOW(),
             NOW() + make_interval(secs => $2)
         )
-        ON CONFLICT (course_id) DO UPDATE
+        ON CONFLICT (workspace_id) DO UPDATE
             SET due_at = LEAST(
                 NOW() + make_interval(secs => $2),
                 relink_queue.first_marked_at + make_interval(secs => $3)
             )
-        RETURNING course_id, first_marked_at, due_at
+        RETURNING workspace_id, first_marked_at, due_at
         "#,
-        course_id,
+        workspace_id,
         debounce_seconds as f64,
         max_pending_age_seconds as f64,
     )
@@ -61,18 +61,18 @@ pub async fn mark_dirty(
 /// completion where waiting the debounce window would feel laggy.
 pub async fn mark_dirty_immediate(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<RelinkEntry, sqlx::Error> {
     sqlx::query_as!(
         RelinkEntry,
         r#"
-        INSERT INTO relink_queue (course_id, first_marked_at, due_at)
+        INSERT INTO relink_queue (workspace_id, first_marked_at, due_at)
         VALUES ($1, NOW(), NOW())
-        ON CONFLICT (course_id) DO UPDATE
+        ON CONFLICT (workspace_id) DO UPDATE
             SET due_at = LEAST(relink_queue.due_at, NOW())
-        RETURNING course_id, first_marked_at, due_at
+        RETURNING workspace_id, first_marked_at, due_at
         "#,
-        course_id,
+        workspace_id,
     )
     .fetch_one(db)
     .await
@@ -87,7 +87,7 @@ pub async fn take_due(db: &PgPool) -> Result<Vec<RelinkEntry>, sqlx::Error> {
         r#"
         DELETE FROM relink_queue
         WHERE due_at <= NOW()
-        RETURNING course_id, first_marked_at, due_at
+        RETURNING workspace_id, first_marked_at, due_at
         "#,
     )
     .fetch_all(db)
@@ -107,12 +107,12 @@ pub async fn pending_count(db: &PgPool) -> Result<i64, sqlx::Error> {
 /// while the sweep catches up. A row is present iff `mark_dirty` (or
 /// `mark_dirty_immediate`) has fired for the course since the last
 /// successful drain by `take_due`.
-pub async fn is_queued(db: &PgPool, course_id: Uuid) -> Result<bool, sqlx::Error> {
+pub async fn is_queued(db: &PgPool, workspace_id: Uuid) -> Result<bool, sqlx::Error> {
     let row = sqlx::query_scalar!(
         r#"SELECT EXISTS (
-               SELECT 1 FROM relink_queue WHERE course_id = $1
+               SELECT 1 FROM relink_queue WHERE workspace_id = $1
            ) AS "exists!""#,
-        course_id,
+        workspace_id,
     )
     .fetch_one(db)
     .await?;

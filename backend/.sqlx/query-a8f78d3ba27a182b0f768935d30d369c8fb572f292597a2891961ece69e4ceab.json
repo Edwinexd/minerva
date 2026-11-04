@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE workspace_suggested_questions c SET workspace_id = $1\n           WHERE c.workspace_id = $2\n             AND NOT EXISTS (SELECT 1 FROM workspace_suggested_questions q WHERE q.workspace_id = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a8f78d3ba27a182b0f768935d30d369c8fb572f292597a2891961ece69e4ceab"
+}

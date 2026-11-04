@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE workspaces SET active = true, updated_at = NOW() WHERE id = $1 AND active = false",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "565fbe638610ec1818d2b36f773d40f5930bdb2983310bdddd08f4905e4d7f8e"
+}

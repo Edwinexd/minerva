@@ -282,7 +282,7 @@ struct MessageFeedbackResponse {
 /// analyzer at send time would double cost per turn, and the
 /// student is the only one who reads their own panel so a
 /// manipulated payload only fools themselves; teacher dashboards
-/// can re-derive truth from `course_token_usage` (category=aegis).
+/// can re-derive truth from `workspace_token_usage` (category=aegis).
 /// We DO clamp the suggestion array to AEGIS_SUGGESTIONS_MAX items
 /// at insert time; the analyzer's schema enforces it, but
 /// defending against a hand-crafted body costs nothing.
@@ -548,7 +548,7 @@ impl ConversationTokenState {
     /// threshold, and the split endpoint's eligibility gate).
     pub(crate) async fn resolve(
         state: &AppState,
-        course: &minerva_db::queries::courses::CourseRow,
+        course: &minerva_db::queries::workspaces::WorkspaceRow,
         conversation_id: Uuid,
     ) -> Result<Self, AppError> {
         let total =
@@ -581,7 +581,7 @@ async fn list_conversations(
         rows.into_iter()
             .map(|r| ConversationResponse {
                 id: r.id,
-                course_id: r.course_id,
+                course_id: r.workspace_id,
                 title: r.title,
                 pinned: r.pinned,
                 created_at: r.created_at,
@@ -624,7 +624,7 @@ async fn list_all_conversations(
                 );
                 ConversationWithFeedbackResponse {
                     id: r.id,
-                    course_id: r.course_id,
+                    course_id: r.workspace_id,
                     user_id: r.user_id,
                     title: r.title,
                     pinned: r.pinned,
@@ -724,7 +724,7 @@ pub(crate) async fn list_pinned_conversations_for(
                 ext_obfuscate::apply(ps.as_ref(), r.user_id, raw_eppn, raw_display);
             ConversationWithUserResponse {
                 id: r.id,
-                course_id: r.course_id,
+                course_id: r.workspace_id,
                 user_id: r.user_id,
                 title: r.title,
                 pinned: r.pinned,
@@ -773,7 +773,7 @@ pub(crate) async fn fetch_conversation_for_view(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
 
@@ -1170,7 +1170,7 @@ pub(crate) async fn analyze_prompt_for_user(
         let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
             .await?
             .ok_or(AppError::NotFound)?;
-        if conv.course_id != course_id {
+        if conv.workspace_id != course_id {
             return Err(AppError::NotFound);
         }
         if conv.user_id != user_id {
@@ -1468,7 +1468,7 @@ async fn start_conversation(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_chat_message(
     state: &AppState,
-    course: minerva_db::queries::courses::CourseRow,
+    course: minerva_db::queries::workspaces::WorkspaceRow,
     user_id: Uuid,
     user_privacy_acknowledged_at: Option<chrono::DateTime<chrono::Utc>>,
     cid: Option<Uuid>,
@@ -1486,7 +1486,7 @@ pub(super) async fn run_chat_message(
         let row = minerva_db::queries::conversations::find_by_id(&state.db, cid)
             .await?
             .ok_or(AppError::NotFound)?;
-        if row.course_id != course_id {
+        if row.workspace_id != course_id {
             return Err(AppError::NotFound);
         }
         if row.user_id != user_id {
@@ -1853,7 +1853,7 @@ async fn set_pin(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
 
@@ -1863,7 +1863,7 @@ async fn set_pin(
 
     Ok(Json(ConversationResponse {
         id: row.id,
-        course_id: row.course_id,
+        course_id: row.workspace_id,
         title: row.title,
         pinned: row.pinned,
         created_at: row.created_at,
@@ -1903,7 +1903,7 @@ async fn list_notes(
 
     // Scope the conversation to the URL's course so a teacher/admin of one
     // course cannot list notes from conversations in another course.
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
 
@@ -1950,7 +1950,7 @@ async fn create_note(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
 
@@ -1992,7 +1992,7 @@ async fn update_note(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
     let existing = minerva_db::queries::conversations::find_note_by_id(&state.db, note_id)
@@ -2035,7 +2035,7 @@ async fn delete_note(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
     let existing = minerva_db::queries::conversations::find_note_by_id(&state.db, note_id)
@@ -2069,7 +2069,7 @@ async fn set_feedback(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.course_id != course_id || conv.user_id != user.id {
+    if conv.workspace_id != course_id || conv.user_id != user.id {
         return Err(AppError::Forbidden);
     }
 
@@ -2150,7 +2150,7 @@ async fn mark_read(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
 
@@ -2193,7 +2193,7 @@ async fn acknowledge_flag(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
     let existing = minerva_db::queries::conversation_flags::find_by_id(&state.db, flag_id)
@@ -2243,7 +2243,7 @@ async fn acknowledge_feedback(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
     let existing = minerva_db::queries::message_feedback::find_by_id(&state.db, fb_id)
@@ -2301,7 +2301,7 @@ pub(super) async fn verify_course_access_pub(
     state: &AppState,
     course_id: Uuid,
     user_id: Uuid,
-) -> Result<minerva_db::queries::courses::CourseRow, AppError> {
+) -> Result<minerva_db::queries::workspaces::WorkspaceRow, AppError> {
     verify_course_access(state, course_id, user_id).await
 }
 
@@ -2369,7 +2369,7 @@ async fn embed_topic_turns(
 /// a wrong nudge is worse than a missing one.
 fn spawn_topic_switch_detection(
     state: &AppState,
-    course: &minerva_db::queries::courses::CourseRow,
+    course: &minerva_db::queries::workspaces::WorkspaceRow,
     conversation_id: Uuid,
     message_id: Uuid,
     content: String,
@@ -2538,13 +2538,13 @@ async fn verify_course_access(
     state: &AppState,
     course_id: Uuid,
     user_id: Uuid,
-) -> Result<minerva_db::queries::courses::CourseRow, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+) -> Result<minerva_db::queries::workspaces::WorkspaceRow, AppError> {
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
     if course.owner_id != user_id
-        && !minerva_db::queries::courses::is_member(&state.db, course_id, user_id).await?
+        && !minerva_db::queries::workspaces::is_member(&state.db, course_id, user_id).await?
     {
         return Err(AppError::Forbidden);
     }

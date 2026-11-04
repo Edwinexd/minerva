@@ -110,7 +110,7 @@ impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
     fn from(row: minerva_db::queries::documents::DocumentRow) -> Self {
         Self {
             id: row.id,
-            course_id: row.course_id,
+            course_id: row.workspace_id,
             filename: row.filename,
             mime_type: row.mime_type,
             size_bytes: row.size_bytes,
@@ -249,7 +249,7 @@ pub async fn upload_or_dedup(
         &state.db,
         minerva_db::queries::documents::NewDocument {
             id: doc_id,
-            course_id,
+            workspace_id: course_id,
             filename,
             mime_type,
             size_bytes,
@@ -516,7 +516,7 @@ async fn patch_document(
     let doc = minerva_db::queries::documents::find_by_id(&state.db, doc_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if doc.course_id != course_id {
+    if doc.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
 
@@ -567,7 +567,7 @@ async fn delete_document(
     let doc = minerva_db::queries::documents::find_by_id(&state.db, doc_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if doc.course_id != course_id {
+    if doc.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
 
@@ -820,7 +820,7 @@ async fn load_doc_in_course(
     let doc = minerva_db::queries::documents::find_by_id(&state.db, doc_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if doc.course_id != course_id {
+    if doc.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
     Ok(doc)
@@ -844,7 +844,7 @@ pub(crate) async fn run_classify_one(
     let ext = extension_from_filename(&doc.filename);
     let file_path = format!(
         "{}/{}/{}.{}",
-        state.config.docs_path, doc.course_id, doc.id, ext
+        state.config.docs_path, doc.workspace_id, doc.id, ext
     );
     let path = std::path::Path::new(&file_path);
     let text = minerva_pipeline::pipeline::extract_document_text(path)
@@ -857,7 +857,7 @@ pub(crate) async fn run_classify_one(
     );
     use minerva_pipeline::classifier::Classifier;
     let result = classifier
-        .classify(doc.course_id, &doc.filename, &doc.mime_type, &text)
+        .classify(doc.workspace_id, &doc.filename, &doc.mime_type, &text)
         .await
         .map_err(AppError::Internal)?;
 
@@ -1234,7 +1234,7 @@ async fn reject_edge(
     let edge = minerva_db::queries::document_relations::find_by_id(&state.db, edge_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if edge.course_id != course_id {
+    if edge.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
 
@@ -1263,7 +1263,7 @@ async fn unreject_edge(
     let edge = minerva_db::queries::document_relations::find_by_id(&state.db, edge_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if edge.course_id != course_id {
+    if edge.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
 

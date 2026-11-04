@@ -418,7 +418,7 @@ async fn handle_launch(
     };
 
     // 8. Verify the resolved course still exists.
-    minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -500,9 +500,10 @@ async fn apply_course_membership(
 ) -> Result<(), AppError> {
     let claimed_role = lti::lti_roles_to_course_role(&claims.roles);
     let existing_role =
-        minerva_db::queries::courses::get_member_role(&state.db, course_id, user.id).await?;
+        minerva_db::queries::workspaces::get_member_role(&state.db, course_id, user.id).await?;
     if existing_role.is_none() {
-        minerva_db::queries::courses::add_member(&state.db, course_id, user.id, "student").await?;
+        minerva_db::queries::workspaces::add_member(&state.db, course_id, user.id, "student")
+            .await?;
     }
     if claimed_role == "teacher" && existing_role.as_deref() != Some("teacher") {
         let detail = serde_json::json!({ "lti_roles": claims.roles });
@@ -1050,9 +1051,9 @@ async fn bind_info(
         .ok_or_else(|| AppError::bad_request("lti.bind_user_not_found"))?;
 
     let courses = if user.role == "admin" {
-        minerva_db::queries::courses::list_all(&state.db).await?
+        minerva_db::queries::workspaces::list_all(&state.db).await?
     } else if user.role == "teacher" {
-        minerva_db::queries::courses::list_for_teacher(&state.db, user.id).await?
+        minerva_db::queries::workspaces::list_for_teacher(&state.db, user.id).await?
     } else {
         Vec::new()
     };
@@ -1119,14 +1120,14 @@ async fn bind_complete(
     // Re-check authorization: must be admin, course owner, or teacher
     // on the target course. Mirrors require_course_teacher but operating
     // on a UserRow rather than an auth-middleware User.
-    let course = minerva_db::queries::courses::find_by_id(&state.db, body.course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, body.course_id)
         .await?
         .ok_or(AppError::NotFound)?;
     let is_admin = user.role == "admin";
     let is_owner = course.owner_id == user.id;
     let is_teacher = is_admin
         || is_owner
-        || minerva_db::queries::courses::is_course_teacher_strict(
+        || minerva_db::queries::workspaces::is_course_teacher_strict(
             &state.db,
             body.course_id,
             user.id,
@@ -2090,7 +2091,7 @@ async fn list_platform_bindings(
     let rows = minerva_db::queries::lti::list_bindings_for_platform(&state.db, platform_id).await?;
     let mut out = Vec::with_capacity(rows.len());
     for b in rows {
-        let course_name = minerva_db::queries::courses::find_by_id(&state.db, b.course_id)
+        let course_name = minerva_db::queries::workspaces::find_by_id(&state.db, b.course_id)
             .await?
             .map(|c| c.name);
         out.push(BindingResponse {

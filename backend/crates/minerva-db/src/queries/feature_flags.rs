@@ -19,7 +19,7 @@ use uuid::Uuid;
 pub struct FeatureFlagRow {
     pub id: Uuid,
     pub flag: String,
-    pub course_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     pub user_id: Option<Uuid>,
     pub enabled: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -54,7 +54,7 @@ pub async fn set(
     scope: Scope,
     enabled: bool,
 ) -> Result<FeatureFlagRow, sqlx::Error> {
-    let (course_id, user_id) = scope.as_pair();
+    let (workspace_id, user_id) = scope.as_pair();
     // We can't use a single `ON CONFLICT (flag, course_id, user_id)`
     // because the unique constraint is split across three partial
     // indexes (one per scope shape). Branch in Rust instead; this
@@ -64,13 +64,13 @@ pub async fn set(
         Scope::Course(_) => {
             sqlx::query_as!(
                 FeatureFlagRow,
-                r#"INSERT INTO feature_flags (flag, course_id, user_id, enabled)
+                r#"INSERT INTO feature_flags (flag, workspace_id, user_id, enabled)
                VALUES ($1, $2, $3, $4)
-               ON CONFLICT (flag, course_id) WHERE course_id IS NOT NULL
+               ON CONFLICT (flag, workspace_id) WHERE workspace_id IS NOT NULL
                DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()
-               RETURNING id, flag, course_id, user_id, enabled, created_at, updated_at"#,
+               RETURNING id, flag, workspace_id, user_id, enabled, created_at, updated_at"#,
                 flag,
-                course_id,
+                workspace_id,
                 user_id,
                 enabled,
             )
@@ -80,13 +80,13 @@ pub async fn set(
         Scope::User(_) => {
             sqlx::query_as!(
                 FeatureFlagRow,
-                r#"INSERT INTO feature_flags (flag, course_id, user_id, enabled)
+                r#"INSERT INTO feature_flags (flag, workspace_id, user_id, enabled)
                VALUES ($1, $2, $3, $4)
                ON CONFLICT (flag, user_id) WHERE user_id IS NOT NULL
                DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()
-               RETURNING id, flag, course_id, user_id, enabled, created_at, updated_at"#,
+               RETURNING id, flag, workspace_id, user_id, enabled, created_at, updated_at"#,
                 flag,
-                course_id,
+                workspace_id,
                 user_id,
                 enabled,
             )
@@ -96,11 +96,11 @@ pub async fn set(
         Scope::Global => {
             sqlx::query_as!(
                 FeatureFlagRow,
-                r#"INSERT INTO feature_flags (flag, course_id, user_id, enabled)
+                r#"INSERT INTO feature_flags (flag, workspace_id, user_id, enabled)
                VALUES ($1, NULL, NULL, $2)
-               ON CONFLICT (flag) WHERE course_id IS NULL AND user_id IS NULL
+               ON CONFLICT (flag) WHERE workspace_id IS NULL AND user_id IS NULL
                DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()
-               RETURNING id, flag, course_id, user_id, enabled, created_at, updated_at"#,
+               RETURNING id, flag, workspace_id, user_id, enabled, created_at, updated_at"#,
                 flag,
                 enabled,
             )
@@ -115,11 +115,11 @@ pub async fn set(
 /// rather than leaving an explicit `enabled = false` row in place.
 pub async fn delete(db: &PgPool, flag: &str, scope: Scope) -> Result<bool, sqlx::Error> {
     let result = match scope {
-        Scope::Course(course_id) => {
+        Scope::Course(workspace_id) => {
             sqlx::query!(
-                "DELETE FROM feature_flags WHERE flag = $1 AND course_id = $2",
+                "DELETE FROM feature_flags WHERE flag = $1 AND workspace_id = $2",
                 flag,
-                course_id
+                workspace_id
             )
             .execute(db)
             .await?
@@ -135,7 +135,7 @@ pub async fn delete(db: &PgPool, flag: &str, scope: Scope) -> Result<bool, sqlx:
         }
         Scope::Global => {
             sqlx::query!(
-            "DELETE FROM feature_flags WHERE flag = $1 AND course_id IS NULL AND user_id IS NULL",
+            "DELETE FROM feature_flags WHERE flag = $1 AND workspace_id IS NULL AND user_id IS NULL",
             flag,
         )
             .execute(db)
@@ -151,7 +151,7 @@ pub async fn delete(db: &PgPool, flag: &str, scope: Scope) -> Result<bool, sqlx:
 pub async fn list_all(db: &PgPool) -> Result<Vec<FeatureFlagRow>, sqlx::Error> {
     sqlx::query_as!(
         FeatureFlagRow,
-        "SELECT id, flag, course_id, user_id, enabled, created_at, updated_at FROM feature_flags ORDER BY flag, created_at"
+        "SELECT id, flag, workspace_id, user_id, enabled, created_at, updated_at FROM feature_flags ORDER BY flag, created_at"
     )
     .fetch_all(db)
     .await
@@ -161,12 +161,12 @@ pub async fn list_all(db: &PgPool) -> Result<Vec<FeatureFlagRow>, sqlx::Error> {
 /// admin panel.
 pub async fn list_for_course(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<Vec<FeatureFlagRow>, sqlx::Error> {
     sqlx::query_as!(
         FeatureFlagRow,
-        "SELECT id, flag, course_id, user_id, enabled, created_at, updated_at FROM feature_flags WHERE course_id = $1",
-        course_id,
+        "SELECT id, flag, workspace_id, user_id, enabled, created_at, updated_at FROM feature_flags WHERE workspace_id = $1",
+        workspace_id,
     )
     .fetch_all(db)
     .await
@@ -179,14 +179,14 @@ pub async fn list_for_course(
 pub async fn is_enabled_for_course(
     db: &PgPool,
     flag: &str,
-    course_id: Uuid,
+    workspace_id: Uuid,
     default: bool,
 ) -> Result<bool, sqlx::Error> {
     // 1. course-scoped row?
     let course_row: Option<bool> = sqlx::query_scalar!(
-        "SELECT enabled FROM feature_flags WHERE flag = $1 AND course_id = $2",
+        "SELECT enabled FROM feature_flags WHERE flag = $1 AND workspace_id = $2",
         flag,
-        course_id,
+        workspace_id,
     )
     .fetch_optional(db)
     .await?;
@@ -195,7 +195,7 @@ pub async fn is_enabled_for_course(
     }
     // 2. global row?
     let global_row: Option<bool> = sqlx::query_scalar!(
-        "SELECT enabled FROM feature_flags WHERE flag = $1 AND course_id IS NULL AND user_id IS NULL",
+        "SELECT enabled FROM feature_flags WHERE flag = $1 AND workspace_id IS NULL AND user_id IS NULL",
         flag,
     )
     .fetch_optional(db)
@@ -222,7 +222,7 @@ pub async fn is_enabled_for_user(
         return Ok(enabled);
     }
     let global_row: Option<bool> = sqlx::query_scalar!(
-        "SELECT enabled FROM feature_flags WHERE flag = $1 AND course_id IS NULL AND user_id IS NULL",
+        "SELECT enabled FROM feature_flags WHERE flag = $1 AND workspace_id IS NULL AND user_id IS NULL",
         flag,
     )
     .fetch_optional(db)

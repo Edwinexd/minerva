@@ -111,7 +111,7 @@ pub async fn continue_conversation(
 /// same way out of a closed thread.
 pub(super) async fn split(
     state: &AppState,
-    course: &minerva_db::queries::courses::CourseRow,
+    course: &minerva_db::queries::workspaces::WorkspaceRow,
     cid: Uuid,
     user_id: Uuid,
 ) -> Result<ContinuationResponse, AppError> {
@@ -120,7 +120,7 @@ pub(super) async fn split(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
     // Strictly the owner: a teacher browsing a student's conversation
@@ -229,7 +229,7 @@ pub async fn branch_conversation(
 /// Shared with the embed surface, which authenticates by signed token.
 pub(super) async fn branch(
     state: &AppState,
-    course: &minerva_db::queries::courses::CourseRow,
+    course: &minerva_db::queries::workspaces::WorkspaceRow,
     cid: Uuid,
     user_id: Uuid,
 ) -> Result<ContinuationResponse, AppError> {
@@ -238,7 +238,7 @@ pub(super) async fn branch(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.course_id != course_id {
+    if conv.workspace_id != course_id {
         return Err(AppError::NotFound);
     }
     if conv.user_id != user_id {
@@ -391,7 +391,7 @@ async fn summarize(
             crate::llm::record_pipeline_usage(
                 &state.db,
                 course_id,
-                minerva_db::queries::course_token_usage::CATEGORY_CONVERSATION_CARRYOVER,
+                minerva_db::queries::workspace_token_usage::CATEGORY_CONVERSATION_CARRYOVER,
                 &utility.model,
                 &usage,
             )

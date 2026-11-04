@@ -443,7 +443,7 @@ pub async fn run_sync(
     state: &AppState,
     conn: &minerva_db::queries::canvas::ConnectionRow,
 ) -> Result<SyncResult, AppError> {
-    let course = minerva_db::queries::courses::find_by_id(&state.db, conn.course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, conn.course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -566,7 +566,7 @@ async fn create_synced_doc(
         &state.db,
         minerva_db::queries::documents::NewDocument {
             id: doc_id,
-            course_id: conn.course_id,
+            workspace_id: conn.course_id,
             filename: doc.filename,
             mime_type: doc.content_type,
             size_bytes: doc.data.len() as i64,
@@ -907,7 +907,7 @@ async fn sync_url(
         &state.db,
         minerva_db::queries::documents::NewDocument {
             id: doc_id,
-            course_id,
+            workspace_id: course_id,
             filename: &filename,
             mime_type: "text/x-url",
             size_bytes: url.len() as i64,

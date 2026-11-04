@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE messages m\n           SET topic_embedding = NULL,\n               topic_embedding_model = NULL,\n               topic_embedding_version = NULL\n          FROM conversations c\n         WHERE m.conversation_id = c.id\n           AND c.workspace_id = $1\n           AND (m.topic_embedding IS NOT NULL\n                OR m.topic_embedding_model IS NOT NULL\n                OR m.topic_embedding_version IS NOT NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "22665901b42b1017e60e3d4509dc779a3d52465cdbf320b93173c74fab9658eb"
+}

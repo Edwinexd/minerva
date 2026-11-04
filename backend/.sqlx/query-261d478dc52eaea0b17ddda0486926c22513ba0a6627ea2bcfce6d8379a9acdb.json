@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM conversations\n            WHERE workspace_id = ANY($1)\n               OR user_id IN (SELECT pk::uuid FROM seeds WHERE table_name = 'users')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "261d478dc52eaea0b17ddda0486926c22513ba0a6627ea2bcfce6d8379a9acdb"
+}

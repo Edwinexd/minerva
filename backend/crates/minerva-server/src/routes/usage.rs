@@ -52,7 +52,7 @@ async fn get_course_usage(
         rows.into_iter()
             .map(|r| UsageResponse {
                 user_id: r.user_id,
-                course_id: r.course_id,
+                course_id: r.workspace_id,
                 date: r.date,
                 prompt_tokens: r.prompt_tokens,
                 completion_tokens: r.completion_tokens,
@@ -103,7 +103,7 @@ async fn get_course_kg_token_usage(
     // short enough that the dashboard stays focused on "current
     // term" usage rather than lifetime totals.
     let since = chrono::Utc::now() - chrono::Duration::days(30);
-    let rows = minerva_db::queries::course_token_usage::aggregate_by_category_for_course(
+    let rows = minerva_db::queries::workspace_token_usage::aggregate_by_category_for_course(
         &state.db, course_id, since,
     )
     .await?;
@@ -136,7 +136,7 @@ async fn get_all_usage(
         rows.into_iter()
             .map(|r| UsageResponse {
                 user_id: r.user_id,
-                course_id: r.course_id,
+                course_id: r.workspace_id,
                 date: r.date,
                 prompt_tokens: r.prompt_tokens,
                 completion_tokens: r.completion_tokens,

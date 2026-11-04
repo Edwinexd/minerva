@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a_doc_id, b_doc_id, decided_at, a_classified_at, b_classified_at,\n                  relation, confidence\n           FROM linker_decisions\n           WHERE workspace_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "a_doc_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "a_doc_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "b_doc_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "b_doc_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "decided_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "decided_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "a_classified_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "a_classified_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "b_classified_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "b_classified_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "relation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "relation"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "confidence",
+        "type_info": "Float4",
+        "origin": {
+          "Table": {
+            "table": "linker_decisions",
+            "name": "confidence"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e12430e8fbf6f32bba76e4c9ebd301fc6ae53d51cec4e9e6d8ffcc6ec1c9b0d9"
+}

@@ -33,15 +33,15 @@ pub struct DecisionRow {
 /// linker uses this to short-circuit LLM calls.
 pub async fn list_for_course(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<HashMap<(Uuid, Uuid), DecisionRow>, sqlx::Error> {
     let rows = sqlx::query_as!(
         DecisionRow,
         r#"SELECT a_doc_id, b_doc_id, decided_at, a_classified_at, b_classified_at,
                   relation, confidence
            FROM linker_decisions
-           WHERE course_id = $1"#,
-        course_id,
+           WHERE workspace_id = $1"#,
+        workspace_id,
     )
     .fetch_all(db)
     .await?;
@@ -58,7 +58,7 @@ pub async fn list_for_course(
 #[allow(clippy::too_many_arguments)]
 pub async fn upsert(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     a_doc_id: Uuid,
     b_doc_id: Uuid,
     a_classified_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -68,7 +68,7 @@ pub async fn upsert(
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"INSERT INTO linker_decisions
-            (course_id, a_doc_id, b_doc_id, decided_at,
+            (workspace_id, a_doc_id, b_doc_id, decided_at,
              a_classified_at, b_classified_at, relation, confidence)
         VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7)
         ON CONFLICT (a_doc_id, b_doc_id) DO UPDATE
@@ -77,7 +77,7 @@ pub async fn upsert(
                 b_classified_at = EXCLUDED.b_classified_at,
                 relation = EXCLUDED.relation,
                 confidence = EXCLUDED.confidence"#,
-        course_id,
+        workspace_id,
         a_doc_id,
         b_doc_id,
         a_classified_at,
@@ -94,18 +94,21 @@ pub async fn upsert(
 /// snapshot timestamps; i.e. how many pairs the linker would have
 /// to re-evaluate on the next relink. Surfaced to the graph viewer
 /// so the teacher sees "linking pending" while ingest catches up.
-pub async fn stale_decisions_for_course(db: &PgPool, course_id: Uuid) -> Result<i64, sqlx::Error> {
+pub async fn stale_decisions_for_course(
+    db: &PgPool,
+    workspace_id: Uuid,
+) -> Result<i64, sqlx::Error> {
     let n: Option<i64> = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!"
            FROM linker_decisions ld
            JOIN documents da ON da.id = ld.a_doc_id
            JOIN documents db ON db.id = ld.b_doc_id
-           WHERE ld.course_id = $1
+           WHERE ld.workspace_id = $1
              AND (
                  da.classified_at IS DISTINCT FROM ld.a_classified_at
               OR db.classified_at IS DISTINCT FROM ld.b_classified_at
              )"#,
-        course_id,
+        workspace_id,
     )
     .fetch_optional(db)
     .await?;

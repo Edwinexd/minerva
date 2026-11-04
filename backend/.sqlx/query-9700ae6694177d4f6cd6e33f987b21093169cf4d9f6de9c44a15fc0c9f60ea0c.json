@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE relink_queue r SET workspace_id = $1\n           WHERE r.workspace_id = $2\n             AND NOT EXISTS (SELECT 1 FROM relink_queue q WHERE q.workspace_id = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9700ae6694177d4f6cd6e33f987b21093169cf4d9f6de9c44a15fc0c9f60ea0c"
+}

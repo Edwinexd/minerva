@@ -140,8 +140,13 @@ async fn join_via_token(
     }
 
     // Add user to course
-    minerva_db::queries::courses::add_member(&state.db, signed_url.course_id, user.id, "student")
-        .await?;
+    minerva_db::queries::workspaces::add_member(
+        &state.db,
+        signed_url.course_id,
+        user.id,
+        "student",
+    )
+    .await?;
 
     // Increment use count
     minerva_db::queries::signed_urls::increment_use(&state.db, signed_url.id).await?;

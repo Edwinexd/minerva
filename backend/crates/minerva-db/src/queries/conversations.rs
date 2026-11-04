@@ -4,7 +4,7 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct ConversationRow {
     pub id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub user_id: Uuid,
     pub title: Option<String>,
     pub pinned: bool,
@@ -23,7 +23,7 @@ pub struct ConversationRow {
 #[derive(Debug)]
 pub struct StudentSidebarConversationRow {
     pub id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub user_id: Uuid,
     pub title: Option<String>,
     pub pinned: bool,
@@ -40,7 +40,7 @@ pub struct StudentSidebarConversationRow {
 #[derive(Debug)]
 pub struct ConversationWithUserRow {
     pub id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub user_id: Uuid,
     pub title: Option<String>,
     pub pinned: bool,
@@ -112,10 +112,10 @@ pub struct MessageRow {
 pub async fn create(
     db: &PgPool,
     id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
     user_id: Uuid,
 ) -> Result<ConversationRow, sqlx::Error> {
-    create_continuation(db, id, course_id, user_id, None, None).await
+    create_continuation(db, id, workspace_id, user_id, None, None).await
 }
 
 /// `create`, plus the backlink and carryover recap written when a
@@ -125,18 +125,18 @@ pub async fn create(
 pub async fn create_continuation(
     db: &PgPool,
     id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
     user_id: Uuid,
     continued_from_id: Option<Uuid>,
     carryover_summary: Option<&str>,
 ) -> Result<ConversationRow, sqlx::Error> {
     sqlx::query_as!(
         ConversationRow,
-        "INSERT INTO conversations (id, course_id, user_id, continued_from_id, carryover_summary) \
+        "INSERT INTO conversations (id, workspace_id, user_id, continued_from_id, carryover_summary) \
          VALUES ($1, $2, $3, $4, $5) \
-         RETURNING id, course_id, user_id, title, pinned, created_at, updated_at, continued_from_id, carryover_summary",
+         RETURNING id, workspace_id, user_id, title, pinned, created_at, updated_at, continued_from_id, carryover_summary",
         id,
-        course_id,
+        workspace_id,
         user_id,
         continued_from_id,
         carryover_summary,
@@ -167,7 +167,7 @@ pub async fn token_total(db: &PgPool, conversation_id: Uuid) -> Result<i64, sqlx
 
 pub async fn list_by_course_user(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     user_id: Uuid,
 ) -> Result<Vec<StudentSidebarConversationRow>, sqlx::Error> {
     // `has_unread_note` is a single correlated EXISTS per row;
@@ -182,7 +182,7 @@ pub async fn list_by_course_user(
     // `student_last_viewed_at = NOW()` on every existing row.
     sqlx::query_as!(
         StudentSidebarConversationRow,
-        r#"SELECT c.id, c.course_id, c.user_id, c.title, c.pinned,
+        r#"SELECT c.id, c.workspace_id, c.user_id, c.title, c.pinned,
             c.created_at, c.updated_at,
             EXISTS (
                 SELECT 1 FROM teacher_notes tn
@@ -193,9 +193,9 @@ pub async fn list_by_course_user(
                   )
             ) AS "has_unread_note!: bool"
         FROM conversations c
-        WHERE c.course_id = $1 AND c.user_id = $2
+        WHERE c.workspace_id = $1 AND c.user_id = $2
         ORDER BY c.updated_at DESC"#,
-        course_id,
+        workspace_id,
         user_id,
     )
     .fetch_all(db)
@@ -205,7 +205,7 @@ pub async fn list_by_course_user(
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<ConversationRow>, sqlx::Error> {
     sqlx::query_as!(
         ConversationRow,
-        "SELECT id, course_id, user_id, title, pinned, created_at, updated_at, continued_from_id, carryover_summary FROM conversations WHERE id = $1",
+        "SELECT id, workspace_id, user_id, title, pinned, created_at, updated_at, continued_from_id, carryover_summary FROM conversations WHERE id = $1",
         id,
     )
     .fetch_optional(db)
@@ -215,7 +215,7 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<ConversationRow>
 #[derive(Debug)]
 pub struct ConversationWithFeedbackRow {
     pub id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub user_id: Uuid,
     pub title: Option<String>,
     pub pinned: bool,
@@ -261,18 +261,18 @@ pub struct ConversationWithFeedbackRow {
 
 pub async fn list_all_by_course(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<Vec<ConversationWithUserRow>, sqlx::Error> {
     sqlx::query_as!(
         ConversationWithUserRow,
-        r#"SELECT c.id, c.course_id, c.user_id, c.title, c.pinned, c.created_at, c.updated_at,
+        r#"SELECT c.id, c.workspace_id, c.user_id, c.title, c.pinned, c.created_at, c.updated_at,
             u.eppn AS "user_eppn?", u.display_name AS user_display_name,
             (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count
         FROM conversations c
         JOIN users u ON u.id = c.user_id
-        WHERE c.course_id = $1
+        WHERE c.workspace_id = $1
         ORDER BY c.updated_at DESC"#,
-        course_id,
+        workspace_id,
     )
     .fetch_all(db)
     .await
@@ -280,7 +280,7 @@ pub async fn list_all_by_course(
 
 pub async fn list_all_by_course_with_feedback(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     reviewer_id: Uuid,
 ) -> Result<Vec<ConversationWithFeedbackRow>, sqlx::Error> {
     // `teacher_unreviewed` joins the *current reviewer's* per-conversation
@@ -299,7 +299,7 @@ pub async fn list_all_by_course_with_feedback(
     // the new explicit ack button.
     sqlx::query_as!(
         ConversationWithFeedbackRow,
-        r#"SELECT c.id, c.course_id, c.user_id, c.title, c.pinned, c.created_at, c.updated_at,
+        r#"SELECT c.id, c.workspace_id, c.user_id, c.title, c.pinned, c.created_at, c.updated_at,
             u.eppn AS "user_eppn?", u.display_name AS user_display_name,
             (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
             COALESCE((
@@ -354,9 +354,9 @@ pub async fn list_all_by_course_with_feedback(
             LIMIT 1
         ) latest_review ON TRUE
         LEFT JOIN users ru ON ru.id = latest_review.reviewed_by
-        WHERE c.course_id = $1
+        WHERE c.workspace_id = $1
         ORDER BY c.updated_at DESC"#,
-        course_id,
+        workspace_id,
         reviewer_id,
     )
     .fetch_all(db)
@@ -365,18 +365,18 @@ pub async fn list_all_by_course_with_feedback(
 
 pub async fn list_pinned_by_course(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<Vec<ConversationWithUserRow>, sqlx::Error> {
     sqlx::query_as!(
         ConversationWithUserRow,
-        r#"SELECT c.id, c.course_id, c.user_id, c.title, c.pinned, c.created_at, c.updated_at,
+        r#"SELECT c.id, c.workspace_id, c.user_id, c.title, c.pinned, c.created_at, c.updated_at,
             u.eppn AS "user_eppn?", u.display_name AS user_display_name,
             (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count
         FROM conversations c
         JOIN users u ON u.id = c.user_id
-        WHERE c.course_id = $1 AND c.pinned = true
+        WHERE c.workspace_id = $1 AND c.pinned = true
         ORDER BY c.updated_at DESC"#,
-        course_id,
+        workspace_id,
     )
     .fetch_all(db)
     .await
@@ -389,7 +389,7 @@ pub async fn set_pinned(
 ) -> Result<Option<ConversationRow>, sqlx::Error> {
     sqlx::query_as!(
         ConversationRow,
-        "UPDATE conversations SET pinned = $2, updated_at = NOW() WHERE id = $1 RETURNING id, course_id, user_id, title, pinned, created_at, updated_at, continued_from_id, carryover_summary",
+        "UPDATE conversations SET pinned = $2, updated_at = NOW() WHERE id = $1 RETURNING id, workspace_id, user_id, title, pinned, created_at, updated_at, continued_from_id, carryover_summary",
         id,
         pinned,
     )
@@ -554,7 +554,7 @@ pub async fn set_topic_embedding(
     db: &PgPool,
     message_id: Uuid,
     embedding: &[f32],
-    course_id: Uuid,
+    workspace_id: Uuid,
     embedding_version: i32,
 ) -> Result<bool, sqlx::Error> {
     let mut tx = db.begin().await?;
@@ -562,11 +562,11 @@ pub async fn set_topic_embedding(
         r#"SELECT course.embedding_version
            FROM messages m
            JOIN conversations c ON c.id = m.conversation_id
-           JOIN courses course ON course.id = c.course_id
-          WHERE m.id = $1 AND c.course_id = $2
+           JOIN workspaces course ON course.id = c.workspace_id
+          WHERE m.id = $1 AND c.workspace_id = $2
           FOR SHARE OF course"#,
         message_id,
-        course_id,
+        workspace_id,
     )
     .fetch_optional(&mut *tx)
     .await?;
@@ -709,16 +709,16 @@ pub struct ConversationMessageTextRow {
 /// Fetch all user messages for a course (for topic analysis).
 pub async fn list_user_messages_by_course(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<Vec<ConversationMessageTextRow>, sqlx::Error> {
     sqlx::query_as!(
         ConversationMessageTextRow,
         r#"SELECT m.conversation_id, m.content
         FROM messages m
         JOIN conversations c ON c.id = m.conversation_id
-        WHERE c.course_id = $1 AND m.role = 'user'
+        WHERE c.workspace_id = $1 AND m.role = 'user'
         ORDER BY m.created_at ASC"#,
-        course_id,
+        workspace_id,
     )
     .fetch_all(db)
     .await
@@ -783,7 +783,7 @@ pub async fn mark_teacher_reviewed(
 #[derive(Debug)]
 pub struct StudentUnreadRow {
     pub conversation_id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
 }
 
 /// All conversations owned by `user_id` that have a teacher_note
@@ -803,7 +803,7 @@ pub async fn student_unread_conversations(
 ) -> Result<Vec<StudentUnreadRow>, sqlx::Error> {
     sqlx::query_as!(
         StudentUnreadRow,
-        r#"SELECT c.id AS conversation_id, c.course_id
+        r#"SELECT c.id AS conversation_id, c.workspace_id
         FROM conversations c
         WHERE c.user_id = $1
           AND EXISTS (

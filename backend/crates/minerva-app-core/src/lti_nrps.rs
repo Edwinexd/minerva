@@ -302,7 +302,7 @@ pub async fn reconcile_context(
 
     // Archived/deleted course: nothing to reconcile. (A hard delete cascades
     // the context row away; archive just flips active=false.)
-    let course = match minerva_db::queries::courses::find_by_id(db, ctx.course_id).await? {
+    let course = match minerva_db::queries::workspaces::find_by_id(db, ctx.course_id).await? {
         Some(c) => c,
         None => {
             return Ok(SyncOutcome {
@@ -358,9 +358,10 @@ pub async fn reconcile_context(
         active_user_ids.insert(user.id);
 
         let existing =
-            minerva_db::queries::courses::get_member_role(db, ctx.course_id, user.id).await?;
+            minerva_db::queries::workspaces::get_member_role(db, ctx.course_id, user.id).await?;
         if existing.is_none() {
-            minerva_db::queries::courses::add_member(db, ctx.course_id, user.id, "student").await?;
+            minerva_db::queries::workspaces::add_member(db, ctx.course_id, user.id, "student")
+                .await?;
             added += 1;
         }
 
@@ -413,7 +414,7 @@ pub async fn reconcile_context(
             minerva_db::queries::lti_nrps::delete_membership(db, ctx.id, row.user_id).await?;
             continue;
         }
-        if minerva_db::queries::courses::remove_member(db, ctx.course_id, row.user_id).await? {
+        if minerva_db::queries::workspaces::remove_member(db, ctx.course_id, row.user_id).await? {
             removed += 1;
         }
         minerva_db::queries::lti_nrps::delete_membership(db, ctx.id, row.user_id).await?;

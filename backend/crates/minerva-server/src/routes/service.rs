@@ -127,7 +127,7 @@ async fn reconcile_daisy_schedule(
     )
     .await?;
 
-    let course = minerva_db::queries::courses::find_by_id(&state.db, offering.course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, offering.course_id)
         .await?
         .ok_or(AppError::NotFound)?;
     let source_system = format!("daisy_schedule:{}", momenttillf_id.trim());
@@ -594,12 +594,12 @@ async fn pending_transcripts(
     let mut result = Vec::new();
 
     for doc in docs {
-        let Some(url) = read_url_stub(&state, doc.course_id, doc.id, &doc.filename).await else {
+        let Some(url) = read_url_stub(&state, doc.workspace_id, doc.id, &doc.filename).await else {
             continue;
         };
         result.push(PendingTranscriptInfo {
             id: doc.id,
-            course_id: doc.course_id,
+            course_id: doc.workspace_id,
             filename: doc.filename,
             url,
             created_at: doc.created_at,
@@ -661,7 +661,7 @@ async fn submit_transcript(
         // intact on disk. If the DB transaction below fails we clean
         // up the orphaned file before returning.
         let child_id = Uuid::new_v4();
-        let dir = format!("{}/{}", state.config.docs_path, doc.course_id);
+        let dir = format!("{}/{}", state.config.docs_path, doc.workspace_id);
         let txt_path = format!("{}/{}.txt", dir, child_id);
         tokio::fs::write(&txt_path, text.as_bytes())
             .await
@@ -673,7 +673,7 @@ async fn submit_transcript(
             "awaiting_transcript",
             minerva_db::queries::documents::NewDocument {
                 id: child_id,
-                course_id: doc.course_id,
+                workspace_id: doc.workspace_id,
                 filename: &child_filename,
                 mime_type: "text/plain",
                 size_bytes,
@@ -861,7 +861,7 @@ async fn create_url_document(
 
     let filename = sanitize_url_filename(&body.filename)?;
 
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -872,7 +872,7 @@ async fn create_url_document(
     {
         return Ok(Json(CreateUrlDocumentResponse {
             id: doc.id,
-            course_id: doc.course_id,
+            course_id: doc.workspace_id,
             filename: doc.filename,
             status: doc.status,
             created: false,
@@ -904,7 +904,7 @@ async fn create_url_document(
         &state.db,
         minerva_db::queries::documents::NewDocument {
             id: doc_id,
-            course_id,
+            workspace_id: course_id,
             filename: &filename,
             mime_type: "text/x-url",
             size_bytes,
@@ -937,7 +937,7 @@ async fn create_url_document(
             })?;
             return Ok(Json(CreateUrlDocumentResponse {
                 id: existing.id,
-                course_id: existing.course_id,
+                course_id: existing.workspace_id,
                 filename: existing.filename,
                 status: existing.status,
                 created: false,
@@ -955,7 +955,7 @@ async fn create_url_document(
 
     Ok(Json(CreateUrlDocumentResponse {
         id: row.id,
-        course_id: row.course_id,
+        course_id: row.workspace_id,
         filename: row.filename,
         status: row.status,
         created: true,
@@ -1279,7 +1279,7 @@ pub(super) async fn compute_offering_diff(
     // whose eppns resolve to no user would be created+added on apply, so
     // it counts as "added"; an existing user not yet a member is also
     // "added"; a member whose role would flip is "role_changed".
-    let members = minerva_db::queries::courses::list_members(&state.db, course_id).await?;
+    let members = minerva_db::queries::workspaces::list_members(&state.db, course_id).await?;
     for participant in &input.participants {
         let eppns: Vec<String> = participant
             .eppns
@@ -1714,8 +1714,13 @@ pub(super) async fn apply_one(
     // teacher promotion lands, but the membership itself never gets
     // removed by re-sync.
     for p in &resolved {
-        minerva_db::queries::courses::add_member(&state.db, outcome.course.id, p.user_id, p.role)
-            .await?;
+        minerva_db::queries::workspaces::add_member(
+            &state.db,
+            outcome.course.id,
+            p.user_id,
+            p.role,
+        )
+        .await?;
         summary.members_added += 1;
     }
 

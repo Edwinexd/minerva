@@ -157,7 +157,7 @@ pub fn extract_openai_usage(payload: &serde_json::Value) -> Option<(i32, i32)> {
     Some((p as i32, c as i32))
 }
 
-/// Record one utility call's `usage` as a `course_token_usage` row.
+/// Record one utility call's `usage` as a `workspace_token_usage` row.
 /// Best-effort: a DB error is logged, never propagated, so tracking can
 /// never block a chat / ingest path. Used from every utility call site
 /// so none of them drops a failed insert silently.
@@ -171,7 +171,7 @@ pub async fn record_pipeline_usage(
     // The row records model + tokens; USD cost is derived on read by
     // joining the model's current rate (see usage cost queries), so a
     // re-price moves every past figure along with enforcement.
-    if let Err(e) = minerva_db::queries::course_token_usage::record(
+    if let Err(e) = minerva_db::queries::workspace_token_usage::record(
         db,
         course_id,
         category,
@@ -182,7 +182,7 @@ pub async fn record_pipeline_usage(
     .await
     {
         tracing::warn!(
-            "course_token_usage: insert failed for course={} category={}: {}",
+            "workspace_token_usage: insert failed for course={} category={}: {}",
             course_id,
             category,
             e

@@ -2,6 +2,35 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Subtype of a workspace (`workspaces.kind`). A `Course` has a row in
+/// `courses` (term, Daisy linkage, LMS integrations); a `CreditTransfer`
+/// workspace is a staff tool with no course-only machinery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceKind {
+    Course,
+    CreditTransfer,
+}
+
+impl WorkspaceKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Course => "course",
+            Self::CreditTransfer => "credit_transfer",
+        }
+    }
+
+    /// `None` for a value the `workspaces_kind_check` constraint would
+    /// reject; callers treat that as a corrupt row.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "course" => Some(Self::Course),
+            "credit_transfer" => Some(Self::CreditTransfer),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
@@ -293,4 +322,17 @@ pub struct Message {
     pub tokens_prompt: Option<i32>,
     pub tokens_completion: Option<i32>,
     pub created_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod workspace_kind_tests {
+    use super::WorkspaceKind;
+
+    #[test]
+    fn round_trips_every_kind() {
+        for kind in [WorkspaceKind::Course, WorkspaceKind::CreditTransfer] {
+            assert_eq!(WorkspaceKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(WorkspaceKind::parse("seminar"), None);
+    }
 }

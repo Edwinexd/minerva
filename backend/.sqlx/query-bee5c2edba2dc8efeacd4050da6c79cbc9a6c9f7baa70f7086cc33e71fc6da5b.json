@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO workspace_token_usage\n            (workspace_id, category, model, prompt_tokens, completion_tokens)\n        VALUES ($1, $2, $3, $4, $5)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bee5c2edba2dc8efeacd4050da6c79cbc9a6c9f7baa70f7086cc33e71fc6da5b"
+}

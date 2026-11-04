@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO workspace_token_usage\n                           (id, workspace_id, category, model, prompt_tokens,\n                            completion_tokens, created_at)\n                       VALUES ($1, $2, $3, $4, $5, $6,\n                               NOW() - ($7 || ' days')::interval\n                                     + ($8 || ' minutes')::interval)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3b0c26f16a2570071dd04b113611cac8681fd6b5cd3096d13403083a97bf8011"
+}

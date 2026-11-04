@@ -5,7 +5,7 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct UsageDailyRow {
     pub user_id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub date: chrono::NaiveDate,
     /// The chat model these tokens were billed against. The daily
     /// aggregate is per-model so on-read cost (tokens x the model's
@@ -38,7 +38,7 @@ pub struct UsageDailyRow {
 pub async fn record_usage(
     db: &PgPool,
     user_id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
     model: &str,
     provider: &str,
     prompt_tokens: i64,
@@ -49,9 +49,9 @@ pub async fn record_usage(
     request_count: i32,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
-        r#"INSERT INTO usage_daily (user_id, course_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, research_prompt_tokens, research_completion_tokens, request_count)
+        r#"INSERT INTO usage_daily (user_id, workspace_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, research_prompt_tokens, research_completion_tokens, request_count)
         VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10)
-        ON CONFLICT (user_id, course_id, date, model)
+        ON CONFLICT (user_id, workspace_id, date, model)
         DO UPDATE SET
             prompt_tokens = usage_daily.prompt_tokens + $5,
             completion_tokens = usage_daily.completion_tokens + $6,
@@ -60,7 +60,7 @@ pub async fn record_usage(
             research_completion_tokens = usage_daily.research_completion_tokens + $9,
             request_count = usage_daily.request_count + $10"#,
         user_id,
-        course_id,
+        workspace_id,
         model,
         provider,
         prompt_tokens,
@@ -77,12 +77,12 @@ pub async fn record_usage(
 
 pub async fn get_course_usage(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<Vec<UsageDailyRow>, sqlx::Error> {
     sqlx::query_as!(
         UsageDailyRow,
-        "SELECT user_id, course_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily WHERE course_id = $1 ORDER BY date DESC",
-        course_id,
+        "SELECT user_id, workspace_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily WHERE workspace_id = $1 ORDER BY date DESC",
+        workspace_id,
     )
     .fetch_all(db)
     .await
@@ -91,7 +91,7 @@ pub async fn get_course_usage(
 pub async fn get_all_usage(db: &PgPool) -> Result<Vec<UsageDailyRow>, sqlx::Error> {
     sqlx::query_as!(
         UsageDailyRow,
-        "SELECT user_id, course_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily ORDER BY date DESC",
+        "SELECT user_id, workspace_id, date, model, provider, prompt_tokens, completion_tokens, embedding_tokens, request_count, research_prompt_tokens, research_completion_tokens FROM usage_daily ORDER BY date DESC",
     )
     .fetch_all(db)
     .await
@@ -100,16 +100,16 @@ pub async fn get_all_usage(db: &PgPool) -> Result<Vec<UsageDailyRow>, sqlx::Erro
 pub async fn get_user_daily_tokens(
     db: &PgPool,
     user_id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<i64, sqlx::Error> {
     // SUM across the per-model rows for the day (a course can switch
     // model mid-day, splitting the aggregate into multiple rows).
     let row = sqlx::query_scalar!(
         r#"SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint AS "total!"
            FROM usage_daily
-           WHERE user_id = $1 AND course_id = $2 AND date = CURRENT_DATE"#,
+           WHERE user_id = $1 AND workspace_id = $2 AND date = CURRENT_DATE"#,
         user_id,
-        course_id,
+        workspace_id,
     )
     .fetch_one(db)
     .await?;
@@ -142,7 +142,7 @@ pub async fn get_owner_daily_tokens(db: &PgPool, owner_id: Uuid) -> Result<i64, 
     let row = sqlx::query_scalar!(
         r#"SELECT COALESCE(SUM(u.prompt_tokens + u.completion_tokens), 0)::bigint AS "total!"
            FROM usage_daily u
-           JOIN courses c ON c.id = u.course_id
+           JOIN workspaces c ON c.id = u.workspace_id
            WHERE c.owner_id = $1 AND u.date = CURRENT_DATE"#,
         owner_id,
     )
@@ -159,7 +159,7 @@ pub async fn get_owner_daily_tokens(db: &PgPool, owner_id: Uuid) -> Result<i64, 
 pub async fn get_user_daily_cost(
     db: &PgPool,
     user_id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<Decimal, sqlx::Error> {
     // LEFT JOIN + COALESCE so a usage row whose model is no longer in the
     // catalog stays in the sum (priced at $0) rather than silently
@@ -171,9 +171,9 @@ pub async fn get_user_daily_cost(
            ), 0)::numeric AS "cost!"
            FROM usage_daily u
            LEFT JOIN chat_models cm ON cm.model = u.model
-           WHERE u.user_id = $1 AND u.course_id = $2 AND u.date = CURRENT_DATE"#,
+           WHERE u.user_id = $1 AND u.workspace_id = $2 AND u.date = CURRENT_DATE"#,
         user_id,
-        course_id,
+        workspace_id,
     )
     .fetch_one(db)
     .await?;
@@ -182,7 +182,7 @@ pub async fn get_user_daily_cost(
 
 /// Today's total USD spend across every course owned by `owner_id`:
 /// student chat spend (`usage_daily`) PLUS pipeline / classification
-/// spend (`course_token_usage`), each computed as tokens x the model's
+/// spend (`workspace_token_usage`), each computed as tokens x the model's
 /// current rate. This is what the per-owner cap enforces against.
 pub async fn get_owner_daily_cost(db: &PgPool, owner_id: Uuid) -> Result<Decimal, sqlx::Error> {
     let cost = sqlx::query_scalar!(
@@ -193,7 +193,7 @@ pub async fn get_owner_daily_cost(db: &PgPool, owner_id: Uuid) -> Result<Decimal
                  + u.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000
             ), 0) AS c
             FROM usage_daily u
-            JOIN courses co ON co.id = u.course_id
+            JOIN workspaces co ON co.id = u.workspace_id
             LEFT JOIN chat_models cm ON cm.model = u.model
             WHERE co.owner_id = $1 AND u.date = CURRENT_DATE
         ),
@@ -202,8 +202,8 @@ pub async fn get_owner_daily_cost(db: &PgPool, owner_id: Uuid) -> Result<Decimal
                 (ctu.prompt_tokens * COALESCE(cm.input_usd_per_mtok, 0)
                  + ctu.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000
             ), 0) AS c
-            FROM course_token_usage ctu
-            JOIN courses co ON co.id = ctu.course_id
+            FROM workspace_token_usage ctu
+            JOIN workspaces co ON co.id = ctu.workspace_id
             LEFT JOIN chat_models cm ON cm.model = ctu.model
             WHERE co.owner_id = $1 AND ctu.created_at >= CURRENT_DATE
         )
@@ -219,7 +219,7 @@ pub async fn get_owner_daily_cost(db: &PgPool, owner_id: Uuid) -> Result<Decimal
 
 #[derive(Debug)]
 pub struct UsageSummaryRow {
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub total_prompt_tokens: Option<i64>,
     pub total_completion_tokens: Option<i64>,
     pub total_embedding_tokens: Option<i64>,
@@ -228,23 +228,23 @@ pub struct UsageSummaryRow {
 
 pub async fn get_course_summary(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<UsageSummaryRow, sqlx::Error> {
     sqlx::query_as!(
         UsageSummaryRow,
-        r#"SELECT course_id,
+        r#"SELECT workspace_id,
             SUM(prompt_tokens)::bigint as total_prompt_tokens,
             SUM(completion_tokens)::bigint as total_completion_tokens,
             SUM(embedding_tokens)::bigint as total_embedding_tokens,
             SUM(request_count)::bigint as total_requests
-        FROM usage_daily WHERE course_id = $1 GROUP BY course_id"#,
-        course_id,
+        FROM usage_daily WHERE workspace_id = $1 GROUP BY workspace_id"#,
+        workspace_id,
     )
     .fetch_optional(db)
     .await
     .map(|opt| {
         opt.unwrap_or(UsageSummaryRow {
-            course_id,
+            workspace_id,
             total_prompt_tokens: Some(0),
             total_completion_tokens: Some(0),
             total_embedding_tokens: Some(0),
@@ -262,7 +262,7 @@ pub async fn get_course_summary(
 /// back together anyway.
 #[derive(Debug)]
 pub struct OwnerChatUsageRow {
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub course_name: String,
     pub course_code: Option<String>,
     pub course_semester_label: Option<String>,
@@ -290,8 +290,8 @@ pub async fn get_owner_chat_usage(
 ) -> Result<Vec<OwnerChatUsageRow>, sqlx::Error> {
     sqlx::query_as!(
         OwnerChatUsageRow,
-        r#"SELECT c.id AS "course_id!", c.name AS "course_name!", c.course_code,
-                  c.semester_label AS "course_semester_label", c.active AS "course_active!",
+        r#"SELECT c.id AS "workspace_id!", c.name AS "course_name!", co.course_code AS "course_code?",
+                  co.semester_label AS "course_semester_label?", c.active AS "course_active!",
                   u.date AS "date!",
                   u.model AS "model!", u.provider AS "provider!",
                   (u.date = CURRENT_DATE) AS "is_today!",
@@ -303,10 +303,11 @@ pub async fn get_owner_chat_usage(
                        + u.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000
                   ), 0)::numeric AS "cost_usd!"
              FROM usage_daily u
-             JOIN courses c ON c.id = u.course_id
+             JOIN workspaces c ON c.id = u.workspace_id
+             LEFT JOIN courses co ON co.workspace_id = c.id
              LEFT JOIN chat_models cm ON cm.model = u.model
             WHERE c.owner_id = $1 AND u.date >= CURRENT_DATE - $2::int
-            GROUP BY c.id, u.date, u.model, u.provider
+            GROUP BY c.id, co.workspace_id, u.date, u.model, u.provider
             ORDER BY u.date DESC"#,
         owner_id,
         days,
@@ -316,12 +317,12 @@ pub async fn get_owner_chat_usage(
 }
 
 /// Same window and shape as [`get_owner_chat_usage`], for the pipeline /
-/// classification spend the owner cap also counts (`course_token_usage`).
+/// classification spend the owner cap also counts (`workspace_token_usage`).
 /// That spend has no student behind it, so it is kept as a separate axis
 /// rather than folded into the chat rows.
 #[derive(Debug)]
 pub struct OwnerPipelineUsageRow {
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub course_name: String,
     pub course_code: Option<String>,
     pub course_semester_label: Option<String>,
@@ -344,8 +345,8 @@ pub async fn get_owner_pipeline_usage(
 ) -> Result<Vec<OwnerPipelineUsageRow>, sqlx::Error> {
     sqlx::query_as!(
         OwnerPipelineUsageRow,
-        r#"SELECT c.id AS "course_id!", c.name AS "course_name!", c.course_code,
-                  c.semester_label AS "course_semester_label", c.active AS "course_active!",
+        r#"SELECT c.id AS "workspace_id!", c.name AS "course_name!", co.course_code AS "course_code?",
+                  co.semester_label AS "course_semester_label?", c.active AS "course_active!",
                   ctu.created_at::date AS "date!", ctu.model AS "model!",
                   COALESCE(cm.provider, 'unknown') AS "provider!",
                   (ctu.created_at >= CURRENT_DATE) AS "is_today!",
@@ -355,12 +356,13 @@ pub async fn get_owner_pipeline_usage(
                       (ctu.prompt_tokens * COALESCE(cm.input_usd_per_mtok, 0)
                        + ctu.completion_tokens * COALESCE(cm.output_usd_per_mtok, 0)) / 1000000
                   ), 0)::numeric AS "cost_usd!"
-             FROM course_token_usage ctu
-             JOIN courses c ON c.id = ctu.course_id
+             FROM workspace_token_usage ctu
+             JOIN workspaces c ON c.id = ctu.workspace_id
+             LEFT JOIN courses co ON co.workspace_id = c.id
              LEFT JOIN chat_models cm ON cm.model = ctu.model
             WHERE c.owner_id = $1
               AND ctu.created_at >= (CURRENT_DATE - $2::int)::timestamptz
-            GROUP BY c.id, ctu.created_at::date, ctu.model,
+            GROUP BY c.id, co.workspace_id, ctu.created_at::date, ctu.model,
                      COALESCE(cm.provider, 'unknown'),
                      (ctu.created_at >= CURRENT_DATE)
             ORDER BY ctu.created_at::date DESC"#,
@@ -373,7 +375,7 @@ pub async fn get_owner_pipeline_usage(
 
 #[derive(Debug)]
 pub struct OwnerCourseStudentsRow {
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub active_students: i64,
 }
 
@@ -388,12 +390,12 @@ pub async fn get_owner_active_students(
 ) -> Result<Vec<OwnerCourseStudentsRow>, sqlx::Error> {
     sqlx::query_as!(
         OwnerCourseStudentsRow,
-        r#"SELECT u.course_id AS "course_id!",
+        r#"SELECT u.workspace_id AS "workspace_id!",
                   COUNT(DISTINCT u.user_id)::bigint AS "active_students!"
              FROM usage_daily u
-             JOIN courses c ON c.id = u.course_id
+             JOIN workspaces c ON c.id = u.workspace_id
             WHERE c.owner_id = $1 AND u.date >= CURRENT_DATE - $2::int
-            GROUP BY u.course_id"#,
+            GROUP BY u.workspace_id"#,
         owner_id,
         days,
     )

@@ -103,10 +103,11 @@ async fn list_all_courses(
     Extension(user): Extension<User>,
 ) -> Result<Json<Vec<crate::routes::courses::CourseResponse>>, AppError> {
     require_admin(&user)?;
-    let rows = minerva_db::queries::courses::list_all_including_archived(&state.db).await?;
+    let rows = minerva_db::queries::workspaces::list_all_including_archived(&state.db).await?;
     // One grouped query for every course's student count instead of a
     // per-course COUNT in the loop.
-    let student_counts = minerva_db::queries::courses::count_students_by_course(&state.db).await?;
+    let student_counts =
+        minerva_db::queries::workspaces::count_students_by_course(&state.db).await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let student_count = student_counts.get(&row.id).copied().unwrap_or(0);
@@ -201,10 +202,10 @@ async fn merge_courses(
     }
 
     // Both must exist and be active (find_by_id filters archived).
-    let survivor = minerva_db::queries::courses::find_by_id(&state.db, body.survivor_id)
+    let survivor = minerva_db::queries::workspaces::find_by_id(&state.db, body.survivor_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    let source = minerva_db::queries::courses::find_by_id(&state.db, body.source_id)
+    let source = minerva_db::queries::workspaces::find_by_id(&state.db, body.source_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -213,7 +214,7 @@ async fn merge_courses(
     relocate_course_docs(&state.config.docs_path, source.id, survivor.id).await?;
 
     let outcome =
-        minerva_db::queries::courses::merge_courses(&state.db, survivor.id, source.id).await?;
+        minerva_db::queries::workspaces::merge_courses(&state.db, survivor.id, source.id).await?;
 
     // The DB now points every moved doc at the survivor, so the source
     // dir is dead weight. Best-effort removal; a leftover dir is
@@ -258,7 +259,7 @@ async fn archive_course(
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_admin(&user)?;
-    let archived = minerva_db::queries::courses::archive(&state.db, id).await?;
+    let archived = minerva_db::queries::workspaces::archive(&state.db, id).await?;
     if !archived {
         // Either the course doesn't exist or it's already archived.
         return Err(AppError::NotFound);
@@ -272,7 +273,7 @@ async fn unarchive_course(
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_admin(&user)?;
-    let restored = minerva_db::queries::courses::unarchive(&state.db, id).await?;
+    let restored = minerva_db::queries::workspaces::unarchive(&state.db, id).await?;
     if !restored {
         return Err(AppError::NotFound);
     }
@@ -365,23 +366,33 @@ async fn merge_suggestions(
 ) -> Result<Json<Vec<MergeSuggestionGroup>>, AppError> {
     require_admin(&user)?;
 
-    let courses: Vec<minerva_db::queries::courses::CourseRow> =
-        minerva_db::queries::courses::list_all_including_archived(&state.db)
+    let courses: Vec<minerva_db::queries::workspaces::WorkspaceRow> =
+        minerva_db::queries::workspaces::list_all_including_archived(&state.db)
             .await?
             .into_iter()
             .filter(|c| c.active)
             .collect();
+    let ids: Vec<Uuid> = courses.iter().map(|c| c.id).collect();
+    let facts = minerva_db::queries::courses::find_many(&state.db, &ids).await?;
 
     // Bucket by (semester, normalized core code). Courses without a
-    // course code are never suggested.
+    // course code (and workspaces that are not courses) are never
+    // suggested.
     let mut buckets: std::collections::HashMap<(Option<String>, String), Vec<usize>> =
         std::collections::HashMap::new();
     for (i, c) in courses.iter().enumerate() {
-        let Some(code) = c.course_code.as_deref().and_then(normalize_course_code) else {
+        let Some(course) = facts.get(&c.id) else {
+            continue;
+        };
+        let Some(code) = course
+            .course_code
+            .as_deref()
+            .and_then(normalize_course_code)
+        else {
             continue;
         };
         buckets
-            .entry((c.semester_label.clone(), code))
+            .entry((course.semester_label.clone(), code))
             .or_default()
             .push(i);
     }
@@ -395,13 +406,14 @@ async fn merge_suggestions(
             .iter()
             .map(|&i| {
                 let c = &courses[i];
+                let course = &facts[&c.id];
                 MergeSuggestionCourse {
                     id: c.id,
                     name: c.name.clone(),
-                    course_code: c.course_code.clone(),
-                    semester_label: c.semester_label.clone(),
+                    course_code: course.course_code.clone(),
+                    semester_label: course.semester_label.clone(),
                     owner_id: c.owner_id,
-                    auto_managed: c.auto_managed,
+                    auto_managed: course.auto_managed,
                 }
             })
             .collect();
@@ -1089,7 +1101,7 @@ async fn backfill_classifications(
         let mut errs = 0usize;
         let mut touched_courses: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
         for doc in candidates {
-            let course_id = doc.course_id;
+            let course_id = doc.workspace_id;
             match crate::routes::documents::run_classify_one(&state_clone, &doc).await {
                 Ok(Some(_)) => {
                     ok += 1;
@@ -1171,7 +1183,7 @@ async fn get_course_feature_flags(
     require_admin(&user)?;
 
     // 404 if course doesn't exist (avoid leaking flags for a nonexistent id).
-    if minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    if minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .is_none()
     {
@@ -1224,7 +1236,7 @@ async fn set_course_feature_flags(
     Json(body): Json<SetCourseFeatureFlagsRequest>,
 ) -> Result<Json<CourseFeatureFlagsResponse>, AppError> {
     require_admin(&user)?;
-    if minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    if minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .is_none()
     {
@@ -1392,7 +1404,7 @@ async fn apply_bulk_one(
     // Only active courses are editable (the underlying UPDATE is scoped
     // to active = true). Report archived / missing ids as a clear
     // per-course failure rather than silently skipping them.
-    let existing = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let existing = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or_else(|| AppError::bad_request("admin.bulk_course_not_active"))?;
 
@@ -1519,7 +1531,7 @@ async fn bulk_archive_courses(
         // A real DB failure bubbles as a 500 (it'd fail every course
         // anyway); `Ok(false)` is the benign "already archived / gone"
         // no-op, surfaced per-course.
-        let changed = minerva_db::queries::courses::archive(&state.db, course_id).await?;
+        let changed = minerva_db::queries::workspaces::archive(&state.db, course_id).await?;
         results.push(BulkResultItem {
             course_id,
             ok: changed,
@@ -1556,7 +1568,7 @@ async fn bulk_unarchive_courses(
 
     let mut results = Vec::with_capacity(body.course_ids.len());
     for &course_id in &body.course_ids {
-        let changed = minerva_db::queries::courses::unarchive(&state.db, course_id).await?;
+        let changed = minerva_db::queries::workspaces::unarchive(&state.db, course_id).await?;
         results.push(BulkResultItem {
             course_id,
             ok: changed,
@@ -1666,7 +1678,7 @@ async fn list_embedding_models(
     // and openai-provider rows don't surface in the picker.
     let usage_rows = sqlx::query!(
         r#"SELECT embedding_model, COUNT(*)::BIGINT AS "count!"
-           FROM courses
+           FROM workspaces
            WHERE active = true
              AND embedding_provider = 'local'
            GROUP BY embedding_model"#,
@@ -1888,7 +1900,7 @@ async fn list_chat_models(
     // column holds the chat model id.
     let usage_rows = sqlx::query!(
         r#"SELECT model, COUNT(*)::BIGINT AS "count!"
-           FROM courses
+           FROM workspaces
            WHERE active = true
            GROUP BY model"#,
     )
@@ -2207,7 +2219,7 @@ async fn list_reranker_models(
 
     let usage_rows = sqlx::query!(
         r#"SELECT reranker_model, COUNT(*)::BIGINT AS "count!"
-           FROM courses
+           FROM workspaces
            WHERE active = true
            GROUP BY reranker_model"#,
     )

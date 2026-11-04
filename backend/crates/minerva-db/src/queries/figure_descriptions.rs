@@ -5,7 +5,7 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct DescriptionJob {
     pub figure_id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub document_id: Uuid,
     pub image_path: String,
     pub context: String,
@@ -24,7 +24,7 @@ pub async fn enqueue(
         INSERT INTO figure_descriptions (figure_id, model, version)
         SELECT f.id, $1, $2 FROM document_figures f
         JOIN documents d ON d.id = f.document_id
-        JOIN courses c ON c.id = f.course_id
+        JOIN workspaces c ON c.id = f.workspace_id
         LEFT JOIN figure_descriptions fd ON fd.figure_id = f.id
         WHERE d.orphaned_at IS NULL AND c.active AND f.shows_person = FALSE
           AND (fd.figure_id IS NULL OR fd.model <> $1 OR fd.version <> $2)
@@ -62,7 +62,7 @@ pub async fn claim(
             SELECT fd.figure_id FROM figure_descriptions fd
             JOIN document_figures f ON f.id = fd.figure_id
             JOIN documents d ON d.id = f.document_id
-            JOIN courses c ON c.id = f.course_id
+            JOIN workspaces c ON c.id = f.workspace_id
             WHERE fd.model = $1 AND fd.version = $2 AND fd.described_at IS NULL
               AND fd.attempts < 5 AND fd.retry_at <= NOW()
               AND (fd.lease_expires_at IS NULL OR fd.lease_expires_at < NOW())
@@ -75,7 +75,7 @@ pub async fn claim(
             FROM candidate WHERE fd.figure_id = candidate.figure_id
             RETURNING fd.figure_id, fd.lease
         )
-        SELECT f.id AS "figure_id!", f.course_id, f.document_id, f.image_path,
+        SELECT f.id AS "figure_id!", f.workspace_id, f.document_id, f.image_path,
                f.context, claimed.lease AS "lease!"
         FROM claimed JOIN document_figures f ON f.id = claimed.figure_id
         "#,

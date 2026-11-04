@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT cf.conversation_id, cf.flag\n           FROM conversation_flags cf\n           JOIN conversations c ON c.id = cf.conversation_id\n           WHERE c.workspace_id = $1 AND cf.acknowledged_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conversation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "conversation_flags",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "flag",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversation_flags",
+            "name": "flag"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1b30d3d22fa4c3d48f4c16e93f804aa9e9d41161868c87115cb0f8d1bd24deb5"
+}

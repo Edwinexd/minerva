@@ -31,7 +31,7 @@
 use serde::Deserialize;
 
 use crate::llm::{util_request, UtilityModel};
-use minerva_db::queries::course_token_usage::CATEGORY_TOPIC_SWITCH;
+use minerva_db::queries::workspace_token_usage::CATEGORY_TOPIC_SWITCH;
 
 /// How many earlier user turns layer 1 compares against. The measured
 /// detectors were insensitive to this (nearest-of-3 and nearest-of-all

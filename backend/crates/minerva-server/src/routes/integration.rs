@@ -145,7 +145,7 @@ async fn list_courses(
     let api_key = authenticate(&state, &headers).await?;
 
     // Return only the course this key is scoped to.
-    let course = minerva_db::queries::courses::find_by_id(&state.db, api_key.course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, api_key.course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -205,7 +205,7 @@ async fn add_member(
 ) -> Result<Json<serde_json::Value>, AppError> {
     authenticate_for_course(&state, &headers, course_id).await?;
 
-    minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -221,7 +221,7 @@ async fn add_member(
     let user_id = user.id;
 
     let role = body.role.as_deref().unwrap_or("student");
-    minerva_db::queries::courses::add_member(&state.db, course_id, user_id, role).await?;
+    minerva_db::queries::workspaces::add_member(&state.db, course_id, user_id, role).await?;
 
     Ok(Json(
         serde_json::json!({ "added": true, "user_id": user_id }),
@@ -244,7 +244,7 @@ async fn list_members(
 ) -> Result<Json<Vec<MemberInfo>>, AppError> {
     authenticate_for_course(&state, &headers, course_id).await?;
 
-    let rows = minerva_db::queries::courses::list_members(&state.db, course_id).await?;
+    let rows = minerva_db::queries::workspaces::list_members(&state.db, course_id).await?;
     Ok(Json(
         rows.into_iter()
             .map(|r| MemberInfo {
@@ -271,7 +271,7 @@ async fn remove_member_by_eppn(
         .ok_or(AppError::NotFound)?;
 
     let removed =
-        minerva_db::queries::courses::remove_member(&state.db, course_id, user.id).await?;
+        minerva_db::queries::workspaces::remove_member(&state.db, course_id, user.id).await?;
     Ok(Json(serde_json::json!({ "removed": removed })))
 }
 
@@ -292,7 +292,7 @@ async fn list_documents(
 ) -> Result<Json<Vec<DocumentInfo>>, AppError> {
     authenticate_for_course(&state, &headers, course_id).await?;
 
-    minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -332,7 +332,7 @@ async fn upload_document(
 ) -> Result<Json<DocumentInfo>, AppError> {
     authenticate_for_course(&state, &headers, course_id).await?;
 
-    minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -405,7 +405,7 @@ async fn upload_document(
 
     // Get course owner as uploader for plugin-driven uploads. Course
     // existence was verified above; this lookup is cheap (PK).
-    let course = minerva_db::queries::courses::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -575,8 +575,9 @@ async fn create_embed_token(
     let user_id = user.id;
 
     // Ensure the user is a course member.
-    if !minerva_db::queries::courses::is_member(&state.db, course_id, user_id).await? {
-        minerva_db::queries::courses::add_member(&state.db, course_id, user_id, "student").await?;
+    if !minerva_db::queries::workspaces::is_member(&state.db, course_id, user_id).await? {
+        minerva_db::queries::workspaces::add_member(&state.db, course_id, user_id, "student")
+            .await?;
     }
 
     let expires_at = chrono::Utc::now() + chrono::Duration::seconds(EMBED_TOKEN_TTL_SECS);
@@ -762,9 +763,9 @@ async fn site_courses_for_user(
     // Admins see everything; otherwise restrict to courses they own or
     // have the teacher role on.
     let rows = if user.role == "admin" {
-        minerva_db::queries::courses::list_all(&state.db).await?
+        minerva_db::queries::workspaces::list_all(&state.db).await?
     } else {
-        minerva_db::queries::courses::list_for_teacher_strict(&state.db, user.id).await?
+        minerva_db::queries::workspaces::list_for_teacher_strict(&state.db, user.id).await?
     };
 
     Ok(Json(SiteCoursesForUserResponse {
@@ -827,7 +828,7 @@ async fn site_provision_course_key(
             AppError::bad_request_with("site_integration.user_not_found", [("eppn", eppn.clone())])
         })?;
 
-    let course = minerva_db::queries::courses::find_by_id(&state.db, body.minerva_course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, body.minerva_course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -839,7 +840,7 @@ async fn site_provision_course_key(
     let is_owner = course.owner_id == user.id;
     let authorized = is_admin
         || is_owner
-        || minerva_db::queries::courses::is_course_teacher_strict(&state.db, course.id, user.id)
+        || minerva_db::queries::workspaces::is_course_teacher_strict(&state.db, course.id, user.id)
             .await?;
     if !authorized {
         return Err(AppError::Forbidden);
@@ -866,10 +867,10 @@ enum OfferingResolution {
     /// At least one id resolved. A Moodle course may carry several Daisy
     /// offering ids (different formal offerings, same taught course); they
     /// should all link to one Minerva course, so we pick the first id (in
-    /// external-id order) that resolves and link there. `CourseRow` is large;
+    /// external-id order) that resolves and link there. `WorkspaceRow` is large;
     /// box it so the enum isn't sized to the biggest variant.
     Matched {
-        course: Box<minerva_db::queries::courses::CourseRow>,
+        course: Box<minerva_db::queries::workspaces::WorkspaceRow>,
         /// Ids that resolved to the chosen course.
         matched_ids: Vec<String>,
         /// True when the ids actually resolved to more than one distinct
@@ -902,7 +903,7 @@ async fn resolve_offerings(
     // First id (in order) that resolves wins the link. We keep scanning the
     // rest only to record ids pointing at the same course and to detect a
     // split mapping (ids resolving to different courses) for logging.
-    let mut chosen: Option<minerva_db::queries::courses::CourseRow> = None;
+    let mut chosen: Option<minerva_db::queries::workspaces::WorkspaceRow> = None;
     let mut matched_ids: Vec<String> = Vec::new();
     let mut distinct: Vec<Uuid> = Vec::new();
     for id in ids {
@@ -1048,7 +1049,7 @@ async fn site_resolve_offerings(
     let is_owner = course.owner_id == user.id;
     let authorized = is_admin
         || is_owner
-        || minerva_db::queries::courses::is_course_teacher_strict(&state.db, course.id, user.id)
+        || minerva_db::queries::workspaces::is_course_teacher_strict(&state.db, course.id, user.id)
             .await?;
 
     Ok(Json(SiteResolveOfferingsResponse {

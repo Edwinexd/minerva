@@ -179,7 +179,7 @@ pub async fn acknowledge(
 /// Per-category thumbs-down counts for all conversations in a course.
 pub async fn category_counts_for_course(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<Vec<FeedbackCategoryCountRow>, sqlx::Error> {
     sqlx::query_as!(
         FeedbackCategoryCountRow,
@@ -187,10 +187,10 @@ pub async fn category_counts_for_course(
         FROM message_feedback f
         JOIN messages m ON m.id = f.message_id
         JOIN conversations c ON c.id = m.conversation_id
-        WHERE c.course_id = $1 AND f.rating = 'down'
+        WHERE c.workspace_id = $1 AND f.rating = 'down'
         GROUP BY f.category
         ORDER BY COUNT(*) DESC"#,
-        course_id,
+        workspace_id,
     )
     .fetch_all(db)
     .await
@@ -199,7 +199,7 @@ pub async fn category_counts_for_course(
 /// Total thumbs-up and thumbs-down counts for all conversations in a course.
 pub async fn total_ratings_for_course(
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<CourseFeedbackSummaryRow, sqlx::Error> {
     sqlx::query_as!(
         CourseFeedbackSummaryRow,
@@ -209,8 +209,8 @@ pub async fn total_ratings_for_course(
         FROM message_feedback f
         JOIN messages m ON m.id = f.message_id
         JOIN conversations c ON c.id = m.conversation_id
-        WHERE c.course_id = $1"#,
-        course_id,
+        WHERE c.workspace_id = $1"#,
+        workspace_id,
     )
     .fetch_one(db)
     .await

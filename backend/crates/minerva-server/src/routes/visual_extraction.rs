@@ -125,14 +125,14 @@ async fn fetch_slots(
     for slot in reserved {
         let doc = minerva_db::queries::documents::find_by_id(&state.db, slot.document_id).await?;
         let url = match doc {
-            Some(doc) => read_url_stub(&state, doc.course_id, doc.id, &doc.filename).await,
+            Some(doc) => read_url_stub(&state, doc.workspace_id, doc.id, &doc.filename).await,
             None => None,
         };
         match url {
             Some(url) => slots.push(FetchSlot {
                 job_id: slot.job_id,
                 document_id: slot.document_id,
-                course_id: slot.course_id,
+                course_id: slot.workspace_id,
                 url,
                 not_ready_releases: slot.not_ready_releases,
             }),
@@ -358,7 +358,7 @@ async fn download_source(
         }
         _ => format!(
             "{}/{}/{}.pdf",
-            state.config.docs_path, job.course_id, job.document_id
+            state.config.docs_path, job.workspace_id, job.document_id
         ),
     };
     if tokio::fs::metadata(&path).await.is_err() {
@@ -539,7 +539,8 @@ async fn upload_result(
 
     // Each accepted result gets its own directory, so the previous one keeps
     // serving until this commit and is removed after.
-    let assets_root = figures::assets_dir(&state.config.docs_path, job.course_id, job.document_id);
+    let assets_root =
+        figures::assets_dir(&state.config.docs_path, job.workspace_id, job.document_id);
     let version_dir = format!(
         "a{}-{}",
         grant.attempt,
@@ -728,7 +729,7 @@ async fn ingest(
         let child_id = Uuid::new_v4();
         let path = format!(
             "{}/{}/{child_id}.txt",
-            state.config.docs_path, job.course_id
+            state.config.docs_path, job.workspace_id
         );
         tokio::fs::write(&path, text.as_bytes())
             .await
@@ -761,15 +762,15 @@ async fn ingest(
     // After commit: the previous text child and figure points are gone from
     // the database, so remove their vectors and files too.
     let embedding_version = sqlx::query_scalar!(
-        "SELECT embedding_version FROM courses WHERE id = $1",
-        job.course_id
+        "SELECT embedding_version FROM workspaces WHERE id = $1",
+        job.workspace_id
     )
     .fetch_one(&state.db)
     .await?;
     if !replaced_children.is_empty() {
         super::documents::purge_document_artifacts(
             state,
-            job.course_id,
+            job.workspace_id,
             embedding_version,
             &replaced_children,
         )
@@ -777,9 +778,15 @@ async fn ingest(
         for id in &replaced_children {
             minerva_db::queries::documents::delete(&state.db, *id).await?;
         }
-        super::documents::remove_document_files(state, job.course_id, &replaced_children).await;
+        super::documents::remove_document_files(state, job.workspace_id, &replaced_children).await;
     }
-    delete_figure_points(state, job.course_id, embedding_version, &replaced_figures).await?;
+    delete_figure_points(
+        state,
+        job.workspace_id,
+        embedding_version,
+        &replaced_figures,
+    )
+    .await?;
     // A PDF's chunks came from text extraction so it was searchable at
     // once; now that its OCR text exists, re-chunk from that instead.
     if !is_lecture && new_pages.iter().any(|p| !p.text.trim().is_empty()) {
@@ -823,7 +830,7 @@ async fn commit_ingest(
             &["awaiting_transcript", "tracked", "failed"],
             minerva_db::queries::documents::NewDocument {
                 id: *child_id,
-                course_id: doc.course_id,
+                workspace_id: doc.workspace_id,
                 filename: &filename,
                 mime_type: "text/plain",
                 size_bytes: text.len() as i64,
@@ -845,9 +852,14 @@ async fn commit_ingest(
             other => other.into(),
         })?;
     }
-    let replaced_figures =
-        queue::replace_layout_in(&mut tx, job.document_id, job.course_id, pages, figures_new)
-            .await?;
+    let replaced_figures = queue::replace_layout_in(
+        &mut tx,
+        job.document_id,
+        job.workspace_id,
+        pages,
+        figures_new,
+    )
+    .await?;
     if !queue::complete(&mut tx, job.id, grant.attempt).await? {
         return Err(AppError::bad_request("visual_extraction.stale_attempt"));
     }

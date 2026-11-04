@@ -61,7 +61,7 @@ pub struct SeedReport {
     /// (student, course, day, model).
     pub usage_rows: usize,
     /// Rows in the pipeline / classification ledger
-    /// (`course_token_usage`).
+    /// (`workspace_token_usage`).
     pub pipeline_usage_rows: usize,
     pub wiped: WipeReport,
 }
@@ -98,7 +98,7 @@ const WIPE_TABLE_ORDER: &[&str] = &[
     // ON DELETE CASCADE, so they have to go before either parent or
     // the course delete below fails on a constraint violation.
     "usage_daily",
-    "course_token_usage",
+    "workspace_token_usage",
     "course_members",
     "external_auth_invites",
     "chat_models",
@@ -326,7 +326,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
         (discrete, "teacher", teacher),
         (discrete, "student", alice),
     ] {
-        minerva_db::queries::courses::add_member(&state.db, course_id, user_id, role).await?;
+        minerva_db::queries::workspaces::add_member(&state.db, course_id, user_id, role).await?;
         // Composite-PK table; encode the pair as `course_id:user_id`
         // so the registry can target the right row at wipe time.
         track_composite(state, "course_members", &format!("{course_id}:{user_id}")).await?;
@@ -543,7 +543,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
     // ---- AI spend ledger ---------------------------------------------
     //
     // The teacher portal (/teacher/usage) and the admin usage tab read
-    // `usage_daily` (student chat) and `course_token_usage` (ingest and
+    // `usage_daily` (student chat) and `workspace_token_usage` (ingest and
     // classification). With neither populated both pages render an
     // empty shell, which is exactly the state that hides layout, copy
     // and rounding bugs. Seed five weeks of weekday traffic across all
@@ -869,12 +869,12 @@ async fn seed_usage_ledger(state: &AppState, plans: &[UsagePlan]) -> Result<usiz
                 let id = Uuid::new_v4();
                 sqlx::query!(
                     r#"INSERT INTO usage_daily
-                           (id, user_id, course_id, date, model, provider,
+                           (id, user_id, workspace_id, date, model, provider,
                             prompt_tokens, completion_tokens, embedding_tokens,
                             research_prompt_tokens, research_completion_tokens,
                             request_count)
                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, $9, $10, $11)
-                       ON CONFLICT (user_id, course_id, date, model) DO NOTHING"#,
+                       ON CONFLICT (user_id, workspace_id, date, model) DO NOTHING"#,
                     id,
                     student,
                     plan.course_id,
@@ -916,8 +916,8 @@ async fn seed_pipeline_ledger(state: &AppState, courses: &[Uuid]) -> Result<usiz
             for call in 0..calls {
                 let id = Uuid::new_v4();
                 sqlx::query!(
-                    r#"INSERT INTO course_token_usage
-                           (id, course_id, category, model, prompt_tokens,
+                    r#"INSERT INTO workspace_token_usage
+                           (id, workspace_id, category, model, prompt_tokens,
                             completion_tokens, created_at)
                        VALUES ($1, $2, $3, $4, $5, $6,
                                NOW() - ($7 || ' days')::interval
@@ -933,7 +933,7 @@ async fn seed_pipeline_ledger(state: &AppState, courses: &[Uuid]) -> Result<usiz
                 )
                 .execute(&state.db)
                 .await?;
-                track(state, "course_token_usage", id).await?;
+                track(state, "workspace_token_usage", id).await?;
                 rows += 1;
             }
         }
@@ -1160,10 +1160,11 @@ struct SeedCourse<'a> {
 /// `track` records it.
 async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<Uuid, AppError> {
     let course_id = Uuid::new_v4();
-    let _row = minerva_db::queries::courses::create(
+    let _row = minerva_db::queries::workspaces::create_course(
         &state.db,
         course_id,
-        &minerva_db::queries::courses::CreateCourse {
+        &minerva_db::queries::workspaces::CreateWorkspace {
+            kind: minerva_core::models::WorkspaceKind::Course.as_str(),
             name: config.name.to_string(),
             description: config.description.map(|s| s.to_string()),
             owner_id: config.owner_id,
@@ -1187,19 +1188,19 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             embedding_model: None,
             reranker_model: None,
             system_prompt: None,
-            // Dev seed predates the per-semester grouping; give every
-            // seeded course an explicit label so the My Courses page
-            // renders real term headers instead of an Ad-hoc bucket.
-            semester_label: config.semester_label.to_string(),
         },
+        // Dev seed predates the per-semester grouping; give every
+        // seeded course an explicit label so the home page renders real
+        // term headers instead of an Ad-hoc bucket.
+        Some(config.semester_label),
     )
     .await?;
     track(state, "courses", course_id).await?;
 
-    minerva_db::queries::courses::update(
+    minerva_db::queries::workspaces::update(
         &state.db,
         course_id,
-        &minerva_db::queries::courses::UpdateCourse {
+        &minerva_db::queries::workspaces::UpdateWorkspace {
             name: None,
             description: None,
             context_ratio: None,
@@ -1221,13 +1222,12 @@ async fn create_seed_course(state: &AppState, config: SeedCourse<'_>) -> Result<
             daily_cost_limit_usd: None,
             conversation_soft_token_limit: None,
             conversation_hard_token_limit: None,
-            semester_label: None,
         },
     )
     .await?;
 
     if config.archived {
-        minerva_db::queries::courses::archive(&state.db, course_id).await?;
+        minerva_db::queries::workspaces::archive(&state.db, course_id).await?;
     }
 
     Ok(course_id)
@@ -1277,12 +1277,13 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
     // Collect the course ids first so we can clean up bytes-on-disk +
     // Qdrant collections before the DB row goes (the row is what gives
     // us the course id; deleting it would lose the lookup).
-    let course_ids: Vec<Uuid> = sqlx::query!("SELECT pk FROM seeds WHERE table_name = 'courses'",)
-        .fetch_all(&state.db)
-        .await?
-        .into_iter()
-        .filter_map(|r| Uuid::parse_str(&r.pk).ok())
-        .collect();
+    let course_ids: Vec<Uuid> =
+        sqlx::query!("SELECT pk FROM seeds WHERE table_name = 'workspaces'",)
+            .fetch_all(&state.db)
+            .await?
+            .into_iter()
+            .filter_map(|r| Uuid::parse_str(&r.pk).ok())
+            .collect();
 
     for course_id in &course_ids {
         // Remove the course's docs directory. `remove_dir_all` is a
@@ -1301,7 +1302,8 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
         // versioned Qdrant collection. If the row is already gone
         // (orphaned tag), we don't know the version and can't safely
         // delete a guessed collection name; skip silently.
-        if let Ok(Some(row)) = minerva_db::queries::courses::find_by_id(&state.db, *course_id).await
+        if let Ok(Some(row)) =
+            minerva_db::queries::workspaces::find_by_id(&state.db, *course_id).await
         {
             let collection = if row.embedding_version <= 1 {
                 format!("course_{course_id}")
@@ -1355,7 +1357,7 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
     // developer's own rows in non-seeded courses are untouched.
     let orphan_conversations = sqlx::query!(
         r#"DELETE FROM conversations
-            WHERE course_id = ANY($1)
+            WHERE workspace_id = ANY($1)
                OR user_id IN (SELECT pk::uuid FROM seeds WHERE table_name = 'users')"#,
         &course_ids,
     )
@@ -1381,8 +1383,8 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
             "conversations" => delete_by_uuid_pk(&state.db, "conversations", &pks).await?,
             "documents" => delete_by_uuid_pk(&state.db, "documents", &pks).await?,
             "usage_daily" => delete_by_uuid_pk(&state.db, "usage_daily", &pks).await?,
-            "course_token_usage" => {
-                delete_by_uuid_pk(&state.db, "course_token_usage", &pks).await?
+            "workspace_token_usage" => {
+                delete_by_uuid_pk(&state.db, "workspace_token_usage", &pks).await?
             }
             "chat_models" => delete_chat_models(&state.db, &pks).await?,
             "course_members" => delete_course_members(&state.db, &pks).await?,
@@ -1411,7 +1413,7 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
             "conversations" => report.conversations = deleted,
             "documents" => report.documents = deleted,
             "usage_daily" => report.usage_rows = deleted,
-            "course_token_usage" => report.pipeline_usage_rows = deleted,
+            "workspace_token_usage" => report.pipeline_usage_rows = deleted,
             "course_members" => report.course_members = deleted,
             "external_auth_invites" => report.external_invites = deleted,
             "courses" => report.courses = deleted,
@@ -1451,10 +1453,10 @@ async fn delete_by_uuid_pk(
         "conversations" => "DELETE FROM conversations WHERE id = ANY($1)",
         "documents" => "DELETE FROM documents WHERE id = ANY($1)",
         "usage_daily" => "DELETE FROM usage_daily WHERE id = ANY($1)",
-        "course_token_usage" => "DELETE FROM course_token_usage WHERE id = ANY($1)",
+        "workspace_token_usage" => "DELETE FROM workspace_token_usage WHERE id = ANY($1)",
         "external_auth_invites" => "DELETE FROM external_auth_invites WHERE id = ANY($1)",
         "lti_platforms" => "DELETE FROM lti_platforms WHERE id = ANY($1)",
-        "courses" => "DELETE FROM courses WHERE id = ANY($1)",
+        "courses" => "DELETE FROM workspaces WHERE id = ANY($1)",
         "users" => "DELETE FROM users WHERE id = ANY($1)",
         other => {
             return Err(sqlx::Error::InvalidArgument(format!(
@@ -1495,8 +1497,8 @@ async fn delete_course_members(db: &sqlx::PgPool, pks: &[String]) -> Result<u64,
         return Ok(0);
     }
     let result = sqlx::query!(
-        "DELETE FROM course_members
-         WHERE (course_id, user_id) IN (
+        "DELETE FROM workspace_members
+         WHERE (workspace_id, user_id) IN (
              SELECT * FROM UNNEST($1::UUID[], $2::UUID[])
          )",
         &course_ids,

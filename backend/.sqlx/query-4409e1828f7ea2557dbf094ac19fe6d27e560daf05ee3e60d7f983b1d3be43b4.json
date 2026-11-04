@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.category, COUNT(*) AS \"count!: i64\"\n        FROM message_feedback f\n        JOIN messages m ON m.id = f.message_id\n        JOIN conversations c ON c.id = m.conversation_id\n        WHERE c.workspace_id = $1 AND f.rating = 'down'\n        GROUP BY f.category\n        ORDER BY COUNT(*) DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "category",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "message_feedback",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "count!: i64",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "4409e1828f7ea2557dbf094ac19fe6d27e560daf05ee3e60d7f983b1d3be43b4"
+}

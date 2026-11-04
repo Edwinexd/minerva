@@ -97,8 +97,8 @@ pub async fn list_pending_for_course(
                   s.created_at
            FROM course_member_role_suggestions s
            JOIN users u ON u.id = s.user_id
-           LEFT JOIN course_members cm
-             ON cm.course_id = s.course_id AND cm.user_id = s.user_id
+           LEFT JOIN workspace_members cm
+             ON cm.workspace_id = s.course_id AND cm.user_id = s.user_id
            WHERE s.course_id = $1 AND s.resolution IS NULL
            ORDER BY s.created_at ASC"#,
         course_id,

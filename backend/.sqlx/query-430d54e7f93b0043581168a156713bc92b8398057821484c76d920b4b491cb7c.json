@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"count!\"\n           FROM linker_decisions ld\n           JOIN documents da ON da.id = ld.a_doc_id\n           JOIN documents db ON db.id = ld.b_doc_id\n           WHERE ld.workspace_id = $1\n             AND (\n                 da.classified_at IS DISTINCT FROM ld.a_classified_at\n              OR db.classified_at IS DISTINCT FROM ld.b_classified_at\n             )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "430d54e7f93b0043581168a156713bc92b8398057821484c76d920b4b491cb7c"
+}

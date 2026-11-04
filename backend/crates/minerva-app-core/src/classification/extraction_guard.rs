@@ -33,7 +33,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::llm::util_request;
-use minerva_db::queries::course_token_usage::CATEGORY_EXTRACTION_GUARD;
+use minerva_db::queries::workspace_token_usage::CATEGORY_EXTRACTION_GUARD;
 
 // All four guard calls run on the admin-selected utility model
 // (resolved per call via `AppState::utility_model`), at temperature 0 +

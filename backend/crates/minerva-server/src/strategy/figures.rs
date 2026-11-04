@@ -129,6 +129,7 @@ async fn visual_search(
         }
     };
     let excluded: Vec<String> = orphaned.iter().cloned().collect();
+    // "course_id" is the stored payload key, holding the workspace id.
     let mut filter = Filter::must([Condition::matches("course_id", ctx.course_id.to_string())]);
     if !excluded.is_empty() {
         filter.must_not = vec![Condition::matches("document_id", excluded)];

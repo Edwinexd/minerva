@@ -11,16 +11,16 @@ async fn fixture(db: &sqlx::PgPool) -> (Uuid, Uuid, Uuid) {
         .execute(db)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO courses (id,name,owner_id) VALUES ($1,'Figures',$2)")
+    sqlx::query("INSERT INTO workspaces (id,name,owner_id) VALUES ($1,'Figures',$2)")
         .bind(course)
         .bind(user)
         .execute(db)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO documents (id,course_id,filename,mime_type,size_bytes,status,uploaded_by) VALUES ($1,$2,'slides.pdf','application/pdf',100,'ready',$3)")
+    sqlx::query("INSERT INTO documents (id,workspace_id,filename,mime_type,size_bytes,status,uploaded_by) VALUES ($1,$2,'slides.pdf','application/pdf',100,'ready',$3)")
         .bind(doc).bind(course).bind(user).execute(db).await.unwrap();
     for position in 0..2 {
-        sqlx::query("INSERT INTO document_figures (document_id,course_id,page_position,box,image_path,context,visual_model,visual_vector,indexed_at,shows_person) VALUES ($1,$2,$3,ARRAY[0,0,1,1]::real[],'crop.jpg','Whole page text','clip',ARRAY[0.1,0.2]::real[],NOW(),FALSE)")
+        sqlx::query("INSERT INTO document_figures (document_id,workspace_id,page_position,box,image_path,context,visual_model,visual_vector,indexed_at,shows_person) VALUES ($1,$2,$3,ARRAY[0,0,1,1]::real[],'crop.jpg','Whole page text','clip',ARRAY[0.1,0.2]::real[],NOW(),FALSE)")
             .bind(doc).bind(course).bind(position).execute(db).await.unwrap();
     }
     (user, course, doc)
@@ -157,7 +157,7 @@ async fn capacity_and_spending_caps_defer_without_exhausting_retries(db: sqlx::P
 async fn flex_variant_prices_drive_owner_cost_without_discount_logic(db: sqlx::PgPool) {
     let (owner, course, _) = fixture(&db).await;
     sqlx::query("INSERT INTO chat_models(model,provider,display_name,input_usd_per_mtok,output_usd_per_mtok) VALUES ('vision','openai','Vision',0.10,0.50),('vision@flex','openai','Vision (Flex)',0.05,0.25)").execute(&db).await.unwrap();
-    minerva_db::queries::course_token_usage::record(
+    minerva_db::queries::workspace_token_usage::record(
         &db,
         course,
         "figure_description",

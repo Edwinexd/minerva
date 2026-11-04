@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM document_relations WHERE workspace_id = $1 AND confidence < $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "db08459038e52b7105b33b8b1beaccdb7a29ae062afea9e0ac779a9a95a8c378"
+}

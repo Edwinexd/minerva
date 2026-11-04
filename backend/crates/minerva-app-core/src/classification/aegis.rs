@@ -52,7 +52,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::llm::util_request;
-use minerva_db::queries::course_token_usage::CATEGORY_AEGIS;
+use minerva_db::queries::workspace_token_usage::CATEGORY_AEGIS;
 
 // Both analyzer fires (cold-start and follow-up) run on the
 // admin-selected utility model; the schema-constrained output keeps the

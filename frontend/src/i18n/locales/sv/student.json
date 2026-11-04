@@ -175,7 +175,114 @@
     "listLabel": "Filer i ärendet",
     "remove": "Ta bort {{name}}",
     "noText": "Ingen text kunde läsas ur filen",
-    "retention": "Ärendet och dess filer raderas {{days}} dagar efter senaste användning ({{date}}).",
     "formats": "PDF, text eller HTML."
+  },
+  "creditTransfer": {
+    "opensInNewTab": "öppnas i en ny flik",
+    "allCases": "Alla ärenden",
+    "newCase": "Nytt ärende",
+    "myCases": "Mina ärenden",
+    "untitledCase": "Namnlöst ärende",
+    "assess": "Bedöm",
+    "assessPlaceholder": "Lägg till en anteckning till bedömningen (valfritt), t.ex. vilken DSV-kurs studenten ansöker om",
+    "assessDefault": "Bedöm den bifogade kursplanen mot DSV:s kursplaner.",
+    "caseDates": "Skapat {{created}}. Raderas med sina filer {{deleted}} om det inte används igen.",
+    "retentionNote": "Ett ärende och dess filer raderas {{days}} dagar efter att det senast användes.",
+    "exportPdf": "Exportera som PDF",
+    "intro": "Varje ärende innehåller de uppladdade externa kursplanerna och bedömningen. Uppladdade filer och ärendet raderas {{days}} dagar efter att de senast användes.",
+    "tabs": {
+      "cases": "Mina ärenden",
+      "plans": "DSV:s kursplaner",
+      "assistant": "Använd från din AI-assistent",
+      "settings": "Inställningar för arbetsytan"
+    },
+    "casesPrivate": "Bara du kan se dina ärenden.",
+    "noCases": "Inga ärenden än. Starta ett genom att bifoga kursplanen för kursen som studenten läst någon annanstans.",
+    "casesTable": "Dina ärenden",
+    "col": {
+      "case": "Ärende",
+      "files": "Externa kursplaner",
+      "bestMatch": "Bästa DSV-matchning",
+      "updated": "Uppdaterat",
+      "deletedOn": "Raderas"
+    },
+    "notAssessed": "Inte bedömt än",
+    "noFiles": "Inga filer",
+    "verdictShort": {
+      "full": "Helt",
+      "partial": "Delvis",
+      "none": "Ingen"
+    },
+    "verdict": {
+      "full": "Fullt tillgodoräknande föreslås",
+      "partial": "Delvis tillgodoräknande föreslås",
+      "none": "Inte likvärdig"
+    },
+    "match": {
+      "match": "Lika",
+      "differs": "Skiljer sig",
+      "unknown": "Ej angivet"
+    },
+    "coverage": {
+      "covered": "Täckt",
+      "partly": "Delvis",
+      "gap": "Saknas"
+    },
+    "assessment": {
+      "advisory": "Endast rådgivande. Beslutet och dess motivering ligger hos examinatorn. Jämfört med den senaste versionen av varje kursplan från DSV.",
+      "cite": "{{doc}} s.{{page}}",
+      "noCandidates": "Ingen kursplan från DSV matchade den här kursplanen.",
+      "externalCourse": "Extern kurs",
+      "ects": "{{credits}} ECTS",
+      "creditsUnknown": "omfattning ej angiven",
+      "outcomeCount_one": "{{count}} lärandemål",
+      "outcomeCount_other": "{{count}} lärandemål",
+      "examination": "examination: {{examination}}",
+      "planVersion": "kursplan {{version}}",
+      "showDetails": "Visa detaljer",
+      "hideDetails": "Dölj detaljer",
+      "credits": "Högskolepoäng",
+      "versus": "{{dsv}} mot {{external}}",
+      "level": "Nivå",
+      "outcomesCovered": "Täckta lärandemål",
+      "coveredOf": "{{covered}} av {{total}}",
+      "partlyCount_one": "({{count}} delvis)",
+      "partlyCount_other": "({{count}} delvis)",
+      "outcomeTable": "Jämförda lärandemål för {{code}}",
+      "dsvOutcome": "DSV-mål ({{code}})",
+      "externalOutcome": "Närmaste externa mål ({{course}})",
+      "coverage": "Täckning",
+      "noCorresponding": "Inget motsvarande mål",
+      "suggestion": "Förslag",
+      "creditedModules": "Moment som kan tillgodoräknas",
+      "module": "{{code}} {{name}} ({{credits}} hp)",
+      "ruledOut_one": "{{count}} DSV-kurs till genomsökt, ingen tydlig överlappning",
+      "ruledOut_other": "{{count}} DSV-kurser till genomsökta, ingen tydlig överlappning"
+    },
+    "plans": {
+      "search": "Sök kursplaner på kod, namn eller innehåll",
+      "syncStatus_one": "Senast kontrollerade {{date}}. {{count}} kursplan, {{changed}} ändrade den här veckan.",
+      "syncStatus_other": "Senast kontrollerade {{date}}. {{count}} kursplaner, {{changed}} ändrade den här veckan.",
+      "neverSynced": "Kursplanearkivet har inte synkats än.",
+      "readOnly": "Synkas dagligen från Stockholms universitets kursplanearkiv. Ingen laddar upp här; bedömningar använder alltid den senaste versionen.",
+      "table": "DSV:s kursplaner",
+      "code": "Kod",
+      "name": "Namn",
+      "creditsLevel": "Hp / nivå",
+      "latest": "Senaste version",
+      "older": "Äldre versioner",
+      "status": "Status",
+      "openPdf": "Kursplan för {{code}} {{version}}, PDF på {{language}}",
+      "none": "inga",
+      "statuses": {
+        "indexed": "Indexerad",
+        "indexing": "Indexeras",
+        "pending": "Inte hämtad än",
+        "failed": "Hämtning misslyckades",
+        "discontinued": "Nedlagd"
+      },
+      "newThisWeek": "Ny den här veckan",
+      "noMatch": "Ingen kursplan matchar sökningen."
+    }
   }
 }

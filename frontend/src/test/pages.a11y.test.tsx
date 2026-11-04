@@ -75,6 +75,7 @@ vi.mock("@/lib/api", () => {
 import * as queries from "@/lib/queries"
 import type {
   AdminUser,
+  CaseAssessment,
   Course,
   CourseMember,
   Document,
@@ -99,6 +100,8 @@ import { Home } from "@/components/home/home-page"
 import { AttachmentsBar } from "@/components/chat/attachments-bar"
 import { AssistantsPage } from "@/components/teacher/assistants-page"
 import { ConnectPage } from "@/components/connect-page"
+import { AssessmentView } from "@/components/credit-transfer/assessment-view"
+import { CreditTransferWorkspacePage } from "@/components/credit-transfer/workspace-page"
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -458,6 +461,98 @@ const populatedConversationFixtures: Seed[] = [
   ],
 ]
 
+const creditTransferWorkspace: Course = {
+  ...course,
+  id: "ws-ct",
+  kind: "credit_transfer",
+  name: "Credit transfer",
+  description: null,
+  semester_label: null,
+  course_code: null,
+  my_role: "teacher",
+  case_retention_days: 90,
+}
+
+/** One partial match, one weak candidate collapsed, one plan ruled out. */
+const caseAssessment: CaseAssessment = {
+  version: 1,
+  language: "en",
+  summary: "DD1337 partly corresponds to IB130N.",
+  external_courses: [
+    {
+      file: "DD1337.pdf",
+      attachment_id: "att-1",
+      url: "/api/workspaces/ws-ct/conversations/case-1/attachments/att-1/file",
+      code: "DD1337",
+      name: "Programmeringsteknik",
+      institution: "KTH",
+      credits: 7.5,
+      level: "G1N",
+      level_note: "First cycle",
+      outcome_count: 6,
+      examination: "labs and exam",
+    },
+  ],
+  candidates: [
+    {
+      code: "IB130N",
+      name: "Introduktion till data- och systemvetenskap",
+      plan_version: "HT2020",
+      plan_language: "sv",
+      plan_url: "https://albatross.it.su.se/api/education/educationplan/pdf/IB130N/HT2020",
+      dsv_credits: 7.5,
+      dsv_level: "G1N",
+      modules: [{ code: "IDSI", name: "Inlämningsuppgift", credits: 3.5 }],
+      external_file: "DD1337.pdf",
+      external_url: "/api/workspaces/ws-ct/conversations/case-1/attachments/att-1/file",
+      external_credits: 7.5,
+      external_level: "G1N",
+      credits_match: "match",
+      level_match: "match",
+      verdict: "partial",
+      verdict_title: "Partial credit: 3.5 of 7.5 credits",
+      verdict_reason: "Networking is absent from DD1337.",
+      overlap_note: "2 of 3 outcomes covered",
+      credited_modules: [{ code: "IDSI", name: "Inlämningsuppgift", credits: 3.5 }],
+      credited_credits: 3.5,
+      outcomes: [
+        { dsv_outcome: "Write simple programs", dsv_page: 1, external_outcome: "Write structured programs", external_page: 2, coverage: "covered" },
+        { dsv_outcome: "Explain algorithms", dsv_page: 1, external_outcome: "Analyse algorithms", external_page: 2, coverage: "partly" },
+        { dsv_outcome: "Describe computer networks", dsv_page: 2, external_outcome: null, external_page: null, coverage: "gap" },
+      ],
+      notes: [{ label: "Language", value: "Python vs Java" }],
+    },
+    {
+      code: "IB440C",
+      name: "Programmering 2",
+      plan_version: "HT2020",
+      plan_language: "sv",
+      plan_url: "https://albatross.it.su.se/api/education/educationplan/pdf/IB440C/HT2020",
+      dsv_credits: 7.5,
+      dsv_level: "G2F",
+      modules: [],
+      external_file: "DD1337.pdf",
+      external_url: null,
+      external_credits: 7.5,
+      external_level: "G1N",
+      credits_match: "match",
+      level_match: "differs",
+      verdict: "none",
+      verdict_title: "",
+      verdict_reason: "Builds on a first course.",
+      overlap_note: "Shared topic area only",
+      credited_modules: [],
+      credited_credits: null,
+      outcomes: [
+        { dsv_outcome: "Build graphical interfaces", dsv_page: 1, external_outcome: null, external_page: null, coverage: "gap" },
+      ],
+      notes: [],
+    },
+  ],
+  ruled_out: [{ code: "IB138N", name: "Grundläggande programmering", reason: "Same ground as IB130N." }],
+  searched: 3,
+}
+
 // ── Harness ─────────────────────────────────────────────────────────────
 
 type Seed = [readonly unknown[], unknown]
@@ -734,12 +829,7 @@ describe("Authenticated pages a11y", () => {
       },
     ]
     const { container, getByText, getByRole } = renderPage(
-      <AttachmentsBar
-        courseId="ws-ct"
-        conversationId="conv-1"
-        retentionDays={90}
-        lastUsed="2026-11-04T10:00:00Z"
-      />,
+      <AttachmentsBar courseId="ws-ct" conversationId="conv-1" />,
       [[queries.attachmentsQuery("ws-ct", "conv-1").queryKey, files]],
     )
     expect(getByText("KTH DD1337 kursplan.pdf")).toBeInTheDocument()
@@ -749,15 +839,146 @@ describe("Authenticated pages a11y", () => {
 
   it("starting a credit transfer case has no axe violations", async () => {
     const { container, getByRole } = renderPage(
-      <AttachmentsBar
-        courseId="ws-ct"
-        conversationId={null}
-        retentionDays={90}
-        lastUsed={undefined}
-      />,
+      <AttachmentsBar courseId="ws-ct" conversationId={null} />,
       [],
     )
     expect(getByRole("button", { name: /Attach syllabus/ })).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("credit transfer assessment has no axe violations", async () => {
+    const { container, getByText, getAllByRole, getByRole } = renderPage(
+      <AssessmentView assessment={caseAssessment} />,
+      [],
+    )
+    expect(getByText("Partial credit suggested")).toBeInTheDocument()
+    expect(getByText("Suggestion: Partial credit: 3.5 of 7.5 credits")).toBeInTheDocument()
+    // Citations open the cited page of either document.
+    const cites = getAllByRole("link", { name: /IB130N p\.1/ })
+    expect(cites[0]).toHaveAttribute("href", expect.stringMatching(/IB130N\/HT2020#page=1$/))
+    expect(getAllByRole("link", { name: /DD1337 p\.2/ })[0]).toHaveAttribute(
+      "href",
+      expect.stringMatching(/attachments\/att-1\/file#page=2$/),
+    )
+    // The weak candidate starts collapsed, behind a disclosure button.
+    expect(getByRole("button", { name: "Show details" })).toHaveAttribute("aria-expanded", "false")
+    expect(getByText(/1 more DSV course searched/)).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("credit transfer case page has no axe violations", async () => {
+    const assessed = {
+      ...chatMessage("message-2", "assistant", "Rendered assessment"),
+      assessment: caseAssessment,
+    }
+    const { container, getByText, getByRole } = renderPage(
+      <ChatRouteComponent useParams={() => ({ courseId: "ws-ct", conversationId: "case-1" })} />,
+      [
+        [queries.courseQuery("ws-ct").queryKey, creditTransferWorkspace],
+        [
+          queries.conversationsQuery("ws-ct").queryKey,
+          [
+            {
+              id: "case-1",
+              workspace_id: "ws-ct",
+              title: "KTH: DD1337 Programmeringsteknik",
+              pinned: false,
+              created_at: "2026-11-04T10:00:00Z",
+              updated_at: "2026-11-04T10:05:00Z",
+            },
+          ],
+        ],
+        [queries.pinnedConversationsQuery("ws-ct").queryKey, []],
+        [queries.userQuery.queryKey, user],
+        [queries.attachmentsQuery("ws-ct", "case-1").queryKey, []],
+        [
+          queries.conversationDetailQuery("ws-ct", "case-1").queryKey,
+          {
+            messages: [chatMessage("message-1", "user", "Assess this."), assessed],
+            notes: [],
+            feedback: [],
+            flags: [],
+            prompt_analyses: [],
+          },
+        ],
+      ],
+    )
+    expect(getByRole("heading", { name: "KTH: DD1337 Programmeringsteknik" })).toBeInTheDocument()
+    expect(getByRole("button", { name: "Export as PDF" })).toBeInTheDocument()
+    // The assessment replaces the markdown body of its message.
+    expect(getByText("IB130N: Introduktion till data- och systemvetenskap")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("credit transfer cases tab has no axe violations", async () => {
+    const { container, getByText } = renderPage(
+      <CreditTransferWorkspacePage workspace={creditTransferWorkspace} tab="cases" />,
+      [
+        [
+          queries.creditTransferSummaryQuery("ws-ct").queryKey,
+          { plan_count: 214, plans_changed_this_week: 2, plans_checked_at: "2026-11-04T04:10:00Z", my_case_count: 1, case_retention_days: 90 },
+        ],
+        [
+          queries.creditTransferCasesQuery("ws-ct").queryKey,
+          [
+            {
+              id: "case-1",
+              title: "KTH: DD1337 Programmeringsteknik",
+              created_at: "2026-11-04T10:00:00Z",
+              updated_at: "2026-11-04T10:05:00Z",
+              deleted_on: "2027-02-02T10:05:00Z",
+              attachments: ["DD1337.pdf"],
+              best_match: { code: "IB130N", verdict: "partial" },
+              candidate_count: 2,
+            },
+          ],
+        ],
+      ],
+    )
+    expect(getByText("KTH: DD1337 Programmeringsteknik")).toBeInTheDocument()
+    expect(getByText("Partial")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("credit transfer plans tab has no axe violations", async () => {
+    const { container, getByText } = renderPage(
+      <CreditTransferWorkspacePage workspace={creditTransferWorkspace} tab="plans" />,
+      [
+        [
+          queries.creditTransferSummaryQuery("ws-ct").queryKey,
+          { plan_count: 214, plans_changed_this_week: 2, plans_checked_at: "2026-11-04T04:10:00Z", my_case_count: 1, case_retention_days: 90 },
+        ],
+        [
+          queries.dsvPlansQuery("ws-ct").queryKey,
+          [
+            {
+              code: "IB440C",
+              name_sv: "Programmering 2",
+              name_en: "Programming 2",
+              ects: 7.5,
+              level: "G2F",
+              latest: { valid_from: "HT2020", files: [{ language: "sv", pdf_url: "https://albatross.it.su.se/x" }] },
+              older_versions: ["VT2015", "VT2013"],
+              status: "indexed",
+              changed_this_week: true,
+            },
+            {
+              code: "DA1003",
+              name_sv: "Datorstödd rapportframställning",
+              name_en: null,
+              ects: 7.5,
+              level: null,
+              latest: null,
+              older_versions: [],
+              status: "discontinued",
+              changed_this_week: false,
+            },
+          ],
+        ],
+      ],
+    )
+    expect(getByText("VT2015, VT2013")).toBeInTheDocument()
+    expect(getByText("Discontinued")).toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
   })
 

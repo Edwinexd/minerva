@@ -175,7 +175,114 @@
     "listLabel": "Files in this case",
     "remove": "Remove {{name}}",
     "noText": "No text could be read from this file",
-    "retention": "This case and its files are deleted {{days}} days after it was last used ({{date}}).",
     "formats": "PDF, text or HTML."
+  },
+  "creditTransfer": {
+    "opensInNewTab": "opens in a new tab",
+    "allCases": "All cases",
+    "newCase": "New case",
+    "myCases": "My cases",
+    "untitledCase": "Untitled case",
+    "assess": "Assess",
+    "assessPlaceholder": "Add a note for the assessment (optional), e.g. which DSV course the student asks for",
+    "assessDefault": "Assess the attached syllabus against the DSV course plans.",
+    "caseDates": "Created {{created}}. Deleted with its files on {{deleted}} unless used again.",
+    "retentionNote": "A case and its files are deleted {{days}} days after it was last used.",
+    "exportPdf": "Export as PDF",
+    "intro": "Each case holds the uploaded external syllabuses and the assessment. Uploaded files and the case are deleted {{days}} days after they were last used.",
+    "tabs": {
+      "cases": "My cases",
+      "plans": "DSV course plans",
+      "assistant": "Use from your AI assistant",
+      "settings": "Workspace settings"
+    },
+    "casesPrivate": "Only you can see your cases.",
+    "noCases": "No cases yet. Start one by attaching the syllabus of the course the student took elsewhere.",
+    "casesTable": "Your cases",
+    "col": {
+      "case": "Case",
+      "files": "External syllabuses",
+      "bestMatch": "Best DSV match",
+      "updated": "Updated",
+      "deletedOn": "Deleted on"
+    },
+    "notAssessed": "Not assessed yet",
+    "noFiles": "No files",
+    "verdictShort": {
+      "full": "Full",
+      "partial": "Partial",
+      "none": "None"
+    },
+    "verdict": {
+      "full": "Full credit suggested",
+      "partial": "Partial credit suggested",
+      "none": "Not equivalent"
+    },
+    "match": {
+      "match": "Match",
+      "differs": "Differs",
+      "unknown": "Not stated"
+    },
+    "coverage": {
+      "covered": "Covered",
+      "partly": "Partly",
+      "gap": "Gap"
+    },
+    "assessment": {
+      "advisory": "Advisory only. The decision and its justification remain with the examiner. Compared against the latest version of each DSV plan.",
+      "cite": "{{doc}} p.{{page}}",
+      "noCandidates": "No DSV course plan matched this syllabus.",
+      "externalCourse": "External course",
+      "ects": "{{credits}} ECTS",
+      "creditsUnknown": "credits not stated",
+      "outcomeCount_one": "{{count}} learning outcome",
+      "outcomeCount_other": "{{count}} learning outcomes",
+      "examination": "examination: {{examination}}",
+      "planVersion": "course plan version {{version}}",
+      "showDetails": "Show details",
+      "hideDetails": "Hide details",
+      "credits": "Credits",
+      "versus": "{{dsv}} vs {{external}}",
+      "level": "Level",
+      "outcomesCovered": "Outcomes covered",
+      "coveredOf": "{{covered}} of {{total}}",
+      "partlyCount_one": "({{count}} partly)",
+      "partlyCount_other": "({{count}} partly)",
+      "outcomeTable": "Learning outcomes of {{code}} compared",
+      "dsvOutcome": "DSV outcome ({{code}})",
+      "externalOutcome": "Closest external outcome ({{course}})",
+      "coverage": "Coverage",
+      "noCorresponding": "No corresponding outcome",
+      "suggestion": "Suggestion",
+      "creditedModules": "Modules that could be credited",
+      "module": "{{code}} {{name}} ({{credits}} credits)",
+      "ruledOut_one": "{{count}} more DSV course searched, no meaningful overlap",
+      "ruledOut_other": "{{count}} more DSV courses searched, no meaningful overlap"
+    },
+    "plans": {
+      "search": "Search plans by code, name or content",
+      "syncStatus_one": "Last checked {{date}}. {{count}} plan, {{changed}} changed this week.",
+      "syncStatus_other": "Last checked {{date}}. {{count}} plans, {{changed}} changed this week.",
+      "neverSynced": "The plan archive has not been synced yet.",
+      "readOnly": "Kept in sync daily from Stockholm University's plan archive. Nobody uploads here; assessments always use the latest version.",
+      "table": "DSV course plans",
+      "code": "Code",
+      "name": "Name",
+      "creditsLevel": "Credits / level",
+      "latest": "Latest version",
+      "older": "Older versions",
+      "status": "Status",
+      "openPdf": "{{code}} plan {{version}}, {{language}} PDF",
+      "none": "none",
+      "statuses": {
+        "indexed": "Indexed",
+        "indexing": "Indexing",
+        "pending": "Not downloaded yet",
+        "failed": "Download failed",
+        "discontinued": "Discontinued"
+      },
+      "newThisWeek": "New this week",
+      "noMatch": "No plan matches the search."
+    }
   }
 }

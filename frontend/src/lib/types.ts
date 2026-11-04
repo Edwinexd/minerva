@@ -755,6 +755,8 @@ export interface Message {
    * whether to render "[Reasoning hidden under integrity guard]".
    */
   thinking_hidden: boolean
+  /** Structured assessment carried by a credit transfer reply. */
+  assessment?: CaseAssessment
   created_at: string
 }
 
@@ -1178,6 +1180,118 @@ export interface ConversationAttachment {
   /** Length of the extracted text; near zero means a scan with no text. */
   text_chars: number
   created_at: string
+}
+
+/** A DSV plan module (Ladok examination code) with its credits. */
+export interface PlanModule {
+  code: string
+  name: string
+  credits: number
+}
+
+export type Coverage = "covered" | "partly" | "gap"
+export type Verdict = "full" | "partial" | "none"
+/** Decided by the server from archive facts, never by the model. */
+export type FactMatch = "match" | "differs" | "unknown"
+
+/**
+ * A structured credit transfer assessment (`strategy::assessment` on the
+ * server). DSV facts come from the plan archive; the rest is the model's
+ * suggestion, checked against the plans it was given.
+ */
+export interface CaseAssessment {
+  version: number
+  language: "sv" | "en"
+  summary: string
+  external_courses: ExternalCourse[]
+  candidates: AssessmentCandidate[]
+  ruled_out: { code: string; name: string; reason: string }[]
+  searched: number
+}
+
+export interface ExternalCourse {
+  file: string
+  attachment_id: string | null
+  /** The uploaded file; append `#page=N` to open a page. */
+  url: string | null
+  code: string
+  name: string
+  institution: string
+  credits: number | null
+  level: string | null
+  level_note: string
+  outcome_count: number | null
+  examination: string
+}
+
+export interface AssessmentCandidate {
+  code: string
+  name: string
+  plan_version: string
+  plan_language: string
+  /** The plan PDF in SU's archive; append `#page=N` to open a page. */
+  plan_url: string
+  dsv_credits: number | null
+  dsv_level: string | null
+  modules: PlanModule[]
+  external_file: string
+  external_url: string | null
+  external_credits: number | null
+  external_level: string | null
+  credits_match: FactMatch
+  level_match: FactMatch
+  verdict: Verdict
+  verdict_title: string
+  verdict_reason: string
+  overlap_note: string
+  credited_modules: PlanModule[]
+  credited_credits: number | null
+  outcomes: AssessmentOutcome[]
+  notes: { label: string; value: string }[]
+}
+
+export interface AssessmentOutcome {
+  dsv_outcome: string
+  dsv_page: number | null
+  external_outcome: string | null
+  external_page: number | null
+  coverage: Coverage
+}
+
+/** `GET /workspaces/{id}/credit-transfer`. */
+export interface CreditTransferSummary {
+  plan_count: number
+  plans_changed_this_week: number
+  plans_checked_at: string | null
+  my_case_count: number
+  case_retention_days: number
+}
+
+/** One of the viewer's own credit transfer cases. */
+export interface CreditTransferCase {
+  id: string
+  title: string | null
+  created_at: string
+  updated_at: string
+  deleted_on: string
+  attachments: string[]
+  best_match: { code: string; verdict: Verdict } | null
+  candidate_count: number | null
+}
+
+export type PlanStatus = "indexed" | "indexing" | "pending" | "failed" | "discontinued"
+
+/** A DSV course plan as the plans tab lists it. */
+export interface DsvPlan {
+  code: string
+  name_sv: string
+  name_en: string | null
+  ects: number | null
+  level: string | null
+  latest: { valid_from: string; files: { language: string; pdf_url: string }[] } | null
+  older_versions: string[]
+  status: PlanStatus
+  changed_this_week: boolean
 }
 
 /** An AI assistant the user connected over MCP (an OAuth grant). */

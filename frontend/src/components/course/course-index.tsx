@@ -2,9 +2,18 @@ import { useNavigate } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { courseQuery } from "@/lib/queries"
 import { Skeleton } from "@/components/ui/skeleton"
+import { CreditTransferWorkspacePage } from "@/components/credit-transfer/workspace-page"
+import type { WorkspaceTab } from "@/components/credit-transfer/tabs"
 
-export function CourseIndex({ useParams }: { useParams: () => { courseId: string } }) {
+export function CourseIndex({
+  useParams,
+  useSearch,
+}: {
+  useParams: () => { courseId: string }
+  useSearch: () => { tab?: WorkspaceTab }
+}) {
   const { courseId } = useParams()
+  const { tab } = useSearch()
   const navigate = useNavigate()
   // Course load gates the redirect to a fresh `/new` chat. Previously
   // this auto-selected the most recent conversation, which polluted
@@ -12,6 +21,12 @@ export function CourseIndex({ useParams }: { useParams: () => { courseId: string
   // course. The history sidebar is still one click away on the chat
   // page itself.
   const { data: course, isLoading: courseLoading } = useQuery(courseQuery(courseId))
+
+  // A credit transfer workspace has a page of its own: its cases, the
+  // DSV plans and assistant access, rather than a chat to land in.
+  if (course?.kind === "credit_transfer") {
+    return <CreditTransferWorkspacePage workspace={course} tab={tab ?? "cases"} />
+  }
 
   if (course) {
     navigate({

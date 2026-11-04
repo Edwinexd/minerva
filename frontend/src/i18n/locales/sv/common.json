@@ -2,6 +2,7 @@
   "nav": {
     "admin": "Admin",
     "courses": "Kurser",
+    "workspaces": "Arbetsytor",
     "teacher": "Lärare",
     "teacherView": "Lärarvy",
     "dataHandling": "Datahantering",
@@ -136,6 +137,12 @@
     "workspaceKind": {
       "course": "Kurs",
       "credit_transfer": "Jämför externa kursplaner med DSV:s kursplaner."
+    },
+    "staffTool": {
+      "plans": "{{count}} kursplaner från DSV, senast kontrollerade {{date}}.",
+      "badge": "Personalverktyg",
+      "cases_one": "{{count}} ärende",
+      "cases_other": "{{count}} ärenden"
     }
   },
   "teacherGuide": {

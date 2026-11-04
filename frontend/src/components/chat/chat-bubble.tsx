@@ -18,7 +18,8 @@ import Markdown, { defaultUrlTransform } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { ClampedText } from "@/components/clamped-text"
-import type { ReplyFigure } from "@/lib/types"
+import { AssessmentView } from "@/components/credit-transfer/assessment-view"
+import type { CaseAssessment, ReplyFigure } from "@/lib/types"
 
 /**
  * Citation markers the writeup phase emits inline. The model is
@@ -213,6 +214,8 @@ export interface ChatBubbleMessage {
   research_completion_tokens?: number | null
   generation_ms?: number | null
   retrieval_count?: number | null
+  /** Credit transfer replies: drawn as candidate cards, not markdown. */
+  assessment?: CaseAssessment
 }
 
 /**
@@ -471,12 +474,18 @@ export function ChatBubble({
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`rounded-lg px-4 py-2 max-w-[80%] ${
-          isUser ? "bg-primary text-primary-foreground" : "bg-muted"
-        }`}
+        className={
+          !isUser && message.assessment
+            ? "w-full"
+            : `rounded-lg px-4 py-2 max-w-[80%] ${
+                isUser ? "bg-primary text-primary-foreground" : "bg-muted"
+              }`
+        }
       >
         {isUser ? (
           <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+        ) : message.assessment ? (
+          <AssessmentView assessment={message.assessment} />
         ) : (
           <MarkdownContent
             content={message.content}

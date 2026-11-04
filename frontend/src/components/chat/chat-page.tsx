@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import {
+  attachmentsQuery,
   courseQuery,
   conversationsQuery,
   conversationDetailQuery,
@@ -34,6 +35,7 @@ import { useDocumentTitle } from "@/lib/use-document-title"
 import type { ChatBubbleLabels } from "./chat-bubble"
 import { ConversationList } from "./conversation-list"
 import { AttachmentsBar } from "./attachments-bar"
+import { CaseHeader } from "@/components/credit-transfer/case-header"
 import {
   ChatSurface,
   type ChatSurfaceAdapter,
@@ -80,6 +82,7 @@ function ChatPage({
   const isPinnedView = conversationId !== null &&
     !!pinned?.some((p) => p.id === conversationId)
 
+  const isCase = course?.kind === "credit_transfer"
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [prevConversationId, setPrevConversationId] = useState(conversationId)
 
@@ -92,7 +95,7 @@ function ChatPage({
   }
 
   return (
-    <div className="relative flex h-[calc(100vh-120px)] gap-4">
+    <div className="relative flex h-[calc(100vh-120px)] gap-4 print-case">
       <Button
         variant="outline"
         size="sm"
@@ -111,7 +114,7 @@ function ChatPage({
         />
       )}
       <div
-        className={`${
+        className={`print:hidden ${
           sidebarOpen
             ? "fixed inset-y-0 left-0 z-40 w-72 bg-background border-r p-4 flex flex-col md:static md:inset-auto md:w-64 md:p-0 md:pr-4 md:bg-transparent"
             : "hidden md:flex md:w-64 border-r pr-4 flex-col"
@@ -127,13 +130,25 @@ function ChatPage({
             <X className="w-4 h-4" />
           </Button>
         </div>
+        {isCase && (
+          <Link
+            to="/course/$courseId"
+            params={{ courseId }}
+            className="mb-2 text-sm text-muted-foreground underline hover:text-foreground"
+          >
+            {t("creditTransfer.allCases")}
+          </Link>
+        )}
         <Button
           className="mb-4"
           onClick={() => navigate({ to: "/course/$courseId/new", params: { courseId } })}
           disabled={conversationId === null}
         >
-          {t("sidebar.newChat")}
+          {isCase ? t("creditTransfer.newCase") : t("sidebar.newChat")}
         </Button>
+        {isCase && (
+          <h2 className="mb-1 text-sm font-semibold">{t("creditTransfer.myCases")}</h2>
+        )}
         <div className="space-y-1 overflow-y-auto flex-1">
           <ConversationList
             conversations={conversations}
@@ -153,7 +168,9 @@ function ChatPage({
             )}
             labels={{
               pinned: t("sidebar.pinned"),
-              newConversation: t("sidebar.newConversation"),
+              newConversation: isCase
+                ? t("creditTransfer.untitledCase")
+                : t("sidebar.newConversation"),
               conversation: t("sidebar.conversation"),
               pinnedByTeacher: t("sidebar.pinnedByTeacher"),
               studentFallback: t("sidebar.studentFallback"),
@@ -169,13 +186,15 @@ function ChatPage({
       </div>
 
       <div className="flex-1 flex flex-col min-w-0 pt-10 md:pt-0">
-        {course?.kind === "credit_transfer" && (
-          <AttachmentsBar
-            courseId={courseId}
-            conversationId={conversationId}
-            retentionDays={course.case_retention_days}
-            lastUsed={conversations?.find((c) => c.id === conversationId)?.updated_at}
-          />
+        {isCase && (
+          <>
+            <CaseHeader
+              conversation={conversations?.find((c) => c.id === conversationId) ?? null}
+              retentionDays={course?.case_retention_days ?? null}
+              isNew={conversationId === null}
+            />
+            <AttachmentsBar courseId={courseId} conversationId={conversationId} />
+          </>
         )}
         <ChatWindow
           courseId={courseId}
@@ -224,6 +243,19 @@ export function ChatWindow({
     enabled: conversationId !== null,
   })
   const messages = data?.messages
+  const isCase = course?.kind === "credit_transfer"
+  const { data: attachments } = useQuery({
+    ...attachmentsQuery(courseId, conversationId ?? ""),
+    enabled: isCase && conversationId !== null,
+  })
+  // Files attached since the case's latest assessment: the next message
+  // assesses them (the server decides the same way), so Send says so and
+  // works without a note.
+  const lastAssessedAt = (messages ?? [])
+    .filter((m) => m.assessment)
+    .reduce((latest, m) => (m.created_at > latest ? m.created_at : latest), "")
+  const assessmentPending =
+    isCase && (attachments ?? []).some((a) => a.created_at > lastAssessedAt)
   const notes = data?.notes || []
   const feedback = data?.feedback || []
   const promptAnalyses = data?.prompt_analyses ?? []
@@ -423,6 +455,9 @@ export function ChatWindow({
       queryClient.invalidateQueries({
         queryKey: ["courses", courseId, "conversations"],
       })
+      queryClient.invalidateQueries({
+        queryKey: ["courses", courseId, "credit-transfer"],
+      })
     },
     [courseId, queryClient],
   )
@@ -551,6 +586,13 @@ export function ChatWindow({
         />
       ) : null,
     aegisEnabled,
+    pendingAction: assessmentPending
+      ? {
+          label: t("creditTransfer.assess"),
+          placeholder: t("creditTransfer.assessPlaceholder"),
+          content: t("creditTransfer.assessDefault"),
+        }
+      : null,
     labels,
     layout,
   }

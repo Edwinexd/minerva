@@ -173,3 +173,17 @@
     display: none;
   }
 }
+
+/* "Export as PDF" on a credit transfer case prints the page. The case
+   view is a fixed-height column of scroll containers, which would print
+   only their visible slice, so in print every box inside it grows to its
+   content. The site chrome, the case list and the composer are marked
+   `print:hidden` where they are rendered. */
+@media print {
+  .print-case,
+  .print-case :is(div, section, main, article) {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}

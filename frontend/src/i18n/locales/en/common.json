@@ -2,6 +2,7 @@
   "nav": {
     "admin": "Admin",
     "courses": "Courses",
+    "workspaces": "Workspaces",
     "teacher": "Teacher",
     "teacherView": "Teacher view",
     "dataHandling": "Data handling",
@@ -136,6 +137,12 @@
     "workspaceKind": {
       "course": "Course",
       "credit_transfer": "Compare external syllabuses against DSV course plans."
+    },
+    "staffTool": {
+      "plans": "{{count}} DSV plans, last checked {{date}}.",
+      "badge": "Staff workspace",
+      "cases_one": "{{count}} case",
+      "cases_other": "{{count}} cases"
     }
   },
   "teacherGuide": {

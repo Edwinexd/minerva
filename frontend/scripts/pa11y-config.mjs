@@ -91,6 +91,14 @@ if (!conversation) {
 
 const token = mintEmbedToken(course.id, me.id)
 
+// The seeder's credit transfer workspace and its one assessed case: the
+// workspace page in each tab, and the case with its assessment cards.
+const creditTransfer = courses.find((c) => c.kind === "credit_transfer")
+if (!creditTransfer) throw new Error("dev seed produced no credit transfer workspace")
+const cases = await api(`/workspaces/${creditTransfer.id}/credit-transfer/cases`)
+const assessedCase = cases.find((c) => c.best_match)
+if (!assessedCase) throw new Error("dev seed produced no assessed credit transfer case")
+
 // The seeder's teacher owns courses with spend, so their id is what makes
 // the admin drill-down render a populated page rather than an empty one.
 const users = await api("/admin/users")
@@ -120,6 +128,9 @@ const authenticated = [
   // actually audits.
   "/teacher/usage",
   "/teacher/assistants",
+  `/course/${creditTransfer.id}`,
+  `/course/${creditTransfer.id}?tab=plans`,
+  `/course/${creditTransfer.id}/new`,
   "/teacher/guide",
   "/admin/courses",
   "/admin/users",
@@ -145,6 +156,16 @@ const config = {
       url: `${BASE}${path}`,
       headers: asAdmin,
     })),
+    // The assessed case at a height that fits the whole assessment. The
+    // transcript scrolls to its newest message, and at 800px the top of
+    // this long reply sits scrolled out of the region; axe cannot measure
+    // text there (needs review, `elmPartiallyObscured`, ratio 0) and pa11y
+    // counts that as an error. Fitting it lets axe measure every line.
+    {
+      url: `${BASE}/course/${creditTransfer.id}/${assessedCase.id}`,
+      headers: asAdmin,
+      viewport: { width: 1280, height: 1600 },
+    },
     // The LTI embed authenticates by token, not by dev header. Its viewport is
     // deliberately small: the iframe is where an overflowing transcript was
     // first caught, and the rule only applies when content actually overflows.

@@ -1,7 +1,12 @@
 import { Link } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { coursesQuery, unreadCountsQuery, userQuery } from "@/lib/queries"
+import {
+  coursesQuery,
+  creditTransferSummaryQuery,
+  unreadCountsQuery,
+  userQuery,
+} from "@/lib/queries"
 import { api } from "@/lib/api"
 import { useApiErrorMessage } from "@/lib/use-api-error"
 import { useDocumentTitle } from "@/lib/use-document-title"
@@ -498,10 +503,19 @@ function CreateCourseForm({
 }
 
 function StaffToolCard({ workspace }: { workspace: Course }) {
-  const { t } = useTranslation("common")
+  const { t, i18n } = useTranslation("common")
   const manages = workspace.my_role === "teacher" || workspace.my_role === "ta"
+  const { data: summary } = useQuery({
+    ...creditTransferSummaryQuery(workspace.id),
+    enabled: workspace.kind === "credit_transfer",
+  })
+  const synced = summary?.plans_checked_at
+    ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium", timeStyle: "short" }).format(
+        new Date(summary.plans_checked_at),
+      )
+    : null
   return (
-    <Card className="h-full">
+    <Card className="h-full border-blue-200 dark:border-blue-900">
       <CardHeader>
         <CardTitle className="text-lg">
           <Link
@@ -514,19 +528,28 @@ function StaffToolCard({ workspace }: { workspace: Course }) {
         </CardTitle>
         <CardDescription>
           {workspace.description || t(`home.workspaceKind.${workspace.kind}`)}
+          {summary && synced && (
+            <> {t("home.staffTool.plans", { count: summary.plan_count, date: synced })}</>
+          )}
         </CardDescription>
       </CardHeader>
-      {manages && (
-        <CardContent>
+      <CardContent className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline">{t("home.staffTool.badge")}</Badge>
+        {summary && (
+          <Badge variant="secondary">
+            {t("home.staffTool.cases", { count: summary.my_case_count })}
+          </Badge>
+        )}
+        {manages && (
           <Link
             to="/teacher/courses/$courseId"
             params={{ courseId: workspace.id }}
-            className="text-sm text-muted-foreground underline hover:text-foreground"
+            className="ml-auto text-sm text-muted-foreground underline hover:text-foreground"
           >
             {t("home.manageWorkspace")}
           </Link>
-        </CardContent>
-      )}
+        )}
+      </CardContent>
     </Card>
   )
 }

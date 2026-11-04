@@ -21,16 +21,11 @@ const ACCEPT = ".pdf,.txt,.md,.html,.htm,application/pdf,text/plain,text/html"
 export function AttachmentsBar({
   courseId,
   conversationId,
-  retentionDays,
-  lastUsed,
 }: {
   courseId: string
   conversationId: string | null
-  /** Workspace retention period; with `lastUsed` gives the deletion date. */
-  retentionDays: number | null | undefined
-  lastUsed: string | undefined
 }) {
-  const { t, i18n } = useTranslation("student")
+  const { t } = useTranslation("student")
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -56,6 +51,7 @@ export function AttachmentsBar({
             .then((attachment) => ({ conversation_id: conversationId, attachment })),
     onSuccess: ({ conversation_id }) => {
       queryClient.invalidateQueries({ queryKey: ["courses", courseId, "conversations"] })
+      queryClient.invalidateQueries({ queryKey: ["courses", courseId, "credit-transfer"] })
       if (conversationId === null) {
         navigate({
           to: "/course/$courseId/$conversationId",
@@ -73,13 +69,6 @@ export function AttachmentsBar({
         queryKey: attachmentsQuery(courseId, conversationId ?? "").queryKey,
       }),
   })
-
-  const deletionDate =
-    retentionDays && lastUsed
-      ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium" }).format(
-          new Date(new Date(lastUsed).getTime() + retentionDays * 86_400_000),
-        )
-      : null
 
   const picker = (
     <>
@@ -129,7 +118,10 @@ export function AttachmentsBar({
   }
 
   return (
-    <section className="border-b pb-2 mb-2 space-y-2" aria-label={t("attachments.listLabel")}>
+    <section
+      className="border-b pb-2 mb-2 space-y-2 print:hidden"
+      aria-label={t("attachments.listLabel")}
+    >
       {attachments && attachments.length > 0 && (
         <ul className="flex flex-wrap gap-2">
           {attachments.map((a) => (
@@ -158,11 +150,6 @@ export function AttachmentsBar({
         </ul>
       )}
       <div className="flex flex-wrap items-center gap-2">{picker}</div>
-      {deletionDate && (
-        <p className="text-xs text-muted-foreground">
-          {t("attachments.retention", { days: retentionDays, date: deletionDate })}
-        </p>
-      )}
       {(upload.isError || remove.isError) && (
         <ErrorText error={upload.error ?? remove.error} />
       )}

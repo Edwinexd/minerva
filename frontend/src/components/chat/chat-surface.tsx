@@ -271,6 +271,14 @@ export interface ChatSurfaceAdapter<M extends ChatBubbleMessage> {
   aegisEnabled: boolean
 
   /**
+   * Overrides Send while the conversation has work waiting for its next
+   * message (a credit transfer case with files not assessed yet): the
+   * button reads `label`, the composer hints with `placeholder`, and
+   * an empty composer sends `content`.
+   */
+  pendingAction?: { label: string; placeholder: string; content: string } | null
+
+  /**
    * Translation-namespace-resolved labels.
    */
   labels: ChatSurfaceLabels
@@ -337,6 +345,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
     initialDraft,
     renderCarryoverNote,
     aegisEnabled,
+    pendingAction = null,
     labels,
     layout,
   } = adapter
@@ -519,8 +528,8 @@ export function ChatSurface<M extends ChatBubbleMessage>({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || stream.streaming || submitChecking) return
-    const msg = input
+    const msg = input.trim() ? input : (pendingAction?.content ?? "")
+    if (!msg.trim() || stream.streaming || submitChecking) return
 
     // Second press of Send for the same draft we already soft-blocked
     // on. The student saw the suggestions, decided to send anyway.
@@ -750,7 +759,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
         </section>
 
         {!readOnly && (
-          <div className={`${layout.inputBlock} border-t space-y-2`}>
+          <div className={`${layout.inputBlock} border-t space-y-2 print:hidden`}>
             {limitState !== "ok" && renderLimitNotice?.()}
             {/* A blocked conversation keeps the notice but loses the
                 composer: the send endpoint returns 409 for it, so an
@@ -801,7 +810,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
                   <Input
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder={labels.inputPlaceholder}
+                    placeholder={pendingAction?.placeholder ?? labels.inputPlaceholder}
                     aria-label={labels.inputLabel}
                     disabled={stream.streaming || needsPrivacyAck}
                     className="flex-1 min-w-0"
@@ -811,7 +820,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
                     variant={sendNeedsConfirm ? "outline" : "default"}
                     disabled={
                       stream.streaming ||
-                      !input.trim() ||
+                      (!input.trim() && !pendingAction) ||
                       needsPrivacyAck ||
                       submitChecking
                     }
@@ -820,7 +829,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
                       ? labels.aegisChecking
                       : sendNeedsConfirm
                         ? labels.aegisSendAsIs
-                        : labels.send}
+                        : (pendingAction?.label ?? labels.send)}
                   </Button>
                   {offerNewChat && moveDraftToNewChat && (
                     <Button

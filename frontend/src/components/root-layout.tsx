@@ -83,7 +83,7 @@ export function RootLayout() {
           {t("nav.skipToContent")}
         </a>
       )}
-      <header className="border-b px-4 sm:px-6 py-4">
+      <header className="border-b px-4 sm:px-6 py-4 print:hidden">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 max-w-7xl mx-auto min-w-0">
           {isEmbed ? (
             <a href={embedCourseHref} target="_blank" rel="noopener noreferrer" className="text-xl font-bold tracking-tight hover:opacity-80 flex items-center gap-1.5">
@@ -102,7 +102,9 @@ export function RootLayout() {
                 to="/"
                 className="text-muted-foreground hover:text-foreground"
               >
-                {t("nav.courses")}
+                {/* Staff also reach staff tools from here, so for them
+                    the list is of workspaces, not only courses. */}
+                {isTeacherOrAbove(user.role) ? t("nav.workspaces") : t("nav.courses")}
               </Link>
             )}
             {!isEmbed && user && isTeacherOrAbove(user.role) && (
@@ -152,7 +154,7 @@ export function RootLayout() {
       <main id="main-content" tabIndex={-1} className={`${isEmbed ? "flex-1 min-h-0" : "max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full min-w-0"}`}>
         <Outlet />
       </main>
-      <footer className="border-t px-4 sm:px-6 py-4 mt-auto">
+      <footer className="border-t px-4 sm:px-6 py-4 mt-auto print:hidden">
         <div className="flex flex-wrap items-center justify-between gap-2 max-w-7xl mx-auto text-xs text-muted-foreground">
           <span>
             <a href="https://github.com/Edwinexd/minerva" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">Minerva</a>

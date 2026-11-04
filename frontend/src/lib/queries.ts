@@ -1,6 +1,6 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationAttachment, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, DevConfig, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, McpConnections, LtiDiagnostics, LtiNrpsRun, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, OwnerUsage, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationAttachment, ConversationDetail, CreditTransferCase, CreditTransferSummary, DsvPlan, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, DevConfig, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, McpConnections, LtiDiagnostics, LtiNrpsRun, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, OwnerUsage, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -266,6 +266,32 @@ export const chatModelsQuery = queryOptions({
   queryFn: () => api.get<{ models: PublicChatModel[] }>("/chat-models-catalog"),
   staleTime: 60_000,
 })
+
+export const creditTransferSummaryQuery = (workspaceId: string) =>
+  queryOptions({
+    queryKey: ["courses", workspaceId, "credit-transfer"],
+    queryFn: () => api.get<CreditTransferSummary>(`/workspaces/${workspaceId}/credit-transfer`),
+  })
+
+export const creditTransferCasesQuery = (workspaceId: string) =>
+  queryOptions({
+    queryKey: ["courses", workspaceId, "credit-transfer", "cases"],
+    queryFn: () =>
+      api.get<CreditTransferCase[]>(`/workspaces/${workspaceId}/credit-transfer/cases`),
+  })
+
+/** `search` also matches the plans' text, server side. */
+export const dsvPlansQuery = (workspaceId: string, search = "") =>
+  queryOptions({
+    queryKey: ["courses", workspaceId, "credit-transfer", "plans", search],
+    queryFn: () =>
+      api.get<DsvPlan[]>(
+        `/workspaces/${workspaceId}/credit-transfer/plans${
+          search ? `?q=${encodeURIComponent(search)}` : ""
+        }`,
+      ),
+    staleTime: 5 * 60_000,
+  })
 
 export const attachmentsQuery = (courseId: string, conversationId: string) =>
   queryOptions({

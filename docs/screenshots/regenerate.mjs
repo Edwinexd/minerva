@@ -46,7 +46,7 @@ async function snap(path, file, opts = {}) {
 await snap("/", "01-home-courses.png", { fullPage: true });
 
 const firstCourseId = await page.evaluate(async () => {
-  const r = await fetch("/api/courses");
+  const r = await fetch("/api/workspaces");
   const j = await r.json();
   return j[0]?.id;
 });

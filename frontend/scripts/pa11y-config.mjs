@@ -76,14 +76,14 @@ const report = await api("/admin/dev/seed", { method: "POST" })
 console.log(`seeded: ${report.users} users, ${report.courses} courses, ${report.documents} docs`)
 
 const me = await api("/auth/me")
-const courses = await api("/courses")
+const courses = await api("/workspaces")
 // The seeder's first course ("Intro Programming") is the plain baseline: admin
 // owns it, students are enrolled, and it has conversations with real turns,
 // which is what makes the transcript long enough to actually scroll.
 const course = courses.find((c) => c.name.startsWith("Intro Programming")) ?? courses[0]
 if (!course) throw new Error("dev seed produced no courses")
 
-const conversations = await api(`/courses/${course.id}/conversations`)
+const conversations = await api(`/workspaces/${course.id}/conversations`)
 const conversation = conversations[0]
 if (!conversation) {
   throw new Error(`seeded course ${course.id} has no conversations to audit`)
@@ -119,6 +119,7 @@ const authenticated = [
   // way, so naming the target is the only way the list says what it
   // actually audits.
   "/teacher/usage",
+  "/teacher/assistants",
   "/teacher/guide",
   "/admin/courses",
   "/admin/users",

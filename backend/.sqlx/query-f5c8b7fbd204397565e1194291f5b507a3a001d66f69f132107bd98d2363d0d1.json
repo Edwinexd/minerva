@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at, c.updated_at, c.kind\n        FROM workspaces c\n        LEFT JOIN workspace_members cm ON cm.workspace_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1 OR cm.role IN ('teacher', 'ta'))\n        ORDER BY c.updated_at DESC",
+  "query": "SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at, c.updated_at, c.kind\n        FROM workspaces c\n        LEFT JOIN workspace_access cm ON cm.workspace_id = c.id AND cm.user_id = $1\n        WHERE c.active = true\n          AND (c.owner_id = $1\n               OR cm.role IN ('teacher', 'ta')\n               OR (c.kind <> 'course' AND cm.user_id IS NOT NULL))\n        ORDER BY c.updated_at DESC",
   "describe": {
     "columns": [
       {
@@ -288,5 +288,5 @@
       false
     ]
   },
-  "hash": "2c5bec35688453b9e256832ed0f69b1cef676070762fee19b7755d6c99d7cf88"
+  "hash": "f5c8b7fbd204397565e1194291f5b507a3a001d66f69f132107bd98d2363d0d1"
 }

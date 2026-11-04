@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT 1 FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
+  "query": "SELECT 1 FROM workspace_access WHERE workspace_id = $1 AND user_id = $2",
   "describe": {
     "columns": [
       {
@@ -20,5 +20,5 @@
       null
     ]
   },
-  "hash": "8c332590fac91d0adebf65230505406efe52ac86cb7d1503ee1389c92e911a5c"
+  "hash": "03caf260aa1446fef98199d32aa9f3095c7de061edabcef8d64e3ae4aae3bf3f"
 }

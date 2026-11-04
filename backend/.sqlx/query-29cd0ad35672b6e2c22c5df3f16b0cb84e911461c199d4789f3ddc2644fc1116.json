@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at, c.updated_at, c.kind\n        FROM workspaces c\n        JOIN workspace_members cm ON cm.workspace_id = c.id\n        WHERE cm.user_id = $1 AND c.active = true\n        ORDER BY c.updated_at DESC",
+  "query": "SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at, c.updated_at, c.kind\n        FROM workspaces c\n        JOIN workspace_access cm ON cm.workspace_id = c.id\n        WHERE cm.user_id = $1 AND c.active = true\n        ORDER BY c.updated_at DESC",
   "describe": {
     "columns": [
       {
@@ -288,5 +288,5 @@
       false
     ]
   },
-  "hash": "a4ce1c2ad9d1079c6d2ef72ecc2ae1cd779718fcfb98ce096c3982f13c2a913f"
+  "hash": "29cd0ad35672b6e2c22c5df3f16b0cb84e911461c199d4789f3ddc2644fc1116"
 }

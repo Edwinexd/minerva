@@ -948,3 +948,27 @@ pub async fn classification_stats(db: &PgPool) -> Result<ClassificationStats, sq
         locked_by_teacher: row.locked_by_teacher,
     })
 }
+
+/// `source_ref -> content_hash` for the active documents one source system
+/// owns in a workspace. Lets a sync skip unchanged sources without reading
+/// their bytes.
+pub async fn active_source_hashes(
+    db: &PgPool,
+    workspace_id: Uuid,
+    source_system: &str,
+) -> Result<std::collections::HashMap<String, Option<String>>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT source_ref AS "source_ref!", content_hash
+           FROM documents
+           WHERE workspace_id = $1 AND source_system = $2
+             AND source_ref IS NOT NULL AND orphaned_at IS NULL"#,
+        workspace_id,
+        source_system,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.source_ref, r.content_hash))
+        .collect())
+}

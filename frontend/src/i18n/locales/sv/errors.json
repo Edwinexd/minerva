@@ -49,7 +49,8 @@
     "bulk_too_many": "För många kurser valda samtidigt (max {{max}}).",
     "bulk_course_not_active": "Kursen är arkiverad eller finns inte längre; återställ den innan du redigerar.",
     "bulk_archive_noop": "Redan arkiverad eller finns inte längre.",
-    "bulk_unarchive_noop": "Redan aktiv eller finns inte längre."
+    "bulk_unarchive_noop": "Redan aktiv eller finns inte längre.",
+    "merge_not_course": "Bara kurser kan slås ihop."
   },
   "chat": {
     "rating_invalid": "Betyget måste vara 'up' eller 'down'.",

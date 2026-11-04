@@ -1,7 +1,7 @@
 use axum::extract::{Extension, Path, State};
 use axum::routing::{delete, get};
 use axum::{Json, Router};
-use minerva_core::models::User;
+use minerva_core::models::{User, WorkspaceKind};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -54,8 +54,11 @@ async fn student_unread_counts(
 struct CreateWorkspaceRequest {
     name: String,
     description: Option<String>,
-    /// Which semester this course is delivered in (e.g. `VT2026`).
-    /// Blank or absent creates an ad-hoc course with no term.
+    /// Defaults to a course. Only admins create other kinds.
+    #[serde(default)]
+    kind: Option<WorkspaceKind>,
+    /// Courses only: which semester the course is delivered in (e.g.
+    /// `VT2026`). Blank or absent creates an ad-hoc course with no term.
     #[serde(default)]
     semester_label: Option<String>,
 }
@@ -373,6 +376,12 @@ async fn create_workspace(
     if !user.role.is_teacher_or_above() {
         return Err(AppError::Forbidden);
     }
+    let kind = body.kind.unwrap_or(WorkspaceKind::Course);
+    // A staff tool is opened to every teacher-or-above user at once, so
+    // creating one is an admin decision.
+    if kind != WorkspaceKind::Course && !user.role.is_admin() {
+        return Err(AppError::Forbidden);
+    }
 
     let semester_label = match body.semester_label.as_deref().map(str::trim) {
         Some(raw) if !raw.is_empty() => Some(validate_semester_label(raw)?),
@@ -400,7 +409,7 @@ async fn create_workspace(
         name: body.name,
         description: body.description,
         owner_id: user.id,
-        kind: minerva_core::models::WorkspaceKind::Course.as_str(),
+        kind: kind.as_str(),
         daily_cost_limit_usd: crate::system_defaults::course_daily_cost_limit_usd(&state.db).await,
         conversation_soft_token_limit: Some(
             crate::system_defaults::course_conversation_soft_token_limit(&state.db).await,
@@ -423,13 +432,21 @@ async fn create_workspace(
         system_prompt: crate::system_defaults::course_system_prompt(&state.db).await,
     };
 
-    let row = minerva_db::queries::workspaces::create_course(
-        &state.db,
-        id,
-        &input,
-        semester_label.as_deref(),
-    )
-    .await?;
+    let row = match kind {
+        WorkspaceKind::Course => {
+            minerva_db::queries::workspaces::create_course(
+                &state.db,
+                id,
+                &input,
+                semester_label.as_deref(),
+            )
+            .await?
+        }
+        WorkspaceKind::CreditTransfer => {
+            minerva_db::queries::workspaces::create_credit_transfer(&state.db, id, &input, None)
+                .await?
+        }
+    };
     let course = minerva_db::queries::courses::find(&state.db, id).await?;
 
     // Auto-add owner as teacher member

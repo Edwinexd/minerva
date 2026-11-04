@@ -2,7 +2,9 @@
 //! `/api/courses/{course_id}`. Generic workspace endpoints (config,
 //! members, documents, chat) live in `routes::workspaces`.
 
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Request, State};
+use axum::middleware::Next;
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use minerva_core::models::User;
@@ -12,6 +14,30 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::routes::guards::{require_workspace_owner, require_workspace_teacher, TeacherScope};
 use crate::state::AppState;
+
+/// Route layer for everything under `/courses/{course_id}`: those
+/// endpoints manage course-only rows (LTI, Canvas, join links, Moodle
+/// keys, Play), whose foreign keys only accept a course. Any other
+/// workspace kind is reported as not found rather than surfacing a
+/// constraint error.
+pub(crate) async fn require_course(
+    State(state): State<AppState>,
+    Path(params): Path<std::collections::HashMap<String, String>>,
+    req: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    let id = params
+        .get("course_id")
+        .and_then(|raw| Uuid::parse_str(raw).ok())
+        .ok_or(AppError::NotFound)?;
+    if minerva_db::queries::courses::find(&state.db, id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::NotFound);
+    }
+    Ok(next.run(req).await)
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()

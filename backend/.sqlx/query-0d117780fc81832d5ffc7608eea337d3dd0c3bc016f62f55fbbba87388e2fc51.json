@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH latest AS (\n               SELECT code, MAX(valid_from_term_id) AS term_id\n               FROM syllabus_versions\n               WHERE delisted_at IS NULL\n               GROUP BY code\n           )\n           SELECT v.code, v.language, v.valid_from,\n                  v.content_hash AS \"content_hash!\", p.name_sv, p.name_en\n           FROM syllabus_versions v\n           JOIN latest l ON l.code = v.code AND l.term_id = v.valid_from_term_id\n           JOIN syllabus_plans p ON p.code = v.code\n           WHERE v.delisted_at IS NULL\n             AND v.content_hash IS NOT NULL\n             AND NOT p.is_discontinued\n           ORDER BY v.code, v.language",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "code"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "language",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "language"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "valid_from",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "valid_from"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "content_hash!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "content_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "name_sv",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "name_sv"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "name_en",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "name_en"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "0d117780fc81832d5ffc7608eea337d3dd0c3bc016f62f55fbbba87388e2fc51"
+}

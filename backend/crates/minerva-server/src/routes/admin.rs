@@ -1,7 +1,7 @@
 use axum::extract::{Extension, Path, State};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
-use minerva_core::models::{RuleOperator, User};
+use minerva_core::models::{RuleOperator, User, WorkspaceKind};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -209,6 +209,13 @@ async fn merge_courses(
     let source = minerva_db::queries::workspaces::find_by_id(&state.db, body.source_id)
         .await?
         .ok_or(AppError::NotFound)?;
+    // Merging moves course-only rows (Daisy offerings, LTI, Canvas...),
+    // so both sides must be courses.
+    if survivor.kind != WorkspaceKind::Course.as_str()
+        || source.kind != WorkspaceKind::Course.as_str()
+    {
+        return Err(AppError::bad_request("admin.merge_not_course"));
+    }
 
     // Copy the source's document bytes into the survivor's dir BEFORE
     // the DB transaction commits (see relocate_course_docs).

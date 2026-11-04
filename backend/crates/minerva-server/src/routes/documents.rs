@@ -189,85 +189,19 @@ pub async fn upload_or_dedup(
     source_system: Option<&str>,
     source_ref: Option<&str>,
 ) -> Result<minerva_db::queries::documents::DocumentRow, AppError> {
-    let content_hash = compute_content_hash(bytes);
-
-    // Source-identity branch (slice 2): the plugin tells us which Moodle
-    // object this upload represents. When that object already has an
-    // active doc with *different* bytes, the Moodle-side material was
-    // edited; orphan the previous doc so the source-identity unique
-    // index is free for the new row. The previous doc's chunks stay
-    // in Qdrant + DB so old chat-history citations still resolve; the
-    // retrieval-time filter (`orphaned_doc_ids`) keeps them out of new
-    // turns. If the existing doc has the same bytes, we fall through
-    // to the content-hash dedup below and return that same row.
-    if let (Some(sys), Some(sref)) = (source_system, source_ref) {
-        if let Some(prev) = minerva_db::queries::documents::find_active_by_source_ref(
-            &state.db,
-            workspace_id,
-            sys,
-            sref,
-        )
-        .await?
-        {
-            if prev.content_hash.as_deref() == Some(content_hash.as_str()) {
-                return Ok(prev);
-            }
-            minerva_db::queries::documents::orphan(&state.db, prev.id).await?;
-        }
-    }
-
-    if let Some(existing) = minerva_db::queries::documents::find_active_by_content_hash(
+    minerva_app_core::documents::upload_or_dedup(
         &state.db,
+        &state.config.docs_path,
         workspace_id,
-        &content_hash,
+        filename,
+        mime_type,
+        bytes,
+        uploaded_by,
+        source_url,
+        source_system,
+        source_ref,
     )
-    .await?
-    {
-        // Same bytes already in this course as an active doc; reuse it.
-        // Slice 2 caveat: when a `source_ref` collision was orphaned
-        // above and the new bytes match a *different* active doc, we
-        // return that other doc and do NOT re-tag it with the
-        // caller's source_ref (per-doc source_ref is a single value;
-        // a many-to-many table would change the schema shape and is
-        // out of scope for this slice). Net effect: cross-source
-        // content collisions stay tracked under whichever source
-        // first registered them.
-        return Ok(existing);
-    }
-
-    let doc_id = Uuid::new_v4();
-    let dir = format!("{}/{}", state.config.docs_path, workspace_id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
-
-    let ext = extension_from_filename(filename);
-    let file_path = format!("{}/{}.{}", dir, doc_id, ext);
-    tokio::fs::write(&file_path, bytes)
-        .await
-        .map_err(|e| AppError::Internal(format!("failed to write file: {}", e)))?;
-
-    let size_bytes = bytes.len() as i64;
-    let row = minerva_db::queries::documents::insert(
-        &state.db,
-        minerva_db::queries::documents::NewDocument {
-            id: doc_id,
-            workspace_id,
-            filename,
-            mime_type,
-            size_bytes,
-            uploaded_by,
-            source_url,
-            content_hash: Some(&content_hash),
-            source_system,
-            source_ref,
-            // Teacher / Moodle / Canvas uploads are first-class; only the
-            // worker materializing a `text/x-url` stub sets a parent.
-            parent_document_id: None,
-        },
-    )
-    .await?;
-    Ok(row)
+    .await
 }
 
 async fn list_documents(

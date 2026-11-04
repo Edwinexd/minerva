@@ -49,7 +49,8 @@
     "bulk_too_many": "Too many courses selected at once (max {{max}}).",
     "bulk_course_not_active": "Course is archived or no longer exists; restore it before editing.",
     "bulk_archive_noop": "Already archived or no longer exists.",
-    "bulk_unarchive_noop": "Already active or no longer exists."
+    "bulk_unarchive_noop": "Already active or no longer exists.",
+    "merge_not_course": "Only courses can be merged."
   },
   "chat": {
     "rating_invalid": "Rating must be 'up' or 'down'.",

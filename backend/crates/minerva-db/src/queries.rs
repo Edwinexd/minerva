@@ -6,6 +6,7 @@ pub mod conversations;
 pub mod course_daisy_offerings;
 pub mod course_schedule_events;
 pub mod courses;
+pub mod credit_transfer;
 pub mod daisy_pending_imports;
 pub mod daisy_settings;
 pub mod document_relations;

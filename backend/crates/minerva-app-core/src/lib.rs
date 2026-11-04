@@ -10,6 +10,7 @@
 pub mod canvas;
 pub mod classification;
 pub mod config;
+pub mod documents;
 pub mod error;
 pub mod feature_flags;
 pub mod figure_descriptions;

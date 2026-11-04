@@ -371,19 +371,23 @@ pub fn start_scheduler_loops(state: AppState) {
     // Syllabus archive: download the PDFs the nightly Daisy sync listed,
     // and re-download each one every `RECHECK_INTERVAL_DAYS` to catch
     // revisions published under an unchanged URL. `next_check_at` on the
-    // version row is the due clock, so restarts lose nothing.
+    // version row is the due clock, so restarts lose nothing. Then mirror
+    // the current plans into every credit transfer workspace.
     {
         let state = state.clone();
         tokio::spawn(async move {
             let mut ticker = schedule_ticker();
             loop {
                 ticker.tick().await;
-                match crate::syllabus_archive::run_due(&state).await {
-                    Ok(s) if s.fetched + s.failed > 0 => tracing::info!(
-                        "syllabus archive: {} fetched ({} new or changed), {} failed",
+                match crate::syllabus_archive::run_tick(&state).await {
+                    Ok(s) if s.fetched + s.failed + s.mirrored + s.retired > 0 => tracing::info!(
+                        "syllabus archive: {} fetched ({} new or changed), {} failed; \
+                         {} plan documents mirrored, {} retired",
                         s.fetched,
                         s.changed,
-                        s.failed
+                        s.failed,
+                        s.mirrored,
+                        s.retired
                     ),
                     Ok(_) => {}
                     Err(e) => tracing::error!("syllabus archive: tick failed: {}", e),

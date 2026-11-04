@@ -1,15 +1,15 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
+  "query": "SELECT role AS \"role!\" FROM workspace_access WHERE workspace_id = $1 AND user_id = $2",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "role",
+        "name": "role!",
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "workspace_members",
+            "table": "workspace_access",
             "name": "role"
           }
         }
@@ -22,8 +22,8 @@
       ]
     },
     "nullable": [
-      false
+      true
     ]
   },
-  "hash": "96552bee814b7e712274f0f6cb7f8d084bca1b008680bc0a048691802541cfe2"
+  "hash": "c87d696d95899e5cfba730d0df069c0227172e5d476f9ca677517b013dabcdfe"
 }

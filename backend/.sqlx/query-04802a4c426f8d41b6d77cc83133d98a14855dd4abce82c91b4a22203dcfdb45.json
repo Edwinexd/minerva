@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ct.workspace_id, ct.case_retention_days, ct.access_min_role\n           FROM credit_transfer_workspaces ct\n           JOIN workspaces w ON w.id = ct.workspace_id\n           WHERE w.active",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "workspace_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "credit_transfer_workspaces",
+            "name": "workspace_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "case_retention_days",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "credit_transfer_workspaces",
+            "name": "case_retention_days"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "access_min_role",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "credit_transfer_workspaces",
+            "name": "access_min_role"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "04802a4c426f8d41b6d77cc83133d98a14855dd4abce82c91b4a22203dcfdb45"
+}

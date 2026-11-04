@@ -86,14 +86,22 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/workspaces/{workspace_id}", usage::workspace_router())
         .nest("/workspaces/{workspace_id}", suggested_questions::router())
         // Course-only extensions: join links, Moodle API keys, Play,
-        // LTI, Canvas, LTI role suggestions.
-        .nest("/courses/{course_id}", courses::router())
-        .nest("/courses/{course_id}", signed_urls::course_router())
-        .nest("/courses/{course_id}", api_keys::router())
-        .nest("/courses/{course_id}", play_designations::router())
+        // LTI, Canvas, LTI role suggestions. 404 for any other kind.
+        .nest(
+            "/courses/{course_id}",
+            Router::new()
+                .merge(courses::router())
+                .merge(signed_urls::course_router())
+                .merge(api_keys::router())
+                .merge(play_designations::router())
+                .merge(lti::course_router())
+                .merge(canvas::course_router())
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    courses::require_course,
+                )),
+        )
         .merge(play_designations::catalog_router())
-        .nest("/courses/{course_id}", lti::course_router())
-        .nest("/courses/{course_id}", canvas::course_router())
         .nest("/teacher", teacher::router())
         .nest("/admin", admin::router())
         .nest("/admin", teacher::admin_router())

@@ -245,3 +245,41 @@ pub async fn record_fetch_failure(
     .await?;
     Ok(row.fetch_failures)
 }
+
+/// A downloaded PDF of a plan's current version, ready to index.
+pub struct CurrentVersion {
+    pub code: String,
+    pub language: String,
+    pub valid_from: String,
+    pub content_hash: String,
+    pub name_sv: String,
+    pub name_en: Option<String>,
+}
+
+/// The newest listed version of every plan still given, in each language
+/// that version has a downloaded PDF for. An English PDF from an older
+/// version is left out: comparing against outdated outcomes would be wrong,
+/// and the archive often only translated earlier versions. Discontinued
+/// plans are left out because credit is granted towards courses DSV gives.
+pub async fn current_versions(db: &PgPool) -> Result<Vec<CurrentVersion>, sqlx::Error> {
+    sqlx::query_as!(
+        CurrentVersion,
+        r#"WITH latest AS (
+               SELECT code, MAX(valid_from_term_id) AS term_id
+               FROM syllabus_versions
+               WHERE delisted_at IS NULL
+               GROUP BY code
+           )
+           SELECT v.code, v.language, v.valid_from,
+                  v.content_hash AS "content_hash!", p.name_sv, p.name_en
+           FROM syllabus_versions v
+           JOIN latest l ON l.code = v.code AND l.term_id = v.valid_from_term_id
+           JOIN syllabus_plans p ON p.code = v.code
+           WHERE v.delisted_at IS NULL
+             AND v.content_hash IS NOT NULL
+             AND NOT p.is_discontinued
+           ORDER BY v.code, v.language"#,
+    )
+    .fetch_all(db)
+    .await
+}

@@ -183,6 +183,21 @@ where
     .await
 }
 
+/// Create a credit transfer workspace and its subtype row atomically.
+pub async fn create_credit_transfer(
+    db: &PgPool,
+    id: Uuid,
+    input: &CreateWorkspace,
+    case_retention_days: Option<i32>,
+) -> Result<WorkspaceRow, sqlx::Error> {
+    debug_assert_eq!(input.kind, "credit_transfer");
+    let mut tx = db.begin().await?;
+    let row = create(&mut *tx, id, input).await?;
+    super::credit_transfer::insert(&mut *tx, id, case_retention_days).await?;
+    tx.commit().await?;
+    Ok(row)
+}
+
 /// Create a course: the workspace row (`input.kind` must be `course`) and
 /// its `courses` subtype row, atomically. `semester_label` is NULL for an
 /// ad-hoc course; the route layer validates the format.
@@ -225,7 +240,7 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<WorkspaceR
         WorkspaceRow,
         r#"SELECT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at, c.updated_at, c.kind
         FROM workspaces c
-        JOIN workspace_members cm ON cm.workspace_id = c.id
+        JOIN workspace_access cm ON cm.workspace_id = c.id
         WHERE cm.user_id = $1 AND c.active = true
         ORDER BY c.updated_at DESC"#,
         user_id,
@@ -237,6 +252,8 @@ pub async fn list_by_member(db: &PgPool, user_id: Uuid) -> Result<Vec<WorkspaceR
 /// Courses where the user is owner OR a teacher/ta member. Used for the
 /// teacher dashboard so co-teachers (added via `/courses/:id/members` with
 /// role=teacher) see the course even though they don't own it.
+// Staff tools (non-course kinds) are used rather than taught, so any
+// access to one lists it, including implicit staff access.
 pub async fn list_for_teacher(
     db: &PgPool,
     user_id: Uuid,
@@ -245,9 +262,11 @@ pub async fn list_for_teacher(
         WorkspaceRow,
         r#"SELECT DISTINCT c.id, c.name, c.description, c.owner_id, c.context_ratio, c.temperature, c.model, c.system_prompt, c.max_chunks, c.min_score, c.strategy, c.tool_use_enabled, c.embedding_provider, c.embedding_model, c.embedding_version, c.reranker_model, c.daily_cost_limit_usd, c.conversation_soft_token_limit, c.conversation_hard_token_limit, c.active, c.created_at, c.updated_at, c.kind
         FROM workspaces c
-        LEFT JOIN workspace_members cm ON cm.workspace_id = c.id AND cm.user_id = $1
+        LEFT JOIN workspace_access cm ON cm.workspace_id = c.id AND cm.user_id = $1
         WHERE c.active = true
-          AND (c.owner_id = $1 OR cm.role IN ('teacher', 'ta'))
+          AND (c.owner_id = $1
+               OR cm.role IN ('teacher', 'ta')
+               OR (c.kind <> 'course' AND cm.user_id IS NOT NULL))
         ORDER BY c.updated_at DESC"#,
         user_id,
     )
@@ -524,7 +543,7 @@ pub async fn is_member(
     user_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
     let row = sqlx::query_scalar!(
-        "SELECT 1 FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
+        "SELECT 1 FROM workspace_access WHERE workspace_id = $1 AND user_id = $2",
         workspace_id,
         user_id,
     )
@@ -565,14 +584,16 @@ pub async fn is_teacher_strict(
     Ok(row.is_some())
 }
 
-/// Returns the viewer's course_member role, or None if not a member.
+/// The viewer's role in the workspace, or None without access. Reads
+/// `workspace_access`, so implicit staff access to a credit transfer
+/// workspace counts (as `student`).
 pub async fn get_member_role(
     db: &PgPool,
     workspace_id: Uuid,
     user_id: Uuid,
 ) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar!(
-        "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
+        r#"SELECT role AS "role!" FROM workspace_access WHERE workspace_id = $1 AND user_id = $2"#,
         workspace_id,
         user_id,
     )

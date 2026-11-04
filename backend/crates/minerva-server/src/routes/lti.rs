@@ -521,7 +521,7 @@ async fn apply_course_membership(
     Ok(())
 }
 
-/// Build the `/embed/{course_id}?token=...` URL for a launched user. Shared
+/// Build the `/embed/courses/{course_id}?token=...` URL for a launched user. Shared
 /// by the launch HTML redirect and the bind-complete JSON response.
 fn build_embed_redirect_url(
     state: &AppState,
@@ -544,7 +544,7 @@ fn build_embed_redirect_url(
     };
 
     Ok(format!(
-        "/embed/{}?token={}&lti_client_id={}",
+        "/embed/courses/{}?token={}&lti_client_id={}",
         course_id,
         token,
         urlencoding::encode(client_id)
@@ -1696,7 +1696,7 @@ async fn do_dynamic_register(
     // Pending row exists; before closing the LMS popup, hand off to the
     // SPA so the scope-suggestion form renders inside Minerva's normal
     // chrome (RootLayout + i18n + Tailwind components) instead of a
-    // hand-rolled HTML page. The SPA route at /lti/setup/<id> is
+    // hand-rolled HTML page. The SPA route at /lti/platforms/<id>/setup is
     // included in RootLayout's no-auth-fetch carve-out (next to
     // /lti/bind) and submits to /lti/dynamic-register/<id>/scope.
     Ok(redirect_to_scope_setup(
@@ -1713,7 +1713,7 @@ async fn do_dynamic_register(
 /// extra info-fetch round trip.
 fn redirect_to_scope_setup(base_url: &str, id: Uuid, name: &str, issuer: &str) -> Response {
     let location = format!(
-        "{}/lti/setup/{}?name={}&issuer={}",
+        "{}/lti/platforms/{}/setup?name={}&issuer={}",
         base_url,
         id,
         urlencoding::encode(name),
@@ -1858,7 +1858,7 @@ async fn update_platform_scope(
 }
 
 /// POST /lti/dynamic-register/{id}/scope: PUBLIC endpoint called by the
-/// SPA scope-form submission (the `/lti/setup/<id>` route the dynreg
+/// SPA scope-form submission (the `/lti/platforms/<id>/setup` route the dynreg
 /// handler 303s to). Records the LMS admin's suggested eppn domains on
 /// a PENDING platform row. No activation here: the suggestion has no
 /// effect until an integrator approves the row in Minerva, and they

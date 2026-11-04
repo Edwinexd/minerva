@@ -47,18 +47,18 @@ const TAB_LABEL_KEYS: Record<(typeof TAB_VALUES)[number], string> = {
 type TabValue = (typeof TAB_VALUES)[number]
 
 const TAB_ROUTES = {
-  "config": "/teacher/courses/$courseId/config",
-  "members": "/teacher/courses/$courseId/members",
-  "conversations": "/teacher/courses/$courseId/conversations",
-  "documents": "/teacher/courses/$courseId/documents",
-  "knowledge-graph": "/teacher/courses/$courseId/knowledge-graph",
-  "invite": "/teacher/courses/$courseId/invite",
-  "lti": "/teacher/courses/$courseId/lti",
-  "canvas": "/teacher/courses/$courseId/canvas",
-  "api-keys": "/teacher/courses/$courseId/api-keys",
-  "play-designations": "/teacher/courses/$courseId/play-designations",
-  "rag": "/teacher/courses/$courseId/rag",
-  "usage": "/teacher/courses/$courseId/usage",
+  "config": "/teacher/workspaces/$courseId/config",
+  "members": "/teacher/workspaces/$courseId/members",
+  "conversations": "/teacher/workspaces/$courseId/conversations",
+  "documents": "/teacher/workspaces/$courseId/documents",
+  "knowledge-graph": "/teacher/workspaces/$courseId/knowledge-graph",
+  "invite": "/teacher/workspaces/$courseId/invite",
+  "lti": "/teacher/workspaces/$courseId/lti",
+  "canvas": "/teacher/workspaces/$courseId/canvas",
+  "api-keys": "/teacher/workspaces/$courseId/api-keys",
+  "play-designations": "/teacher/workspaces/$courseId/play-designations",
+  "rag": "/teacher/workspaces/$courseId/rag",
+  "usage": "/teacher/workspaces/$courseId/usage",
 } as const satisfies Record<TabValue, string>
 
 // Tabs that TAs cannot see: invite/LTI/API keys/play designations are
@@ -122,7 +122,7 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight">{course.name}</h1>
-        <Link to="/course/$courseId" params={{ courseId }}>
+        <Link to="/workspaces/$workspaceId" params={{ workspaceId: courseId }}>
           <Button variant="outline">{t("layout.tryChat")}</Button>
         </Link>
       </div>

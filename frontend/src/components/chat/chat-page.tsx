@@ -36,6 +36,7 @@ import type { ChatBubbleLabels } from "./chat-bubble"
 import { ConversationList } from "./conversation-list"
 import { AttachmentsBar } from "./attachments-bar"
 import { CaseHeader } from "@/components/credit-transfer/case-header"
+import { chatLink } from "@/lib/workspace-routes"
 import {
   ChatSurface,
   type ChatSurfaceAdapter,
@@ -83,6 +84,20 @@ function ChatPage({
     !!pinned?.some((p) => p.id === conversationId)
 
   const isCase = course?.kind === "credit_transfer"
+  // A case lives under /cases and a course conversation under
+  // /conversations. Old /course/... links land on the latter, so move a
+  // case on once the workspace's kind is known.
+  const pathname = useLocation().pathname
+  const wrongPath = course
+    ? isCase
+      ? pathname.includes("/conversations/")
+      : pathname.includes("/cases/")
+    : false
+  useEffect(() => {
+    if (wrongPath && course) {
+      navigate({ ...chatLink(course.kind, courseId, conversationId), replace: true })
+    }
+  }, [wrongPath, course, courseId, conversationId, navigate])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [prevConversationId, setPrevConversationId] = useState(conversationId)
 
@@ -132,8 +147,8 @@ function ChatPage({
         </div>
         {isCase && (
           <Link
-            to="/course/$courseId"
-            params={{ courseId }}
+            to="/workspaces/$workspaceId"
+            params={{ workspaceId: courseId }}
             className="mb-2 text-sm text-muted-foreground underline hover:text-foreground"
           >
             {t("creditTransfer.allCases")}
@@ -141,7 +156,7 @@ function ChatPage({
         )}
         <Button
           className="mb-4"
-          onClick={() => navigate({ to: "/course/$courseId/new", params: { courseId } })}
+          onClick={() => navigate(chatLink(course?.kind, courseId, null))}
           disabled={conversationId === null}
         >
           {isCase ? t("creditTransfer.newCase") : t("sidebar.newChat")}
@@ -157,12 +172,7 @@ function ChatPage({
             pinnedLoading={pinnedLoading}
             activeConversationId={conversationId}
             renderRow={({ conversationId: cid, className, children }) => (
-              <Link
-                key={cid}
-                to="/course/$courseId/$conversationId"
-                params={{ courseId, conversationId: cid }}
-                className={className}
-              >
+              <Link key={cid} {...chatLink(course?.kind, courseId, cid)} className={className}>
                 {children}
               </Link>
             )}
@@ -185,7 +195,7 @@ function ChatPage({
         )}
       </div>
 
-      <div className="flex-1 flex flex-col min-w-0 pt-10 md:pt-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 pt-10 md:pt-0">
         {isCase && (
           <>
             <CaseHeader
@@ -325,8 +335,7 @@ export function ChatWindow({
       queryKey: ["courses", courseId, "conversations"],
     })
     navigate({
-      to: "/course/$courseId/$conversationId",
-      params: { courseId, conversationId: created.id },
+      ...chatLink(course?.kind, courseId, created.id),
       state: { composerDraft: draft },
     })
   }
@@ -464,13 +473,9 @@ export function ChatWindow({
 
   const onConversationCreated = useCallback(
     (id: string) => {
-      navigate({
-        to: "/course/$courseId/$conversationId",
-        params: { courseId, conversationId: id },
-        replace: true,
-      })
+      navigate({ ...chatLink(course?.kind, courseId, id), replace: true })
     },
-    [navigate, courseId],
+    [navigate, courseId, course?.kind],
   )
 
   const bubbleLabels: ChatBubbleLabels = {
@@ -508,9 +513,12 @@ export function ChatWindow({
         ? t("chat.inputPlaceholderCase")
         : t("chat.inputPlaceholder"),
     inputLabel: t("chat.inputLabel"),
-    heading: course?.name
-      ? t("chat.heading", { course: course.name })
-      : t("chat.headingFallback"),
+    heading:
+      course?.kind === "credit_transfer"
+        ? t("creditTransfer.chatHeading", { workspace: course.name })
+        : course?.name
+          ? t("chat.heading", { course: course.name })
+          : t("chat.headingFallback"),
     aegisChecking: t("aegis.checking"),
     aegisSendAsIs: t("aegis.sendAsIs"),
     aegisPendingTitle: t("aegis.pendingTitle"),
@@ -520,7 +528,9 @@ export function ChatWindow({
     aegisShowPanelButton: t("aegis.showPanelButton"),
     aegisPanelLabel: t("aegis.panelLabel"),
     transcriptLabel: t("chat.transcriptLabel"),
-    disclaimerBefore: t("chat.disclaimerBefore"),
+    disclaimerBefore: isCase
+      ? t("creditTransfer.disclaimerBefore")
+      : t("chat.disclaimerBefore"),
     disclaimerLink: t("chat.dataHandlingLink"),
     disclaimerAfter: t("chat.disclaimerAfter"),
     teacherNote: t("message.teacherNote"),

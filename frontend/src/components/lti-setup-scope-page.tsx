@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation } from "@tanstack/react-query"
-import { Route as SetupRoute } from "@/routes/lti/setup.$platformId"
+import { Route as SetupRoute } from "@/routes/lti/platforms.$platformId.setup"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import {
   DYNREG_CHANNEL,
@@ -26,7 +26,7 @@ import { ErrorText } from "@/components/ui/error-text"
  * to *suggest*; final activation still requires a Minerva integrator to
  * click Approve on the platform.
  *
- * This page is public (RootLayout skips its userQuery on /lti/setup, same
+ * This page is public (RootLayout skips its userQuery on /lti/platforms/<id>/setup, same
  * way it does for /lti/bind). It posts the chosen suggestion to the
  * public-but-platform-scoped endpoint `/lti/dynamic-register/<id>/scope`,
  * then renders a success state with the IMS-spec close postMessage so the
@@ -191,7 +191,7 @@ export function LtiSetupScopePage() {
           </p>
           <div className="flex flex-wrap gap-2">
             <a
-              href={`/admin/lti-approve/${encodeURIComponent(platformId)}`}
+              href={`/admin/lti/platforms/${encodeURIComponent(platformId)}/approve`}
               target="_blank"
               rel="noopener noreferrer"
               className={buttonVariants()}

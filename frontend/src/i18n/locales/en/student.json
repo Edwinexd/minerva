@@ -280,6 +280,8 @@
       },
       "newThisWeek": "New this week",
       "noMatch": "No plan matches the search."
-    }
+    },
+    "chatHeading": "Credit transfer case: {{workspace}}",
+    "disclaimerBefore": "Messages, the attached files and the DSV course plans they are compared with are sent to Cerebras for AI inference. Check the comparison against the syllabuses themselves. See "
   }
 }

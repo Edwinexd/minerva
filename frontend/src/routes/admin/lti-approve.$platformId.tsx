@@ -1,11 +1,12 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { LtiApprovePlatformPage } from "@/components/admin/lti-approve-platform-page"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
-// Focused approve page deep-linked from the dynreg iframe's "Open Minerva
-// to approve" button. Sibling of /admin/lti (the full platforms list);
-// integrators land here, see only the one pending row's details + scope
-// form, and confirm. Avoids hunting through the platforms list for the
-// matching row.
+// Old address, kept as a redirect: LMS popups opened before the move.
 export const Route = createFileRoute("/admin/lti-approve/$platformId")({
-  component: LtiApprovePlatformPage,
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/admin/lti/platforms/$platformId/approve",
+      params: { platformId: params.platformId },
+      replace: true,
+    })
+  },
 })

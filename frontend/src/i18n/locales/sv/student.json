@@ -280,6 +280,8 @@
       },
       "newThisWeek": "Ny den här veckan",
       "noMatch": "Ingen kursplan matchar sökningen."
-    }
+    },
+    "chatHeading": "Ärende om tillgodoräknande: {{workspace}}",
+    "disclaimerBefore": "Meddelanden, de bifogade filerna och de kursplaner från DSV de jämförs med skickas till Cerebras för AI-inferens. Kontrollera jämförelsen mot kursplanerna själva. Läs "
   }
 }

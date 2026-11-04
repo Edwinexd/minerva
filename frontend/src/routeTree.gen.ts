@@ -26,8 +26,10 @@ import { Route as AdminLtiRouteImport } from "./routes/admin/lti"
 import { Route as AdminRulesRouteImport } from "./routes/admin/rules"
 import { Route as AdminSystemRouteImport } from "./routes/admin/system"
 import { Route as AdminUsersRouteImport } from "./routes/admin/users"
+import { Route as AdminWorkspacesRouteImport } from "./routes/admin/workspaces"
 import { Route as ConnectRequestIdRouteImport } from "./routes/connect.$requestId"
 import { Route as EmbedCourseIdRouteImport } from "./routes/embed/$courseId"
+import { Route as InvitesTokenRouteImport } from "./routes/invites/$token"
 import { Route as JoinTokenRouteImport } from "./routes/join/$token"
 import { Route as LtiBindRouteImport } from "./routes/lti/bind"
 import { Route as TeacherIndexRouteImport } from "./routes/teacher/index"
@@ -38,24 +40,35 @@ import { Route as AdminUsageUserIdRouteImport } from "./routes/admin/usage/$user
 import { Route as CourseCourseIdIndexRouteImport } from "./routes/course/$courseId/index"
 import { Route as CourseCourseIdConversationIdRouteImport } from "./routes/course/$courseId/$conversationId"
 import { Route as CourseCourseIdNewRouteImport } from "./routes/course/$courseId/new"
+import { Route as EmbedCoursesCourseIdRouteImport } from "./routes/embed/courses.$courseId"
 import { Route as LtiSetupPlatformIdRouteImport } from "./routes/lti/setup.$platformId"
+import { Route as OauthRequestsRequestIdRouteImport } from "./routes/oauth/requests.$requestId"
 import { Route as TeacherPortalAssistantsRouteImport } from "./routes/teacher/_portal.assistants"
 import { Route as TeacherPortalGuideRouteImport } from "./routes/teacher/_portal.guide"
 import { Route as TeacherPortalUsageRouteImport } from "./routes/teacher/_portal.usage"
-import { Route as TeacherCoursesCourseIdRouteImport } from "./routes/teacher/courses.$courseId"
-import { Route as TeacherCoursesCourseIdIndexRouteImport } from "./routes/teacher/courses.$courseId/index"
-import { Route as TeacherCoursesCourseIdApiKeysRouteImport } from "./routes/teacher/courses.$courseId/api-keys"
-import { Route as TeacherCoursesCourseIdCanvasRouteImport } from "./routes/teacher/courses.$courseId/canvas"
-import { Route as TeacherCoursesCourseIdConfigRouteImport } from "./routes/teacher/courses.$courseId/config"
-import { Route as TeacherCoursesCourseIdConversationsRouteImport } from "./routes/teacher/courses.$courseId/conversations"
-import { Route as TeacherCoursesCourseIdDocumentsRouteImport } from "./routes/teacher/courses.$courseId/documents"
-import { Route as TeacherCoursesCourseIdInviteRouteImport } from "./routes/teacher/courses.$courseId/invite"
-import { Route as TeacherCoursesCourseIdKnowledgeGraphRouteImport } from "./routes/teacher/courses.$courseId/knowledge-graph"
-import { Route as TeacherCoursesCourseIdLtiRouteImport } from "./routes/teacher/courses.$courseId/lti"
-import { Route as TeacherCoursesCourseIdMembersRouteImport } from "./routes/teacher/courses.$courseId/members"
-import { Route as TeacherCoursesCourseIdPlayDesignationsRouteImport } from "./routes/teacher/courses.$courseId/play-designations"
-import { Route as TeacherCoursesCourseIdRagRouteImport } from "./routes/teacher/courses.$courseId/rag"
-import { Route as TeacherCoursesCourseIdUsageRouteImport } from "./routes/teacher/courses.$courseId/usage"
+import { Route as TeacherWorkspacesCourseIdRouteImport } from "./routes/teacher/workspaces.$courseId"
+import { Route as WorkspacesWorkspaceIdIndexRouteImport } from "./routes/workspaces/$workspaceId/index"
+import { Route as AdminUsersUserIdUsageRouteImport } from "./routes/admin/users_.$userId.usage"
+import { Route as LtiPlatformsPlatformIdSetupRouteImport } from "./routes/lti/platforms.$platformId.setup"
+import { Route as TeacherCoursesCourseIdSplatRouteImport } from "./routes/teacher/courses.$courseId.$"
+import { Route as TeacherWorkspacesCourseIdIndexRouteImport } from "./routes/teacher/workspaces.$courseId/index"
+import { Route as TeacherWorkspacesCourseIdApiKeysRouteImport } from "./routes/teacher/workspaces.$courseId/api-keys"
+import { Route as TeacherWorkspacesCourseIdCanvasRouteImport } from "./routes/teacher/workspaces.$courseId/canvas"
+import { Route as TeacherWorkspacesCourseIdConfigRouteImport } from "./routes/teacher/workspaces.$courseId/config"
+import { Route as TeacherWorkspacesCourseIdConversationsRouteImport } from "./routes/teacher/workspaces.$courseId/conversations"
+import { Route as TeacherWorkspacesCourseIdDocumentsRouteImport } from "./routes/teacher/workspaces.$courseId/documents"
+import { Route as TeacherWorkspacesCourseIdInviteRouteImport } from "./routes/teacher/workspaces.$courseId/invite"
+import { Route as TeacherWorkspacesCourseIdKnowledgeGraphRouteImport } from "./routes/teacher/workspaces.$courseId/knowledge-graph"
+import { Route as TeacherWorkspacesCourseIdLtiRouteImport } from "./routes/teacher/workspaces.$courseId/lti"
+import { Route as TeacherWorkspacesCourseIdMembersRouteImport } from "./routes/teacher/workspaces.$courseId/members"
+import { Route as TeacherWorkspacesCourseIdPlayDesignationsRouteImport } from "./routes/teacher/workspaces.$courseId/play-designations"
+import { Route as TeacherWorkspacesCourseIdRagRouteImport } from "./routes/teacher/workspaces.$courseId/rag"
+import { Route as TeacherWorkspacesCourseIdUsageRouteImport } from "./routes/teacher/workspaces.$courseId/usage"
+import { Route as WorkspacesWorkspaceIdCasesCaseIdRouteImport } from "./routes/workspaces/$workspaceId/cases/$caseId"
+import { Route as WorkspacesWorkspaceIdCasesNewRouteImport } from "./routes/workspaces/$workspaceId/cases/new"
+import { Route as WorkspacesWorkspaceIdConversationsConversationIdRouteImport } from "./routes/workspaces/$workspaceId/conversations/$conversationId"
+import { Route as WorkspacesWorkspaceIdConversationsNewRouteImport } from "./routes/workspaces/$workspaceId/conversations/new"
+import { Route as AdminLtiPlatformsPlatformIdApproveRouteImport } from "./routes/admin/lti_.platforms.$platformId.approve"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -142,6 +155,11 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: "/users",
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminWorkspacesRoute = AdminWorkspacesRouteImport.update({
+  id: "/workspaces",
+  path: "/workspaces",
+  getParentRoute: () => AdminRoute,
+} as any)
 const ConnectRequestIdRoute = ConnectRequestIdRouteImport.update({
   id: "/connect/$requestId",
   path: "/connect/$requestId",
@@ -150,6 +168,11 @@ const ConnectRequestIdRoute = ConnectRequestIdRouteImport.update({
 const EmbedCourseIdRoute = EmbedCourseIdRouteImport.update({
   id: "/embed/$courseId",
   path: "/embed/$courseId",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvitesTokenRoute = InvitesTokenRouteImport.update({
+  id: "/invites/$token",
+  path: "/invites/$token",
   getParentRoute: () => rootRouteImport,
 } as any)
 const JoinTokenRoute = JoinTokenRouteImport.update({
@@ -204,9 +227,19 @@ const CourseCourseIdNewRoute = CourseCourseIdNewRouteImport.update({
   path: "/course/$courseId/new",
   getParentRoute: () => rootRouteImport,
 } as any)
+const EmbedCoursesCourseIdRoute = EmbedCoursesCourseIdRouteImport.update({
+  id: "/embed/courses/$courseId",
+  path: "/embed/courses/$courseId",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LtiSetupPlatformIdRoute = LtiSetupPlatformIdRouteImport.update({
   id: "/lti/setup/$platformId",
   path: "/lti/setup/$platformId",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OauthRequestsRequestIdRoute = OauthRequestsRequestIdRouteImport.update({
+  id: "/oauth/requests/$requestId",
+  path: "/oauth/requests/$requestId",
   getParentRoute: () => rootRouteImport,
 } as any)
 const TeacherPortalAssistantsRoute = TeacherPortalAssistantsRouteImport.update({
@@ -224,88 +257,142 @@ const TeacherPortalUsageRoute = TeacherPortalUsageRouteImport.update({
   path: "/usage",
   getParentRoute: () => TeacherPortalRoute,
 } as any)
-const TeacherCoursesCourseIdRoute = TeacherCoursesCourseIdRouteImport.update({
-  id: "/teacher/courses/$courseId",
-  path: "/teacher/courses/$courseId",
-  getParentRoute: () => rootRouteImport,
+const TeacherWorkspacesCourseIdRoute =
+  TeacherWorkspacesCourseIdRouteImport.update({
+    id: "/teacher/workspaces/$courseId",
+    path: "/teacher/workspaces/$courseId",
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const WorkspacesWorkspaceIdIndexRoute =
+  WorkspacesWorkspaceIdIndexRouteImport.update({
+    id: "/workspaces/$workspaceId/",
+    path: "/workspaces/$workspaceId/",
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AdminUsersUserIdUsageRoute = AdminUsersUserIdUsageRouteImport.update({
+  id: "/users_/$userId/usage",
+  path: "/users/$userId/usage",
+  getParentRoute: () => AdminRoute,
 } as any)
-const TeacherCoursesCourseIdIndexRoute =
-  TeacherCoursesCourseIdIndexRouteImport.update({
+const LtiPlatformsPlatformIdSetupRoute =
+  LtiPlatformsPlatformIdSetupRouteImport.update({
+    id: "/lti/platforms/$platformId/setup",
+    path: "/lti/platforms/$platformId/setup",
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TeacherCoursesCourseIdSplatRoute =
+  TeacherCoursesCourseIdSplatRouteImport.update({
+    id: "/teacher/courses/$courseId/$",
+    path: "/teacher/courses/$courseId/$",
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const TeacherWorkspacesCourseIdIndexRoute =
+  TeacherWorkspacesCourseIdIndexRouteImport.update({
     id: "/",
     path: "/",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdApiKeysRoute =
-  TeacherCoursesCourseIdApiKeysRouteImport.update({
+const TeacherWorkspacesCourseIdApiKeysRoute =
+  TeacherWorkspacesCourseIdApiKeysRouteImport.update({
     id: "/api-keys",
     path: "/api-keys",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdCanvasRoute =
-  TeacherCoursesCourseIdCanvasRouteImport.update({
+const TeacherWorkspacesCourseIdCanvasRoute =
+  TeacherWorkspacesCourseIdCanvasRouteImport.update({
     id: "/canvas",
     path: "/canvas",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdConfigRoute =
-  TeacherCoursesCourseIdConfigRouteImport.update({
+const TeacherWorkspacesCourseIdConfigRoute =
+  TeacherWorkspacesCourseIdConfigRouteImport.update({
     id: "/config",
     path: "/config",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdConversationsRoute =
-  TeacherCoursesCourseIdConversationsRouteImport.update({
+const TeacherWorkspacesCourseIdConversationsRoute =
+  TeacherWorkspacesCourseIdConversationsRouteImport.update({
     id: "/conversations",
     path: "/conversations",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdDocumentsRoute =
-  TeacherCoursesCourseIdDocumentsRouteImport.update({
+const TeacherWorkspacesCourseIdDocumentsRoute =
+  TeacherWorkspacesCourseIdDocumentsRouteImport.update({
     id: "/documents",
     path: "/documents",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdInviteRoute =
-  TeacherCoursesCourseIdInviteRouteImport.update({
+const TeacherWorkspacesCourseIdInviteRoute =
+  TeacherWorkspacesCourseIdInviteRouteImport.update({
     id: "/invite",
     path: "/invite",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdKnowledgeGraphRoute =
-  TeacherCoursesCourseIdKnowledgeGraphRouteImport.update({
+const TeacherWorkspacesCourseIdKnowledgeGraphRoute =
+  TeacherWorkspacesCourseIdKnowledgeGraphRouteImport.update({
     id: "/knowledge-graph",
     path: "/knowledge-graph",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdLtiRoute =
-  TeacherCoursesCourseIdLtiRouteImport.update({
+const TeacherWorkspacesCourseIdLtiRoute =
+  TeacherWorkspacesCourseIdLtiRouteImport.update({
     id: "/lti",
     path: "/lti",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdMembersRoute =
-  TeacherCoursesCourseIdMembersRouteImport.update({
+const TeacherWorkspacesCourseIdMembersRoute =
+  TeacherWorkspacesCourseIdMembersRouteImport.update({
     id: "/members",
     path: "/members",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdPlayDesignationsRoute =
-  TeacherCoursesCourseIdPlayDesignationsRouteImport.update({
+const TeacherWorkspacesCourseIdPlayDesignationsRoute =
+  TeacherWorkspacesCourseIdPlayDesignationsRouteImport.update({
     id: "/play-designations",
     path: "/play-designations",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdRagRoute =
-  TeacherCoursesCourseIdRagRouteImport.update({
+const TeacherWorkspacesCourseIdRagRoute =
+  TeacherWorkspacesCourseIdRagRouteImport.update({
     id: "/rag",
     path: "/rag",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
   } as any)
-const TeacherCoursesCourseIdUsageRoute =
-  TeacherCoursesCourseIdUsageRouteImport.update({
+const TeacherWorkspacesCourseIdUsageRoute =
+  TeacherWorkspacesCourseIdUsageRouteImport.update({
     id: "/usage",
     path: "/usage",
-    getParentRoute: () => TeacherCoursesCourseIdRoute,
+    getParentRoute: () => TeacherWorkspacesCourseIdRoute,
+  } as any)
+const WorkspacesWorkspaceIdCasesCaseIdRoute =
+  WorkspacesWorkspaceIdCasesCaseIdRouteImport.update({
+    id: "/workspaces/$workspaceId/cases/$caseId",
+    path: "/workspaces/$workspaceId/cases/$caseId",
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const WorkspacesWorkspaceIdCasesNewRoute =
+  WorkspacesWorkspaceIdCasesNewRouteImport.update({
+    id: "/workspaces/$workspaceId/cases/new",
+    path: "/workspaces/$workspaceId/cases/new",
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const WorkspacesWorkspaceIdConversationsConversationIdRoute =
+  WorkspacesWorkspaceIdConversationsConversationIdRouteImport.update({
+    id: "/workspaces/$workspaceId/conversations/$conversationId",
+    path: "/workspaces/$workspaceId/conversations/$conversationId",
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const WorkspacesWorkspaceIdConversationsNewRoute =
+  WorkspacesWorkspaceIdConversationsNewRouteImport.update({
+    id: "/workspaces/$workspaceId/conversations/new",
+    path: "/workspaces/$workspaceId/conversations/new",
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AdminLtiPlatformsPlatformIdApproveRoute =
+  AdminLtiPlatformsPlatformIdApproveRouteImport.update({
+    id: "/lti_/platforms/$platformId/approve",
+    path: "/lti/platforms/$platformId/approve",
+    getParentRoute: () => AdminRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -325,8 +412,10 @@ export interface FileRoutesByFullPath {
   "/admin/rules": typeof AdminRulesRoute
   "/admin/system": typeof AdminSystemRoute
   "/admin/users": typeof AdminUsersRoute
+  "/admin/workspaces": typeof AdminWorkspacesRoute
   "/connect/$requestId": typeof ConnectRequestIdRoute
   "/embed/$courseId": typeof EmbedCourseIdRoute
+  "/invites/$token": typeof InvitesTokenRoute
   "/join/$token": typeof JoinTokenRoute
   "/lti/bind": typeof LtiBindRoute
   "/teacher": typeof TeacherPortalRouteWithChildren
@@ -336,26 +425,37 @@ export interface FileRoutesByFullPath {
   "/admin/usage/$userId": typeof AdminUsageUserIdRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
+  "/embed/courses/$courseId": typeof EmbedCoursesCourseIdRoute
   "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
+  "/oauth/requests/$requestId": typeof OauthRequestsRequestIdRoute
   "/teacher/assistants": typeof TeacherPortalAssistantsRoute
   "/teacher/guide": typeof TeacherPortalGuideRoute
   "/teacher/usage": typeof TeacherPortalUsageRoute
-  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
+  "/teacher/workspaces/$courseId": typeof TeacherWorkspacesCourseIdRouteWithChildren
   "/admin/usage/": typeof AdminUsageIndexRoute
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
-  "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
-  "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
-  "/teacher/courses/$courseId/config": typeof TeacherCoursesCourseIdConfigRoute
-  "/teacher/courses/$courseId/conversations": typeof TeacherCoursesCourseIdConversationsRoute
-  "/teacher/courses/$courseId/documents": typeof TeacherCoursesCourseIdDocumentsRoute
-  "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
-  "/teacher/courses/$courseId/knowledge-graph": typeof TeacherCoursesCourseIdKnowledgeGraphRoute
-  "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
-  "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
-  "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
-  "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
-  "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
-  "/teacher/courses/$courseId/": typeof TeacherCoursesCourseIdIndexRoute
+  "/workspaces/$workspaceId/": typeof WorkspacesWorkspaceIdIndexRoute
+  "/admin/users/$userId/usage": typeof AdminUsersUserIdUsageRoute
+  "/lti/platforms/$platformId/setup": typeof LtiPlatformsPlatformIdSetupRoute
+  "/teacher/courses/$courseId/$": typeof TeacherCoursesCourseIdSplatRoute
+  "/teacher/workspaces/$courseId/api-keys": typeof TeacherWorkspacesCourseIdApiKeysRoute
+  "/teacher/workspaces/$courseId/canvas": typeof TeacherWorkspacesCourseIdCanvasRoute
+  "/teacher/workspaces/$courseId/config": typeof TeacherWorkspacesCourseIdConfigRoute
+  "/teacher/workspaces/$courseId/conversations": typeof TeacherWorkspacesCourseIdConversationsRoute
+  "/teacher/workspaces/$courseId/documents": typeof TeacherWorkspacesCourseIdDocumentsRoute
+  "/teacher/workspaces/$courseId/invite": typeof TeacherWorkspacesCourseIdInviteRoute
+  "/teacher/workspaces/$courseId/knowledge-graph": typeof TeacherWorkspacesCourseIdKnowledgeGraphRoute
+  "/teacher/workspaces/$courseId/lti": typeof TeacherWorkspacesCourseIdLtiRoute
+  "/teacher/workspaces/$courseId/members": typeof TeacherWorkspacesCourseIdMembersRoute
+  "/teacher/workspaces/$courseId/play-designations": typeof TeacherWorkspacesCourseIdPlayDesignationsRoute
+  "/teacher/workspaces/$courseId/rag": typeof TeacherWorkspacesCourseIdRagRoute
+  "/teacher/workspaces/$courseId/usage": typeof TeacherWorkspacesCourseIdUsageRoute
+  "/workspaces/$workspaceId/cases/$caseId": typeof WorkspacesWorkspaceIdCasesCaseIdRoute
+  "/workspaces/$workspaceId/cases/new": typeof WorkspacesWorkspaceIdCasesNewRoute
+  "/workspaces/$workspaceId/conversations/$conversationId": typeof WorkspacesWorkspaceIdConversationsConversationIdRoute
+  "/workspaces/$workspaceId/conversations/new": typeof WorkspacesWorkspaceIdConversationsNewRoute
+  "/teacher/workspaces/$courseId/": typeof TeacherWorkspacesCourseIdIndexRoute
+  "/admin/lti/platforms/$platformId/approve": typeof AdminLtiPlatformsPlatformIdApproveRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
@@ -373,8 +473,10 @@ export interface FileRoutesByTo {
   "/admin/rules": typeof AdminRulesRoute
   "/admin/system": typeof AdminSystemRoute
   "/admin/users": typeof AdminUsersRoute
+  "/admin/workspaces": typeof AdminWorkspacesRoute
   "/connect/$requestId": typeof ConnectRequestIdRoute
   "/embed/$courseId": typeof EmbedCourseIdRoute
+  "/invites/$token": typeof InvitesTokenRoute
   "/join/$token": typeof JoinTokenRoute
   "/lti/bind": typeof LtiBindRoute
   "/teacher": typeof TeacherIndexRoute
@@ -383,25 +485,36 @@ export interface FileRoutesByTo {
   "/admin/usage/$userId": typeof AdminUsageUserIdRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
+  "/embed/courses/$courseId": typeof EmbedCoursesCourseIdRoute
   "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
+  "/oauth/requests/$requestId": typeof OauthRequestsRequestIdRoute
   "/teacher/assistants": typeof TeacherPortalAssistantsRoute
   "/teacher/guide": typeof TeacherPortalGuideRoute
   "/teacher/usage": typeof TeacherPortalUsageRoute
   "/admin/usage": typeof AdminUsageIndexRoute
   "/course/$courseId": typeof CourseCourseIdIndexRoute
-  "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
-  "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
-  "/teacher/courses/$courseId/config": typeof TeacherCoursesCourseIdConfigRoute
-  "/teacher/courses/$courseId/conversations": typeof TeacherCoursesCourseIdConversationsRoute
-  "/teacher/courses/$courseId/documents": typeof TeacherCoursesCourseIdDocumentsRoute
-  "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
-  "/teacher/courses/$courseId/knowledge-graph": typeof TeacherCoursesCourseIdKnowledgeGraphRoute
-  "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
-  "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
-  "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
-  "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
-  "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
-  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdIndexRoute
+  "/workspaces/$workspaceId": typeof WorkspacesWorkspaceIdIndexRoute
+  "/admin/users/$userId/usage": typeof AdminUsersUserIdUsageRoute
+  "/lti/platforms/$platformId/setup": typeof LtiPlatformsPlatformIdSetupRoute
+  "/teacher/courses/$courseId/$": typeof TeacherCoursesCourseIdSplatRoute
+  "/teacher/workspaces/$courseId/api-keys": typeof TeacherWorkspacesCourseIdApiKeysRoute
+  "/teacher/workspaces/$courseId/canvas": typeof TeacherWorkspacesCourseIdCanvasRoute
+  "/teacher/workspaces/$courseId/config": typeof TeacherWorkspacesCourseIdConfigRoute
+  "/teacher/workspaces/$courseId/conversations": typeof TeacherWorkspacesCourseIdConversationsRoute
+  "/teacher/workspaces/$courseId/documents": typeof TeacherWorkspacesCourseIdDocumentsRoute
+  "/teacher/workspaces/$courseId/invite": typeof TeacherWorkspacesCourseIdInviteRoute
+  "/teacher/workspaces/$courseId/knowledge-graph": typeof TeacherWorkspacesCourseIdKnowledgeGraphRoute
+  "/teacher/workspaces/$courseId/lti": typeof TeacherWorkspacesCourseIdLtiRoute
+  "/teacher/workspaces/$courseId/members": typeof TeacherWorkspacesCourseIdMembersRoute
+  "/teacher/workspaces/$courseId/play-designations": typeof TeacherWorkspacesCourseIdPlayDesignationsRoute
+  "/teacher/workspaces/$courseId/rag": typeof TeacherWorkspacesCourseIdRagRoute
+  "/teacher/workspaces/$courseId/usage": typeof TeacherWorkspacesCourseIdUsageRoute
+  "/workspaces/$workspaceId/cases/$caseId": typeof WorkspacesWorkspaceIdCasesCaseIdRoute
+  "/workspaces/$workspaceId/cases/new": typeof WorkspacesWorkspaceIdCasesNewRoute
+  "/workspaces/$workspaceId/conversations/$conversationId": typeof WorkspacesWorkspaceIdConversationsConversationIdRoute
+  "/workspaces/$workspaceId/conversations/new": typeof WorkspacesWorkspaceIdConversationsNewRoute
+  "/teacher/workspaces/$courseId": typeof TeacherWorkspacesCourseIdIndexRoute
+  "/admin/lti/platforms/$platformId/approve": typeof AdminLtiPlatformsPlatformIdApproveRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -421,8 +534,10 @@ export interface FileRoutesById {
   "/admin/rules": typeof AdminRulesRoute
   "/admin/system": typeof AdminSystemRoute
   "/admin/users": typeof AdminUsersRoute
+  "/admin/workspaces": typeof AdminWorkspacesRoute
   "/connect/$requestId": typeof ConnectRequestIdRoute
   "/embed/$courseId": typeof EmbedCourseIdRoute
+  "/invites/$token": typeof InvitesTokenRoute
   "/join/$token": typeof JoinTokenRoute
   "/lti/bind": typeof LtiBindRoute
   "/teacher/_portal": typeof TeacherPortalRouteWithChildren
@@ -432,26 +547,37 @@ export interface FileRoutesById {
   "/admin/usage/$userId": typeof AdminUsageUserIdRoute
   "/course/$courseId/$conversationId": typeof CourseCourseIdConversationIdRoute
   "/course/$courseId/new": typeof CourseCourseIdNewRoute
+  "/embed/courses/$courseId": typeof EmbedCoursesCourseIdRoute
   "/lti/setup/$platformId": typeof LtiSetupPlatformIdRoute
+  "/oauth/requests/$requestId": typeof OauthRequestsRequestIdRoute
   "/teacher/_portal/assistants": typeof TeacherPortalAssistantsRoute
   "/teacher/_portal/guide": typeof TeacherPortalGuideRoute
   "/teacher/_portal/usage": typeof TeacherPortalUsageRoute
-  "/teacher/courses/$courseId": typeof TeacherCoursesCourseIdRouteWithChildren
+  "/teacher/workspaces/$courseId": typeof TeacherWorkspacesCourseIdRouteWithChildren
   "/admin/usage/": typeof AdminUsageIndexRoute
   "/course/$courseId/": typeof CourseCourseIdIndexRoute
-  "/teacher/courses/$courseId/api-keys": typeof TeacherCoursesCourseIdApiKeysRoute
-  "/teacher/courses/$courseId/canvas": typeof TeacherCoursesCourseIdCanvasRoute
-  "/teacher/courses/$courseId/config": typeof TeacherCoursesCourseIdConfigRoute
-  "/teacher/courses/$courseId/conversations": typeof TeacherCoursesCourseIdConversationsRoute
-  "/teacher/courses/$courseId/documents": typeof TeacherCoursesCourseIdDocumentsRoute
-  "/teacher/courses/$courseId/invite": typeof TeacherCoursesCourseIdInviteRoute
-  "/teacher/courses/$courseId/knowledge-graph": typeof TeacherCoursesCourseIdKnowledgeGraphRoute
-  "/teacher/courses/$courseId/lti": typeof TeacherCoursesCourseIdLtiRoute
-  "/teacher/courses/$courseId/members": typeof TeacherCoursesCourseIdMembersRoute
-  "/teacher/courses/$courseId/play-designations": typeof TeacherCoursesCourseIdPlayDesignationsRoute
-  "/teacher/courses/$courseId/rag": typeof TeacherCoursesCourseIdRagRoute
-  "/teacher/courses/$courseId/usage": typeof TeacherCoursesCourseIdUsageRoute
-  "/teacher/courses/$courseId/": typeof TeacherCoursesCourseIdIndexRoute
+  "/workspaces/$workspaceId/": typeof WorkspacesWorkspaceIdIndexRoute
+  "/admin/users_/$userId/usage": typeof AdminUsersUserIdUsageRoute
+  "/lti/platforms/$platformId/setup": typeof LtiPlatformsPlatformIdSetupRoute
+  "/teacher/courses/$courseId/$": typeof TeacherCoursesCourseIdSplatRoute
+  "/teacher/workspaces/$courseId/api-keys": typeof TeacherWorkspacesCourseIdApiKeysRoute
+  "/teacher/workspaces/$courseId/canvas": typeof TeacherWorkspacesCourseIdCanvasRoute
+  "/teacher/workspaces/$courseId/config": typeof TeacherWorkspacesCourseIdConfigRoute
+  "/teacher/workspaces/$courseId/conversations": typeof TeacherWorkspacesCourseIdConversationsRoute
+  "/teacher/workspaces/$courseId/documents": typeof TeacherWorkspacesCourseIdDocumentsRoute
+  "/teacher/workspaces/$courseId/invite": typeof TeacherWorkspacesCourseIdInviteRoute
+  "/teacher/workspaces/$courseId/knowledge-graph": typeof TeacherWorkspacesCourseIdKnowledgeGraphRoute
+  "/teacher/workspaces/$courseId/lti": typeof TeacherWorkspacesCourseIdLtiRoute
+  "/teacher/workspaces/$courseId/members": typeof TeacherWorkspacesCourseIdMembersRoute
+  "/teacher/workspaces/$courseId/play-designations": typeof TeacherWorkspacesCourseIdPlayDesignationsRoute
+  "/teacher/workspaces/$courseId/rag": typeof TeacherWorkspacesCourseIdRagRoute
+  "/teacher/workspaces/$courseId/usage": typeof TeacherWorkspacesCourseIdUsageRoute
+  "/workspaces/$workspaceId/cases/$caseId": typeof WorkspacesWorkspaceIdCasesCaseIdRoute
+  "/workspaces/$workspaceId/cases/new": typeof WorkspacesWorkspaceIdCasesNewRoute
+  "/workspaces/$workspaceId/conversations/$conversationId": typeof WorkspacesWorkspaceIdConversationsConversationIdRoute
+  "/workspaces/$workspaceId/conversations/new": typeof WorkspacesWorkspaceIdConversationsNewRoute
+  "/teacher/workspaces/$courseId/": typeof TeacherWorkspacesCourseIdIndexRoute
+  "/admin/lti_/platforms/$platformId/approve": typeof AdminLtiPlatformsPlatformIdApproveRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -472,8 +598,10 @@ export interface FileRouteTypes {
     | "/admin/rules"
     | "/admin/system"
     | "/admin/users"
+    | "/admin/workspaces"
     | "/connect/$requestId"
     | "/embed/$courseId"
+    | "/invites/$token"
     | "/join/$token"
     | "/lti/bind"
     | "/teacher"
@@ -483,26 +611,37 @@ export interface FileRouteTypes {
     | "/admin/usage/$userId"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
+    | "/embed/courses/$courseId"
     | "/lti/setup/$platformId"
+    | "/oauth/requests/$requestId"
     | "/teacher/assistants"
     | "/teacher/guide"
     | "/teacher/usage"
-    | "/teacher/courses/$courseId"
+    | "/teacher/workspaces/$courseId"
     | "/admin/usage/"
     | "/course/$courseId/"
-    | "/teacher/courses/$courseId/api-keys"
-    | "/teacher/courses/$courseId/canvas"
-    | "/teacher/courses/$courseId/config"
-    | "/teacher/courses/$courseId/conversations"
-    | "/teacher/courses/$courseId/documents"
-    | "/teacher/courses/$courseId/invite"
-    | "/teacher/courses/$courseId/knowledge-graph"
-    | "/teacher/courses/$courseId/lti"
-    | "/teacher/courses/$courseId/members"
-    | "/teacher/courses/$courseId/play-designations"
-    | "/teacher/courses/$courseId/rag"
-    | "/teacher/courses/$courseId/usage"
-    | "/teacher/courses/$courseId/"
+    | "/workspaces/$workspaceId/"
+    | "/admin/users/$userId/usage"
+    | "/lti/platforms/$platformId/setup"
+    | "/teacher/courses/$courseId/$"
+    | "/teacher/workspaces/$courseId/api-keys"
+    | "/teacher/workspaces/$courseId/canvas"
+    | "/teacher/workspaces/$courseId/config"
+    | "/teacher/workspaces/$courseId/conversations"
+    | "/teacher/workspaces/$courseId/documents"
+    | "/teacher/workspaces/$courseId/invite"
+    | "/teacher/workspaces/$courseId/knowledge-graph"
+    | "/teacher/workspaces/$courseId/lti"
+    | "/teacher/workspaces/$courseId/members"
+    | "/teacher/workspaces/$courseId/play-designations"
+    | "/teacher/workspaces/$courseId/rag"
+    | "/teacher/workspaces/$courseId/usage"
+    | "/workspaces/$workspaceId/cases/$caseId"
+    | "/workspaces/$workspaceId/cases/new"
+    | "/workspaces/$workspaceId/conversations/$conversationId"
+    | "/workspaces/$workspaceId/conversations/new"
+    | "/teacher/workspaces/$courseId/"
+    | "/admin/lti/platforms/$platformId/approve"
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
@@ -520,8 +659,10 @@ export interface FileRouteTypes {
     | "/admin/rules"
     | "/admin/system"
     | "/admin/users"
+    | "/admin/workspaces"
     | "/connect/$requestId"
     | "/embed/$courseId"
+    | "/invites/$token"
     | "/join/$token"
     | "/lti/bind"
     | "/teacher"
@@ -530,25 +671,36 @@ export interface FileRouteTypes {
     | "/admin/usage/$userId"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
+    | "/embed/courses/$courseId"
     | "/lti/setup/$platformId"
+    | "/oauth/requests/$requestId"
     | "/teacher/assistants"
     | "/teacher/guide"
     | "/teacher/usage"
     | "/admin/usage"
     | "/course/$courseId"
-    | "/teacher/courses/$courseId/api-keys"
-    | "/teacher/courses/$courseId/canvas"
-    | "/teacher/courses/$courseId/config"
-    | "/teacher/courses/$courseId/conversations"
-    | "/teacher/courses/$courseId/documents"
-    | "/teacher/courses/$courseId/invite"
-    | "/teacher/courses/$courseId/knowledge-graph"
-    | "/teacher/courses/$courseId/lti"
-    | "/teacher/courses/$courseId/members"
-    | "/teacher/courses/$courseId/play-designations"
-    | "/teacher/courses/$courseId/rag"
-    | "/teacher/courses/$courseId/usage"
-    | "/teacher/courses/$courseId"
+    | "/workspaces/$workspaceId"
+    | "/admin/users/$userId/usage"
+    | "/lti/platforms/$platformId/setup"
+    | "/teacher/courses/$courseId/$"
+    | "/teacher/workspaces/$courseId/api-keys"
+    | "/teacher/workspaces/$courseId/canvas"
+    | "/teacher/workspaces/$courseId/config"
+    | "/teacher/workspaces/$courseId/conversations"
+    | "/teacher/workspaces/$courseId/documents"
+    | "/teacher/workspaces/$courseId/invite"
+    | "/teacher/workspaces/$courseId/knowledge-graph"
+    | "/teacher/workspaces/$courseId/lti"
+    | "/teacher/workspaces/$courseId/members"
+    | "/teacher/workspaces/$courseId/play-designations"
+    | "/teacher/workspaces/$courseId/rag"
+    | "/teacher/workspaces/$courseId/usage"
+    | "/workspaces/$workspaceId/cases/$caseId"
+    | "/workspaces/$workspaceId/cases/new"
+    | "/workspaces/$workspaceId/conversations/$conversationId"
+    | "/workspaces/$workspaceId/conversations/new"
+    | "/teacher/workspaces/$courseId"
+    | "/admin/lti/platforms/$platformId/approve"
   id:
     | "__root__"
     | "/"
@@ -567,8 +719,10 @@ export interface FileRouteTypes {
     | "/admin/rules"
     | "/admin/system"
     | "/admin/users"
+    | "/admin/workspaces"
     | "/connect/$requestId"
     | "/embed/$courseId"
+    | "/invites/$token"
     | "/join/$token"
     | "/lti/bind"
     | "/teacher/_portal"
@@ -578,26 +732,37 @@ export interface FileRouteTypes {
     | "/admin/usage/$userId"
     | "/course/$courseId/$conversationId"
     | "/course/$courseId/new"
+    | "/embed/courses/$courseId"
     | "/lti/setup/$platformId"
+    | "/oauth/requests/$requestId"
     | "/teacher/_portal/assistants"
     | "/teacher/_portal/guide"
     | "/teacher/_portal/usage"
-    | "/teacher/courses/$courseId"
+    | "/teacher/workspaces/$courseId"
     | "/admin/usage/"
     | "/course/$courseId/"
-    | "/teacher/courses/$courseId/api-keys"
-    | "/teacher/courses/$courseId/canvas"
-    | "/teacher/courses/$courseId/config"
-    | "/teacher/courses/$courseId/conversations"
-    | "/teacher/courses/$courseId/documents"
-    | "/teacher/courses/$courseId/invite"
-    | "/teacher/courses/$courseId/knowledge-graph"
-    | "/teacher/courses/$courseId/lti"
-    | "/teacher/courses/$courseId/members"
-    | "/teacher/courses/$courseId/play-designations"
-    | "/teacher/courses/$courseId/rag"
-    | "/teacher/courses/$courseId/usage"
-    | "/teacher/courses/$courseId/"
+    | "/workspaces/$workspaceId/"
+    | "/admin/users_/$userId/usage"
+    | "/lti/platforms/$platformId/setup"
+    | "/teacher/courses/$courseId/$"
+    | "/teacher/workspaces/$courseId/api-keys"
+    | "/teacher/workspaces/$courseId/canvas"
+    | "/teacher/workspaces/$courseId/config"
+    | "/teacher/workspaces/$courseId/conversations"
+    | "/teacher/workspaces/$courseId/documents"
+    | "/teacher/workspaces/$courseId/invite"
+    | "/teacher/workspaces/$courseId/knowledge-graph"
+    | "/teacher/workspaces/$courseId/lti"
+    | "/teacher/workspaces/$courseId/members"
+    | "/teacher/workspaces/$courseId/play-designations"
+    | "/teacher/workspaces/$courseId/rag"
+    | "/teacher/workspaces/$courseId/usage"
+    | "/workspaces/$workspaceId/cases/$caseId"
+    | "/workspaces/$workspaceId/cases/new"
+    | "/workspaces/$workspaceId/conversations/$conversationId"
+    | "/workspaces/$workspaceId/conversations/new"
+    | "/teacher/workspaces/$courseId/"
+    | "/admin/lti_/platforms/$platformId/approve"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -609,15 +774,25 @@ export interface RootRouteChildren {
   TeacherHelpRoute: typeof TeacherHelpRoute
   ConnectRequestIdRoute: typeof ConnectRequestIdRoute
   EmbedCourseIdRoute: typeof EmbedCourseIdRoute
+  InvitesTokenRoute: typeof InvitesTokenRoute
   JoinTokenRoute: typeof JoinTokenRoute
   LtiBindRoute: typeof LtiBindRoute
   TeacherPortalRoute: typeof TeacherPortalRouteWithChildren
   TeacherIndexRoute: typeof TeacherIndexRoute
   CourseCourseIdConversationIdRoute: typeof CourseCourseIdConversationIdRoute
   CourseCourseIdNewRoute: typeof CourseCourseIdNewRoute
+  EmbedCoursesCourseIdRoute: typeof EmbedCoursesCourseIdRoute
   LtiSetupPlatformIdRoute: typeof LtiSetupPlatformIdRoute
-  TeacherCoursesCourseIdRoute: typeof TeacherCoursesCourseIdRouteWithChildren
+  OauthRequestsRequestIdRoute: typeof OauthRequestsRequestIdRoute
+  TeacherWorkspacesCourseIdRoute: typeof TeacherWorkspacesCourseIdRouteWithChildren
   CourseCourseIdIndexRoute: typeof CourseCourseIdIndexRoute
+  WorkspacesWorkspaceIdIndexRoute: typeof WorkspacesWorkspaceIdIndexRoute
+  LtiPlatformsPlatformIdSetupRoute: typeof LtiPlatformsPlatformIdSetupRoute
+  TeacherCoursesCourseIdSplatRoute: typeof TeacherCoursesCourseIdSplatRoute
+  WorkspacesWorkspaceIdCasesCaseIdRoute: typeof WorkspacesWorkspaceIdCasesCaseIdRoute
+  WorkspacesWorkspaceIdCasesNewRoute: typeof WorkspacesWorkspaceIdCasesNewRoute
+  WorkspacesWorkspaceIdConversationsConversationIdRoute: typeof WorkspacesWorkspaceIdConversationsConversationIdRoute
+  WorkspacesWorkspaceIdConversationsNewRoute: typeof WorkspacesWorkspaceIdConversationsNewRoute
 }
 
 declare module "@tanstack/react-router" {
@@ -741,6 +916,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof AdminRoute
     }
+    "/admin/workspaces": {
+      id: "/admin/workspaces"
+      path: "/workspaces"
+      fullPath: "/admin/workspaces"
+      preLoaderRoute: typeof AdminWorkspacesRouteImport
+      parentRoute: typeof AdminRoute
+    }
     "/connect/$requestId": {
       id: "/connect/$requestId"
       path: "/connect/$requestId"
@@ -753,6 +935,13 @@ declare module "@tanstack/react-router" {
       path: "/embed/$courseId"
       fullPath: "/embed/$courseId"
       preLoaderRoute: typeof EmbedCourseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/invites/$token": {
+      id: "/invites/$token"
+      path: "/invites/$token"
+      fullPath: "/invites/$token"
+      preLoaderRoute: typeof InvitesTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/join/$token": {
@@ -825,11 +1014,25 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof CourseCourseIdNewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/embed/courses/$courseId": {
+      id: "/embed/courses/$courseId"
+      path: "/embed/courses/$courseId"
+      fullPath: "/embed/courses/$courseId"
+      preLoaderRoute: typeof EmbedCoursesCourseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/lti/setup/$platformId": {
       id: "/lti/setup/$platformId"
       path: "/lti/setup/$platformId"
       fullPath: "/lti/setup/$platformId"
       preLoaderRoute: typeof LtiSetupPlatformIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/oauth/requests/$requestId": {
+      id: "/oauth/requests/$requestId"
+      path: "/oauth/requests/$requestId"
+      fullPath: "/oauth/requests/$requestId"
+      preLoaderRoute: typeof OauthRequestsRequestIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/teacher/_portal/assistants": {
@@ -853,103 +1056,166 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof TeacherPortalUsageRouteImport
       parentRoute: typeof TeacherPortalRoute
     }
-    "/teacher/courses/$courseId": {
-      id: "/teacher/courses/$courseId"
-      path: "/teacher/courses/$courseId"
-      fullPath: "/teacher/courses/$courseId"
-      preLoaderRoute: typeof TeacherCoursesCourseIdRouteImport
+    "/teacher/workspaces/$courseId": {
+      id: "/teacher/workspaces/$courseId"
+      path: "/teacher/workspaces/$courseId"
+      fullPath: "/teacher/workspaces/$courseId"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/teacher/courses/$courseId/": {
-      id: "/teacher/courses/$courseId/"
+    "/workspaces/$workspaceId/": {
+      id: "/workspaces/$workspaceId/"
+      path: "/workspaces/$workspaceId"
+      fullPath: "/workspaces/$workspaceId/"
+      preLoaderRoute: typeof WorkspacesWorkspaceIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/admin/users_/$userId/usage": {
+      id: "/admin/users_/$userId/usage"
+      path: "/users/$userId/usage"
+      fullPath: "/admin/users/$userId/usage"
+      preLoaderRoute: typeof AdminUsersUserIdUsageRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    "/lti/platforms/$platformId/setup": {
+      id: "/lti/platforms/$platformId/setup"
+      path: "/lti/platforms/$platformId/setup"
+      fullPath: "/lti/platforms/$platformId/setup"
+      preLoaderRoute: typeof LtiPlatformsPlatformIdSetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/teacher/courses/$courseId/$": {
+      id: "/teacher/courses/$courseId/$"
+      path: "/teacher/courses/$courseId/$"
+      fullPath: "/teacher/courses/$courseId/$"
+      preLoaderRoute: typeof TeacherCoursesCourseIdSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/teacher/workspaces/$courseId/": {
+      id: "/teacher/workspaces/$courseId/"
       path: "/"
-      fullPath: "/teacher/courses/$courseId/"
-      preLoaderRoute: typeof TeacherCoursesCourseIdIndexRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdIndexRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/api-keys": {
-      id: "/teacher/courses/$courseId/api-keys"
+    "/teacher/workspaces/$courseId/api-keys": {
+      id: "/teacher/workspaces/$courseId/api-keys"
       path: "/api-keys"
-      fullPath: "/teacher/courses/$courseId/api-keys"
-      preLoaderRoute: typeof TeacherCoursesCourseIdApiKeysRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/api-keys"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdApiKeysRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/canvas": {
-      id: "/teacher/courses/$courseId/canvas"
+    "/teacher/workspaces/$courseId/canvas": {
+      id: "/teacher/workspaces/$courseId/canvas"
       path: "/canvas"
-      fullPath: "/teacher/courses/$courseId/canvas"
-      preLoaderRoute: typeof TeacherCoursesCourseIdCanvasRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/canvas"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdCanvasRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/config": {
-      id: "/teacher/courses/$courseId/config"
+    "/teacher/workspaces/$courseId/config": {
+      id: "/teacher/workspaces/$courseId/config"
       path: "/config"
-      fullPath: "/teacher/courses/$courseId/config"
-      preLoaderRoute: typeof TeacherCoursesCourseIdConfigRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/config"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdConfigRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/conversations": {
-      id: "/teacher/courses/$courseId/conversations"
+    "/teacher/workspaces/$courseId/conversations": {
+      id: "/teacher/workspaces/$courseId/conversations"
       path: "/conversations"
-      fullPath: "/teacher/courses/$courseId/conversations"
-      preLoaderRoute: typeof TeacherCoursesCourseIdConversationsRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/conversations"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdConversationsRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/documents": {
-      id: "/teacher/courses/$courseId/documents"
+    "/teacher/workspaces/$courseId/documents": {
+      id: "/teacher/workspaces/$courseId/documents"
       path: "/documents"
-      fullPath: "/teacher/courses/$courseId/documents"
-      preLoaderRoute: typeof TeacherCoursesCourseIdDocumentsRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/documents"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdDocumentsRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/invite": {
-      id: "/teacher/courses/$courseId/invite"
+    "/teacher/workspaces/$courseId/invite": {
+      id: "/teacher/workspaces/$courseId/invite"
       path: "/invite"
-      fullPath: "/teacher/courses/$courseId/invite"
-      preLoaderRoute: typeof TeacherCoursesCourseIdInviteRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/invite"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdInviteRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/knowledge-graph": {
-      id: "/teacher/courses/$courseId/knowledge-graph"
+    "/teacher/workspaces/$courseId/knowledge-graph": {
+      id: "/teacher/workspaces/$courseId/knowledge-graph"
       path: "/knowledge-graph"
-      fullPath: "/teacher/courses/$courseId/knowledge-graph"
-      preLoaderRoute: typeof TeacherCoursesCourseIdKnowledgeGraphRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/knowledge-graph"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdKnowledgeGraphRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/lti": {
-      id: "/teacher/courses/$courseId/lti"
+    "/teacher/workspaces/$courseId/lti": {
+      id: "/teacher/workspaces/$courseId/lti"
       path: "/lti"
-      fullPath: "/teacher/courses/$courseId/lti"
-      preLoaderRoute: typeof TeacherCoursesCourseIdLtiRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/lti"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdLtiRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/members": {
-      id: "/teacher/courses/$courseId/members"
+    "/teacher/workspaces/$courseId/members": {
+      id: "/teacher/workspaces/$courseId/members"
       path: "/members"
-      fullPath: "/teacher/courses/$courseId/members"
-      preLoaderRoute: typeof TeacherCoursesCourseIdMembersRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/members"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdMembersRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/play-designations": {
-      id: "/teacher/courses/$courseId/play-designations"
+    "/teacher/workspaces/$courseId/play-designations": {
+      id: "/teacher/workspaces/$courseId/play-designations"
       path: "/play-designations"
-      fullPath: "/teacher/courses/$courseId/play-designations"
-      preLoaderRoute: typeof TeacherCoursesCourseIdPlayDesignationsRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/play-designations"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdPlayDesignationsRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/rag": {
-      id: "/teacher/courses/$courseId/rag"
+    "/teacher/workspaces/$courseId/rag": {
+      id: "/teacher/workspaces/$courseId/rag"
       path: "/rag"
-      fullPath: "/teacher/courses/$courseId/rag"
-      preLoaderRoute: typeof TeacherCoursesCourseIdRagRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/rag"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdRagRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
     }
-    "/teacher/courses/$courseId/usage": {
-      id: "/teacher/courses/$courseId/usage"
+    "/teacher/workspaces/$courseId/usage": {
+      id: "/teacher/workspaces/$courseId/usage"
       path: "/usage"
-      fullPath: "/teacher/courses/$courseId/usage"
-      preLoaderRoute: typeof TeacherCoursesCourseIdUsageRouteImport
-      parentRoute: typeof TeacherCoursesCourseIdRoute
+      fullPath: "/teacher/workspaces/$courseId/usage"
+      preLoaderRoute: typeof TeacherWorkspacesCourseIdUsageRouteImport
+      parentRoute: typeof TeacherWorkspacesCourseIdRoute
+    }
+    "/workspaces/$workspaceId/cases/$caseId": {
+      id: "/workspaces/$workspaceId/cases/$caseId"
+      path: "/workspaces/$workspaceId/cases/$caseId"
+      fullPath: "/workspaces/$workspaceId/cases/$caseId"
+      preLoaderRoute: typeof WorkspacesWorkspaceIdCasesCaseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/workspaces/$workspaceId/cases/new": {
+      id: "/workspaces/$workspaceId/cases/new"
+      path: "/workspaces/$workspaceId/cases/new"
+      fullPath: "/workspaces/$workspaceId/cases/new"
+      preLoaderRoute: typeof WorkspacesWorkspaceIdCasesNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/workspaces/$workspaceId/conversations/$conversationId": {
+      id: "/workspaces/$workspaceId/conversations/$conversationId"
+      path: "/workspaces/$workspaceId/conversations/$conversationId"
+      fullPath: "/workspaces/$workspaceId/conversations/$conversationId"
+      preLoaderRoute: typeof WorkspacesWorkspaceIdConversationsConversationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/workspaces/$workspaceId/conversations/new": {
+      id: "/workspaces/$workspaceId/conversations/new"
+      path: "/workspaces/$workspaceId/conversations/new"
+      fullPath: "/workspaces/$workspaceId/conversations/new"
+      preLoaderRoute: typeof WorkspacesWorkspaceIdConversationsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/admin/lti_/platforms/$platformId/approve": {
+      id: "/admin/lti_/platforms/$platformId/approve"
+      path: "/lti/platforms/$platformId/approve"
+      fullPath: "/admin/lti/platforms/$platformId/approve"
+      preLoaderRoute: typeof AdminLtiPlatformsPlatformIdApproveRouteImport
+      parentRoute: typeof AdminRoute
     }
   }
 }
@@ -965,10 +1231,13 @@ interface AdminRouteChildren {
   AdminRulesRoute: typeof AdminRulesRoute
   AdminSystemRoute: typeof AdminSystemRoute
   AdminUsersRoute: typeof AdminUsersRoute
+  AdminWorkspacesRoute: typeof AdminWorkspacesRoute
   AdminIndexRoute: typeof AdminIndexRoute
   AdminLtiApprovePlatformIdRoute: typeof AdminLtiApprovePlatformIdRoute
   AdminUsageUserIdRoute: typeof AdminUsageUserIdRoute
   AdminUsageIndexRoute: typeof AdminUsageIndexRoute
+  AdminUsersUserIdUsageRoute: typeof AdminUsersUserIdUsageRoute
+  AdminLtiPlatformsPlatformIdApproveRoute: typeof AdminLtiPlatformsPlatformIdApproveRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
@@ -982,10 +1251,14 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminRulesRoute: AdminRulesRoute,
   AdminSystemRoute: AdminSystemRoute,
   AdminUsersRoute: AdminUsersRoute,
+  AdminWorkspacesRoute: AdminWorkspacesRoute,
   AdminIndexRoute: AdminIndexRoute,
   AdminLtiApprovePlatformIdRoute: AdminLtiApprovePlatformIdRoute,
   AdminUsageUserIdRoute: AdminUsageUserIdRoute,
   AdminUsageIndexRoute: AdminUsageIndexRoute,
+  AdminUsersUserIdUsageRoute: AdminUsersUserIdUsageRoute,
+  AdminLtiPlatformsPlatformIdApproveRoute:
+    AdminLtiPlatformsPlatformIdApproveRoute,
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
@@ -1006,45 +1279,48 @@ const TeacherPortalRouteWithChildren = TeacherPortalRoute._addFileChildren(
   TeacherPortalRouteChildren,
 )
 
-interface TeacherCoursesCourseIdRouteChildren {
-  TeacherCoursesCourseIdApiKeysRoute: typeof TeacherCoursesCourseIdApiKeysRoute
-  TeacherCoursesCourseIdCanvasRoute: typeof TeacherCoursesCourseIdCanvasRoute
-  TeacherCoursesCourseIdConfigRoute: typeof TeacherCoursesCourseIdConfigRoute
-  TeacherCoursesCourseIdConversationsRoute: typeof TeacherCoursesCourseIdConversationsRoute
-  TeacherCoursesCourseIdDocumentsRoute: typeof TeacherCoursesCourseIdDocumentsRoute
-  TeacherCoursesCourseIdInviteRoute: typeof TeacherCoursesCourseIdInviteRoute
-  TeacherCoursesCourseIdKnowledgeGraphRoute: typeof TeacherCoursesCourseIdKnowledgeGraphRoute
-  TeacherCoursesCourseIdLtiRoute: typeof TeacherCoursesCourseIdLtiRoute
-  TeacherCoursesCourseIdMembersRoute: typeof TeacherCoursesCourseIdMembersRoute
-  TeacherCoursesCourseIdPlayDesignationsRoute: typeof TeacherCoursesCourseIdPlayDesignationsRoute
-  TeacherCoursesCourseIdRagRoute: typeof TeacherCoursesCourseIdRagRoute
-  TeacherCoursesCourseIdUsageRoute: typeof TeacherCoursesCourseIdUsageRoute
-  TeacherCoursesCourseIdIndexRoute: typeof TeacherCoursesCourseIdIndexRoute
+interface TeacherWorkspacesCourseIdRouteChildren {
+  TeacherWorkspacesCourseIdApiKeysRoute: typeof TeacherWorkspacesCourseIdApiKeysRoute
+  TeacherWorkspacesCourseIdCanvasRoute: typeof TeacherWorkspacesCourseIdCanvasRoute
+  TeacherWorkspacesCourseIdConfigRoute: typeof TeacherWorkspacesCourseIdConfigRoute
+  TeacherWorkspacesCourseIdConversationsRoute: typeof TeacherWorkspacesCourseIdConversationsRoute
+  TeacherWorkspacesCourseIdDocumentsRoute: typeof TeacherWorkspacesCourseIdDocumentsRoute
+  TeacherWorkspacesCourseIdInviteRoute: typeof TeacherWorkspacesCourseIdInviteRoute
+  TeacherWorkspacesCourseIdKnowledgeGraphRoute: typeof TeacherWorkspacesCourseIdKnowledgeGraphRoute
+  TeacherWorkspacesCourseIdLtiRoute: typeof TeacherWorkspacesCourseIdLtiRoute
+  TeacherWorkspacesCourseIdMembersRoute: typeof TeacherWorkspacesCourseIdMembersRoute
+  TeacherWorkspacesCourseIdPlayDesignationsRoute: typeof TeacherWorkspacesCourseIdPlayDesignationsRoute
+  TeacherWorkspacesCourseIdRagRoute: typeof TeacherWorkspacesCourseIdRagRoute
+  TeacherWorkspacesCourseIdUsageRoute: typeof TeacherWorkspacesCourseIdUsageRoute
+  TeacherWorkspacesCourseIdIndexRoute: typeof TeacherWorkspacesCourseIdIndexRoute
 }
 
-const TeacherCoursesCourseIdRouteChildren: TeacherCoursesCourseIdRouteChildren =
+const TeacherWorkspacesCourseIdRouteChildren: TeacherWorkspacesCourseIdRouteChildren =
   {
-    TeacherCoursesCourseIdApiKeysRoute: TeacherCoursesCourseIdApiKeysRoute,
-    TeacherCoursesCourseIdCanvasRoute: TeacherCoursesCourseIdCanvasRoute,
-    TeacherCoursesCourseIdConfigRoute: TeacherCoursesCourseIdConfigRoute,
-    TeacherCoursesCourseIdConversationsRoute:
-      TeacherCoursesCourseIdConversationsRoute,
-    TeacherCoursesCourseIdDocumentsRoute: TeacherCoursesCourseIdDocumentsRoute,
-    TeacherCoursesCourseIdInviteRoute: TeacherCoursesCourseIdInviteRoute,
-    TeacherCoursesCourseIdKnowledgeGraphRoute:
-      TeacherCoursesCourseIdKnowledgeGraphRoute,
-    TeacherCoursesCourseIdLtiRoute: TeacherCoursesCourseIdLtiRoute,
-    TeacherCoursesCourseIdMembersRoute: TeacherCoursesCourseIdMembersRoute,
-    TeacherCoursesCourseIdPlayDesignationsRoute:
-      TeacherCoursesCourseIdPlayDesignationsRoute,
-    TeacherCoursesCourseIdRagRoute: TeacherCoursesCourseIdRagRoute,
-    TeacherCoursesCourseIdUsageRoute: TeacherCoursesCourseIdUsageRoute,
-    TeacherCoursesCourseIdIndexRoute: TeacherCoursesCourseIdIndexRoute,
+    TeacherWorkspacesCourseIdApiKeysRoute:
+      TeacherWorkspacesCourseIdApiKeysRoute,
+    TeacherWorkspacesCourseIdCanvasRoute: TeacherWorkspacesCourseIdCanvasRoute,
+    TeacherWorkspacesCourseIdConfigRoute: TeacherWorkspacesCourseIdConfigRoute,
+    TeacherWorkspacesCourseIdConversationsRoute:
+      TeacherWorkspacesCourseIdConversationsRoute,
+    TeacherWorkspacesCourseIdDocumentsRoute:
+      TeacherWorkspacesCourseIdDocumentsRoute,
+    TeacherWorkspacesCourseIdInviteRoute: TeacherWorkspacesCourseIdInviteRoute,
+    TeacherWorkspacesCourseIdKnowledgeGraphRoute:
+      TeacherWorkspacesCourseIdKnowledgeGraphRoute,
+    TeacherWorkspacesCourseIdLtiRoute: TeacherWorkspacesCourseIdLtiRoute,
+    TeacherWorkspacesCourseIdMembersRoute:
+      TeacherWorkspacesCourseIdMembersRoute,
+    TeacherWorkspacesCourseIdPlayDesignationsRoute:
+      TeacherWorkspacesCourseIdPlayDesignationsRoute,
+    TeacherWorkspacesCourseIdRagRoute: TeacherWorkspacesCourseIdRagRoute,
+    TeacherWorkspacesCourseIdUsageRoute: TeacherWorkspacesCourseIdUsageRoute,
+    TeacherWorkspacesCourseIdIndexRoute: TeacherWorkspacesCourseIdIndexRoute,
   }
 
-const TeacherCoursesCourseIdRouteWithChildren =
-  TeacherCoursesCourseIdRoute._addFileChildren(
-    TeacherCoursesCourseIdRouteChildren,
+const TeacherWorkspacesCourseIdRouteWithChildren =
+  TeacherWorkspacesCourseIdRoute._addFileChildren(
+    TeacherWorkspacesCourseIdRouteChildren,
   )
 
 const rootRouteChildren: RootRouteChildren = {
@@ -1056,15 +1332,27 @@ const rootRouteChildren: RootRouteChildren = {
   TeacherHelpRoute: TeacherHelpRoute,
   ConnectRequestIdRoute: ConnectRequestIdRoute,
   EmbedCourseIdRoute: EmbedCourseIdRoute,
+  InvitesTokenRoute: InvitesTokenRoute,
   JoinTokenRoute: JoinTokenRoute,
   LtiBindRoute: LtiBindRoute,
   TeacherPortalRoute: TeacherPortalRouteWithChildren,
   TeacherIndexRoute: TeacherIndexRoute,
   CourseCourseIdConversationIdRoute: CourseCourseIdConversationIdRoute,
   CourseCourseIdNewRoute: CourseCourseIdNewRoute,
+  EmbedCoursesCourseIdRoute: EmbedCoursesCourseIdRoute,
   LtiSetupPlatformIdRoute: LtiSetupPlatformIdRoute,
-  TeacherCoursesCourseIdRoute: TeacherCoursesCourseIdRouteWithChildren,
+  OauthRequestsRequestIdRoute: OauthRequestsRequestIdRoute,
+  TeacherWorkspacesCourseIdRoute: TeacherWorkspacesCourseIdRouteWithChildren,
   CourseCourseIdIndexRoute: CourseCourseIdIndexRoute,
+  WorkspacesWorkspaceIdIndexRoute: WorkspacesWorkspaceIdIndexRoute,
+  LtiPlatformsPlatformIdSetupRoute: LtiPlatformsPlatformIdSetupRoute,
+  TeacherCoursesCourseIdSplatRoute: TeacherCoursesCourseIdSplatRoute,
+  WorkspacesWorkspaceIdCasesCaseIdRoute: WorkspacesWorkspaceIdCasesCaseIdRoute,
+  WorkspacesWorkspaceIdCasesNewRoute: WorkspacesWorkspaceIdCasesNewRoute,
+  WorkspacesWorkspaceIdConversationsConversationIdRoute:
+    WorkspacesWorkspaceIdConversationsConversationIdRoute,
+  WorkspacesWorkspaceIdConversationsNewRoute:
+    WorkspacesWorkspaceIdConversationsNewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

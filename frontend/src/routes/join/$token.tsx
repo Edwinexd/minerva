@@ -1,6 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { JoinPage } from "@/components/join/join-page"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
+// Old invite address, kept as a redirect: join links already handed out
+// (course pages, emails) use it.
 export const Route = createFileRoute("/join/$token")({
-  component: () => <JoinPage useParams={Route.useParams} />,
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: "/invites/$token", params: { token: params.token }, replace: true })
+  },
 })

@@ -23,7 +23,7 @@ pub fn course_router() -> Router<AppState> {
 }
 
 pub fn join_router() -> Router<AppState> {
-    Router::new().route("/join/{token}", get(join_via_token))
+    Router::new().route("/invites/{token}", get(join_via_token))
 }
 
 #[derive(Serialize)]
@@ -76,7 +76,7 @@ async fn create_signed_url(
         id: row.id,
         course_id: row.course_id,
         token: row.token.clone(),
-        url: format!("/join/{}", row.token),
+        url: format!("/invites/{}", row.token),
         expires_at: row.expires_at,
         max_uses: row.max_uses,
         use_count: row.use_count,
@@ -97,7 +97,7 @@ async fn list_signed_urls(
                 id: r.id,
                 course_id: r.course_id,
                 token: r.token.clone(),
-                url: format!("/join/{}", r.token),
+                url: format!("/invites/{}", r.token),
                 expires_at: r.expires_at,
                 max_uses: r.max_uses,
                 use_count: r.use_count,

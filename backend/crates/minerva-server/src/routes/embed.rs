@@ -39,21 +39,21 @@ pub fn router() -> Router<AppState> {
             "/figures/{grant}",
             get(super::visual_extraction::figure_image),
         )
-        .route("/course/{course_id}", get(get_course))
+        .route("/courses/{course_id}", get(get_course))
         .route(
-            "/course/{course_id}/conversations",
+            "/courses/{course_id}/conversations",
             get(list_conversations).post(start_conversation),
         )
         .route(
-            "/course/{course_id}/conversations/pinned",
+            "/courses/{course_id}/conversations/pinned",
             get(list_pinned_conversations),
         )
         .route(
-            "/course/{course_id}/conversations/{cid}",
+            "/courses/{course_id}/conversations/{cid}",
             get(get_conversation),
         )
         .route(
-            "/course/{course_id}/conversations/{cid}/message",
+            "/courses/{course_id}/conversations/{cid}/message",
             post(send_message),
         )
         // Split a conversation that hit the course's per-conversation
@@ -61,11 +61,11 @@ pub fn router() -> Router<AppState> {
         // the embed surface too, so the escape hatch has to exist here
         // as well or an LTI student is simply stuck.
         .route(
-            "/course/{course_id}/conversations/{cid}/continue",
+            "/courses/{course_id}/conversations/{cid}/continue",
             post(continue_conversation),
         )
         .route(
-            "/course/{course_id}/conversations/{cid}/branch",
+            "/courses/{course_id}/conversations/{cid}/branch",
             post(branch_conversation),
         )
         // Mirrors the Shibboleth chat router's mark-read. The embed
@@ -74,25 +74,25 @@ pub fn router() -> Router<AppState> {
         // `student_last_viewed_at`; no teacher branch like the
         // Shibboleth handler has.
         .route(
-            "/course/{course_id}/conversations/{cid}/mark-read",
+            "/courses/{course_id}/conversations/{cid}/mark-read",
             post(mark_read),
         )
-        .route("/course/{course_id}/me", get(get_me))
+        .route("/courses/{course_id}/me", get(get_me))
         .route(
-            "/course/{course_id}/acknowledge-privacy",
+            "/courses/{course_id}/acknowledge-privacy",
             post(acknowledge_privacy),
         )
         // Mirrors the Shibboleth chat router's live aegis analyzer
         // endpoint. Same `analyze_prompt_for_user` helper backs
         // both; the only difference here is the embed-token auth
         // flow + token in the body.
-        .route("/course/{course_id}/aegis/analyze", post(analyze_prompt))
+        .route("/courses/{course_id}/aegis/analyze", post(analyze_prompt))
         // Mirrors the Shibboleth aegis rewrite route. Used by the
         // panel's "Some ideas" button to revise a draft with the
         // suggestions baked in.
-        .route("/course/{course_id}/aegis/rewrite", post(rewrite_prompt))
+        .route("/courses/{course_id}/aegis/rewrite", post(rewrite_prompt))
         .route(
-            "/course/{course_id}/suggested-questions",
+            "/courses/{course_id}/suggested-questions",
             get(suggested_questions_handler),
         )
 }
@@ -508,7 +508,7 @@ async fn get_conversation(
     }))
 }
 
-/// `POST /embed/course/{course_id}/conversations/{cid}/continue`
+/// `POST /embed/courses/{course_id}/conversations/{cid}/continue`
 ///
 /// Embed-token counterpart to the Shibboleth route. The token is
 /// owner-scoped, and `split` re-checks conversation ownership against
@@ -528,7 +528,7 @@ async fn continue_conversation(
     ))
 }
 
-/// `POST /embed/course/{course_id}/conversations/{cid}/branch`
+/// `POST /embed/courses/{course_id}/conversations/{cid}/branch`
 ///
 /// Embed-token counterpart to the Shibboleth branch route.
 async fn branch_conversation(

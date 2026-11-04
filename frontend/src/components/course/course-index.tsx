@@ -2,17 +2,17 @@ import { useNavigate } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { courseQuery } from "@/lib/queries"
 import { Skeleton } from "@/components/ui/skeleton"
+import { chatLink } from "@/lib/workspace-routes"
 import { CreditTransferWorkspacePage } from "@/components/credit-transfer/workspace-page"
 import type { WorkspaceTab } from "@/components/credit-transfer/tabs"
 
 export function CourseIndex({
-  useParams,
+  courseId,
   useSearch,
 }: {
-  useParams: () => { courseId: string }
+  courseId: string
   useSearch: () => { tab?: WorkspaceTab }
 }) {
-  const { courseId } = useParams()
   const { tab } = useSearch()
   const navigate = useNavigate()
   // Course load gates the redirect to a fresh `/new` chat. Previously
@@ -29,11 +29,7 @@ export function CourseIndex({
   }
 
   if (course) {
-    navigate({
-      to: "/course/$courseId/new",
-      params: { courseId },
-      replace: true,
-    })
+    navigate({ ...chatLink(course.kind, courseId, null), replace: true })
   }
 
   return (

@@ -7,7 +7,7 @@
 //!   `/.well-known/oauth-authorization-server` describe the endpoints.
 //! * `GET /api/oauth/authorize` sits behind Shibboleth like the rest of the
 //!   site: it validates the request, parks it, and sends the browser to the
-//!   SPA consent page `/connect/{id}`, which approves or denies through
+//!   SPA consent page `/oauth/requests/{id}`, which approves or denies through
 //!   `/api/oauth/requests/{id}/...`.
 //! * `/api/oauth/token`, `/register` and `/revoke` are called by the client
 //!   itself and are exempt from Shibboleth (see `apache/minerva-app.conf`).
@@ -415,7 +415,7 @@ async fn authorize(
         tracing::error!("oauth: storing pending authorization failed: {e}");
         return fail("server_error", "could not store the request");
     }
-    Redirect::to(&format!("/connect/{id}")).into_response()
+    Redirect::to(&format!("/oauth/requests/{id}")).into_response()
 }
 
 #[derive(Serialize)]

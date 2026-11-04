@@ -113,7 +113,7 @@ export function InvitePage({ useParams }: { useParams: () => { courseId: string 
             <ListRow key={link.id}>
               <div className="space-y-1 flex-1 min-w-0">
                 <code className="text-xs bg-muted px-2 py-1 rounded block truncate">
-                  {window.location.origin}/join/{link.token}
+                  {window.location.origin}/invites/{link.token}
                 </code>
                 <div className="flex gap-3 text-xs text-muted-foreground">
                   <span>{t("invite.expires")} <RelativeTime date={link.expires_at} /></span>
@@ -129,7 +129,7 @@ export function InvitePage({ useParams }: { useParams: () => { courseId: string 
                   variant="outline"
                   size="sm"
                   onClick={() =>
-                    copyText(`${window.location.origin}/join/${link.token}`)
+                    copyText(`${window.location.origin}/invites/${link.token}`)
                   }
                 >
                   {tCommon("actions.copy")}

@@ -111,35 +111,35 @@ if (!adminUserId) throw new Error("dev seed produced no users")
 // job's wall-clock sane; the goal is one instance of each distinct layout.
 const authenticated = [
   "/",
-  `/course/${course.id}`,
-  `/course/${course.id}/new`,
+  `/workspaces/${course.id}`,
+  `/workspaces/${course.id}/conversations/new`,
   // Populated transcript: the only state in which the scroll region exists.
-  `/course/${course.id}/${conversation.id}`,
-  `/teacher/courses/${course.id}`,
-  `/teacher/courses/${course.id}/members`,
-  `/teacher/courses/${course.id}/documents`,
-  `/teacher/courses/${course.id}/conversations`,
-  `/teacher/courses/${course.id}/rag`,
-  `/teacher/courses/${course.id}/usage`,
-  `/teacher/courses/${course.id}/invite`,
+  `/workspaces/${course.id}/conversations/${conversation.id}`,
+  `/teacher/workspaces/${course.id}`,
+  `/teacher/workspaces/${course.id}/members`,
+  `/teacher/workspaces/${course.id}/documents`,
+  `/teacher/workspaces/${course.id}/conversations`,
+  `/teacher/workspaces/${course.id}/rag`,
+  `/teacher/workspaces/${course.id}/usage`,
+  `/teacher/workspaces/${course.id}/invite`,
   // Canonical paths, not the `/teacher` and `/teacher-help` redirects
   // that used to stand in for them: pa11y follows the redirect either
   // way, so naming the target is the only way the list says what it
   // actually audits.
   "/teacher/usage",
   "/teacher/assistants",
-  `/course/${creditTransfer.id}`,
-  `/course/${creditTransfer.id}?tab=plans`,
-  `/course/${creditTransfer.id}/new`,
+  `/workspaces/${creditTransfer.id}`,
+  `/workspaces/${creditTransfer.id}?tab=plans`,
+  `/workspaces/${creditTransfer.id}/cases/new`,
   "/teacher/guide",
-  "/admin/courses",
+  "/admin/workspaces",
   "/admin/users",
   "/admin/rules",
   // Catalog role controls and the horizontally scrolling model tables.
   "/admin/defaults",
   // The per-account spend drill-down, which renders the same panels as
   // the teacher's own page against another user's id.
-  `/admin/usage/${adminUserId}`,
+  `/admin/users/${adminUserId}/usage`,
 ]
 
 // `.pa11yci.json` holds paths, not absolute URLs, so $MINERVA_BASE_URL is the
@@ -162,7 +162,7 @@ const config = {
     // text there (needs review, `elmPartiallyObscured`, ratio 0) and pa11y
     // counts that as an error. Fitting it lets axe measure every line.
     {
-      url: `${BASE}/course/${creditTransfer.id}/${assessedCase.id}`,
+      url: `${BASE}/workspaces/${creditTransfer.id}/cases/${assessedCase.id}`,
       headers: asAdmin,
       viewport: { width: 1280, height: 1600 },
     },
@@ -170,7 +170,7 @@ const config = {
     // deliberately small: the iframe is where an overflowing transcript was
     // first caught, and the rule only applies when content actually overflows.
     {
-      url: `${BASE}/embed/${course.id}?token=${token}`,
+      url: `${BASE}/embed/courses/${course.id}?token=${token}`,
       viewport: { width: 640, height: 480 },
     },
   ],

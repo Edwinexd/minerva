@@ -30,7 +30,7 @@ export const coursesQuery = queryOptions({
  */
 export const adminCoursesQuery = queryOptions({
   queryKey: ["admin", "courses"],
-  queryFn: () => api.get<Course[]>("/admin/courses"),
+  queryFn: () => api.get<Course[]>("/admin/workspaces"),
 })
 
 /**

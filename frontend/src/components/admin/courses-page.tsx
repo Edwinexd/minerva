@@ -283,7 +283,7 @@ export function CourseManagementPanel() {
                     </td>
                     <td className="py-2 pr-4">
                       <Link
-                        to="/teacher/courses/$courseId/config"
+                        to="/teacher/workspaces/$courseId/config"
                         params={{ courseId: course.id }}
                         className="text-primary underline-offset-4 hover:underline"
                       >
@@ -350,7 +350,7 @@ function CourseFeatureFlagsCell({
     queryKey: ["admin", "courses", courseId, "feature-flags"],
     queryFn: () =>
       api.get<CourseFeatureFlagsResponse>(
-        `/admin/courses/${courseId}/feature-flags`,
+        `/admin/workspaces/${courseId}/feature-flags`,
       ),
     // Only fetch when the dialog opens; saves N admin-courses
     // queries on initial page load. The cell summary uses the
@@ -368,7 +368,7 @@ function CourseFeatureFlagsCell({
       enabled: boolean | null
     }) =>
       api.put<CourseFeatureFlagsResponse>(
-        `/admin/courses/${courseId}/feature-flags`,
+        `/admin/workspaces/${courseId}/feature-flags`,
         { flags: { [flag]: enabled } },
       ),
     onSuccess: (data) => {
@@ -695,8 +695,8 @@ function CourseActionsCell({
   const toggleArchiveMutation = useMutation({
     mutationFn: () =>
       course.active
-        ? api.post(`/admin/courses/${course.id}/archive`, {})
-        : api.post(`/admin/courses/${course.id}/unarchive`, {}),
+        ? api.post(`/admin/workspaces/${course.id}/archive`, {})
+        : api.post(`/admin/workspaces/${course.id}/unarchive`, {}),
     onSuccess: () => {
       invalidateCourseCaches(queryClient)
     },
@@ -1140,8 +1140,8 @@ function BulkActionBar({
     }) =>
       api.post<BulkResponse>(
         kind === "archive"
-          ? "/admin/courses/bulk-archive"
-          : "/admin/courses/bulk-unarchive",
+          ? "/admin/workspaces/bulk-archive"
+          : "/admin/workspaces/bulk-unarchive",
         { course_ids: ids },
       ),
     onSuccess: (data) => {
@@ -1462,7 +1462,7 @@ function BulkEditDialog({
 
   const mutation = useMutation({
     mutationFn: () =>
-      api.post<BulkResponse>("/admin/courses/bulk", {
+      api.post<BulkResponse>("/admin/workspaces/bulk", {
         course_ids: selected.map((c) => c.id),
         patch,
         feature_flags: flags,

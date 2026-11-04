@@ -21,7 +21,7 @@
  *     `promptAnalyses` / `isLoading`, which is what this component
  *     consumes.
  *   * Conversation-creation hand-off. Shibboleth navigates to
- *     `/course/$courseId/$conversationId`; embed flips
+ *     `/workspaces/$workspaceId/conversations/$conversationId`; embed flips
  *     `setActiveConvId` and stays at the same iframe URL.
  *   * Post-send refresh. Shibboleth invalidates the React Query
  *     cache; embed reloads conversation detail via `embedGet`.
@@ -660,7 +660,7 @@ export function ChatSurface<M extends ChatBubbleMessage>({
           greeting's h2 (which only renders on an empty conversation)
           would be the first heading a screen reader hits. */}
       <h1 className="sr-only">{labels.heading}</h1>
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* A long transcript scrolls, and its content is frequently plain
             text with nothing tabbable inside, which leaves keyboard-only
             users unable to reach the scrollbar at all (WCAG 2.1.1). Making
@@ -671,7 +671,11 @@ export function ChatSurface<M extends ChatBubbleMessage>({
             pages.a11y.test.tsx asserts the attributes directly instead. */}
         <section
           ref={transcriptScrollRef}
-          className={`flex-1 overflow-y-auto ${layout.transcriptScroll}`}
+          // `relative` makes this the containing block of absolutely
+          // positioned descendants (the sr-only "opens in a new tab"
+          // labels), so they scroll with the transcript instead of
+          // stretching the page past the chat.
+          className={`relative flex-1 overflow-y-auto ${layout.transcriptScroll}`}
           // jsx-a11y wants tabindex only on interactive elements, but axe's
           // `scrollable-region-focusable` wants it exactly here; the two rules
           // disagree for scrollable regions. axe wins: without this the

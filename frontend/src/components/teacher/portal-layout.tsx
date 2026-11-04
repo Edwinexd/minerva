@@ -16,7 +16,7 @@ import {
  * the mobile Select / desktop Tabs pair.
  *
  * It is a pathless route (`teacher/_portal`) so it wraps only these
- * pages; `/teacher/courses/$courseId/*` keeps its own course-scoped tab
+ * pages; `/teacher/workspaces/$courseId/*` keeps its own course-scoped tab
  * bar and stays outside this shell.
  */
 const TAB_VALUES = ["usage", "assistants", "guide"] as const

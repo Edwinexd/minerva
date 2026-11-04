@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorText } from "@/components/ui/error-text"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AssistantsPage } from "@/components/teacher/assistants-page"
+import { chatLink } from "@/lib/workspace-routes"
 import { StatusBadge } from "./assessment-view"
 import { useDateFormat } from "./dates"
 import { WORKSPACE_TABS, type WorkspaceTab } from "./tabs"
@@ -51,8 +52,8 @@ export function CreditTransferWorkspacePage({
         onValueChange={(value: unknown) => {
           if (typeof value === "string" && (WORKSPACE_TABS as readonly string[]).includes(value)) {
             navigate({
-              to: "/course/$courseId",
-              params: { courseId: workspace.id },
+              to: "/workspaces/$workspaceId",
+              params: { workspaceId: workspace.id },
               search: { tab: value as WorkspaceTab },
               replace: true,
             })
@@ -67,7 +68,7 @@ export function CreditTransferWorkspacePage({
           </TabsList>
           {manages && (
             <Link
-              to="/teacher/courses/$courseId"
+              to="/teacher/workspaces/$courseId"
               params={{ courseId: workspace.id }}
               className="text-sm text-muted-foreground underline hover:text-foreground"
             >
@@ -101,7 +102,7 @@ function CasesTab({ workspaceId }: { workspaceId: string }) {
         <p className="text-sm text-muted-foreground">{t("creditTransfer.casesPrivate")}</p>
         <Button
           type="button"
-          onClick={() => navigate({ to: "/course/$courseId/new", params: { courseId: workspaceId } })}
+          onClick={() => navigate(chatLink("credit_transfer", workspaceId, null))}
         >
           {t("creditTransfer.newCase")}
         </Button>
@@ -135,8 +136,7 @@ function CasesTab({ workspaceId }: { workspaceId: string }) {
                 <tr key={c.id} className="border-b align-top last:border-b-0">
                   <td className="py-2 pr-3">
                     <Link
-                      to="/course/$courseId/$conversationId"
-                      params={{ courseId: workspaceId, conversationId: c.id }}
+                      {...chatLink("credit_transfer", workspaceId, c.id)}
                       className="font-medium hover:underline"
                     >
                       {c.title ?? t("creditTransfer.untitledCase")}

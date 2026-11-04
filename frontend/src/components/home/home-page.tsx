@@ -251,7 +251,7 @@ function CourseSection({
 function TeacherCourseCard({ course }: { course: Course }) {
   const { t } = useTranslation("common")
   return (
-    <Link to="/teacher/courses/$courseId" params={{ courseId: course.id }}>
+    <Link to="/teacher/workspaces/$courseId" params={{ courseId: course.id }}>
       <Card className="hover:border-foreground/20 transition-colors cursor-pointer h-full">
         <CardHeader>
           <div className="flex items-start justify-between gap-2">
@@ -309,7 +309,7 @@ function StudentCourseCard({
 }) {
   const { t } = useTranslation("common")
   return (
-    <Link to="/course/$courseId" params={{ courseId: course.id }}>
+    <Link to="/workspaces/$workspaceId" params={{ workspaceId: course.id }}>
       <Card className="hover:border-foreground/20 transition-colors cursor-pointer h-full">
         <CardHeader>
           <div className="flex items-start justify-between gap-2">
@@ -520,7 +520,7 @@ function StaffToolCard({ workspace }: { workspace: Course }) {
   // Same card as a course: the whole card opens the workspace, the
   // badge on the right says what it is, chips below say what is in it.
   return (
-    <Link to="/course/$courseId" params={{ courseId: workspace.id }}>
+    <Link to="/workspaces/$workspaceId" params={{ workspaceId: workspace.id }}>
       <Card className="hover:border-foreground/20 transition-colors cursor-pointer h-full">
         <CardHeader>
           <div className="flex items-start justify-between gap-2">

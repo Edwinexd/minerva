@@ -1,6 +1,12 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { EmbedPage } from "@/components/embed/embed-page"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
+// Old embed address, kept as a redirect with its query (the launch token)
+// for an LTI frame opened before the move.
 export const Route = createFileRoute("/embed/$courseId")({
-  component: () => <EmbedPage useParams={Route.useParams} />,
+  beforeLoad: ({ params, location }) => {
+    throw redirect({
+      href: `/embed/courses/${params.courseId}${location.searchStr}`,
+      replace: true,
+    })
+  },
 })

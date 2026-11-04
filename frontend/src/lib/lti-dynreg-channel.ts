@@ -4,7 +4,7 @@
 // Flow:
 //   1. LMS admin completes dynreg in the iframe; sees a success card with
 //      an "Open Minerva to approve" link.
-//   2. They click the link; a new tab loads /admin/lti-approve/<id>.
+//   2. They click the link; a new tab loads /admin/lti/platforms/<id>/approve.
 //   3. They (or another integrator on the same machine) approve.
 //   4. The approve page posts {type:"approved", platformId} on this
 //      channel.

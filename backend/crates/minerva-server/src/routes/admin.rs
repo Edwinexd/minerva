@@ -41,20 +41,20 @@ pub fn router() -> Router<AppState> {
         // archive / restore. Distinct from the teacher-facing
         // `/courses` router so it can surface archived rows and the
         // admin-only merge.
-        .route("/courses", get(list_all_courses))
+        .route("/workspaces", get(list_all_courses))
         .route("/courses/merge-suggestions", get(merge_suggestions))
         .route("/courses/merge", post(merge_courses))
-        .route("/courses/{id}/archive", post(archive_course))
-        .route("/courses/{id}/unarchive", post(unarchive_course))
+        .route("/workspaces/{id}/archive", post(archive_course))
+        .route("/workspaces/{id}/unarchive", post(unarchive_course))
         // Bulk actions over a multi-selected set of courses: a settings
         // + feature-flag patch (`/bulk`), or a lifecycle action
         // (`/bulk-archive`, `/bulk-unarchive`). Each reports per-course
         // results so a partial batch is transparent.
-        .route("/courses/bulk", post(bulk_update_courses))
-        .route("/courses/bulk-archive", post(bulk_archive_courses))
-        .route("/courses/bulk-unarchive", post(bulk_unarchive_courses))
+        .route("/workspaces/bulk", post(bulk_update_courses))
+        .route("/workspaces/bulk-archive", post(bulk_archive_courses))
+        .route("/workspaces/bulk-unarchive", post(bulk_unarchive_courses))
         .route(
-            "/courses/{course_id}/feature-flags",
+            "/workspaces/{course_id}/feature-flags",
             get(get_course_feature_flags).put(set_course_feature_flags),
         )
         .route(

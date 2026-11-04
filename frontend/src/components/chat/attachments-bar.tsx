@@ -4,6 +4,7 @@ import { useId, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Paperclip, X } from "lucide-react"
 import { api } from "@/lib/api"
+import { chatLink } from "@/lib/workspace-routes"
 import { attachmentsQuery } from "@/lib/queries"
 import type { ConversationAttachment } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -53,10 +54,7 @@ export function AttachmentsBar({
       queryClient.invalidateQueries({ queryKey: ["courses", courseId, "conversations"] })
       queryClient.invalidateQueries({ queryKey: ["courses", courseId, "credit-transfer"] })
       if (conversationId === null) {
-        navigate({
-          to: "/course/$courseId/$conversationId",
-          params: { courseId, conversationId: conversation_id },
-        })
+        navigate(chatLink("credit_transfer", courseId, conversation_id))
       }
     },
   })

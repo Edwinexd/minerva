@@ -280,7 +280,7 @@ export function OwnerUsageView({
                       <td className="py-2 pr-4">
                         {course.active ? (
                           <Link
-                            to="/teacher/courses/$courseId/usage"
+                            to="/teacher/workspaces/$courseId/usage"
                             params={{ courseId: course.id }}
                             className="underline hover:text-foreground"
                           >

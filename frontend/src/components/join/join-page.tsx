@@ -17,11 +17,11 @@ export function JoinPage({ useParams }: { useParams: () => { token: string } }) 
 
   useEffect(() => {
     api
-      .get<{ joined: boolean; course_id: string }>(`/join/${token}`)
+      .get<{ joined: boolean; course_id: string }>(`/invites/${token}`)
       .then((data) => {
         navigate({
-          to: "/course/$courseId",
-          params: { courseId: data.course_id },
+          to: "/workspaces/$workspaceId",
+          params: { workspaceId: data.course_id },
           replace: true,
         })
       })

@@ -40,7 +40,7 @@ const INTEGRATOR_TABS: readonly TabValue[] = ["lti", "integrations"]
 const TAB_ROUTES = {
   usage: "/admin/usage",
   users: "/admin/users",
-  courses: "/admin/courses",
+  courses: "/admin/workspaces",
   daisy: "/admin/daisy",
   rules: "/admin/rules",
   "external-invites": "/admin/external-invites",
@@ -107,19 +107,23 @@ export function AdminLayout() {
 
   // Most admin sub-pages put the tab name as the last path segment
   // (`/admin/users` -> tab "users"), but a couple of focused sub-flows
-  // live under deeper paths (e.g. `/admin/lti-approve/<id>` belongs to
+  // live under deeper paths (e.g. `/admin/lti/platforms/<id>/approve` belongs to
   // the "lti" tab). Map those overrides explicitly; everything else
   // falls back to last-segment matching.
+  const userUsage = /^\/admin\/users\/[^/]+\/usage$/.test(location.pathname)
   const pathOverrideTab: TabValue | null = location.pathname.startsWith(
-    "/admin/lti-approve",
+    "/admin/lti/platforms",
   )
     ? "lti"
-    : // `/admin/usage/<user>` is the per-account drill-down; its last
-      // segment is an id, so name the tab it belongs to explicitly
-      // rather than leaning on the fallback.
-      location.pathname.startsWith("/admin/usage/")
+    : // `/admin/users/<id>/usage` is the per-account spend drill-down,
+      // reached from the usage tab, so it stays under that tab.
+      userUsage
       ? "usage"
-      : null
+      : // The tab is still called "courses" internally; its page lists
+        // every workspace.
+        location.pathname.startsWith("/admin/workspaces")
+        ? "courses"
+        : null
   const lastSegment = location.pathname.split("/").pop() || ""
   const activeTab: TabValue =
     pathOverrideTab ??
@@ -131,7 +135,7 @@ export function AdminLayout() {
   // specific title (e.g. the LTI approve page). Passing `undefined` keeps
   // this layout's effect from overwriting it.
   useDocumentTitle(
-    pathOverrideTab && !location.pathname.startsWith("/admin/usage/")
+    pathOverrideTab && pathOverrideTab !== "courses" && !userUsage
       ? undefined
       : `${tCommon("pageTitles.admin")} – ${tCommon(TAB_TITLE_KEYS[activeTab])}`,
   )

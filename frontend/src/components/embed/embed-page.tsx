@@ -230,7 +230,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
     if (!token) return
     try {
       const convs = await embedGet<EmbedConversation[]>(
-        `/course/${courseId}/conversations`,
+        `/courses/${courseId}/conversations`,
         token,
       )
       setConversations(convs)
@@ -246,7 +246,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
   // Best-effort; failure just leaves the dot up.
   useEffect(() => {
     if (!token || activeConvId === null) return
-    void embedPost(`/course/${courseId}/conversations/${activeConvId}/mark-read`, token)
+    void embedPost(`/courses/${courseId}/conversations/${activeConvId}/mark-read`, token)
       .then(() => void refreshConversations())
       .catch(() => {
         // Cosmetic; ignore.
@@ -266,16 +266,16 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
     ;(async () => {
       try {
         const [c, convs, m, pins, suggestions] = await Promise.all([
-          embedGet<EmbedCourse>(`/course/${courseId}`, token),
-          embedGet<EmbedConversation[]>(`/course/${courseId}/conversations`, token),
-          embedGet<EmbedMe>(`/course/${courseId}/me`, token),
+          embedGet<EmbedCourse>(`/courses/${courseId}`, token),
+          embedGet<EmbedConversation[]>(`/courses/${courseId}/conversations`, token),
+          embedGet<EmbedMe>(`/courses/${courseId}/me`, token),
           embedGet<EmbedPinnedConversation[]>(
-            `/course/${courseId}/conversations/pinned`,
+            `/courses/${courseId}/conversations/pinned`,
             token,
           ).catch(() => [] as EmbedPinnedConversation[]),
           // Soft-failures collapse to no chips; greeting still renders.
           embedGet<{ questions: string[] }>(
-            `/course/${courseId}/suggested-questions`,
+            `/courses/${courseId}/suggested-questions`,
             token,
           ).catch(() => ({ questions: [] as string[] })),
         ])
@@ -298,7 +298,7 @@ export function EmbedPage({ useParams }: { useParams: () => { courseId: string }
 
   const acknowledgePrivacy = async () => {
     if (!token) return
-    await embedPost<{ ok: boolean }>(`/course/${courseId}/acknowledge-privacy`, token)
+    await embedPost<{ ok: boolean }>(`/courses/${courseId}/acknowledge-privacy`, token)
     setMe((prev) => (prev ? { ...prev, privacy_acknowledged_at: new Date().toISOString() } : prev))
   }
 
@@ -511,7 +511,7 @@ function EmbedChatWindow({
    */
   aegisEnabled?: boolean
   // Greeting + chip strip data; threaded from the parent so the
-  // embed-only `/me` + `/course` fetches stay where they already live.
+  // embed-only `/me` + `/courses/{id}` fetches stay where they already live.
   courseName?: string | null
   displayName?: string | null
   suggestedQuestions?: string[]
@@ -555,7 +555,7 @@ function EmbedChatWindow({
   useEffect(() => {
     if (conversationId === null) return
     let cancelled = false
-    embedGet<EmbedConversationDetail>(`/course/${courseId}/conversations/${conversationId}`, token)
+    embedGet<EmbedConversationDetail>(`/courses/${courseId}/conversations/${conversationId}`, token)
       .then((data) => {
         if (!cancelled) {
           setMessages(data.messages)
@@ -595,7 +595,7 @@ function EmbedChatWindow({
     conversationId,
     doSplit: (cid) =>
       embedPost<ConversationContinuation>(
-        `/course/${courseId}/conversations/${cid}/${limitAction}`,
+        `/courses/${courseId}/conversations/${cid}/${limitAction}`,
         token,
       ),
     onSplit: openContinuation,
@@ -609,8 +609,8 @@ function EmbedChatWindow({
   >(
     ({ content, existingConvId, analysisAtSend }) => {
       const url = existingConvId
-        ? `/api/embed/course/${courseId}/conversations/${existingConvId}/message`
-        : `/api/embed/course/${courseId}/conversations`
+        ? `/api/embed/courses/${courseId}/conversations/${existingConvId}/message`
+        : `/api/embed/courses/${courseId}/conversations`
       return () =>
         fetch(url, {
           method: "POST",
@@ -631,7 +631,7 @@ function EmbedChatWindow({
     ChatSurfaceAdapter<EmbedMessage>["fetchLiveAnalysis"]
   >(
     async (content, previousSuggestions, mode, signal) => {
-      const res = await fetch(`/api/embed/course/${courseId}/aegis/analyze`, {
+      const res = await fetch(`/api/embed/courses/${courseId}/aegis/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -659,7 +659,7 @@ function EmbedChatWindow({
   >(
     async (draft, selected, mode) => {
       try {
-        const res = await fetch(`/api/embed/course/${courseId}/aegis/rewrite`, {
+        const res = await fetch(`/api/embed/courses/${courseId}/aegis/rewrite`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -692,7 +692,7 @@ function EmbedChatWindow({
       // (with metadata) replaces the optimistic streamed copy.
       try {
         const data = await embedGet<EmbedConversationDetail>(
-          `/course/${courseId}/conversations/${landedConvId}`,
+          `/courses/${courseId}/conversations/${landedConvId}`,
           token,
         )
         setMessages(data.messages)

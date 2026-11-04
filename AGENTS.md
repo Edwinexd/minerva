@@ -427,6 +427,19 @@ reference `courses`: Daisy offerings and staging, Play designations, LTI,
 Canvas, Moodle `api_keys`, join links (`signed_urls`), LTI role
 suggestions.
 
+Page URLs follow the same model, plural collections with a named
+segment between ids: `/workspaces/{id}` (a course goes straight to a new
+conversation, a credit transfer workspace has its own page),
+`/workspaces/{id}/conversations/{cid}` and, for credit transfer,
+`/workspaces/{id}/cases/{cid}`; workspace settings under
+`/teacher/workspaces/{id}/...`; `/admin/workspaces`,
+`/admin/users/{id}/usage`, `/admin/lti/platforms/{id}/approve`,
+`/lti/platforms/{id}/setup`, `/oauth/requests/{id}`, `/invites/{token}`
+and `/embed/courses/{id}`. The previous addresses (`/course/...`,
+`/teacher/courses/...`, `/join/...`, `/embed/{id}`, ...) are redirect-only
+routes, because links to them are already out in Moodle, emails and LMS
+frames; The chat links are built by `chatLink` in `lib/workspace-routes.ts`.
+
 API: generic endpoints live under `/api/workspaces/{id}/...`;
 course-only ones under `/api/courses/{id}/...` behind
 `routes::courses::require_course`, which 404s any other kind. The
@@ -480,7 +493,7 @@ teacher) can use it without a membership row.
   workspace as ordinary documents (`source_system = syllabus_archive`,
   `source_ref = {code}/{lang}`, kind locked to `syllabus`); a new version
   replaces its document, a dropped plan is orphaned.
-- `/course/{id}` is the workspace page, not a chat: My cases (a table of
+- `/workspaces/{id}` is the workspace page, not a chat: My cases (a table of
   the viewer's own cases with their best match), DSV course plans (every
   plan with level, versions and indexing state) and the MCP connector;
   `?tab=` picks the tab. Routes in `routes::credit_transfer`.
@@ -538,7 +551,7 @@ S256, Client ID Metadata Documents (fetched with SSRF guards) or
 dynamic registration, tokens bound to `{base}/mcp`, refresh tokens
 rotated with replay revoking the grant, `iss` in the authorization
 response. `/api/oauth/authorize` is Shibboleth-gated and hands off to
-the SPA consent page `/connect/{id}`; the discovery documents, `/mcp`
+the SPA consent page `/oauth/requests/{id}`; the discovery documents, `/mcp`
 and `/api/oauth/{token,register,revoke}` are exempt from Shibboleth in
 `apache/minerva-app.conf`. Users see and revoke connected assistants
 under Teacher, AI assistants.
@@ -919,8 +932,8 @@ Known, accepted gaps: a call whose stream errors mid-way reports no usage
 ## Teacher Portal
 
 `/teacher` is a pathless-layout section (`routes/teacher/_portal.tsx`)
-with two tabs, deliberately outside `/teacher/courses/$id/*` so the
-course pages keep their own tab bar:
+with two tabs, deliberately outside `/teacher/workspaces/$id/*` so the
+workspace pages keep their own tab bar:
 
 - **AI usage** (`/teacher/usage`, `GET /api/teacher/usage?days=N`):
   the caller's own spend against their owner cap. Today, a rolling

@@ -52,8 +52,8 @@ const firstCourseId = await page.evaluate(async () => {
 });
 
 if (firstCourseId) {
-  await snap(`/course/${firstCourseId}/new`, "02-chat-new.png", { settle: 2000 });
-  await snap(`/teacher/courses/${firstCourseId}`, "03-teacher-course-config.png", {
+  await snap(`/workspaces/${firstCourseId}/conversations/new`, "02-chat-new.png", { settle: 2000 });
+  await snap(`/teacher/workspaces/${firstCourseId}`, "03-teacher-course-config.png", {
     fullPage: true,
     settle: 2500,
   });

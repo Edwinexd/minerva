@@ -226,7 +226,7 @@ impl DaisyOfferingView {
 /// Per-course feature-flag snapshot, resolved through the runtime
 /// flag path (course row > global > compiled-in default). Shared
 /// between the Shibboleth `/courses/{id}` route and the embed
-/// `/embed/course/{id}` route; both surface the same shape so the
+/// `/embed/courses/{id}` route; both surface the same shape so the
 /// frontend can gate UI uniformly regardless of how the user
 /// reached the chat. Add new flags here AND in `resolve_workspace_flags`.
 #[derive(Serialize, Default)]

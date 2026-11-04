@@ -460,14 +460,12 @@ async fn create_workspace(
     let flags = resolve_workspace_flags(&state.db, row.id).await;
     // A just-created course has only its owner (added as a teacher
     // above), so there are no student members yet.
-    Ok(Json(WorkspaceResponse::from_row(
-        row,
-        course,
-        Some("teacher".into()),
-        flags,
-        Vec::new(),
-        0,
-    )))
+    let mut response =
+        WorkspaceResponse::from_row(row, course, Some("teacher".into()), flags, Vec::new(), 0);
+    response.case_retention_days = minerva_db::queries::credit_transfer::find(&state.db, id)
+        .await?
+        .map(|ct| ct.case_retention_days);
+    Ok(Json(response))
 }
 
 async fn get_workspace(

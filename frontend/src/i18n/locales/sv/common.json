@@ -124,6 +124,9 @@
       "semesterHint": "Använd VT (vårtermin) eller HT (hösttermin) plus 4-siffrigt år, t.ex. VT2026, HT2026.",
       "submit": "Skapa",
       "submitting": "Skapar…",
+      "titleCreditTransfer": "Skapa arbetsyta för tillgodoräknande",
+      "nameLabelWorkspace": "Namn",
+      "namePlaceholderCreditTransfer": "t.ex. Tillgodoräknande DSV",
       "kindLabel": "Typ",
       "kindCreditTransfer": "Tillgodoräknande (personalverktyg)",
       "semesterOptional": "Lämna tomt för en kurs utan termin."

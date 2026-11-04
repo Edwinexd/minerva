@@ -124,6 +124,9 @@
       "semesterHint": "Use VT (spring) or HT (autumn) plus a 4-digit year, e.g. VT2026, HT2026.",
       "submit": "Create",
       "submitting": "Creating…",
+      "titleCreditTransfer": "Create credit transfer workspace",
+      "nameLabelWorkspace": "Name",
+      "namePlaceholderCreditTransfer": "e.g. Credit transfer DSV",
       "kindLabel": "Kind",
       "kindCreditTransfer": "Credit transfer (staff tool)",
       "semesterOptional": "Leave empty for a course without a term."

@@ -8,6 +8,7 @@ import { useDocumentTitle } from "@/lib/use-document-title"
 import { isTeacherOrAbove } from "@/lib/roles"
 import { groupBySemester, type SemesterGroup } from "@/lib/semester"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Card,
   CardContent,
@@ -365,6 +366,11 @@ function CreateCourseForm({
   const { t } = useTranslation("common")
   const queryClient = useQueryClient()
   const [kind, setKind] = useState<WorkspaceKind>("course")
+  const kindItems: { value: WorkspaceKind; label: string }[] = [
+    { value: "course", label: t("home.workspaceKind.course") },
+    { value: "credit_transfer", label: t("home.create.kindCreditTransfer") },
+  ]
+  const isCourse = kind === "course"
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   // Pre-populate with the current semester. Teachers prepping the
@@ -387,7 +393,9 @@ function CreateCourseForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t("home.create.title")}</CardTitle>
+        <CardTitle>
+          {isCourse ? t("home.create.title") : t("home.create.titleCreditTransfer")}
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <form
@@ -399,7 +407,7 @@ function CreateCourseForm({
               description: description || null,
               kind,
               semester_label:
-                kind === "course" && semesterLabel.trim()
+                isCourse && semesterLabel.trim()
                   ? semesterLabel.trim().toUpperCase()
                   : null,
             })
@@ -408,20 +416,27 @@ function CreateCourseForm({
           {canChooseKind && (
             <div className="space-y-2">
               <Label htmlFor="workspace_kind">{t("home.create.kindLabel")}</Label>
-              <select
-                id="workspace_kind"
+              <Select
                 value={kind}
-                onChange={(e) => setKind(e.target.value as WorkspaceKind)}
-                className="block border rounded px-2 py-1.5 text-sm bg-background"
+                onValueChange={(v) => v && setKind(v as WorkspaceKind)}
+                items={kindItems}
               >
-                <option value="course">{t("home.workspaceKind.course")}</option>
-                <option value="credit_transfer">{t("home.create.kindCreditTransfer")}</option>
-              </select>
+                <SelectTrigger id="workspace_kind" className="w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {kindItems.map((k) => (
+                    <SelectItem key={k.value} value={k.value}>
+                      {k.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
           <div className="space-y-2">
             <Label htmlFor="name">
-              {t("home.create.nameLabel")}{" "}
+              {isCourse ? t("home.create.nameLabel") : t("home.create.nameLabelWorkspace")}{" "}
               <span className="text-destructive" aria-hidden="true">{t("forms.requiredMark")}</span>
               <span className="sr-only">{t("forms.requiredLabel")}</span>
             </Label>
@@ -429,11 +444,15 @@ function CreateCourseForm({
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={t("home.create.namePlaceholder")}
+              placeholder={
+                isCourse
+                  ? t("home.create.namePlaceholder")
+                  : t("home.create.namePlaceholderCreditTransfer")
+              }
               required
             />
           </div>
-          {kind === "course" && (
+          {isCourse && (
             <div className="space-y-2">
               <Label htmlFor="semester_label">{t("home.create.semesterLabel")}</Label>
               <Input

@@ -40,7 +40,8 @@
     "thinkingHiddenBody": "Tutorns resonemang för denna fråga hölls inne enligt kursens regler om akademisk hederlighet. Din lärare kan fortfarande se vad som genererades.",
     "thinkingHiddenRevealed": "Dolt för studenten",
     "thinkingHiddenRevealedBody": "Integritetsskyddet höll inne resonemanget för den här frågan. Studenten såg en platshållare här; du ser det för att du undervisar på kursen.",
-    "toolCallsAriaLabel": "Verktyg som assistenten anropade under research-fasen"
+    "toolCallsAriaLabel": "Verktyg som assistenten anropade under research-fasen",
+    "inputPlaceholderCase": "Fråga om ärendet, t.ex. vilken DSV-kurs det motsvarar…"
   },
   "message": {
     "tokensUsed_one": "{{count}} token",
@@ -164,5 +165,17 @@
     "nudgeTopicBody": "Chatten har blivit lång, och din senaste fråga ser ut att handla om något nytt. Flytta den till en ny chatt: frågan och svaret du fick följer med, och den här chatten ligger kvar i listan.",
     "blockedTopicBody": "Den här chatten har hunnit med mycket, och svaren blir vagare ju fler ämnen en och samma chatt bär på. Fortsätt i en ny chatt så följer din senaste fråga med, tillsammans med svaret du fick.",
     "askInNewChat": "Fråga i ny chatt"
+  },
+  "attachments": {
+    "startTitle": "Starta ett ärende",
+    "startHint": "Bifoga kursplanen för kursen som studenten läst någon annanstans. Minerva jämför den med DSV:s kursplaner.",
+    "attachFirst": "Bifoga kursplan",
+    "attachAnother": "Bifoga en fil till",
+    "uploading": "Laddar upp...",
+    "listLabel": "Filer i ärendet",
+    "remove": "Ta bort {{name}}",
+    "noText": "Ingen text kunde läsas ur filen",
+    "retention": "Ärendet och dess filer raderas {{days}} dagar efter senaste användning ({{date}}).",
+    "formats": "PDF, text eller HTML."
   }
 }

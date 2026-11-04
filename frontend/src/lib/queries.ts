@@ -1,6 +1,6 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, DevConfig, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiDiagnostics, LtiNrpsRun, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, OwnerUsage, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationAttachment, ConversationDetail, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, DevConfig, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, LtiDiagnostics, LtiNrpsRun, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, OwnerUsage, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -266,6 +266,15 @@ export const chatModelsQuery = queryOptions({
   queryFn: () => api.get<{ models: PublicChatModel[] }>("/chat-models-catalog"),
   staleTime: 60_000,
 })
+
+export const attachmentsQuery = (courseId: string, conversationId: string) =>
+  queryOptions({
+    queryKey: ["courses", courseId, "conversations", conversationId, "attachments"],
+    queryFn: () =>
+      api.get<ConversationAttachment[]>(
+        `/workspaces/${courseId}/conversations/${conversationId}/attachments`,
+      ),
+  })
 
 export const conversationsQuery = (courseId: string) =>
   queryOptions({

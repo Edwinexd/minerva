@@ -40,7 +40,8 @@
     "thinkingHiddenBody": "The tutor's reasoning for this turn was held back under the course's academic-integrity policy. Your teacher can still see what was generated.",
     "thinkingHiddenRevealed": "Hidden from the student",
     "thinkingHiddenRevealedBody": "The integrity guard held this reasoning back for this turn. The student saw a placeholder here; you see it because you teach this course.",
-    "toolCallsAriaLabel": "Tools the assistant called during research"
+    "toolCallsAriaLabel": "Tools the assistant called during research",
+    "inputPlaceholderCase": "Ask about this case, e.g. which DSV course it matches…"
   },
   "message": {
     "tokensUsed_one": "{{count}} token",
@@ -164,5 +165,17 @@
     "nudgeTopicBody": "This chat has grown long, and your latest question looks like a new topic. Move it to a new chat: your question and the answer you got come with you, and this chat stays in your list.",
     "blockedTopicBody": "This chat has covered a lot of ground, and answers get vaguer the more topics one chat carries. Continue in a new chat and your latest question comes with you, along with the answer you got.",
     "askInNewChat": "Ask in new chat"
+  },
+  "attachments": {
+    "startTitle": "Start a case",
+    "startHint": "Attach the syllabus of the course the student took elsewhere. Minerva compares it with DSV course plans.",
+    "attachFirst": "Attach syllabus",
+    "attachAnother": "Attach another file",
+    "uploading": "Uploading...",
+    "listLabel": "Files in this case",
+    "remove": "Remove {{name}}",
+    "noText": "No text could be read from this file",
+    "retention": "This case and its files are deleted {{days}} days after it was last used ({{date}}).",
+    "formats": "PDF, text or HTML."
   }
 }

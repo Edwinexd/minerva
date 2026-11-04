@@ -134,5 +134,10 @@
     "stale_attempt": "This attempt no longer holds the job.",
     "invalid_result": "The result could not be accepted: {{reason}}",
     "parent_unavailable": "The lecture's document is no longer in a state that accepts slides."
+  },
+  "attachment": {
+    "too_many": "A case can hold at most {{max}} files.",
+    "unsupported_type": "Files of type .{{ext}} are not supported. Use PDF, text or HTML.",
+    "no_text": "No text could be read from this file. If it is a scan, export it as a text PDF first."
   }
 }

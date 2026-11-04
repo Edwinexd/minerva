@@ -134,5 +134,10 @@
     "stale_attempt": "Det här försöket har inte längre jobbet.",
     "invalid_result": "Resultatet kunde inte tas emot: {{reason}}",
     "parent_unavailable": "Föreläsningens dokument tar inte längre emot bilder."
+  },
+  "attachment": {
+    "too_many": "Ett ärende kan ha högst {{max}} filer.",
+    "unsupported_type": "Filer av typen .{{ext}} stöds inte. Använd PDF, text eller HTML.",
+    "no_text": "Ingen text kunde läsas ur filen. Om den är inskannad, exportera den som en text-PDF först."
   }
 }

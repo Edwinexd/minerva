@@ -33,6 +33,7 @@ import { FeedbackControls } from "@/components/message-feedback"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import type { ChatBubbleLabels } from "./chat-bubble"
 import { ConversationList } from "./conversation-list"
+import { AttachmentsBar } from "./attachments-bar"
 import {
   ChatSurface,
   type ChatSurfaceAdapter,
@@ -168,6 +169,14 @@ function ChatPage({
       </div>
 
       <div className="flex-1 flex flex-col min-w-0 pt-10 md:pt-0">
+        {course?.kind === "credit_transfer" && (
+          <AttachmentsBar
+            courseId={courseId}
+            conversationId={conversationId}
+            retentionDays={course.case_retention_days}
+            lastUsed={conversations?.find((c) => c.id === conversationId)?.updated_at}
+          />
+        )}
         <ChatWindow
           courseId={courseId}
           conversationId={conversationId}
@@ -459,7 +468,10 @@ export function ChatWindow({
     unknownError: t("chat.unknownError"),
     send: t("chat.send"),
     askInNewChat: t("limit.askInNewChat"),
-    inputPlaceholder: t("chat.inputPlaceholder"),
+    inputPlaceholder:
+      course?.kind === "credit_transfer"
+        ? t("chat.inputPlaceholderCase")
+        : t("chat.inputPlaceholder"),
     inputLabel: t("chat.inputLabel"),
     heading: course?.name
       ? t("chat.heading", { course: course.name })

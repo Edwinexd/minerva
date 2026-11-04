@@ -153,6 +153,10 @@ pub(crate) struct WorkspaceResponse {
     /// fields below (`semester_label`, `course_code`, `auto_managed`,
     /// `daisy_offerings`) are empty for every other kind.
     kind: String,
+    /// Credit transfer only: days of inactivity after which a case and its
+    /// attachments are deleted. Filled on the single-workspace read, where
+    /// the chat page shows each case's deletion date.
+    case_retention_days: Option<i32>,
     /// Viewer's course_member role ("teacher"|"ta"|"student"), or None if
     /// viewer is admin-only / not a member. Lets the frontend gate UI tabs.
     my_role: Option<String>,
@@ -273,6 +277,7 @@ impl WorkspaceResponse {
             created_at: row.created_at,
             updated_at: row.updated_at,
             kind: row.kind,
+            case_retention_days: None,
             my_role,
             feature_flags,
             semester_label: course.as_ref().and_then(|c| c.semester_label.clone()),
@@ -484,14 +489,12 @@ async fn get_workspace(
     let offerings = resolve_course_offerings(&state.db, row.id).await;
     let student_count = minerva_db::queries::workspaces::count_students(&state.db, row.id).await?;
     let course = minerva_db::queries::courses::find(&state.db, row.id).await?;
-    Ok(Json(WorkspaceResponse::from_row(
-        row,
-        course,
-        my_role,
-        flags,
-        offerings,
-        student_count,
-    )))
+    let mut response =
+        WorkspaceResponse::from_row(row, course, my_role, flags, offerings, student_count);
+    response.case_retention_days = minerva_db::queries::credit_transfer::find(&state.db, id)
+        .await?
+        .map(|ct| ct.case_retention_days);
+    Ok(Json(response))
 }
 
 /// Sanity ceiling for the per-course, per-student daily USD spend cap.

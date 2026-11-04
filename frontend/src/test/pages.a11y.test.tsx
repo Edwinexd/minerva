@@ -96,6 +96,7 @@ import { RoleRulesPanel } from "@/components/admin/rules-page"
 import { OwnerUsagePage } from "@/components/teacher/owner-usage-page"
 import { AdminUserUsagePage } from "@/components/admin/user-usage-page"
 import { Home } from "@/components/home/home-page"
+import { AttachmentsBar } from "@/components/chat/attachments-bar"
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -706,6 +707,55 @@ describe("Authenticated pages a11y", () => {
     // The staff tool gets its own section, apart from the term-grouped courses.
     expect(getByText("Staff tools")).toBeInTheDocument()
     expect(getByText("Credit transfer")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("credit transfer case files have no axe violations", async () => {
+    const files = [
+      {
+        id: "att-1",
+        conversation_id: "conv-1",
+        filename: "KTH DD1337 kursplan.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 22403,
+        text_chars: 3487,
+        created_at: "2026-11-04T10:00:00Z",
+      },
+      {
+        id: "att-2",
+        conversation_id: "conv-1",
+        filename: "scan.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 9000,
+        text_chars: 3,
+        created_at: "2026-11-04T10:01:00Z",
+      },
+    ]
+    const { container, getByText, getByRole } = renderPage(
+      <AttachmentsBar
+        courseId="ws-ct"
+        conversationId="conv-1"
+        retentionDays={90}
+        lastUsed="2026-11-04T10:00:00Z"
+      />,
+      [[queries.attachmentsQuery("ws-ct", "conv-1").queryKey, files]],
+    )
+    expect(getByText("KTH DD1337 kursplan.pdf")).toBeInTheDocument()
+    expect(getByRole("button", { name: "Remove scan.pdf" })).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("starting a credit transfer case has no axe violations", async () => {
+    const { container, getByRole } = renderPage(
+      <AttachmentsBar
+        courseId="ws-ct"
+        conversationId={null}
+        retentionDays={90}
+        lastUsed={undefined}
+      />,
+      [],
+    )
+    expect(getByRole("button", { name: /Attach syllabus/ })).toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
   })
 })

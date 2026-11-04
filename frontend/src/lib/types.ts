@@ -16,6 +16,11 @@ export interface Course {
   id: string
   /** Course-only fields (term, code, Daisy) are empty for other kinds. */
   kind: WorkspaceKind
+  /**
+   * Credit transfer only, and only on the single-workspace read: days of
+   * inactivity after which a case and its attachments are deleted.
+   */
+  case_retention_days?: number | null
   name: string
   description: string | null
   owner_id: string
@@ -1161,4 +1166,16 @@ export interface Document {
 export interface DevConfig {
   dev_mode: boolean
   users?: { eppn: string; label: string }[]
+}
+
+/** A file attached to one conversation (a credit transfer case). */
+export interface ConversationAttachment {
+  id: string
+  conversation_id: string
+  filename: string
+  mime_type: string
+  size_bytes: number
+  /** Length of the extracted text; near zero means a scan with no text. */
+  text_chars: number
+  created_at: string
 }

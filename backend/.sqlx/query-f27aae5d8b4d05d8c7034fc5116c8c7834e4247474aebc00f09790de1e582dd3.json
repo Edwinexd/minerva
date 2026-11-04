@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM syllabus_plan_offerings WHERE code = $1 AND NOT (momenttillf_id = ANY($2))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f27aae5d8b4d05d8c7034fc5116c8c7834e4247474aebc00f09790de1e582dd3"
+}

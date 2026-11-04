@@ -1,5 +1,6 @@
 //! Periodic scheduler loops: Canvas auto-sync, LTI NRPS reconcile,
-//! LTI platform-health probe, and pending-platform cleanup.
+//! LTI platform-health probe, pending-platform cleanup, and syllabus
+//! archive downloads.
 //!
 //! Axum-free: the loops call into `crate::canvas` (the Canvas sync engine)
 //! and `crate::lti_nrps`, both of which live in this crate, so the
@@ -65,7 +66,7 @@ pub fn start(state: AppState, max_concurrent: usize) {
     start_scheduler_loops(state);
 }
 
-/// Spawn the four periodic pollers. Owned by the `minerva-scheduler`
+/// Spawn the periodic pollers. Owned by the `minerva-scheduler`
 /// binary in the Phase 3.5 topology; also called by [`start`] in the
 /// monolith / api-with-worker path.
 pub fn start_scheduler_loops(state: AppState) {
@@ -362,6 +363,30 @@ pub fn start_scheduler_loops(state: AppState) {
                         PLATFORM_ORPHAN_GRACE_DAYS
                     ),
                     Err(e) => tracing::error!("lti health: orphan delete failed: {}", e),
+                }
+            }
+        });
+    }
+
+    // Syllabus archive: download the PDFs the nightly Daisy sync listed,
+    // and re-download each one every `RECHECK_INTERVAL_DAYS` to catch
+    // revisions published under an unchanged URL. `next_check_at` on the
+    // version row is the due clock, so restarts lose nothing.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = schedule_ticker();
+            loop {
+                ticker.tick().await;
+                match crate::syllabus_archive::run_due(&state).await {
+                    Ok(s) if s.fetched + s.failed > 0 => tracing::info!(
+                        "syllabus archive: {} fetched ({} new or changed), {} failed",
+                        s.fetched,
+                        s.changed,
+                        s.failed
+                    ),
+                    Ok(_) => {}
+                    Err(e) => tracing::error!("syllabus archive: tick failed: {}", e),
                 }
             }
         });

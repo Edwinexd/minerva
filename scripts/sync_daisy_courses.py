@@ -8,6 +8,12 @@ membership additions, alias registration, and play-designation creation
 all happen server-side; this script's only job is the dsv-wrapper
 plumbing.
 
+It also resolves the course syllabi (kursplaner) each offering belongs to.
+Daisy only links to SU's planarkiv page per Ladok code; dsv-wrapper's
+`SyllabusClient` lists every published version with its PDF URL, and each
+plan is PUT to `/api/service/syllabus-plans/{code}`. The scheduler pod
+downloads the PDFs.
+
 Called by `.github/workflows/daisy-sync.yml` on a daily schedule.
 Requires: SU_USERNAME, SU_PASSWORD, MINERVA_API_URL, MINERVA_SERVICE_API_KEY.
 
@@ -27,6 +33,9 @@ from dsv_wrapper import (
     AmbiguousMatchError,
     DaisyClient,
     Semester,
+    SyllabusArchiveEntry,
+    SyllabusClient,
+    SyllabusNotFoundError,
     TermSeason,
 )
 
@@ -169,14 +178,21 @@ def build_course_payload(
     daisy: DaisyClient,
     course: Any,
     participant_cache: dict[str, dict],
+    syllabus_refs: dict[str, dict[str, str | None]],
 ) -> dict:
     """Per-course payload including detail-page enrichment (syllabus,
     unit, course period) and the resolved participants list.
 
     The period comes from the detail page's `Datum:` row. The search
     result carries one too, but its parser yields None silently on a
-    malformed cell, so it is only the fallback."""
+    malformed cell, so it is only the fallback.
+
+    Records every syllabus course the offering belongs to in
+    `syllabus_refs` ({code: {momenttillf_id: requirement}}); the payload
+    itself keeps only the first `syllabus_url`, as before."""
     detail = daisy.get_course(course.momenttillf_id)
+    for sc in detail.courses:
+        syllabus_refs.setdefault(sc.code, {})[course.momenttillf_id] = sc.requirement
     roster = daisy.get_course_participants(course.momenttillf_id)
 
     participants_resolved: list[dict] = []
@@ -218,6 +234,7 @@ def iter_payloads(
     daisy: DaisyClient,
     semesters: list[Semester],
     participant_cache: dict[str, dict],
+    syllabus_refs: dict[str, dict[str, str | None]],
 ):
     """Yield per-course payloads as we walk Daisy. Lets the caller
     decide between batch-and-drain (normal path) or fully buffered
@@ -227,7 +244,7 @@ def iter_payloads(
         courses = daisy.get_courses(sem)
         print(f"[{sem.label}] {len(courses)} course offerings")
         for course in courses:
-            yield build_course_payload(daisy, course, participant_cache)
+            yield build_course_payload(daisy, course, participant_cache, syllabus_refs)
 
 
 def send_batch(
@@ -335,6 +352,75 @@ def post_schedule(session: MinervaSession, momenttillf_id: str, events: list[dic
     return resp.json()
 
 
+def build_syllabus_payload(
+    sv: SyllabusArchiveEntry,
+    en: SyllabusArchiveEntry,
+    offerings: dict[str, str | None],
+) -> dict:
+    """Merge the Swedish and English archive listings for one code.
+
+    The Swedish listing has a Swedish PDF for every version. The English
+    one swaps in an English PDF where one exists and repeats the Swedish
+    PDF otherwise, so only its `language == "en"` versions are new."""
+    versions = list(sv.versions) + [v for v in en.versions if v.language == "en"]
+    return {
+        "name_sv": sv.name,
+        "name_en": en.name or None,
+        "education_type": sv.education_type,
+        "ects": sv.ects,
+        "description": sv.description,
+        "is_discontinued": sv.is_discontinued,
+        "versions": [
+            {
+                "valid_from": v.semester.label,
+                "language": v.language,
+                "pdf_url": v.pdf_url,
+                "title": v.title,
+            }
+            for v in versions
+        ],
+        "offerings": [
+            {"momenttillf_id": mid, "requirement": req}
+            for mid, req in sorted(offerings.items())
+        ],
+    }
+
+
+def sync_syllabi(
+    session: MinervaSession,
+    syllabus_refs: dict[str, dict[str, str | None]],
+) -> dict:
+    """PUT every referenced plan. A code the archive does not know is
+    reported and skipped (Daisy occasionally lists a code before Ladok
+    publishes it); any other failure propagates per the error policy."""
+    totals = {
+        "syllabus_plans": 0,
+        "syllabus_versions_added": 0,
+        "syllabus_versions_url_changed": 0,
+        "syllabus_versions_delisted": 0,
+        "syllabus_versions_relisted": 0,
+        "syllabus_codes_not_in_archive": [],
+    }
+    with SyllabusClient() as archive:
+        for code in sorted(syllabus_refs):
+            try:
+                sv = archive.get_syllabus_archive(code, language="sv")
+                en = archive.get_syllabus_archive(code, language="en")
+            except SyllabusNotFoundError:
+                totals["syllabus_codes_not_in_archive"].append(code)
+                continue
+            resp = session.put(
+                f"/api/service/syllabus-plans/{code}",
+                json=build_syllabus_payload(sv, en, syllabus_refs[code]),
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            totals["syllabus_plans"] += 1
+            for key in ("added", "url_changed", "delisted", "relisted"):
+                totals[f"syllabus_versions_{key}"] += result.get(f"versions_{key}", 0)
+    return totals
+
+
 def merge_summary(into: dict, batch_summary: dict) -> None:
     """Sum counters across batches; concat per-course error strings.
     Mirrors `DaisyImportSummary` on the backend so the printed total
@@ -378,6 +464,7 @@ def main() -> None:
     # across batches so a kursansvarig who teaches courses in both
     # VT and HT only triggers one profile-page fetch per run.
     participant_cache: dict[str, dict] = {}
+    syllabus_refs: dict[str, dict[str, str | None]] = {}
     dry_run = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
 
     with session, DaisyClient(username=su_username, password=su_password) as daisy:
@@ -386,12 +473,24 @@ def main() -> None:
             # final stats + sample are computed against the full set.
             # At today's scale this is a few MB and the GH runner has
             # 7 GB; if scope explodes the streaming path below applies.
-            all_payloads = list(iter_payloads(daisy, semesters, participant_cache))
+            all_payloads = list(
+                iter_payloads(daisy, semesters, participant_cache, syllabus_refs)
+            )
             _emit_dry_run_summary(all_payloads)
             if all_payloads:
                 sample_id = all_payloads[0]["momenttillf_id"]
                 sample_events = serialize_schedule(daisy.get_course_schedule_ical(sample_id))
                 print(f"  sample schedule: {sample_id}, {len(sample_events)} events")
+            print(f"  syllabus codes:         {len(syllabus_refs)}")
+            if syllabus_refs:
+                code = sorted(syllabus_refs)[0]
+                with SyllabusClient() as archive:
+                    payload = build_syllabus_payload(
+                        archive.get_syllabus_archive(code, language="sv"),
+                        archive.get_syllabus_archive(code, language="en"),
+                        syllabus_refs[code],
+                    )
+                print(f"  sample syllabus {code}: {len(payload['versions'])} versions")
             return
 
         # Streaming path. We POST each batch as it fills and drop it
@@ -402,7 +501,7 @@ def main() -> None:
         batch: list[dict] = []
         batches_sent = 0
         offering_ids: list[str] = []
-        for payload in iter_payloads(daisy, semesters, participant_cache):
+        for payload in iter_payloads(daisy, semesters, participant_cache, syllabus_refs):
             offering_ids.append(payload["momenttillf_id"])
             batch.append(payload)
             if len(batch) >= CHUNK_SIZE:
@@ -432,6 +531,7 @@ def main() -> None:
         total["schedules_skipped_staged"] = schedule_skipped
         total["schedule_documents"] = schedule_documents
         total["schedule_documents_orphaned"] = schedule_documents_orphaned
+        total.update(sync_syllabi(session, syllabus_refs))
 
     if batches_sent == 0:
         print("Nothing to push.")

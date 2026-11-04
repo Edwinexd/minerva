@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH prev AS (\n                   SELECT pdf_url, delisted_at FROM syllabus_versions\n                   WHERE code = $1 AND valid_from = $2 AND language = $4\n               )\n               INSERT INTO syllabus_versions\n                   (code, valid_from, valid_from_term_id, language, pdf_url, title)\n               VALUES ($1, $2, $3, $4, $5, $6)\n               ON CONFLICT (code, valid_from, language) DO UPDATE SET\n                   title = EXCLUDED.title,\n                   valid_from_term_id = EXCLUDED.valid_from_term_id,\n                   pdf_url = EXCLUDED.pdf_url,\n                   next_check_at = CASE\n                       WHEN syllabus_versions.pdf_url <> EXCLUDED.pdf_url THEN NOW()\n                       ELSE syllabus_versions.next_check_at\n                   END,\n                   delisted_at = NULL\n               RETURNING id,\n                   (SELECT pdf_url FROM prev) AS \"prev_url?\",\n                   (SELECT delisted_at FROM prev) AS \"prev_delisted_at?\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "prev_url?",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "prev_delisted_at?",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "c654318a720a9ca94751f85e4e093a74c83cd8283f29a94d4ca8d6c4b180e075"
+}

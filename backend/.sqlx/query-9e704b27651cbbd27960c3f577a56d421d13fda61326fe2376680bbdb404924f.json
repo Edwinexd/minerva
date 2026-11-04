@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO syllabus_plan_offerings (code, momenttillf_id, requirement)\n           SELECT $1, o.id, o.requirement\n           FROM UNNEST($2::text[], $3::text[]) AS o(id, requirement)\n           ON CONFLICT (code, momenttillf_id) DO UPDATE SET\n               requirement = EXCLUDED.requirement,\n               synced_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9e704b27651cbbd27960c3f577a56d421d13fda61326fe2376680bbdb404924f"
+}

@@ -646,47 +646,12 @@ async fn download_github_pdf(
         .build()
         .map_err(|e| format!("http client init: {}", e))?;
 
-    let mut resp = client
-        .get(&gh.download_url)
-        .header(reqwest::header::USER_AGENT, "minerva-ingest/1.0")
-        .header(reqwest::header::ACCEPT, "application/pdf, */*")
-        .send()
-        .await
-        .map_err(|e| format!("request: {}", e))?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        return Err(format!("http {}", status.as_u16()));
-    }
-
-    // Early reject when the server tells us the body would exceed our cap.
-    // We still cap streaming-side too because Content-Length can be absent
-    // or wrong.
-    if let Some(len) = resp.content_length() {
-        if len as usize > max_bytes {
-            return Err(format!("response too large ({} bytes)", len));
-        }
-    }
-
-    let mut buf: Vec<u8> = Vec::new();
-    while let Some(chunk) = resp
-        .chunk()
-        .await
-        .map_err(|e| format!("body read: {}", e))?
-    {
-        if buf.len() + chunk.len() > max_bytes {
-            return Err(format!("response exceeds {} byte cap", max_bytes));
-        }
-        buf.extend_from_slice(&chunk);
-    }
-
-    if !buf.starts_with(b"%PDF-") {
-        // Most common failure mode is GitHub serving an HTML "404 not
-        // found" page (still HTTP 200 for unknown release tags via the
-        // /releases/latest/download/ redirect). Magic-bytes guard makes
-        // sure we don't hand garbage to the PDF parser.
-        return Err("response is not a PDF (missing %PDF- header)".to_string());
-    }
+    // GitHub serves an HTML "404 not found" page with status 200 for
+    // unknown release tags via /releases/latest/download/; `fetch_pdf`'s
+    // magic-bytes check rejects it before it reaches the PDF parser.
+    let buf =
+        crate::pdf_fetch::fetch_pdf(&client, &gh.download_url, max_bytes, "minerva-ingest/1.0")
+            .await?;
 
     let child_id = uuid::Uuid::new_v4();
     let dir = format!("{}/{}", docs_path, parent.course_id);

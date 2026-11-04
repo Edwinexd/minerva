@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE syllabus_versions SET delisted_at = NOW()\n           WHERE code = $1 AND delisted_at IS NULL AND NOT (id = ANY($2))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f1b6c3aa9e95bca7576c268add401a3dcc7353eed3806666ba963fb2f83f408"
+}

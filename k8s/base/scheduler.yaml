@@ -98,8 +98,9 @@ spec:
           volumeMounts:
             # Canvas auto-sync writes files to /data/documents via
             # minerva_app_core::canvas::run_sync, the same codepath the
-            # admin "Sync now" route calls. See docs/ARCHITECTURE.md
-            # "Service topology".
+            # admin "Sync now" route calls, and the syllabus archive
+            # loop writes PDFs to /data/documents/syllabi. See
+            # docs/ARCHITECTURE.md "Service topology".
             - name: app-data
               mountPath: /data
             # restricted Olympus scheduler key and Olympus's pinned host key
@@ -113,7 +114,7 @@ spec:
             # ~50-80 MiB (sqlx pool + reqwest pool + tokio runtime)
             # plus the per-tick Canvas / NRPS allocation spikes.
             # Memory req == lim for Guaranteed QoS; CPU ranged.
-            # 4 periodic loops are normally idle but Canvas auto-sync
+            # The periodic loops are normally idle but Canvas auto-sync
             # can briefly use a core when downloading + parsing a
             # large batch of materials.
             requests:

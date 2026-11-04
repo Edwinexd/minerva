@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE syllabus_versions SET\n               fetch_error = $2,\n               fetch_failures = fetch_failures + 1,\n               last_checked_at = NOW(),\n               next_check_at = NOW() + make_interval(\n                   hours => LEAST(power(2, LEAST(fetch_failures, 16))::int, $3)\n               )\n           WHERE id = $1\n           RETURNING fetch_failures",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "fetch_failures",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "fetch_failures"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "309cf5bc32d4b63886c27e92bac705fd2c0333da651e94fc9c14a8532335910f"
+}

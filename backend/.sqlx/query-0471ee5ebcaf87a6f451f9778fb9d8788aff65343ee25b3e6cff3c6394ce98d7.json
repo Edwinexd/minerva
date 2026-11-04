@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO syllabus_plans\n               (code, name_sv, name_en, education_type, ects, description, is_discontinued)\n           VALUES ($1, $2, $3, $4, $5, $6, $7)\n           ON CONFLICT (code) DO UPDATE SET\n               name_sv = EXCLUDED.name_sv,\n               name_en = COALESCE(EXCLUDED.name_en, syllabus_plans.name_en),\n               education_type = EXCLUDED.education_type,\n               ects = EXCLUDED.ects,\n               description = EXCLUDED.description,\n               is_discontinued = EXCLUDED.is_discontinued,\n               last_listed_at = NOW(),\n               updated_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Float4",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0471ee5ebcaf87a6f451f9778fb9d8788aff65343ee25b3e6cff3c6394ce98d7"
+}

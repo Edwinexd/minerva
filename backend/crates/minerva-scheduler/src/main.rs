@@ -1,14 +1,16 @@
 //! Standalone periodic scheduler.
 //!
-//! Boots `AppState` and runs the four periodic pollers via
+//! Boots `AppState` and runs the periodic pollers via
 //! `minerva_app_core::schedulers::start_scheduler_loops`:
 //!   - Canvas auto-sync (re-syncs `auto_sync=true` connections that are due)
 //!   - LTI NRPS reconcile (roster add/remove per syncable context)
 //!   - LTI platform-health probe (~daily token-endpoint ping)
 //!   - pending-platform cleanup (drops unapproved dynreg rows)
+//!   - syllabus archive (downloads and re-checks course syllabus PDFs)
 //!
 //! No HTTP listener and no model engine: the loops are DB queries +
-//! outbound HTTP, and Canvas downloads land on the shared docs volume.
+//! outbound HTTP, and Canvas and syllabus downloads land on the shared
+//! docs volume.
 //! The fat ingest worker lives in the separate `minerva-worker` pod, so
 //! an ingest OOM can't pause NRPS reconciliation and a worker roll
 //! doesn't reset these scheduler clocks.
@@ -37,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
     minerva_metrics::spawn_memprobe("minerva-scheduler");
 
     tracing::info!(
-        "starting minerva-scheduler (canvas / lti nrps / platform health / pending cleanup)"
+        "starting minerva-scheduler (canvas / lti nrps / platform health / pending cleanup / syllabus archive)"
     );
     schedulers::start_scheduler_loops(state);
 

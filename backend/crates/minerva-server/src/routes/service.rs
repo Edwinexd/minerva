@@ -52,6 +52,7 @@ pub fn router() -> Router<AppState> {
             put(reconcile_daisy_schedule),
         )
         .nest("/visual-extraction", super::visual_extraction::router())
+        .route("/syllabus-plans/{code}", put(reconcile_syllabus_plan))
 }
 
 #[derive(Deserialize)]
@@ -252,6 +253,246 @@ pub(crate) async fn read_url_stub(
     );
     let content = tokio::fs::read_to_string(&file_path).await.ok()?;
     Some(content.trim().to_string())
+}
+
+#[derive(Deserialize)]
+struct SyllabusVersionPayload {
+    /// Term the version is valid from, e.g. `HT2020`.
+    valid_from: String,
+    language: String,
+    pdf_url: String,
+    title: String,
+}
+
+#[derive(Deserialize)]
+struct SyllabusOfferingPayload {
+    momenttillf_id: String,
+    requirement: Option<String>,
+}
+
+/// One plan's full listing from the syllabus archive, merged across the
+/// Swedish and English responses by `scripts/sync_daisy_courses.py`.
+#[derive(Deserialize)]
+struct SyllabusPlanPayload {
+    name_sv: String,
+    name_en: Option<String>,
+    education_type: String,
+    ects: Option<f32>,
+    description: Option<String>,
+    #[serde(default)]
+    is_discontinued: bool,
+    versions: Vec<SyllabusVersionPayload>,
+    #[serde(default)]
+    offerings: Vec<SyllabusOfferingPayload>,
+}
+
+/// The scheduler downloads whatever URL is stored here, so only the
+/// archive's own PDF host is accepted.
+const SYLLABUS_PDF_PREFIX: &str = "https://albatross.it.su.se/api/education/educationplan/pdf/";
+
+fn syllabus_bad_request(code: &'static str, field: &str) -> AppError {
+    AppError::BadRequest {
+        code,
+        params: [("field", field.to_owned())].into(),
+    }
+}
+
+/// `HT2020` -> 20202 (Daisy's terminID form: VT = 1, HT = 2).
+fn syllabus_term_id(label: &str) -> Option<i32> {
+    let (season, year) = label.split_at_checked(2)?;
+    let season = match season {
+        "VT" => 1,
+        "HT" => 2,
+        _ => return None,
+    };
+    if year.len() != 4 || !year.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(year.parse::<i32>().ok()? * 10 + season)
+}
+
+/// Validate a plan listing; returns each version's term id in input order.
+fn validate_syllabus_plan(code: &str, input: &SyllabusPlanPayload) -> Result<Vec<i32>, AppError> {
+    if code.is_empty()
+        || code.len() > 16
+        || !code
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+    {
+        return Err(syllabus_bad_request("syllabus.invalid_field", "code"));
+    }
+    if input.name_sv.trim().is_empty() {
+        return Err(syllabus_bad_request("syllabus.invalid_field", "name_sv"));
+    }
+    if input.education_type.trim().is_empty() {
+        return Err(syllabus_bad_request(
+            "syllabus.invalid_field",
+            "education_type",
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut term_ids = Vec::with_capacity(input.versions.len());
+    for v in &input.versions {
+        let term_id = syllabus_term_id(&v.valid_from)
+            .ok_or_else(|| syllabus_bad_request("syllabus.invalid_field", "valid_from"))?;
+        if v.language != "sv" && v.language != "en" {
+            return Err(syllabus_bad_request("syllabus.invalid_field", "language"));
+        }
+        let Some(rest) = v.pdf_url.strip_prefix(SYLLABUS_PDF_PREFIX) else {
+            return Err(syllabus_bad_request("syllabus.invalid_field", "pdf_url"));
+        };
+        // The URL must name this plan, so one code's listing cannot point
+        // at another code's PDF.
+        if rest.split('/').next() != Some(code) {
+            return Err(syllabus_bad_request("syllabus.invalid_field", "pdf_url"));
+        }
+        if !seen.insert((v.valid_from.as_str(), v.language.as_str())) {
+            return Err(syllabus_bad_request(
+                "syllabus.duplicate_version",
+                "versions",
+            ));
+        }
+        term_ids.push(term_id);
+    }
+    let mut offering_ids = std::collections::HashSet::new();
+    for o in &input.offerings {
+        if o.momenttillf_id.trim().is_empty() || !offering_ids.insert(o.momenttillf_id.trim()) {
+            return Err(syllabus_bad_request("syllabus.invalid_field", "offerings"));
+        }
+    }
+    Ok(term_ids)
+}
+
+/// Reconcile one syllabus plan from the archive. Idempotent: the nightly
+/// sync PUTs every plan referenced by a current DSV offering, and the
+/// scheduler picks up any version that is new or whose URL changed.
+async fn reconcile_syllabus_plan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(code): Path<String>,
+    Json(input): Json<SyllabusPlanPayload>,
+) -> Result<Json<minerva_db::queries::syllabus_archive::ReconcileSummary>, AppError> {
+    authenticate_service(&state, &headers)?;
+    let code = code.trim().to_owned();
+    let term_ids = validate_syllabus_plan(&code, &input)?;
+
+    use minerva_db::queries::syllabus_archive as q;
+    let plan = q::PlanInput {
+        code: &code,
+        name_sv: input.name_sv.trim(),
+        name_en: input
+            .name_en
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        education_type: input.education_type.trim(),
+        ects: input.ects,
+        description: input
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        is_discontinued: input.is_discontinued,
+    };
+    let versions: Vec<_> = input
+        .versions
+        .iter()
+        .zip(&term_ids)
+        .map(|(v, &term_id)| q::VersionInput {
+            valid_from: &v.valid_from,
+            valid_from_term_id: term_id,
+            language: &v.language,
+            pdf_url: &v.pdf_url,
+            title: v.title.trim(),
+        })
+        .collect();
+    let offerings: Vec<_> = input
+        .offerings
+        .iter()
+        .map(|o| q::OfferingInput {
+            momenttillf_id: o.momenttillf_id.trim(),
+            requirement: o
+                .requirement
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+        })
+        .collect();
+    let summary = q::reconcile_plan(&state.db, &plan, &versions, &offerings).await?;
+    Ok(Json(summary))
+}
+
+#[cfg(test)]
+mod syllabus_plan_tests {
+    use super::{syllabus_term_id, validate_syllabus_plan, SyllabusPlanPayload};
+
+    fn payload(versions: serde_json::Value) -> SyllabusPlanPayload {
+        serde_json::from_value(serde_json::json!({
+            "name_sv": "Programmering 2",
+            "education_type": "course",
+            "versions": versions,
+            "offerings": [{"momenttillf_id": "7620", "requirement": "obligatorisk"}],
+        }))
+        .unwrap()
+    }
+
+    fn version(term: &str, lang: &str, url: &str) -> serde_json::Value {
+        serde_json::json!({"valid_from": term, "language": lang, "pdf_url": url, "title": "t"})
+    }
+
+    const BASE: &str = "https://albatross.it.su.se/api/education/educationplan/pdf/";
+
+    #[test]
+    fn term_ids_follow_daisy_encoding() {
+        assert_eq!(syllabus_term_id("HT2020"), Some(20202));
+        assert_eq!(syllabus_term_id("VT2015"), Some(20151));
+        assert_eq!(syllabus_term_id("ST2015"), None);
+        assert_eq!(syllabus_term_id("HT20"), None);
+        assert_eq!(syllabus_term_id("HTabcd"), None);
+        assert_eq!(syllabus_term_id("Hö2020"), None);
+    }
+
+    #[test]
+    fn accepts_archive_listing() {
+        let p = payload(serde_json::json!([
+            version("HT2020", "sv", &format!("{BASE}IB440C/HT2020")),
+            version("HT2011", "en", &format!("{BASE}IB440C/HT2011/en")),
+            version("HT2011", "sv", &format!("{BASE}IB440C/HT2011")),
+        ]));
+        assert_eq!(
+            validate_syllabus_plan("IB440C", &p).unwrap(),
+            vec![20202, 20112, 20112]
+        );
+    }
+
+    #[test]
+    fn rejects_foreign_or_mismatched_pdf_urls() {
+        for url in [
+            "https://example.com/IB440C/HT2020".to_owned(),
+            "http://albatross.it.su.se/api/education/educationplan/pdf/IB440C/HT2020".to_owned(),
+            format!("{BASE}IB130N/HT2020"),
+        ] {
+            let p = payload(serde_json::json!([version("HT2020", "sv", &url)]));
+            assert!(validate_syllabus_plan("IB440C", &p).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_versions_bad_codes_and_languages() {
+        let url = format!("{BASE}IB440C/HT2020");
+        let dup = payload(serde_json::json!([
+            version("HT2020", "sv", &url),
+            version("HT2020", "sv", &url),
+        ]));
+        assert!(validate_syllabus_plan("IB440C", &dup).is_err());
+
+        let lang = payload(serde_json::json!([version("HT2020", "de", &url)]));
+        assert!(validate_syllabus_plan("IB440C", &lang).is_err());
+
+        let ok = payload(serde_json::json!([version("HT2020", "sv", &url)]));
+        assert!(validate_syllabus_plan("ib440c", &ok).is_err());
+        assert!(validate_syllabus_plan("", &ok).is_err());
+    }
 }
 
 /// Authenticate using the global service API key (MINERVA_SERVICE_API_KEY).

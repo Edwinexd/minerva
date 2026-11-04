@@ -95,6 +95,7 @@ import { AdminDefaultsPanel } from "@/components/admin/defaults-page"
 import { RoleRulesPanel } from "@/components/admin/rules-page"
 import { OwnerUsagePage } from "@/components/teacher/owner-usage-page"
 import { AdminUserUsagePage } from "@/components/admin/user-usage-page"
+import { Home } from "@/components/home/home-page"
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -683,6 +684,28 @@ describe("Authenticated pages a11y", () => {
     // The course name appears twice on a loaded page: the per-course
     // table and the course picker in the limit-increase card.
     expect(getAllByText("Database Systems (DBSYS)")).toHaveLength(2)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("home page with a staff tool has no axe violations", async () => {
+    const staffTool: Course = {
+      ...course,
+      id: "workspace-ct",
+      kind: "credit_transfer",
+      name: "Credit transfer",
+      description: null,
+      semester_label: null,
+      course_code: null,
+      my_role: "teacher",
+    }
+    const { container, getByText } = renderPage(<Home />, [
+      [queries.userQuery.queryKey, user],
+      [queries.coursesQuery.queryKey, [staffTool, course]],
+      [queries.unreadCountsQuery.queryKey, {}],
+    ])
+    // The staff tool gets its own section, apart from the term-grouped courses.
+    expect(getByText("Staff tools")).toBeInTheDocument()
+    expect(getByText("Credit transfer")).toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
   })
 })

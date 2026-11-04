@@ -122,7 +122,16 @@
       "semesterPlaceholder": "VT2026",
       "semesterHint": "Use VT (spring) or HT (autumn) plus a 4-digit year, e.g. VT2026, HT2026.",
       "submit": "Create",
-      "submitting": "Creating…"
+      "submitting": "Creating…",
+      "kindLabel": "Kind",
+      "kindCreditTransfer": "Credit transfer (staff tool)",
+      "semesterOptional": "Leave empty for a course without a term."
+    },
+    "staffToolsSection": "Staff tools",
+    "manageWorkspace": "Manage",
+    "workspaceKind": {
+      "course": "Course",
+      "credit_transfer": "Compare external syllabuses against DSV course plans."
     }
   },
   "teacherGuide": {

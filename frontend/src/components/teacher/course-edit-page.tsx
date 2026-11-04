@@ -71,6 +71,16 @@ const TA_HIDDEN_TABS = new Set<string>([
   "play-designations",
 ])
 
+// Tabs backed by course-only endpoints (`/api/courses/{id}/...`). Other
+// workspace kinds (credit transfer) have no join links, LMS or Play.
+const COURSE_ONLY_TABS = new Set<string>([
+  "invite",
+  "lti",
+  "canvas",
+  "api-keys",
+  "play-designations",
+])
+
 export function CourseEditPage({ useParams }: { useParams: () => { courseId: string } }) {
   const { courseId } = useParams()
   const { data: course, isLoading } = useQuery(courseQuery(courseId))
@@ -90,8 +100,10 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
   const baseTabs = course?.my_role === "ta"
     ? TAB_VALUES.filter((v) => !TA_HIDDEN_TABS.has(v))
     : TAB_VALUES
+  const isCourse = course?.kind === "course"
   const visibleTabValues = baseTabs
     .filter((v) => kgEnabled || v !== "knowledge-graph")
+    .filter((v) => isCourse || !COURSE_ONLY_TABS.has(v))
   const validTabs = new Set<string>(visibleTabValues)
 
   const lastSegment = location.pathname.split("/").pop() || ""

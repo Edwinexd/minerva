@@ -122,7 +122,16 @@
       "semesterPlaceholder": "VT2026",
       "semesterHint": "Använd VT (vårtermin) eller HT (hösttermin) plus 4-siffrigt år, t.ex. VT2026, HT2026.",
       "submit": "Skapa",
-      "submitting": "Skapar…"
+      "submitting": "Skapar…",
+      "kindLabel": "Typ",
+      "kindCreditTransfer": "Tillgodoräknande (personalverktyg)",
+      "semesterOptional": "Lämna tomt för en kurs utan termin."
+    },
+    "staffToolsSection": "Personalverktyg",
+    "manageWorkspace": "Hantera",
+    "workspaceKind": {
+      "course": "Kurs",
+      "credit_transfer": "Jämför externa kursplaner med DSV:s kursplaner."
     }
   },
   "teacherGuide": {

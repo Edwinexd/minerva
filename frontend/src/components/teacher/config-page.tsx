@@ -375,7 +375,7 @@ function CourseConfigForm({ course }: { course: Course }) {
   // here, but the next sync rewrites the value, so the input is
   // gated to non-auto-managed rows + admins.
   const [semesterLabel, setSemesterLabel] = useState(course.semester_label ?? "")
-  const semesterLabelEditable = !course.auto_managed
+  const semesterLabelEditable = course.kind === "course" && !course.auto_managed
   // Two-step save: any provider/model change opens this dialog so the
   // teacher acknowledges the re-ingestion. Other field changes save
   // immediately. The dialog is keyed off the *baseline* values from
@@ -479,37 +479,40 @@ function CourseConfigForm({ course }: { course: Course }) {
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="semester_label">
-              {t("config.semesterLabel")}
-              {!course.semester_label && (
-                <span className="ml-2 text-xs text-muted-foreground">
-                  ({t("config.semesterBackfillHint")})
-                </span>
-              )}
-            </Label>
-            <Input
-              id="semester_label"
-              value={semesterLabel}
-              onChange={(e) => setSemesterLabel(e.target.value)}
-              placeholder="VT2026"
-              // Mirrors the server-side regex; lets the browser flag
-              // a typo before the round-trip.
-              pattern="(?:VT|HT|vt|ht)\d{4}"
-              title={t("config.semesterFormatHint")}
-              // Daisy-managed courses get their semester rewritten on
-              // every nightly sync; let the field stay visible so the
-              // current value is obvious, but disable editing so a
-              // teacher doesn't waste effort on a change that won't
-              // survive the next cron tick.
-              disabled={readOnly || !semesterLabelEditable}
-            />
-            <p className="text-xs text-muted-foreground">
-              {!semesterLabelEditable
-                ? t("config.semesterManagedByDaisy")
-                : t("config.semesterFormatHint")}
-            </p>
-          </div>
+          {/* Only a course has a term. */}
+          {course.kind === "course" && (
+            <div className="space-y-2">
+              <Label htmlFor="semester_label">
+                {t("config.semesterLabel")}
+                {!course.semester_label && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    ({t("config.semesterBackfillHint")})
+                  </span>
+                )}
+              </Label>
+              <Input
+                id="semester_label"
+                value={semesterLabel}
+                onChange={(e) => setSemesterLabel(e.target.value)}
+                placeholder="VT2026"
+                // Mirrors the server-side regex; lets the browser flag
+                // a typo before the round-trip.
+                pattern="(?:VT|HT|vt|ht)\d{4}"
+                title={t("config.semesterFormatHint")}
+                // Daisy-managed courses get their semester rewritten on
+                // every nightly sync; let the field stay visible so the
+                // current value is obvious, but disable editing so a
+                // teacher doesn't waste effort on a change that won't
+                // survive the next cron tick.
+                disabled={readOnly || !semesterLabelEditable}
+              />
+              <p className="text-xs text-muted-foreground">
+                {!semesterLabelEditable
+                  ? t("config.semesterManagedByDaisy")
+                  : t("config.semesterFormatHint")}
+              </p>
+            </div>
+          )}
 
           <Separator />
 

@@ -22,7 +22,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorText } from "@/components/ui/error-text"
 import { useState } from "react"
-import type { Course } from "@/lib/types"
+import type { Course, WorkspaceKind } from "@/lib/types"
 
 export function Home() {
   const { t } = useTranslation("common")
@@ -34,10 +34,14 @@ export function Home() {
 
   const canCreate = isTeacherOrAbove(user?.role)
 
-  const teacherCourses = courses?.filter(
+  // Staff tools (every kind but `course`) get their own section above the
+  // term-grouped courses instead of landing in the ad-hoc bucket.
+  const staffTools = courses?.filter((c) => c.kind !== "course") ?? []
+  const courseRows = courses?.filter((c) => c.kind === "course") ?? []
+  const teacherCourses = courseRows.filter(
     (c) => c.my_role === "teacher" || c.my_role === "ta",
-  ) ?? []
-  const studentCourses = courses?.filter((c) => c.my_role === "student") ?? []
+  )
+  const studentCourses = courseRows.filter((c) => c.my_role === "student")
   const hasBoth = teacherCourses.length > 0 && studentCourses.length > 0
 
   // Group teacher courses by `semester_label` so VT2026, HT2026, ...
@@ -67,7 +71,12 @@ export function Home() {
         )}
       </div>
 
-      {showCreate && <CreateCourseForm onCreated={() => setShowCreate(false)} />}
+      {showCreate && (
+        <CreateCourseForm
+          canChooseKind={user?.role === "admin"}
+          onCreated={() => setShowCreate(false)}
+        />
+      )}
 
       {error && (
         <p className="text-destructive">
@@ -89,6 +98,19 @@ export function Home() {
             </Card>
           ))}
         </div>
+      )}
+
+      {!isLoading && staffTools.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+            {t("home.staffToolsSection")}
+          </h2>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {staffTools.map((tool) => (
+              <StaffToolCard key={tool.id} workspace={tool} />
+            ))}
+          </div>
+        </section>
       )}
 
       {!isLoading && teacherCourses.length > 0 && (
@@ -332,9 +354,17 @@ function defaultSemesterLabel(today: Date = new Date()): string {
   return month <= 6 ? `VT${year}` : `HT${year}`
 }
 
-function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
+function CreateCourseForm({
+  onCreated,
+  canChooseKind,
+}: {
+  onCreated: () => void
+  /** Only admins create staff tools; the backend enforces the same. */
+  canChooseKind: boolean
+}) {
   const { t } = useTranslation("common")
   const queryClient = useQueryClient()
+  const [kind, setKind] = useState<WorkspaceKind>("course")
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   // Pre-populate with the current semester. Teachers prepping the
@@ -345,7 +375,8 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
     mutationFn: (data: {
       name: string
       description: string | null
-      semester_label: string
+      kind: WorkspaceKind
+      semester_label: string | null
     }) => api.post<Course>("/workspaces", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["courses"] })
@@ -366,10 +397,28 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
             mutation.mutate({
               name,
               description: description || null,
-              semester_label: semesterLabel.trim().toUpperCase(),
+              kind,
+              semester_label:
+                kind === "course" && semesterLabel.trim()
+                  ? semesterLabel.trim().toUpperCase()
+                  : null,
             })
           }}
         >
+          {canChooseKind && (
+            <div className="space-y-2">
+              <Label htmlFor="workspace_kind">{t("home.create.kindLabel")}</Label>
+              <select
+                id="workspace_kind"
+                value={kind}
+                onChange={(e) => setKind(e.target.value as WorkspaceKind)}
+                className="block border rounded px-2 py-1.5 text-sm bg-background"
+              >
+                <option value="course">{t("home.workspaceKind.course")}</option>
+                <option value="credit_transfer">{t("home.create.kindCreditTransfer")}</option>
+              </select>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="name">
               {t("home.create.nameLabel")}{" "}
@@ -384,29 +433,25 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
               required
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="semester_label">
-              {t("home.create.semesterLabel")}{" "}
-              <span className="text-destructive" aria-hidden="true">
-                {t("forms.requiredMark")}
-              </span>
-              <span className="sr-only">{t("forms.requiredLabel")}</span>
-            </Label>
-            <Input
-              id="semester_label"
-              value={semesterLabel}
-              onChange={(e) => setSemesterLabel(e.target.value)}
-              placeholder={t("home.create.semesterPlaceholder")}
-              // Client-side mirror of the backend regex. Lets the
-              // browser surface the format hint before a round-trip.
-              pattern="(?:VT|HT|vt|ht)\d{4}"
-              title={t("home.create.semesterHint")}
-              required
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("home.create.semesterHint")}
-            </p>
-          </div>
+          {kind === "course" && (
+            <div className="space-y-2">
+              <Label htmlFor="semester_label">{t("home.create.semesterLabel")}</Label>
+              <Input
+                id="semester_label"
+                value={semesterLabel}
+                onChange={(e) => setSemesterLabel(e.target.value)}
+                placeholder={t("home.create.semesterPlaceholder")}
+                // Client-side mirror of the backend regex. Lets the
+                // browser surface the format hint before a round-trip.
+                pattern="(?:VT|HT|vt|ht)\d{4}"
+                title={t("home.create.semesterHint")}
+                aria-describedby="semester_label_hint"
+              />
+              <p id="semester_label_hint" className="text-xs text-muted-foreground">
+                {t("home.create.semesterHint")} {t("home.create.semesterOptional")}
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="description">{t("home.create.descriptionLabel")}</Label>
             <Textarea
@@ -418,7 +463,7 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
           </div>
           <Button
             type="submit"
-            disabled={mutation.isPending || !name || !semesterLabel.trim()}
+            disabled={mutation.isPending || !name}
           >
             {mutation.isPending
               ? t("home.create.submitting")
@@ -429,6 +474,40 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
           )}
         </form>
       </CardContent>
+    </Card>
+  )
+}
+
+function StaffToolCard({ workspace }: { workspace: Course }) {
+  const { t } = useTranslation("common")
+  const manages = workspace.my_role === "teacher" || workspace.my_role === "ta"
+  return (
+    <Card className="h-full">
+      <CardHeader>
+        <CardTitle className="text-lg">
+          <Link
+            to="/course/$courseId"
+            params={{ courseId: workspace.id }}
+            className="hover:underline"
+          >
+            {workspace.name}
+          </Link>
+        </CardTitle>
+        <CardDescription>
+          {workspace.description || t(`home.workspaceKind.${workspace.kind}`)}
+        </CardDescription>
+      </CardHeader>
+      {manages && (
+        <CardContent>
+          <Link
+            to="/teacher/courses/$courseId"
+            params={{ courseId: workspace.id }}
+            className="text-sm text-muted-foreground underline hover:text-foreground"
+          >
+            {t("home.manageWorkspace")}
+          </Link>
+        </CardContent>
+      )}
     </Card>
   )
 }

@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH latest AS (\n               SELECT v.code, MAX(v.valid_from_term_id) AS term_id\n               FROM syllabus_versions v\n               JOIN syllabus_plans p ON p.code = v.code\n               WHERE v.delisted_at IS NULL AND NOT p.is_discontinued\n               GROUP BY v.code\n           ),\n           current AS (\n               SELECT v.code,\n                      BOOL_OR(v.content_hash IS NOT NULL) AS downloaded,\n                      MAX(GREATEST(v.first_seen_at, v.content_changed_at)) AS changed_at\n               FROM syllabus_versions v\n               JOIN latest l ON l.code = v.code AND l.term_id = v.valid_from_term_id\n               WHERE v.delisted_at IS NULL\n               GROUP BY v.code\n           )\n           SELECT\n               (SELECT COUNT(*) FROM current WHERE downloaded) AS \"plan_count!\",\n               (SELECT COUNT(*) FROM current\n                WHERE downloaded AND changed_at > NOW() - INTERVAL '7 days') AS \"plans_changed_this_week!\",\n               (SELECT MAX(last_checked_at) FROM syllabus_versions) AS plans_checked_at,\n               (SELECT COUNT(*) FROM conversations\n                WHERE workspace_id = $1 AND user_id = $2) AS \"my_case_count!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "plan_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "plans_changed_this_week!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "plans_checked_at",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "my_case_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "1adc39efea09dfdcc27d8386d0254c3c900fc8c1ecd7fefe3a26256217c51e8d"
+}

@@ -47,6 +47,55 @@ pub struct TickStats {
     pub mirrored: usize,
     /// Plan documents orphaned because the plan is no longer current.
     pub retired: usize,
+    /// Versions whose level and modules were read off the PDF.
+    pub facts_read: usize,
+}
+
+/// Versions read per tick. Reading is local (`pdftotext` on a file on
+/// disk), so this mainly bounds the first backfill.
+const FACTS_BATCH_SIZE: i64 = 50;
+
+/// Read the page-marked text, level and modules (`crate::syllabus_facts`)
+/// off every downloaded version that has not been read since its last
+/// change.
+pub async fn read_pending_facts(state: &AppState) -> Result<usize, sqlx::Error> {
+    let pending =
+        minerva_db::queries::syllabus_archive::find_facts_pending(&state.db, FACTS_BATCH_SIZE)
+            .await?;
+    let mut read = 0;
+    for v in pending {
+        let path =
+            std::path::PathBuf::from(syllabus_pdf_path(&state.config.docs_path, &v.content_hash));
+        let pages =
+            tokio::task::spawn_blocking(move || minerva_pipeline::pdf::extract_pages(&path))
+                .await
+                .unwrap_or_else(|e| Err(format!("extraction task failed: {e}")));
+        match pages {
+            Ok(pages) => {
+                let facts = crate::syllabus_facts::parse(&pages);
+                let modules = serde_json::to_value(&facts.modules).ok();
+                let text = minerva_pipeline::pdf::mark_pages(&pages);
+                minerva_db::queries::syllabus_archive::record_facts(
+                    &state.db,
+                    v.id,
+                    Some(&text),
+                    facts.level.as_deref(),
+                    modules.as_ref(),
+                    i32::try_from(pages.len()).ok(),
+                )
+                .await?;
+                read += 1;
+            }
+            Err(e) => {
+                tracing::warn!("syllabus archive: could not read {}: {}", v.content_hash, e);
+                minerva_db::queries::syllabus_archive::record_facts(
+                    &state.db, v.id, None, None, None, None,
+                )
+                .await?;
+            }
+        }
+    }
+    Ok(read)
 }
 
 pub fn syllabus_dir(docs_path: &str) -> String {
@@ -61,6 +110,7 @@ pub fn syllabus_pdf_path(docs_path: &str, content_hash: &str) -> String {
 /// plans into every credit transfer workspace.
 pub async fn run_tick(state: &AppState) -> Result<TickStats, crate::error::AppError> {
     let mut stats = run_due(state).await?;
+    stats.facts_read = read_pending_facts(state).await?;
     let current = minerva_db::queries::syllabus_archive::current_versions(&state.db).await?;
     for ws in minerva_db::queries::credit_transfer::list_active(&state.db).await? {
         mirror_into(state, ws.workspace_id, &current, &mut stats).await?;

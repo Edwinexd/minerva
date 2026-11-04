@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT code AS \"code!\"\n           FROM syllabus_versions\n           WHERE delisted_at IS NULL AND text IS NOT NULL\n             AND strpos(lower(text), lower($1)) > 0",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "code"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ca1d95ff053ba3f4906ac85bd2ed137233346fcfc30166477262e1cfd3ace41c"
+}

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE syllabus_versions SET\n               text = $2, level = $3, modules = $4, page_count = $5, facts_parsed_at = NOW()\n           WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fb720022c3bf3962119d27139d73005e5b91eefdd7f1170b2c906f601ba5b883"
+}

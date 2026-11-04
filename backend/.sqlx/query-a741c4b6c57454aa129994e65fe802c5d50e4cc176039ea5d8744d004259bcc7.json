@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT code, name_sv, name_en, ects, is_discontinued\n           FROM syllabus_plans ORDER BY code",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "code"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name_sv",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "name_sv"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name_en",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "name_en"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ects",
+        "type_info": "Float4",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "ects"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "is_discontinued",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "is_discontinued"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "a741c4b6c57454aa129994e65fe802c5d50e4cc176039ea5d8744d004259bcc7"
+}

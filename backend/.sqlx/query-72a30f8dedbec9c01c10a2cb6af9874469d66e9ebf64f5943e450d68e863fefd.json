@@ -1,0 +1,160 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH latest AS (\n               SELECT code, MAX(valid_from_term_id) AS term_id\n               FROM syllabus_versions\n               WHERE delisted_at IS NULL AND code = ANY($1)\n               GROUP BY code\n           )\n           SELECT v.code, v.language, v.valid_from, v.pdf_url,\n                  v.content_hash AS \"content_hash!\", p.name_sv, p.name_en, p.ects,\n                  v.level, v.modules, v.text, v.page_count\n           FROM syllabus_versions v\n           JOIN latest l ON l.code = v.code AND l.term_id = v.valid_from_term_id\n           JOIN syllabus_plans p ON p.code = v.code\n           WHERE v.delisted_at IS NULL\n             AND v.content_hash IS NOT NULL\n             AND NOT p.is_discontinued\n           ORDER BY v.code, v.language",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "code"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "language",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "language"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "valid_from",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "valid_from"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "pdf_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "pdf_url"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "content_hash!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "content_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "name_sv",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "name_sv"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "name_en",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "name_en"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "ects",
+        "type_info": "Float4",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "ects"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "level",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "modules",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "modules"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "text"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "page_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "page_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "72a30f8dedbec9c01c10a2cb6af9874469d66e9ebf64f5943e450d68e863fefd"
+}

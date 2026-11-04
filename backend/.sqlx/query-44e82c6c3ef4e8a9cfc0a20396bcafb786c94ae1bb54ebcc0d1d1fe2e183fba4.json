@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT p.code AS \"code!\"\n           FROM syllabus_plans p\n           LEFT JOIN syllabus_plan_offerings o ON o.code = p.code\n           LEFT JOIN course_daisy_offerings d ON d.momenttillf_id = o.momenttillf_id\n           WHERE NOT p.is_discontinued\n             AND (p.code = ANY($1) OR UPPER(split_part(d.course_code, ' ', 1)) = ANY($1))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "code"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "44e82c6c3ef4e8a9cfc0a20396bcafb786c94ae1bb54ebcc0d1d1fe2e183fba4"
+}

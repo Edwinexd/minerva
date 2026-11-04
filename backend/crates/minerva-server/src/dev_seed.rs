@@ -106,6 +106,9 @@ const WIPE_TABLE_ORDER: &[&str] = &[
     // to go before `users` because `created_by` does not cascade.
     "lti_platforms",
     "courses",
+    // Fixture plans for the credit transfer workspace; their versions
+    // cascade. Only plans the seed inserted are tagged, never real ones.
+    "syllabus_plans",
     "users",
 ];
 
@@ -614,6 +617,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
     )
     .await?;
     let pipeline_usage_rows = seed_pipeline_ledger(state, &[intro, algos, web, db_sys]).await?;
+    seed_credit_transfer(state, admin_id).await?;
     seed_lti_roster_sync(state, admin_id, intro, algos, web).await?;
 
     // Give `seed-teacher` a cap their seeded spend sits comfortably
@@ -642,6 +646,316 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
         usage_rows,
         pipeline_usage_rows,
         wiped,
+    })
+}
+
+/// One DSV plan of the credit transfer fixture.
+struct SeedPlan {
+    code: &'static str,
+    name_sv: &'static str,
+    name_en: &'static str,
+    ects: f32,
+    level: &'static str,
+    /// The current version's modules: code, name, credits.
+    modules: &'static [(&'static str, &'static str, f64)],
+    /// Older versions, so the plan tab's history column has content.
+    older: &'static [&'static str],
+}
+
+const SEED_PLANS: &[SeedPlan] = &[
+    SeedPlan {
+        code: "IB130N",
+        name_sv: "Introduktion till data- och systemvetenskap",
+        name_en: "Introduction to Computer and Systems Sciences",
+        ects: 7.5,
+        level: "G1N",
+        modules: &[
+            ("IDSI", "Inlämningsuppgift", 3.5),
+            ("IDST", "Tentamen", 4.0),
+        ],
+        older: &[],
+    },
+    SeedPlan {
+        code: "IB138N",
+        name_sv: "Grundläggande programmering",
+        name_en: "Basic Programming",
+        ects: 7.5,
+        level: "G1N",
+        modules: &[
+            ("PROG", "Programmeringsuppgifter", 3.0),
+            ("TENT", "Tentamen", 4.5),
+        ],
+        older: &["HT2020"],
+    },
+    SeedPlan {
+        code: "IB440C",
+        name_sv: "Programmering 2",
+        name_en: "Programming 2",
+        ects: 7.5,
+        level: "G2F",
+        modules: &[
+            ("PR2T", "Tentamen", 4.0),
+            ("PR2I", "Inlämningsuppgift", 3.5),
+        ],
+        older: &["VT2015", "VT2013"],
+    },
+];
+
+/// A credit transfer workspace with a few DSV plans and one assessed case
+/// owned by the operator, so the workspace page, its tabs and the
+/// assessment cards render in dev and in the real-browser a11y pass
+/// without an LLM or the plan archive.
+async fn seed_credit_transfer(state: &AppState, admin_id: Uuid) -> Result<(), AppError> {
+    for SeedPlan {
+        code,
+        name_sv,
+        name_en,
+        ects,
+        level,
+        modules,
+        older,
+    } in SEED_PLANS
+    {
+        // A dev database may already hold the real plan from a sync;
+        // leave it alone and only tag what this seed created.
+        let inserted = sqlx::query_scalar!(
+            r#"INSERT INTO syllabus_plans (code, name_sv, name_en, education_type, ects)
+               VALUES ($1, $2, $3, 'course', $4)
+               ON CONFLICT (code) DO NOTHING
+               RETURNING code"#,
+            code,
+            name_sv,
+            name_en,
+            ects,
+        )
+        .fetch_optional(&state.db)
+        .await?;
+        if inserted.is_none() {
+            continue;
+        }
+        track_composite(state, "syllabus_plans", code).await?;
+        let modules_json = serde_json::json!(modules
+            .iter()
+            .map(|(c, n, cr)| serde_json::json!({ "code": c, "name": n, "credits": cr }))
+            .collect::<Vec<_>>());
+        let versions = std::iter::once(("HT2026", 20262, true)).chain(
+            older
+                .iter()
+                .enumerate()
+                .map(|(i, v)| (*v, 20200 - i as i32, false)),
+        );
+        for (valid_from, term_id, current) in versions {
+            for language in ["sv", "en"] {
+                if !current && language == "en" {
+                    continue;
+                }
+                let text = format!(
+                    "[Page 1]\nKursplan {code} {name_sv}\nFördjupning: {level}\n\
+                     Förväntade studieresultat\n- beskriva grundläggande begrepp\n"
+                );
+                // Never due: a seeded version must not send the
+                // scheduler to SU's archive for a PDF that is not there.
+                sqlx::query!(
+                    r#"INSERT INTO syllabus_versions
+                           (code, valid_from, valid_from_term_id, language, pdf_url, title,
+                            content_hash, next_check_at, text, level, modules, page_count,
+                            facts_parsed_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() + INTERVAL '100 years',
+                               $8, $9, $10, 1, NOW())"#,
+                    code,
+                    valid_from,
+                    term_id,
+                    language,
+                    format!(
+                        "https://albatross.it.su.se/api/education/educationplan/pdf/{code}/{valid_from}{}",
+                        if language == "en" { "/en" } else { "" }
+                    ),
+                    format!("{code} {valid_from}"),
+                    format!("seed-{code}-{valid_from}-{language}"),
+                    current.then_some(text),
+                    current.then_some(*level),
+                    current.then_some(&modules_json),
+                )
+                .execute(&state.db)
+                .await?;
+            }
+        }
+    }
+
+    let workspace_id = Uuid::new_v4();
+    minerva_db::queries::workspaces::create_credit_transfer(
+        &state.db,
+        workspace_id,
+        &minerva_db::queries::workspaces::CreateWorkspace {
+            kind: minerva_core::models::WorkspaceKind::CreditTransfer.as_str(),
+            name: "Credit transfer".to_string(),
+            description: None,
+            owner_id: admin_id,
+            daily_cost_limit_usd: rust_decimal::Decimal::ZERO,
+            conversation_soft_token_limit: None,
+            conversation_hard_token_limit: None,
+            model: None,
+            temperature: None,
+            context_ratio: None,
+            max_chunks: None,
+            min_score: None,
+            strategy: None,
+            tool_use_enabled: None,
+            embedding_provider: None,
+            embedding_model: None,
+            reranker_model: None,
+            system_prompt: None,
+        },
+        None,
+    )
+    .await?;
+    track(state, "courses", workspace_id).await?;
+    minerva_db::queries::workspaces::add_member(&state.db, workspace_id, admin_id, "teacher")
+        .await?;
+
+    let conv_id = Uuid::new_v4();
+    minerva_db::queries::conversations::create(&state.db, conv_id, workspace_id, admin_id).await?;
+    track(state, "conversations", conv_id).await?;
+    minerva_db::queries::conversations::update_title(
+        &state.db,
+        conv_id,
+        "KTH: DD1337 Programmeringsteknik",
+    )
+    .await?;
+
+    let assessment: crate::strategy::assessment::Assessment =
+        serde_json::from_value(seed_assessment())
+            .map_err(|e| AppError::Internal(format!("seed assessment fixture: {e}")))?;
+    let user_msg_id = Uuid::new_v4();
+    let asst_msg_id = Uuid::new_v4();
+    for (id, role, content) in [
+        (
+            user_msg_id,
+            "user",
+            "Student wants this credited towards IB130N or anything equivalent.".to_string(),
+        ),
+        (
+            asst_msg_id,
+            "assistant",
+            crate::strategy::assessment::render_markdown(&assessment),
+        ),
+    ] {
+        let assistant = role == "assistant";
+        minerva_db::queries::conversations::insert_message(
+            &state.db,
+            id,
+            conv_id,
+            role,
+            &content,
+            None,
+            assistant.then_some("seed-fixture"),
+            assistant.then_some(0),
+            assistant.then_some(0),
+            assistant.then_some(0),
+            assistant.then_some(3),
+            assistant.then_some(SEED_ASSESSMENT_TRACE),
+            None,
+            assistant.then_some(0),
+            None,
+            None,
+            false,
+        )
+        .await?;
+        track(state, "messages", id).await?;
+    }
+    let json = serde_json::to_value(&assessment)
+        .map_err(|e| AppError::Internal(format!("seed assessment: {e}")))?;
+    minerva_db::queries::case_assessments::insert(
+        &state.db,
+        &minerva_db::queries::case_assessments::NewAssessment {
+            message_id: asst_msg_id,
+            conversation_id: conv_id,
+            assessment: &json,
+            best_code: Some("IB130N"),
+            best_verdict: Some("partial"),
+            candidate_count: 2,
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+const SEED_ASSESSMENT_TRACE: &str = "Searching the DSV course plans for matching courses.\n\
+    Comparing with 3: IB130N Introduktion till data- och systemvetenskap, \
+    IB138N Grundläggande programmering, IB440C Programmering 2.\n\
+    Done: 2 candidates, strongest IB130N (partial credit).\n";
+
+/// The fixture case's assessment, in the stored shape
+/// (`strategy::assessment::Assessment`): one partial match, one weak
+/// candidate and one plan ruled out, so every part of the case view
+/// has something to draw.
+fn seed_assessment() -> serde_json::Value {
+    let plan_url = |code: &str| {
+        format!("https://albatross.it.su.se/api/education/educationplan/pdf/{code}/HT2026")
+    };
+    let module = |code: &str, name: &str, credits: f64| serde_json::json!({ "code": code, "name": name, "credits": credits });
+    let outcome = |dsv: &str, page: u32, ext: Option<&str>, coverage: &str| {
+        serde_json::json!({
+            "dsv_outcome": dsv, "dsv_page": page, "external_outcome": ext,
+            "external_page": ext.map(|_| 2), "coverage": coverage,
+        })
+    };
+    serde_json::json!({
+        "version": 1,
+        "language": "en",
+        "summary": "DD1337 covers most of IB130N's programming and computer systems outcomes at the same level, but not its networking outcomes.",
+        "external_courses": [{
+            "file": "DD1337_kursplan.pdf", "attachment_id": null, "url": null,
+            "code": "DD1337", "name": "Programmeringsteknik", "institution": "KTH",
+            "credits": 7.5, "level": "G1N", "level_note": "First cycle",
+            "outcome_count": 6, "examination": "lab assignments and a written exam",
+        }],
+        "candidates": [
+            {
+                "code": "IB130N", "name": "Introduktion till data- och systemvetenskap",
+                "plan_version": "HT2026", "plan_language": "sv", "plan_url": plan_url("IB130N"),
+                "dsv_credits": 7.5, "dsv_level": "G1N",
+                "modules": [module("IDSI", "Inlämningsuppgift", 3.5), module("IDST", "Tentamen", 4.0)],
+                "external_file": "DD1337_kursplan.pdf", "external_url": null,
+                "external_credits": 7.5, "external_level": "G1N",
+                "credits_match": "match", "level_match": "match",
+                "verdict": "partial",
+                "verdict_title": "Partial credit: 3.5 of 7.5 credits",
+                "verdict_reason": "The programming and data representation outcomes are covered at the same level. Networking and operating systems are absent from DD1337, so the exam module cannot be replaced; the assignment module can.",
+                "overlap_note": "3 of 5 outcomes covered",
+                "credited_modules": [module("IDSI", "Inlämningsuppgift", 3.5)],
+                "credited_credits": 3.5,
+                "outcomes": [
+                    outcome("Describe how data is represented in a computer", 1, Some("Explain binary representation of numbers and text"), "covered"),
+                    outcome("Write simple programs", 1, Some("Write structured programs using selection, iteration and functions"), "covered"),
+                    outcome("Explain basic algorithms", 1, Some("Analyse simple algorithms"), "covered"),
+                    outcome("Describe operating systems", 2, Some("Use the command line of an operating system"), "partly"),
+                    outcome("Describe computer networks and the Internet", 2, None, "gap"),
+                ],
+                "notes": [{ "label": "Language", "value": "Python vs Java" }],
+            },
+            {
+                "code": "IB440C", "name": "Programmering 2",
+                "plan_version": "HT2026", "plan_language": "sv", "plan_url": plan_url("IB440C"),
+                "dsv_credits": 7.5, "dsv_level": "G2F",
+                "modules": [module("PR2T", "Tentamen", 4.0), module("PR2I", "Inlämningsuppgift", 3.5)],
+                "external_file": "DD1337_kursplan.pdf", "external_url": null,
+                "external_credits": 7.5, "external_level": "G1N",
+                "credits_match": "match", "level_match": "differs",
+                "verdict": "none",
+                "verdict_title": "",
+                "verdict_reason": "IB440C builds on a first programming course; DD1337 is that first course.",
+                "overlap_note": "Shared topic area only (1 of 4 outcomes)",
+                "credited_modules": [], "credited_credits": null,
+                "outcomes": [
+                    outcome("Write programs with a graphical user interface", 1, None, "gap"),
+                    outcome("Use collection classes from the standard library", 1, Some("Use lists and dictionaries"), "partly"),
+                ],
+                "notes": [],
+            },
+        ],
+        "ruled_out": [{ "code": "IB138N", "name": "Grundläggande programmering", "reason": "Covers the same ground as IB130N's programming part only." }],
+        "searched": 3,
     })
 }
 
@@ -1277,13 +1591,12 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
     // Collect the course ids first so we can clean up bytes-on-disk +
     // Qdrant collections before the DB row goes (the row is what gives
     // us the course id; deleting it would lose the lookup).
-    let course_ids: Vec<Uuid> =
-        sqlx::query!("SELECT pk FROM seeds WHERE table_name = 'workspaces'",)
-            .fetch_all(&state.db)
-            .await?
-            .into_iter()
-            .filter_map(|r| Uuid::parse_str(&r.pk).ok())
-            .collect();
+    let course_ids: Vec<Uuid> = sqlx::query!("SELECT pk FROM seeds WHERE table_name = 'courses'",)
+        .fetch_all(&state.db)
+        .await?
+        .into_iter()
+        .filter_map(|r| Uuid::parse_str(&r.pk).ok())
+        .collect();
 
     for course_id in &course_ids {
         // Remove the course's docs directory. `remove_dir_all` is a
@@ -1393,6 +1706,12 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
             }
             "lti_platforms" => delete_by_uuid_pk(&state.db, "lti_platforms", &pks).await?,
             "courses" => delete_by_uuid_pk(&state.db, "courses", &pks).await?,
+            "syllabus_plans" => {
+                sqlx::query!("DELETE FROM syllabus_plans WHERE code = ANY($1)", &pks)
+                    .execute(&state.db)
+                    .await?
+                    .rows_affected()
+            }
             "users" => delete_by_uuid_pk(&state.db, "users", &pks).await?,
             other => {
                 tracing::warn!("dev_seed: unknown table in WIPE_TABLE_ORDER: {other}");

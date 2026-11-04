@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT pk FROM seeds WHERE table_name = 'workspaces'",
+  "query": "SELECT pk FROM seeds WHERE table_name = 'courses'",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "301aa6840850ede25ea23efe9cee0138f984ebcde6b3b738b7d40f9c9e836542"
+  "hash": "22c92cedd1a4e056a3927fcd568efef3b2c234895eaa2bda90d3abb1152e4751"
 }

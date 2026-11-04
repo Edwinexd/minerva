@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE syllabus_versions SET\n               content_hash = $2,\n               size_bytes = $3,\n               content_changed_at = CASE WHEN $4 THEN NOW() ELSE content_changed_at END,\n               facts_parsed_at = CASE WHEN $4 THEN NULL ELSE facts_parsed_at END,\n               last_checked_at = NOW(),\n               next_check_at = $5,\n               fetch_error = NULL,\n               fetch_failures = 0\n           WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "461b65dd99b4232a46c9ea26708682a0d7ce8ed157a1d6d99bed4b918859c42e"
+}

@@ -27,6 +27,7 @@ pub mod rules;
 pub mod schedulers;
 pub mod state;
 pub mod syllabus_archive;
+pub mod syllabus_facts;
 pub mod system_defaults;
 pub mod visual_extraction;
 pub mod worker;

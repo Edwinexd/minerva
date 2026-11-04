@@ -9,7 +9,7 @@
 //! reference material on every turn of the conversation.
 
 use axum::extract::{Extension, Multipart, Path, State};
-use axum::routing::{delete, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use minerva_core::models::{User, WorkspaceKind};
 use serde::Serialize;
@@ -48,6 +48,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/conversations/{cid}/attachments/{attachment_id}",
             delete(delete_attachment),
+        )
+        .route(
+            "/conversations/{cid}/attachments/{attachment_id}/file",
+            get(attachment_file),
         )
 }
 
@@ -170,6 +174,62 @@ async fn delete_attachment(
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
+/// The uploaded file, for an assessment's citation links (`#page=N`).
+/// A PDF opens in the browser's viewer; anything else is served as plain
+/// text, never as HTML: an uploaded page must not run on Minerva's origin.
+async fn attachment_file(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((workspace_id, cid, attachment_id)): Path<(Uuid, Uuid, Uuid)>,
+) -> Result<axum::response::Response, AppError> {
+    use axum::http::header;
+    use axum::response::IntoResponse;
+
+    own_conversation(&state, workspace_id, cid, &user).await?;
+    let row = minerva_db::queries::conversation_attachments::list(&state.db, cid)
+        .await?
+        .into_iter()
+        .find(|a| a.id == attachment_id)
+        .ok_or(AppError::NotFound)?;
+    let path = attachment_path(&state.config.docs_path, workspace_id, row.id, &row.filename);
+    let bytes = tokio::fs::read(&path).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            AppError::NotFound
+        } else {
+            AppError::Internal(format!("reading attachment {}: {e}", row.id))
+        }
+    })?;
+    let is_pdf = minerva_pipeline::pipeline::extension_from_filename(&row.filename) == "pdf";
+    let content_type = if is_pdf {
+        "application/pdf"
+    } else {
+        "text/plain; charset=utf-8"
+    };
+    let disposition = format!(
+        "inline; filename*=UTF-8''{}",
+        urlencoding::encode(&row.filename)
+    );
+    let mut response = (
+        [
+            (header::CONTENT_TYPE, content_type.to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+            (header::CACHE_CONTROL, "private, no-store".to_string()),
+        ],
+        bytes,
+    )
+        .into_response();
+    // `sandbox` would also stop the browser's PDF viewer, which runs a
+    // PDF's own scripts in isolation anyway; text gets it as a backstop.
+    if !is_pdf {
+        response.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            axum::http::HeaderValue::from_static("sandbox"),
+        );
+    }
+    Ok(response)
+}
+
 /// The conversation must be the caller's own, in a workspace kind that
 /// uses attachments. Teachers reviewing conversations do not get to read
 /// or change a case's files: they can carry an applicant's personal data.
@@ -266,8 +326,16 @@ async fn store(
 
     let result = async {
         let path_buf = std::path::PathBuf::from(&path);
+        // PDFs keep their page breaks as `[Page N]` markers, so an
+        // assessment can cite the page an outcome is stated on.
+        let is_pdf = ext == "pdf";
         let text = tokio::task::spawn_blocking(move || {
-            minerva_pipeline::pipeline::extract_document_text(&path_buf)
+            if is_pdf {
+                minerva_pipeline::pdf::extract_pages(&path_buf)
+                    .map(|pages| minerva_pipeline::pdf::mark_pages(&pages))
+            } else {
+                minerva_pipeline::pipeline::extract_document_text(&path_buf)
+            }
         })
         .await
         .map_err(|e| AppError::Internal(format!("extraction task failed: {e}")))?

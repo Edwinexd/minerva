@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO syllabus_versions\n                           (code, valid_from, valid_from_term_id, language, pdf_url, title,\n                            content_hash, next_check_at, text, level, modules, page_count,\n                            facts_parsed_at)\n                       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() + INTERVAL '100 years',\n                               $8, $9, $10, 1, NOW())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e0dc29ffda8d9a37fdda28f7a831fff426b55ffe4286ddf86269d5f220efeb88"
+}

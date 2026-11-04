@@ -6,6 +6,7 @@ mod chat;
 mod conversation_continuation;
 mod conversation_topics;
 mod courses;
+mod credit_transfer;
 mod daisy_admin;
 mod dev;
 pub(crate) mod documents;
@@ -87,6 +88,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/workspaces/{workspace_id}/documents", documents::router())
         .nest("/workspaces/{workspace_id}", chat::router())
         .nest("/workspaces/{workspace_id}", attachments::router())
+        .nest("/workspaces/{workspace_id}", credit_transfer::router())
         .nest("/workspaces/{workspace_id}", usage::workspace_router())
         .nest("/workspaces/{workspace_id}", suggested_questions::router())
         // Course-only extensions: join links, Moodle API keys, Play,

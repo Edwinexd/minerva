@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH latest AS (\n               SELECT code, MAX(valid_from_term_id) AS term_id\n               FROM syllabus_versions\n               WHERE delisted_at IS NULL\n               GROUP BY code\n           )\n           SELECT DISTINCT ON (v.code) v.code, v.text AS \"text!\"\n           FROM syllabus_versions v\n           JOIN latest l ON l.code = v.code AND l.term_id = v.valid_from_term_id\n           JOIN syllabus_plans p ON p.code = v.code\n           WHERE v.delisted_at IS NULL AND v.text IS NOT NULL AND NOT p.is_discontinued\n           ORDER BY v.code, v.language = 'sv' DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "code"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "text!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "text"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "f35fa17674d20ab68e744cc59611340b5c85103aca10a7c64c63be966f65dcf2"
+}

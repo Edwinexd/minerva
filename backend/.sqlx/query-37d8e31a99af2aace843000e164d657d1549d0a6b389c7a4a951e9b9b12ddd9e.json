@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, content_hash AS \"content_hash!\"\n           FROM syllabus_versions\n           WHERE content_hash IS NOT NULL AND facts_parsed_at IS NULL\n           ORDER BY code\n           LIMIT $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "content_hash!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "content_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "37d8e31a99af2aace843000e164d657d1549d0a6b389c7a4a951e9b9b12ddd9e"
+}

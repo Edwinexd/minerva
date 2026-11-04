@@ -226,6 +226,10 @@ struct MessageResponse {
     /// single-pass shape). Teachers keep the content and the flag
     /// labels the disclosure as hidden from the student.
     thinking_hidden: bool,
+    /// Structured credit transfer assessment this reply carries
+    /// (`strategy::assessment`); absent on every other message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assessment: Option<serde_json::Value>,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -944,6 +948,12 @@ async fn get_conversation(
     let reply_figures =
         crate::strategy::figures::for_conversation(&state.db, &state.config.hmac_secret, cid)
             .await?;
+    let mut assessments: HashMap<Uuid, serde_json::Value> =
+        minerva_db::queries::case_assessments::list_for_conversation(&state.db, cid)
+            .await?
+            .into_iter()
+            .map(|a| (a.message_id, a.assessment))
+            .collect();
 
     Ok(Json(ConversationDetailResponse {
         messages: messages
@@ -985,6 +995,7 @@ async fn get_conversation(
                 // rendering the placeholder, so the same turn reads
                 // the same way live and on refetch.
                 thinking_hidden: guarded_ids.contains(&m.id),
+                assessment: assessments.remove(&m.id),
                 created_at: m.created_at,
             })
             .collect(),
@@ -1836,6 +1847,17 @@ pub(super) async fn run_chat_message(
         minerva_core::models::WorkspaceKind::parse(&course.kind).ok_or_else(|| {
             AppError::Internal(format!("workspace {workspace_id} has kind {}", course.kind))
         })?;
+    // A credit transfer case is assessed (structured, see
+    // `strategy::assessment`) on the turn after files were attached;
+    // every other turn is a follow-up in ordinary chat.
+    let strategy_name = if workspace_kind == minerva_core::models::WorkspaceKind::CreditTransfer
+        && minerva_db::queries::case_assessments::has_unassessed_attachments(&state.db, conv_id)
+            .await?
+    {
+        strategy::ASSESSMENT.to_string()
+    } else {
+        strategy_name
+    };
 
     let ctx = strategy::GenerationContext {
         course_name: course.name,

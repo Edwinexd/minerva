@@ -203,6 +203,7 @@ pub async fn record_fetch_success(
                content_hash = $2,
                size_bytes = $3,
                content_changed_at = CASE WHEN $4 THEN NOW() ELSE content_changed_at END,
+               facts_parsed_at = CASE WHEN $4 THEN NULL ELSE facts_parsed_at END,
                last_checked_at = NOW(),
                next_check_at = $5,
                fetch_error = NULL,
@@ -279,6 +280,206 @@ pub async fn current_versions(db: &PgPool) -> Result<Vec<CurrentVersion>, sqlx::
              AND v.content_hash IS NOT NULL
              AND NOT p.is_discontinued
            ORDER BY v.code, v.language"#,
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// A downloaded version whose level and modules have not been read yet:
+/// new downloads, revisions, and everything downloaded before the facts
+/// columns existed.
+pub struct FactsPending {
+    pub id: Uuid,
+    pub content_hash: String,
+}
+
+pub async fn find_facts_pending(db: &PgPool, limit: i64) -> Result<Vec<FactsPending>, sqlx::Error> {
+    sqlx::query_as!(
+        FactsPending,
+        r#"SELECT id, content_hash AS "content_hash!"
+           FROM syllabus_versions
+           WHERE content_hash IS NOT NULL AND facts_parsed_at IS NULL
+           ORDER BY code
+           LIMIT $1"#,
+        limit,
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// Store what was read off a version's PDF. Called with `None`s when the
+/// file could not be read, so a broken PDF is not retried every tick; a
+/// re-download with new content clears `facts_parsed_at` again.
+pub async fn record_facts(
+    db: &PgPool,
+    id: Uuid,
+    text: Option<&str>,
+    level: Option<&str>,
+    modules: Option<&serde_json::Value>,
+    page_count: Option<i32>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"UPDATE syllabus_versions SET
+               text = $2, level = $3, modules = $4, page_count = $5, facts_parsed_at = NOW()
+           WHERE id = $1"#,
+        id,
+        text,
+        level,
+        modules,
+        page_count,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// One language of a plan's current version, with everything an
+/// assessment states about it.
+#[derive(Debug, Clone)]
+pub struct CurrentPlan {
+    pub code: String,
+    pub language: String,
+    pub valid_from: String,
+    pub pdf_url: String,
+    pub content_hash: String,
+    pub name_sv: String,
+    pub name_en: Option<String>,
+    pub ects: Option<f32>,
+    pub level: Option<String>,
+    pub modules: Option<serde_json::Value>,
+    /// Page-marked text; NULL until the scheduler has read the PDF.
+    pub text: Option<String>,
+    pub page_count: Option<i32>,
+}
+
+/// The current version of the given plans (same rule as
+/// [`current_versions`]), in every downloaded language.
+pub async fn current_plans(db: &PgPool, codes: &[String]) -> Result<Vec<CurrentPlan>, sqlx::Error> {
+    sqlx::query_as!(
+        CurrentPlan,
+        r#"WITH latest AS (
+               SELECT code, MAX(valid_from_term_id) AS term_id
+               FROM syllabus_versions
+               WHERE delisted_at IS NULL AND code = ANY($1)
+               GROUP BY code
+           )
+           SELECT v.code, v.language, v.valid_from, v.pdf_url,
+                  v.content_hash AS "content_hash!", p.name_sv, p.name_en, p.ects,
+                  v.level, v.modules, v.text, v.page_count
+           FROM syllabus_versions v
+           JOIN latest l ON l.code = v.code AND l.term_id = v.valid_from_term_id
+           JOIN syllabus_plans p ON p.code = v.code
+           WHERE v.delisted_at IS NULL
+             AND v.content_hash IS NOT NULL
+             AND NOT p.is_discontinued
+           ORDER BY v.code, v.language"#,
+        codes,
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// Plan codes among `candidates` (upper-cased words from a user's note)
+/// that name a plan, either by its Ladok code or by the Daisy designation
+/// of an offering it is linked to (`PROG1` for `IB138N`).
+pub async fn resolve_codes(db: &PgPool, candidates: &[String]) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT DISTINCT p.code AS "code!"
+           FROM syllabus_plans p
+           LEFT JOIN syllabus_plan_offerings o ON o.code = p.code
+           LEFT JOIN course_daisy_offerings d ON d.momenttillf_id = o.momenttillf_id
+           WHERE NOT p.is_discontinued
+             AND (p.code = ANY($1) OR UPPER(split_part(d.course_code, ' ', 1)) = ANY($1))"#,
+        candidates,
+    )
+    .fetch_all(db)
+    .await
+}
+
+pub struct PlanListing {
+    pub code: String,
+    pub name_sv: String,
+    pub name_en: Option<String>,
+    pub ects: Option<f32>,
+    pub is_discontinued: bool,
+}
+
+pub async fn list_plans(db: &PgPool) -> Result<Vec<PlanListing>, sqlx::Error> {
+    sqlx::query_as!(
+        PlanListing,
+        r#"SELECT code, name_sv, name_en, ects, is_discontinued
+           FROM syllabus_plans ORDER BY code"#,
+    )
+    .fetch_all(db)
+    .await
+}
+
+pub struct VersionListing {
+    pub code: String,
+    pub valid_from: String,
+    pub valid_from_term_id: i32,
+    pub language: String,
+    pub pdf_url: String,
+    pub downloaded: bool,
+    pub fetch_error: Option<String>,
+    pub level: Option<String>,
+    pub first_seen_at: DateTime<Utc>,
+    pub content_changed_at: Option<DateTime<Utc>>,
+    pub last_checked_at: Option<DateTime<Utc>>,
+}
+
+/// Every listed version, for the plan overview.
+pub async fn list_versions(db: &PgPool) -> Result<Vec<VersionListing>, sqlx::Error> {
+    sqlx::query_as!(
+        VersionListing,
+        r#"SELECT code, valid_from, valid_from_term_id, language, pdf_url,
+                  content_hash IS NOT NULL AS "downloaded!", fetch_error, level,
+                  first_seen_at, content_changed_at, last_checked_at
+           FROM syllabus_versions
+           WHERE delisted_at IS NULL
+           ORDER BY code, valid_from_term_id DESC, language"#,
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// Text of every plan's current version, one language per plan (Swedish
+/// when there is one: it is the authoritative text). For ranking plans
+/// against an external syllabus without the embedding index.
+pub struct PlanText {
+    pub code: String,
+    pub text: String,
+}
+
+pub async fn current_plan_texts(db: &PgPool) -> Result<Vec<PlanText>, sqlx::Error> {
+    sqlx::query_as!(
+        PlanText,
+        r#"WITH latest AS (
+               SELECT code, MAX(valid_from_term_id) AS term_id
+               FROM syllabus_versions
+               WHERE delisted_at IS NULL
+               GROUP BY code
+           )
+           SELECT DISTINCT ON (v.code) v.code, v.text AS "text!"
+           FROM syllabus_versions v
+           JOIN latest l ON l.code = v.code AND l.term_id = v.valid_from_term_id
+           JOIN syllabus_plans p ON p.code = v.code
+           WHERE v.delisted_at IS NULL AND v.text IS NOT NULL AND NOT p.is_discontinued
+           ORDER BY v.code, v.language = 'sv' DESC"#,
+    )
+    .fetch_all(db)
+    .await
+}
+
+/// Plans whose current text contains `needle` (case-insensitive), for
+/// searching the plan list by content as well as code and name.
+pub async fn codes_with_text(db: &PgPool, needle: &str) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT DISTINCT code AS "code!"
+           FROM syllabus_versions
+           WHERE delisted_at IS NULL AND text IS NOT NULL
+             AND strpos(lower(text), lower($1)) > 0"#,
+        needle,
     )
     .fetch_all(db)
     .await

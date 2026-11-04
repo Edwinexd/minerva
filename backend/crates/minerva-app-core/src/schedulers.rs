@@ -414,15 +414,19 @@ pub fn start_scheduler_loops(state: AppState) {
             loop {
                 ticker.tick().await;
                 match crate::syllabus_archive::run_tick(&state).await {
-                    Ok(s) if s.fetched + s.failed + s.mirrored + s.retired > 0 => tracing::info!(
-                        "syllabus archive: {} fetched ({} new or changed), {} failed; \
-                         {} plan documents mirrored, {} retired",
-                        s.fetched,
-                        s.changed,
-                        s.failed,
-                        s.mirrored,
-                        s.retired
-                    ),
+                    Ok(s) if s.fetched + s.failed + s.mirrored + s.retired + s.facts_read > 0 => {
+                        tracing::info!(
+                            "syllabus archive: {} fetched ({} new or changed), {} failed; \
+                             {} read for level and modules; \
+                             {} plan documents mirrored, {} retired",
+                            s.fetched,
+                            s.changed,
+                            s.failed,
+                            s.facts_read,
+                            s.mirrored,
+                            s.retired
+                        )
+                    }
                     Ok(_) => {}
                     Err(e) => tracing::error!("syllabus archive: tick failed: {}", e),
                 }

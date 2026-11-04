@@ -1,0 +1,141 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT code, valid_from, valid_from_term_id, language, pdf_url,\n                  content_hash IS NOT NULL AS \"downloaded!\", fetch_error, level,\n                  first_seen_at, content_changed_at, last_checked_at\n           FROM syllabus_versions\n           WHERE delisted_at IS NULL\n           ORDER BY code, valid_from_term_id DESC, language",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "code"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "valid_from",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "valid_from"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "valid_from_term_id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "valid_from_term_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "language",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "language"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "pdf_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "pdf_url"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "downloaded!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "fetch_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "fetch_error"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "level",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "first_seen_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "first_seen_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "content_changed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "content_changed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "last_checked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "syllabus_versions",
+            "name": "last_checked_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "a845d643065996feaea8a2320610d0100bdab000f9ecd8f62a0fd46a7b3e9c44"
+}

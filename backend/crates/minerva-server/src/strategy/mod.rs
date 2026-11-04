@@ -1,3 +1,4 @@
+pub mod assessment;
 pub mod common;
 pub mod extraction_guard;
 pub mod figures;
@@ -340,6 +341,11 @@ impl GenerationContext {
     }
 }
 
+/// Strategy name of a credit transfer case's assessment turn. Never stored
+/// on a workspace; `routes::chat` picks it for the turn that follows newly
+/// attached files.
+pub const ASSESSMENT: &str = "credit_transfer_assessment";
+
 /// Run the appropriate strategy based on the strategy name.
 ///
 /// `parallel` is retired (migration `20260519000001` remaps existing
@@ -354,6 +360,7 @@ pub async fn run_strategy(
     tx: mpsc::Sender<Result<Event, AppError>>,
 ) {
     match strategy {
+        ASSESSMENT => assessment::run(ctx, tx).await,
         "flare" => flare::run(ctx, tx).await,
         _ => simple::run(ctx, tx).await,
     }

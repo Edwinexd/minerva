@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO syllabus_plans (code, name_sv, name_en, education_type, ects)\n               VALUES ($1, $2, $3, 'course', $4)\n               ON CONFLICT (code) DO NOTHING\n               RETURNING code",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "syllabus_plans",
+            "name": "code"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Float4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8eb46e425fcb20e15f52ffc37309dd4938499b8fb503299e0ba566bd50f73f4d"
+}

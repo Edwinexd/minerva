@@ -35,14 +35,11 @@ export function AssistantsPage() {
         <CardContent className="space-y-4">
           {data.allowed ? (
             <div className="space-y-1">
-              <p className="text-sm font-medium" id="mcp-url-label">
+              <p className="text-sm font-medium">
                 {t("assistants.urlLabel")}
               </p>
               <div className="flex gap-2">
-                <code
-                  aria-labelledby="mcp-url-label"
-                  className="flex-1 rounded-md bg-muted px-3 py-2 text-sm break-all"
-                >
+                <code className="flex-1 rounded-md bg-muted px-3 py-2 text-sm break-all">
                   {data.mcp_url}
                 </code>
                 <Button

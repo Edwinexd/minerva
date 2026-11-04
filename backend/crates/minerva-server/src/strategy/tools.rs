@@ -58,7 +58,7 @@ pub struct ToolDispatchCtx<'a> {
     pub collection_name: &'a str,
     pub embedding_provider: &'a str,
     pub embedding_model: &'a str,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     /// Score threshold passed through to `semantic_search`. The
     /// tool-provided `k` is clamped against the per-tool schema cap
     /// (10 for semantic, 20 for keyword), so we don't thread the
@@ -348,7 +348,7 @@ async fn run_keyword_search(
 }
 
 async fn run_list_documents(ctx: &ToolDispatchCtx<'_>) -> Result<ToolOutcome, ToolError> {
-    let docs = minerva_db::queries::documents::list_by_course(ctx.db, ctx.course_id)
+    let docs = minerva_db::queries::documents::list_by_course(ctx.db, ctx.workspace_id)
         .await
         .map_err(|e| ToolError::Backend {
             tool: "list_documents",
@@ -406,7 +406,7 @@ async fn run_get_document_chunks(
             reason: format!("no document with id {}", doc_id),
         });
     };
-    if doc.workspace_id != ctx.course_id {
+    if doc.workspace_id != ctx.workspace_id {
         return Err(ToolError::BadArgs {
             tool: "get_document_chunks",
             reason: format!("document {} does not belong to this course", doc_id),

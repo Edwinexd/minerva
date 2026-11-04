@@ -47,7 +47,7 @@ impl LlmClassifier {
 
     async fn call(
         &self,
-        course_id: Uuid,
+        workspace_id: Uuid,
         mime_type: &str,
         excerpt: &str,
     ) -> Result<ClassifiedKind, String> {
@@ -108,7 +108,7 @@ impl LlmClassifier {
         // automatically split into separate rows.
         crate::llm::record_pipeline_usage(
             &self.db,
-            course_id,
+            workspace_id,
             CATEGORY_DOCUMENT_CLASSIFIER,
             &self.util.model,
             &usage,
@@ -123,7 +123,7 @@ impl LlmClassifier {
 impl Classifier for LlmClassifier {
     async fn classify(
         &self,
-        course_id: Uuid,
+        workspace_id: Uuid,
         filename: &str,
         mime_type: &str,
         text: &str,
@@ -163,7 +163,7 @@ impl Classifier for LlmClassifier {
         // course for an identical verdict. Low-confidence outputs flow
         // through with their `suspicious_flags`; the teacher dashboard
         // surfaces both so a human can step in when the model is unsure.
-        self.call(course_id, mime_type, &excerpt)
+        self.call(workspace_id, mime_type, &excerpt)
             .await
             .map_err(|e| format!("classifier: call failed: {e}"))
     }

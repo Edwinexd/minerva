@@ -6,12 +6,12 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::routes::guards::{require_course_teacher, TeacherScope};
+use crate::routes::guards::{require_workspace_teacher, TeacherScope};
 use crate::state::AppState;
 
-pub fn course_router() -> Router<AppState> {
+pub fn workspace_router() -> Router<AppState> {
     Router::new()
-        .route("/usage", get(get_course_usage))
+        .route("/usage", get(get_workspace_usage))
         .route("/kg-token-usage", get(get_course_kg_token_usage))
 }
 
@@ -22,7 +22,7 @@ pub fn admin_router() -> Router<AppState> {
 #[derive(Serialize)]
 struct UsageResponse {
     user_id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
     date: chrono::NaiveDate,
     prompt_tokens: i64,
     completion_tokens: i64,
@@ -40,19 +40,19 @@ struct UsageResponse {
     request_count: i32,
 }
 
-async fn get_course_usage(
+async fn get_workspace_usage(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<UsageResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
-    let rows = minerva_db::queries::usage::get_course_usage(&state.db, course_id).await?;
+    let rows = minerva_db::queries::usage::get_course_usage(&state.db, workspace_id).await?;
     Ok(Json(
         rows.into_iter()
             .map(|r| UsageResponse {
                 user_id: r.user_id,
-                course_id: r.workspace_id,
+                workspace_id: r.workspace_id,
                 date: r.date,
                 prompt_tokens: r.prompt_tokens,
                 completion_tokens: r.completion_tokens,
@@ -92,11 +92,11 @@ struct KgTokenUsageResponse {
 async fn get_course_kg_token_usage(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<KgTokenUsageResponse>, AppError> {
     // Same access rule as the chat-usage endpoint above: course
     // owner, course teacher, or admin.
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
     // 30-day rolling window. Long enough to cover a course's
     // ingest-burst week and the steady chat-time guard cost,
@@ -104,7 +104,9 @@ async fn get_course_kg_token_usage(
     // term" usage rather than lifetime totals.
     let since = chrono::Utc::now() - chrono::Duration::days(30);
     let rows = minerva_db::queries::workspace_token_usage::aggregate_by_category_for_course(
-        &state.db, course_id, since,
+        &state.db,
+        workspace_id,
+        since,
     )
     .await?;
 
@@ -136,7 +138,7 @@ async fn get_all_usage(
         rows.into_iter()
             .map(|r| UsageResponse {
                 user_id: r.user_id,
-                course_id: r.workspace_id,
+                workspace_id: r.workspace_id,
                 date: r.date,
                 prompt_tokens: r.prompt_tokens,
                 completion_tokens: r.completion_tokens,

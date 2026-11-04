@@ -59,27 +59,27 @@ pub struct SuggestedQuestionsResponse {
 async fn handler_shib(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<SuggestedQuestionsResponse>, AppError> {
-    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, workspace_id)
         .await?
         .ok_or(AppError::NotFound)?;
     if course.owner_id != user.id
-        && !minerva_db::queries::workspaces::is_member(&state.db, course_id, user.id).await?
+        && !minerva_db::queries::workspaces::is_member(&state.db, workspace_id, user.id).await?
     {
         return Err(AppError::Forbidden);
     }
 
-    let questions = get_or_refresh(&state, course_id).await?;
+    let questions = get_or_refresh(&state, workspace_id).await?;
     Ok(Json(SuggestedQuestionsResponse { questions }))
 }
 
 /// Shared entry point used by both the Shibboleth route and the
 /// embed mirror. Caller is responsible for proving the user has
 /// access to `course_id`.
-pub async fn get_or_refresh(state: &AppState, course_id: Uuid) -> Result<Vec<String>, AppError> {
+pub async fn get_or_refresh(state: &AppState, workspace_id: Uuid) -> Result<Vec<String>, AppError> {
     let cached =
-        minerva_db::queries::workspace_suggested_questions::get(&state.db, course_id).await?;
+        minerva_db::queries::workspace_suggested_questions::get(&state.db, workspace_id).await?;
     if let Some(row) = cached.as_ref() {
         if chrono::Utc::now() - row.last_checked_at < STALENESS {
             return Ok(row.questions.0.clone());
@@ -88,7 +88,7 @@ pub async fn get_or_refresh(state: &AppState, course_id: Uuid) -> Result<Vec<Str
 
     let docs = minerva_db::queries::documents::list_latest_ready_by_course(
         &state.db,
-        course_id,
+        workspace_id,
         SOURCE_DOC_LIMIT,
     )
     .await?;
@@ -96,17 +96,20 @@ pub async fn get_or_refresh(state: &AppState, course_id: Uuid) -> Result<Vec<Str
 
     if let Some(row) = cached.as_ref() {
         if row.source_doc_ids == current_ids {
-            minerva_db::queries::workspace_suggested_questions::touch_checked(&state.db, course_id)
-                .await?;
+            minerva_db::queries::workspace_suggested_questions::touch_checked(
+                &state.db,
+                workspace_id,
+            )
+            .await?;
             return Ok(row.questions.0.clone());
         }
     }
 
     let util = state.utility_model().await;
-    let questions = regenerate(state, &util, course_id, &docs).await?;
+    let questions = regenerate(state, &util, workspace_id, &docs).await?;
     minerva_db::queries::workspace_suggested_questions::upsert(
         &state.db,
-        course_id,
+        workspace_id,
         &questions,
         &current_ids,
         &util.model,
@@ -118,7 +121,7 @@ pub async fn get_or_refresh(state: &AppState, course_id: Uuid) -> Result<Vec<Str
 async fn regenerate(
     state: &AppState,
     util: &crate::llm::UtilityModel,
-    course_id: Uuid,
+    workspace_id: Uuid,
     docs: &[ReadyDocSummary],
 ) -> Result<Vec<String>, AppError> {
     // Zero ready docs: skip the LLM entirely. The empty array is
@@ -127,9 +130,10 @@ async fn regenerate(
         return Ok(Vec::new());
     }
 
-    let collection = minerva_pipeline::pipeline::collection_name_for_course(&state.db, course_id)
-        .await
-        .map_err(AppError::Database)?;
+    let collection =
+        minerva_pipeline::pipeline::collection_name_for_course(&state.db, workspace_id)
+            .await
+            .map_err(AppError::Database)?;
 
     // Fan out per-doc scrolls; sequentially this is ~3x the
     // wall-clock for no good reason.
@@ -206,7 +210,7 @@ async fn regenerate(
 
     crate::llm::record_pipeline_usage(
         &state.db,
-        course_id,
+        workspace_id,
         CATEGORY_SUGGESTED_QUESTIONS,
         &util.model,
         &usage,

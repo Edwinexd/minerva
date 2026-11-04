@@ -19,12 +19,12 @@ export const devConfigQuery = queryOptions({
 
 export const coursesQuery = queryOptions({
   queryKey: ["courses"],
-  queryFn: () => api.get<Course[]>("/courses"),
+  queryFn: () => api.get<Course[]>("/workspaces"),
 })
 
 /**
  * Admin-only course listing. Same shape as `coursesQuery` but includes
- * archived courses (the teacher-facing `/courses` route hides them), so
+ * archived courses (the teacher-facing `/workspaces` route hides them), so
  * the admin panel can restore or merge them. Keyed separately so it
  * doesn't collide with the teacher/student `["courses"]` cache.
  */
@@ -49,13 +49,13 @@ export const adminMergeSuggestionsQuery = queryOptions({
 export const courseQuery = (id: string) =>
   queryOptions({
     queryKey: ["courses", id],
-    queryFn: () => api.get<Course>(`/courses/${id}`),
+    queryFn: () => api.get<Course>(`/workspaces/${id}`),
   })
 
 export const courseMembersQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "members"],
-    queryFn: () => api.get<CourseMember[]>(`/courses/${courseId}/members`),
+    queryFn: () => api.get<CourseMember[]>(`/workspaces/${courseId}/members`),
   })
 
 export const courseRoleSuggestionsQuery = (courseId: string) =>
@@ -68,7 +68,7 @@ export const courseRoleSuggestionsQuery = (courseId: string) =>
 export const courseDocumentsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "documents"],
-    queryFn: () => api.get<Document[]>(`/courses/${courseId}/documents`),
+    queryFn: () => api.get<Document[]>(`/workspaces/${courseId}/documents`),
     refetchInterval: 5000, // Poll for processing status updates
   })
 
@@ -270,7 +270,7 @@ export const chatModelsQuery = queryOptions({
 export const conversationsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations"],
-    queryFn: () => api.get<Conversation[]>(`/courses/${courseId}/conversations`),
+    queryFn: () => api.get<Conversation[]>(`/workspaces/${courseId}/conversations`),
   })
 
 /**
@@ -288,20 +288,20 @@ export const conversationsQuery = (courseId: string) =>
  */
 export const unreadCountsQuery = queryOptions({
   queryKey: ["courses", "unread-counts"],
-  queryFn: () => api.get<Record<string, number>>(`/courses/unread-counts`),
+  queryFn: () => api.get<Record<string, number>>(`/workspaces/unread-counts`),
   staleTime: 30 * 1000,
 })
 
 export const allConversationsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", "all"],
-    queryFn: () => api.get<ConversationWithUser[]>(`/courses/${courseId}/conversations/all`),
+    queryFn: () => api.get<ConversationWithUser[]>(`/workspaces/${courseId}/conversations/all`),
   })
 
 export const pinnedConversationsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", "pinned"],
-    queryFn: () => api.get<ConversationWithUser[]>(`/courses/${courseId}/conversations/pinned`),
+    queryFn: () => api.get<ConversationWithUser[]>(`/workspaces/${courseId}/conversations/pinned`),
   })
 
 export interface SuggestedQuestionsResponse {
@@ -316,7 +316,7 @@ export const suggestedQuestionsQuery = (courseId: string) =>
     queryKey: ["courses", courseId, "suggested-questions"],
     queryFn: () =>
       api.get<SuggestedQuestionsResponse>(
-        `/courses/${courseId}/suggested-questions`,
+        `/workspaces/${courseId}/suggested-questions`,
       ),
     staleTime: 60 * 60 * 1000,
   })
@@ -324,14 +324,14 @@ export const suggestedQuestionsQuery = (courseId: string) =>
 export const conversationTopicsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", "topics"],
-    queryFn: () => api.get<TopicGroup[]>(`/courses/${courseId}/conversations/topics`),
+    queryFn: () => api.get<TopicGroup[]>(`/workspaces/${courseId}/conversations/topics`),
     staleTime: 5 * 60 * 1000,
   })
 
 export const courseFeedbackStatsQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "feedback-stats"],
-    queryFn: () => api.get<CourseFeedbackStats>(`/courses/${courseId}/conversations/feedback-stats`),
+    queryFn: () => api.get<CourseFeedbackStats>(`/workspaces/${courseId}/conversations/feedback-stats`),
   })
 
 /**
@@ -345,20 +345,20 @@ export const conversationFlagKindsQuery = (courseId: string) =>
     queryKey: ["courses", courseId, "conversations", "flag-kinds"],
     queryFn: () =>
       api.get<Record<string, string[]>>(
-        `/courses/${courseId}/conversations/flag-kinds`,
+        `/workspaces/${courseId}/conversations/flag-kinds`,
       ),
   })
 
 export const conversationDetailQuery = (courseId: string, conversationId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", conversationId],
-    queryFn: () => api.get<ConversationDetail>(`/courses/${courseId}/conversations/${conversationId}`),
+    queryFn: () => api.get<ConversationDetail>(`/workspaces/${courseId}/conversations/${conversationId}`),
   })
 
 export const conversationNotesQuery = (courseId: string, conversationId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "conversations", conversationId, "notes"],
-    queryFn: () => api.get<TeacherNote[]>(`/courses/${courseId}/conversations/${conversationId}/notes`),
+    queryFn: () => api.get<TeacherNote[]>(`/workspaces/${courseId}/conversations/${conversationId}/notes`),
   })
 
 export const apiKeysQuery = (courseId: string) =>
@@ -449,7 +449,7 @@ export const courseKgTokenUsageQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "kg-token-usage"],
     queryFn: () =>
-      api.get<KgTokenUsage>(`/courses/${courseId}/kg-token-usage`),
+      api.get<KgTokenUsage>(`/workspaces/${courseId}/kg-token-usage`),
   })
 
 export const adminUsersQuery = queryOptions({
@@ -619,7 +619,7 @@ export interface KnowledgeGraphNode {
 
 export interface KnowledgeGraphEdge {
   /// Stable identifier; addressable as
-  /// `/courses/{courseId}/documents/knowledge-graph/edges/{id}/reject`
+  /// `/workspaces/{courseId}/documents/knowledge-graph/edges/{id}/reject`
   /// for per-edge teacher veto + un-veto.
   id: string
   src_id: string
@@ -645,7 +645,7 @@ export const courseKnowledgeGraphQuery = (courseId: string) =>
   queryOptions({
     queryKey: ["courses", courseId, "knowledge-graph"],
     queryFn: () =>
-      api.get<KnowledgeGraph>(`/courses/${courseId}/documents/knowledge-graph`),
+      api.get<KnowledgeGraph>(`/workspaces/${courseId}/documents/knowledge-graph`),
     /// Poll while the linker's catching up; the pending indicators
     /// flip back to 0 once the next sweep tick lands and the
     /// teacher sees the graph stabilise without manually refreshing.

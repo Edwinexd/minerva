@@ -115,6 +115,7 @@ const user: User = {
 }
 
 const course: Course = {
+  kind: "course",
   id: COURSE_ID,
   name: "Programming 1",
   description: "Intro course",
@@ -188,7 +189,7 @@ const members: CourseMember[] = [
 const documents: Document[] = [
   {
     id: "doc-1",
-    course_id: COURSE_ID,
+    workspace_id: COURSE_ID,
     filename: "lecture-1.pdf",
     mime_type: "application/pdf",
     size_bytes: 12345,

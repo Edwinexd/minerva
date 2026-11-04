@@ -98,7 +98,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name =
-        minerva_pipeline::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
+        minerva_pipeline::pipeline::collection_name(ctx.workspace_id, ctx.embedding_version);
 
     // Initial retrieval using user's question (per the paper).
     // Adversarial filter runs on the initial chunks before they enter
@@ -109,9 +109,10 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // teacher has marked as superseded or deleted upstream. Computed once
     // and threaded into seed + inner-loop FLARE retrievals; see
     // `common::rag_lookup`.
-    let orphaned_doc_ids = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.course_id)
-        .await
-        .unwrap_or_default();
+    let orphaned_doc_ids =
+        minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.workspace_id)
+            .await
+            .unwrap_or_default();
     let initial_chunks_raw = common::rag_lookup(
         &http_client,
         &ctx.openai_api_key,
@@ -136,7 +137,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             &http_client,
             &ctx.utility,
             &ctx.db,
-            ctx.course_id,
+            ctx.workspace_id,
             initial_chunks_raw,
         )
         .await
@@ -159,7 +160,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             &ctx.fastembed,
             &http_client,
             &ctx.openai_api_key,
-            ctx.course_id,
+            ctx.workspace_id,
             &collection_name,
             &ctx.embedding_provider,
             &ctx.embedding_model,
@@ -176,7 +177,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // retrieval callback, without having to bring up a real Postgres,
     // Qdrant, or FastEmbed stack.
     let unclassified_doc_ids = if ctx.kg_enabled {
-        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
+        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.workspace_id)
             .await
             .unwrap_or_default()
     } else {
@@ -202,7 +203,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.db,
         &http_client,
         &ctx.utility,
-        ctx.course_id,
+        ctx.workspace_id,
         ctx.conversation_id,
         &ctx.history,
         &ctx.user_content,
@@ -277,7 +278,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         let collection_name = collection_name.clone();
         let embedding_provider = ctx.embedding_provider.clone();
         let embedding_model = ctx.embedding_model.clone();
-        let course_id = ctx.course_id;
+        let workspace_id = ctx.workspace_id;
         let kg_enabled = ctx.kg_enabled;
         let orphaned = orphaned_for_loop.clone();
         async move {
@@ -305,7 +306,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                     &http_client,
                     &utility,
                     &db,
-                    course_id,
+                    workspace_id,
                     raw,
                 )
                 .await
@@ -325,7 +326,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
                     &fastembed,
                     &http_client,
                     &openai_key,
-                    course_id,
+                    workspace_id,
                     &collection_name,
                     &embedding_provider,
                     &embedding_model,
@@ -349,7 +350,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         output.total_completion_tokens,
     );
 
-    let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
+    let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.workspace_id)
         .await
         .unwrap_or_default();
     let chunks_json = if output.all_chunks.is_empty() {
@@ -368,7 +369,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.db,
         &http_client,
         &ctx.utility,
-        ctx.course_id,
+        ctx.workspace_id,
         ctx.conversation_id,
         &guard_decision,
         &ctx.user_content,

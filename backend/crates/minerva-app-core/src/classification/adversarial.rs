@@ -100,7 +100,7 @@ async fn is_solution_chunk(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     chunk_text: &str,
 ) -> bool {
     let excerpt: String = chunk_text.chars().take(MAX_EXCERPT_CHARS).collect();
@@ -128,7 +128,7 @@ async fn is_solution_chunk(
 
     crate::llm::record_pipeline_usage(
         db,
-        course_id,
+        workspace_id,
         CATEGORY_ADVERSARIAL_FILTER,
         &util.model,
         &usage,
@@ -151,7 +151,7 @@ pub async fn filter_solution_chunks(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     chunks: Vec<RagChunk>,
 ) -> Vec<RagChunk> {
     if chunks.is_empty() {
@@ -174,7 +174,7 @@ pub async fn filter_solution_chunks(
         .map(|c| {
             let (http, util, db, text) = (http.clone(), util.clone(), db.clone(), c.text.clone());
             tokio::spawn(
-                async move { is_solution_chunk(&http, &util, &db, course_id, &text).await },
+                async move { is_solution_chunk(&http, &util, &db, workspace_id, &text).await },
             )
         })
         .collect::<Vec<_>>();

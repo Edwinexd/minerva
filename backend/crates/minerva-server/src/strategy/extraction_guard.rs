@@ -197,17 +197,17 @@ pub async fn evaluate_for_turn(
     db: &PgPool,
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
-    course_id: Uuid,
+    workspace_id: Uuid,
     conversation_id: Uuid,
     history: &[minerva_db::queries::conversations::MessageRow],
     user_content: &str,
     rag_signals: &[RagChunk],
     rag_context: &[RagChunk],
 ) -> Option<GuardDecision> {
-    if !extraction_guard_enabled(db, course_id).await {
+    if !extraction_guard_enabled(db, workspace_id).await {
         tracing::debug!(
             "extraction_guard: feature flag off for course {}, skipping",
-            course_id
+            workspace_id
         );
         return None;
     }
@@ -224,7 +224,8 @@ pub async fn evaluate_for_turn(
     // pairing against the prior assistant message.
     let recent_user_messages = recent_user_messages(history, INTENT_HISTORY_TURNS);
     let intent =
-        extraction_guard::classify_intent(http, util, db, course_id, &recent_user_messages).await;
+        extraction_guard::classify_intent(http, util, db, workspace_id, &recent_user_messages)
+            .await;
     tracing::info!(
         "extraction_guard: turn={} conversation={} intent.is_extraction={} intent.rationale={:?}",
         turn_index,
@@ -296,7 +297,7 @@ pub async fn evaluate_for_turn(
     if !context_lecture_doc_ids.is_empty() {
         match minerva_db::queries::document_relations::applied_in_assignments_for_lectures(
             db,
-            course_id,
+            workspace_id,
             &context_lecture_doc_ids,
         )
         .await
@@ -332,7 +333,7 @@ pub async fn evaluate_for_turn(
             http,
             util,
             db,
-            course_id,
+            workspace_id,
             prior_assistant,
             user_content,
         )
@@ -548,7 +549,7 @@ pub async fn intercept_reply(
     db: &PgPool,
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
-    course_id: Uuid,
+    workspace_id: Uuid,
     conversation_id: Uuid,
     decision: &Option<GuardDecision>,
     student_message: &str,
@@ -569,7 +570,7 @@ pub async fn intercept_reply(
         http,
         util,
         db,
-        course_id,
+        workspace_id,
         assistant_reply,
         &decision.assignment_excerpts,
     )
@@ -593,7 +594,7 @@ pub async fn intercept_reply(
         http,
         util,
         db,
-        course_id,
+        workspace_id,
         student_message,
         assistant_reply,
     )

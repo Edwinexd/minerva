@@ -9,7 +9,7 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::routes::guards::{require_course_owner, require_course_teacher, TeacherScope};
+use crate::routes::guards::{require_workspace_owner, require_workspace_teacher, TeacherScope};
 use crate::state::AppState;
 
 /// Hard ceiling on `axum::DefaultBodyLimit::max(...)` for single-doc
@@ -65,7 +65,7 @@ pub fn router() -> Router<AppState> {
 #[derive(Serialize)]
 struct DocumentResponse {
     id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
     filename: String,
     mime_type: String,
     size_bytes: i64,
@@ -110,7 +110,7 @@ impl From<minerva_db::queries::documents::DocumentRow> for DocumentResponse {
     fn from(row: minerva_db::queries::documents::DocumentRow) -> Self {
         Self {
             id: row.id,
-            course_id: row.workspace_id,
+            workspace_id: row.workspace_id,
             filename: row.filename,
             mime_type: row.mime_type,
             size_bytes: row.size_bytes,
@@ -180,7 +180,7 @@ pub async fn compute_content_hash_streaming(path: &std::path::Path) -> std::io::
 #[allow(clippy::too_many_arguments)]
 pub async fn upload_or_dedup(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     filename: &str,
     mime_type: &str,
     bytes: &[u8],
@@ -202,7 +202,10 @@ pub async fn upload_or_dedup(
     // to the content-hash dedup below and return that same row.
     if let (Some(sys), Some(sref)) = (source_system, source_ref) {
         if let Some(prev) = minerva_db::queries::documents::find_active_by_source_ref(
-            &state.db, course_id, sys, sref,
+            &state.db,
+            workspace_id,
+            sys,
+            sref,
         )
         .await?
         {
@@ -215,7 +218,7 @@ pub async fn upload_or_dedup(
 
     if let Some(existing) = minerva_db::queries::documents::find_active_by_content_hash(
         &state.db,
-        course_id,
+        workspace_id,
         &content_hash,
     )
     .await?
@@ -233,7 +236,7 @@ pub async fn upload_or_dedup(
     }
 
     let doc_id = Uuid::new_v4();
-    let dir = format!("{}/{}", state.config.docs_path, course_id);
+    let dir = format!("{}/{}", state.config.docs_path, workspace_id);
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| AppError::Internal(format!("failed to create directory: {}", e)))?;
@@ -249,7 +252,7 @@ pub async fn upload_or_dedup(
         &state.db,
         minerva_db::queries::documents::NewDocument {
             id: doc_id,
-            workspace_id: course_id,
+            workspace_id,
             filename,
             mime_type,
             size_bytes,
@@ -270,22 +273,22 @@ pub async fn upload_or_dedup(
 async fn list_documents(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<DocumentResponse>>, AppError> {
     // Verify access; owner, admin, teacher, and TA can read the document list.
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
-    let rows = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+    let rows = minerva_db::queries::documents::list_by_course(&state.db, workspace_id).await?;
     Ok(Json(rows.into_iter().map(DocumentResponse::from).collect()))
 }
 
 async fn upload_document(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<DocumentResponse>, AppError> {
-    require_course_owner(&state, course_id, &user).await?;
+    require_workspace_owner(&state, workspace_id, &user).await?;
     // Teacher-facing upload accepts an optional `source_ref` multipart
     // field. When set, the doc is tagged with `source_system = "manual"`
     // (UI uploads, as opposed to the integration `"moodle"` /
@@ -353,7 +356,7 @@ async fn upload_document(
     let source_system = source_ref.as_ref().map(|_| "manual");
     let row = upload_or_dedup(
         &state,
-        course_id,
+        workspace_id,
         &filename,
         &content_type,
         &data,
@@ -380,10 +383,10 @@ struct MbzImportResponse {
 async fn upload_mbz(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<MbzImportResponse>, AppError> {
-    require_course_owner(&state, course_id, &user).await?;
+    require_workspace_owner(&state, workspace_id, &user).await?;
     let field = multipart
         .next_field()
         .await
@@ -460,7 +463,7 @@ async fn upload_mbz(
 
         upload_or_dedup(
             &state,
-            course_id,
+            workspace_id,
             &item.filename,
             &item.mime,
             &bytes,
@@ -506,17 +509,17 @@ struct PatchDocumentBody {
 async fn patch_document(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, doc_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<PatchDocumentBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_owner(&state, course_id, &user).await?;
+    require_workspace_owner(&state, workspace_id, &user).await?;
     // Scope doc_id to this course: the DB helper filters by id only, so
     // without this check a course owner could modify documents in other
     // courses by putting a foreign doc_id in the path.
     let doc = minerva_db::queries::documents::find_by_id(&state.db, doc_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if doc.workspace_id != course_id {
+    if doc.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
 
@@ -558,16 +561,16 @@ async fn patch_document(
 async fn delete_document(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let course = require_course_owner(&state, course_id, &user).await?;
+    let course = require_workspace_owner(&state, workspace_id, &user).await?;
     // Scope doc_id to this course: the DB delete filters by id only, so
     // without this check a course owner could delete documents in other
     // courses by putting a foreign doc_id in the path.
     let doc = minerva_db::queries::documents::find_by_id(&state.db, doc_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if doc.workspace_id != course_id {
+    if doc.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
 
@@ -579,10 +582,10 @@ async fn delete_document(
     let mut all_ids: Vec<Uuid> = children.iter().map(|c| c.id).collect();
     all_ids.push(doc_id);
 
-    purge_document_artifacts(&state, course_id, course.embedding_version, &all_ids).await?;
+    purge_document_artifacts(&state, workspace_id, course.embedding_version, &all_ids).await?;
     // Delete the parent from DB; FK cascade removes child rows.
     minerva_db::queries::documents::delete(&state.db, doc_id).await?;
-    remove_document_files(&state, course_id, &all_ids).await;
+    remove_document_files(&state, workspace_id, &all_ids).await;
 
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
@@ -592,13 +595,13 @@ async fn delete_document(
 /// (slide frames, figure crops). The rows themselves are the caller's.
 pub(crate) async fn purge_document_artifacts(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     embedding_version: i32,
     ids: &[Uuid],
 ) -> Result<(), AppError> {
     let collections = [
-        minerva_pipeline::pipeline::collection_name(course_id, embedding_version),
-        minerva_pipeline::figures::context_collection_name(course_id, embedding_version),
+        minerva_pipeline::pipeline::collection_name(workspace_id, embedding_version),
+        minerva_pipeline::figures::context_collection_name(workspace_id, embedding_version),
         minerva_pipeline::figures::COLLECTION.to_string(),
     ];
     for collection_name in &collections {
@@ -628,7 +631,8 @@ pub(crate) async fn purge_document_artifacts(
         }
     }
     for id in ids {
-        let assets = minerva_pipeline::figures::assets_dir(&state.config.docs_path, course_id, *id);
+        let assets =
+            minerva_pipeline::figures::assets_dir(&state.config.docs_path, workspace_id, *id);
         let _ = tokio::fs::remove_dir_all(assets).await;
     }
     Ok(())
@@ -636,10 +640,10 @@ pub(crate) async fn purge_document_artifacts(
 
 /// Delete the stored source file of each document. The extension is not
 /// stored, so try the ones documents are saved under.
-pub(crate) async fn remove_document_files(state: &AppState, course_id: Uuid, ids: &[Uuid]) {
+pub(crate) async fn remove_document_files(state: &AppState, workspace_id: Uuid, ids: &[Uuid]) {
     for id in ids {
         for ext in &["pdf", "docx", "doc", "pptx", "ppt", "txt", "html", "url"] {
-            let file_path = format!("{}/{}/{}.{}", state.config.docs_path, course_id, id, ext);
+            let file_path = format!("{}/{}/{}.{}", state.config.docs_path, workspace_id, id, ext);
             if tokio::fs::remove_file(&file_path).await.is_ok() {
                 break;
             }
@@ -658,13 +662,14 @@ struct ChunkResponse {
 async fn list_chunks(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<ChunkResponse>>, AppError> {
     let course =
-        require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+        require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants)
+            .await?;
 
     let collection_name =
-        minerva_pipeline::pipeline::collection_name(course_id, course.embedding_version);
+        minerva_pipeline::pipeline::collection_name(workspace_id, course.embedding_version);
 
     // Check if collection exists
     let exists = state
@@ -731,14 +736,15 @@ struct SearchResult {
 async fn search_chunks(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<Vec<SearchResult>>, AppError> {
     let course =
-        require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+        require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants)
+            .await?;
 
     let collection_name =
-        minerva_pipeline::pipeline::collection_name(course_id, course.embedding_version);
+        minerva_pipeline::pipeline::collection_name(workspace_id, course.embedding_version);
     let exists = state
         .qdrant
         .collection_exists(&collection_name)
@@ -753,7 +759,7 @@ async fn search_chunks(
 
     // Admin search UI: exclude orphaned docs at the Qdrant layer so the
     // top-N contract is preserved (same reasoning as the chat path).
-    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&state.db, course_id)
+    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&state.db, workspace_id)
         .await
         .unwrap_or_default();
     let scored_points = crate::strategy::common::embedding_search(
@@ -802,8 +808,8 @@ pub use minerva_pipeline::pipeline::extension_from_filename;
 /// Returns 404 (not 403) when off so a non-KG course "looks like"
 /// the feature simply doesn't exist; no surface for student or
 /// teacher fishing.
-async fn require_kg_enabled(state: &AppState, course_id: Uuid) -> Result<(), AppError> {
-    if crate::feature_flags::course_kg_enabled(&state.db, course_id).await {
+async fn require_kg_enabled(state: &AppState, workspace_id: Uuid) -> Result<(), AppError> {
+    if crate::feature_flags::course_kg_enabled(&state.db, workspace_id).await {
         Ok(())
     } else {
         Err(AppError::NotFound)
@@ -814,13 +820,13 @@ async fn require_kg_enabled(state: &AppState, course_id: Uuid) -> Result<(), App
 /// belongs to the course. Same scope-check as `patch_document`.
 async fn load_doc_in_course(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     doc_id: Uuid,
 ) -> Result<minerva_db::queries::documents::DocumentRow, AppError> {
     let doc = minerva_db::queries::documents::find_by_id(&state.db, doc_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if doc.workspace_id != course_id {
+    if doc.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
     Ok(doc)
@@ -893,11 +899,11 @@ struct ReclassifyResponse {
 async fn reclassify_document(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ReclassifyResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
-    let doc = load_doc_in_course(&state, course_id, doc_id).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_kg_enabled(&state, workspace_id).await?;
+    let doc = load_doc_in_course(&state, workspace_id, doc_id).await?;
 
     match run_classify_one(&state, &doc).await? {
         None => Ok(Json(ReclassifyResponse {
@@ -908,7 +914,7 @@ async fn reclassify_document(
             rationale: doc.kind_rationale,
         })),
         Some((kind, confidence, rationale)) => {
-            state.relink_scheduler.mark_dirty(course_id).await;
+            state.relink_scheduler.mark_dirty(workspace_id).await;
             Ok(Json(ReclassifyResponse {
                 classified: true,
                 locked: false,
@@ -932,12 +938,12 @@ struct SetKindBody {
 async fn set_document_kind(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, doc_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<SetKindBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
-    let doc = load_doc_in_course(&state, course_id, doc_id).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_kg_enabled(&state, workspace_id).await?;
+    let doc = load_doc_in_course(&state, workspace_id, doc_id).await?;
 
     // Reject unknown kinds at the API boundary so the user gets a 400
     // instead of a 500 from the DB CHECK constraint.
@@ -959,7 +965,7 @@ async fn set_document_kind(
         // orphan. One quick round-trip; this path is only taken on a
         // teacher's manual lock action so it's not hot.
         let collection_name =
-            minerva_pipeline::pipeline::collection_name_for_course(&state.db, course_id)
+            minerva_pipeline::pipeline::collection_name_for_course(&state.db, workspace_id)
                 .await
                 .map_err(|e| AppError::Internal(format!("course lookup failed: {}", e)))?;
         if state
@@ -998,7 +1004,7 @@ async fn set_document_kind(
     // in `solution_of` / `part_of_unit` edges (e.g. flipping reading ->
     // sample_solution removes its embeddings AND should remove edges
     // pointing at it). Mark the course dirty for the relink sweeper.
-    state.relink_scheduler.mark_dirty(course_id).await;
+    state.relink_scheduler.mark_dirty(workspace_id).await;
 
     Ok(Json(serde_json::json!({
         "kind": body.kind,
@@ -1012,11 +1018,11 @@ async fn set_document_kind(
 async fn clear_kind_lock(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, doc_id)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
-    let _doc = load_doc_in_course(&state, course_id, doc_id).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_kg_enabled(&state, workspace_id).await?;
+    let _doc = load_doc_in_course(&state, workspace_id, doc_id).await?;
     minerva_db::queries::documents::clear_kind_lock(&state.db, doc_id).await?;
     Ok(Json(serde_json::json!({
         "kind_locked_by_teacher": false,
@@ -1035,12 +1041,12 @@ struct ReclassifyAllResponse {
 async fn reclassify_all_in_course(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<ReclassifyAllResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_kg_enabled(&state, workspace_id).await?;
 
-    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+    let docs = minerva_db::queries::documents::list_by_course(&state.db, workspace_id).await?;
     let candidates: Vec<_> = docs
         .into_iter()
         .filter(|d| !d.kind_locked_by_teacher && d.status == "ready")
@@ -1061,7 +1067,7 @@ async fn reclassify_all_in_course(
         }
         tracing::info!(
             "reclassify-all: finished course {} ({} docs)",
-            course_id,
+            workspace_id,
             queued
         );
     });
@@ -1071,7 +1077,10 @@ async fn reclassify_all_in_course(
     // each candidate; we additionally mark the course immediate-dirty
     // so the sweeper picks it up on its next tick (typically ~10s,
     // well after the classify task is done).
-    state.relink_scheduler.mark_dirty_immediate(course_id).await;
+    state
+        .relink_scheduler
+        .mark_dirty_immediate(workspace_id)
+        .await;
 
     Ok(Json(ReclassifyAllResponse { queued }))
 }
@@ -1149,14 +1158,14 @@ struct GraphResponse {
 async fn get_knowledge_graph(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<GraphResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_kg_enabled(&state, workspace_id).await?;
 
-    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id).await?;
+    let docs = minerva_db::queries::documents::list_by_course(&state.db, workspace_id).await?;
     let edges_rows =
-        minerva_db::queries::document_relations::list_by_course(&state.db, course_id).await?;
+        minerva_db::queries::document_relations::list_by_course(&state.db, workspace_id).await?;
 
     let nodes: Vec<GraphNode> = docs
         .into_iter()
@@ -1192,11 +1201,11 @@ async fn get_knowledge_graph(
     //     will redo).
     // Both signals come from authoritative tables. Two cheap
     // queries; no docs join required.
-    let queued = minerva_db::queries::relink_queue::is_queued(&state.db, course_id)
+    let queued = minerva_db::queries::relink_queue::is_queued(&state.db, workspace_id)
         .await
         .unwrap_or(false);
     let stale_pairs =
-        minerva_db::queries::linker_decisions::stale_decisions_for_course(&state.db, course_id)
+        minerva_db::queries::linker_decisions::stale_decisions_for_course(&state.db, workspace_id)
             .await
             .unwrap_or(0);
     let linker_pending = queued || stale_pairs > 0;
@@ -1223,10 +1232,10 @@ struct EdgeMutationResponse {
 async fn reject_edge(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, edge_id)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, edge_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<EdgeMutationResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_kg_enabled(&state, workspace_id).await?;
 
     // Cross-course safety: if the edge id resolves to a different
     // course, surface 404 rather than silently allowing a teacher to
@@ -1234,7 +1243,7 @@ async fn reject_edge(
     let edge = minerva_db::queries::document_relations::find_by_id(&state.db, edge_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if edge.workspace_id != course_id {
+    if edge.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
 
@@ -1255,15 +1264,15 @@ async fn reject_edge(
 async fn unreject_edge(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, edge_id)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, edge_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<EdgeMutationResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_kg_enabled(&state, workspace_id).await?;
 
     let edge = minerva_db::queries::document_relations::find_by_id(&state.db, edge_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if edge.workspace_id != course_id {
+    if edge.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
 
@@ -1290,11 +1299,11 @@ struct RelinkResponse {
 async fn rebuild_knowledge_graph(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<RelinkResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    require_kg_enabled(&state, course_id).await?;
-    let edges = crate::relink_scheduler::relink_course(&state, course_id)
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_kg_enabled(&state, workspace_id).await?;
+    let edges = crate::relink_scheduler::relink_course(&state, workspace_id)
         .await
         .map_err(AppError::Internal)?;
     Ok(Json(RelinkResponse { edges }))

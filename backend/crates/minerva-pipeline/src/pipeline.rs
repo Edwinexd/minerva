@@ -101,11 +101,11 @@ pub fn compute_content_hash(bytes: &[u8]) -> String {
 /// One source of truth: every chunk-search, chunk-delete, and ingest
 /// upsert in the codebase goes through this helper, so a rotation can
 /// never leak references to the wrong collection.
-pub fn collection_name(course_id: uuid::Uuid, version: i32) -> String {
+pub fn collection_name(workspace_id: uuid::Uuid, version: i32) -> String {
     if version <= 1 {
-        format!("course_{}", course_id)
+        format!("course_{}", workspace_id)
     } else {
-        format!("course_{}_v{}", course_id, version)
+        format!("course_{}_v{}", workspace_id, version)
     }
 }
 
@@ -117,15 +117,15 @@ pub fn collection_name(course_id: uuid::Uuid, version: i32) -> String {
 /// avoid a panic).
 pub async fn collection_name_for_course(
     db: &sqlx::PgPool,
-    course_id: uuid::Uuid,
+    workspace_id: uuid::Uuid,
 ) -> Result<String, sqlx::Error> {
     let version: Option<i32> = sqlx::query_scalar!(
         "SELECT embedding_version FROM workspaces WHERE id = $1",
-        course_id,
+        workspace_id,
     )
     .fetch_optional(db)
     .await?;
-    Ok(collection_name(course_id, version.unwrap_or(1)))
+    Ok(collection_name(workspace_id, version.unwrap_or(1)))
 }
 
 pub use minerva_catalog::VALID_EMBEDDING_PROVIDERS;
@@ -171,7 +171,7 @@ pub async fn process_document(
     embedder: &Arc<dyn EmbedderClient>,
     classifier: &Arc<dyn Classifier>,
     document_id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
     file_path: &Path,
     filename: &str,
     mime_type: &str,
@@ -224,7 +224,7 @@ pub async fn process_document(
         );
         if locked_kind.is_none() {
             if let Ok(c) = classifier
-                .classify(course_id, filename, mime_type, &text)
+                .classify(workspace_id, filename, mime_type, &text)
                 .await
             {
                 let _ = minerva_db::queries::documents::set_classification(
@@ -253,7 +253,7 @@ pub async fn process_document(
         kind.to_owned()
     } else {
         match classifier
-            .classify(course_id, filename, mime_type, &text)
+            .classify(workspace_id, filename, mime_type, &text)
             .await
         {
             Ok(c) => {
@@ -305,7 +305,7 @@ pub async fn process_document(
     // (which bumps the version in courses.rs::rotate_embedding) lands
     // chunks in a fresh collection without colliding with the
     // previous-model vectors.
-    let collection_name = collection_name(course_id, embedding_version);
+    let collection_name = collection_name(workspace_id, embedding_version);
     let is_sample_solution = kind_str == KIND_SAMPLE_SOLUTION;
     // Ids for this version's points. A document processed before (a PDF
     // whose OCR text just replaced its extracted text) keeps its old points
@@ -325,7 +325,7 @@ pub async fn process_document(
             ("document_id".to_string(), document_id.to_string().into()),
             // Stored payload key: points written before courses became
             // workspaces carry "course_id", so the key stays.
-            ("course_id".to_string(), course_id.to_string().into()),
+            ("course_id".to_string(), workspace_id.to_string().into()),
             ("chunk_index".to_string(), (chunk.index as i64).into()),
             ("text".to_string(), chunk.text.clone().into()),
             ("filename".to_string(), filename.to_string().into()),

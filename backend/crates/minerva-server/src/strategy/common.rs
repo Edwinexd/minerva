@@ -915,7 +915,7 @@ pub async fn expand_context_via_graph(
     fastembed: &Arc<dyn EmbedderClient>,
     http_client: &reqwest::Client,
     openai_api_key: &str,
-    course_id: uuid::Uuid,
+    workspace_id: uuid::Uuid,
     collection_name: &str,
     embedding_provider: &str,
     embedding_model: &str,
@@ -946,7 +946,7 @@ pub async fn expand_context_via_graph(
 
     let partners_map = match minerva_db::queries::document_relations::unit_partners_for_docs(
         db,
-        course_id,
+        workspace_id,
         &source_doc_ids,
     )
     .await
@@ -1060,7 +1060,7 @@ pub async fn expand_context_via_graph(
     if !expanded.is_empty() {
         tracing::info!(
             "graph_expand: course {}; added {} chunk(s) from {} partner doc(s)",
-            course_id,
+            workspace_id,
             expanded.len(),
             expanded.len(),
         );
@@ -1411,7 +1411,7 @@ pub async fn record_turn_usage(ctx: &super::GenerationContext, usage: &super::Tu
         if let Err(e) = minerva_db::queries::usage::record_usage(
             &ctx.db,
             ctx.user_id,
-            ctx.course_id,
+            ctx.workspace_id,
             // Billing model + provider; the daily cost is derived on read
             // from that model's current rate.
             &route.model,

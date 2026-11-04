@@ -242,12 +242,12 @@ pub async fn adjudicate(
     http: &reqwest::Client,
     util: &UtilityModel,
     db: &sqlx::PgPool,
-    course_id: uuid::Uuid,
+    workspace_id: uuid::Uuid,
     earlier: &[String],
     current: &str,
 ) -> TopicShift {
     if util.provider.is_none() {
-        tracing::warn!(%course_id, "topic_switch: no utility model configured");
+        tracing::warn!(%workspace_id, "topic_switch: no utility model configured");
         return TopicShift::Undetermined;
     }
     let body = request_body(&util.model, earlier, current);
@@ -255,7 +255,7 @@ pub async fn adjudicate(
         Some(Ok((content, usage))) => {
             crate::llm::record_pipeline_usage(
                 db,
-                course_id,
+                workspace_id,
                 CATEGORY_TOPIC_SWITCH,
                 &util.model,
                 &usage,
@@ -265,13 +265,13 @@ pub async fn adjudicate(
                 Ok(v) if v.new_topic => TopicShift::Confirmed,
                 Ok(_) => TopicShift::Rejected,
                 Err(e) => {
-                    tracing::warn!(%course_id, "topic_switch: unparseable verdict ({e})");
+                    tracing::warn!(%workspace_id, "topic_switch: unparseable verdict ({e})");
                     TopicShift::Undetermined
                 }
             }
         }
         Some(Err(e)) => {
-            tracing::warn!(%course_id, "topic_switch: request failed ({e})");
+            tracing::warn!(%workspace_id, "topic_switch: request failed ({e})");
             TopicShift::Undetermined
         }
         None => TopicShift::Undetermined,

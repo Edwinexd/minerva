@@ -386,7 +386,7 @@ pub async fn analyze_prompt(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     trail: &[AegisTrailEntry],
     mode: AegisMode,
 ) -> Result<Option<AegisVerdict>, String> {
@@ -603,7 +603,7 @@ pub async fn analyze_prompt(
         }
         None => return Err("no utility model configured".to_string()),
     };
-    crate::llm::record_pipeline_usage(db, course_id, CATEGORY_AEGIS, &model_used, &usage).await;
+    crate::llm::record_pipeline_usage(db, workspace_id, CATEGORY_AEGIS, &model_used, &usage).await;
 
     let raw = content.as_str();
     let parsed: serde_json::Value = match serde_json::from_str(raw.trim()) {
@@ -707,7 +707,7 @@ pub async fn rewrite_prompt(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     original: &str,
     suggestions: &[AegisSuggestion],
     mode: AegisMode,
@@ -772,7 +772,7 @@ pub async fn rewrite_prompt(
         }
         None => return Err("no utility model configured".to_string()),
     };
-    crate::llm::record_pipeline_usage(db, course_id, CATEGORY_AEGIS, &util.model, &usage).await;
+    crate::llm::record_pipeline_usage(db, workspace_id, CATEGORY_AEGIS, &util.model, &usage).await;
 
     let rewritten = content.trim();
     if rewritten.is_empty() {

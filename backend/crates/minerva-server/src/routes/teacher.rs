@@ -204,7 +204,7 @@ async fn owner_usage(
     let owned_ids: Vec<Uuid> = owned.iter().map(|c| c.id).collect();
     let mut course_facts = minerva_db::queries::courses::find_many(&state.db, &owned_ids).await?;
     let student_counts =
-        minerva_db::queries::workspaces::count_students_by_course(&state.db).await?;
+        minerva_db::queries::workspaces::count_students_by_workspace(&state.db).await?;
     let chat_rows =
         minerva_db::queries::usage::get_owner_chat_usage(&state.db, user.id, days).await?;
     let pipeline_rows =

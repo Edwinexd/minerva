@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::routes::guards::require_course_owner;
+use crate::routes::guards::require_workspace_owner;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -44,7 +44,7 @@ async fn list_api_keys(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<ApiKeyResponse>>, AppError> {
-    require_course_owner(&state, course_id, &user).await?;
+    require_workspace_owner(&state, course_id, &user).await?;
     let rows = minerva_db::queries::api_keys::list_by_course(&state.db, course_id).await?;
     Ok(Json(
         rows.into_iter()
@@ -65,7 +65,7 @@ async fn create_api_key(
     Path(course_id): Path<Uuid>,
     Json(body): Json<CreateApiKeyRequest>,
 ) -> Result<Json<ApiKeyCreatedResponse>, AppError> {
-    require_course_owner(&state, course_id, &user).await?;
+    require_workspace_owner(&state, course_id, &user).await?;
     let name = body.name.trim().to_string();
     if name.is_empty() || name.len() > 100 {
         return Err(AppError::bad_request("api_keys.name_invalid_length"));
@@ -109,7 +109,7 @@ async fn delete_api_key(
     Extension(user): Extension<User>,
     Path((course_id, key_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_owner(&state, course_id, &user).await?;
+    require_workspace_owner(&state, course_id, &user).await?;
     let deleted = minerva_db::queries::api_keys::delete(&state.db, key_id, course_id).await?;
     Ok(Json(serde_json::json!({ "deleted": deleted })))
 }

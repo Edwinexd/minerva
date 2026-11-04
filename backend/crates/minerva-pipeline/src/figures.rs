@@ -108,7 +108,7 @@ pub fn matches_exemplar(image: &[f32], exemplars: &[Vec<f32>]) -> bool {
 /// vectors.
 pub async fn delete_figure_points(
     qdrant: &Qdrant,
-    course_id: Uuid,
+    workspace_id: Uuid,
     version: i32,
     ids: &[Uuid],
 ) -> Result<(), String> {
@@ -120,7 +120,7 @@ pub async fn delete_figure_points(
     };
     for collection in [
         COLLECTION.to_string(),
-        context_collection_name(course_id, version),
+        context_collection_name(workspace_id, version),
     ] {
         if !qdrant
             .collection_exists(&collection)
@@ -143,16 +143,16 @@ pub async fn delete_figure_points(
 
 /// Per-course collection of figure context vectors, alongside (and
 /// versioned with) the course's chunk collection.
-pub fn context_collection_name(course_id: Uuid, embedding_version: i32) -> String {
+pub fn context_collection_name(workspace_id: Uuid, embedding_version: i32) -> String {
     format!(
         "{}_figures",
-        crate::pipeline::collection_name(course_id, embedding_version)
+        crate::pipeline::collection_name(workspace_id, embedding_version)
     )
 }
 
 /// Where a document's slide frames and figure crops live on disk.
-pub fn assets_dir(docs_path: &str, course_id: Uuid, document_id: Uuid) -> String {
-    format!("{docs_path}/{course_id}/visual/{document_id}")
+pub fn assets_dir(docs_path: &str, workspace_id: Uuid, document_id: Uuid) -> String {
+    format!("{docs_path}/{workspace_id}/visual/{document_id}")
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -244,7 +244,7 @@ pub struct FigureToIndex {
 
 /// How a course embeds text, as the ingest pipeline does it.
 pub struct CourseEmbedding<'a> {
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub provider: &'a str,
     pub model: &'a str,
     pub version: i32,
@@ -277,7 +277,10 @@ pub async fn index_figures(
     let payload = |figure: &FigureToIndex| -> HashMap<String, qdrant_client::qdrant::Value> {
         HashMap::from([
             // Stored payload key (predates workspaces); see pipeline.rs.
-            ("course_id".to_string(), course.course_id.to_string().into()),
+            (
+                "course_id".to_string(),
+                course.workspace_id.to_string().into(),
+            ),
             (
                 "document_id".to_string(),
                 figure.document_id.to_string().into(),
@@ -286,7 +289,7 @@ pub async fn index_figures(
         ])
     };
 
-    let context_collection = context_collection_name(course.course_id, course.version);
+    let context_collection = context_collection_name(course.workspace_id, course.version);
     ensure_collection(qdrant, &context_collection, dimensions).await?;
     let context_points = figures
         .iter()

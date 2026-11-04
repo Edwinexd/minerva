@@ -33,19 +33,19 @@ pub(crate) fn require_site_integrator(user: &User) -> Result<(), AppError> {
 
 /// Whether course assistants count as teachers for a given check.
 pub(crate) enum TeacherScope {
-    /// Teachers and assistants (`is_course_teacher`).
+    /// Teachers and assistants (`is_workspace_teacher`).
     WithAssistants,
-    /// Teachers only; assistants are rejected (`is_course_teacher_strict`).
+    /// Teachers only; assistants are rejected (`is_teacher_strict`).
     /// LTI registration uses this.
     Strict,
 }
 
 /// Load a course, 404ing when it does not exist.
-pub(crate) async fn load_course(
+pub(crate) async fn load_workspace(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<WorkspaceRow, AppError> {
-    minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
+    minerva_db::queries::workspaces::find_by_id(&state.db, workspace_id)
         .await?
         .ok_or(AppError::NotFound)
 }
@@ -55,13 +55,13 @@ pub(crate) async fn load_course(
 ///
 /// The course is resolved before the role check, so a course id that does
 /// not exist is a 404 for everyone including admins.
-pub(crate) async fn require_course_teacher(
+pub(crate) async fn require_workspace_teacher(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     user: &User,
     scope: TeacherScope,
 ) -> Result<WorkspaceRow, AppError> {
-    let course = load_course(state, course_id).await?;
+    let course = load_workspace(state, workspace_id).await?;
     if is_teacher_of(state, &course, user, scope).await? {
         Ok(course)
     } else {
@@ -72,19 +72,19 @@ pub(crate) async fn require_course_teacher(
 /// Is the caller a teacher of this course? For handlers that vary their
 /// response rather than rejecting. A course id that does not exist is still
 /// a 404.
-pub(crate) async fn is_course_teacher(
+pub(crate) async fn is_workspace_teacher(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     user: &User,
     scope: TeacherScope,
 ) -> Result<bool, AppError> {
-    let course = load_course(state, course_id).await?;
+    let course = load_workspace(state, workspace_id).await?;
     is_teacher_of(state, &course, user, scope).await
 }
 
 /// Same check against a course row the caller already holds. The chat send
 /// path resolves the course before it can do anything else, so going through
-/// `require_course_teacher` there would re-fetch it by primary key on every
+/// `require_workspace_teacher` there would re-fetch it by primary key on every
 /// turn just to answer one bool.
 pub(crate) async fn is_teacher_of(
     state: &AppState,
@@ -97,11 +97,10 @@ pub(crate) async fn is_teacher_of(
     }
     Ok(match scope {
         TeacherScope::WithAssistants => {
-            minerva_db::queries::workspaces::is_course_teacher(&state.db, course.id, user.id)
-                .await?
+            minerva_db::queries::workspaces::is_teacher(&state.db, course.id, user.id).await?
         }
         TeacherScope::Strict => {
-            minerva_db::queries::workspaces::is_course_teacher_strict(&state.db, course.id, user.id)
+            minerva_db::queries::workspaces::is_teacher_strict(&state.db, course.id, user.id)
                 .await?
         }
     })
@@ -110,12 +109,12 @@ pub(crate) async fn is_teacher_of(
 /// Authorize the caller as course owner or admin, and hand back the course
 /// row. Course membership grants nothing here; this is the guard for
 /// course-configuration surfaces (keys, signed URLs, settings).
-pub(crate) async fn require_course_owner(
+pub(crate) async fn require_workspace_owner(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     user: &User,
 ) -> Result<WorkspaceRow, AppError> {
-    let course = load_course(state, course_id).await?;
+    let course = load_workspace(state, workspace_id).await?;
     if course.owner_id != user.id && !user.role.is_admin() {
         return Err(AppError::Forbidden);
     }

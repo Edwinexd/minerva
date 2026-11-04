@@ -246,7 +246,7 @@ export function ChatWindow({
   useEffect(() => {
     if (conversationId === null || readOnly) return
     void api
-      .post(`/courses/${courseId}/conversations/${conversationId}/mark-read`, {})
+      .post(`/workspaces/${courseId}/conversations/${conversationId}/mark-read`, {})
       .then(() => {
         queryClient.invalidateQueries({
           queryKey: ["courses", courseId, "conversations"],
@@ -293,7 +293,7 @@ export function ChatWindow({
     conversationId,
     doSplit: (cid) =>
       api.post<ConversationContinuation>(
-        `/courses/${courseId}/conversations/${cid}/${limitAction}`,
+        `/workspaces/${courseId}/conversations/${cid}/${limitAction}`,
         {},
       ),
     onSplit: openContinuation,
@@ -327,8 +327,8 @@ export function ChatWindow({
   const buildSendFetch = useCallback<ChatSurfaceAdapter<Message>["buildSendFetch"]>(
     ({ content, existingConvId, analysisAtSend }) => {
       const url = existingConvId
-        ? `/api/courses/${courseId}/conversations/${existingConvId}/message`
-        : `/api/courses/${courseId}/conversations`
+        ? `/api/workspaces/${courseId}/conversations/${existingConvId}/message`
+        : `/api/workspaces/${courseId}/conversations`
       return () =>
         fetch(url, {
           method: "POST",
@@ -350,7 +350,7 @@ export function ChatWindow({
     ChatSurfaceAdapter<Message>["fetchLiveAnalysis"]
   >(
     async (content, previousSuggestions, mode, signal) => {
-      const res = await fetch(`/api/courses/${courseId}/aegis/analyze`, {
+      const res = await fetch(`/api/workspaces/${courseId}/aegis/analyze`, {
         method: "POST",
         headers: buildHeaders(),
         body: JSON.stringify({
@@ -382,7 +382,7 @@ export function ChatWindow({
   >(
     async (draft, selected, mode) => {
       try {
-        const res = await fetch(`/api/courses/${courseId}/aegis/rewrite`, {
+        const res = await fetch(`/api/workspaces/${courseId}/aegis/rewrite`, {
           method: "POST",
           headers: buildHeaders(),
           body: JSON.stringify({

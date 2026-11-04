@@ -80,7 +80,7 @@ Rules:
 pub struct ContinuationResponse {
     /// The new conversation. The client navigates straight to it.
     pub id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub continued_from_id: Uuid,
     /// The stored recap, or `null` when summarization was unavailable.
     /// The split still happens in that case; the student just starts
@@ -97,9 +97,9 @@ pub struct ContinuationResponse {
 pub async fn continue_conversation(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, cid)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ContinuationResponse>, AppError> {
-    let course = super::chat::verify_course_access_pub(&state, course_id, user.id).await?;
+    let course = super::chat::verify_course_access_pub(&state, workspace_id, user.id).await?;
     Ok(Json(split(&state, &course, cid, user.id).await?))
 }
 
@@ -115,12 +115,12 @@ pub(super) async fn split(
     cid: Uuid,
     user_id: Uuid,
 ) -> Result<ContinuationResponse, AppError> {
-    let course_id = course.id;
+    let workspace_id = course.id;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
     // Strictly the owner: a teacher browsing a student's conversation
@@ -149,13 +149,13 @@ pub(super) async fn split(
     }
 
     let messages = minerva_db::queries::conversations::list_messages(&state.db, cid).await?;
-    let carryover = summarize(state, course_id, &messages).await;
+    let carryover = summarize(state, workspace_id, &messages).await;
 
     let new_id = Uuid::new_v4();
     minerva_db::queries::conversations::create_continuation(
         &state.db,
         new_id,
-        course_id,
+        workspace_id,
         user_id,
         Some(cid),
         carryover.as_deref(),
@@ -166,7 +166,7 @@ pub(super) async fn split(
 
     Ok(ContinuationResponse {
         id: new_id,
-        course_id,
+        workspace_id,
         continued_from_id: cid,
         carryover_summary: carryover,
     })
@@ -219,9 +219,9 @@ pub(crate) async fn pending_topic_switch(
 pub async fn branch_conversation(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, cid)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ContinuationResponse>, AppError> {
-    let course = super::chat::verify_course_access_pub(&state, course_id, user.id).await?;
+    let course = super::chat::verify_course_access_pub(&state, workspace_id, user.id).await?;
     Ok(Json(branch(&state, &course, cid, user.id).await?))
 }
 
@@ -233,12 +233,12 @@ pub(super) async fn branch(
     cid: Uuid,
     user_id: Uuid,
 ) -> Result<ContinuationResponse, AppError> {
-    let course_id = course.id;
+    let workspace_id = course.id;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
     if conv.user_id != user_id {
@@ -262,7 +262,7 @@ pub(super) async fn branch(
     minerva_db::queries::conversations::create_continuation(
         &state.db,
         new_id,
-        course_id,
+        workspace_id,
         user_id,
         Some(cid),
         carryover.as_deref(),
@@ -273,7 +273,7 @@ pub(super) async fn branch(
 
     Ok(ContinuationResponse {
         id: new_id,
-        course_id,
+        workspace_id,
         continued_from_id: cid,
         carryover_summary: carryover,
     })
@@ -359,12 +359,12 @@ fn split_threshold(soft_limit: i64, hard_limit: i64) -> Option<i64> {
 /// what returning an error here would do.
 async fn summarize(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     messages: &[minerva_db::queries::conversations::MessageRow],
 ) -> Option<String> {
     let utility = state.utility_model().await;
     if utility.provider.is_none() {
-        tracing::warn!(%course_id, "conversation split: no utility model configured, no carryover");
+        tracing::warn!(%workspace_id, "conversation split: no utility model configured, no carryover");
         return None;
     }
 
@@ -390,7 +390,7 @@ async fn summarize(
         Some(Ok((content, usage))) => {
             crate::llm::record_pipeline_usage(
                 &state.db,
-                course_id,
+                workspace_id,
                 minerva_db::queries::workspace_token_usage::CATEGORY_CONVERSATION_CARRYOVER,
                 &utility.model,
                 &usage,
@@ -403,7 +403,7 @@ async fn summarize(
             Some(truncate_chars(trimmed, CARRYOVER_MAX_CHARS))
         }
         Some(Err(error)) => {
-            tracing::warn!(%course_id, %error, "conversation split: carryover summary failed");
+            tracing::warn!(%workspace_id, %error, "conversation split: carryover summary failed");
             None
         }
         None => None,

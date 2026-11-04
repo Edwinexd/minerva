@@ -186,9 +186,9 @@ pub async fn api_main() -> anyhow::Result<()> {
                     cursor = Some((last.4, last.0));
                 }
 
-                for (doc_id, course_id, filename, _mime_type, _created_at) in rows {
+                for (doc_id, workspace_id, filename, _mime_type, _created_at) in rows {
                     let ext = routes::documents::extension_from_filename(&filename);
-                    let path = format!("{}/{}/{}.{}", docs_path, course_id, doc_id, ext);
+                    let path = format!("{}/{}/{}.{}", docs_path, workspace_id, doc_id, ext);
                     // Stream-hash the file in 64 KiB chunks rather than
                     // slurping it into a Vec<u8>. The sweep hits every
                     // legacy doc on disk; with multi-MB PDFs that
@@ -250,7 +250,7 @@ pub async fn api_main() -> anyhow::Result<()> {
                             // live copy of the content. If the slot is now free,
                             // leave the row NULL; the next sweep fills it.
                             match minerva_db::queries::documents::find_active_by_content_hash(
-                                &state.db, course_id, &hash,
+                                &state.db, workspace_id, &hash,
                             )
                             .await
                             {
@@ -264,7 +264,7 @@ pub async fn api_main() -> anyhow::Result<()> {
                                             "content_hash backfill: orphaned doc {} as a duplicate of active doc {} in course {}",
                                             doc_id,
                                             holder.id,
-                                            course_id
+                                            workspace_id
                                         ),
                                         Err(e) => tracing::warn!(
                                             "content_hash backfill: failed to orphan duplicate doc {}: {}",

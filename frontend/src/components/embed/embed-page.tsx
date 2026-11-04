@@ -52,7 +52,7 @@ interface EmbedCourse {
 
 interface EmbedConversation {
   id: string
-  course_id: string
+  workspace_id: string
   title: string | null
   created_at: string
   updated_at: string

@@ -101,18 +101,19 @@ pub fn router() -> Router<AppState> {
 async fn list_all_courses(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-) -> Result<Json<Vec<crate::routes::courses::CourseResponse>>, AppError> {
+) -> Result<Json<Vec<crate::routes::workspaces::WorkspaceResponse>>, AppError> {
     require_admin(&user)?;
     let rows = minerva_db::queries::workspaces::list_all_including_archived(&state.db).await?;
     // One grouped query for every course's student count instead of a
     // per-course COUNT in the loop.
     let student_counts =
-        minerva_db::queries::workspaces::count_students_by_course(&state.db).await?;
+        minerva_db::queries::workspaces::count_students_by_workspace(&state.db).await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let student_count = student_counts.get(&row.id).copied().unwrap_or(0);
         out.push(
-            crate::routes::courses::admin_course_response(&state.db, row, student_count).await,
+            crate::routes::workspaces::admin_workspace_response(&state.db, row, student_count)
+                .await,
         );
     }
     Ok(Json(out))
@@ -1291,7 +1292,7 @@ async fn set_course_feature_flags(
 // response reports per-course success / failure, so a partial batch
 // (e.g. one course sitting on a now-disabled model) is fully
 // transparent rather than failing the whole request. Settings changes
-// route through the SAME `apply_course_update` path as
+// route through the SAME `apply_workspace_update` path as
 // `PUT /courses/{id}`, so every model-capability / embedding / reranker
 // validation applies per course; admins bypass the picker-disabled
 // gates exactly as they do via the per-course force-migrate dialog.
@@ -1306,7 +1307,7 @@ const BULK_MAX_COURSES: usize = 500;
 struct BulkCoursePatch {
     // `name` / `description` are intentionally absent: they're per-course
     // identity, and setting them identically across a selection is never
-    // what an admin wants. Everything else `apply_course_update` accepts
+    // what an admin wants. Everything else `apply_workspace_update` accepts
     // is bulk-settable.
     context_ratio: Option<f64>,
     temperature: Option<f64>,
@@ -1328,7 +1329,7 @@ struct BulkCoursePatch {
 impl BulkCoursePatch {
     /// True when no settings field is present. A bulk call may carry only
     /// feature-flag changes, in which case we skip the
-    /// `apply_course_update` round-trip (and its potential re-embed)
+    /// `apply_workspace_update` round-trip (and its potential re-embed)
     /// entirely.
     fn is_empty(&self) -> bool {
         self.context_ratio.is_none()
@@ -1411,10 +1412,10 @@ async fn apply_bulk_one(
     if !patch.is_empty() {
         // `name` / `description` stay None (not bulk-settable). All
         // validation and any embedding rotation happen inside
-        // `apply_course_update`, identical to PUT /courses/{id}; we pass
+        // `apply_workspace_update`, identical to PUT /courses/{id}; we pass
         // is_admin = true (the route gated on `require_admin`) so a
         // disabled-picker model can still be targeted.
-        let fields = crate::routes::courses::CourseUpdateFields {
+        let fields = crate::routes::workspaces::WorkspaceUpdateFields {
             name: None,
             description: None,
             context_ratio: patch.context_ratio,
@@ -1433,7 +1434,7 @@ async fn apply_bulk_one(
             conversation_hard_token_limit: patch.conversation_hard_token_limit,
             semester_label: patch.semester_label.clone(),
         };
-        crate::routes::courses::apply_course_update(state, &existing, fields, true).await?;
+        crate::routes::workspaces::apply_workspace_update(state, &existing, fields, true).await?;
     }
 
     for (flag, desired) in feature_flags {

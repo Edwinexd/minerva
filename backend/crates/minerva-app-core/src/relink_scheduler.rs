@@ -70,10 +70,10 @@ impl RelinkScheduler {
     /// `RELINK_DEBOUNCE` of quiescence; i.e. no further marks --
     /// OR `MAX_PENDING_AGE` after the FIRST mark, whichever comes
     /// first. The cap is what makes long bursts not starve the linker.
-    pub async fn mark_dirty(&self, course_id: Uuid) {
+    pub async fn mark_dirty(&self, workspace_id: Uuid) {
         if let Err(e) = minerva_db::queries::relink_queue::mark_dirty(
             &self.db,
-            course_id,
+            workspace_id,
             RELINK_DEBOUNCE.as_secs() as i64,
             MAX_PENDING_AGE.as_secs() as i64,
         )
@@ -81,7 +81,7 @@ impl RelinkScheduler {
         {
             tracing::warn!(
                 "relink_scheduler: mark_dirty({}) failed: {}; linker will not run",
-                course_id,
+                workspace_id,
                 e
             );
         }
@@ -91,13 +91,13 @@ impl RelinkScheduler {
     /// tick. Used by the explicit "Re-classify all" / admin backfill
     /// completion paths where the user has finished a batch and
     /// reasonably wants edges refreshed without a 60s wait.
-    pub async fn mark_dirty_immediate(&self, course_id: Uuid) {
+    pub async fn mark_dirty_immediate(&self, workspace_id: Uuid) {
         if let Err(e) =
-            minerva_db::queries::relink_queue::mark_dirty_immediate(&self.db, course_id).await
+            minerva_db::queries::relink_queue::mark_dirty_immediate(&self.db, workspace_id).await
         {
             tracing::warn!(
                 "relink_scheduler: mark_dirty_immediate({}) failed: {}",
-                course_id,
+                workspace_id,
                 e
             );
         }
@@ -142,23 +142,26 @@ pub fn spawn_sweep(state: crate::state::AppState) {
                 continue;
             }
             tracing::info!("relink sweeper: firing linker for {} course(s)", due.len());
-            for course_id in due {
+            for workspace_id in due {
                 let started = std::time::Instant::now();
-                match relink_course(&state, course_id).await {
+                match relink_course(&state, workspace_id).await {
                     Ok(edges_written) => {
                         tracing::info!(
                             "relink sweeper: course {} done in {}ms ({} edges)",
-                            course_id,
+                            workspace_id,
                             started.elapsed().as_millis(),
                             edges_written,
                         );
                     }
                     Err(e) => {
-                        tracing::warn!("relink sweeper: course {} failed: {:?}", course_id, e);
+                        tracing::warn!("relink sweeper: course {} failed: {:?}", workspace_id, e);
                         // On error, re-mark immediate so the next sweep
                         // retries. Avoids losing a relink to a transient
                         // Cerebras 5xx.
-                        state.relink_scheduler.mark_dirty_immediate(course_id).await;
+                        state
+                            .relink_scheduler
+                            .mark_dirty_immediate(workspace_id)
+                            .await;
                     }
                 }
             }
@@ -174,9 +177,9 @@ pub fn spawn_sweep(state: crate::state::AppState) {
 /// route tree.
 pub async fn relink_course(
     state: &crate::state::AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<usize, String> {
-    let docs = minerva_db::queries::documents::list_by_course(&state.db, course_id)
+    let docs = minerva_db::queries::documents::list_by_course(&state.db, workspace_id)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -193,11 +196,11 @@ pub async fn relink_course(
     // been re-classified since its prior decision keeps both its cache
     // row AND its existing document_relations edge (if any); no LLM
     // call, no DB churn.
-    let result = crate::classification::linker::link_course(&ctx, course_id, &docs).await?;
+    let result = crate::classification::linker::link_course(&ctx, workspace_id, &docs).await?;
 
     tracing::info!(
         "relink: course {} considered {} doc(s); {} cached, {} re-evaluated, {} live edge(s)",
-        course_id,
+        workspace_id,
         result.considered,
         result.cached_hits,
         result.re_evaluated,

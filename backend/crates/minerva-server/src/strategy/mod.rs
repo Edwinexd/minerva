@@ -205,7 +205,7 @@ pub struct GenerationContext {
     pub temperature: f64,
     pub max_chunks: i32,
     pub min_score: f32,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub conversation_id: Uuid,
     pub user_id: Uuid,
     /// Resolved chat provider for `model`, drawn from the `AppState`

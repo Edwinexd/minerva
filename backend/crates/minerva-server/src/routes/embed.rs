@@ -26,9 +26,9 @@ use crate::routes::chat::{
     AegisModeWire, AegisRewriteResponse, AegisSuggestionPayload, ConversationWithUserResponse,
     PromptAnalysisResponse,
 };
-use crate::routes::courses::{resolve_course_flags, CourseFeatureFlagsView};
 use crate::routes::integration::verify_embed_token;
 use crate::routes::suggested_questions::{self, SuggestedQuestionsResponse};
+use crate::routes::workspaces::{resolve_workspace_flags, WorkspaceFeatureFlagsView};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -120,7 +120,7 @@ fn authenticate(
 //; Response types --
 
 #[derive(Serialize)]
-struct CourseResponse {
+struct WorkspaceResponse {
     id: Uuid,
     name: String,
     description: Option<String>,
@@ -128,8 +128,8 @@ struct CourseResponse {
     /// runtime uses. Lets the iframe-side frontend gate the aegis
     /// Feedback panel (and any future flags) without an extra
     /// round-trip. Same shape as the Shibboleth `/courses/{id}`
-    /// route via `crate::routes::courses::CourseFeatureFlagsView`.
-    feature_flags: CourseFeatureFlagsView,
+    /// route via `crate::routes::workspaces::WorkspaceFeatureFlagsView`.
+    feature_flags: WorkspaceFeatureFlagsView,
 }
 
 #[derive(Serialize)]
@@ -286,15 +286,15 @@ async fn get_course(
     State(state): State<AppState>,
     Path(course_id): Path<Uuid>,
     Query(query): Query<TokenQuery>,
-) -> Result<Json<CourseResponse>, AppError> {
+) -> Result<Json<WorkspaceResponse>, AppError> {
     authenticate(&state, course_id, &query)?;
 
     let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let feature_flags = resolve_course_flags(&state.db, course.id).await;
-    Ok(Json(CourseResponse {
+    let feature_flags = resolve_workspace_flags(&state.db, course.id).await;
+    Ok(Json(WorkspaceResponse {
         id: course.id,
         name: course.name,
         description: course.description,

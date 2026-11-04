@@ -143,13 +143,13 @@ export function ConversationsPage({ useParams }: { useParams: () => { courseId: 
   // cleared by viewing; they need explicit Acknowledge clicks.
   const markReviewedMutation = useMutation({
     mutationFn: (cid: string) =>
-      api.post(`/courses/${courseId}/conversations/${cid}/mark-read`, {}),
+      api.post(`/workspaces/${courseId}/conversations/${cid}/mark-read`, {}),
     onSuccess: invalidateConversations,
   })
 
   const pinMutation = useMutation({
     mutationFn: ({ cid, pinned }: { cid: string; pinned: boolean }) =>
-      api.put(`/courses/${courseId}/conversations/${cid}/pin`, { pinned }),
+      api.put(`/workspaces/${courseId}/conversations/${cid}/pin`, { pinned }),
     onSuccess: invalidateConversations,
   })
 
@@ -584,7 +584,7 @@ function FeedbackBadges({
   const ackFeedback = useMutation({
     mutationFn: (fbId: string) =>
       api.post(
-        `/courses/${courseId}/conversations/${conversationId}/feedback/${fbId}/acknowledge`,
+        `/workspaces/${courseId}/conversations/${conversationId}/feedback/${fbId}/acknowledge`,
         {},
       ),
     onSuccess: () =>
@@ -682,7 +682,7 @@ function ConversationFlagDisplay({
   const ackMutation = useMutation({
     mutationFn: () =>
       api.post(
-        `/courses/${courseId}/conversations/${conversationId}/flags/${flag.id}/acknowledge`,
+        `/workspaces/${courseId}/conversations/${conversationId}/flags/${flag.id}/acknowledge`,
         {},
       ),
     onSuccess: () => {
@@ -802,7 +802,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
 
   const addNoteMutation = useMutation({
     mutationFn: (body: { content: string; message_id?: string }) =>
-      api.post<TeacherNote>(`/courses/${courseId}/conversations/${conversationId}/notes`, body),
+      api.post<TeacherNote>(`/workspaces/${courseId}/conversations/${conversationId}/notes`, body),
     onSuccess: () => {
       invalidateDetail()
       setNoteContent("")
@@ -812,7 +812,7 @@ function ConversationExpanded({ courseId, conversationId }: { courseId: string; 
 
   const deleteNoteMutation = useMutation({
     mutationFn: (noteId: string) =>
-      api.delete(`/courses/${courseId}/conversations/${conversationId}/notes/${noteId}`),
+      api.delete(`/workspaces/${courseId}/conversations/${conversationId}/notes/${noteId}`),
     onSuccess: invalidateDetail,
   })
 

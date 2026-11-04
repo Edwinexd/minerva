@@ -54,13 +54,13 @@ export function PlatformUsagePanel() {
 
   const byCourse = new Map<string, Agg>()
   for (const row of usage) {
-    const existing = byCourse.get(row.course_id) ?? emptyAgg()
+    const existing = byCourse.get(row.workspace_id) ?? emptyAgg()
     existing.prompt += row.prompt_tokens
     existing.completion += row.completion_tokens
     existing.researchPrompt += row.research_prompt_tokens
     existing.researchCompletion += row.research_completion_tokens
     existing.requests += row.request_count
-    byCourse.set(row.course_id, existing)
+    byCourse.set(row.workspace_id, existing)
   }
 
   const byUser = new Map<string, Agg>()

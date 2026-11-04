@@ -459,8 +459,8 @@ async fn remove_people_from_search(state: &AppState) -> Result<(), String> {
             .or_default()
             .push(person.id);
     }
-    for (course_id, ids) in by_course {
-        let Some(course) = queue::course_embedding(&state.db, course_id)
+    for (workspace_id, ids) in by_course {
+        let Some(course) = queue::course_embedding(&state.db, workspace_id)
             .await
             .map_err(|e| e.to_string())?
         else {
@@ -468,13 +468,13 @@ async fn remove_people_from_search(state: &AppState) -> Result<(), String> {
         };
         if let Err(e) = minerva_pipeline::figures::delete_figure_points(
             &state.qdrant,
-            course_id,
+            workspace_id,
             course.embedding_version,
             &ids,
         )
         .await
         {
-            tracing::warn!("removing people from search for course {course_id} failed: {e}");
+            tracing::warn!("removing people from search for workspace {workspace_id} failed: {e}");
             continue;
         }
         queue::mark_people_removed(&state.db, &ids)
@@ -496,8 +496,8 @@ async fn index_pending_figures(state: &AppState) -> Result<(), String> {
             .or_default()
             .push(figure);
     }
-    for (course_id, course_figures) in by_course {
-        let Some(course) = queue::course_embedding(&state.db, course_id)
+    for (workspace_id, course_figures) in by_course {
+        let Some(course) = queue::course_embedding(&state.db, workspace_id)
             .await
             .map_err(|e| e.to_string())?
         else {
@@ -515,7 +515,7 @@ async fn index_pending_figures(state: &AppState) -> Result<(), String> {
         // durable indexing queue, so a Qdrant failure is retried next pass.
         if let Err(e) = minerva_pipeline::figures::delete_figure_points(
             &state.qdrant,
-            course_id,
+            workspace_id,
             course.embedding_version,
             &decorative_ids,
         )
@@ -535,7 +535,7 @@ async fn index_pending_figures(state: &AppState) -> Result<(), String> {
             })
             .collect();
         let embedding = minerva_pipeline::figures::CourseEmbedding {
-            course_id,
+            workspace_id,
             provider: &course.embedding_provider,
             model: &course.embedding_model,
             version: course.embedding_version,
@@ -556,7 +556,7 @@ async fn index_pending_figures(state: &AppState) -> Result<(), String> {
             Err(e) => {
                 metrics::counter!("visual_extraction_figure_index_failures_total").increment(1);
                 tracing::warn!(
-                    "visual extraction: indexing figures for course {course_id} failed: {e}"
+                    "visual extraction: indexing figures for workspace {workspace_id} failed: {e}"
                 );
             }
         }

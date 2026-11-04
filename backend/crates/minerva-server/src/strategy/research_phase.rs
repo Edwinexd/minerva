@@ -285,7 +285,7 @@ pub async fn run(
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name =
-        minerva_pipeline::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
+        minerva_pipeline::pipeline::collection_name(ctx.workspace_id, ctx.embedding_version);
 
     // Tell the frontend up front that the disclosure should render
     // as a placeholder for this turn. Done before any other SSE
@@ -308,7 +308,7 @@ pub async fn run(
         collection_name: &collection_name,
         embedding_provider: &ctx.embedding_provider,
         embedding_model: &ctx.embedding_model,
-        course_id: ctx.course_id,
+        workspace_id: ctx.workspace_id,
         min_score: ctx.min_score,
         orphaned_doc_ids,
     };
@@ -1243,7 +1243,7 @@ mod stream_integration_tests {
             temperature: 0.3,
             max_chunks: 10,
             min_score: 0.0,
-            course_id: uuid::Uuid::nil(),
+            workspace_id: uuid::Uuid::nil(),
             conversation_id: uuid::Uuid::nil(),
             user_id: uuid::Uuid::nil(),
             // Research streaming reads `chat_base_url` directly; the

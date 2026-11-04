@@ -46,7 +46,7 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
 
   const addMutation = useMutation({
     mutationFn: (data: { eppn: string; role: string }) =>
-      api.post(`/courses/${courseId}/members`, data),
+      api.post(`/workspaces/${courseId}/members`, data),
     onSuccess: () => {
       invalidate()
       setEppn("")
@@ -55,7 +55,7 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
 
   const removeMutation = useMutation({
     mutationFn: (userId: string) =>
-      api.delete(`/courses/${courseId}/members/${userId}`),
+      api.delete(`/workspaces/${courseId}/members/${userId}`),
     onSuccess: invalidate,
   })
 

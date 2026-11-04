@@ -302,7 +302,7 @@ fn pair_fully_rejected(rejected: &HashSet<RejectedPairKey>, a: Uuid, b: Uuid) ->
 ///      vetoes.
 pub async fn link_course(
     ctx: &LinkContext<'_>,
-    course_id: Uuid,
+    workspace_id: Uuid,
     docs: &[DocumentRow],
 ) -> Result<LinkerOutput, String> {
     let classified: Vec<&DocumentRow> = docs
@@ -345,7 +345,7 @@ pub async fn link_course(
     // Load teacher-vetoed pairs ONCE per linker pass. Cheap query;
     // saves us asking the model about pairs we'd just drop anyway.
     let rejected =
-        minerva_db::queries::document_relations::rejected_pairs_for_course(ctx.db, course_id)
+        minerva_db::queries::document_relations::rejected_pairs_for_course(ctx.db, workspace_id)
             .await
             .unwrap_or_else(|e| {
                 tracing::warn!(
@@ -357,14 +357,15 @@ pub async fn link_course(
     if !rejected.is_empty() {
         tracing::info!(
             "linker: course {} has {} teacher-vetoed pair(s); those will be skipped",
-            course_id,
+            workspace_id,
             rejected.len(),
         );
     }
 
     // Step 1: gather pooled embeddings, lazily backfilling any that
     // are missing.
-    let embeddings: HashMap<Uuid, Vec<f32>> = gather_embeddings(ctx, course_id, truncated).await?;
+    let embeddings: HashMap<Uuid, Vec<f32>> =
+        gather_embeddings(ctx, workspace_id, truncated).await?;
 
     // Step 2: embedding-similarity candidates (the only candidate
     // channel; no filename heuristics).
@@ -459,7 +460,7 @@ pub async fn link_course(
     if !auto_none_pairs.is_empty() {
         tracing::info!(
             "linker: course {}; {} pair(s) auto-none'd by kind prefilter (both kinds in {{unknown, syllabus}}), no LLM call",
-            course_id,
+            workspace_id,
             auto_none_pairs.len(),
         );
         for key in &auto_none_pairs {
@@ -476,7 +477,7 @@ pub async fn link_course(
             .await;
             if let Err(e) = minerva_db::queries::linker_decisions::upsert(
                 ctx.db,
-                course_id,
+                workspace_id,
                 key.0,
                 key.1,
                 da.classified_at,
@@ -500,7 +501,7 @@ pub async fn link_course(
         // Even if there are no fresh candidates, count what's
         // already in the table for the response.
         let edges_written =
-            minerva_db::queries::document_relations::list_by_course(ctx.db, course_id)
+            minerva_db::queries::document_relations::list_by_course(ctx.db, workspace_id)
                 .await
                 .map(|v| v.len())
                 .unwrap_or(0);
@@ -518,7 +519,7 @@ pub async fn link_course(
     // optimisation: a one-doc reclassify only forces re-evaluation
     // of pairs involving that one doc; everyone else's edges are
     // preserved without an LLM round-trip.
-    let cached = minerva_db::queries::linker_decisions::list_for_course(ctx.db, course_id)
+    let cached = minerva_db::queries::linker_decisions::list_for_course(ctx.db, workspace_id)
         .await
         .unwrap_or_else(|e| {
             tracing::warn!(
@@ -552,7 +553,7 @@ pub async fn link_course(
     if cached_hits > 0 {
         tracing::info!(
             "linker: course {}; {} candidate(s) reused from decision cache, {} fresh",
-            course_id,
+            workspace_id,
             cached_hits,
             fresh_candidates.len(),
         );
@@ -560,7 +561,7 @@ pub async fn link_course(
 
     if fresh_candidates.is_empty() {
         let edges_written =
-            minerva_db::queries::document_relations::list_by_course(ctx.db, course_id)
+            minerva_db::queries::document_relations::list_by_course(ctx.db, workspace_id)
                 .await
                 .map(|v| v.len())
                 .unwrap_or(0);
@@ -583,7 +584,7 @@ pub async fn link_course(
     let excerpts: HashMap<Uuid, String> = load_excerpts(
         ctx.db,
         ctx.qdrant,
-        course_id,
+        workspace_id,
         truncated,
         &docs_in_candidates,
     )
@@ -594,7 +595,7 @@ pub async fn link_course(
         ctx.http,
         ctx.util,
         ctx.db,
-        course_id,
+        workspace_id,
         truncated,
         &fresh_candidates,
         &similarity_by_pair,
@@ -603,7 +604,7 @@ pub async fn link_course(
     .await?;
     tracing::info!(
         "linker: course {}; LLM proposed {} edge(s) over {} fresh candidate pair(s) ({} cached)",
-        course_id,
+        workspace_id,
         edges.len(),
         fresh_candidates.len(),
         cached_hits,
@@ -698,7 +699,7 @@ pub async fn link_course(
             // Insert the fresh edge.
             if let Err(e) = minerva_db::queries::document_relations::upsert(
                 ctx.db,
-                course_id,
+                workspace_id,
                 edge.src_id,
                 edge.dst_id,
                 &edge.relation,
@@ -724,7 +725,7 @@ pub async fn link_course(
 
         if let Err(e) = minerva_db::queries::linker_decisions::upsert(
             ctx.db,
-            course_id,
+            workspace_id,
             key.0,
             key.1,
             da.classified_at,
@@ -743,10 +744,11 @@ pub async fn link_course(
         }
     }
 
-    let edges_written = minerva_db::queries::document_relations::list_by_course(ctx.db, course_id)
-        .await
-        .map(|v| v.len())
-        .unwrap_or(0);
+    let edges_written =
+        minerva_db::queries::document_relations::list_by_course(ctx.db, workspace_id)
+            .await
+            .map(|v| v.len())
+            .unwrap_or(0);
 
     Ok(LinkerOutput {
         considered: truncated.len(),
@@ -778,13 +780,13 @@ pub async fn link_course(
 /// of a new doc will repopulate.
 async fn gather_embeddings(
     ctx: &LinkContext<'_>,
-    course_id: Uuid,
+    workspace_id: Uuid,
     docs: &[&DocumentRow],
 ) -> Result<HashMap<Uuid, Vec<f32>>, String> {
     let mut out: HashMap<Uuid, Vec<f32>> = HashMap::new();
-    let collection = minerva_pipeline::pipeline::collection_name_for_course(ctx.db, course_id)
+    let collection = minerva_pipeline::pipeline::collection_name_for_course(ctx.db, workspace_id)
         .await
-        .unwrap_or_else(|_| minerva_pipeline::pipeline::collection_name(course_id, 1));
+        .unwrap_or_else(|_| minerva_pipeline::pipeline::collection_name(workspace_id, 1));
     let collection_exists = ctx
         .qdrant
         .collection_exists(&collection)
@@ -940,13 +942,13 @@ fn build_similarity_matrix(
 async fn load_excerpts(
     db: &PgPool,
     qdrant: &Qdrant,
-    course_id: Uuid,
+    workspace_id: Uuid,
     docs: &[&DocumentRow],
     only_for: &HashSet<Uuid>,
 ) -> HashMap<Uuid, String> {
-    let collection = minerva_pipeline::pipeline::collection_name_for_course(db, course_id)
+    let collection = minerva_pipeline::pipeline::collection_name_for_course(db, workspace_id)
         .await
-        .unwrap_or_else(|_| minerva_pipeline::pipeline::collection_name(course_id, 1));
+        .unwrap_or_else(|_| minerva_pipeline::pipeline::collection_name(workspace_id, 1));
     if !qdrant.collection_exists(&collection).await.unwrap_or(false) {
         // Collection hasn't been created yet (e.g. brand-new course
         // with all-sample_solution uploads): nothing to scroll.
@@ -1054,7 +1056,7 @@ async fn call_linker_llm(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &sqlx::PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     docs: &[&DocumentRow],
     candidates: &HashSet<(Uuid, Uuid)>,
     similarity: &HashMap<(Uuid, Uuid), f32>,
@@ -1106,7 +1108,7 @@ async fn call_linker_llm(
     // (which are logged inside `classify_one_pair`) so the final
     // collected Vec only contains real edges.
     let edges: Vec<ProposedEdge> = stream::iter(pair_inputs)
-        .map(|pair| async move { classify_one_pair(http, util, db, course_id, pair).await })
+        .map(|pair| async move { classify_one_pair(http, util, db, workspace_id, pair).await })
         .buffer_unordered(PAIR_CALL_CONCURRENCY)
         .filter_map(|r| async move { r })
         .collect()
@@ -1145,7 +1147,7 @@ async fn classify_one_pair(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &sqlx::PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     p: PairInput,
 ) -> Option<ProposedEdge> {
     let user_payload = serde_json::json!({
@@ -1227,7 +1229,7 @@ async fn classify_one_pair(
     // call against `course_id` in the `linker` category, regardless
     // of whether the call ultimately produced an edge; the cost
     // was paid either way.
-    crate::llm::record_pipeline_usage(db, course_id, CATEGORY_LINKER, &util.model, &usage).await;
+    crate::llm::record_pipeline_usage(db, workspace_id, CATEGORY_LINKER, &util.model, &usage).await;
     // An empty body means the model produced nothing usable (e.g. it
     // hit the completion-token cap mid-token); a truncated-but-nonempty
     // body falls through to the JSON parse below and is rejected there.

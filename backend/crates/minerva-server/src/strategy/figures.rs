@@ -85,7 +85,7 @@ async fn context_search(
     query: &str,
     orphaned: &HashSet<String>,
 ) -> Vec<Uuid> {
-    let collection = figure_index::context_collection_name(ctx.course_id, ctx.embedding_version);
+    let collection = figure_index::context_collection_name(ctx.workspace_id, ctx.embedding_version);
     let threshold = (ctx.min_score > 0.0).then_some(ctx.min_score);
     match super::common::embedding_search(
         client,
@@ -130,7 +130,10 @@ async fn visual_search(
     };
     let excluded: Vec<String> = orphaned.iter().cloned().collect();
     // "course_id" is the stored payload key, holding the workspace id.
-    let mut filter = Filter::must([Condition::matches("course_id", ctx.course_id.to_string())]);
+    let mut filter = Filter::must([Condition::matches(
+        "course_id",
+        ctx.workspace_id.to_string(),
+    )]);
     if !excluded.is_empty() {
         filter.must_not = vec![Condition::matches("document_id", excluded)];
     }
@@ -157,7 +160,7 @@ pub async fn figure_lookup(
 ) -> Vec<FigureHit> {
     // A course nothing has been extracted for yet costs one indexed lookup,
     // not two searches plus the CLIP encoder loaded in the embedder.
-    match queue::course_has_indexed_figures(&ctx.db, ctx.course_id).await {
+    match queue::course_has_indexed_figures(&ctx.db, ctx.workspace_id).await {
         Ok(true) => {}
         Ok(false) => return Vec::new(),
         Err(e) => {
@@ -170,7 +173,7 @@ pub async fn figure_lookup(
         visual_search(ctx, query, orphaned)
     );
     tracing::debug!(
-        course_id = %ctx.course_id,
+        workspace_id = %ctx.workspace_id,
         context_hits = by_context.len(),
         visual_hits = by_pixels.len(),
         "figures: searched"
@@ -182,7 +185,7 @@ pub async fn figure_lookup(
     // Over-fetch rows: some may be filtered out by the kind and visibility
     // rules, which only the database can apply.
     let candidates: Vec<Uuid> = ranked.into_iter().take(MAX_FIGURES * 3).collect();
-    match queue::find_chat_figures(&ctx.db, ctx.course_id, &candidates, ctx.kg_enabled).await {
+    match queue::find_chat_figures(&ctx.db, ctx.workspace_id, &candidates, ctx.kg_enabled).await {
         Ok(rows) => {
             let hits: Vec<FigureHit> = rows
                 .into_iter()

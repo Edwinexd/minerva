@@ -14,7 +14,7 @@ import { ListSkeleton } from "@/components/ui/list"
 
 interface UsageRow {
   user_id: string
-  course_id: string
+  workspace_id: string
   date: string
   prompt_tokens: number
   completion_tokens: number
@@ -42,7 +42,7 @@ export function UsagePage({ useParams }: { useParams: () => { courseId: string }
   const { t } = useTranslation("teacher")
   const { data: usage, isLoading } = useQuery({
     queryKey: ["courses", courseId, "usage"],
-    queryFn: () => api.get<UsageRow[]>(`/courses/${courseId}/usage`),
+    queryFn: () => api.get<UsageRow[]>(`/workspaces/${courseId}/usage`),
   })
   const { data: members } = useQuery(courseMembersQuery(courseId))
 

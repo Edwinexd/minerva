@@ -37,7 +37,7 @@ pub trait Classifier: Send + Sync {
     /// implementations may ignore it.
     async fn classify(
         &self,
-        course_id: Uuid,
+        workspace_id: Uuid,
         filename: &str,
         mime_type: &str,
         text: &str,

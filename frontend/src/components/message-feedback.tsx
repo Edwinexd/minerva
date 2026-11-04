@@ -48,7 +48,7 @@ export function FeedbackControls({
   const setMutation = useMutation({
     mutationFn: (body: { rating: "up" | "down"; category?: string; comment?: string }) =>
       api.put(
-        `/courses/${courseId}/conversations/${conversationId}/messages/${messageId}/feedback`,
+        `/workspaces/${courseId}/conversations/${conversationId}/messages/${messageId}/feedback`,
         body,
       ),
     onSuccess: () => {

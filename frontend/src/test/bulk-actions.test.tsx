@@ -52,6 +52,7 @@ import type { Course } from "@/lib/types"
 import { CourseManagementPanel } from "@/components/admin/courses-page"
 
 const course: Course = {
+  kind: "course",
   id: "course-1",
   name: "Programming 1",
   description: null,

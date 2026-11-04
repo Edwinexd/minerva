@@ -9,8 +9,13 @@ export interface User {
   privacy_acknowledged_at: string | null
 }
 
+/** Subtype of a workspace; mirrors `minerva_core::models::WorkspaceKind`. */
+export type WorkspaceKind = "course" | "credit_transfer"
+
 export interface Course {
   id: string
+  /** Course-only fields (term, code, Daisy) are empty for other kinds. */
+  kind: WorkspaceKind
   name: string
   description: string | null
   owner_id: string
@@ -272,7 +277,7 @@ export interface RoleRuleAttributeValues {
 
 export interface UsageRecord {
   user_id: string
-  course_id: string
+  workspace_id: string
   date: string
   prompt_tokens: number
   completion_tokens: number
@@ -374,7 +379,7 @@ export interface RoleSuggestion {
 
 export interface Conversation {
   id: string
-  course_id: string
+  workspace_id: string
   title: string | null
   pinned: boolean
   created_at: string
@@ -501,7 +506,7 @@ export interface ConversationTokenState {
 /** The new conversation minted by `POST .../conversations/{id}/continue`. */
 export interface ConversationContinuation {
   id: string
-  course_id: string
+  workspace_id: string
   continued_from_id: string
   /** Null when summarization was unavailable; the split still happened. */
   carryover_summary: string | null
@@ -1122,7 +1127,7 @@ export const DOCUMENT_KINDS: DocumentKind[] = [
 
 export interface Document {
   id: string
-  course_id: string
+  workspace_id: string
   filename: string
   mime_type: string
   size_bytes: number

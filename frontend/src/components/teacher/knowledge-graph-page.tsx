@@ -771,7 +771,7 @@ function EdgeList({
   const rejectMutation = useMutation({
     mutationFn: (edgeId: string) =>
       api.post(
-        `/courses/${courseId}/documents/knowledge-graph/edges/${edgeId}/reject`,
+        `/workspaces/${courseId}/documents/knowledge-graph/edges/${edgeId}/reject`,
         {},
       ),
     onSuccess: () => {
@@ -784,7 +784,7 @@ function EdgeList({
   const unrejectMutation = useMutation({
     mutationFn: (edgeId: string) =>
       api.delete(
-        `/courses/${courseId}/documents/knowledge-graph/edges/${edgeId}/reject`,
+        `/workspaces/${courseId}/documents/knowledge-graph/edges/${edgeId}/reject`,
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({

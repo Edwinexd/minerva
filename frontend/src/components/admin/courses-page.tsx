@@ -493,7 +493,7 @@ function CourseFeatureFlagsCell({
 // The cell shows the course's currently-configured embedding provider
 // + model and a "Migrate" button. The button opens an AlertDialog with
 // a provider radio and a model select; on confirm we PUT to
-// `/courses/{id}` with the new (provider, model). Admins bypass the
+// `/workspaces/{id}` with the new (provider, model). Admins bypass the
 // `local_embedding_model_disabled` check on that route, so we can
 // target *any* catalog model; including ones currently disabled in
 // the picker (a typical workflow is "disable model X site-wide, then
@@ -563,7 +563,7 @@ function CourseMigrateDialog({
 
   const mutation = useMutation({
     mutationFn: () =>
-      api.put(`/courses/${course.id}`, {
+      api.put(`/workspaces/${course.id}`, {
         embedding_provider: provider,
         // OpenAI canonicalises the model server-side; sending the
         // current value here is a no-op and keeps the payload simple.

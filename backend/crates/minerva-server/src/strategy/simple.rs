@@ -23,7 +23,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name =
-        minerva_pipeline::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
+        minerva_pipeline::pipeline::collection_name(ctx.workspace_id, ctx.embedding_version);
 
     // Orphan filter runs first and unconditionally: an orphaned doc
     // (Moodle activity deleted, page edited, etc.) must never appear in
@@ -32,7 +32,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // still need to resolve client-side. Computed once and threaded
     // into every RAG primitive that runs this turn (rag_lookup +
     // keyword_lookup + tool dispatch); see `common::rag_lookup`.
-    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.course_id)
+    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.workspace_id)
         .await
         .unwrap_or_default();
 
@@ -63,7 +63,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // `kg_enabled`; KG-disabled courses bypass the partition and the
     // adversarial filter entirely.
     let unclassified = if ctx.kg_enabled {
-        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
+        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.workspace_id)
             .await
             .unwrap_or_default()
     } else {
@@ -79,7 +79,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
             &http_client,
             &ctx.utility,
             &ctx.db,
-            ctx.course_id,
+            ctx.workspace_id,
             rag.context,
         )
         .await;
@@ -92,14 +92,14 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // otherwise miss.
     if ctx.kg_enabled {
         let collection_name =
-            minerva_pipeline::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
+            minerva_pipeline::pipeline::collection_name(ctx.workspace_id, ctx.embedding_version);
         let extra = common::expand_context_via_graph(
             &ctx.db,
             &ctx.qdrant,
             &ctx.fastembed,
             &http_client,
             &ctx.openai_api_key,
-            ctx.course_id,
+            ctx.workspace_id,
             &collection_name,
             &ctx.embedding_provider,
             &ctx.embedding_model,
@@ -126,7 +126,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.db,
         &http_client,
         &ctx.utility,
-        ctx.course_id,
+        ctx.workspace_id,
         ctx.conversation_id,
         &ctx.history,
         &ctx.user_content,
@@ -157,7 +157,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
     // bit below is the guard verdict alone.
     let disclosure = super::ThinkingDisclosure::resolve(suppress_thinking, ctx.viewer_is_teacher);
 
-    let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
+    let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.workspace_id)
         .await
         .unwrap_or_default();
     // Sources surfaced to the client include both context + signals; a
@@ -223,7 +223,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.db,
         &http_client,
         &ctx.utility,
-        ctx.course_id,
+        ctx.workspace_id,
         ctx.conversation_id,
         &guard_decision,
         &ctx.user_content,

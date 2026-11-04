@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use crate::error::AppError;
 use crate::ext_obfuscate::{self, Pseudonymizer};
 use crate::routes::enforce_owner_cap;
-use crate::routes::guards::{self, require_course_teacher, TeacherScope};
+use crate::routes::guards::{self, require_workspace_teacher, TeacherScope};
 use crate::state::AppState;
 use crate::strategy;
 
@@ -107,7 +107,7 @@ pub fn router() -> Router<AppState> {
 #[derive(Serialize)]
 struct ConversationResponse {
     id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
     title: Option<String>,
     pinned: bool,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -122,7 +122,7 @@ struct ConversationResponse {
 #[derive(Serialize)]
 pub(crate) struct ConversationWithUserResponse {
     pub id: Uuid,
-    pub course_id: Uuid,
+    pub workspace_id: Uuid,
     pub user_id: Uuid,
     pub title: Option<String>,
     pub pinned: bool,
@@ -136,7 +136,7 @@ pub(crate) struct ConversationWithUserResponse {
 #[derive(Serialize)]
 struct ConversationWithFeedbackResponse {
     id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
     user_id: Uuid,
     title: Option<String>,
     pinned: bool,
@@ -569,19 +569,19 @@ impl ConversationTokenState {
 async fn list_conversations(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<ConversationResponse>>, AppError> {
-    verify_course_access(&state, course_id, user.id).await?;
+    verify_course_access(&state, workspace_id, user.id).await?;
 
     let rows =
-        minerva_db::queries::conversations::list_by_course_user(&state.db, course_id, user.id)
+        minerva_db::queries::conversations::list_by_course_user(&state.db, workspace_id, user.id)
             .await?;
 
     Ok(Json(
         rows.into_iter()
             .map(|r| ConversationResponse {
                 id: r.id,
-                course_id: r.workspace_id,
+                workspace_id: r.workspace_id,
                 title: r.title,
                 pinned: r.pinned,
                 created_at: r.created_at,
@@ -596,12 +596,14 @@ async fn list_conversations(
 async fn list_all_conversations(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<ConversationWithFeedbackResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
     let rows = minerva_db::queries::conversations::list_all_by_course_with_feedback(
-        &state.db, course_id, user.id,
+        &state.db,
+        workspace_id,
+        user.id,
     )
     .await?;
     let ps = Pseudonymizer::for_viewer(&state.db, &user, &state.config.hmac_secret).await?;
@@ -624,7 +626,7 @@ async fn list_all_conversations(
                 );
                 ConversationWithFeedbackResponse {
                     id: r.id,
-                    course_id: r.workspace_id,
+                    workspace_id: r.workspace_id,
                     user_id: r.user_id,
                     title: r.title,
                     pinned: r.pinned,
@@ -656,12 +658,14 @@ async fn list_all_conversations(
 async fn list_flag_kinds(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<HashMap<Uuid, Vec<String>>>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
-    let map =
-        minerva_db::queries::conversation_flags::flag_kinds_by_conversation(&state.db, course_id)
-            .await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    let map = minerva_db::queries::conversation_flags::flag_kinds_by_conversation(
+        &state.db,
+        workspace_id,
+    )
+    .await?;
     Ok(Json(map))
 }
 
@@ -669,15 +673,15 @@ async fn list_flag_kinds(
 async fn get_course_feedback_stats(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<CourseFeedbackStatsResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
     let summary =
-        minerva_db::queries::message_feedback::total_ratings_for_course(&state.db, course_id)
+        minerva_db::queries::message_feedback::total_ratings_for_course(&state.db, workspace_id)
             .await?;
     let categories =
-        minerva_db::queries::message_feedback::category_counts_for_course(&state.db, course_id)
+        minerva_db::queries::message_feedback::category_counts_for_course(&state.db, workspace_id)
             .await?;
 
     Ok(Json(CourseFeedbackStatsResponse {
@@ -702,13 +706,14 @@ async fn get_course_feedback_stats(
 /// the course (membership, embed token, etc.) before invoking this.
 pub(crate) async fn list_pinned_conversations_for(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     viewer: &User,
 ) -> Result<Vec<ConversationWithUserResponse>, AppError> {
     let is_teacher =
-        guards::is_course_teacher(state, course_id, viewer, TeacherScope::WithAssistants).await?;
+        guards::is_workspace_teacher(state, workspace_id, viewer, TeacherScope::WithAssistants)
+            .await?;
     let rows =
-        minerva_db::queries::conversations::list_pinned_by_course(&state.db, course_id).await?;
+        minerva_db::queries::conversations::list_pinned_by_course(&state.db, workspace_id).await?;
     let ps = Pseudonymizer::for_viewer(&state.db, viewer, &state.config.hmac_secret).await?;
 
     Ok(rows
@@ -724,7 +729,7 @@ pub(crate) async fn list_pinned_conversations_for(
                 ext_obfuscate::apply(ps.as_ref(), r.user_id, raw_eppn, raw_display);
             ConversationWithUserResponse {
                 id: r.id,
-                course_id: r.workspace_id,
+                workspace_id: r.workspace_id,
                 user_id: r.user_id,
                 title: r.title,
                 pinned: r.pinned,
@@ -742,11 +747,11 @@ pub(crate) async fn list_pinned_conversations_for(
 async fn list_pinned_conversations(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<ConversationWithUserResponse>>, AppError> {
-    verify_course_access(&state, course_id, user.id).await?;
+    verify_course_access(&state, workspace_id, user.id).await?;
     Ok(Json(
-        list_pinned_conversations_for(&state, course_id, &user).await?,
+        list_pinned_conversations_for(&state, workspace_id, &user).await?,
     ))
 }
 
@@ -765,7 +770,7 @@ async fn list_pinned_conversations(
 /// when a student opened a teacher-pinned chat from the sidebar.
 pub(crate) async fn fetch_conversation_for_view(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     cid: Uuid,
     viewer: &User,
 ) -> Result<(minerva_db::queries::conversations::ConversationRow, bool), AppError> {
@@ -773,12 +778,13 @@ pub(crate) async fn fetch_conversation_for_view(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
 
     let is_teacher =
-        guards::is_course_teacher(state, course_id, viewer, TeacherScope::WithAssistants).await?;
+        guards::is_workspace_teacher(state, workspace_id, viewer, TeacherScope::WithAssistants)
+            .await?;
     if conv.user_id != viewer.id && !is_teacher && !conv.pinned {
         return Err(AppError::Forbidden);
     }
@@ -789,11 +795,11 @@ pub(crate) async fn fetch_conversation_for_view(
 async fn get_conversation(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, cid)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ConversationDetailResponse>, AppError> {
-    let course = verify_course_access(&state, course_id, user.id).await?;
+    let course = verify_course_access(&state, workspace_id, user.id).await?;
 
-    let (conv, is_teacher) = fetch_conversation_for_view(&state, course_id, cid, &user).await?;
+    let (conv, is_teacher) = fetch_conversation_for_view(&state, workspace_id, cid, &user).await?;
 
     // Token state is resolved against the course's *current* ceilings,
     // not any value snapshotted when the conversation started, so a
@@ -1139,14 +1145,14 @@ impl AegisModeWire {
 /// mirrors `run_chat_message`'s IDOR guard.
 pub(crate) async fn analyze_prompt_for_user(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     user_id: Uuid,
     content: String,
     conversation_id: Option<Uuid>,
     mode: AegisModeWire,
     previous_suggestions: Vec<AegisSuggestionPayload>,
 ) -> Result<Option<AegisAnalysisPayload>, AppError> {
-    if !crate::feature_flags::aegis_enabled(&state.db, course_id).await {
+    if !crate::feature_flags::aegis_enabled(&state.db, workspace_id).await {
         return Ok(None);
     }
 
@@ -1170,7 +1176,7 @@ pub(crate) async fn analyze_prompt_for_user(
         let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
             .await?
             .ok_or(AppError::NotFound)?;
-        if conv.workspace_id != course_id {
+        if conv.workspace_id != workspace_id {
             return Err(AppError::NotFound);
         }
         if conv.user_id != user_id {
@@ -1256,7 +1262,7 @@ pub(crate) async fn analyze_prompt_for_user(
         &state.http_client,
         &state.utility_model().await,
         &state.db,
-        course_id,
+        workspace_id,
         &trail,
         mode.into_internal(),
     )
@@ -1291,13 +1297,13 @@ pub(crate) async fn analyze_prompt_for_user(
 async fn analyze_prompt_route(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
     Json(body): Json<AnalyzePromptRequest>,
 ) -> Result<Json<Option<AegisAnalysisPayload>>, AppError> {
-    verify_course_access(&state, course_id, user.id).await?;
+    verify_course_access(&state, workspace_id, user.id).await?;
     let verdict = analyze_prompt_for_user(
         &state,
-        course_id,
+        workspace_id,
         user.id,
         body.content,
         body.conversation_id,
@@ -1337,12 +1343,12 @@ pub(crate) struct RewritePromptRequest {
 /// rather than silently failing back to the original draft.
 pub(crate) async fn rewrite_prompt_for_user(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     content: String,
     suggestions: Vec<AegisSuggestionPayload>,
     mode: AegisModeWire,
 ) -> Result<AegisRewriteResponse, AppError> {
-    if !crate::feature_flags::aegis_enabled(&state.db, course_id).await {
+    if !crate::feature_flags::aegis_enabled(&state.db, workspace_id).await {
         // Aegis off -> rewrite makes no sense to expose. 404 reads
         // cleaner than 400 here since the route conceptually
         // doesn't exist for this course.
@@ -1372,7 +1378,7 @@ pub(crate) async fn rewrite_prompt_for_user(
         &state.http_client,
         &state.utility_model().await,
         &state.db,
-        course_id,
+        workspace_id,
         &content,
         &analyzer_suggestions,
         mode.into_internal(),
@@ -1387,23 +1393,28 @@ pub(crate) async fn rewrite_prompt_for_user(
 async fn rewrite_prompt_route(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
     Json(body): Json<RewritePromptRequest>,
 ) -> Result<Json<AegisRewriteResponse>, AppError> {
-    verify_course_access(&state, course_id, user.id).await?;
-    let resp =
-        rewrite_prompt_for_user(&state, course_id, body.content, body.suggestions, body.mode)
-            .await?;
+    verify_course_access(&state, workspace_id, user.id).await?;
+    let resp = rewrite_prompt_for_user(
+        &state,
+        workspace_id,
+        body.content,
+        body.suggestions,
+        body.mode,
+    )
+    .await?;
     Ok(Json(resp))
 }
 
 async fn send_message(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, cid)): Path<(Uuid, Uuid)>,
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
-    let course = verify_course_access(&state, course_id, user.id).await?;
+    let course = verify_course_access(&state, workspace_id, user.id).await?;
     let viewer_is_teacher =
         guards::is_teacher_of(&state, &course, &user, TeacherScope::WithAssistants).await?;
     run_chat_message(
@@ -1422,10 +1433,10 @@ async fn send_message(
 async fn start_conversation(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
-    let course = verify_course_access(&state, course_id, user.id).await?;
+    let course = verify_course_access(&state, workspace_id, user.id).await?;
     let viewer_is_teacher =
         guards::is_teacher_of(&state, &course, &user, TeacherScope::WithAssistants).await?;
     run_chat_message(
@@ -1476,7 +1487,7 @@ pub(super) async fn run_chat_message(
     prompt_analysis: Option<AegisAnalysisPayload>,
     viewer_is_teacher: bool,
 ) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, AppError>> + Send>>>, AppError> {
-    let course_id = course.id;
+    let workspace_id = course.id;
 
     // For an existing-conv send, scope-check up front (mirrors the IDOR
     // fix in get_conversation): cross-course id -> NotFound, same-course
@@ -1486,7 +1497,7 @@ pub(super) async fn run_chat_message(
         let row = minerva_db::queries::conversations::find_by_id(&state.db, cid)
             .await?
             .ok_or(AppError::NotFound)?;
-        if row.workspace_id != course_id {
+        if row.workspace_id != workspace_id {
             return Err(AppError::NotFound);
         }
         if row.user_id != user_id {
@@ -1538,7 +1549,8 @@ pub(super) async fn run_chat_message(
 
     if course.daily_cost_limit_usd > rust_decimal::Decimal::ZERO {
         let used =
-            minerva_db::queries::usage::get_user_daily_cost(&state.db, user_id, course_id).await?;
+            minerva_db::queries::usage::get_user_daily_cost(&state.db, user_id, workspace_id)
+                .await?;
         if used >= course.daily_cost_limit_usd {
             metrics::counter!("chat_quota_exceeded_total", "scope" => "course").increment(1);
             return Err(AppError::QuotaExceeded);
@@ -1554,9 +1566,13 @@ pub(super) async fn run_chat_message(
         Some(c) => (c, false),
         None => {
             let new_id = Uuid::new_v4();
-            let row =
-                minerva_db::queries::conversations::create(&state.db, new_id, course_id, user_id)
-                    .await?;
+            let row = minerva_db::queries::conversations::create(
+                &state.db,
+                new_id,
+                workspace_id,
+                user_id,
+            )
+            .await?;
             (row, true)
         }
     };
@@ -1622,7 +1638,7 @@ pub(super) async fn run_chat_message(
     // into the strategy context. This both saves a DB lookup per
     // partition call and guarantees a stable view across the run --
     // an admin flipping the flag mid-conversation won't half-apply.
-    let kg_enabled = crate::feature_flags::course_kg_enabled(&state.db, course_id).await;
+    let kg_enabled = crate::feature_flags::course_kg_enabled(&state.db, workspace_id).await;
     let reranking_enabled = crate::system_defaults::reranking_enabled(&state.db).await;
 
     // Aegis: persist the verdict the student had on screen when
@@ -1641,7 +1657,7 @@ pub(super) async fn run_chat_message(
     // The student already saw the panel during typing; missing
     // a History entry is the right failure mode.
     if let Some(analysis) = prompt_analysis {
-        if crate::feature_flags::aegis_enabled(&state.db, course_id).await {
+        if crate::feature_flags::aegis_enabled(&state.db, workspace_id).await {
             // Trim to the same ceiling the analyzer schema
             // enforces, in case a hand-crafted body exceeds.
             let mut suggestions = analysis.suggestions;
@@ -1780,7 +1796,7 @@ pub(super) async fn run_chat_message(
                 // model. Surface it rather than running silently uncapped.
                 tracing::warn!(
                     "course {} has a daily USD cap but model '{}' is unpriced; spend bills at $0 and the per-response token cap is disabled",
-                    course_id,
+                    workspace_id,
                     course.model,
                 );
                 0
@@ -1797,7 +1813,7 @@ pub(super) async fn run_chat_message(
         temperature: course.temperature,
         max_chunks: course.max_chunks,
         min_score: course.min_score,
-        course_id,
+        workspace_id,
         conversation_id: conv_id,
         user_id: conv.user_id,
         provider,
@@ -1844,16 +1860,16 @@ struct SetPinRequest {
 async fn set_pin(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, cid)): Path<(Uuid, Uuid)>,
     Json(body): Json<SetPinRequest>,
 ) -> Result<Json<ConversationResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
 
@@ -1863,7 +1879,7 @@ async fn set_pin(
 
     Ok(Json(ConversationResponse {
         id: row.id,
-        course_id: row.workspace_id,
+        workspace_id: row.workspace_id,
         title: row.title,
         pinned: row.pinned,
         created_at: row.created_at,
@@ -1893,9 +1909,9 @@ struct UpdateNoteRequest {
 async fn list_notes(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, cid)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<TeacherNoteResponse>>, AppError> {
-    verify_course_access(&state, course_id, user.id).await?;
+    verify_course_access(&state, workspace_id, user.id).await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
@@ -1903,13 +1919,14 @@ async fn list_notes(
 
     // Scope the conversation to the URL's course so a teacher/admin of one
     // course cannot list notes from conversations in another course.
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
 
     // Anyone can see notes on pinned conversations, or own conversations, or teachers
     let is_teacher =
-        guards::is_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+        guards::is_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants)
+            .await?;
     if conv.user_id != user.id && !is_teacher && !conv.pinned {
         return Err(AppError::Forbidden);
     }
@@ -1941,16 +1958,16 @@ async fn list_notes(
 async fn create_note(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, cid)): Path<(Uuid, Uuid)>,
     Json(body): Json<CreateNoteRequest>,
 ) -> Result<Json<TeacherNoteResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
 
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
 
@@ -1980,10 +1997,10 @@ async fn create_note(
 async fn update_note(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((workspace_id, cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
     Json(body): Json<UpdateNoteRequest>,
 ) -> Result<Json<TeacherNoteResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
     // Verify the note lives in the conversation from the URL, and the
     // conversation lives in the URL's course. Without this, a teacher of
@@ -1992,7 +2009,7 @@ async fn update_note(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
     let existing = minerva_db::queries::conversations::find_note_by_id(&state.db, note_id)
@@ -2024,9 +2041,9 @@ async fn update_note(
 async fn delete_note(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((workspace_id, cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
     // Verify the note lives in the conversation from the URL, and the
     // conversation lives in the URL's course. Without this, a teacher of
@@ -2035,7 +2052,7 @@ async fn delete_note(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
     let existing = minerva_db::queries::conversations::find_note_by_id(&state.db, note_id)
@@ -2061,15 +2078,15 @@ struct SetFeedbackRequest {
 async fn set_feedback(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid, message_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((workspace_id, cid, message_id)): Path<(Uuid, Uuid, Uuid)>,
     Json(body): Json<SetFeedbackRequest>,
 ) -> Result<Json<MessageFeedbackResponse>, AppError> {
-    verify_course_access(&state, course_id, user.id).await?;
+    verify_course_access(&state, workspace_id, user.id).await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.workspace_id != course_id || conv.user_id != user.id {
+    if conv.workspace_id != workspace_id || conv.user_id != user.id {
         return Err(AppError::Forbidden);
     }
 
@@ -2140,23 +2157,24 @@ async fn set_feedback(
 async fn mark_read(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid)): Path<(Uuid, Uuid)>,
+    Path((workspace_id, cid)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     // Course-membership gate; verify_course_access also returns
     // 404 for non-existent course ids so we get the same auth
     // shape as the rest of the chat routes.
-    verify_course_access(&state, course_id, user.id).await?;
+    verify_course_access(&state, workspace_id, user.id).await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
 
     let is_owner = conv.user_id == user.id;
     let is_teacher =
-        guards::is_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+        guards::is_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants)
+            .await?;
     // Reject early if neither relationship applies. Pinned
     // conversations are readable by non-owner students, but
     // there's no "student bookmark" concept here; silently
@@ -2183,9 +2201,9 @@ async fn mark_read(
 async fn acknowledge_flag(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid, flag_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((workspace_id, cid, flag_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<ConversationFlagResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
     // Triple-check the (course, conversation, flag) URL path:
     // otherwise a teacher of course A could ack a flag in
@@ -2193,7 +2211,7 @@ async fn acknowledge_flag(
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
     let existing = minerva_db::queries::conversation_flags::find_by_id(&state.db, flag_id)
@@ -2236,14 +2254,14 @@ async fn acknowledge_flag(
 async fn acknowledge_feedback(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((course_id, cid, fb_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((workspace_id, cid, fb_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<MessageFeedbackResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
         .ok_or(AppError::NotFound)?;
-    if conv.workspace_id != course_id {
+    if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
     }
     let existing = minerva_db::queries::message_feedback::find_by_id(&state.db, fb_id)
@@ -2299,10 +2317,10 @@ async fn acknowledge_feedback(
 /// the identical membership check.
 pub(super) async fn verify_course_access_pub(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     user_id: Uuid,
 ) -> Result<minerva_db::queries::workspaces::WorkspaceRow, AppError> {
-    verify_course_access(state, course_id, user_id).await
+    verify_course_access(state, workspace_id, user_id).await
 }
 
 /// Embed topic-switch texts with the same query-side semantics as retrieval.
@@ -2313,7 +2331,7 @@ pub(super) async fn verify_course_access_pub(
 /// after a feature rollout / embedding rotation.
 async fn embed_topic_turns(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     embedding_provider: &str,
     embedding_model: &str,
     texts: Vec<String>,
@@ -2342,7 +2360,7 @@ async fn embed_topic_turns(
         Ok(embeddings) if embeddings.len() == expected => Some(embeddings),
         Ok(embeddings) => {
             tracing::warn!(
-                %course_id,
+                %workspace_id,
                 expected,
                 returned = embeddings.len(),
                 "topic_switch: embed returned the wrong vector count"
@@ -2350,7 +2368,7 @@ async fn embed_topic_turns(
             None
         }
         Err(e) => {
-            tracing::warn!(%course_id, "topic_switch: embed failed ({e})");
+            tracing::warn!(%workspace_id, "topic_switch: embed failed ({e})");
             None
         }
     }
@@ -2377,7 +2395,7 @@ fn spawn_topic_switch_detection(
     use minerva_app_core::classification::topic_switch as ts;
 
     let state = state.clone();
-    let course_id = course.id;
+    let workspace_id = course.id;
     let embedding_provider = course.embedding_provider.clone();
     let embedding_model = course.embedding_model.clone();
     let embedding_version = course.embedding_version;
@@ -2390,7 +2408,7 @@ fn spawn_topic_switch_detection(
         // every other cached vector in the conversation.
         let Some(mut vectors) = embed_topic_turns(
             &state,
-            course_id,
+            workspace_id,
             &embedding_provider,
             &embedding_model,
             vec![content.clone()],
@@ -2409,7 +2427,7 @@ fn spawn_topic_switch_detection(
             &state.db,
             message_id,
             &vector,
-            course_id,
+            workspace_id,
             embedding_version,
         )
         .await
@@ -2422,7 +2440,7 @@ fn spawn_topic_switch_detection(
                 // A failed cache write does not affect the freshly computed
                 // vector, so preserve today's best-effort behaviour for this
                 // turn. The next one will attempt the cache repair again.
-                tracing::warn!(%course_id, "topic_switch: embedding cache write failed ({e})");
+                tracing::warn!(%workspace_id, "topic_switch: embedding cache write failed ({e})");
             }
         }
 
@@ -2437,7 +2455,7 @@ fn spawn_topic_switch_detection(
         {
             Ok(t) => t,
             Err(e) => {
-                tracing::warn!(%course_id, "topic_switch: history read failed ({e})");
+                tracing::warn!(%workspace_id, "topic_switch: history read failed ({e})");
                 return;
             }
         };
@@ -2459,7 +2477,7 @@ fn spawn_topic_switch_detection(
                 .collect();
             let Some(repaired) = embed_topic_turns(
                 &state,
-                course_id,
+                workspace_id,
                 &embedding_provider,
                 &embedding_model,
                 missing_texts,
@@ -2474,7 +2492,7 @@ fn spawn_topic_switch_detection(
                     &state.db,
                     prior_message_id,
                     &embedding,
-                    course_id,
+                    workspace_id,
                     embedding_version,
                 )
                 .await
@@ -2487,7 +2505,7 @@ fn spawn_topic_switch_detection(
                         // Keep this freshly computed vector for this verdict;
                         // an unavailable cache merely means it will be
                         // repaired again on a later turn.
-                        tracing::warn!(%course_id, "topic_switch: repaired embedding cache write failed ({e})");
+                        tracing::warn!(%workspace_id, "topic_switch: repaired embedding cache write failed ({e})");
                         earlier[index].embedding = Some(embedding);
                     }
                 }
@@ -2513,7 +2531,7 @@ fn spawn_topic_switch_detection(
                 &state.http_client,
                 &state.utility_model().await,
                 &state.db,
-                course_id,
+                workspace_id,
                 &texts,
                 &content,
             )
@@ -2529,22 +2547,22 @@ fn spawn_topic_switch_detection(
         )
         .await
         {
-            tracing::warn!(%course_id, "topic_switch: verdict write failed ({e})");
+            tracing::warn!(%workspace_id, "topic_switch: verdict write failed ({e})");
         }
     });
 }
 
 async fn verify_course_access(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     user_id: Uuid,
 ) -> Result<minerva_db::queries::workspaces::WorkspaceRow, AppError> {
-    let course = minerva_db::queries::workspaces::find_by_id(&state.db, course_id)
+    let course = minerva_db::queries::workspaces::find_by_id(&state.db, workspace_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
     if course.owner_id != user_id
-        && !minerva_db::queries::workspaces::is_member(&state.db, course_id, user_id).await?
+        && !minerva_db::queries::workspaces::is_member(&state.db, workspace_id, user_id).await?
     {
         return Err(AppError::Forbidden);
     }

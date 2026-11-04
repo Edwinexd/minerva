@@ -170,7 +170,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
     mutationFn: async (files: File[]) => {
       const results = await Promise.allSettled(
         files.map((file) =>
-          api.upload<DocType>(`/courses/${courseId}/documents`, file),
+          api.upload<DocType>(`/workspaces/${courseId}/documents`, file),
         ),
       )
       const failed = results.filter((r) => r.status === "rejected")
@@ -193,7 +193,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   const mbzMutation = useMutation({
     mutationFn: (file: File) =>
       api.upload<{ imported: number; skipped_hidden: number }>(
-        `/courses/${courseId}/documents/mbz`,
+        `/workspaces/${courseId}/documents/mbz`,
         file,
       ),
     onSuccess: (res) => {
@@ -205,7 +205,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
 
   const deleteMutation = useMutation({
     mutationFn: (docId: string) =>
-      api.delete(`/courses/${courseId}/documents/${docId}`),
+      api.delete(`/workspaces/${courseId}/documents/${docId}`),
     onSuccess: () => {
       setConfirmSingle(null)
       invalidate()
@@ -216,7 +216,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
     mutationFn: async (docIds: string[]) => {
       const results = await Promise.allSettled(
         docIds.map((id) =>
-          api.delete(`/courses/${courseId}/documents/${id}`),
+          api.delete(`/workspaces/${courseId}/documents/${id}`),
         ),
       )
       const failed = results.filter((r) => r.status === "rejected").length
@@ -255,7 +255,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
 
   const toggleDisplayableMutation = useMutation({
     mutationFn: ({ docId, displayable }: { docId: string; displayable: boolean }) =>
-      api.patch(`/courses/${courseId}/documents/${docId}`, { displayable }),
+      api.patch(`/workspaces/${courseId}/documents/${docId}`, { displayable }),
     onSuccess: invalidate,
   })
 
@@ -266,25 +266,25 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
   // (back to untagged); non-empty sets system="manual" server-side.
   const setSourceRefMutation = useMutation({
     mutationFn: ({ docId, sourceRef }: { docId: string; sourceRef: string }) =>
-      api.patch(`/courses/${courseId}/documents/${docId}`, { source_ref: sourceRef }),
+      api.patch(`/workspaces/${courseId}/documents/${docId}`, { source_ref: sourceRef }),
     onSuccess: invalidate,
   })
 
   const setKindMutation = useMutation({
     mutationFn: ({ docId, kind }: { docId: string; kind: DocumentKind }) =>
-      api.patch(`/courses/${courseId}/documents/${docId}/kind`, { kind }),
+      api.patch(`/workspaces/${courseId}/documents/${docId}/kind`, { kind }),
     onSuccess: invalidate,
   })
 
   const clearLockMutation = useMutation({
     mutationFn: ({ docId }: { docId: string }) =>
-      api.delete(`/courses/${courseId}/documents/${docId}/kind/lock`),
+      api.delete(`/workspaces/${courseId}/documents/${docId}/kind/lock`),
     onSuccess: invalidate,
   })
 
   const reclassifyMutation = useMutation({
     mutationFn: ({ docId }: { docId: string }) =>
-      api.post(`/courses/${courseId}/documents/${docId}/reclassify`, {}),
+      api.post(`/workspaces/${courseId}/documents/${docId}/reclassify`, {}),
     onSuccess: invalidate,
   })
 
@@ -307,7 +307,7 @@ export function DocumentsPage({ useParams }: { useParams: () => { courseId: stri
       const skippedLocked = docIds.length - eligible.length
       const results = await Promise.allSettled(
         eligible.map((id) =>
-          api.post(`/courses/${courseId}/documents/${id}/reclassify`, {}),
+          api.post(`/workspaces/${courseId}/documents/${id}/reclassify`, {}),
         ),
       )
       const failed = results.filter((r) => r.status === "rejected").length

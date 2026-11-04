@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{AppError, LocalizedMessage};
-use crate::routes::guards::{require_course_teacher, TeacherScope};
+use crate::routes::guards::{require_workspace_teacher, TeacherScope};
 use crate::state::AppState;
 use minerva_app_core::canvas::{discover_items, paginate_json, run_sync, ItemKind, SyncResult};
 use minerva_core::models::User;
@@ -74,7 +74,7 @@ async fn list_connections(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<ConnectionResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let rows = minerva_db::queries::canvas::list_connections(&state.db, course_id).await?;
     Ok(Json(
@@ -108,7 +108,7 @@ async fn lookup_courses(
     Path(course_id): Path<Uuid>,
     Json(body): Json<LookupCoursesRequest>,
 ) -> Result<Json<Vec<CanvasCourseInfo>>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let base = body.canvas_base_url.trim().trim_end_matches('/');
     let token = body.canvas_api_token.trim();
@@ -148,7 +148,7 @@ async fn create_connection(
     Path(course_id): Path<Uuid>,
     Json(body): Json<CreateConnectionRequest>,
 ) -> Result<Json<ConnectionResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     if body.name.trim().is_empty() {
         return Err(AppError::bad_request("canvas.name_required"));
@@ -200,7 +200,7 @@ async fn delete_connection(
     Extension(user): Extension<User>,
     Path((course_id, connection_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conn = minerva_db::queries::canvas::find_connection(&state.db, connection_id)
         .await?
@@ -241,7 +241,7 @@ async fn list_canvas_items(
     Extension(user): Extension<User>,
     Path((course_id, connection_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<CanvasItemsResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conn = minerva_db::queries::canvas::find_connection(&state.db, connection_id)
         .await?
@@ -302,7 +302,7 @@ async fn trigger_sync(
     Extension(user): Extension<User>,
     Path((course_id, connection_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<SyncResult>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conn = minerva_db::queries::canvas::find_connection(&state.db, connection_id)
         .await?
@@ -327,7 +327,7 @@ async fn update_auto_sync(
     Path((course_id, connection_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<AutoSyncRequest>,
 ) -> Result<Json<ConnectionResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
 
     let conn = minerva_db::queries::canvas::find_connection(&state.db, connection_id)
         .await?

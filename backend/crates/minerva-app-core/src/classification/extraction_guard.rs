@@ -97,7 +97,7 @@ pub async fn classify_intent(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     recent_user_messages: &[String],
 ) -> IntentVerdict {
     if util.provider.is_none() {
@@ -170,7 +170,7 @@ pub async fn classify_intent(
     };
     crate::llm::record_pipeline_usage(
         db,
-        course_id,
+        workspace_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
         &usage,
@@ -234,7 +234,7 @@ pub async fn check_output_for_solution(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     assistant_reply: &str,
     assignment_excerpts: &[String],
 ) -> OutputVerdict {
@@ -293,7 +293,7 @@ pub async fn check_output_for_solution(
     };
     crate::llm::record_pipeline_usage(
         db,
-        course_id,
+        workspace_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
         &usage,
@@ -337,7 +337,7 @@ pub async fn generate_socratic_rewrite(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     student_message: &str,
     original_reply: &str,
 ) -> String {
@@ -372,7 +372,7 @@ pub async fn generate_socratic_rewrite(
     };
     crate::llm::record_pipeline_usage(
         db,
-        course_id,
+        workspace_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
         &usage,
@@ -436,7 +436,7 @@ pub async fn classify_engagement(
     http: &reqwest::Client,
     util: &crate::llm::UtilityModel,
     db: &PgPool,
-    course_id: Uuid,
+    workspace_id: Uuid,
     prior_assistant_reply: &str,
     new_student_message: &str,
 ) -> EngagementVerdict {
@@ -514,7 +514,7 @@ pub async fn classify_engagement(
     };
     crate::llm::record_pipeline_usage(
         db,
-        course_id,
+        workspace_id,
         CATEGORY_EXTRACTION_GUARD,
         &util.model,
         &usage,

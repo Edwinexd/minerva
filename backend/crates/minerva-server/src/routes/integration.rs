@@ -840,7 +840,7 @@ async fn site_provision_course_key(
     let is_owner = course.owner_id == user.id;
     let authorized = is_admin
         || is_owner
-        || minerva_db::queries::workspaces::is_course_teacher_strict(&state.db, course.id, user.id)
+        || minerva_db::queries::workspaces::is_teacher_strict(&state.db, course.id, user.id)
             .await?;
     if !authorized {
         return Err(AppError::Forbidden);
@@ -1049,7 +1049,7 @@ async fn site_resolve_offerings(
     let is_owner = course.owner_id == user.id;
     let authorized = is_admin
         || is_owner
-        || minerva_db::queries::workspaces::is_course_teacher_strict(&state.db, course.id, user.id)
+        || minerva_db::queries::workspaces::is_teacher_strict(&state.db, course.id, user.id)
             .await?;
 
     Ok(Json(SiteResolveOfferingsResponse {

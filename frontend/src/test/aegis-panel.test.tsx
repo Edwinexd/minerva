@@ -55,6 +55,7 @@ import { NewChatRouteComponent } from "@/components/chat/chat-page"
 const COURSE_ID = "course-1"
 
 const course: Course = {
+  kind: "course",
   id: COURSE_ID,
   name: "Programming 1",
   description: null,

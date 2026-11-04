@@ -23,6 +23,7 @@ mod system;
 mod teacher;
 mod usage;
 mod visual_extraction;
+mod workspaces;
 
 use axum::extract::{Extension, State};
 use axum::middleware;
@@ -77,17 +78,22 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .route("/embedding-catalog", get(health::embedding_models))
         .route("/reranker-catalog", get(health::reranker_models))
         .route("/chat-models-catalog", get(health::chat_models))
-        .nest("/courses", courses::router())
-        .nest("/courses/{course_id}/documents", documents::router())
-        .nest("/courses/{course_id}", chat::router())
+        // Generic workspace API: every kind (courses, credit transfer)
+        // has config, members, documents, chat and usage.
+        .nest("/workspaces", workspaces::router())
+        .nest("/workspaces/{workspace_id}/documents", documents::router())
+        .nest("/workspaces/{workspace_id}", chat::router())
+        .nest("/workspaces/{workspace_id}", usage::workspace_router())
+        .nest("/workspaces/{workspace_id}", suggested_questions::router())
+        // Course-only extensions: join links, Moodle API keys, Play,
+        // LTI, Canvas, LTI role suggestions.
+        .nest("/courses/{course_id}", courses::router())
         .nest("/courses/{course_id}", signed_urls::course_router())
         .nest("/courses/{course_id}", api_keys::router())
         .nest("/courses/{course_id}", play_designations::router())
         .merge(play_designations::catalog_router())
         .nest("/courses/{course_id}", lti::course_router())
         .nest("/courses/{course_id}", canvas::course_router())
-        .nest("/courses/{course_id}", usage::course_router())
-        .nest("/courses/{course_id}", suggested_questions::router())
         .nest("/teacher", teacher::router())
         .nest("/admin", admin::router())
         .nest("/admin", teacher::admin_router())

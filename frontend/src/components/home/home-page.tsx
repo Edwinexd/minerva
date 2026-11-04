@@ -346,7 +346,7 @@ function CreateCourseForm({ onCreated }: { onCreated: () => void }) {
       name: string
       description: string | null
       semester_label: string
-    }) => api.post<Course>("/courses", data),
+    }) => api.post<Course>("/workspaces", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["courses"] })
       onCreated()

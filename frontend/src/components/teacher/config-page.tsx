@@ -385,7 +385,7 @@ function CourseConfigForm({ course }: { course: Course }) {
 
   const mutation = useMutation({
     mutationFn: (data: Record<string, unknown>) =>
-      api.put<Course>(`/courses/${course.id}`, data),
+      api.put<Course>(`/workspaces/${course.id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["courses"] })
       setPendingRotate(false)

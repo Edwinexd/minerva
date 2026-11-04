@@ -56,7 +56,7 @@ function RagDebugPanel({
 
   const saveMutation = useMutation({
     mutationFn: (min_score: number) =>
-      api.put<Course>(`/courses/${courseId}`, { min_score }),
+      api.put<Course>(`/workspaces/${courseId}`, { min_score }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["courses", courseId] })
       queryClient.invalidateQueries({ queryKey: ["courses"] })
@@ -69,7 +69,7 @@ function RagDebugPanel({
     setSearching(true)
     try {
       const res = await api.get<typeof results>(
-        `/courses/${courseId}/documents/search?q=${encodeURIComponent(query)}&limit=10`,
+        `/workspaces/${courseId}/documents/search?q=${encodeURIComponent(query)}&limit=10`,
       )
       setResults(res)
     } catch {
@@ -217,7 +217,7 @@ function ChunkBrowser({ courseId }: { courseId: string }) {
     queryKey: ["courses", courseId, "documents", selectedDoc, "chunks"],
     queryFn: () =>
       api.get<{ chunk_index: number; text: string; filename: string }[]>(
-        `/courses/${courseId}/documents/${selectedDoc}/chunks`,
+        `/workspaces/${courseId}/documents/${selectedDoc}/chunks`,
       ),
     enabled: !!selectedDoc,
   })

@@ -533,7 +533,7 @@ pub async fn is_member(
     Ok(row.is_some())
 }
 
-pub async fn is_course_teacher(
+pub async fn is_teacher(
     db: &PgPool,
     workspace_id: Uuid,
     user_id: Uuid,
@@ -550,7 +550,7 @@ pub async fn is_course_teacher(
 
 /// Strict teacher check: `role = 'teacher'` only (TAs excluded). Use this for
 /// operations TAs must not perform (LTI, API keys, invites, play designations).
-pub async fn is_course_teacher_strict(
+pub async fn is_teacher_strict(
     db: &PgPool,
     workspace_id: Uuid,
     user_id: Uuid,
@@ -604,7 +604,7 @@ pub async fn count_students(db: &PgPool, workspace_id: Uuid) -> Result<i64, sqlx
 /// stays a single query rather than adding an Nth round-trip to the
 /// already-per-course flag/offering resolution. Courses with zero student
 /// members are simply absent from the map; callers default to 0.
-pub async fn count_students_by_course(
+pub async fn count_students_by_workspace(
     db: &PgPool,
 ) -> Result<std::collections::HashMap<Uuid, i64>, sqlx::Error> {
     let rows = sqlx::query!(

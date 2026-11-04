@@ -32,7 +32,7 @@ use uuid::Uuid;
 
 use crate::error::{AppError, ErrorParams};
 use crate::lti;
-use crate::routes::guards::{require_course_teacher, require_site_integrator, TeacherScope};
+use crate::routes::guards::{require_site_integrator, require_workspace_teacher, TeacherScope};
 use crate::state::AppState;
 use minerva_app_core::lti_identity::{self, LtiIdentity};
 use minerva_core::models::User;
@@ -658,7 +658,7 @@ async fn lti_setup(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<LtiSetupResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     Ok(Json(build_setup_response(&state.config.base_url)))
 }
 
@@ -764,7 +764,7 @@ async fn list_registrations(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<RegistrationResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
 
     let rows =
         minerva_db::queries::lti::list_registrations_for_course(&state.db, course_id).await?;
@@ -796,7 +796,7 @@ async fn create_registration(
     Path(course_id): Path<Uuid>,
     Json(body): Json<CreateRegistrationRequest>,
 ) -> Result<Json<RegistrationResponse>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
 
     let issuer = body.issuer.trim_end_matches('/');
     let auth_login_url = body
@@ -855,7 +855,7 @@ async fn delete_registration(
     Extension(user): Extension<User>,
     Path((course_id, registration_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
 
     let reg = minerva_db::queries::lti::find_registration_by_id(&state.db, registration_id)
         .await?
@@ -1118,7 +1118,7 @@ async fn bind_complete(
         .ok_or_else(|| AppError::bad_request("lti.bind_user_not_found"))?;
 
     // Re-check authorization: must be admin, course owner, or teacher
-    // on the target course. Mirrors require_course_teacher but operating
+    // on the target course. Mirrors require_workspace_teacher but operating
     // on a UserRow rather than an auth-middleware User.
     let course = minerva_db::queries::workspaces::find_by_id(&state.db, body.course_id)
         .await?
@@ -1127,12 +1127,8 @@ async fn bind_complete(
     let is_owner = course.owner_id == user.id;
     let is_teacher = is_admin
         || is_owner
-        || minerva_db::queries::workspaces::is_course_teacher_strict(
-            &state.db,
-            body.course_id,
-            user.id,
-        )
-        .await?;
+        || minerva_db::queries::workspaces::is_teacher_strict(&state.db, body.course_id, user.id)
+            .await?;
     if !is_teacher {
         return Err(AppError::Forbidden);
     }
@@ -2242,7 +2238,7 @@ async fn list_course_nrps_status(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<NrpsStatusResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let rows =
         minerva_db::queries::lti_nrps::list_contexts_for_course(&state.db, course_id).await?;
     Ok(Json(nrps_status_responses(&state, rows).await?))
@@ -2268,7 +2264,7 @@ async fn list_course_nrps_runs(
     Path((course_id, nrps_context_id)): Path<(Uuid, Uuid)>,
     Query(q): Query<NrpsRunsQuery>,
 ) -> Result<Json<Vec<NrpsRunResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let runs = minerva_db::queries::lti_nrps::list_runs_before(
         &state.db,
         nrps_context_id,
@@ -2289,7 +2285,7 @@ async fn set_course_nrps_sync_enabled(
     Path((course_id, nrps_context_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<SetNrpsSyncEnabledRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let updated = minerva_db::queries::lti_nrps::set_sync_enabled(
         &state.db,
         nrps_context_id,
@@ -2356,7 +2352,7 @@ async fn list_course_site_bindings(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<CourseSiteBindingResponse>>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let rows = minerva_db::queries::lti::list_bindings_for_course(&state.db, course_id).await?;
     Ok(Json(
         rows.into_iter()
@@ -2388,7 +2384,7 @@ async fn delete_course_site_binding(
     Extension(user): Extension<User>,
     Path((course_id, binding_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_course_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let bindings = minerva_db::queries::lti::list_bindings_for_course(&state.db, course_id).await?;
     if !bindings.iter().any(|b| b.binding_id == binding_id) {
         return Err(AppError::NotFound);

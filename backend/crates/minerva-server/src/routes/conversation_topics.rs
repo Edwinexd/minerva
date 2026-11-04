@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::routes::guards::{require_course_teacher, TeacherScope};
+use crate::routes::guards::{require_workspace_teacher, TeacherScope};
 use crate::state::AppState;
 
 /// Keeps the prompt bounded while covering enough of the current class activity
@@ -95,16 +95,17 @@ Return JSON only."#;
 pub async fn conversation_themes(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(course_id): Path<Uuid>,
+    Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<TopicResponse>>, AppError> {
     let course =
-        require_course_teacher(&state, course_id, &user, TeacherScope::WithAssistants).await?;
+        require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants)
+            .await?;
 
     let messages =
-        minerva_db::queries::conversations::list_user_messages_by_course(&state.db, course_id)
+        minerva_db::queries::conversations::list_user_messages_by_course(&state.db, workspace_id)
             .await?;
     let conversations =
-        minerva_db::queries::conversations::list_all_by_course(&state.db, course_id).await?;
+        minerva_db::queries::conversations::list_all_by_course(&state.db, workspace_id).await?;
     let metadata: HashMap<Uuid, (Uuid, i64)> = conversations
         .iter()
         .map(|conversation| {
@@ -134,7 +135,7 @@ pub async fn conversation_themes(
     hasher.update(source_json.as_bytes());
     let source_hash = hex::encode(hasher.finalize());
     let cached =
-        minerva_db::queries::workspace_conversation_topics::get(&state.db, course_id).await?;
+        minerva_db::queries::workspace_conversation_topics::get(&state.db, workspace_id).await?;
     let utility = state.utility_model().await;
 
     if let Some(row) = cached.as_ref() {
@@ -145,7 +146,7 @@ pub async fn conversation_themes(
         }
     }
     if utility.provider.is_none() {
-        tracing::warn!(%course_id, "semantic topics skipped: no utility model configured");
+        tracing::warn!(%workspace_id, "semantic topics skipped: no utility model configured");
         return Ok(Json(cached_topics(cached.as_ref())));
     }
 
@@ -157,7 +158,7 @@ pub async fn conversation_themes(
         Ok(vectors) if vectors.len() == source.len() => vectors,
         Ok(vectors) => {
             tracing::warn!(
-                %course_id,
+                %workspace_id,
                 expected = source.len(),
                 actual = vectors.len(),
                 "semantic topics embedder returned wrong vector count"
@@ -165,14 +166,21 @@ pub async fn conversation_themes(
             return Ok(Json(cached_topics(cached.as_ref())));
         }
         Err(error) => {
-            tracing::warn!(%course_id, %error, "semantic topics embedding failed");
+            tracing::warn!(%workspace_id, %error, "semantic topics embedding failed");
             return Ok(Json(cached_topics(cached.as_ref())));
         }
     };
 
     let clusters = candidate_clusters(&vectors);
     if clusters.is_empty() {
-        return cache_and_return(&state, course_id, Vec::new(), &source_hash, &utility.model).await;
+        return cache_and_return(
+            &state,
+            workspace_id,
+            Vec::new(),
+            &source_hash,
+            &utility.model,
+        )
+        .await;
     }
     let prompt_clusters = build_prompt_clusters(&clusters, &source, &vectors);
     let clusters_json = serde_json::to_string(&prompt_clusters).unwrap_or_default();
@@ -183,7 +191,7 @@ pub async fn conversation_themes(
             // is malformed, so account for usage before validating the payload.
             crate::llm::record_pipeline_usage(
                 &state.db,
-                course_id,
+                workspace_id,
                 minerva_db::queries::workspace_token_usage::CATEGORY_CONVERSATION_TOPICS,
                 &utility.model,
                 &usage,
@@ -192,23 +200,23 @@ pub async fn conversation_themes(
             match serde_json::from_str::<ModelReply>(content.trim()) {
                 Ok(reply) => Some(materialize(reply, &clusters, &source_ids, &metadata)),
                 Err(error) => {
-                    tracing::warn!(%course_id, %error, "conversation themes returned invalid JSON");
+                    tracing::warn!(%workspace_id, %error, "conversation themes returned invalid JSON");
                     None
                 }
             }
         }
         Some(Err(error)) => {
-            tracing::warn!(%course_id, %error, "conversation theme generation failed");
+            tracing::warn!(%workspace_id, %error, "conversation theme generation failed");
             None
         }
         None => {
-            tracing::warn!(%course_id, "conversation themes skipped: no utility model configured");
+            tracing::warn!(%workspace_id, "conversation themes skipped: no utility model configured");
             None
         }
     };
 
     if let Some(topics) = generated {
-        return cache_and_return(&state, course_id, topics, &source_hash, &utility.model).await;
+        return cache_and_return(&state, workspace_id, topics, &source_hash, &utility.model).await;
     }
 
     // Provider outages should not blank a previously useful dashboard card.
@@ -573,7 +581,7 @@ fn cached_topics(
 
 async fn cache_and_return(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     topics: Vec<TopicResponse>,
     source_hash: &str,
     model: &str,
@@ -582,7 +590,7 @@ async fn cache_and_return(
         .map_err(|error| AppError::Internal(format!("serialize conversation themes: {error}")))?;
     minerva_db::queries::workspace_conversation_topics::upsert(
         &state.db,
-        course_id,
+        workspace_id,
         &value,
         source_hash,
         model,

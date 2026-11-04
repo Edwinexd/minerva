@@ -118,12 +118,12 @@ pub async fn run(
     let started_at = std::time::Instant::now();
     let http_client = reqwest::Client::new();
     let collection_name =
-        minerva_pipeline::pipeline::collection_name(ctx.course_id, ctx.embedding_version);
+        minerva_pipeline::pipeline::collection_name(ctx.workspace_id, ctx.embedding_version);
 
     // Drop chunks from orphaned docs before any partition; see
     // `simple.rs` for the rationale. Computed once per turn and
     // re-used for the model's tool-driven retrievals below.
-    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.course_id)
+    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.workspace_id)
         .await
         .unwrap_or_default();
 
@@ -152,7 +152,7 @@ pub async fn run(
         super::figures::figure_lookup(&ctx, &http_client, &ctx.user_content, &orphaned).await;
 
     let unclassified = if ctx.kg_enabled {
-        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.course_id)
+        minerva_db::queries::documents::unclassified_doc_ids(&ctx.db, ctx.workspace_id)
             .await
             .unwrap_or_default()
     } else {
@@ -165,7 +165,7 @@ pub async fn run(
             &http_client,
             &ctx.utility,
             &ctx.db,
-            ctx.course_id,
+            ctx.workspace_id,
             rag.context,
         )
         .await;
@@ -200,7 +200,7 @@ pub async fn run(
             &ctx.fastembed,
             &http_client,
             &ctx.openai_api_key,
-            ctx.course_id,
+            ctx.workspace_id,
             &collection_name,
             &ctx.embedding_provider,
             &ctx.embedding_model,
@@ -237,7 +237,7 @@ pub async fn run(
         &ctx.db,
         &http_client,
         &ctx.utility,
-        ctx.course_id,
+        ctx.workspace_id,
         ctx.conversation_id,
         &ctx.history,
         &ctx.user_content,
@@ -399,7 +399,7 @@ pub async fn run(
         &ctx.db,
         &http_client,
         &ctx.utility,
-        ctx.course_id,
+        ctx.workspace_id,
         ctx.conversation_id,
         &guard_decision,
         &ctx.user_content,
@@ -421,7 +421,7 @@ pub async fn run(
     // when `thinking_hidden`) and at read time in chat.rs /
     // embed.rs (owner viewers get null on GET, teachers see the
     // full set). Same shape as the thinking_transcript handling.
-    let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.course_id)
+    let hidden = minerva_db::queries::documents::hidden_document_ids(&ctx.db, ctx.workspace_id)
         .await
         .unwrap_or_default();
     let mut displayed = research.chunks.clone();

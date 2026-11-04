@@ -84,7 +84,7 @@ struct FetchSlotsBody {
 struct FetchSlot {
     job_id: Uuid,
     document_id: Uuid,
-    course_id: Uuid,
+    workspace_id: Uuid,
     url: String,
     not_ready_releases: i32,
 }
@@ -132,7 +132,7 @@ async fn fetch_slots(
             Some(url) => slots.push(FetchSlot {
                 job_id: slot.job_id,
                 document_id: slot.document_id,
-                course_id: slot.workspace_id,
+                workspace_id: slot.workspace_id,
                 url,
                 not_ready_releases: slot.not_ready_releases,
             }),
@@ -417,12 +417,12 @@ pub(crate) async fn figure_image(
     request: Request,
 ) -> Result<Response, AppError> {
     let grant = verify_grant(&state, &token, Scope::Figure)?;
-    let (course_id, document_id, image_path) = queue::figure_image(&state.db, grant.id)
+    let (workspace_id, document_id, image_path) = queue::figure_image(&state.db, grant.id)
         .await?
         .ok_or(AppError::NotFound)?;
     let path = format!(
         "{}/{image_path}",
-        figures::assets_dir(&state.config.docs_path, course_id, document_id)
+        figures::assets_dir(&state.config.docs_path, workspace_id, document_id)
     );
     let response = ServeFile::new(path)
         .oneshot(request)
@@ -869,7 +869,7 @@ async fn commit_ingest(
 
 async fn delete_figure_points(
     state: &AppState,
-    course_id: Uuid,
+    workspace_id: Uuid,
     embedding_version: i32,
     figure_ids: &[Uuid],
 ) -> Result<(), AppError> {
@@ -881,7 +881,7 @@ async fn delete_figure_points(
     };
     for collection in [
         figures::COLLECTION.to_string(),
-        figures::context_collection_name(course_id, embedding_version),
+        figures::context_collection_name(workspace_id, embedding_version),
     ] {
         if !state
             .qdrant

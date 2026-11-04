@@ -16,6 +16,8 @@ mod health;
 pub mod integration;
 mod integration_admin;
 pub mod lti;
+pub mod mcp;
+pub mod oauth;
 mod play_designations;
 pub mod service;
 mod signed_urls;
@@ -120,9 +122,14 @@ pub fn api_router(state: AppState) -> Router<AppState> {
     let authed = authed
         .merge(usage::admin_router())
         .merge(signed_urls::join_router())
+        // MCP connections: the consent page and the user's connected apps.
+        .merge(oauth::authed_router())
         .route_layer(middleware::from_fn_with_state(state, auth_middleware));
 
     Router::new()
+        // OAuth endpoints the MCP client calls itself (token, register,
+        // revoke): no user session, exempt from Shibboleth in Apache.
+        .merge(oauth::public_router())
         .route("/health", get(health::health))
         .route("/models", get(health::models))
         .route("/embedding-benchmarks", get(health::embedding_benchmarks))

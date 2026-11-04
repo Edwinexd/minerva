@@ -19,22 +19,25 @@ import {
  * pages; `/teacher/courses/$courseId/*` keeps its own course-scoped tab
  * bar and stays outside this shell.
  */
-const TAB_VALUES = ["usage", "guide"] as const
+const TAB_VALUES = ["usage", "assistants", "guide"] as const
 
 type TabValue = (typeof TAB_VALUES)[number]
 
 const TAB_ROUTES = {
   usage: "/teacher/usage",
+  assistants: "/teacher/assistants",
   guide: "/teacher/guide",
 } as const satisfies Record<TabValue, string>
 
 const TAB_LABEL_KEYS: Record<TabValue, string> = {
   usage: "portal.tabs.usage",
+  assistants: "portal.tabs.assistants",
   guide: "portal.tabs.guide",
 }
 
 const TAB_TITLE_KEYS: Record<TabValue, string> = {
   usage: "pageTitles.teacherTab.usage",
+  assistants: "pageTitles.teacherTab.assistants",
   guide: "pageTitles.teacherTab.guide",
 }
 

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oauth_authorization_codes\n               (code_hash, grant_id, redirect_uri, code_challenge, expires_at)\n           VALUES ($1, $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e12c19af35c042d8aa9785c1304ab52b694011eee969b841e3c60bf4027dceac"
+}

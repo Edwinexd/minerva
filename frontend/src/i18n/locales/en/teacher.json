@@ -23,7 +23,8 @@
     "sectionNavLabel": "Teacher section",
     "tabs": {
       "usage": "AI usage",
-      "guide": "Guide"
+      "guide": "Guide",
+      "assistants": "AI assistants"
     }
   },
   "shared": {
@@ -589,5 +590,26 @@
     "openExternal": "Open in Daisy",
     "lastSynced": "Last sync",
     "neverSynced": "Never"
+  },
+  "assistants": {
+    "connectTitle": "Use Minerva from your own AI assistant",
+    "connectBody": "Add Minerva as a connector (MCP) in an AI assistant that supports MCP. The first time, you sign in with your SU account and approve the connection.",
+    "urlLabel": "Connector URL",
+    "copy": "Copy",
+    "notAllowed": "Only staff can connect an assistant to Minerva.",
+    "toolsTitle": "What your assistant can do",
+    "tools": {
+      "listWorkspaces": "List the courses you teach and the staff tools you use",
+      "search": "Search the material in one of them",
+      "documents": "List and read documents in full",
+      "plans": "Read the current DSV course plan for a course code (credit transfer users)"
+    },
+    "privacy": "Access is read-only and limited to what you can see in Minerva. Anything you attach in your assistant stays there; Minerva only sends material back.",
+    "connectedTitle": "Connected assistants",
+    "none": "No assistant is connected.",
+    "connectedOn": "Connected {{date}}",
+    "lastUsed": "last used {{date}}",
+    "revoke": "Revoke",
+    "revokeNamed": "Revoke {{name}}"
   }
 }

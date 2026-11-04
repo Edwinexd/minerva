@@ -1179,3 +1179,20 @@ export interface ConversationAttachment {
   text_chars: number
   created_at: string
 }
+
+/** An AI assistant the user connected over MCP (an OAuth grant). */
+export interface McpConnection {
+  id: string
+  client_name: string
+  client_id: string
+  connected_at: string
+  last_used_at: string | null
+}
+
+export interface McpConnections {
+  /** Connector URL to paste into the assistant. */
+  mcp_url: string
+  /** Staff only; students and external accounts cannot connect. */
+  allowed: boolean
+  connections: McpConnection[]
+}

@@ -338,6 +338,10 @@ pub async fn api_main() -> anyhow::Result<()> {
 
     let mut app = Router::new()
         .nest("/api", routes::api_router(state.clone()))
+        // MCP endpoint and its OAuth discovery documents live at the root
+        // (clients derive the well-known URLs from the issuer / resource).
+        .merge(routes::mcp::router())
+        .merge(routes::oauth::well_known_router())
         .nest(
             "/lti",
             routes::lti::public_router().with_state(state.clone()),

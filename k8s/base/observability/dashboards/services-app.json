@@ -30,7 +30,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Request rate by route",
-      "description": "rate(http_requests_total) by matched route template. Routes are templates (/api/courses/:id), not raw URLs, so cardinality is bounded.",
+      "description": "rate(http_requests_total) by matched route template. Routes are templates (/api/workspaces/:id), not raw URLs, so cardinality is bounded.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 9, "w": 16, "x": 0, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never", "stacking": { "mode": "normal" } } }, "overrides": [] },

@@ -21,6 +21,7 @@ pub mod lti;
 pub mod lti_nrps;
 pub mod message_feedback;
 pub(crate) mod model_catalog;
+pub mod oauth;
 pub mod play_course_catalog;
 pub mod play_designations;
 pub mod prompt_analyses;

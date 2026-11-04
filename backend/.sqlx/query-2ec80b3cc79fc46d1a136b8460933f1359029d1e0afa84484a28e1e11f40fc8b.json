@@ -1,0 +1,85 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH prev AS (\n               SELECT rotated_at FROM oauth_tokens WHERE token_hash = $1 AND kind = 'refresh'\n           ),\n           upd AS (\n               UPDATE oauth_tokens SET rotated_at = COALESCE(rotated_at, NOW())\n               WHERE token_hash = $1 AND kind = 'refresh'\n               RETURNING grant_id, expires_at\n           )\n           SELECT upd.grant_id, g.client_id, g.resource, g.scope,\n                  (upd.expires_at <= NOW()) AS \"expired!\",\n                  ((SELECT rotated_at FROM prev) IS NOT NULL) AS \"rotated!\",\n                  (g.revoked_at IS NOT NULL) AS \"grant_revoked!\"\n           FROM upd JOIN oauth_grants g ON g.id = upd.grant_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "grant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_tokens",
+            "name": "grant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_grants",
+            "name": "client_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "resource",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_grants",
+            "name": "resource"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_grants",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expired!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "rotated!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "grant_revoked!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "2ec80b3cc79fc46d1a136b8460933f1359029d1e0afa84484a28e1e11f40fc8b"
+}

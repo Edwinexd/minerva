@@ -97,6 +97,8 @@ import { OwnerUsagePage } from "@/components/teacher/owner-usage-page"
 import { AdminUserUsagePage } from "@/components/admin/user-usage-page"
 import { Home } from "@/components/home/home-page"
 import { AttachmentsBar } from "@/components/chat/attachments-bar"
+import { AssistantsPage } from "@/components/teacher/assistants-page"
+import { ConnectPage } from "@/components/connect-page"
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -756,6 +758,48 @@ describe("Authenticated pages a11y", () => {
       [],
     )
     expect(getByRole("button", { name: /Attach syllabus/ })).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("AI assistants page has no axe violations", async () => {
+    const { container, getByText, getByRole } = renderPage(<AssistantsPage />, [
+      [
+        queries.mcpConnectionsQuery.queryKey,
+        {
+          mcp_url: "https://minerva.dsv.su.se/mcp",
+          allowed: true,
+          connections: [
+            {
+              id: "grant-1",
+              client_name: "Example Assistant",
+              client_id: "https://assistant.example/oauth/mcp-client.json",
+              connected_at: "2026-10-30T09:00:00Z",
+              last_used_at: "2026-11-04T09:00:00Z",
+            },
+          ],
+        },
+      ],
+    ])
+    expect(getByText("https://minerva.dsv.su.se/mcp")).toBeInTheDocument()
+    expect(getByRole("button", { name: "Revoke Example Assistant" })).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("assistant consent page has no axe violations", async () => {
+    const { container, getByRole } = renderPage(<ConnectPage requestId="req-1" />, [
+      [
+        ["oauth", "requests", "req-1"],
+        {
+          id: "req-1",
+          client_name: "Example Assistant",
+          client_id: "https://assistant.example/oauth/mcp-client.json",
+          redirect_host: "localhost",
+          redirect_is_loopback: true,
+          scope: "minerva:read",
+        },
+      ],
+    ])
+    expect(getByRole("button", { name: "Approve" })).toBeInTheDocument()
     expect(await axe(container)).toHaveNoViolations()
   })
 })

@@ -16,7 +16,8 @@
     "teacher": "Lärare",
     "teacherTab": {
       "usage": "AI-användning",
-      "guide": "Guide"
+      "guide": "Guide",
+      "assistants": "AI-assistenter"
     },
     "admin": "Admin",
     "adminTab": {
@@ -280,5 +281,19 @@
     "heading": "Figurer från kursmaterialet",
     "open": "Öppna {{origin}} i full storlek",
     "alt": "Figur från {{origin}}"
+  },
+  "connect": {
+    "title": "Koppla en assistent",
+    "heading": "Koppla {{name}} till Minerva?",
+    "body": "Assistenten ber om att få använda Minerva för din räkning.",
+    "canRead": "Den kan läsa kurserna du undervisar i, personalverktygen du använder och deras dokument.",
+    "cannotWrite": "Den kan inte ändra något eller agera som du i chattar.",
+    "revokeHint": "Du kan återkalla den när som helst under Lärare, AI-assistenter.",
+    "returnsTo": "När du godkänt kommer du tillbaka till",
+    "loopbackWarning": "Assistenten körs på din egen dator (localhost). Godkänn bara om du själv startade kopplingen.",
+    "clientId": "Klient:",
+    "approve": "Godkänn",
+    "deny": "Neka",
+    "expired": "Kopplingsförfrågan har gått ut eller redan besvarats. Starta kopplingen igen från din assistent."
   }
 }

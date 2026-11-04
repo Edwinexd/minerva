@@ -368,6 +368,22 @@ pub fn start_scheduler_loops(state: AppState) {
         });
     }
 
+    // MCP OAuth housekeeping: drop expired pending authorizations, codes
+    // and tokens. Revocation and expiry are enforced on use; this only
+    // keeps the tables from growing.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+            loop {
+                tokio::time::sleep(SWEEP_INTERVAL).await;
+                if let Err(e) = minerva_db::queries::oauth::delete_expired(&state.db).await {
+                    tracing::error!("oauth cleanup: sweep failed: {}", e);
+                }
+            }
+        });
+    }
+
     // Credit transfer case retention: delete cases (conversations and
     // their attachment files) untouched for the workspace's retention
     // period. Hourly is plenty for a days-long period.

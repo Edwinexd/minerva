@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oauth_pending_authorizations WHERE expires_at < NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "e78f6df8fbfe5b7db6bb8dd16ad1ff15a3f9d8b581c95dc35eaddf6059b77904"
+}

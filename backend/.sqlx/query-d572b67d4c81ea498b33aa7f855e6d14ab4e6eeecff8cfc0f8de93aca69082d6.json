@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oauth_grants SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d572b67d4c81ea498b33aa7f855e6d14ab4e6eeecff8cfc0f8de93aca69082d6"
+}

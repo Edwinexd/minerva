@@ -9,8 +9,8 @@
 //!   - `http_request_duration_seconds` (histogram; `_seconds` suffix picks
 //!     up the latency buckets configured in `minerva_metrics::init`)
 //!
-//! `path` is the *matched route template* (`/api/courses/:id`), never the
-//! raw URL (`/api/courses/abc-123`), so label cardinality stays bounded;
+//! `path` is the *matched route template* (`/api/workspaces/:id`), never the
+//! raw URL (`/api/workspaces/abc-123`), so label cardinality stays bounded;
 //! unbounded label values are the classic way to OOM a Prometheus, which
 //! on this single node we very much want to avoid.
 

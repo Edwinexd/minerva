@@ -23,7 +23,8 @@
     "sectionNavLabel": "Lärarsektion",
     "tabs": {
       "usage": "AI-användning",
-      "guide": "Guide"
+      "guide": "Guide",
+      "assistants": "AI-assistenter"
     }
   },
   "shared": {
@@ -587,5 +588,26 @@
     "openExternal": "Öppna i Daisy",
     "lastSynced": "Senaste synk",
     "neverSynced": "Aldrig"
+  },
+  "assistants": {
+    "connectTitle": "Använd Minerva från din egen AI-assistent",
+    "connectBody": "Lägg till Minerva som koppling (MCP) i en AI-assistent som stöder MCP. Första gången loggar du in med ditt SU-konto och godkänner kopplingen.",
+    "urlLabel": "Kopplings-URL",
+    "copy": "Kopiera",
+    "notAllowed": "Bara personal kan koppla en assistent till Minerva.",
+    "toolsTitle": "Vad din assistent kan göra",
+    "tools": {
+      "listWorkspaces": "Lista kurserna du undervisar i och personalverktygen du använder",
+      "search": "Söka i materialet i en av dem",
+      "documents": "Lista och läsa dokument i sin helhet",
+      "plans": "Läsa den aktuella DSV-kursplanen för en kurskod (för tillgodoräknande)"
+    },
+    "privacy": "Åtkomsten är skrivskyddad och begränsad till det du ser i Minerva. Det du bifogar i din assistent stannar där; Minerva skickar bara material tillbaka.",
+    "connectedTitle": "Kopplade assistenter",
+    "none": "Ingen assistent är kopplad.",
+    "connectedOn": "Kopplad {{date}}",
+    "lastUsed": "senast använd {{date}}",
+    "revoke": "Återkalla",
+    "revokeNamed": "Återkalla {{name}}"
   }
 }

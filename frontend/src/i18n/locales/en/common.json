@@ -16,7 +16,8 @@
     "teacher": "Teacher",
     "teacherTab": {
       "usage": "AI usage",
-      "guide": "Guide"
+      "guide": "Guide",
+      "assistants": "AI assistants"
     },
     "admin": "Admin",
     "adminTab": {
@@ -280,5 +281,19 @@
     "heading": "Figures from the course material",
     "open": "Open {{origin}} full size",
     "alt": "Figure from {{origin}}"
+  },
+  "connect": {
+    "title": "Connect an assistant",
+    "heading": "Connect {{name}} to Minerva?",
+    "body": "This assistant asks to use Minerva on your behalf.",
+    "canRead": "It can read the courses you teach, the staff tools you use, and their documents.",
+    "cannotWrite": "It cannot change anything or act as you in chats.",
+    "revokeHint": "You can revoke it at any time under Teacher, AI assistants.",
+    "returnsTo": "After approving you return to",
+    "loopbackWarning": "This assistant runs on your own computer (localhost). Only approve if you started the connection yourself.",
+    "clientId": "Client:",
+    "approve": "Approve",
+    "deny": "Deny",
+    "expired": "This connection request has expired or was already answered. Start the connection again from your assistant."
   }
 }

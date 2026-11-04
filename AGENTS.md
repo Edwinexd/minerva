@@ -458,6 +458,17 @@ is only visible by hash. "Current" means the newest version of a plan
 still given, in each language that version has; an English PDF of an
 older version is never used.
 
+After each download (and once for every PDF fetched before it existed)
+the scheduler reads the PDF with `pdftotext -layout`
+(`minerva_pipeline::pdf::extract_pages`) and stores on the version its
+text with `[Page N]` markers, the level code and the module table
+(`minerva_app_core::syllabus_facts`, migration
+`20261104000006_case_assessments.sql`). Both sit in fixed places of SU's
+plan template in either language (`Fördjupning:` / `Specialisation:`,
+and the `Provkod` / `Examination code` table); old plans that state no
+level keep it NULL rather than a guess. A revised PDF clears
+`facts_parsed_at`, so it is read again.
+
 ## Credit Transfer Workspaces
 
 Staff tool for assessing credit transfer (tillgodoräknande) applications.
@@ -469,12 +480,39 @@ teacher) can use it without a membership row.
   workspace as ordinary documents (`source_system = syllabus_archive`,
   `source_ref = {code}/{lang}`, kind locked to `syllabus`); a new version
   replaces its document, a dropped plan is orphaned.
-- The chat uses a staff persona (`common::PromptFrame`), not the student
-  tutor, and asks for a structured per-candidate assessment.
+- `/course/{id}` is the workspace page, not a chat: My cases (a table of
+  the viewer's own cases with their best match), DSV course plans (every
+  plan with level, versions and indexing state) and the MCP connector;
+  `?tab=` picks the tab. Routes in `routes::credit_transfer`.
 - A case is a conversation. Staff attach the external syllabus
   (`conversation_attachments`, PDF / text / HTML, text extracted at
-  upload); attachments go into the prompt in full, never into the shared
-  index, and seed retrieval with their learning-outcomes passage.
+  upload, PDFs with `[Page N]` markers); attachments go into the prompt in
+  full and never into the shared index. The owner can open the file again
+  (`.../attachments/{id}/file`, text served as `text/plain` with a sandbox
+  CSP, never as HTML).
+- The message after newly attached files is assessed, not chatted
+  (`strategy::assessment`, picked in `chat::run_chat_message` when
+  `case_assessments::has_unassessed_attachments`). It finds candidate
+  plans (codes named in the staff note, then embedding search fused with
+  BM25 over the plans' stored text, so a missing embedder only weakens
+  it), gives the model the attachments and the full text of up to five
+  plans, and asks for one JSON assessment under a strict schema. The
+  answer is checked before it is kept: unknown plan codes are dropped,
+  pages outside a document cleared, credited modules limited to the
+  plan's own; DSV credits, level, name, version and modules come from
+  the archive, and credits / level match is decided in code. The message
+  text is a plain rendering (what follow-ups and exports read); the
+  structure is in `case_assessments` and drawn as cards by
+  `components/credit-transfer/assessment-view.tsx`, with page citations
+  into the SU plan PDF and the uploaded file. Search and comparison
+  stream as the turn's thinking trace. Later messages are ordinary chat
+  with the staff persona (`common::PromptFrame`).
+- "Export as PDF" prints the case; `index.css` grows its scroll
+  containers in print media and the chrome is `print:hidden`.
+- `scripts/seed-dev.sh` seeds a credit transfer workspace, three fixture
+  plans (scheduled never to download, and only where the plan is not
+  already there) and one assessed case for the operator, so the case view
+  and both tabs render in dev and in the pa11y job without an LLM.
 - Cases are private to their author: no teacher review, pins, notes or
   conversation analytics (`guards::require_conversation_reviewer`).
 - Retention: a case untouched for `case_retention_days` (default 90) is

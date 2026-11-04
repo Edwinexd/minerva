@@ -61,9 +61,6 @@ export function AssessmentView({ assessment }: { assessment: CaseAssessment }) {
   const weak = assessment.candidates.filter((c) => c.verdict === "none")
   return (
     <div className="space-y-3 text-sm" data-assessment>
-      <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-        {t("creditTransfer.assessment.advisory")}
-      </p>
       {assessment.summary && <p>{assessment.summary}</p>}
       {assessment.external_courses.map((e) => (
         <ExternalFacts key={e.file} course={e} />
@@ -285,26 +282,14 @@ function CandidateCard({
           </section>
         )}
 
-        <div className={`rounded-md border px-3 py-2 ${TONE_CLASS[VERDICT_TONE[c.verdict]]}`}>
-          <p className="font-semibold">
-            {t("creditTransfer.assessment.suggestion")}: {c.verdict_title || verdictText}
-          </p>
-          {c.verdict_reason && <p className="mt-1 text-[13px]">{c.verdict_reason}</p>}
-          {c.credited_modules.length > 0 && (
-            <p className="mt-1 text-[13px]">
-              {t("creditTransfer.assessment.creditedModules")}:{" "}
-              {c.credited_modules
-                .map((m) =>
-                  t("creditTransfer.assessment.module", {
-                    code: m.code,
-                    name: m.name,
-                    credits: credits(m.credits),
-                  }),
-                )
-                .join(", ")}
-            </p>
-          )}
-        </div>
+        {/* What overlaps and what is missing. Deliberately no recommended
+            decision: the staff member reading this makes it. */}
+        {c.verdict_reason && (
+          <div className="rounded-md border bg-muted/40 px-3 py-2">
+            <p className="font-semibold">{t("creditTransfer.assessment.analysis")}</p>
+            <p className="mt-1 text-[13px]">{c.verdict_reason}</p>
+          </div>
+        )}
       </div>
     </section>
   )

@@ -214,9 +214,9 @@
       "none": "None"
     },
     "verdict": {
-      "full": "Full credit suggested",
-      "partial": "Partial credit suggested",
-      "none": "Not equivalent"
+      "full": "Full overlap",
+      "partial": "Partial overlap",
+      "none": "No meaningful overlap"
     },
     "match": {
       "match": "Match",
@@ -229,7 +229,6 @@
       "gap": "Gap"
     },
     "assessment": {
-      "advisory": "Advisory only. The decision and its justification remain with the examiner. Compared against the latest version of each DSV plan.",
       "cite": "{{doc}} p.{{page}}",
       "noCandidates": "No DSV course plan matched this syllabus.",
       "externalCourse": "External course",
@@ -253,11 +252,9 @@
       "externalOutcome": "Closest external outcome ({{course}})",
       "coverage": "Coverage",
       "noCorresponding": "No corresponding outcome",
-      "suggestion": "Suggestion",
-      "creditedModules": "Modules that could be credited",
-      "module": "{{code}} {{name}} ({{credits}} credits)",
       "ruledOut_one": "{{count}} more DSV course searched, no meaningful overlap",
-      "ruledOut_other": "{{count}} more DSV courses searched, no meaningful overlap"
+      "ruledOut_other": "{{count}} more DSV courses searched, no meaningful overlap",
+      "analysis": "What overlaps and what is missing"
     },
     "plans": {
       "search": "Search plans by code, name or content",

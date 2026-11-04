@@ -497,10 +497,13 @@ teacher) can use it without a membership row.
   BM25 over the plans' stored text, so a missing embedder only weakens
   it), gives the model the attachments and the full text of up to five
   plans, and asks for one JSON assessment under a strict schema. The
-  answer is checked before it is kept: unknown plan codes are dropped,
-  pages outside a document cleared, credited modules limited to the
-  plan's own; DSV credits, level, name, version and modules come from
-  the archive, and credits / level match is decided in code. The message
+  answer is checked before it is kept: unknown plan codes are dropped and
+  pages outside a document cleared; DSV credits, level, name, version and
+  modules come from the archive, and credits / level match is decided in
+  code. It describes overlap (full, partial, none) and what is missing,
+  never a decision: no recommended verdict, credit amount or modules to
+  grant, and no advisory banner, since the staff using it decide. The
+  stored field is still called `verdict`. The message
   text is a plain rendering (what follow-ups and exports read); the
   structure is in `case_assessments` and drawn as cards by
   `components/credit-transfer/assessment-view.tsx`, with page citations

@@ -1197,7 +1197,8 @@ export type FactMatch = "match" | "differs" | "unknown"
 /**
  * A structured credit transfer assessment (`strategy::assessment` on the
  * server). DSV facts come from the plan archive; the rest is the model's
- * suggestion, checked against the plans it was given.
+ * comparison, checked against the plans it was given. It describes overlap
+ * and never recommends a decision.
  */
 export interface CaseAssessment {
   version: number
@@ -1240,12 +1241,11 @@ export interface AssessmentCandidate {
   external_level: string | null
   credits_match: FactMatch
   level_match: FactMatch
+  /** Degree of overlap, never a decision on the application. */
   verdict: Verdict
-  verdict_title: string
+  /** What overlaps and what is missing. */
   verdict_reason: string
   overlap_note: string
-  credited_modules: PlanModule[]
-  credited_credits: number | null
   outcomes: AssessmentOutcome[]
   notes: { label: string; value: string }[]
 }

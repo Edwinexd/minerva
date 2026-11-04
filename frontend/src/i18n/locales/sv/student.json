@@ -214,9 +214,9 @@
       "none": "Ingen"
     },
     "verdict": {
-      "full": "Fullt tillgodoräknande föreslås",
-      "partial": "Delvis tillgodoräknande föreslås",
-      "none": "Inte likvärdig"
+      "full": "Full överlappning",
+      "partial": "Delvis överlappning",
+      "none": "Ingen tydlig överlappning"
     },
     "match": {
       "match": "Lika",
@@ -229,7 +229,6 @@
       "gap": "Saknas"
     },
     "assessment": {
-      "advisory": "Endast rådgivande. Beslutet och dess motivering ligger hos examinatorn. Jämfört med den senaste versionen av varje kursplan från DSV.",
       "cite": "{{doc}} s.{{page}}",
       "noCandidates": "Ingen kursplan från DSV matchade den här kursplanen.",
       "externalCourse": "Extern kurs",
@@ -253,11 +252,9 @@
       "externalOutcome": "Närmaste externa mål ({{course}})",
       "coverage": "Täckning",
       "noCorresponding": "Inget motsvarande mål",
-      "suggestion": "Förslag",
-      "creditedModules": "Moment som kan tillgodoräknas",
-      "module": "{{code}} {{name}} ({{credits}} hp)",
       "ruledOut_one": "{{count}} DSV-kurs till genomsökt, ingen tydlig överlappning",
-      "ruledOut_other": "{{count}} DSV-kurser till genomsökta, ingen tydlig överlappning"
+      "ruledOut_other": "{{count}} DSV-kurser till genomsökta, ingen tydlig överlappning",
+      "analysis": "Vad som överlappar och vad som saknas"
     },
     "plans": {
       "search": "Sök kursplaner på kod, namn eller innehåll",

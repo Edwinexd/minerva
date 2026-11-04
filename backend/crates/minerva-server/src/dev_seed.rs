@@ -883,7 +883,7 @@ async fn seed_credit_transfer(state: &AppState, admin_id: Uuid) -> Result<(), Ap
 const SEED_ASSESSMENT_TRACE: &str = "Searching the DSV course plans for matching courses.\n\
     Comparing with 3: IB130N Introduktion till data- och systemvetenskap, \
     IB138N Grundläggande programmering, IB440C Programmering 2.\n\
-    Done: 2 candidates, strongest IB130N (partial credit).\n";
+    Done: 2 candidates, strongest IB130N (partial overlap).\n";
 
 /// The fixture case's assessment, in the stored shape
 /// (`strategy::assessment::Assessment`): one partial match, one weak
@@ -920,11 +920,8 @@ fn seed_assessment() -> serde_json::Value {
                 "external_credits": 7.5, "external_level": "G1N",
                 "credits_match": "match", "level_match": "match",
                 "verdict": "partial",
-                "verdict_title": "Partial credit: 3.5 of 7.5 credits",
-                "verdict_reason": "The programming and data representation outcomes are covered at the same level. Networking and operating systems are absent from DD1337, so the exam module cannot be replaced; the assignment module can.",
+                "verdict_reason": "The programming, algorithm and data representation outcomes are covered at the same level. Operating systems are covered only as command-line use, and networking is absent from DD1337.",
                 "overlap_note": "3 of 5 outcomes covered",
-                "credited_modules": [module("IDSI", "Inlämningsuppgift", 3.5)],
-                "credited_credits": 3.5,
                 "outcomes": [
                     outcome("Describe how data is represented in a computer", 1, Some("Explain binary representation of numbers and text"), "covered"),
                     outcome("Write simple programs", 1, Some("Write structured programs using selection, iteration and functions"), "covered"),
@@ -943,10 +940,8 @@ fn seed_assessment() -> serde_json::Value {
                 "external_credits": 7.5, "external_level": "G1N",
                 "credits_match": "match", "level_match": "differs",
                 "verdict": "none",
-                "verdict_title": "",
                 "verdict_reason": "IB440C builds on a first programming course; DD1337 is that first course.",
                 "overlap_note": "Shared topic area only (1 of 4 outcomes)",
-                "credited_modules": [], "credited_credits": null,
                 "outcomes": [
                     outcome("Write programs with a graphical user interface", 1, None, "gap"),
                     outcome("Use collection classes from the standard library", 1, Some("Use lists and dictionaries"), "partly"),

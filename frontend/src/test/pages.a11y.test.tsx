@@ -510,11 +510,8 @@ const caseAssessment: CaseAssessment = {
       credits_match: "match",
       level_match: "match",
       verdict: "partial",
-      verdict_title: "Partial credit: 3.5 of 7.5 credits",
       verdict_reason: "Networking is absent from DD1337.",
       overlap_note: "2 of 3 outcomes covered",
-      credited_modules: [{ code: "IDSI", name: "Inlämningsuppgift", credits: 3.5 }],
-      credited_credits: 3.5,
       outcomes: [
         { dsv_outcome: "Write simple programs", dsv_page: 1, external_outcome: "Write structured programs", external_page: 2, coverage: "covered" },
         { dsv_outcome: "Explain algorithms", dsv_page: 1, external_outcome: "Analyse algorithms", external_page: 2, coverage: "partly" },
@@ -538,11 +535,8 @@ const caseAssessment: CaseAssessment = {
       credits_match: "match",
       level_match: "differs",
       verdict: "none",
-      verdict_title: "",
       verdict_reason: "Builds on a first course.",
       overlap_note: "Shared topic area only",
-      credited_modules: [],
-      credited_credits: null,
       outcomes: [
         { dsv_outcome: "Build graphical interfaces", dsv_page: 1, external_outcome: null, external_page: null, coverage: "gap" },
       ],
@@ -847,12 +841,14 @@ describe("Authenticated pages a11y", () => {
   })
 
   it("credit transfer assessment has no axe violations", async () => {
-    const { container, getByText, getAllByRole, getByRole } = renderPage(
+    const { container, getByText, getAllByRole, getByRole, queryByText } = renderPage(
       <AssessmentView assessment={caseAssessment} />,
       [],
     )
-    expect(getByText("Partial credit suggested")).toBeInTheDocument()
-    expect(getByText("Suggestion: Partial credit: 3.5 of 7.5 credits")).toBeInTheDocument()
+    expect(getByText("Partial overlap")).toBeInTheDocument()
+    expect(getByText("Networking is absent from DD1337.")).toBeInTheDocument()
+    // Staff decide: no recommendation and no advisory banner.
+    expect(queryByText(/Suggestion|Advisory|credited/i)).toBeNull()
     // Citations open the cited page of either document.
     const cites = getAllByRole("link", { name: /IB130N p\.1/ })
     expect(cites[0]).toHaveAttribute("href", expect.stringMatching(/IB130N\/HT2020#page=1$/))

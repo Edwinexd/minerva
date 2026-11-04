@@ -14,9 +14,13 @@
 //!    candidate plan, both page-marked, and ask for one JSON assessment
 //!    under a strict schema.
 //! 3. Check the answer against what Minerva knows: candidates must be
-//!    plans it was given, pages must exist, credited modules must be the
-//!    plan's own. DSV credits, level, name, version and modules always
-//!    come from the archive, never from the model.
+//!    plans it was given and pages must exist. DSV credits, level, name,
+//!    version and modules always come from the archive, never from the
+//!    model.
+//!
+//! The assessment describes overlap; it never recommends a decision.
+//! Whether, and how much, to credit is the staff member's call, so the
+//! model is not asked for a verdict, credit amounts or modules to grant.
 //! 4. Save it as an assistant message whose text is a readable rendering
 //!    (follow-ups and every other reader of `messages` use that), with
 //!    the structured form in `case_assessments` for the case view.
@@ -51,7 +55,9 @@ const RRF_K: f64 = 60.0;
 const SYSTEM_PROMPT: &str = "You assess credit transfer (tillgodoräknande) applications for \
 DSV (Department of Computer and Systems Sciences), Stockholm University. Staff give you the \
 syllabus of a course a student took elsewhere and the DSV course plans that may correspond to \
-it. You compare them and suggest a verdict. You are advisory: the examiner decides.\n\
+it. You compare them for the staff member, who decides on the application. Describe how \
+far each DSV course is covered and what is missing; never recommend whether or how much \
+credit to grant, and never propose modules or credit amounts.\n\
 \n\
 Rules:\n\
 - Compare only against the DSV plans given below. A candidate's `code` must be one of their \
@@ -65,15 +71,12 @@ reaches the same knowledge at a comparable level, `partly` when it overlaps but 
 shallower or only implied by the content, `gap` when it is absent.\n\
 - Pages: the texts carry `[Page N]` markers. Give the page each outcome is stated on, or 0 \
 when you cannot tell.\n\
-- `verdict`: `full` when every outcome is covered and credits and level are comparable; \
-`partial` when a meaningful part is covered; `none` otherwise. For `partial`, list in \
-`credited_modules` the examination codes of the DSV modules the external course could replace \
-(only codes from that plan's module list) and their total in `credited_credits`; otherwise \
-leave both empty or 0. Partial credit never names every module: if all of them are \
-covered, the verdict is `full`.\n\
-- `verdict_title` is a short heading such as \"Partial credit: 4 of 7.5 credits\". \
-`verdict_reason` explains it in two to four sentences, naming the decisive outcomes. \
-`overlap_note` is one line on how much overlaps, for a collapsed card.\n\
+- `verdict` is the degree of overlap, not a decision: `full` when every outcome is \
+covered at a comparable level, `partial` when a meaningful part is, `none` otherwise.\n\
+- `verdict_reason`: two to four sentences on what overlaps and what is missing, naming \
+the decisive outcomes and any difference in level, credits or examination. State facts; \
+do not recommend a decision. `overlap_note` is one line on how much overlaps, for a \
+collapsed card.\n\
 - `notes`: other facts worth a glance that the syllabuses state, as short label and value \
 pairs (e.g. programming language, examination form). At most three; leave out anything \
 not stated rather than writing \"unspecified\".\n\
@@ -141,11 +144,8 @@ struct ModelCandidate {
     code: String,
     external_file: String,
     verdict: String,
-    verdict_title: String,
     verdict_reason: String,
     overlap_note: String,
-    credited_modules: Vec<String>,
-    credited_credits: f64,
     outcomes: Vec<ModelOutcome>,
     notes: Vec<Note>,
 }
@@ -212,12 +212,11 @@ pub struct Candidate {
     /// `match`, `differs` or `unknown`, decided here, not by the model.
     pub credits_match: String,
     pub level_match: String,
+    /// Degree of overlap (`full`, `partial`, `none`), never a decision.
     pub verdict: String,
-    pub verdict_title: String,
+    /// What overlaps and what is missing.
     pub verdict_reason: String,
     pub overlap_note: String,
-    pub credited_modules: Vec<PlanModule>,
-    pub credited_credits: Option<f64>,
     pub outcomes: Vec<Outcome>,
     pub notes: Vec<Note>,
 }
@@ -824,11 +823,8 @@ fn schema() -> serde_json::Value {
             "code": string(),
             "external_file": string(),
             "verdict": { "type": "string", "enum": ["full", "partial", "none"] },
-            "verdict_title": string(),
             "verdict_reason": string(),
             "overlap_note": string(),
-            "credited_modules": array(string()),
-            "credited_credits": number(),
             "outcomes": array(object(serde_json::json!({
                 "dsv_outcome": string(),
                 "dsv_page": integer(),
@@ -931,15 +927,6 @@ fn note_language(note: &str) -> &'static str {
     }
 }
 
-/// The DSV module a model's `credited_modules` entry names. Models write
-/// the code alone (`IDST`) or with its name (`IDST Tentamen`).
-fn names_module(entry: &str, module: &PlanModule) -> bool {
-    entry
-        .split(|c: char| c.is_whitespace() || matches!(c, ',' | ':' | '(' | ')' | '-'))
-        .find(|t| !t.is_empty())
-        .is_some_and(|code| code.eq_ignore_ascii_case(&module.code))
-}
-
 /// `ids` is (workspace, conversation), for the attachment links.
 /// `language` comes from [`note_language`].
 fn validate(
@@ -1023,24 +1010,6 @@ fn validate(
             "full" | "partial" => c.verdict.clone(),
             _ => "none".to_string(),
         };
-        let credited_modules: Vec<PlanModule> = if verdict == "partial" {
-            plan.modules
-                .iter()
-                .filter(|pm| {
-                    c.credited_modules
-                        .iter()
-                        .any(|entry| names_module(entry, pm))
-                })
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let credited_credits = if credited_modules.is_empty() {
-            Some(c.credited_credits).filter(|v| verdict == "partial" && *v > 0.0 && v.is_finite())
-        } else {
-            Some(credited_modules.iter().map(|m| m.credits).sum())
-        };
         let outcomes = c
             .outcomes
             .into_iter()
@@ -1074,11 +1043,8 @@ fn validate(
             external_credits,
             external_level,
             verdict,
-            verdict_title: c.verdict_title.trim().to_string(),
             verdict_reason: c.verdict_reason.trim().to_string(),
             overlap_note: c.overlap_note.trim().to_string(),
-            credited_modules,
-            credited_credits,
             outcomes,
             notes: c
                 .notes
@@ -1228,12 +1194,12 @@ fn case_title(a: &Assessment, externals: &[ExternalDoc]) -> Option<String> {
 
 fn verdict_label(verdict: &str, sv: bool) -> &'static str {
     match (verdict, sv) {
-        ("full", false) => "full credit",
-        ("partial", false) => "partial credit",
-        (_, false) => "not equivalent",
-        ("full", true) => "fullt tillgodoräknande",
-        ("partial", true) => "delvis tillgodoräknande",
-        (_, true) => "ej likvärdig",
+        ("full", false) => "full overlap",
+        ("partial", false) => "partial overlap",
+        (_, false) => "no meaningful overlap",
+        ("full", true) => "full överlappning",
+        ("partial", true) => "delvis överlappning",
+        (_, true) => "ingen tydlig överlappning",
     }
 }
 
@@ -1243,14 +1209,6 @@ pub fn render_markdown(a: &Assessment) -> String {
     let sv = a.language == "sv";
     let l = |en: &'static str, svs: &'static str| if sv { svs } else { en };
     let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "_{}_\n",
-        l(
-            "Advisory only. The decision and its justification remain with the examiner.",
-            "Endast rådgivande. Beslutet och dess motivering ligger hos examinatorn."
-        )
-    );
     if !a.summary.is_empty() {
         let _ = writeln!(out, "{}\n", a.summary);
     }
@@ -1327,12 +1285,8 @@ pub fn render_markdown(a: &Assessment) -> String {
         let _ = writeln!(
             out,
             "\n**{}: {}**\n\n{}",
-            l("Suggestion", "Förslag"),
-            if c.verdict_title.is_empty() {
-                verdict_label(&c.verdict, sv)
-            } else {
-                &c.verdict_title
-            },
+            l("Overlap", "Överlappning"),
+            verdict_label(&c.verdict, sv),
             c.verdict_reason
         );
     }
@@ -1464,14 +1418,13 @@ mod tests {
             "candidates": [
                 {
                     "code": "IB999X", "external_file": "kth.pdf", "verdict": "full",
-                    "verdict_title": "Invented", "verdict_reason": "", "overlap_note": "",
-                    "credited_modules": [], "credited_credits": 0, "outcomes": [], "notes": []
+                    "verdict_reason": "", "overlap_note": "",
+                    "outcomes": [], "notes": []
                 },
                 {
                     "code": "prog1", "external_file": "KTH.PDF", "verdict": "partial",
-                    "verdict_title": "Partial credit", "verdict_reason": "Exam part covered.",
-                    "overlap_note": "4 of 5", "credited_modules": ["TEN1 Tenta", "NOPE"],
-                    "credited_credits": 99,
+                    "verdict_reason": "Exam part covered.",
+                    "overlap_note": "4 of 5",
                     "outcomes": [
                         { "dsv_outcome": "Write programs", "dsv_page": 1,
                           "external_outcome": "Programs", "external_page": 2, "coverage": "covered" },
@@ -1509,12 +1462,9 @@ mod tests {
         assert_eq!(
             (c.credits_match.as_str(), c.level_match.as_str()),
             ("match", "match")
-        ); // Only the plan's own modules are credited (named by code, with or
-           // without their name), and their credits add up.
-        assert_eq!(c.credited_modules.len(), 1);
+        );
         // A placeholder value is not a fact worth showing.
         assert_eq!(c.notes.len(), 1);
-        assert_eq!(c.credited_credits, Some(4.0));
         // Pages outside either document are dropped.
         assert_eq!(c.outcomes[0].dsv_page, Some(1));
         assert_eq!(c.outcomes[0].external_page, Some(2));
@@ -1544,8 +1494,12 @@ mod tests {
             text.contains("| Write programs | Programs | Covered |"),
             "{text}"
         );
-        assert!(text.contains("**Suggestion: Partial credit**"), "{text}");
-        assert!(text.starts_with("_Advisory only."), "{text}");
+        assert!(text.contains("**Overlap: partial overlap**"), "{text}");
+        // Staff decide; nothing in it recommends a decision or a banner.
+        assert!(
+            !text.contains("Advisory") && !text.contains("credit"),
+            "{text}"
+        );
     }
 
     #[test]

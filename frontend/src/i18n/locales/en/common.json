@@ -99,6 +99,7 @@
     "welcome": "Welcome, {{name}}",
     "appName": "Minerva",
     "yourCourses": "Your courses",
+    "yourCoursesAndTools": "Your courses and staff tools",
     "yourCourse": "Your course",
     "newCourse": "New Course",
     "loadFailed": "Failed to load courses: {{error}}",
@@ -139,7 +140,9 @@
       "credit_transfer": "Compare external syllabuses against DSV course plans."
     },
     "staffTool": {
-      "plans": "{{count}} DSV plans, last checked {{date}}.",
+      "plans_one": "{{count}} DSV plan",
+      "plans_other": "{{count}} DSV plans",
+      "checked": "Checked {{date}}",
       "badge": "Staff workspace",
       "cases_one": "{{count}} case",
       "cases_other": "{{count}} cases"

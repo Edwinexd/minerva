@@ -67,7 +67,11 @@ export function Home() {
               : t("home.appName")}
           </h1>
           <p className="text-muted-foreground mt-1">
-            {user?.role === "student" ? t("home.yourCourse") : t("home.yourCourses")}
+            {user?.role === "student"
+              ? t("home.yourCourse")
+              : staffTools.length > 0
+                ? t("home.yourCoursesAndTools")
+                : t("home.yourCourses")}
           </p>
         </div>
         {canCreate && (
@@ -504,52 +508,49 @@ function CreateCourseForm({
 
 function StaffToolCard({ workspace }: { workspace: Course }) {
   const { t, i18n } = useTranslation("common")
-  const manages = workspace.my_role === "teacher" || workspace.my_role === "ta"
   const { data: summary } = useQuery({
     ...creditTransferSummaryQuery(workspace.id),
     enabled: workspace.kind === "credit_transfer",
   })
-  const synced = summary?.plans_checked_at
-    ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium", timeStyle: "short" }).format(
+  const checked = summary?.plans_checked_at
+    ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium" }).format(
         new Date(summary.plans_checked_at),
       )
     : null
+  // Same card as a course: the whole card opens the workspace, the
+  // badge on the right says what it is, chips below say what is in it.
   return (
-    <Card className="h-full border-blue-200 dark:border-blue-900">
-      <CardHeader>
-        <CardTitle className="text-lg">
-          <Link
-            to="/course/$courseId"
-            params={{ courseId: workspace.id }}
-            className="hover:underline"
-          >
-            {workspace.name}
-          </Link>
-        </CardTitle>
-        <CardDescription>
-          {workspace.description || t(`home.workspaceKind.${workspace.kind}`)}
-          {summary && synced && (
-            <> {t("home.staffTool.plans", { count: summary.plan_count, date: synced })}</>
-          )}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">{t("home.staffTool.badge")}</Badge>
+    <Link to="/course/$courseId" params={{ courseId: workspace.id }}>
+      <Card className="hover:border-foreground/20 transition-colors cursor-pointer h-full">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-2">
+            <CardTitle className="text-lg">{workspace.name}</CardTitle>
+            <Badge variant="outline" className="shrink-0">
+              {t("home.staffTool.badge")}
+            </Badge>
+          </div>
+          <CardDescription>
+            {workspace.description || t(`home.workspaceKind.${workspace.kind}`)}
+          </CardDescription>
+        </CardHeader>
         {summary && (
-          <Badge variant="secondary">
-            {t("home.staffTool.cases", { count: summary.my_case_count })}
-          </Badge>
+          <CardContent>
+            <div className="space-y-2 text-xs">
+              <Badge variant="secondary">
+                {t("home.staffTool.plans", { count: summary.plan_count })}
+              </Badge>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">
+                  {t("home.staffTool.cases", { count: summary.my_case_count })}
+                </Badge>
+                {checked && (
+                  <Badge variant="outline">{t("home.staffTool.checked", { date: checked })}</Badge>
+                )}
+              </div>
+            </div>
+          </CardContent>
         )}
-        {manages && (
-          <Link
-            to="/teacher/courses/$courseId"
-            params={{ courseId: workspace.id }}
-            className="ml-auto text-sm text-muted-foreground underline hover:text-foreground"
-          >
-            {t("home.manageWorkspace")}
-          </Link>
-        )}
-      </CardContent>
-    </Card>
+      </Card>
+    </Link>
   )
 }

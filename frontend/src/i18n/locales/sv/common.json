@@ -99,6 +99,7 @@
     "welcome": "Välkommen, {{name}}",
     "appName": "Minerva",
     "yourCourses": "Dina kurser",
+    "yourCoursesAndTools": "Dina kurser och personalverktyg",
     "yourCourse": "Din kurs",
     "newCourse": "Ny kurs",
     "loadFailed": "Kunde inte läsa in kurser: {{error}}",
@@ -139,7 +140,9 @@
       "credit_transfer": "Jämför externa kursplaner med DSV:s kursplaner."
     },
     "staffTool": {
-      "plans": "{{count}} kursplaner från DSV, senast kontrollerade {{date}}.",
+      "plans_one": "{{count}} kursplan från DSV",
+      "plans_other": "{{count}} kursplaner från DSV",
+      "checked": "Kontrollerade {{date}}",
       "badge": "Personalverktyg",
       "cases_one": "{{count}} ärende",
       "cases_other": "{{count}} ärenden"

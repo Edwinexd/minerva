@@ -716,7 +716,7 @@ fn build_research_system_prompt(ctx: &GenerationContext, chunks: &[RagChunk]) ->
         &ctx.course_name,
         &ctx.custom_prompt,
         chunks,
-        ctx.carryover.as_deref(),
+        ctx.prompt_frame(),
     );
     format!(
         "{base}\n\n## Research phase (you are the FIRST of two agents)\n\
@@ -1268,6 +1268,8 @@ mod stream_integration_tests {
             embedding_version: 1,
             history: Vec::<MessageRow>::new(),
             carryover: None,
+            workspace_kind: minerva_core::models::WorkspaceKind::Course,
+            attachments: Vec::new(),
             user_content: "Hello".to_string(),
             is_first_message: true,
             daily_token_budget: 0,

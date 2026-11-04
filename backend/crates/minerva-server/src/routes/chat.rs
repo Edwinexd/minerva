@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use crate::error::AppError;
 use crate::ext_obfuscate::{self, Pseudonymizer};
 use crate::routes::enforce_owner_cap;
-use crate::routes::guards::{self, require_workspace_teacher, TeacherScope};
+use crate::routes::guards::{self, require_conversation_reviewer, TeacherScope};
 use crate::state::AppState;
 use crate::strategy;
 
@@ -598,7 +598,8 @@ async fn list_all_conversations(
     Extension(user): Extension<User>,
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<ConversationWithFeedbackResponse>>, AppError> {
-    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_conversation_reviewer(&state, workspace_id, &user, TeacherScope::WithAssistants)
+        .await?;
 
     let rows = minerva_db::queries::conversations::list_all_by_course_with_feedback(
         &state.db,
@@ -660,7 +661,8 @@ async fn list_flag_kinds(
     Extension(user): Extension<User>,
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<HashMap<Uuid, Vec<String>>>, AppError> {
-    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_conversation_reviewer(&state, workspace_id, &user, TeacherScope::WithAssistants)
+        .await?;
     let map = minerva_db::queries::conversation_flags::flag_kinds_by_conversation(
         &state.db,
         workspace_id,
@@ -675,7 +677,8 @@ async fn get_course_feedback_stats(
     Extension(user): Extension<User>,
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<CourseFeedbackStatsResponse>, AppError> {
-    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_conversation_reviewer(&state, workspace_id, &user, TeacherScope::WithAssistants)
+        .await?;
 
     let summary =
         minerva_db::queries::message_feedback::total_ratings_for_course(&state.db, workspace_id)
@@ -780,6 +783,15 @@ pub(crate) async fn fetch_conversation_for_view(
 
     if conv.workspace_id != workspace_id {
         return Err(AppError::NotFound);
+    }
+
+    let workspace = guards::load_workspace(state, workspace_id).await?;
+    if guards::conversations_are_private(&workspace.kind) {
+        // A case is its author's alone: no teacher view, no pin exception.
+        if conv.user_id != viewer.id {
+            return Err(AppError::NotFound);
+        }
+        return Ok((conv, false));
     }
 
     let is_teacher =
@@ -1806,6 +1818,25 @@ pub(super) async fn run_chat_message(
         0
     };
 
+    // Attachments are per conversation and only exist in kinds that use
+    // them; skip the query everywhere else.
+    let attachments = if crate::routes::attachments::kind_uses_attachments(&course.kind) {
+        minerva_db::queries::conversation_attachments::list(&state.db, conv_id)
+            .await?
+            .into_iter()
+            .map(|a| strategy::common::ReferenceAttachment {
+                filename: a.filename,
+                text: a.extracted_text,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let workspace_kind =
+        minerva_core::models::WorkspaceKind::parse(&course.kind).ok_or_else(|| {
+            AppError::Internal(format!("workspace {workspace_id} has kind {}", course.kind))
+        })?;
+
     let ctx = strategy::GenerationContext {
         course_name: course.name,
         custom_prompt: course.system_prompt,
@@ -1827,6 +1858,8 @@ pub(super) async fn run_chat_message(
         embedding_version: course.embedding_version,
         history,
         carryover: conv.carryover_summary.clone(),
+        workspace_kind,
+        attachments,
         user_content,
         is_first_message,
         daily_token_budget,
@@ -1863,7 +1896,8 @@ async fn set_pin(
     Path((workspace_id, cid)): Path<(Uuid, Uuid)>,
     Json(body): Json<SetPinRequest>,
 ) -> Result<Json<ConversationResponse>, AppError> {
-    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_conversation_reviewer(&state, workspace_id, &user, TeacherScope::WithAssistants)
+        .await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
@@ -1961,7 +1995,8 @@ async fn create_note(
     Path((workspace_id, cid)): Path<(Uuid, Uuid)>,
     Json(body): Json<CreateNoteRequest>,
 ) -> Result<Json<TeacherNoteResponse>, AppError> {
-    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_conversation_reviewer(&state, workspace_id, &user, TeacherScope::WithAssistants)
+        .await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?
@@ -2000,7 +2035,8 @@ async fn update_note(
     Path((workspace_id, cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
     Json(body): Json<UpdateNoteRequest>,
 ) -> Result<Json<TeacherNoteResponse>, AppError> {
-    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_conversation_reviewer(&state, workspace_id, &user, TeacherScope::WithAssistants)
+        .await?;
 
     // Verify the note lives in the conversation from the URL, and the
     // conversation lives in the URL's course. Without this, a teacher of
@@ -2043,7 +2079,8 @@ async fn delete_note(
     Extension(user): Extension<User>,
     Path((workspace_id, cid, note_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_conversation_reviewer(&state, workspace_id, &user, TeacherScope::WithAssistants)
+        .await?;
 
     // Verify the note lives in the conversation from the URL, and the
     // conversation lives in the URL's course. Without this, a teacher of
@@ -2203,7 +2240,8 @@ async fn acknowledge_flag(
     Extension(user): Extension<User>,
     Path((workspace_id, cid, flag_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<ConversationFlagResponse>, AppError> {
-    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_conversation_reviewer(&state, workspace_id, &user, TeacherScope::WithAssistants)
+        .await?;
 
     // Triple-check the (course, conversation, flag) URL path:
     // otherwise a teacher of course A could ack a flag in
@@ -2256,7 +2294,8 @@ async fn acknowledge_feedback(
     Extension(user): Extension<User>,
     Path((workspace_id, cid, fb_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<MessageFeedbackResponse>, AppError> {
-    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants).await?;
+    require_conversation_reviewer(&state, workspace_id, &user, TeacherScope::WithAssistants)
+        .await?;
 
     let conv = minerva_db::queries::conversations::find_by_id(&state.db, cid)
         .await?

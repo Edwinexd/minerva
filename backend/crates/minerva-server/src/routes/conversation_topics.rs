@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::routes::guards::{require_workspace_teacher, TeacherScope};
+use crate::routes::guards::{require_conversation_reviewer, TeacherScope};
 use crate::state::AppState;
 
 /// Keeps the prompt bounded while covering enough of the current class activity
@@ -98,7 +98,7 @@ pub async fn conversation_themes(
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<TopicResponse>>, AppError> {
     let course =
-        require_workspace_teacher(&state, workspace_id, &user, TeacherScope::WithAssistants)
+        require_conversation_reviewer(&state, workspace_id, &user, TeacherScope::WithAssistants)
             .await?;
 
     let messages =

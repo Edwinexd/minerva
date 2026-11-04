@@ -245,6 +245,12 @@ pub struct GenerationContext {
     /// `common::build_system_prompt_with_signals`, never as
     /// instructions, because it is model-written from student input.
     pub carryover: Option<String>,
+    /// Workspace kind, which picks the system-prompt persona (see
+    /// `common::PromptFrame`).
+    pub workspace_kind: minerva_core::models::WorkspaceKind,
+    /// Files attached to this conversation (`routes::attachments`), given
+    /// to the model in full on every turn.
+    pub attachments: Vec<common::ReferenceAttachment>,
     pub user_content: String,
     pub is_first_message: bool,
     /// Per-response token budget for the tool-use / FLARE fail-safe: the
@@ -304,6 +310,34 @@ pub struct GenerationContext {
     /// a guarded turn regardless of who asked. Always FALSE on the
     /// embed surface, whose tokens are student-scoped by construction.
     pub viewer_is_teacher: bool,
+}
+
+impl GenerationContext {
+    /// What the seed retrieval searches for. Normally the user's message;
+    /// with attachments the message is often just "assess this", so each
+    /// attachment's learning-outcomes passage is searched as well. Bounded
+    /// so the query stays within what the embedding model reads.
+    pub fn retrieval_query(&self) -> std::borrow::Cow<'_, str> {
+        if self.attachments.is_empty() {
+            return std::borrow::Cow::Borrowed(&self.user_content);
+        }
+        let per_file = 1_500 / self.attachments.len().max(1);
+        let mut query = self.user_content.clone();
+        for a in &self.attachments {
+            query.push_str("\n\n");
+            query.push_str(common::outcome_excerpt(&a.text, per_file));
+        }
+        std::borrow::Cow::Owned(query)
+    }
+
+    /// The conversation-stable parts of the system prompt.
+    pub fn prompt_frame(&self) -> common::PromptFrame<'_> {
+        common::PromptFrame {
+            kind: self.workspace_kind,
+            carryover: self.carryover.as_deref(),
+            attachments: &self.attachments,
+        }
+    }
 }
 
 /// Run the appropriate strategy based on the strategy name.

@@ -1,5 +1,6 @@
 mod admin;
 mod api_keys;
+mod attachments;
 pub(crate) mod canvas;
 mod chat;
 mod conversation_continuation;
@@ -83,6 +84,7 @@ pub fn api_router(state: AppState) -> Router<AppState> {
         .nest("/workspaces", workspaces::router())
         .nest("/workspaces/{workspace_id}/documents", documents::router())
         .nest("/workspaces/{workspace_id}", chat::router())
+        .nest("/workspaces/{workspace_id}", attachments::router())
         .nest("/workspaces/{workspace_id}", usage::workspace_router())
         .nest("/workspaces/{workspace_id}", suggested_questions::router())
         // Course-only extensions: join links, Moodle API keys, Play,

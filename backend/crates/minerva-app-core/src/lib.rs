@@ -8,6 +8,7 @@
 //! gated behind the `axum` feature that only the api crate turns on.
 
 pub mod canvas;
+pub mod case_retention;
 pub mod classification;
 pub mod config;
 pub mod documents;

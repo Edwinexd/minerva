@@ -120,3 +120,27 @@ pub(crate) async fn require_workspace_owner(
     }
     Ok(course)
 }
+
+/// Conversations in a credit transfer workspace belong to their author
+/// alone. Cases carry applicants' syllabuses, often with personal data,
+/// so there is no teacher review, pinning or cross-conversation analytics.
+pub(crate) fn conversations_are_private(kind: &str) -> bool {
+    minerva_core::models::WorkspaceKind::parse(kind)
+        == Some(minerva_core::models::WorkspaceKind::CreditTransfer)
+}
+
+/// [`require_workspace_teacher`] for endpoints that read or act on other
+/// people's conversations. Not found in kinds whose conversations are
+/// private, whoever asks.
+pub(crate) async fn require_conversation_reviewer(
+    state: &AppState,
+    workspace_id: Uuid,
+    user: &User,
+    scope: TeacherScope,
+) -> Result<WorkspaceRow, AppError> {
+    let workspace = require_workspace_teacher(state, workspace_id, user, scope).await?;
+    if conversations_are_private(&workspace.kind) {
+        return Err(AppError::NotFound);
+    }
+    Ok(workspace)
+}

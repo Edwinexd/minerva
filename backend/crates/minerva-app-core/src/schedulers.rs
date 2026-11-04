@@ -368,6 +368,24 @@ pub fn start_scheduler_loops(state: AppState) {
         });
     }
 
+    // Credit transfer case retention: delete cases (conversations and
+    // their attachment files) untouched for the workspace's retention
+    // period. Hourly is plenty for a days-long period.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+            loop {
+                match crate::case_retention::sweep(&state).await {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!("case retention: deleted {} expired case(s)", n),
+                    Err(e) => tracing::error!("case retention: sweep failed: {}", e),
+                }
+                tokio::time::sleep(SWEEP_INTERVAL).await;
+            }
+        });
+    }
+
     // Syllabus archive: download the PDFs the nightly Daisy sync listed,
     // and re-download each one every `RECHECK_INTERVAL_DAYS` to catch
     // revisions published under an unchanged URL. `next_check_at` on the

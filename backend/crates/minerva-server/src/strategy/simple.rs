@@ -47,7 +47,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.reranker_model,
         &ctx.qdrant,
         &collection_name,
-        &ctx.user_content,
+        &ctx.retrieval_query(),
         ctx.max_chunks,
         ctx.min_score,
         &ctx.embedding_provider,
@@ -172,7 +172,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.custom_prompt,
         &rag.context,
         &rag.signals,
-        ctx.carryover.as_deref(),
+        ctx.prompt_frame(),
     );
     let global_knowledge = common::retrieve_global_knowledge(
         &http_client,

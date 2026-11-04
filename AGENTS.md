@@ -328,7 +328,7 @@ library crates depend only on the facade.
   so existing log greps still work; the gauges are additive.
 - HTTP metrics (`http_requests_total`, `http_request_duration_seconds`)
   come from a `route_layer` middleware on the api router. `path` is the
-  matched route template (`/api/courses/:id`), never the raw URL, so label
+  matched route template (`/api/workspaces/:id`), never the raw URL, so label
   cardinality stays bounded. Buckets for any `*_seconds` metric are set in
   `minerva_metrics::init`.
 - **Model-cache metrics** (emitted in the embedder/reranker pods from
@@ -408,6 +408,99 @@ silently runs the image default and ships nothing; and Grafana's
 - Break-glass Grafana admin password: optional Secret `grafana-admin`
   key `admin-password`. Absent by default (login form disabled anyway);
   reach via `kubectl exec ... grafana-cli` if ever needed.
+
+## Workspaces and Courses
+
+A course is one kind of workspace (class-table inheritance, migration
+`20261104000002_workspaces.sql`). `workspaces` holds everything every
+kind has: name, owner, model / retrieval config, caps, and `kind`.
+Subtype tables carry the rest, each keyed by `workspace_id` with a
+composite FK on `(workspace_id, kind)` so a workspace cannot hold the
+wrong subtype row:
+
+- `courses`: term (`semester_label`), Daisy `course_code`, `auto_managed`.
+- `credit_transfer_workspaces`: see "Credit Transfer Workspaces".
+
+Generic tables use `workspace_id` (documents, conversations, members,
+usage, KG, figures, ...). Course-only tables keep `course_id` and
+reference `courses`: Daisy offerings and staging, Play designations, LTI,
+Canvas, Moodle `api_keys`, join links (`signed_urls`), LTI role
+suggestions.
+
+API: generic endpoints live under `/api/workspaces/{id}/...`;
+course-only ones under `/api/courses/{id}/...` behind
+`routes::courses::require_course`, which 404s any other kind. The
+Moodle integration API, LTI and embed keep their course naming: they
+are course features and external contracts. Qdrant point payloads keep
+their `"course_id"` key (a stored format; renaming means re-embedding).
+
+Membership checks read the `workspace_access` view, not
+`workspace_members`: explicit members plus implicit access granted by a
+subtype (credit transfer). `queries::workspaces` is the generic layer,
+`queries::courses` the course subtype.
+
+## Course Syllabi (planarkiv)
+
+Daisy links each offering to `utbildning.su.se/.../planarkiv?code=X`,
+an HTML page that loads its PDF list client-side. dsv-wrapper's
+`SyllabusClient` reads the JSON behind it (a Sitevision app endpoint
+whose page / portlet ids are pinned in `dsv_wrapper/syllabus.py`; they
+change if SU rebuilds the page, and requests then 404). Look plans up
+by Ladok code (`SyllabusCourse.code`, e.g. `IB440C`), never by the Daisy
+designation (`PROG2`).
+
+The nightly Daisy workflow PUTs every referenced plan to
+`/api/service/syllabus-plans/{code}` (`syllabus_plans`,
+`syllabus_versions`, `syllabus_plan_offerings`). The scheduler downloads
+the PDFs to `{docs_path}/syllabi/{sha256}.pdf` and re-downloads each
+weekly: the archive sends no ETag, so a revision under an unchanged URL
+is only visible by hash. "Current" means the newest version of a plan
+still given, in each language that version has; an English PDF of an
+older version is never used.
+
+## Credit Transfer Workspaces
+
+Staff tool for assessing credit transfer (tillgodoräknande) applications.
+Admins create one from the home page's New Course form (kind selector).
+Every user whose role ranks at or above `access_min_role` (default
+teacher) can use it without a membership row.
+
+- The scheduler mirrors the current DSV plans into every credit transfer
+  workspace as ordinary documents (`source_system = syllabus_archive`,
+  `source_ref = {code}/{lang}`, kind locked to `syllabus`); a new version
+  replaces its document, a dropped plan is orphaned.
+- The chat uses a staff persona (`common::PromptFrame`), not the student
+  tutor, and asks for a structured per-candidate assessment.
+- A case is a conversation. Staff attach the external syllabus
+  (`conversation_attachments`, PDF / text / HTML, text extracted at
+  upload); attachments go into the prompt in full, never into the shared
+  index, and seed retrieval with their learning-outcomes passage.
+- Cases are private to their author: no teacher review, pins, notes or
+  conversation analytics (`guards::require_conversation_reviewer`).
+- Retention: a case untouched for `case_retention_days` (default 90) is
+  deleted with its files by the scheduler. External syllabuses often
+  carry an applicant's personal data.
+
+## MCP Server
+
+`/mcp` serves MCP 2026-07-28 (stateless Streamable HTTP; `server/discover`,
+`tools/list`, `tools/call`) and still answers the 2025-11-25 `initialize`
+handshake for older clients. Read-only tools: `list_workspaces`,
+`search`, `list_documents`, `get_document`, `get_plan`. Only staff
+(teacher or above, never `ext:`) can connect, and only see courses they
+teach plus staff tools they use. Students never get MCP access: the
+chat guardrails have no MCP counterpart.
+
+Minerva is its own OAuth 2.1 authorization server (`routes::oauth`,
+migration `20261104000005_mcp_oauth.sql`): public clients with PKCE
+S256, Client ID Metadata Documents (fetched with SSRF guards) or
+dynamic registration, tokens bound to `{base}/mcp`, refresh tokens
+rotated with replay revoking the grant, `iss` in the authorization
+response. `/api/oauth/authorize` is Shibboleth-gated and hands off to
+the SPA consent page `/connect/{id}`; the discovery documents, `/mcp`
+and `/api/oauth/{token,register,revoke}` are exempt from Shibboleth in
+`apache/minerva-app.conf`. Users see and revoke connected assistants
+under Teacher, AI assistants.
 
 ## URL Document Routing
 
@@ -735,12 +828,12 @@ next push to `master`; no manual server step needed.
 ## AI Spending Caps
 
 Two layers, both daily, both in USD. Nothing stores a currency amount in
-the ledger: `usage_daily` (student chat) and `course_token_usage`
+the ledger: `usage_daily` (student chat) and `workspace_token_usage`
 (pipeline / classification) store tokens plus the model, and spend is
 derived on read as tokens x that model's current `chat_models` rate. A
 re-price therefore moves enforcement and every dashboard at once.
 
-1. **Per-student-per-course** (`courses.daily_cost_limit_usd`). New
+1. **Per-student-per-course** (`workspaces.daily_cost_limit_usd`). New
    courses default to the `course.daily_cost_limit_usd` system default
    (env `MINERVA_DEFAULT_COURSE_DAILY_USD`, fallback `$0.50`). `0` =
    unlimited per student.
@@ -780,7 +873,7 @@ most days matched exactly. The rules that keep it that way:
   `classification::VERDICT_MAX_TOKENS`.
 
 Known, accepted gaps: a call whose stream errors mid-way reports no usage
-(unknowable), and `course_token_usage` rows are deleted with their course.
+(unknowable), and `workspace_token_usage` rows are deleted with their workspace.
 
 ## Teacher Portal
 
@@ -800,6 +893,8 @@ course pages keep their own tab bar:
   rows. The page also drafts the limit-increase mail to
   `lambda@dsv.su.se` (identity, the courses the teacher ticks, current
   limit, busiest day).
+- **AI assistants** (`/teacher/assistants`): the MCP connector URL and
+  the user's connected assistants, each revocable. See "MCP Server".
 - **Guide** (`/teacher/guide`): the onboarding walkthrough, formerly
   `/teacher-help` (kept as a redirect). Mirrored by the LaTeX guides in
   `docs/teacher-guide/`; update both.
@@ -822,7 +917,7 @@ composer on the Shibboleth and embed surfaces, resolved by the pure
 `frontend/src/components/chat/conversation-limit-state.ts`.
 
 - **Length**: cumulative billed tokens per
-  conversation against `courses.conversation_soft_token_limit` (nudge)
+  conversation against `workspaces.conversation_soft_token_limit` (nudge)
   and `conversation_hard_token_limit` (block: composer hidden, send
   returns 409). New courses snapshot the `course.conversation_*` system
   defaults: 450k / 800k on prod, 300k / 1M as the code fallback.

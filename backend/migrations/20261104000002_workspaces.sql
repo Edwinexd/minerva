@@ -16,9 +16,11 @@
 -- course-only tables (Daisy, Play, LTI, Canvas, Moodle keys, join links)
 -- keep `course_id` and now reference the subtype.
 --
--- Not expand/contract: every rename breaks the previous build's queries,
--- so this ships in a maintenance deploy that stops the api, worker and
--- scheduler before the first new pod migrates (deploy.yml `maintenance`).
+-- Not expand/contract: every rename breaks the previous build's queries.
+-- Pods of the previous build that are still running when this applies
+-- fail their requests until they exit (a few minutes of errors, no data
+-- damage: the migration is one transaction and old writes fail outright).
+-- Stop them first to avoid that.
 --
 -- Qdrant point payloads keep their "course_id" key; it is a stored format
 -- and renaming it would mean re-embedding every collection.

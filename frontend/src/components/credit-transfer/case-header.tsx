@@ -21,15 +21,15 @@ export function CaseHeader({
   const { t } = useTranslation("student")
   const formatDate = useDateFormat()
   const title = isNew
-    ? t("creditTransfer.newCase")
-    : (conversation?.title ?? t("creditTransfer.untitledCase"))
+    ? t("creditTransfer.newChat")
+    : (conversation?.title ?? t("creditTransfer.untitledChat"))
   return (
     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
       <div className="min-w-0">
         <h2 className="text-xl font-semibold">{title}</h2>
         {conversation && retentionDays != null && (
           <p className="text-xs text-muted-foreground">
-            {t("creditTransfer.caseDates", {
+            {t("creditTransfer.chatDates", {
               created: formatDate(conversation.created_at),
               deleted: formatDate(deletionDate(conversation.updated_at, retentionDays)),
             })}

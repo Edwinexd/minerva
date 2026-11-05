@@ -271,10 +271,10 @@ export interface ChatSurfaceAdapter<M extends ChatBubbleMessage> {
   aegisEnabled: boolean
 
   /**
-   * Overrides Send while the conversation has work waiting for its next
-   * message (a credit transfer case with files not assessed yet): the
-   * button reads `label`, the composer hints with `placeholder`, and
-   * an empty composer sends `content`.
+   * What an empty composer does while the conversation has work waiting
+   * (a credit transfer chat with files not compared yet): the composer
+   * hints with `placeholder`, and with nothing typed the button reads
+   * `label` and sends `content`. Anything typed is an ordinary message.
    */
   pendingAction?: { label: string; placeholder: string; content: string } | null
 
@@ -833,7 +833,9 @@ export function ChatSurface<M extends ChatBubbleMessage>({
                       ? labels.aegisChecking
                       : sendNeedsConfirm
                         ? labels.aegisSendAsIs
-                        : (pendingAction?.label ?? labels.send)}
+                        : !input.trim() && pendingAction
+                          ? pendingAction.label
+                          : labels.send}
                   </Button>
                   {offerNewChat && moveDraftToNewChat && (
                     <Button

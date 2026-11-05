@@ -23,8 +23,8 @@ import { WORKSPACE_TABS, type WorkspaceTab } from "./tabs"
 import { VERDICT_TONE } from "./tones"
 
 /**
- * A credit transfer workspace: the viewer's own cases, the DSV course
- * plans they are compared against, SU's rules the chat draws on, and
+ * A credit transfer workspace: the viewer's own chats, the DSV course
+ * plans attached courses are compared against, SU's rules, and
  * connecting an AI assistant. The workspace settings stay on the teacher
  * pages, linked for its managers.
  */
@@ -64,7 +64,7 @@ export function CreditTransferWorkspacePage({
       >
         <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
           <TabsList>
-            <TabsTrigger value="cases">{t("creditTransfer.tabs.cases")}</TabsTrigger>
+            <TabsTrigger value="chats">{t("creditTransfer.tabs.chats")}</TabsTrigger>
             <TabsTrigger value="plans">{t("creditTransfer.tabs.plans")}</TabsTrigger>
             <TabsTrigger value="rules">{t("creditTransfer.tabs.rules")}</TabsTrigger>
             <TabsTrigger value="assistant">{t("creditTransfer.tabs.assistant")}</TabsTrigger>
@@ -79,8 +79,8 @@ export function CreditTransferWorkspacePage({
             </Link>
           )}
         </div>
-        <TabsContent value="cases" className="pt-2">
-          <CasesTab workspaceId={workspace.id} />
+        <TabsContent value="chats" className="pt-2">
+          <ChatsTab workspaceId={workspace.id} />
         </TabsContent>
         <TabsContent value="plans" className="pt-2">
           <PlansTab workspaceId={workspace.id} />
@@ -96,41 +96,41 @@ export function CreditTransferWorkspacePage({
   )
 }
 
-function CasesTab({ workspaceId }: { workspaceId: string }) {
+function ChatsTab({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation("student")
   const navigate = useNavigate()
   const formatDate = useDateFormat()
-  const { data: cases, isLoading, error } = useQuery(creditTransferCasesQuery(workspaceId))
+  const { data: chats, isLoading, error } = useQuery(creditTransferCasesQuery(workspaceId))
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">{t("creditTransfer.casesPrivate")}</p>
+        <p className="text-sm text-muted-foreground">{t("creditTransfer.chatsPrivate")}</p>
         <Button
           type="button"
-          onClick={() => navigate(chatLink("credit_transfer", workspaceId, null))}
+          onClick={() => navigate(chatLink(workspaceId, null))}
         >
-          {t("creditTransfer.newCase")}
+          {t("creditTransfer.newChat")}
         </Button>
       </div>
       {isLoading && <Skeleton className="h-32 w-full" />}
       {error && <ErrorText error={error} />}
-      {cases && cases.length === 0 && (
-        <p className="text-sm text-muted-foreground">{t("creditTransfer.noCases")}</p>
+      {chats && chats.length === 0 && (
+        <p className="text-sm text-muted-foreground">{t("creditTransfer.noChats")}</p>
       )}
-      {cases && cases.length > 0 && (
+      {chats && chats.length > 0 && (
         // Scrolls on a narrow screen (and the plan list always), so the
         // region takes focus for keyboard users (see chat-surface.tsx).
         <section
           className="overflow-x-auto"
           // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
           tabIndex={0}
-          aria-label={t("creditTransfer.casesTable")}
+          aria-label={t("creditTransfer.chatsTable")}
         >
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
-                <th scope="col" className="py-2 pr-3 font-medium">{t("creditTransfer.col.case")}</th>
+                <th scope="col" className="py-2 pr-3 font-medium">{t("creditTransfer.col.chat")}</th>
                 <th scope="col" className="py-2 pr-3 font-medium">{t("creditTransfer.col.files")}</th>
                 <th scope="col" className="py-2 pr-3 font-medium">{t("creditTransfer.col.bestMatch")}</th>
                 <th scope="col" className="py-2 pr-3 font-medium">{t("creditTransfer.col.updated")}</th>
@@ -138,14 +138,14 @@ function CasesTab({ workspaceId }: { workspaceId: string }) {
               </tr>
             </thead>
             <tbody>
-              {cases.map((c) => (
+              {chats.map((c) => (
                 <tr key={c.id} className="border-b align-top last:border-b-0">
                   <td className="py-2 pr-3">
                     <Link
-                      {...chatLink("credit_transfer", workspaceId, c.id)}
+                      {...chatLink(workspaceId, c.id)}
                       className="font-medium hover:underline"
                     >
-                      {c.title ?? t("creditTransfer.untitledCase")}
+                      {c.title ?? t("creditTransfer.untitledChat")}
                     </Link>
                   </td>
                   <td className="py-2 pr-3 text-muted-foreground">

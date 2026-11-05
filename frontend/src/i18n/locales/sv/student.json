@@ -41,7 +41,7 @@
     "thinkingHiddenRevealed": "Dolt för studenten",
     "thinkingHiddenRevealedBody": "Integritetsskyddet höll inne resonemanget för den här frågan. Studenten såg en platshållare här; du ser det för att du undervisar på kursen.",
     "toolCallsAriaLabel": "Verktyg som assistenten anropade under research-fasen",
-    "inputPlaceholderCase": "Fråga om ärendet, t.ex. vilken DSV-kurs det motsvarar…"
+    "inputPlaceholderCreditTransfer": "Fråga om SU:s regler eller de bifogade filerna…"
   },
   "message": {
     "tokensUsed_one": "{{count}} token",
@@ -167,47 +167,47 @@
     "askInNewChat": "Fråga i ny chatt"
   },
   "attachments": {
-    "startTitle": "Starta ett ärende",
-    "startHint": "Bifoga kursplanen för kursen som studenten läst någon annanstans. Minerva jämför den med DSV:s kursplaner.",
+    "startTitle": "Jämför en kurs",
+    "startHint": "Bifoga kursplanen för en kurs som studenten läst någon annanstans så jämför Minerva den med DSV:s kursplaner och SU:s regler. Vill du bara fråga om reglerna skriver du nedan.",
     "attachFirst": "Bifoga kursplan",
     "attachAnother": "Bifoga en fil till",
     "uploading": "Laddar upp...",
-    "listLabel": "Filer i ärendet",
+    "listLabel": "Filer i chatten",
     "remove": "Ta bort {{name}}",
     "noText": "Ingen text kunde läsas ur filen",
     "formats": "PDF, text eller HTML."
   },
   "creditTransfer": {
     "opensInNewTab": "öppnas i en ny flik",
-    "allCases": "Alla ärenden",
-    "newCase": "Nytt ärende",
-    "myCases": "Mina ärenden",
-    "untitledCase": "Namnlöst ärende",
+    "overview": "Översikt",
+    "newChat": "Ny chatt",
+    "myChats": "Mina chattar",
+    "untitledChat": "Namnlös chatt",
     "assess": "Bedöm",
-    "assessPlaceholder": "Lägg till en anteckning till bedömningen (valfritt), t.ex. vilken DSV-kurs studenten ansöker om",
+    "assessPlaceholder": "Fråga om de bifogade filerna, eller skicka som det är för att jämföra dem med DSV:s kursplaner",
     "assessDefault": "Bedöm den bifogade kursplanen mot DSV:s kursplaner.",
-    "caseDates": "Skapat {{created}}. Raderas med sina filer {{deleted}} om det inte används igen.",
-    "retentionNote": "Ett ärende och dess filer raderas {{days}} dagar efter att det senast användes.",
+    "chatDates": "Skapad {{created}}. Raderas med sina filer {{deleted}} om den inte används igen.",
+    "retentionNote": "En chatt och dess filer raderas {{days}} dagar efter att den senast användes.",
     "exportPdf": "Exportera som PDF",
-    "intro": "Varje ärende innehåller de uppladdade externa kursplanerna och bedömningen. Uppladdade filer och ärendet raderas {{days}} dagar efter att de senast användes.",
+    "intro": "Fråga om SU:s regler, eller bifoga kursplanen för en kurs som en student läst någon annanstans för att jämföra den med DSV:s kursplaner. Chattar och deras filer raderas {{days}} dagar efter att de senast användes.",
     "tabs": {
-      "cases": "Mina ärenden",
+      "chats": "Mina chattar",
       "plans": "DSV:s kursplaner",
       "rules": "Regelboken",
       "assistant": "Använd från din AI-assistent",
       "settings": "Inställningar för arbetsytan"
     },
-    "casesPrivate": "Bara du kan se dina ärenden.",
-    "noCases": "Inga ärenden än. Starta ett genom att bifoga kursplanen för kursen som studenten läst någon annanstans.",
-    "casesTable": "Dina ärenden",
+    "chatsPrivate": "Bara du kan se dina chattar.",
+    "noChats": "Inga chattar än. Starta en för att fråga om reglerna, eller bifoga kursplanen för en kurs som en student läst någon annanstans.",
+    "chatsTable": "Dina chattar",
     "col": {
-      "case": "Ärende",
-      "files": "Externa kursplaner",
+      "chat": "Chatt",
+      "files": "Bifogade filer",
       "bestMatch": "Bästa DSV-matchning",
       "updated": "Uppdaterat",
       "deletedOn": "Raderas"
     },
-    "notAssessed": "Inte bedömt än",
+    "notAssessed": "Ingen jämförelse",
     "noFiles": "Inga filer",
     "verdictShort": {
       "full": "Helt",
@@ -255,7 +255,8 @@
       "noCorresponding": "Inget motsvarande mål",
       "ruledOut_one": "{{count}} DSV-kurs till genomsökt, ingen tydlig överlappning",
       "ruledOut_other": "{{count}} DSV-kurser till genomsökta, ingen tydlig överlappning",
-      "analysis": "Vad som överlappar och vad som saknas"
+      "analysis": "Vad som överlappar och vad som saknas",
+      "rulesTitle": "Vad SU:s regler säger"
     },
     "plans": {
       "search": "Sök kursplaner på kod, namn eller innehåll",
@@ -283,7 +284,7 @@
       "noMatch": "Ingen kursplan matchar sökningen."
     },
     "rules": {
-      "intro": "Stockholms universitets styrdokument för utbildning, från Regelboken. Fråga om dem i ett ärende så hänvisar svaret till det dokument det bygger på.",
+      "intro": "Stockholms universitets styrdokument för utbildning, från Regelboken. Fråga om dem i en chatt så hänvisar svaret till det dokument det bygger på; en jämförelse av en bifogad kurs säger också vad de innebär för ansökan.",
       "syncStatus_one": "Senast kontrollerad {{date}}. {{count}} dokument.",
       "syncStatus_other": "Senast kontrollerad {{date}}. {{count}} dokument.",
       "neverSynced": "Regelboken har inte lästs in än.",
@@ -301,7 +302,7 @@
         "failed": "Kunde inte läsas"
       }
     },
-    "chatHeading": "Ärende om tillgodoräknande: {{workspace}}",
+    "chatHeading": "Chatt: {{workspace}}",
     "disclaimerBefore": "Meddelanden, de bifogade filerna, de kursplaner från DSV de jämförs med och de regler från SU som svaren bygger på skickas till Cerebras för AI-inferens. Kontrollera jämförelsen mot kursplanerna själva. Läs "
   }
 }

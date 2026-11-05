@@ -144,8 +144,8 @@
       "plans_other": "{{count}} DSV plans",
       "checked": "Checked {{date}}",
       "badge": "Staff workspace",
-      "cases_one": "{{count}} case",
-      "cases_other": "{{count}} cases"
+      "chats_one": "{{count}} chat",
+      "chats_other": "{{count}} chats"
     }
   },
   "teacherGuide": {

@@ -1,13 +1,12 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { ChatRouteComponent } from "@/components/chat/chat-page"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
+// Old address of a credit transfer chat, kept as a redirect.
 export const Route = createFileRoute("/workspaces/$workspaceId/cases/$caseId")({
-  component: () => (
-    <ChatRouteComponent
-      useParams={() => {
-        const { workspaceId, caseId } = Route.useParams()
-        return { courseId: workspaceId, conversationId: caseId }
-      }}
-    />
-  ),
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/workspaces/$workspaceId/conversations/$conversationId",
+      params: { workspaceId: params.workspaceId, conversationId: params.caseId },
+      replace: true,
+    })
+  },
 })

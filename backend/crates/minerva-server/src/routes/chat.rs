@@ -1847,14 +1847,46 @@ pub(super) async fn run_chat_message(
         minerva_core::models::WorkspaceKind::parse(&course.kind).ok_or_else(|| {
             AppError::Internal(format!("workspace {workspace_id} has kind {}", course.kind))
         })?;
-    // A credit transfer case is assessed (structured, see
-    // `strategy::assessment`) on the turn after files were attached;
-    // every other turn is a follow-up in ordinary chat.
+    // A credit transfer chat answers a turn either with a structured
+    // assessment of its attachments (`strategy::assessment`) or in
+    // ordinary chat; the utility model decides from the message. Without
+    // attachments there is nothing to assess.
     let strategy_name = if workspace_kind == minerva_core::models::WorkspaceKind::CreditTransfer
-        && minerva_db::queries::case_assessments::has_unassessed_attachments(&state.db, conv_id)
-            .await?
+        && !attachments.is_empty()
     {
-        strategy::ASSESSMENT.to_string()
+        use crate::classification::credit_transfer_turn::{self, TurnInput, TurnKind};
+        let unassessed_files =
+            minerva_db::queries::case_assessments::has_unassessed_attachments(&state.db, conv_id)
+                .await?;
+        let assessed_before =
+            minerva_db::queries::case_assessments::exists_for_conversation(&state.db, conv_id)
+                .await?;
+        // `history` already ends with this turn's message.
+        let mut earlier: Vec<String> = history
+            .iter()
+            .filter(|m| m.role == "user")
+            .map(|m| m.content.clone())
+            .collect();
+        earlier.pop();
+        let files: Vec<String> = attachments.iter().map(|a| a.filename.clone()).collect();
+        let kind = credit_transfer_turn::decide(
+            &state.http_client,
+            &state.utility_model().await,
+            &state.db,
+            workspace_id,
+            &TurnInput {
+                message: &user_content,
+                earlier: &earlier,
+                files: &files,
+                unassessed_files,
+                assessed_before,
+            },
+        )
+        .await;
+        match kind {
+            TurnKind::Assessment => strategy::ASSESSMENT.to_string(),
+            TurnKind::Answer => strategy_name,
+        }
     } else {
         strategy_name
     };

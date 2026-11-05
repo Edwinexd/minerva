@@ -50,6 +50,21 @@ pub async fn list_for_conversation(
     .await
 }
 
+/// Whether the conversation holds an assessment at all.
+pub async fn exists_for_conversation(
+    db: &PgPool,
+    conversation_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM case_assessments WHERE conversation_id = $1
+           ) AS "exists!""#,
+        conversation_id,
+    )
+    .fetch_one(db)
+    .await
+}
+
 /// Does the conversation have a file attached after its latest assessment
 /// (or no assessment at all)? Then the next message assesses the files
 /// again; otherwise it is a follow-up question.

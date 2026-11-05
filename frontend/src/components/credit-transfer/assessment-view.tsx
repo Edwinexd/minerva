@@ -7,6 +7,7 @@ import type {
   Coverage,
   ExternalCourse,
   FactMatch,
+  RulePoint,
 } from "@/lib/types"
 import { TONE_CLASS, VERDICT_TONE, type Tone } from "./tones"
 
@@ -51,9 +52,10 @@ function Cite({ href, label, page }: { href: string | null; label: string; page:
 }
 
 /**
- * The structured answer of a credit transfer case: one card per candidate
- * DSV course (facts, outcome-by-outcome mapping, suggested verdict), weak
- * candidates collapsed, and the plans searched without a match.
+ * The structured kind of answer in a credit transfer chat: one card per
+ * candidate DSV course (facts, outcome-by-outcome mapping, overlap), weak
+ * candidates collapsed, what SU's rules say about the application, and the
+ * plans searched without a match.
  */
 export function AssessmentView({ assessment }: { assessment: CaseAssessment }) {
   const { t } = useTranslation("student")
@@ -74,6 +76,9 @@ export function AssessmentView({ assessment }: { assessment: CaseAssessment }) {
       {weak.map((c) => (
         <CandidateCard key={c.code} candidate={c} defaultOpen={false} />
       ))}
+      {assessment.rules && assessment.rules.length > 0 && (
+        <RulesCard rules={assessment.rules} />
+      )}
       {assessment.ruled_out.length > 0 && <RuledOut items={assessment.ruled_out} />}
     </div>
   )
@@ -301,6 +306,49 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="font-medium">{children}</dd>
     </div>
+  )
+}
+
+/** What SU's rules say about the application, each point linked to the
+    rule document (at its page when the excerpt had one). */
+function RulesCard({ rules }: { rules: RulePoint[] }) {
+  const { t } = useTranslation("student")
+  const headingId = useId()
+  return (
+    <section aria-labelledby={headingId} className="rounded-lg border bg-background break-inside-avoid">
+      <h2
+        id={headingId}
+        className="rounded-t-lg border-b bg-muted/40 px-4 py-3 font-semibold"
+      >
+        {t("creditTransfer.assessment.rulesTitle")}
+      </h2>
+      <ul className="list-disc space-y-1.5 py-3 pl-9 pr-4">
+        {rules.map((r) => (
+          <li key={r.point}>
+            {r.point}{" "}
+            {r.url ? (
+              <a
+                href={r.page != null ? `${r.url}#page=${r.page}` : r.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block rounded bg-blue-50 px-1.5 text-[11px] font-medium text-blue-800 underline-offset-2 hover:underline dark:bg-blue-950/60 dark:text-blue-200"
+              >
+                {r.page != null
+                  ? t("creditTransfer.assessment.cite", { doc: r.document, page: r.page })
+                  : r.document}
+                <span className="sr-only"> ({t("creditTransfer.opensInNewTab")})</span>
+              </a>
+            ) : (
+              <span className="text-[11px] text-muted-foreground">
+                {r.page != null
+                  ? t("creditTransfer.assessment.cite", { doc: r.document, page: r.page })
+                  : r.document}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 

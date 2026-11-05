@@ -1019,10 +1019,12 @@ fn seed_assessment() -> serde_json::Value {
             "external_page": ext.map(|_| 2), "coverage": coverage,
         })
     };
+    let rule = "https://medarbetare.su.se/download/18.6e819c2d18d872f98df3cae0/1708691795277/\
+        Regler_och_handlaggningsordning_for_tillgodoraknande_2023.pdf";
     serde_json::json!({
-        "version": 1,
+        "version": 2,
         "language": "en",
-        "summary": "DD1337 covers most of IB130N's programming and computer systems outcomes at the same level, but not its networking outcomes.",
+        "summary": "DD1337 covers most of IB130N's programming and computer systems outcomes at the same level, but not its networking outcomes. Under SU's rules the remaining question is whether the missing networking part is a substantial difference.",
         "external_courses": [{
             "file": "DD1337_kursplan.pdf", "attachment_id": null, "url": null,
             "code": "DD1337", "name": "Programmeringsteknik", "institution": "KTH",
@@ -1069,6 +1071,18 @@ fn seed_assessment() -> serde_json::Value {
             },
         ],
         "ruled_out": [{ "code": "IB138N", "name": "Grundläggande programmering", "reason": "Covers the same ground as IB130N's programming part only." }],
+        "rules": [
+            {
+                "point": "Prior education is credited unless there is a substantial difference between the knowledge and skills it gave and those the DSV course requires.",
+                "document": "Regler och handläggningsordning för tillgodoräknande",
+                "url": rule, "page": 2,
+            },
+            {
+                "point": "The assessment compares learning outcomes, not course names or credits alone, and may credit part of a course.",
+                "document": "Regler och handläggningsordning för tillgodoräknande",
+                "url": rule, "page": 3,
+            },
+        ],
         "searched": 3,
     })
 }

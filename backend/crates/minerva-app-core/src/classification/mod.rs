@@ -21,6 +21,7 @@
 
 pub mod adversarial;
 pub mod aegis;
+pub mod credit_transfer_turn;
 pub mod document;
 pub mod extraction_guard;
 pub mod linker;

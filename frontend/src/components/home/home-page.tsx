@@ -541,7 +541,7 @@ function StaffToolCard({ workspace }: { workspace: Course }) {
               </Badge>
               <div className="flex flex-wrap gap-2">
                 <Badge variant="outline">
-                  {t("home.staffTool.cases", { count: summary.my_case_count })}
+                  {t("home.staffTool.chats", { count: summary.my_case_count })}
                 </Badge>
                 {checked && (
                   <Badge variant="outline">{t("home.staffTool.checked", { date: checked })}</Badge>

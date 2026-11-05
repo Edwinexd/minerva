@@ -83,21 +83,7 @@ function ChatPage({
   const isPinnedView = conversationId !== null &&
     !!pinned?.some((p) => p.id === conversationId)
 
-  const isCase = course?.kind === "credit_transfer"
-  // A case lives under /cases and a course conversation under
-  // /conversations. Old /course/... links land on the latter, so move a
-  // case on once the workspace's kind is known.
-  const pathname = useLocation().pathname
-  const wrongPath = course
-    ? isCase
-      ? pathname.includes("/conversations/")
-      : pathname.includes("/cases/")
-    : false
-  useEffect(() => {
-    if (wrongPath && course) {
-      navigate({ ...chatLink(course.kind, courseId, conversationId), replace: true })
-    }
-  }, [wrongPath, course, courseId, conversationId, navigate])
+  const isCreditTransfer = course?.kind === "credit_transfer"
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [prevConversationId, setPrevConversationId] = useState(conversationId)
 
@@ -145,24 +131,24 @@ function ChatPage({
             <X className="w-4 h-4" />
           </Button>
         </div>
-        {isCase && (
+        {isCreditTransfer && (
           <Link
             to="/workspaces/$workspaceId"
             params={{ workspaceId: courseId }}
             className="mb-2 text-sm text-muted-foreground underline hover:text-foreground"
           >
-            {t("creditTransfer.allCases")}
+            {t("creditTransfer.overview")}
           </Link>
         )}
         <Button
           className="mb-4"
-          onClick={() => navigate(chatLink(course?.kind, courseId, null))}
+          onClick={() => navigate(chatLink(courseId, null))}
           disabled={conversationId === null}
         >
-          {isCase ? t("creditTransfer.newCase") : t("sidebar.newChat")}
+          {isCreditTransfer ? t("creditTransfer.newChat") : t("sidebar.newChat")}
         </Button>
-        {isCase && (
-          <h2 className="mb-1 text-sm font-semibold">{t("creditTransfer.myCases")}</h2>
+        {isCreditTransfer && (
+          <h2 className="mb-1 text-sm font-semibold">{t("creditTransfer.myChats")}</h2>
         )}
         <div className="space-y-1 overflow-y-auto flex-1">
           <ConversationList
@@ -172,14 +158,14 @@ function ChatPage({
             pinnedLoading={pinnedLoading}
             activeConversationId={conversationId}
             renderRow={({ conversationId: cid, className, children }) => (
-              <Link key={cid} {...chatLink(course?.kind, courseId, cid)} className={className}>
+              <Link key={cid} {...chatLink(courseId, cid)} className={className}>
                 {children}
               </Link>
             )}
             labels={{
               pinned: t("sidebar.pinned"),
-              newConversation: isCase
-                ? t("creditTransfer.untitledCase")
+              newConversation: isCreditTransfer
+                ? t("creditTransfer.untitledChat")
                 : t("sidebar.newConversation"),
               conversation: t("sidebar.conversation"),
               pinnedByTeacher: t("sidebar.pinnedByTeacher"),
@@ -196,7 +182,7 @@ function ChatPage({
       </div>
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0 pt-10 md:pt-0">
-        {isCase && (
+        {isCreditTransfer && (
           <>
             <CaseHeader
               conversation={conversations?.find((c) => c.id === conversationId) ?? null}
@@ -253,19 +239,19 @@ export function ChatWindow({
     enabled: conversationId !== null,
   })
   const messages = data?.messages
-  const isCase = course?.kind === "credit_transfer"
+  const isCreditTransfer = course?.kind === "credit_transfer"
   const { data: attachments } = useQuery({
     ...attachmentsQuery(courseId, conversationId ?? ""),
-    enabled: isCase && conversationId !== null,
+    enabled: isCreditTransfer && conversationId !== null,
   })
-  // Files attached since the case's latest assessment: the next message
-  // assesses them (the server decides the same way), so Send says so and
-  // works without a note.
+  // Files attached since the chat's latest comparison: sending with
+  // nothing typed asks for one. A typed message goes to the server's
+  // router, which decides whether it wants a comparison or an answer.
   const lastAssessedAt = (messages ?? [])
     .filter((m) => m.assessment)
     .reduce((latest, m) => (m.created_at > latest ? m.created_at : latest), "")
   const assessmentPending =
-    isCase && (attachments ?? []).some((a) => a.created_at > lastAssessedAt)
+    isCreditTransfer && (attachments ?? []).some((a) => a.created_at > lastAssessedAt)
   const notes = data?.notes || []
   const feedback = data?.feedback || []
   const promptAnalyses = data?.prompt_analyses ?? []
@@ -335,7 +321,7 @@ export function ChatWindow({
       queryKey: ["courses", courseId, "conversations"],
     })
     navigate({
-      ...chatLink(course?.kind, courseId, created.id),
+      ...chatLink(courseId, created.id),
       state: { composerDraft: draft },
     })
   }
@@ -473,9 +459,9 @@ export function ChatWindow({
 
   const onConversationCreated = useCallback(
     (id: string) => {
-      navigate({ ...chatLink(course?.kind, courseId, id), replace: true })
+      navigate({ ...chatLink(courseId, id), replace: true })
     },
-    [navigate, courseId, course?.kind],
+    [navigate, courseId],
   )
 
   const bubbleLabels: ChatBubbleLabels = {
@@ -510,7 +496,7 @@ export function ChatWindow({
     askInNewChat: t("limit.askInNewChat"),
     inputPlaceholder:
       course?.kind === "credit_transfer"
-        ? t("chat.inputPlaceholderCase")
+        ? t("chat.inputPlaceholderCreditTransfer")
         : t("chat.inputPlaceholder"),
     inputLabel: t("chat.inputLabel"),
     heading:
@@ -528,7 +514,7 @@ export function ChatWindow({
     aegisShowPanelButton: t("aegis.showPanelButton"),
     aegisPanelLabel: t("aegis.panelLabel"),
     transcriptLabel: t("chat.transcriptLabel"),
-    disclaimerBefore: isCase
+    disclaimerBefore: isCreditTransfer
       ? t("creditTransfer.disclaimerBefore")
       : t("chat.disclaimerBefore"),
     disclaimerLink: t("chat.dataHandlingLink"),

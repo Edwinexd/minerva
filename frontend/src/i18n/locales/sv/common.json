@@ -144,8 +144,8 @@
       "plans_other": "{{count}} kursplaner från DSV",
       "checked": "Kontrollerade {{date}}",
       "badge": "Personalverktyg",
-      "cases_one": "{{count}} ärende",
-      "cases_other": "{{count}} ärenden"
+      "chats_one": "{{count}} chatt",
+      "chats_other": "{{count}} chattar"
     }
   },
   "teacherGuide": {

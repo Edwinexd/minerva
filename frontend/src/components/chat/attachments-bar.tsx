@@ -54,7 +54,7 @@ export function AttachmentsBar({
       queryClient.invalidateQueries({ queryKey: ["courses", courseId, "conversations"] })
       queryClient.invalidateQueries({ queryKey: ["courses", courseId, "credit-transfer"] })
       if (conversationId === null) {
-        navigate(chatLink("credit_transfer", courseId, conversation_id))
+        navigate(chatLink(courseId, conversation_id))
       }
     },
   })

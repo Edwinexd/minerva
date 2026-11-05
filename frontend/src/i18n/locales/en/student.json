@@ -41,7 +41,7 @@
     "thinkingHiddenRevealed": "Hidden from the student",
     "thinkingHiddenRevealedBody": "The integrity guard held this reasoning back for this turn. The student saw a placeholder here; you see it because you teach this course.",
     "toolCallsAriaLabel": "Tools the assistant called during research",
-    "inputPlaceholderCase": "Ask about this case, e.g. which DSV course it matches…"
+    "inputPlaceholderCreditTransfer": "Ask about SU's rules or the attached files…"
   },
   "message": {
     "tokensUsed_one": "{{count}} token",
@@ -167,47 +167,47 @@
     "askInNewChat": "Ask in new chat"
   },
   "attachments": {
-    "startTitle": "Start a case",
-    "startHint": "Attach the syllabus of the course the student took elsewhere. Minerva compares it with DSV course plans.",
+    "startTitle": "Compare a course",
+    "startHint": "Attach the syllabus of a course the student took elsewhere and Minerva compares it with DSV course plans and SU's rules. To ask about the rules only, write below.",
     "attachFirst": "Attach syllabus",
     "attachAnother": "Attach another file",
     "uploading": "Uploading...",
-    "listLabel": "Files in this case",
+    "listLabel": "Files in this chat",
     "remove": "Remove {{name}}",
     "noText": "No text could be read from this file",
     "formats": "PDF, text or HTML."
   },
   "creditTransfer": {
     "opensInNewTab": "opens in a new tab",
-    "allCases": "All cases",
-    "newCase": "New case",
-    "myCases": "My cases",
-    "untitledCase": "Untitled case",
+    "overview": "Workspace overview",
+    "newChat": "New chat",
+    "myChats": "My chats",
+    "untitledChat": "Untitled chat",
     "assess": "Assess",
-    "assessPlaceholder": "Add a note for the assessment (optional), e.g. which DSV course the student asks for",
+    "assessPlaceholder": "Ask about the attached files, or send as is to compare them with the DSV course plans",
     "assessDefault": "Assess the attached syllabus against the DSV course plans.",
-    "caseDates": "Created {{created}}. Deleted with its files on {{deleted}} unless used again.",
-    "retentionNote": "A case and its files are deleted {{days}} days after it was last used.",
+    "chatDates": "Created {{created}}. Deleted with its files on {{deleted}} unless used again.",
+    "retentionNote": "A chat and its files are deleted {{days}} days after it was last used.",
     "exportPdf": "Export as PDF",
-    "intro": "Each case holds the uploaded external syllabuses and the assessment. Uploaded files and the case are deleted {{days}} days after they were last used.",
+    "intro": "Ask about SU's rules, or attach the syllabus of a course a student took elsewhere to compare it with DSV course plans. Chats and their files are deleted {{days}} days after they were last used.",
     "tabs": {
-      "cases": "My cases",
+      "chats": "My chats",
       "plans": "DSV course plans",
       "rules": "SU rulebook",
       "assistant": "Use from your AI assistant",
       "settings": "Workspace settings"
     },
-    "casesPrivate": "Only you can see your cases.",
-    "noCases": "No cases yet. Start one by attaching the syllabus of the course the student took elsewhere.",
-    "casesTable": "Your cases",
+    "chatsPrivate": "Only you can see your chats.",
+    "noChats": "No chats yet. Start one to ask about the rules, or attach the syllabus of a course a student took elsewhere.",
+    "chatsTable": "Your chats",
     "col": {
-      "case": "Case",
-      "files": "External syllabuses",
+      "chat": "Chat",
+      "files": "Attached files",
       "bestMatch": "Best DSV match",
       "updated": "Updated",
       "deletedOn": "Deleted on"
     },
-    "notAssessed": "Not assessed yet",
+    "notAssessed": "No comparison",
     "noFiles": "No files",
     "verdictShort": {
       "full": "Full",
@@ -255,7 +255,8 @@
       "noCorresponding": "No corresponding outcome",
       "ruledOut_one": "{{count}} more DSV course searched, no meaningful overlap",
       "ruledOut_other": "{{count}} more DSV courses searched, no meaningful overlap",
-      "analysis": "What overlaps and what is missing"
+      "analysis": "What overlaps and what is missing",
+      "rulesTitle": "What SU's rules say"
     },
     "plans": {
       "search": "Search plans by code, name or content",
@@ -283,7 +284,7 @@
       "noMatch": "No plan matches the search."
     },
     "rules": {
-      "intro": "Stockholm University's governing documents for education, from its rulebook (Regelboken). Ask about them in a case and the answer cites the document it relies on.",
+      "intro": "Stockholm University's governing documents for education, from its rulebook (Regelboken). Ask about them in a chat and the answer cites the document it relies on; a comparison of an attached course also says what they mean for the application.",
       "syncStatus_one": "Last checked {{date}}. {{count}} document.",
       "syncStatus_other": "Last checked {{date}}. {{count}} documents.",
       "neverSynced": "The rulebook has not been read yet.",
@@ -301,7 +302,7 @@
         "failed": "Could not be read"
       }
     },
-    "chatHeading": "Credit transfer case: {{workspace}}",
+    "chatHeading": "Chat: {{workspace}}",
     "disclaimerBefore": "Messages, the attached files, the DSV course plans they are compared with and the SU rules answers draw on are sent to Cerebras for AI inference. Check the comparison against the syllabuses themselves. See "
   }
 }

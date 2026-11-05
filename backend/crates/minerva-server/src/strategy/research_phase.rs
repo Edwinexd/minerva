@@ -311,6 +311,7 @@ pub async fn run(
         workspace_id: ctx.workspace_id,
         min_score: ctx.min_score,
         orphaned_doc_ids,
+        rulebook_documents: &ctx.rulebook_documents,
     };
 
     let catalog = tools::assemble_catalog(catalog_flags);

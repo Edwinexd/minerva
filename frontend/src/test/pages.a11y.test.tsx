@@ -544,6 +544,20 @@ const caseAssessment: CaseAssessment = {
     },
   ],
   ruled_out: [{ code: "IB138N", name: "Grundläggande programmering", reason: "Same ground as IB130N." }],
+  rules: [
+    {
+      point: "Prior education counts unless there is a substantial difference in what it taught.",
+      document: "Regler och handläggningsordning för tillgodoräknande",
+      url: "https://medarbetare.su.se/download/rules.pdf",
+      page: 2,
+    },
+    {
+      point: "The comparison is made on learning outcomes.",
+      document: "Lokal examensordning",
+      url: null,
+      page: null,
+    },
+  ],
   searched: 3,
 }
 
@@ -856,6 +870,12 @@ describe("Authenticated pages a11y", () => {
       "href",
       expect.stringMatching(/attachments\/att-1\/file#page=2$/),
     )
+    // Rule points cite their document, at the page when it is known.
+    expect(getByRole("heading", { name: "What SU's rules say" })).toBeInTheDocument()
+    expect(
+      getByRole("link", { name: /Regler och handläggningsordning för tillgodoräknande p\.2/ }),
+    ).toHaveAttribute("href", "https://medarbetare.su.se/download/rules.pdf#page=2")
+    expect(getByText("Lokal examensordning")).toBeInTheDocument()
     // The weak candidate starts collapsed, behind a disclosure button.
     expect(getByRole("button", { name: "Show details" })).toHaveAttribute("aria-expanded", "false")
     expect(getByText(/1 more DSV course searched/)).toBeInTheDocument()
@@ -906,9 +926,9 @@ describe("Authenticated pages a11y", () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it("credit transfer cases tab has no axe violations", async () => {
+  it("credit transfer chats tab has no axe violations", async () => {
     const { container, getByText } = renderPage(
-      <CreditTransferWorkspacePage workspace={creditTransferWorkspace} tab="cases" />,
+      <CreditTransferWorkspacePage workspace={creditTransferWorkspace} tab="chats" />,
       [
         [
           queries.creditTransferSummaryQuery("ws-ct").queryKey,

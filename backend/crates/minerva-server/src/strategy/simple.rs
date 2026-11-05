@@ -55,6 +55,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &orphaned,
     )
     .await;
+    let raw_chunks = ctx.with_rulebook(&http_client, raw_chunks, &orphaned).await;
 
     // Kind-aware partition: assignment_brief / lab_brief / exam matches
     // become `signals` (the model gets a refusal addendum but never the

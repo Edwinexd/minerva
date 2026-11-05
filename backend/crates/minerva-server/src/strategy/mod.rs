@@ -335,6 +335,68 @@ impl GenerationContext {
         std::borrow::Cow::Owned(query)
     }
 
+    /// Excerpts of SU's rulebook matching `query`, searched apart from the
+    /// rest of the workspace: the DSV plans outnumber the rule documents
+    /// several times over and would otherwise fill every slot. Empty
+    /// outside credit transfer workspaces.
+    pub async fn rulebook_lookup(
+        &self,
+        http: &reqwest::Client,
+        query: &str,
+        k: i32,
+        orphaned: &std::collections::HashSet<String>,
+    ) -> Vec<common::RagChunk> {
+        if self.rulebook_documents.is_empty() {
+            return Vec::new();
+        }
+        let collection =
+            minerva_pipeline::pipeline::collection_name(self.workspace_id, self.embedding_version);
+        common::rag_lookup_scoped(
+            http,
+            &self.openai_api_key,
+            &self.fastembed,
+            &self.reranker,
+            self.reranking_enabled,
+            &self.reranker_model,
+            &self.qdrant,
+            &collection,
+            query,
+            k,
+            self.min_score,
+            &self.embedding_provider,
+            &self.embedding_model,
+            common::DocScope::Within {
+                only: &self.rulebook_documents,
+                excluded: orphaned,
+            },
+        )
+        .await
+    }
+
+    /// A turn's seed retrieval plus up to [`RULEBOOK_CHUNKS`] rule
+    /// excerpts for the user's message that it does not already hold, so
+    /// every credit transfer answer can draw on the rules. Unchanged in
+    /// other kinds.
+    pub async fn with_rulebook(
+        &self,
+        http: &reqwest::Client,
+        mut chunks: Vec<common::RagChunk>,
+        orphaned: &std::collections::HashSet<String>,
+    ) -> Vec<common::RagChunk> {
+        let rules = self
+            .rulebook_lookup(http, &self.user_content, RULEBOOK_CHUNKS, orphaned)
+            .await;
+        for rule in rules {
+            if !chunks
+                .iter()
+                .any(|c| c.document_id == rule.document_id && c.text == rule.text)
+            {
+                chunks.push(rule);
+            }
+        }
+        chunks
+    }
+
     /// The conversation-stable parts of the system prompt.
     pub fn prompt_frame(&self) -> common::PromptFrame<'_> {
         common::PromptFrame {
@@ -345,6 +407,10 @@ impl GenerationContext {
         }
     }
 }
+
+/// Rule excerpts a credit transfer chat turn gets beside its seed
+/// retrieval. Each runs a few hundred tokens.
+pub const RULEBOOK_CHUNKS: i32 = 4;
 
 /// Strategy name of a credit transfer case's assessment turn. Never stored
 /// on a workspace; `routes::chat` picks it for the turn that follows newly

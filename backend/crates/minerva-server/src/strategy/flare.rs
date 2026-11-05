@@ -130,6 +130,9 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &orphaned_doc_ids,
     )
     .await;
+    let initial_chunks_raw = ctx
+        .with_rulebook(&http_client, initial_chunks_raw, &orphaned_doc_ids)
+        .await;
     // Adversarial filter is part of the KG bundle (defence in depth on
     // top of per-doc kind classification). Skip when KG is gated off.
     let mut initial_chunks = if ctx.kg_enabled {

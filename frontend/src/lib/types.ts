@@ -1207,7 +1207,17 @@ export interface CaseAssessment {
   external_courses: ExternalCourse[]
   candidates: AssessmentCandidate[]
   ruled_out: { code: string; name: string; reason: string }[]
+  /** What SU's rules say about the application; absent before version 2. */
+  rules?: RulePoint[]
   searched: number
+}
+
+/** One point of SU's rules, read in `document` (on SU's staff web). */
+export interface RulePoint {
+  point: string
+  document: string
+  url: string | null
+  page: number | null
 }
 
 export interface ExternalCourse {

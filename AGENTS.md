@@ -430,8 +430,8 @@ suggestions.
 Page URLs follow the same model, plural collections with a named
 segment between ids: `/workspaces/{id}` (a course goes straight to a new
 conversation, a credit transfer workspace has its own page),
-`/workspaces/{id}/conversations/{cid}` and, for credit transfer,
-`/workspaces/{id}/cases/{cid}`; workspace settings under
+`/workspaces/{id}/conversations/{cid}` (every kind; credit transfer
+chats once lived under `/cases/`, now a redirect); workspace settings under
 `/teacher/workspaces/{id}/...`; `/admin/workspaces`,
 `/admin/users/{id}/usage`, `/admin/lti/platforms/{id}/approve`,
 `/lti/platforms/{id}/setup`, `/oauth/requests/{id}`, `/invites/{token}`
@@ -518,7 +518,8 @@ the education one); adding a section is an insert.
 
 ## Credit Transfer Workspaces
 
-Staff tool for assessing credit transfer (tillgodoräknande) applications.
+Staff tool for handling credit transfer (tillgodoräknande) applications:
+comparing an external course with DSV's and what SU's rules say about it.
 Admins create one from the home page's New Course form (kind selector).
 Every user whose role ranks at or above `access_min_role` (default
 teacher) can use it without being added. The first use makes them a
@@ -534,29 +535,40 @@ teacher checks read the same view.
   replaces its document, a dropped plan is orphaned.
 - It mirrors SU's rulebook the same way (`source_system = su_rulebook`,
   see "SU Rulebook (Regelboken)").
-- `/workspaces/{id}` is the workspace page, not a chat: My cases (a table of
-  the viewer's own cases with their best match), DSV course plans (every
+- `/workspaces/{id}` is the workspace page, not a chat: My chats (a table of
+  the viewer's own chats with their best match), DSV course plans (every
   plan with level, versions and indexing state), Regelboken (every rule
   document by its index heading, with files, SU's update date and
   indexing state) and the MCP connector; `?tab=` picks the tab. Routes in
   `routes::credit_transfer`.
-- A case is a conversation. Staff attach the external syllabus
+- The UI calls them chats, not cases: one chat is used for comparisons
+  and for rule questions alike. Internals keep the older name
+  (`case_assessments`, `case_retention_days`, `/credit-transfer/cases`).
+  Staff attach the external syllabus
   (`conversation_attachments`, PDF / text / HTML, text extracted at
   upload, PDFs with `[Page N]` markers); attachments go into the prompt in
   full and never into the shared index. The owner can open the file again
   (`.../attachments/{id}/file`, text served as `text/plain` with a sandbox
   CSP, never as HTML).
-- The message after newly attached files is assessed, not chatted
-  (`strategy::assessment`, picked in `chat::run_chat_message` when
-  `case_assessments::has_unassessed_attachments`). It finds candidate
-  plans (codes named in the staff note, then embedding search fused with
-  BM25 over the plans' stored text, so a missing embedder only weakens
-  it), gives the model the attachments and the full text of up to five
-  plans, and asks for one JSON assessment under a strict schema. The
-  answer is checked before it is kept: unknown plan codes are dropped and
-  pages outside a document cleared; DSV credits, level, name, version and
-  modules come from the archive, and credits / level match is decided in
-  code. It describes overlap (full, partial, none) and what is missing,
+- The structured assessment (cards) is one kind of answer, not a mode.
+  In a chat with attachments, `classification::credit_transfer_turn`
+  asks the utility model per turn whether the staff member wants the
+  attached courses compared (`strategy::assessment`) or an ordinary
+  answer; without a utility model it assesses only files attached since
+  the last assessment (`case_assessments::has_unassessed_attachments`).
+  An empty composer with new files sends the "Assess" request.
+- The assessment finds candidate plans (codes named in the staff note,
+  then embedding search fused with BM25 over the plans' stored text, so a
+  missing embedder only weakens it) and up to six rulebook excerpts
+  (credit transfer in general, then the note, searched in the rule
+  documents alone), gives the model the attachments, the full text of up
+  to five plans and the excerpts labelled `R1`..., and asks for one JSON
+  assessment under a strict schema. The answer is checked before it is
+  kept: unknown plan codes are dropped, pages outside a document cleared
+  and rule points citing no given excerpt dropped (document, URL and page
+  come from the excerpt); DSV credits, level, name, version and modules
+  come from the archive, and credits / level match is decided in code.
+  Version 2 assessments carry `rules`, drawn as "What SU's rules say". It describes overlap (full, partial, none) and what is missing,
   never a decision: no recommended verdict, credit amount or modules to
   grant, and no advisory banner, since the staff using it decide. The
   stored field is still called `verdict`. The message
@@ -564,24 +576,29 @@ teacher checks read the same view.
   structure is in `case_assessments` and drawn as cards by
   `components/credit-transfer/assessment-view.tsx`, with page citations
   into the SU plan PDF and the uploaded file. Search and comparison
-  stream as the turn's thinking trace. Later messages are ordinary chat
-  with the staff persona (`common::PromptFrame`), which answers rule
-  questions from the rulebook and cites it. Rulebook excerpts get their
-  own prompt section (by document id, `rulebook_documents`), and the
-  assessment's plan search excludes them so they never take a
-  candidate's slot.
-- "Export as PDF" prints the case; `index.css` grows its scroll
+  stream as the turn's thinking trace.
+- Other turns are ordinary chat with the staff persona
+  (`common::PromptFrame`). The 231 plans outnumber the rule documents, so
+  in one shared top-N search the rules rarely made it in: every turn now
+  adds up to `strategy::RULEBOOK_CHUNKS` rule excerpts searched on their
+  own (`GenerationContext::with_rulebook`, a `DocScope::Within` Qdrant
+  filter), the tool-use research phase gets a `search_rules` tool, and
+  the excerpts get their own prompt section (by document id,
+  `rulebook_documents`). The assessment's plan search excludes them so
+  they never take a candidate's slot.
+- "Export as PDF" prints the chat; `index.css` grows its scroll
   containers in print media and the chrome is `print:hidden`.
 - `scripts/seed-dev.sh` seeds a credit transfer workspace, three fixture
   plans (scheduled never to download, and only where the plan is not
   already there), four rulebook entries (real URLs, one per tab state;
   a dev scheduler that reaches SU's web reads over them) and one
-  assessed case for the operator, so the case view and every tab render
+  assessed chat for the operator, so the assessment cards (rules
+  included) and every tab render
   in dev and in the pa11y job without an LLM.
-- Cases are private to their author (so the settings page has no
+- Chats are private to their author (so the settings page has no
   Conversations tab): no teacher review, pins, notes or
   conversation analytics (`guards::require_conversation_reviewer`).
-- Retention: a case untouched for `case_retention_days` (default 90) is
+- Retention: a chat untouched for `case_retention_days` (default 90) is
   deleted with its files by the scheduler. External syllabuses often
   carry an applicant's personal data.
 

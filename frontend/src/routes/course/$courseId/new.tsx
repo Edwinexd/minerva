@@ -1,7 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 
-// Old address, kept as a redirect. A credit transfer workspace moves its
-// new case on to /cases from the conversations page.
+// Old address, kept as a redirect.
 export const Route = createFileRoute("/course/$courseId/new")({
   beforeLoad: ({ params }) => {
     throw redirect({

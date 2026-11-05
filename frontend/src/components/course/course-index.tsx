@@ -22,14 +22,15 @@ export function CourseIndex({
   // page itself.
   const { data: course, isLoading: courseLoading } = useQuery(courseQuery(courseId))
 
-  // A credit transfer workspace has a page of its own: its cases, the
-  // DSV plans and assistant access, rather than a chat to land in.
+  // A credit transfer workspace has a page of its own: its chats, the
+  // DSV plans, SU's rules and assistant access, rather than a chat to
+  // land in.
   if (course?.kind === "credit_transfer") {
-    return <CreditTransferWorkspacePage workspace={course} tab={tab ?? "cases"} />
+    return <CreditTransferWorkspacePage workspace={course} tab={tab ?? "chats"} />
   }
 
   if (course) {
-    navigate({ ...chatLink(course.kind, courseId, null), replace: true })
+    navigate({ ...chatLink(courseId, null), replace: true })
   }
 
   return (

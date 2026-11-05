@@ -210,6 +210,24 @@ pub async fn rulebook_documents(
     Ok(ids.into_iter().map(|id| id.to_string()).collect())
 }
 
+/// Where each of the given rulebook documents comes from (`source_ref`, the
+/// page or file URL on SU's staff web), keyed by document id.
+pub async fn rulebook_sources(
+    db: &PgPool,
+    document_ids: &[Uuid],
+) -> Result<Vec<(Uuid, String)>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, source_ref AS "source_ref!"
+           FROM documents
+           WHERE id = ANY($1) AND source_system = 'su_rulebook'
+             AND source_ref IS NOT NULL"#,
+        document_ids,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.id, r.source_ref)).collect())
+}
+
 /// Indexing status of the workspace's current rulebook documents, keyed by
 /// their `source_ref` (the page or file URL).
 pub async fn rulebook_document_statuses(

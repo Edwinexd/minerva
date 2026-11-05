@@ -273,6 +273,59 @@ pub async fn embedding_search(
     embedding_model: &str,
     excluded_doc_ids: &HashSet<String>,
 ) -> Result<Vec<ScoredPoint>, String> {
+    embedding_search_scoped(
+        client,
+        openai_key,
+        fastembed,
+        qdrant,
+        collection_name,
+        query,
+        limit,
+        score_threshold,
+        embedding_provider,
+        embedding_model,
+        DocScope::Excluding(excluded_doc_ids),
+    )
+    .await
+}
+
+/// Which documents of a collection a search may return.
+#[derive(Clone, Copy)]
+pub enum DocScope<'a> {
+    /// Every document but these (the orphans, usually).
+    Excluding(&'a HashSet<String>),
+    /// Only these documents, less the excluded ones. Lets one corpus that
+    /// shares a collection (SU's rulebook beside the DSV plans) be searched
+    /// on its own, so the larger one never takes all of the top N.
+    Within {
+        only: &'a [String],
+        excluded: &'a HashSet<String>,
+    },
+}
+
+/// [`embedding_search`] over a [`DocScope`]. Both halves of the scope are
+/// Qdrant payload filters, so the top-N contract holds for either.
+#[allow(clippy::too_many_arguments)]
+pub async fn embedding_search_scoped(
+    client: &reqwest::Client,
+    openai_key: &str,
+    fastembed: &Arc<dyn EmbedderClient>,
+    qdrant: &qdrant_client::Qdrant,
+    collection_name: &str,
+    query: &str,
+    limit: u64,
+    score_threshold: Option<f32>,
+    embedding_provider: &str,
+    embedding_model: &str,
+    scope: DocScope<'_>,
+) -> Result<Vec<ScoredPoint>, String> {
+    let (only, excluded_doc_ids) = match scope {
+        DocScope::Excluding(excluded) => (None, excluded),
+        DocScope::Within { only, excluded } => (Some(only), excluded),
+    };
+    if only.is_some_and(|ids| ids.is_empty()) {
+        return Ok(Vec::new());
+    }
     let vector = if embedding_provider == "local" {
         // Apply the model's query-side prefix (e.g. `query: ` for
         // arctic-m-v2.0). No-op for models without one. Documents in
@@ -307,13 +360,20 @@ pub async fn embedding_search(
     if let Some(threshold) = score_threshold {
         builder = builder.score_threshold(threshold);
     }
-    if !excluded_doc_ids.is_empty() {
+    if only.is_some() || !excluded_doc_ids.is_empty() {
         use qdrant_client::qdrant::{Condition, Filter};
         // `must_not` + `match_any` translates to "document_id not in (...)"
-        // server-side. HNSW skips matching points entirely, so the top-N
-        // contract is preserved: see the doc comment above.
-        let excluded: Vec<String> = excluded_doc_ids.iter().cloned().collect();
-        let filter = Filter::must_not([Condition::matches("document_id", excluded)]);
+        // server-side, `must` to "in". HNSW skips non-matching points
+        // entirely, so the top-N contract is preserved: see the doc
+        // comment above.
+        let mut filter = Filter::default();
+        if let Some(only) = only {
+            filter.must = vec![Condition::matches("document_id", only.to_vec())];
+        }
+        if !excluded_doc_ids.is_empty() {
+            let excluded: Vec<String> = excluded_doc_ids.iter().cloned().collect();
+            filter.must_not = vec![Condition::matches("document_id", excluded)];
+        }
         builder = builder.filter(filter);
     }
     qdrant
@@ -533,10 +593,11 @@ const CREDIT_TRANSFER_BASE: &str = "You are Minerva, an assistant for staff at D
     credit transfer (tillgodoräknande) applications.\n\
     \n\
     ## Your role\n\
-    Staff upload the syllabus of a course a student has taken elsewhere. You compare \
-    it with DSV course plans and describe how far it corresponds to a DSV course. The \
-    staff member decides on the application; you never recommend whether or how much \
-    credit to grant.\n\
+    Staff use this chat for everything an application involves: comparing the syllabus \
+    of a course a student took elsewhere with DSV course plans, and what Stockholm \
+    University's rules say about the application and how it is handled. A credit \
+    transfer is decided under those rules, not by the syllabuses alone. The staff member \
+    decides on the application; you never recommend whether or how much credit to grant.\n\
     \n\
     ## How you compare\n\
     - Work only from DSV course plans you are given (excerpts below or through your \
@@ -559,10 +620,13 @@ const CREDIT_TRANSFER_BASE: &str = "You are Minerva, an assistant for staff at D
     \n\
     ## SU's rules\n\
     You also have Stockholm University's governing documents for education \
-    (Regelboken), among them its regulations and procedure for credit transfer. When \
-    staff ask what the rules say or how a case is to be handled, answer from those \
-    documents, name the document and the section or page you rely on, and say when \
-    they do not settle the question. Explaining a rule is not deciding the application.\n\
+    (Regelboken), among them its regulations and procedure for credit transfer \
+    (excerpts below, and through the search_rules tool when you have tools). When staff \
+    ask what the rules say or how an application is to be handled, answer from those \
+    documents. When you compare courses, also say what the rules make of the \
+    differences you find (level, scope, content), when an excerpt covers it. Name the \
+    document and the section or page you rely on, and say when the rules do not settle \
+    the question. Explaining a rule is not deciding the application.\n\
     \n\
     ## What you will not do\n\
     - Recommend a decision, a credit amount or modules to grant.\n\
@@ -1317,6 +1381,46 @@ pub async fn rag_lookup(
     embedding_model: &str,
     orphaned_doc_ids: &HashSet<String>,
 ) -> Vec<RagChunk> {
+    rag_lookup_scoped(
+        client,
+        openai_key,
+        fastembed,
+        reranker,
+        reranking_enabled,
+        reranker_model,
+        qdrant,
+        collection_name,
+        query,
+        max_chunks,
+        min_score,
+        embedding_provider,
+        embedding_model,
+        DocScope::Excluding(orphaned_doc_ids),
+    )
+    .await
+}
+
+/// [`rag_lookup`] over a [`DocScope`].
+#[allow(clippy::too_many_arguments)]
+pub async fn rag_lookup_scoped(
+    client: &reqwest::Client,
+    openai_key: &str,
+    fastembed: &Arc<dyn EmbedderClient>,
+    reranker: &Arc<dyn RerankerClient>,
+    reranking_enabled: bool,
+    reranker_model: &str,
+    qdrant: &qdrant_client::Qdrant,
+    collection_name: &str,
+    query: &str,
+    max_chunks: i32,
+    min_score: f32,
+    embedding_provider: &str,
+    embedding_model: &str,
+    scope: DocScope<'_>,
+) -> Vec<RagChunk> {
+    let orphaned_doc_ids = match scope {
+        DocScope::Excluding(excluded) | DocScope::Within { excluded, .. } => excluded,
+    };
     let threshold = if min_score > 0.0 {
         Some(min_score)
     } else {
@@ -1337,7 +1441,7 @@ pub async fn rag_lookup(
     // results). The post-search `filter_orphaned` is a belt-and-braces
     // pass in case a chunk slips through (e.g. a doc that was orphaned
     // between query build and response).
-    match embedding_search(
+    match embedding_search_scoped(
         client,
         openai_key,
         fastembed,
@@ -1348,7 +1452,7 @@ pub async fn rag_lookup(
         threshold,
         embedding_provider,
         embedding_model,
-        orphaned_doc_ids,
+        scope,
     )
     .await
     {

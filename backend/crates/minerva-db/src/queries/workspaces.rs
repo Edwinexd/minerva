@@ -552,13 +552,34 @@ pub async fn is_member(
     Ok(row.is_some())
 }
 
+/// Make an implicit user a member on first use, so staff tools list who
+/// has used them the way courses list who is enrolled. A no-op for
+/// existing members and for users without access.
+pub async fn record_access(
+    db: &PgPool,
+    workspace_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"INSERT INTO workspace_members (workspace_id, user_id, role)
+        SELECT workspace_id, user_id, role FROM workspace_access
+        WHERE workspace_id = $1 AND user_id = $2 AND implicit
+        ON CONFLICT (workspace_id, user_id) DO NOTHING"#,
+        workspace_id,
+        user_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
 pub async fn is_teacher(
     db: &PgPool,
     workspace_id: Uuid,
     user_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
     let row = sqlx::query_scalar!(
-        "SELECT 1 FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 AND role IN ('teacher', 'ta')",
+        "SELECT 1 FROM workspace_access WHERE workspace_id = $1 AND user_id = $2 AND role IN ('teacher', 'ta')",
         workspace_id,
         user_id,
     )
@@ -575,7 +596,7 @@ pub async fn is_teacher_strict(
     user_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
     let row = sqlx::query_scalar!(
-        "SELECT 1 FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 AND role = 'teacher'",
+        "SELECT 1 FROM workspace_access WHERE workspace_id = $1 AND user_id = $2 AND role = 'teacher'",
         workspace_id,
         user_id,
     )

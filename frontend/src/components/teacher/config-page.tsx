@@ -346,6 +346,8 @@ function CourseConfigForm({ course }: { course: Course }) {
   const { data: embeddingModelsData } = useQuery(embeddingModelsQuery)
   const { data: rerankerModelsData } = useQuery(rerankerModelsQuery)
   const readOnly = course.my_role === "ta"
+  // i18next context: other kinds have users, not students, and no course.
+  const kindContext = course.kind === "course" ? undefined : "workspace"
   const [name, setName] = useState(course.name)
   const [description, setDescription] = useState(course.description || "")
   const [contextRatio, setContextRatio] = useState(course.context_ratio)
@@ -435,15 +437,15 @@ function CourseConfigForm({ course }: { course: Course }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t("config.title")}</CardTitle>
+        <CardTitle>{t("config.title", { context: kindContext })}</CardTitle>
         <CardDescription>
-          {t("config.description")}
+          {t("config.description", { context: kindContext })}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {readOnly && (
           <p className="text-sm text-muted-foreground mb-4">
-            {t("config.readOnly")}
+            {t("config.readOnly", { context: kindContext })}
           </p>
         )}
         <form
@@ -462,7 +464,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           }}
         >
           <div className="space-y-2">
-            <Label htmlFor="name">{t("config.nameLabel")}</Label>
+            <Label htmlFor="name">{t("config.nameLabel", { context: kindContext })}</Label>
             <Input
               id="name"
               value={name}
@@ -630,11 +632,11 @@ function CourseConfigForm({ course }: { course: Course }) {
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              {t("config.embeddingProviderHelp")}
+              {t("config.embeddingProviderHelp", { context: kindContext })}
             </p>
             {embeddingProvider === "openai" && (
               <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                {t("config.openaiWarning")}
+                {t("config.openaiWarning", { context: kindContext })}
               </div>
             )}
           </div>
@@ -701,7 +703,7 @@ function CourseConfigForm({ course }: { course: Course }) {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                {t("config.embeddingModelHelp")}
+                {t("config.embeddingModelHelp", { context: kindContext })}
                 {embeddingModelsData?.models.some((m) => m.benchmark)
                   ? t("config.embeddingModelHelpSpeed")
                   : ""}
@@ -760,7 +762,7 @@ function CourseConfigForm({ course }: { course: Course }) {
                       rerankerModelsData.reranking_unavailable_reason ||
                       t("config.rerankerUnavailableDefaultReason"),
                   })
-                : t("config.rerankerModelHelp")}
+                : t("config.rerankerModelHelp", { context: kindContext })}
             </p>
           </div>
 
@@ -794,7 +796,7 @@ function CourseConfigForm({ course }: { course: Course }) {
           <Separator />
 
           <div className="space-y-2">
-            <Label htmlFor="dailyCostLimitUsd">{t("config.dailyCostLimitUsdLabel")}</Label>
+            <Label htmlFor="dailyCostLimitUsd">{t("config.dailyCostLimitUsdLabel", { context: kindContext })}</Label>
             <Input
               id="dailyCostLimitUsd"
               type="number"
@@ -806,11 +808,12 @@ function CourseConfigForm({ course }: { course: Course }) {
               min={0}
             />
             <p className="text-xs text-muted-foreground">
-              {t("config.dailyCostLimitUsdHelp")}
+              {t("config.dailyCostLimitUsdHelp", { context: kindContext })}
             </p>
             {dailyCostLimitUsd > 0 && course.student_count > 0 && (
               <p className="text-xs text-muted-foreground">
                 {t("config.dailyCostLimitUsdTotal", {
+                  context: kindContext,
                   value: formatUsd(dailyCostLimitUsd * course.student_count),
                   count: course.student_count,
                 })}
@@ -822,7 +825,7 @@ function CourseConfigForm({ course }: { course: Course }) {
 
             <div className="space-y-2">
               <Label htmlFor="conversationSoftTokenLimit">
-                {t("config.conversationSoftTokenLimitLabel")}
+                {t("config.conversationSoftTokenLimitLabel", { context: kindContext })}
               </Label>
               <Input
                 id="conversationSoftTokenLimit"
@@ -835,7 +838,7 @@ function CourseConfigForm({ course }: { course: Course }) {
                 min={0}
               />
               <p className="text-xs text-muted-foreground">
-                {t("config.conversationSoftTokenLimitHelp")}
+                {t("config.conversationSoftTokenLimitHelp", { context: kindContext })}
               </p>
             </div>
 
@@ -854,7 +857,7 @@ function CourseConfigForm({ course }: { course: Course }) {
                 min={0}
               />
               <p className="text-xs text-muted-foreground">
-                {t("config.conversationHardTokenLimitHelp")}
+                {t("config.conversationHardTokenLimitHelp", { context: kindContext })}
               </p>
               {conversationSoftTokenLimit > 0 &&
                 conversationHardTokenLimit > 0 &&
@@ -900,10 +903,11 @@ function CourseConfigForm({ course }: { course: Course }) {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {t("config.embeddingRotateConfirmTitle")}
+                {t("config.embeddingRotateConfirmTitle", { context: kindContext })}
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {t("config.embeddingRotateConfirmBody", {
+                  context: kindContext,
                   fromProvider: course.embedding_provider,
                   fromModel: course.embedding_model,
                   toProvider: embeddingProvider,

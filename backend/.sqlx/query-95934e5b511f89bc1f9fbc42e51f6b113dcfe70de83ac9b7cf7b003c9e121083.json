@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO workspace_members (workspace_id, user_id, role)\n        SELECT workspace_id, user_id, role FROM workspace_access\n        WHERE workspace_id = $1 AND user_id = $2 AND implicit\n        ON CONFLICT (workspace_id, user_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "95934e5b511f89bc1f9fbc42e51f6b113dcfe70de83ac9b7cf7b003c9e121083"
+}

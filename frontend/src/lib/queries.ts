@@ -58,11 +58,12 @@ export const courseMembersQuery = (courseId: string) =>
     queryFn: () => api.get<CourseMember[]>(`/workspaces/${courseId}/members`),
   })
 
-export const courseRoleSuggestionsQuery = (courseId: string) =>
+export const courseRoleSuggestionsQuery = (courseId: string, enabled = true) =>
   queryOptions({
     queryKey: ["courses", courseId, "role-suggestions"],
     queryFn: () =>
       api.get<RoleSuggestion[]>(`/courses/${courseId}/role-suggestions`),
+    enabled,
   })
 
 export const courseDocumentsQuery = (courseId: string) =>

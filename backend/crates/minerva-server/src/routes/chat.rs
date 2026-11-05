@@ -3,7 +3,7 @@ use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use futures::Stream;
-use minerva_core::models::User;
+use minerva_core::models::{User, WorkspaceKind};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -2634,6 +2634,9 @@ async fn verify_course_access(
         && !minerva_db::queries::workspaces::is_member(&state.db, workspace_id, user_id).await?
     {
         return Err(AppError::Forbidden);
+    }
+    if WorkspaceKind::parse(&course.kind) != Some(WorkspaceKind::Course) {
+        minerva_db::queries::workspaces::record_access(&state.db, workspace_id, user_id).await?;
     }
 
     Ok(course)

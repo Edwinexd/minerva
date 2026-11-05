@@ -25,7 +25,13 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
   const { t: tCommon } = useTranslation("common")
   const { data: members, isLoading } = useQuery(courseMembersQuery(courseId))
   const { data: course } = useQuery(courseQuery(courseId))
-  const { data: suggestions } = useQuery(courseRoleSuggestionsQuery(courseId))
+  // Role suggestions come from LTI, so only courses have them. Members of
+  // other kinds are everyone who has used the workspace; their access
+  // follows their Minerva role, and `student` there just means a user.
+  const isCourse = course?.kind === "course"
+  const { data: suggestions } = useQuery(
+    courseRoleSuggestionsQuery(courseId, isCourse),
+  )
   const queryClient = useQueryClient()
   const [eppn, setEppn] = useState("")
   const [role, setRole] = useState("student")
@@ -163,7 +169,7 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
         <CardHeader>
           <CardTitle>{t("members.title")}</CardTitle>
           <CardDescription>
-            {t("members.description")}
+            {t(isCourse ? "members.description" : "members.descriptionWorkspace")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -188,7 +194,7 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
                 aria-label={t("members.roleLabel")}
                 className="border rounded px-2 py-1 text-sm bg-background"
               >
-                <option value="student">{t("members.roleStudent")}</option>
+                <option value="student">{t(isCourse ? "members.roleStudent" : "members.roleUser")}</option>
                 <option value="ta">{t("members.roleTA")}</option>
                 <option value="teacher">{t("members.roleTeacher")}</option>
               </select>
@@ -217,7 +223,9 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant="outline">{m.role}</Badge>
+                  <Badge variant="outline">
+                    {!isCourse && m.role === "student" ? t("members.roleUser") : m.role}
+                  </Badge>
                   {canMutate && (
                     <Button
                       variant="ghost"

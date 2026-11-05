@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { courseMembersQuery } from "@/lib/queries"
+import { courseMembersQuery, courseQuery } from "@/lib/queries"
 import { api } from "@/lib/api"
 import {
   Card,
@@ -45,6 +45,7 @@ export function UsagePage({ useParams }: { useParams: () => { courseId: string }
     queryFn: () => api.get<UsageRow[]>(`/workspaces/${courseId}/usage`),
   })
   const { data: members } = useQuery(courseMembersQuery(courseId))
+  const { data: course } = useQuery(courseQuery(courseId))
 
   const userMap = new Map<string, string>()
   for (const m of members || []) {
@@ -104,7 +105,9 @@ export function UsagePage({ useParams }: { useParams: () => { courseId: string }
       <CardHeader>
         <CardTitle>{t("usage.title")}</CardTitle>
         <CardDescription>
-          {t("usage.description")}
+          {t("usage.description", {
+            context: course && course.kind !== "course" ? "workspace" : undefined,
+          })}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT 1 FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 AND role = 'teacher'",
+  "query": "SELECT 1 FROM workspace_access WHERE workspace_id = $1 AND user_id = $2 AND role IN ('teacher', 'ta')",
   "describe": {
     "columns": [
       {
@@ -20,5 +20,5 @@
       null
     ]
   },
-  "hash": "3d5bcbf23b49997a1f09c8b93f234fbb429aa8c136d9134e8df1ff6da6e27f87"
+  "hash": "001154c51b0c2f86bd732578505ef37b54be45d33a9d74ac77cbbaa080edb349"
 }

@@ -482,6 +482,9 @@ async fn get_workspace(
     if row.owner_id != user.id && !user.role.is_admin() && my_role.is_none() {
         return Err(AppError::Forbidden);
     }
+    if WorkspaceKind::parse(&row.kind) != Some(WorkspaceKind::Course) {
+        minerva_db::queries::workspaces::record_access(&state.db, id, user.id).await?;
+    }
 
     let flags = resolve_workspace_flags(&state.db, row.id).await;
     let offerings = resolve_course_offerings(&state.db, row.id).await;

@@ -72,8 +72,10 @@ const TA_HIDDEN_TABS = new Set<string>([
 ])
 
 // Tabs backed by course-only endpoints (`/api/courses/{id}/...`). Other
-// workspace kinds (credit transfer) have no join links, LMS or Play.
+// workspace kinds (credit transfer) have no join links, LMS or Play, and
+// their conversations are private to their author.
 const COURSE_ONLY_TABS = new Set<string>([
+  "conversations",
   "invite",
   "lti",
   "canvas",
@@ -116,18 +118,19 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
       <Skeleton className="h-64 w-full" />
     </div>
   )
-  if (!course) return <p className="text-muted-foreground">{t("layout.courseNotFound")}</p>
+  if (!course) return <p className="text-muted-foreground">{t("layout.workspaceNotFound")}</p>
+  const sectionNavLabel = t(isCourse ? "layout.sectionNavLabel" : "layout.workspaceSectionNavLabel")
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight">{course.name}</h1>
         <Link to="/workspaces/$workspaceId" params={{ workspaceId: courseId }}>
-          <Button variant="outline">{t("layout.tryChat")}</Button>
+          <Button variant="outline">{t(isCourse ? "layout.tryChat" : "layout.openWorkspace")}</Button>
         </Link>
       </div>
 
-      <nav aria-label={t("layout.sectionNavLabel")}>
+      <nav aria-label={sectionNavLabel}>
         <div className="md:hidden">
           <Select
             value={activeTab}
@@ -135,7 +138,7 @@ export function CourseEditPage({ useParams }: { useParams: () => { courseId: str
               if (typeof value === "string" && Object.hasOwn(TAB_ROUTES, value)) navigate({ to: TAB_ROUTES[value as TabValue], params: { courseId } })
             }}
           >
-            <SelectTrigger className="w-full" aria-label={t("layout.sectionNavLabel")}>
+            <SelectTrigger className="w-full" aria-label={sectionNavLabel}>
               <SelectValue>
                 {visibleTabValues.includes(activeTab as (typeof TAB_VALUES)[number])
                   ? t(TAB_LABEL_KEYS[activeTab as (typeof TAB_VALUES)[number]])

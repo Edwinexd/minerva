@@ -521,7 +521,12 @@ the education one); adding a section is an insert.
 Staff tool for assessing credit transfer (tillgodoräknande) applications.
 Admins create one from the home page's New Course form (kind selector).
 Every user whose role ranks at or above `access_min_role` (default
-teacher) can use it without a membership row.
+teacher) can use it without being added. The first use makes them a
+member (`workspaces::record_access`), so the Members and Usage tabs work
+as on a course, but in this kind a member row grants nothing:
+`workspace_access` re-checks the role on every request, so a demoted
+member keeps their row (who has used it) and loses access at once. The
+teacher checks read the same view.
 
 - The scheduler mirrors the current DSV plans into every credit transfer
   workspace as ordinary documents (`source_system = syllabus_archive`,
@@ -573,7 +578,8 @@ teacher) can use it without a membership row.
   a dev scheduler that reaches SU's web reads over them) and one
   assessed case for the operator, so the case view and every tab render
   in dev and in the pa11y job without an LLM.
-- Cases are private to their author: no teacher review, pins, notes or
+- Cases are private to their author (so the settings page has no
+  Conversations tab): no teacher review, pins, notes or
   conversation analytics (`guards::require_conversation_reviewer`).
 - Retention: a case untouched for `case_retention_days` (default 90) is
   deleted with its files by the scheduler. External syllabuses often

@@ -482,6 +482,40 @@ and the `Provkod` / `Examination code` table); old plans that state no
 level keep it NULL rather than a guess. A revised PDF clears
 `facts_parsed_at`, so it is read again.
 
+## SU Rulebook (Regelboken)
+
+The education section of SU's rulebook
+(`medarbetare.su.se/vart-su/styrning/regelboken/utbildning`, public,
+Sitevision) is mirrored into credit transfer workspaces next to the
+plans. `minerva_app_core::rulebook` runs it in the scheduler, with no
+GitHub workflow: the pages need no login. Sections are rows in
+`rulebook_sections` (migration `20261105000001_rulebook.sql` inserts
+the education one); adding a section is an insert.
+
+- The index lists one page per governing document under headings
+  (`Regler`, `Handläggningsordning`, `Stöddokument`, ...), sometimes a
+  PDF directly. Indexes and pages are read daily: no ETag. Download URLs
+  (`/download/{id}/{upload ms}/{name}.pdf`) are served `immutable`, so a
+  revised file arrives under a new URL and each file is downloaded once,
+  to `{docs_path}/rulebook/{sha256}.pdf`.
+- `rulebook_page` reads the HTML: only `div.pagecontent` (menus,
+  breadcrumbs and the TOC sit outside it), the title from `h1`,
+  "Senast uppdaterad" from `.su-page-info`. Older versions sit in a
+  `div.sv-collapsible-content` headed "Äldre ..." and are skipped, text
+  and links. An index that parses to nothing is an error, never an empty
+  section, so a layout change cannot delist everything.
+- Most pages restate the PDF they link, minus its footnotes (the ÖNH and
+  UKÄ references). So a page whose files carry 70% of its word 4-grams is
+  mirrored as its files only; otherwise as its own text plus the files it
+  does not carry (`rulebook_page::select`, `COVERED`). Measured Nov 2026:
+  pages sat at 78-98% in their PDF, other files at most 8% on the page;
+  26 of 27 pages mirror as PDFs, 36 documents in all with the PDF the
+  index links directly. A page is decided
+  once each of its files has been tried, and a failed download falls
+  back to the page's text.
+- Mirrored as ordinary documents (`source_system = su_rulebook`,
+  `source_ref` = the page or file URL, kind locked to `syllabus`).
+
 ## Credit Transfer Workspaces
 
 Staff tool for assessing credit transfer (tillgodoräknande) applications.
@@ -493,10 +527,14 @@ teacher) can use it without a membership row.
   workspace as ordinary documents (`source_system = syllabus_archive`,
   `source_ref = {code}/{lang}`, kind locked to `syllabus`); a new version
   replaces its document, a dropped plan is orphaned.
+- It mirrors SU's rulebook the same way (`source_system = su_rulebook`,
+  see "SU Rulebook (Regelboken)").
 - `/workspaces/{id}` is the workspace page, not a chat: My cases (a table of
   the viewer's own cases with their best match), DSV course plans (every
-  plan with level, versions and indexing state) and the MCP connector;
-  `?tab=` picks the tab. Routes in `routes::credit_transfer`.
+  plan with level, versions and indexing state), Regelboken (every rule
+  document by its index heading, with files, SU's update date and
+  indexing state) and the MCP connector; `?tab=` picks the tab. Routes in
+  `routes::credit_transfer`.
 - A case is a conversation. Staff attach the external syllabus
   (`conversation_attachments`, PDF / text / HTML, text extracted at
   upload, PDFs with `[Page N]` markers); attachments go into the prompt in
@@ -522,13 +560,19 @@ teacher) can use it without a membership row.
   `components/credit-transfer/assessment-view.tsx`, with page citations
   into the SU plan PDF and the uploaded file. Search and comparison
   stream as the turn's thinking trace. Later messages are ordinary chat
-  with the staff persona (`common::PromptFrame`).
+  with the staff persona (`common::PromptFrame`), which answers rule
+  questions from the rulebook and cites it. Rulebook excerpts get their
+  own prompt section (by document id, `rulebook_documents`), and the
+  assessment's plan search excludes them so they never take a
+  candidate's slot.
 - "Export as PDF" prints the case; `index.css` grows its scroll
   containers in print media and the chrome is `print:hidden`.
 - `scripts/seed-dev.sh` seeds a credit transfer workspace, three fixture
   plans (scheduled never to download, and only where the plan is not
-  already there) and one assessed case for the operator, so the case view
-  and both tabs render in dev and in the pa11y job without an LLM.
+  already there), four rulebook entries (real URLs, one per tab state;
+  a dev scheduler that reaches SU's web reads over them) and one
+  assessed case for the operator, so the case view and every tab render
+  in dev and in the pa11y job without an LLM.
 - Cases are private to their author: no teacher review, pins, notes or
   conversation analytics (`guards::require_conversation_reviewer`).
 - Retention: a case untouched for `case_retention_days` (default 90) is

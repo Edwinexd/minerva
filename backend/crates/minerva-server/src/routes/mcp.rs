@@ -280,9 +280,10 @@ async fn handle(
 }
 
 const INSTRUCTIONS: &str = "Minerva holds the teaching material of DSV courses at Stockholm \
-University and DSV's course plans. Call list_workspaces first to see the courses and staff \
-tools you can reach, then search or read documents in one of them by its id. In a credit \
-transfer workspace, get_plan returns the full current course plan for a DSV course code.";
+University, DSV's course plans and the university's governing documents for education \
+(Regelboken). Call list_workspaces first to see the courses and staff tools you can reach, \
+then search or read documents in one of them by its id. In a credit transfer workspace, \
+get_plan returns the full current course plan for a DSV course code.";
 
 async fn dispatch(
     state: &AppState,
@@ -373,7 +374,7 @@ fn tool_definitions() -> Value {
         {
             "name": "search",
             "title": "Search a workspace",
-            "description": "Semantic search over one workspace's documents (course material, or DSV course plans in a credit transfer workspace). Returns the best matching passages with their document.",
+            "description": "Semantic search over one workspace's documents (course material, or DSV course plans and Stockholm University's governing documents for education in a credit transfer workspace). Returns the best matching passages with their document.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

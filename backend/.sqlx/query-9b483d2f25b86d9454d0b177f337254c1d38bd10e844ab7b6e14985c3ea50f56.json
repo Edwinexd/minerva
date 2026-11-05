@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE rulebook_pages SET delisted_at = NOW()\n           WHERE section_url = $1 AND delisted_at IS NULL AND NOT (url = ANY($2))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9b483d2f25b86d9454d0b177f337254c1d38bd10e844ab7b6e14985c3ea50f56"
+}

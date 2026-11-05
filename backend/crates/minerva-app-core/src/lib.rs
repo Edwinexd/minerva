@@ -23,6 +23,8 @@ pub mod lti_nrps;
 pub mod model_capabilities;
 pub mod pdf_fetch;
 pub mod relink_scheduler;
+pub mod rulebook;
+pub mod rulebook_page;
 pub mod rules;
 pub mod schedulers;
 pub mod state;

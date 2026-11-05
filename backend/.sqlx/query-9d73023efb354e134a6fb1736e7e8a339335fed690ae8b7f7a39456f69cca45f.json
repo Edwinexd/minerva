@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT url AS \"url!\", title AS \"title!\", category AS \"category!\",\n                  is_page AS \"is_page!\", content_hash AS \"content_hash!\"\n           FROM (\n               SELECT p.url, p.title, p.category, TRUE AS is_page, p.content_hash,\n                      p.section_url, p.position, 0 AS file_position\n               FROM rulebook_pages p\n               WHERE p.delisted_at IS NULL AND p.mirror_text\n                 AND p.body IS NOT NULL AND p.content_hash IS NOT NULL\n               UNION ALL\n               (\n                   SELECT DISTINCT ON (f.url)\n                          f.url, f.title, p.category, FALSE, f.content_hash,\n                          p.section_url, p.position, f.position + 1\n                   FROM rulebook_files f\n                   JOIN rulebook_pages p ON p.url = f.page_url\n                   WHERE f.delisted_at IS NULL AND p.delisted_at IS NULL\n                     AND f.mirror AND f.content_hash IS NOT NULL\n                   ORDER BY f.url, p.position\n               )\n           ) d\n           ORDER BY section_url, position, file_position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "url!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "category!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "is_page!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "content_hash!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "9d73023efb354e134a6fb1736e7e8a339335fed690ae8b7f7a39456f69cca45f"
+}

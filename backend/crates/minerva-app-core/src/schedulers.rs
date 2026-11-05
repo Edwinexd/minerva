@@ -433,4 +433,36 @@ pub fn start_scheduler_loops(state: AppState) {
             }
         });
     }
+
+    // SU's rulebook (Regelboken): read the section indexes and pages
+    // daily, download the files they link, and mirror the chosen
+    // documents into every credit transfer workspace. Due clocks live on
+    // the rows, so restarts lose nothing.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = schedule_ticker();
+            loop {
+                ticker.tick().await;
+                match crate::rulebook::run_tick(&state).await {
+                    Ok(s) if !s.is_empty() => tracing::info!(
+                        "rulebook: {} entries listed, {} delisted; {} pages read ({} changed), \
+                         {} files downloaded, {} failed; {} pages reselected; \
+                         {} documents mirrored, {} retired",
+                        s.entries_added,
+                        s.entries_delisted,
+                        s.pages_read,
+                        s.pages_changed,
+                        s.files_fetched,
+                        s.failed,
+                        s.selected,
+                        s.mirrored,
+                        s.retired
+                    ),
+                    Ok(_) => {}
+                    Err(e) => tracing::error!("rulebook: tick failed: {}", e),
+                }
+            }
+        });
+    }
 }

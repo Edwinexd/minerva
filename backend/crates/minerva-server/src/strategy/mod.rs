@@ -252,6 +252,10 @@ pub struct GenerationContext {
     /// Files attached to this conversation (`routes::attachments`), given
     /// to the model in full on every turn.
     pub attachments: Vec<common::ReferenceAttachment>,
+    /// Ids of the workspace's documents mirrored from SU's rulebook; empty
+    /// outside credit transfer workspaces. Their excerpts get their own
+    /// prompt section, and the assessment's plan search skips them.
+    pub rulebook_documents: Vec<String>,
     pub user_content: String,
     pub is_first_message: bool,
     /// Per-response token budget for the tool-use / FLARE fail-safe: the
@@ -337,6 +341,7 @@ impl GenerationContext {
             kind: self.workspace_kind,
             carryover: self.carryover.as_deref(),
             attachments: &self.attachments,
+            rulebook_documents: &self.rulebook_documents,
         }
     }
 }

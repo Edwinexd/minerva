@@ -1,0 +1,117 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT url, category, title, is_file, updated_on,\n                  body IS NOT NULL AS \"read!\", fetch_error, needs_selection, mirror_text\n           FROM rulebook_pages\n           WHERE delisted_at IS NULL\n           ORDER BY section_url, position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "category",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "is_file",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "is_file"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_on",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "updated_on"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "read!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "fetch_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "fetch_error"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "needs_selection",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "needs_selection"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "mirror_text",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "mirror_text"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      null,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2e536ade249c529a0105515b7242c464873bd56ac38d396e47717692c2d98768"
+}

@@ -514,9 +514,12 @@ async fn semantic_ranking(
     if doc_codes.is_empty() {
         return Ok(Vec::new());
     }
-    let orphaned = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.workspace_id)
+    // SU's rules share the index but are never a candidate plan; excluded
+    // in the search itself, they cannot take a plan's place in the top N.
+    let mut excluded = minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.workspace_id)
         .await
         .unwrap_or_default();
+    excluded.extend(ctx.rulebook_documents.iter().cloned());
     let collection =
         minerva_pipeline::pipeline::collection_name(ctx.workspace_id, ctx.embedding_version);
     let http = reqwest::Client::new();
@@ -536,7 +539,7 @@ async fn semantic_ranking(
             0.0,
             &ctx.embedding_provider,
             &ctx.embedding_model,
-            &orphaned,
+            &excluded,
         )
         .await;
         for chunk in chunks {

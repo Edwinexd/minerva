@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH prev AS (\n                   SELECT delisted_at FROM rulebook_pages WHERE url = $1\n               )\n               INSERT INTO rulebook_pages (url, section_url, category, position, title, is_file)\n               VALUES ($1, $2, $3, $4, $5, $6)\n               ON CONFLICT (url) DO UPDATE SET\n                   section_url = EXCLUDED.section_url,\n                   category = EXCLUDED.category,\n                   position = EXCLUDED.position,\n                   title = CASE WHEN EXCLUDED.is_file THEN EXCLUDED.title\n                                ELSE rulebook_pages.title END,\n                   is_file = EXCLUDED.is_file,\n                   delisted_at = NULL\n               RETURNING (SELECT TRUE FROM prev) AS \"existed?\",\n                         (SELECT delisted_at FROM prev) AS \"prev_delisted_at?\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "existed?",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "prev_delisted_at?",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "3e367aa6c9fc04e65bb9e069a22bc1368d980fd63c4e6df25fb9829852116493"
+}

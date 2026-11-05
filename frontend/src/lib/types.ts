@@ -1294,6 +1294,27 @@ export interface DsvPlan {
   changed_this_week: boolean
 }
 
+export type RuleStatus = "indexed" | "indexing" | "pending" | "failed"
+
+/** A governing document from SU's rulebook (Regelboken) as the rules tab lists it. */
+export interface SuRule {
+  /** The page on SU's staff web, or the PDF for a file listed directly. */
+  url: string
+  title: string
+  /** The rulebook heading it is listed under, e.g. `Regler`. */
+  category: string
+  /** "Senast uppdaterad" on the page, `YYYY-MM-DD`. */
+  updated_on: string | null
+  files: { url: string; title: string }[]
+  status: RuleStatus
+}
+
+/** `GET /workspaces/{id}/credit-transfer/rules`. */
+export interface SuRules {
+  checked_at: string | null
+  documents: SuRule[]
+}
+
 /** An AI assistant the user connected over MCP (an OAuth grant). */
 export interface McpConnection {
   id: string

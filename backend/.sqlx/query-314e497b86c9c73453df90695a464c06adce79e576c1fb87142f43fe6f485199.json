@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE rulebook_pages SET needs_selection = TRUE\n           WHERE url IN (SELECT page_url FROM rulebook_files WHERE url = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "314e497b86c9c73453df90695a464c06adce79e576c1fb87142f43fe6f485199"
+}

@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rulebook_pages\n                   (url, section_url, category, position, title, body, content_hash,\n                    updated_on, last_checked_at, fetch_error, fetch_failures,\n                    mirror_text, needs_selection)\n               VALUES ($1, $2, $3, $4, $5, $6, $7,\n                       CASE WHEN $6::TEXT IS NULL THEN NULL ELSE DATE '2026-08-24' END,\n                       CASE WHEN $6::TEXT IS NULL AND $8::TEXT IS NULL THEN NULL ELSE NOW() END,\n                       $8, CASE WHEN $8::TEXT IS NULL THEN 0 ELSE 1 END,\n                       $9, FALSE)\n               ON CONFLICT (url) DO NOTHING\n               RETURNING url",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "url"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ae5464e8026bea5630929f9f0cc4ff0f978aa7fc6f70daddc3819fd42c53b481"
+}

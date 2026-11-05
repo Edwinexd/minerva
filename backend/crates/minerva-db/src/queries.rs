@@ -31,6 +31,7 @@ pub mod reranker_models;
 pub mod role_rule_attribute_observations;
 pub mod role_rules;
 pub mod role_suggestions;
+pub mod rulebook;
 pub mod signed_urls;
 pub mod site_integration_keys;
 pub mod syllabus_archive;

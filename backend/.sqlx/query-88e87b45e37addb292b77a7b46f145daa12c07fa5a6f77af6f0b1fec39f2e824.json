@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE rulebook_files SET\n               content_hash = $2,\n               size_bytes = $3,\n               text = $4,\n               fetched_at = NOW(),\n               fetch_error = NULL\n           WHERE url = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "88e87b45e37addb292b77a7b46f145daa12c07fa5a6f77af6f0b1fec39f2e824"
+}

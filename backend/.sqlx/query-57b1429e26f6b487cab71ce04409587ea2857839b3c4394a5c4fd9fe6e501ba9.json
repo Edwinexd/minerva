@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rulebook_files (page_url, url, position, title)\n                   VALUES ($1, $2, 0, 'Regler och handläggningsordning för tillgodoräknande')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "57b1429e26f6b487cab71ce04409587ea2857839b3c4394a5c4fd9fe6e501ba9"
+}

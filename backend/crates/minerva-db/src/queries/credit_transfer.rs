@@ -193,3 +193,37 @@ pub async fn plan_document_statuses(
     .await?;
     Ok(rows.into_iter().map(|r| (r.source_ref, r.status)).collect())
 }
+
+/// Ids of the workspace's mirrored rulebook documents (orphaned ones too),
+/// as the strings retrieval reports in `RagChunk::document_id`.
+pub async fn rulebook_documents(
+    db: &PgPool,
+    workspace_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    let ids = sqlx::query_scalar!(
+        r#"SELECT id FROM documents
+           WHERE workspace_id = $1 AND source_system = 'su_rulebook'"#,
+        workspace_id,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(ids.into_iter().map(|id| id.to_string()).collect())
+}
+
+/// Indexing status of the workspace's current rulebook documents, keyed by
+/// their `source_ref` (the page or file URL).
+pub async fn rulebook_document_statuses(
+    db: &PgPool,
+    workspace_id: Uuid,
+) -> Result<Vec<(String, String)>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT source_ref AS "source_ref!", status
+           FROM documents
+           WHERE workspace_id = $1 AND source_system = 'su_rulebook'
+             AND source_ref IS NOT NULL AND orphaned_at IS NULL"#,
+        workspace_id,
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.source_ref, r.status)).collect())
+}

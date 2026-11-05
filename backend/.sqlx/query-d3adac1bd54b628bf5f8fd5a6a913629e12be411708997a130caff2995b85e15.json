@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.url, p.body\n           FROM rulebook_pages p\n           WHERE p.needs_selection AND p.delisted_at IS NULL\n             AND (p.is_file OR p.body IS NOT NULL)\n             AND NOT EXISTS (\n                 SELECT 1 FROM rulebook_files f\n                 WHERE f.page_url = p.url AND f.delisted_at IS NULL\n                   AND f.fetched_at IS NULL AND f.fetch_failures = 0\n             )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "body",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "body"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "d3adac1bd54b628bf5f8fd5a6a913629e12be411708997a130caff2995b85e15"
+}

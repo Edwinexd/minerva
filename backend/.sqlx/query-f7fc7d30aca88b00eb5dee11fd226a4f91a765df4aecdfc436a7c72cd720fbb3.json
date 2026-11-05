@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.url\n           FROM rulebook_files f\n           JOIN rulebook_pages p ON p.url = f.page_url\n           WHERE f.delisted_at IS NULL AND p.delisted_at IS NULL\n             AND f.fetched_at IS NULL AND f.next_attempt_at <= NOW()\n           GROUP BY f.url\n           ORDER BY MIN(f.next_attempt_at)\n           LIMIT $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rulebook_files",
+            "name": "url"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f7fc7d30aca88b00eb5dee11fd226a4f91a765df4aecdfc436a7c72cd720fbb3"
+}

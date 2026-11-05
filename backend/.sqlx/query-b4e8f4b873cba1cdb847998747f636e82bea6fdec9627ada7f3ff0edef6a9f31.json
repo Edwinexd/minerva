@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE rulebook_pages SET\n               fetch_error = $2,\n               fetch_failures = fetch_failures + 1,\n               last_checked_at = NOW(),\n               next_check_at = NOW() + make_interval(\n                   hours => LEAST(power(2, LEAST(fetch_failures, 16))::int, $3)\n               )\n           WHERE url = $1\n           RETURNING fetch_failures",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "fetch_failures",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "rulebook_pages",
+            "name": "fetch_failures"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b4e8f4b873cba1cdb847998747f636e82bea6fdec9627ada7f3ff0edef6a9f31"
+}

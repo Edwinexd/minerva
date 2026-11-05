@@ -1858,6 +1858,13 @@ pub(super) async fn run_chat_message(
     } else {
         strategy_name
     };
+    let rulebook_documents = if workspace_kind
+        == minerva_core::models::WorkspaceKind::CreditTransfer
+    {
+        minerva_db::queries::credit_transfer::rulebook_documents(&state.db, workspace_id).await?
+    } else {
+        Vec::new()
+    };
 
     let ctx = strategy::GenerationContext {
         course_name: course.name,
@@ -1882,6 +1889,7 @@ pub(super) async fn run_chat_message(
         carryover: conv.carryover_summary.clone(),
         workspace_kind,
         attachments,
+        rulebook_documents,
         user_content,
         is_first_message,
         daily_token_budget,

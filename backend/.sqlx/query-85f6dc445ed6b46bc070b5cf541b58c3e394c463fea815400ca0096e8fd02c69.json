@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT url FROM rulebook_sections WHERE next_check_at <= NOW() ORDER BY next_check_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rulebook_sections",
+            "name": "url"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "85f6dc445ed6b46bc070b5cf541b58c3e394c463fea815400ca0096e8fd02c69"
+}

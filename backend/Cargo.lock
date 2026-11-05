@@ -3206,6 +3206,7 @@ dependencies = [
  "rsa",
  "rust_decimal",
  "rust_decimal_macros",
+ "scraper",
  "serde",
  "serde_json",
  "sha2 0.11.0",

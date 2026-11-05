@@ -1270,6 +1270,7 @@ mod stream_integration_tests {
             carryover: None,
             workspace_kind: minerva_core::models::WorkspaceKind::Course,
             attachments: Vec::new(),
+            rulebook_documents: Vec::new(),
             user_content: "Hello".to_string(),
             is_first_message: true,
             daily_token_budget: 0,

@@ -109,6 +109,8 @@ const WIPE_TABLE_ORDER: &[&str] = &[
     // Fixture plans for the credit transfer workspace; their versions
     // cascade. Only plans the seed inserted are tagged, never real ones.
     "syllabus_plans",
+    // Fixture rulebook entries, same rule; their files cascade.
+    "rulebook_pages",
     "users",
 ];
 
@@ -701,11 +703,12 @@ const SEED_PLANS: &[SeedPlan] = &[
     },
 ];
 
-/// A credit transfer workspace with a few DSV plans and one assessed case
-/// owned by the operator, so the workspace page, its tabs and the
-/// assessment cards render in dev and in the real-browser a11y pass
-/// without an LLM or the plan archive.
+/// A credit transfer workspace with a few DSV plans, a few of SU's rules
+/// and one assessed case owned by the operator, so the workspace page, its
+/// tabs and the assessment cards render in dev and in the real-browser
+/// a11y pass without an LLM, the plan archive or SU's web.
 async fn seed_credit_transfer(state: &AppState, admin_id: Uuid) -> Result<(), AppError> {
+    seed_rulebook(state).await?;
     for SeedPlan {
         code,
         name_sv,
@@ -877,6 +880,122 @@ async fn seed_credit_transfer(state: &AppState, admin_id: Uuid) -> Result<(), Ap
         },
     )
     .await?;
+    Ok(())
+}
+
+/// A rulebook entry the seed inserts; see [`seed_rulebook`].
+struct SeedRule {
+    slug: &'static str,
+    title: &'static str,
+    category: &'static str,
+    /// The page's text; `None` when it has not been read.
+    body: Option<&'static str>,
+    fetch_error: Option<&'static str>,
+    mirror_text: bool,
+}
+
+const SEED_RULE_CREDIT_TRANSFER: &str = "regler-och-handlaggningsordning-for-tillgodoraknande";
+
+const SEED_RULES: &[SeedRule] = &[
+    SeedRule {
+        slug: SEED_RULE_CREDIT_TRANSFER,
+        title: "Regler och handläggningsordning för tillgodoräknande",
+        category: "Regler",
+        body: Some(
+            "Rektor har 2023-04-05 beslutat om Regler och handläggningsordning för \
+             tillgodoräknande.\n\n## 1.1 Rätten till prövning av tillgodoräknande\n\n\
+             Högskolan ska pröva om tidigare utbildning eller verksamhet kan godtas för \
+             tillgodoräknande.",
+        ),
+        fetch_error: None,
+        mirror_text: false,
+    },
+    SeedRule {
+        slug: "regler-for-stipendier-med-aterbetalningskrav",
+        title: "Regler för stipendier med återbetalningskrav",
+        category: "Regler",
+        body: Some("## Bakgrund\n\nStipendier kan i vissa fall förenas med återbetalningskrav."),
+        fetch_error: None,
+        mirror_text: true,
+    },
+    SeedRule {
+        slug: "vagledning-for-validering",
+        title: "Vägledning för validering",
+        category: "Stöddokument",
+        body: None,
+        fetch_error: Some("http 503"),
+        mirror_text: false,
+    },
+    SeedRule {
+        slug: "handlaggningsordning-for-hantering-av-klagomal-fran-studenter-rorande-utbildning",
+        title: "Handläggningsordning för hantering av klagomål från studenter rörande utbildning",
+        category: "Handläggningsordning",
+        body: None,
+        fetch_error: None,
+        mirror_text: false,
+    },
+];
+
+/// One rulebook entry in each state the rules tab draws: read with its PDF
+/// still to download, read and mirrored as its own text, failing, and not
+/// read yet. The URLs are the real pages, so a dev scheduler that reaches
+/// SU's web reads them over the fixtures; an entry already there from a
+/// sync is left alone.
+async fn seed_rulebook(state: &AppState) -> Result<(), AppError> {
+    const SECTION: &str = "https://medarbetare.su.se/vart-su/styrning/regelboken/utbildning";
+    for (position, rule) in SEED_RULES.iter().enumerate() {
+        let url = format!("{SECTION}/{}", rule.slug);
+        let content_hash = rule.body.map(|b| {
+            minerva_pipeline::pipeline::compute_content_hash(
+                minerva_app_core::rulebook_page::render_document(
+                    rule.title,
+                    rule.category,
+                    &url,
+                    b,
+                )
+                .as_bytes(),
+            )
+        });
+        let inserted = sqlx::query_scalar!(
+            r#"INSERT INTO rulebook_pages
+                   (url, section_url, category, position, title, body, content_hash,
+                    updated_on, last_checked_at, fetch_error, fetch_failures,
+                    mirror_text, needs_selection)
+               VALUES ($1, $2, $3, $4, $5, $6, $7,
+                       CASE WHEN $6::TEXT IS NULL THEN NULL ELSE DATE '2026-08-24' END,
+                       CASE WHEN $6::TEXT IS NULL AND $8::TEXT IS NULL THEN NULL ELSE NOW() END,
+                       $8, CASE WHEN $8::TEXT IS NULL THEN 0 ELSE 1 END,
+                       $9, FALSE)
+               ON CONFLICT (url) DO NOTHING
+               RETURNING url"#,
+            url,
+            SECTION,
+            rule.category,
+            position as i32,
+            rule.title,
+            rule.body,
+            content_hash,
+            rule.fetch_error,
+            rule.mirror_text,
+        )
+        .fetch_optional(&state.db)
+        .await?;
+        if inserted.is_none() {
+            continue;
+        }
+        track_composite(state, "rulebook_pages", &url).await?;
+        if rule.slug == SEED_RULE_CREDIT_TRANSFER {
+            sqlx::query!(
+                r#"INSERT INTO rulebook_files (page_url, url, position, title)
+                   VALUES ($1, $2, 0, 'Regler och handläggningsordning för tillgodoräknande')"#,
+                url,
+                "https://medarbetare.su.se/download/18.6e819c2d18d872f98df3cae0/1708691795277/\
+                 Regler_och_handlaggningsordning_for_tillgodoraknande_2023.pdf",
+            )
+            .execute(&state.db)
+            .await?;
+        }
+    }
     Ok(())
 }
 
@@ -1703,6 +1822,12 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
             "courses" => delete_by_uuid_pk(&state.db, "courses", &pks).await?,
             "syllabus_plans" => {
                 sqlx::query!("DELETE FROM syllabus_plans WHERE code = ANY($1)", &pks)
+                    .execute(&state.db)
+                    .await?
+                    .rows_affected()
+            }
+            "rulebook_pages" => {
+                sqlx::query!("DELETE FROM rulebook_pages WHERE url = ANY($1)", &pks)
                     .execute(&state.db)
                     .await?
                     .rows_affected()

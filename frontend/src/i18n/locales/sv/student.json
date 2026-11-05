@@ -193,6 +193,7 @@
     "tabs": {
       "cases": "Mina ärenden",
       "plans": "DSV:s kursplaner",
+      "rules": "Regelboken",
       "assistant": "Använd från din AI-assistent",
       "settings": "Inställningar för arbetsytan"
     },
@@ -281,7 +282,26 @@
       "newThisWeek": "Ny den här veckan",
       "noMatch": "Ingen kursplan matchar sökningen."
     },
+    "rules": {
+      "intro": "Stockholms universitets styrdokument för utbildning, från Regelboken. Fråga om dem i ett ärende så hänvisar svaret till det dokument det bygger på.",
+      "syncStatus_one": "Senast kontrollerad {{date}}. {{count}} dokument.",
+      "syncStatus_other": "Senast kontrollerad {{date}}. {{count}} dokument.",
+      "neverSynced": "Regelboken har inte lästs in än.",
+      "readOnly": "Synkas dagligen från Stockholms universitets medarbetarwebb. Äldre versioner tas inte med, och ingen laddar upp här.",
+      "empty": "Inga dokument än.",
+      "table": "Regelboken",
+      "document": "Dokument",
+      "files": "Filer",
+      "updated": "Uppdaterad",
+      "status": "Status",
+      "statuses": {
+        "indexed": "Indexerad",
+        "indexing": "Indexeras",
+        "pending": "Inte inläst än",
+        "failed": "Kunde inte läsas"
+      }
+    },
     "chatHeading": "Ärende om tillgodoräknande: {{workspace}}",
-    "disclaimerBefore": "Meddelanden, de bifogade filerna och de kursplaner från DSV de jämförs med skickas till Cerebras för AI-inferens. Kontrollera jämförelsen mot kursplanerna själva. Läs "
+    "disclaimerBefore": "Meddelanden, de bifogade filerna, de kursplaner från DSV de jämförs med och de regler från SU som svaren bygger på skickas till Cerebras för AI-inferens. Kontrollera jämförelsen mot kursplanerna själva. Läs "
   }
 }

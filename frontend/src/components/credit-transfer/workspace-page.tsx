@@ -6,8 +6,9 @@ import {
   creditTransferCasesQuery,
   creditTransferSummaryQuery,
   dsvPlansQuery,
+  suRulesQuery,
 } from "@/lib/queries"
-import type { Course, PlanStatus } from "@/lib/types"
+import type { Course, PlanStatus, RuleStatus, SuRule } from "@/lib/types"
 import { useDocumentTitle } from "@/lib/use-document-title"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -23,8 +24,9 @@ import { VERDICT_TONE } from "./tones"
 
 /**
  * A credit transfer workspace: the viewer's own cases, the DSV course
- * plans they are compared against, and connecting an AI assistant. The
- * workspace settings stay on the teacher pages, linked for its managers.
+ * plans they are compared against, SU's rules the chat draws on, and
+ * connecting an AI assistant. The workspace settings stay on the teacher
+ * pages, linked for its managers.
  */
 export function CreditTransferWorkspacePage({
   workspace,
@@ -64,6 +66,7 @@ export function CreditTransferWorkspacePage({
           <TabsList>
             <TabsTrigger value="cases">{t("creditTransfer.tabs.cases")}</TabsTrigger>
             <TabsTrigger value="plans">{t("creditTransfer.tabs.plans")}</TabsTrigger>
+            <TabsTrigger value="rules">{t("creditTransfer.tabs.rules")}</TabsTrigger>
             <TabsTrigger value="assistant">{t("creditTransfer.tabs.assistant")}</TabsTrigger>
           </TabsList>
           {manages && (
@@ -81,6 +84,9 @@ export function CreditTransferWorkspacePage({
         </TabsContent>
         <TabsContent value="plans" className="pt-2">
           <PlansTab workspaceId={workspace.id} />
+        </TabsContent>
+        <TabsContent value="rules" className="pt-2">
+          <RulesTab workspaceId={workspace.id} />
         </TabsContent>
         <TabsContent value="assistant" className="pt-2">
           <AssistantsPage />
@@ -317,6 +323,128 @@ function PlansTab({ workspaceId }: { workspaceId: string }) {
               )}
             </tbody>
           </table>
+        </section>
+      )}
+    </div>
+  )
+}
+
+const RULE_TONE: Record<RuleStatus, "ok" | "info" | "neutral" | "bad"> = {
+  indexed: "ok",
+  indexing: "info",
+  pending: "neutral",
+  failed: "bad",
+}
+
+/** Documents in index order, split where the rulebook heading changes. */
+function byCategory(documents: SuRule[]): { category: string; documents: SuRule[] }[] {
+  const groups: { category: string; documents: SuRule[] }[] = []
+  for (const d of documents) {
+    const last = groups[groups.length - 1]
+    if (last && last.category === d.category) last.documents.push(d)
+    else groups.push({ category: d.category, documents: [d] })
+  }
+  return groups
+}
+
+function RulesTab({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation("student")
+  const formatDate = useDateFormat()
+  const { data, isLoading, error } = useQuery(suRulesQuery(workspaceId))
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">{t("creditTransfer.rules.intro")}</p>
+        {data && (
+          <p className="text-sm text-muted-foreground">
+            {data.checked_at
+              ? t("creditTransfer.rules.syncStatus", {
+                  date: formatDate(data.checked_at),
+                  count: data.documents.length,
+                })
+              : t("creditTransfer.rules.neverSynced")}
+          </p>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">{t("creditTransfer.rules.readOnly")}</p>
+      {isLoading && <Skeleton className="h-48 w-full" />}
+      {error && <ErrorText error={error} />}
+      {data && data.documents.length === 0 && (
+        <p className="text-sm text-muted-foreground">{t("creditTransfer.rules.empty")}</p>
+      )}
+      {data && data.documents.length > 0 && (
+        // Scrolls on a narrow screen, so the region takes focus for
+        // keyboard users (see chat-surface.tsx).
+        <section
+          className="overflow-x-auto"
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+          tabIndex={0}
+          aria-label={t("creditTransfer.rules.table")}
+        >
+          {/* One table per rulebook heading, named by its caption: a
+              heading row inside a single table would make a two-level
+              header that screen readers cannot attach to the cells.
+              Fixed column widths keep the tables aligned. */}
+          {byCategory(data.documents).map((group) => (
+            <table
+              key={group.category}
+              className="w-full min-w-[44rem] table-fixed border-collapse text-sm"
+            >
+              <caption className="caption-top pt-4 pb-2 text-left font-semibold">
+                {group.category}
+              </caption>
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th scope="col" className="w-[42%] py-2 pr-3 font-medium">{t("creditTransfer.rules.document")}</th>
+                  <th scope="col" className="w-[33%] py-2 pr-3 font-medium">{t("creditTransfer.rules.files")}</th>
+                  <th scope="col" className="w-[11%] py-2 pr-3 font-medium">{t("creditTransfer.rules.updated")}</th>
+                  <th scope="col" className="w-[14%] py-2 font-medium">{t("creditTransfer.rules.status")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {group.documents.map((d) => (
+                  <tr key={d.url} className="border-b align-top last:border-b-0">
+                    <td className="py-2 pr-3">
+                      <a
+                        href={d.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium hover:underline"
+                      >
+                        {d.title}
+                      </a>
+                    </td>
+                    <td className="py-2 pr-3 text-muted-foreground">
+                      {d.files.length > 0
+                        ? d.files.map((f, i) => (
+                            <span key={f.url}>
+                              {i > 0 && ", "}
+                              <a
+                                href={f.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline hover:text-foreground"
+                              >
+                                {f.title}
+                              </a>
+                            </span>
+                          ))
+                        : "-"}
+                    </td>
+                    <td className="py-2 pr-3 whitespace-nowrap">
+                      {d.updated_on ? formatDate(d.updated_on) : "-"}
+                    </td>
+                    <td className="py-2">
+                      <StatusBadge tone={RULE_TONE[d.status]}>
+                        {t(`creditTransfer.rules.statuses.${d.status}`)}
+                      </StatusBadge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ))}
         </section>
       )}
     </div>

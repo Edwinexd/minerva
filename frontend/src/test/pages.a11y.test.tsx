@@ -978,6 +978,58 @@ describe("Authenticated pages a11y", () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
+  it("credit transfer rules tab has no axe violations", async () => {
+    const section = "https://medarbetare.su.se/vart-su/styrning/regelboken/utbildning"
+    const { container, getByText, getByRole } = renderPage(
+      <CreditTransferWorkspacePage workspace={creditTransferWorkspace} tab="rules" />,
+      [
+        [
+          queries.creditTransferSummaryQuery("ws-ct").queryKey,
+          { plan_count: 214, plans_changed_this_week: 2, plans_checked_at: "2026-11-04T04:10:00Z", my_case_count: 1, case_retention_days: 90 },
+        ],
+        [
+          queries.suRulesQuery("ws-ct").queryKey,
+          {
+            checked_at: "2026-11-05T04:00:00Z",
+            documents: [
+              {
+                url: `${section}/regler-och-handlaggningsordning-for-tillgodoraknande`,
+                title: "Regler och handläggningsordning för tillgodoräknande",
+                category: "Regler",
+                updated_on: "2026-08-24",
+                files: [
+                  { url: "https://medarbetare.su.se/download/18.1/1/Regler.pdf", title: "Regler och handläggningsordning för tillgodoräknande" },
+                  { url: "https://medarbetare.su.se/download/18.2/2/Handbok.pdf", title: "Handbok i ärendehandläggning" },
+                ],
+                status: "indexed",
+              },
+              {
+                url: `${section}/regler-for-stipendier-med-aterbetalningskrav`,
+                title: "Regler för stipendier med återbetalningskrav",
+                category: "Regler",
+                updated_on: "2026-04-29",
+                files: [],
+                status: "indexing",
+              },
+              {
+                url: "https://medarbetare.su.se/download/18.3/3/Lista.pdf",
+                title: "Lista över stödformer för riktat pedagogiskt stöd",
+                category: "Stöddokument",
+                updated_on: null,
+                files: [],
+                status: "failed",
+              },
+            ],
+          },
+        ],
+      ],
+    )
+    expect(getByRole("table", { name: "Stöddokument" })).toBeInTheDocument()
+    expect(getByText("Handbok i ärendehandläggning")).toBeInTheDocument()
+    expect(getByText("Could not be read")).toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
   it("AI assistants page has no axe violations", async () => {
     const { container, getByText, getByRole } = renderPage(<AssistantsPage />, [
       [

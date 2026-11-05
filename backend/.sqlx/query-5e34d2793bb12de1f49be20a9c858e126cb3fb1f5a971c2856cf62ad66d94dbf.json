@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE rulebook_files SET mirror = (url = ANY($2)) WHERE page_url = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5e34d2793bb12de1f49be20a9c858e126cb3fb1f5a971c2856cf62ad66d94dbf"
+}

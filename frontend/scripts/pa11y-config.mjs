@@ -130,6 +130,7 @@ const authenticated = [
   "/teacher/assistants",
   `/workspaces/${creditTransfer.id}`,
   `/workspaces/${creditTransfer.id}?tab=plans`,
+  `/workspaces/${creditTransfer.id}?tab=rules`,
   `/workspaces/${creditTransfer.id}/cases/new`,
   "/teacher/guide",
   "/admin/workspaces",

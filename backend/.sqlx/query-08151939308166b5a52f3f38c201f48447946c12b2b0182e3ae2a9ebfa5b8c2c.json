@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH prev AS (\n                   SELECT delisted_at FROM rulebook_files WHERE page_url = $1 AND url = $2\n               ),\n               known AS (\n                   SELECT content_hash, size_bytes, text, fetched_at\n                   FROM rulebook_files\n                   WHERE url = $2 AND fetched_at IS NOT NULL\n                   LIMIT 1\n               )\n               INSERT INTO rulebook_files\n                   (page_url, url, position, title, content_hash, size_bytes, text, fetched_at)\n               SELECT $1, $2, $3, $4, k.content_hash, k.size_bytes, k.text, k.fetched_at\n               FROM (SELECT 1) one LEFT JOIN known k ON TRUE\n               ON CONFLICT (page_url, url) DO UPDATE SET\n                   position = EXCLUDED.position,\n                   title = EXCLUDED.title,\n                   delisted_at = NULL\n               RETURNING (SELECT TRUE FROM prev) AS \"existed?\",\n                         (SELECT delisted_at FROM prev) AS \"prev_delisted_at?\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "existed?",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "prev_delisted_at?",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "08151939308166b5a52f3f38c201f48447946c12b2b0182e3ae2a9ebfa5b8c2c"
+}

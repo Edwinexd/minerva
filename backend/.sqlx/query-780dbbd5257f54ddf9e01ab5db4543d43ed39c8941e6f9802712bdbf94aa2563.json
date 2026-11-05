@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE rulebook_pages SET\n               title = $2,\n               body = $3,\n               content_hash = $4,\n               updated_on = $5,\n               content_changed_at = CASE WHEN $6 THEN NOW() ELSE content_changed_at END,\n               needs_selection = needs_selection OR $7,\n               last_checked_at = NOW(),\n               next_check_at = $8,\n               fetch_error = NULL,\n               fetch_failures = 0\n           WHERE url = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Date",
+        "Bool",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "780dbbd5257f54ddf9e01ab5db4543d43ed39c8941e6f9802712bdbf94aa2563"
+}

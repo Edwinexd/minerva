@@ -1,6 +1,6 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 import { api } from "./api"
-import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationAttachment, ConversationDetail, CreditTransferCase, CreditTransferSummary, DsvPlan, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, DevConfig, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, McpConnections, LtiDiagnostics, LtiNrpsRun, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, OwnerUsage, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
+import type { AdminUser, ApiKey, CanvasConnection, CanvasItemsResponse, Conversation, ConversationAttachment, ConversationDetail, CreditTransferCase, CreditTransferSummary, DsvPlan, ConversationWithUser, CourseFeedbackStats, Course, CourseMember, DevConfig, Document, ExternalAuthInvite, KgTokenUsage, LtiCourseSiteBinding, McpConnections, LtiDiagnostics, LtiNrpsRun, LtiNrpsStatus, LtiPlatform, LtiPlatformBinding, LtiRegistration, LtiSetup, MergeSuggestionGroup, OwnerUsage, PlayCourseCatalogEntry, PlayDesignation, RoleRule, RoleRuleAttributeValues, RoleSuggestion, SiteIntegrationKey, SuRules, SystemMetrics, TeacherNote, TopicGroup, UsageRecord, User } from "./types"
 
 export const userQuery = queryOptions({
   queryKey: ["auth", "me"],
@@ -290,6 +290,13 @@ export const dsvPlansQuery = (workspaceId: string, search = "") =>
           search ? `?q=${encodeURIComponent(search)}` : ""
         }`,
       ),
+    staleTime: 5 * 60_000,
+  })
+
+export const suRulesQuery = (workspaceId: string) =>
+  queryOptions({
+    queryKey: ["courses", workspaceId, "credit-transfer", "rules"],
+    queryFn: () => api.get<SuRules>(`/workspaces/${workspaceId}/credit-transfer/rules`),
     staleTime: 5 * 60_000,
   })
 

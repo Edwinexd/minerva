@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE rulebook_pages SET mirror_text = $2, needs_selection = FALSE WHERE url = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f38638e8502184b1eb1e7ae438d5f2048495fe008df529bf0152a623c50c826e"
+}

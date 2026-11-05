@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rulebook_files (page_url, url, position, title)\n                   VALUES ($1, $1, 0, $2)\n                   ON CONFLICT (page_url, url) DO UPDATE SET\n                       title = EXCLUDED.title,\n                       delisted_at = NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6b57c58749ad46becf8726b45161295a4af3f62d9256a112400c2abd5575fa29"
+}

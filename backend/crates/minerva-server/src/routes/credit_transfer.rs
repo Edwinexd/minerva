@@ -1,7 +1,7 @@
 //! Pages of a credit transfer workspace beyond the chat: the summary its
-//! home card and header show, the viewer's own cases, and the DSV plans it
-//! compares against. Mounted under `/api/workspaces/{workspace_id}`; any
-//! other workspace kind 404s.
+//! home card and header show, the viewer's own cases, the DSV plans it
+//! compares against and SU's rules it draws on. Mounted under
+//! `/api/workspaces/{workspace_id}`; any other workspace kind 404s.
 
 use std::collections::HashMap;
 
@@ -21,6 +21,7 @@ pub fn router() -> Router<AppState> {
         .route("/credit-transfer", get(summary))
         .route("/credit-transfer/cases", get(list_cases))
         .route("/credit-transfer/plans", get(list_plans))
+        .route("/credit-transfer/rules", get(list_rules))
 }
 
 /// Same access as the chat (`workspace_access`), and only this kind.
@@ -269,5 +270,122 @@ fn plan_status<'a>(
         "failed"
     } else {
         "pending"
+    }
+}
+
+#[derive(Serialize)]
+struct RulesResponse {
+    /// When SU's rulebook index was last read.
+    checked_at: Option<DateTime<Utc>>,
+    documents: Vec<RuleDocument>,
+}
+
+#[derive(Serialize)]
+struct RuleDocument {
+    /// The page on SU's staff web, or the PDF for a file the index links
+    /// directly.
+    url: String,
+    title: String,
+    /// The index heading it is listed under ('Regler', 'Stöddokument').
+    category: String,
+    /// "Senast uppdaterad" on the page.
+    updated_on: Option<chrono::NaiveDate>,
+    files: Vec<RuleFile>,
+    /// `indexed`, `indexing`, `pending` (not read or mirrored yet) or
+    /// `failed`.
+    status: &'static str,
+}
+
+#[derive(Serialize)]
+struct RuleFile {
+    url: String,
+    title: String,
+}
+
+/// Every document of SU's rulebook the workspace mirrors, in the index's
+/// order, with the state of its documents in this workspace.
+async fn list_rules(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(workspace_id): Path<Uuid>,
+) -> Result<Json<RulesResponse>, AppError> {
+    credit_transfer_workspace(&state, workspace_id, &user).await?;
+    let pages = minerva_db::queries::rulebook::list_pages(&state.db).await?;
+    let mut files: HashMap<String, Vec<minerva_db::queries::rulebook::FileListing>> =
+        HashMap::new();
+    for f in minerva_db::queries::rulebook::list_files(&state.db).await? {
+        files.entry(f.page_url.clone()).or_default().push(f);
+    }
+    let doc_status: HashMap<String, String> =
+        minerva_db::queries::credit_transfer::rulebook_document_statuses(&state.db, workspace_id)
+            .await?
+            .into_iter()
+            .collect();
+    let documents = pages
+        .into_iter()
+        .map(|p| {
+            let page_files = files.remove(&p.url).unwrap_or_default();
+            let status = rule_status(&p, &page_files, |url| {
+                doc_status.get(url).map(String::as_str)
+            });
+            RuleDocument {
+                // A file entry's own file is the entry; listing it again
+                // would only repeat the title.
+                files: if p.is_file {
+                    Vec::new()
+                } else {
+                    page_files
+                        .into_iter()
+                        .map(|f| RuleFile {
+                            url: f.url,
+                            title: f.title,
+                        })
+                        .collect()
+                },
+                url: p.url,
+                title: p.title,
+                category: p.category,
+                updated_on: p.updated_on,
+                status,
+            }
+        })
+        .collect();
+    Ok(Json(RulesResponse {
+        checked_at: minerva_db::queries::rulebook::last_checked_at(&state.db).await?,
+        documents,
+    }))
+}
+
+/// One rulebook entry's state in a workspace: what it is mirrored as (its
+/// text, its files or both), and how far indexing those has come.
+fn rule_status<'a>(
+    page: &minerva_db::queries::rulebook::PageListing,
+    files: &[minerva_db::queries::rulebook::FileListing],
+    doc_status: impl Fn(&str) -> Option<&'a str>,
+) -> &'static str {
+    let mut mirrored: Vec<&str> = files
+        .iter()
+        .filter(|f| f.mirror && f.downloaded)
+        .map(|f| f.url.as_str())
+        .collect();
+    if page.mirror_text && page.read {
+        mirrored.push(page.url.as_str());
+    }
+    if mirrored.is_empty() {
+        let never_read = !page.is_file && !page.read && page.fetch_error.is_some();
+        let never_downloaded = page.is_file && files.iter().all(|f| f.fetch_error.is_some());
+        return if never_read || (never_downloaded && !files.is_empty()) {
+            "failed"
+        } else {
+            "pending"
+        };
+    }
+    let statuses: Vec<Option<&str>> = mirrored.into_iter().map(&doc_status).collect();
+    if statuses.contains(&Some("failed")) {
+        "failed"
+    } else if statuses.iter().all(|s| *s == Some("ready")) {
+        "indexed"
+    } else {
+        "indexing"
     }
 }

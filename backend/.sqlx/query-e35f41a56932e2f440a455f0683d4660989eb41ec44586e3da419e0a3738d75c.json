@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE rulebook_sections SET\n               last_checked_at = NOW(),\n               next_check_at = $2,\n               fetch_error = NULL,\n               fetch_failures = 0\n           WHERE url = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e35f41a56932e2f440a455f0683d4660989eb41ec44586e3da419e0a3738d75c"
+}

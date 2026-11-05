@@ -193,6 +193,7 @@
     "tabs": {
       "cases": "My cases",
       "plans": "DSV course plans",
+      "rules": "SU rulebook",
       "assistant": "Use from your AI assistant",
       "settings": "Workspace settings"
     },
@@ -281,7 +282,26 @@
       "newThisWeek": "New this week",
       "noMatch": "No plan matches the search."
     },
+    "rules": {
+      "intro": "Stockholm University's governing documents for education, from its rulebook (Regelboken). Ask about them in a case and the answer cites the document it relies on.",
+      "syncStatus_one": "Last checked {{date}}. {{count}} document.",
+      "syncStatus_other": "Last checked {{date}}. {{count}} documents.",
+      "neverSynced": "The rulebook has not been read yet.",
+      "readOnly": "Kept in sync daily with Stockholm University's staff web. Older versions are left out, and nobody uploads here.",
+      "empty": "No documents yet.",
+      "table": "SU rulebook",
+      "document": "Document",
+      "files": "Files",
+      "updated": "Updated",
+      "status": "Status",
+      "statuses": {
+        "indexed": "Indexed",
+        "indexing": "Indexing",
+        "pending": "Not read yet",
+        "failed": "Could not be read"
+      }
+    },
     "chatHeading": "Credit transfer case: {{workspace}}",
-    "disclaimerBefore": "Messages, the attached files and the DSV course plans they are compared with are sent to Cerebras for AI inference. Check the comparison against the syllabuses themselves. See "
+    "disclaimerBefore": "Messages, the attached files, the DSV course plans they are compared with and the SU rules answers draw on are sent to Cerebras for AI inference. Check the comparison against the syllabuses themselves. See "
   }
 }

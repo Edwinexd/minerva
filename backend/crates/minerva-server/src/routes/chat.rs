@@ -227,7 +227,7 @@ struct MessageResponse {
     /// labels the disclosure as hidden from the student.
     thinking_hidden: bool,
     /// Structured credit transfer assessment this reply carries
-    /// (`strategy::assessment`); absent on every other message.
+    /// (`strategy::credit_transfer`); absent on every other message.
     #[serde(skip_serializing_if = "Option::is_none")]
     assessment: Option<serde_json::Value>,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -1829,67 +1829,13 @@ pub(super) async fn run_chat_message(
         0
     };
 
-    // Attachments are per conversation and only exist in kinds that use
-    // them; skip the query everywhere else.
-    let attachments = if crate::routes::attachments::kind_uses_attachments(&course.kind) {
-        minerva_db::queries::conversation_attachments::list(&state.db, conv_id)
-            .await?
-            .into_iter()
-            .map(|a| strategy::common::ReferenceAttachment {
-                filename: a.filename,
-                text: a.extracted_text,
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
     let workspace_kind =
         minerva_core::models::WorkspaceKind::parse(&course.kind).ok_or_else(|| {
             AppError::Internal(format!("workspace {workspace_id} has kind {}", course.kind))
         })?;
-    // A credit transfer chat answers a turn either with a structured
-    // assessment of its attachments (`strategy::assessment`) or in
-    // ordinary chat; the utility model decides from the message. Without
-    // attachments there is nothing to assess.
-    let strategy_name = if workspace_kind == minerva_core::models::WorkspaceKind::CreditTransfer
-        && !attachments.is_empty()
-    {
-        use crate::classification::credit_transfer_turn::{self, TurnInput, TurnKind};
-        let unassessed_files =
-            minerva_db::queries::case_assessments::has_unassessed_attachments(&state.db, conv_id)
-                .await?;
-        let assessed_before =
-            minerva_db::queries::case_assessments::exists_for_conversation(&state.db, conv_id)
-                .await?;
-        // `history` already ends with this turn's message.
-        let mut earlier: Vec<String> = history
-            .iter()
-            .filter(|m| m.role == "user")
-            .map(|m| m.content.clone())
-            .collect();
-        earlier.pop();
-        let files: Vec<String> = attachments.iter().map(|a| a.filename.clone()).collect();
-        let kind = credit_transfer_turn::decide(
-            &state.http_client,
-            &state.utility_model().await,
-            &state.db,
-            workspace_id,
-            &TurnInput {
-                message: &user_content,
-                earlier: &earlier,
-                files: &files,
-                unassessed_files,
-                assessed_before,
-            },
-        )
-        .await;
-        match kind {
-            TurnKind::Assessment => strategy::ASSESSMENT.to_string(),
-            TurnKind::Answer => strategy_name,
-        }
-    } else {
-        strategy_name
-    };
+    // A credit transfer workspace answers every turn itself; see
+    // `strategy::run_strategy`. Course workspaces keep their configured
+    // strategy.
     let rulebook_documents = if workspace_kind
         == minerva_core::models::WorkspaceKind::CreditTransfer
     {
@@ -1920,7 +1866,6 @@ pub(super) async fn run_chat_message(
         history,
         carryover: conv.carryover_summary.clone(),
         workspace_kind,
-        attachments,
         rulebook_documents,
         user_content,
         is_first_message,

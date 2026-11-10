@@ -826,7 +826,7 @@ async fn seed_credit_transfer(state: &AppState, admin_id: Uuid) -> Result<(), Ap
     )
     .await?;
 
-    let assessment: crate::strategy::assessment::Assessment =
+    let assessment: crate::strategy::credit_transfer::Assessment =
         serde_json::from_value(seed_assessment())
             .map_err(|e| AppError::Internal(format!("seed assessment fixture: {e}")))?;
     let user_msg_id = Uuid::new_v4();
@@ -840,7 +840,7 @@ async fn seed_credit_transfer(state: &AppState, admin_id: Uuid) -> Result<(), Ap
         (
             asst_msg_id,
             "assistant",
-            crate::strategy::assessment::render_markdown(&assessment),
+            crate::strategy::credit_transfer::render_markdown(&assessment),
         ),
     ] {
         let assistant = role == "assistant";
@@ -1005,7 +1005,7 @@ const SEED_ASSESSMENT_TRACE: &str = "Searching the DSV course plans for matching
     Done: 2 candidates, strongest IB130N (partial overlap).\n";
 
 /// The fixture case's assessment, in the stored shape
-/// (`strategy::assessment::Assessment`): one partial match, one weak
+/// (`strategy::credit_transfer::Assessment`): one partial match, one weak
 /// candidate and one plan ruled out, so every part of the case view
 /// has something to draw.
 fn seed_assessment() -> serde_json::Value {

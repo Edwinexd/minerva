@@ -137,7 +137,7 @@ pub async fn run(
         &ctx.reranker_model,
         &ctx.qdrant,
         &collection_name,
-        &ctx.retrieval_query(),
+        &ctx.user_content,
         ctx.max_chunks,
         ctx.min_score,
         &ctx.embedding_provider,
@@ -145,7 +145,6 @@ pub async fn run(
         &orphaned,
     )
     .await;
-    let raw_chunks = ctx.with_rulebook(&http_client, raw_chunks, &orphaned).await;
 
     // Figures matching the question, offered beside the reply and
     // described in the writeup prompt.
@@ -304,7 +303,6 @@ pub async fn run(
     let cap = per_response_token_cap(ctx.daily_token_budget);
     let catalog_flags = ToolCatalogFlags {
         kg_enabled: ctx.kg_enabled,
-        rulebook: !ctx.rulebook_documents.is_empty(),
     };
     let config = ResearchConfig::defaults(use_logprobs);
     let mut research = research_phase::run(

@@ -1,5 +1,5 @@
-pub mod assessment;
 pub mod common;
+pub mod credit_transfer;
 pub mod extraction_guard;
 pub mod figures;
 pub mod flare;
@@ -249,12 +249,9 @@ pub struct GenerationContext {
     /// Workspace kind, which picks the system-prompt persona (see
     /// `common::PromptFrame`).
     pub workspace_kind: minerva_core::models::WorkspaceKind,
-    /// Files attached to this conversation (`routes::attachments`), given
-    /// to the model in full on every turn.
-    pub attachments: Vec<common::ReferenceAttachment>,
     /// Ids of the workspace's documents mirrored from SU's rulebook; empty
-    /// outside credit transfer workspaces. Their excerpts get their own
-    /// prompt section, and the assessment's plan search skips them.
+    /// outside credit transfer workspaces. The credit transfer search skips
+    /// them so plans never take a rule excerpt's slot.
     pub rulebook_documents: Vec<String>,
     pub user_content: String,
     pub is_first_message: bool,
@@ -318,23 +315,6 @@ pub struct GenerationContext {
 }
 
 impl GenerationContext {
-    /// What the seed retrieval searches for. Normally the user's message;
-    /// with attachments the message is often just "assess this", so each
-    /// attachment's learning-outcomes passage is searched as well. Bounded
-    /// so the query stays within what the embedding model reads.
-    pub fn retrieval_query(&self) -> std::borrow::Cow<'_, str> {
-        if self.attachments.is_empty() {
-            return std::borrow::Cow::Borrowed(&self.user_content);
-        }
-        let per_file = 1_500 / self.attachments.len().max(1);
-        let mut query = self.user_content.clone();
-        for a in &self.attachments {
-            query.push_str("\n\n");
-            query.push_str(common::outcome_excerpt(&a.text, per_file));
-        }
-        std::borrow::Cow::Owned(query)
-    }
-
     /// Excerpts of SU's rulebook matching `query`, searched apart from the
     /// rest of the workspace: the DSV plans outnumber the rule documents
     /// several times over and would otherwise fill every slot. Empty
@@ -373,49 +353,13 @@ impl GenerationContext {
         .await
     }
 
-    /// A turn's seed retrieval plus up to [`RULEBOOK_CHUNKS`] rule
-    /// excerpts for the user's message that it does not already hold, so
-    /// every credit transfer answer can draw on the rules. Unchanged in
-    /// other kinds.
-    pub async fn with_rulebook(
-        &self,
-        http: &reqwest::Client,
-        mut chunks: Vec<common::RagChunk>,
-        orphaned: &std::collections::HashSet<String>,
-    ) -> Vec<common::RagChunk> {
-        let rules = self
-            .rulebook_lookup(http, &self.user_content, RULEBOOK_CHUNKS, orphaned)
-            .await;
-        for rule in rules {
-            if !chunks
-                .iter()
-                .any(|c| c.document_id == rule.document_id && c.text == rule.text)
-            {
-                chunks.push(rule);
-            }
-        }
-        chunks
-    }
-
     /// The conversation-stable parts of the system prompt.
     pub fn prompt_frame(&self) -> common::PromptFrame<'_> {
         common::PromptFrame {
-            kind: self.workspace_kind,
             carryover: self.carryover.as_deref(),
-            attachments: &self.attachments,
-            rulebook_documents: &self.rulebook_documents,
         }
     }
 }
-
-/// Rule excerpts a credit transfer chat turn gets beside its seed
-/// retrieval. Each runs a few hundred tokens.
-pub const RULEBOOK_CHUNKS: i32 = 4;
-
-/// Strategy name of a credit transfer case's assessment turn. Never stored
-/// on a workspace; `routes::chat` picks it for the turn that follows newly
-/// attached files.
-pub const ASSESSMENT: &str = "credit_transfer_assessment";
 
 /// Run the appropriate strategy based on the strategy name.
 ///
@@ -425,13 +369,22 @@ pub const ASSESSMENT: &str = "credit_transfer_assessment";
 /// `tool_use_enabled` axis is read off `ctx` inside each strategy:
 /// when FALSE they behave as they always have; when TRUE they split
 /// into a research+writeup pair (see `research_phase`, `writeup`).
+///
+/// A credit transfer workspace ignores both: its staff chat answers
+/// every turn itself (`credit_transfer::run`), comparing courses or
+/// talking, from one retrieval and one model call. The course
+/// strategies answer with course material and none of its plans or
+/// rules, so a turn routed there could not use them.
 pub async fn run_strategy(
     strategy: &str,
     ctx: GenerationContext,
     tx: mpsc::Sender<Result<Event, AppError>>,
 ) {
+    if ctx.workspace_kind == minerva_core::models::WorkspaceKind::CreditTransfer {
+        credit_transfer::run(ctx, tx).await;
+        return;
+    }
     match strategy {
-        ASSESSMENT => assessment::run(ctx, tx).await,
         "flare" => flare::run(ctx, tx).await,
         _ => simple::run(ctx, tx).await,
     }

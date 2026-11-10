@@ -1195,8 +1195,8 @@ export type Verdict = "full" | "partial" | "none"
 export type FactMatch = "match" | "differs" | "unknown"
 
 /**
- * A structured credit transfer assessment (`strategy::assessment` on the
- * server). DSV facts come from the plan archive; the rest is the model's
+ * A structured credit transfer comparison (`strategy::credit_transfer` on
+ * the server). DSV facts come from the plan archive; the rest is the model's
  * comparison, checked against the plans it was given. It describes overlap
  * and never recommends a decision.
  */

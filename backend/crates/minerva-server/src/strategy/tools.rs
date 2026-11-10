@@ -38,9 +38,6 @@ pub struct ToolCatalogFlags {
     /// tool. Kept in the struct so the catalog assembler has the
     /// information it needs once that tool lands.
     pub kg_enabled: bool,
-    /// The workspace mirrors SU's rulebook (credit transfer): adds
-    /// `search_rules`, which searches the rules on their own.
-    pub rulebook: bool,
 }
 
 /// Services the dispatcher borrows to execute a tool call. Owned by
@@ -74,9 +71,6 @@ pub struct ToolDispatchCtx<'a> {
     /// corpus as the strategy's seed retrieval. Computed once per
     /// turn by the strategy and reused for every tool call.
     pub orphaned_doc_ids: &'a std::collections::HashSet<String>,
-    /// Ids of the workspace's rulebook documents, the corpus
-    /// `search_rules` is confined to.
-    pub rulebook_documents: &'a [String],
 }
 
 #[derive(Debug)]
@@ -188,24 +182,6 @@ fn get_document_chunks_spec() -> Json {
     })
 }
 
-fn search_rules_spec() -> Json {
-    serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": "search_rules",
-            "description": "Search Stockholm University's governing documents for education (Regelboken: regulations, procedures and guidance on credit transfer, examination, admission, degrees and more) by semantic similarity. Searches only those documents, so course plans never crowd them out. Use it whenever the question touches what the rules require, allow or how a matter is handled. The documents are in Swedish, so Swedish queries match best.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "The rule question or topic, preferably in Swedish (e.g. 'tillgodoräknande väsentlig skillnad')."},
-                    "k": {"type": "integer", "description": "Max chunks to return (1-10).", "default": 5, "minimum": 1, "maximum": 10}
-                },
-                "required": ["query"]
-            }
-        }
-    })
-}
-
 /// Build the catalog of tools to advertise to the model for this
 /// course + this request. Feature flags drive which tools appear;
 /// the v1 base catalog is unconditional (always present when
@@ -215,7 +191,7 @@ pub fn assemble_catalog(flags: ToolCatalogFlags) -> Vec<Json> {
     // Base tools always present when tool_use_enabled. Ordered most-
     // useful-first so a token-budget-limited model is more likely to
     // see the right tool when it scans the catalog.
-    let mut tools = vec![
+    let tools = vec![
         keyword_search_spec(),
         semantic_search_spec(),
         list_documents_spec(),
@@ -227,9 +203,6 @@ pub fn assemble_catalog(flags: ToolCatalogFlags) -> Vec<Json> {
     // to `mut` and push to it once that tool lands. Reading
     // `flags.kg_enabled` here keeps the field live in the codebase.
     let _ = flags.kg_enabled;
-    if flags.rulebook {
-        tools.push(search_rules_spec());
-    }
     tools
 }
 
@@ -298,14 +271,6 @@ pub async fn dispatch(
                 })?;
             run_keyword_search(args, ctx).await
         }
-        "search_rules" => {
-            let args: SemanticSearchArgs =
-                serde_json::from_str(args_str).map_err(|e| ToolError::BadArgs {
-                    tool: "search_rules",
-                    reason: e.to_string(),
-                })?;
-            run_search_rules(args, ctx).await
-        }
         "list_documents" => run_list_documents(ctx).await,
         "get_document_chunks" => {
             let args: GetDocumentChunksArgs =
@@ -349,38 +314,6 @@ async fn run_semantic_search(
         ctx.embedding_provider,
         ctx.embedding_model,
         ctx.orphaned_doc_ids,
-    )
-    .await;
-    let model_message = format_chunks_for_model(&chunks);
-    Ok(ToolOutcome {
-        chunks,
-        model_message,
-    })
-}
-
-async fn run_search_rules(
-    args: SemanticSearchArgs,
-    ctx: &ToolDispatchCtx<'_>,
-) -> Result<ToolOutcome, ToolError> {
-    let k = args.k.unwrap_or(5).clamp(1, 10);
-    let chunks = common::rag_lookup_scoped(
-        ctx.http_client,
-        ctx.openai_api_key,
-        ctx.fastembed,
-        ctx.reranker,
-        ctx.reranking_enabled,
-        ctx.reranker_model,
-        ctx.qdrant,
-        ctx.collection_name,
-        &args.query,
-        k,
-        ctx.min_score,
-        ctx.embedding_provider,
-        ctx.embedding_model,
-        common::DocScope::Within {
-            only: ctx.rulebook_documents,
-            excluded: ctx.orphaned_doc_ids,
-        },
     )
     .await;
     let model_message = format_chunks_for_model(&chunks);
@@ -564,10 +497,7 @@ mod tests {
 
     #[test]
     fn catalog_advertises_four_v1_tools() {
-        let catalog = assemble_catalog(ToolCatalogFlags {
-            kg_enabled: false,
-            rulebook: false,
-        });
+        let catalog = assemble_catalog(ToolCatalogFlags { kg_enabled: false });
         let names: Vec<&str> = catalog
             .iter()
             .filter_map(|t| {
@@ -588,37 +518,9 @@ mod tests {
         // v1 has no kg-gated tool yet, so the flag is currently a
         // no-op. This test exists to fail-loudly when a follow-up
         // adds the gated tool but forgets to update the assertion.
-        let off = assemble_catalog(ToolCatalogFlags {
-            kg_enabled: false,
-            rulebook: false,
-        });
-        let on = assemble_catalog(ToolCatalogFlags {
-            kg_enabled: true,
-            rulebook: false,
-        });
+        let off = assemble_catalog(ToolCatalogFlags { kg_enabled: false });
+        let on = assemble_catalog(ToolCatalogFlags { kg_enabled: true });
         assert_eq!(off.len(), on.len());
-    }
-
-    #[test]
-    fn rulebook_flag_adds_search_rules() {
-        let name = |t: &Json| t["function"]["name"].as_str().map(str::to_string);
-        let off = assemble_catalog(ToolCatalogFlags {
-            kg_enabled: false,
-            rulebook: false,
-        });
-        let on = assemble_catalog(ToolCatalogFlags {
-            kg_enabled: false,
-            rulebook: true,
-        });
-        assert!(!off.iter().filter_map(name).any(|n| n == "search_rules"));
-        assert!(on.iter().filter_map(name).any(|n| n == "search_rules"));
-        assert!(is_advertised(
-            "search_rules",
-            ToolCatalogFlags {
-                kg_enabled: false,
-                rulebook: true
-            }
-        ));
     }
 
     #[test]

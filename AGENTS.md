@@ -532,9 +532,13 @@ teacher checks read the same view.
 - The scheduler mirrors the current DSV plans into every credit transfer
   workspace as ordinary documents (`source_system = syllabus_archive`,
   `source_ref = {code}/{lang}`, kind locked to `syllabus`); a new version
-  replaces its document, a dropped plan is orphaned.
+  replaces its document, a dropped plan is orphaned. Those documents are
+  the embedding index the plan search ranks; the cards' facts and full
+  text come from the plan archive tables.
 - It mirrors SU's rulebook the same way (`source_system = su_rulebook`,
-  see "SU Rulebook (Regelboken)").
+  see "SU Rulebook (Regelboken)"). Their ids
+  (`GenerationContext::rulebook_documents`) keep rule excerpts out of the
+  plan search and let `rulebook_lookup` search the rules alone.
 - `/workspaces/{id}` is the workspace page, not a chat: My chats (a table of
   the viewer's own chats with their best match), DSV course plans (every
   plan with level, versions and indexing state), Regelboken (every rule
@@ -550,42 +554,44 @@ teacher checks read the same view.
   full and never into the shared index. The owner can open the file again
   (`.../attachments/{id}/file`, text served as `text/plain` with a sandbox
   CSP, never as HTML).
-- The structured assessment (cards) is one kind of answer, not a mode.
-  In a chat with attachments, `classification::credit_transfer_turn`
-  asks the utility model per turn whether the staff member wants the
-  attached courses compared (`strategy::assessment`) or an ordinary
-  answer; without a utility model it assesses only files attached since
-  the last assessment (`case_assessments::has_unassessed_attachments`).
-  An empty composer with new files sends the "Assess" request.
-- The assessment finds candidate plans (codes named in the staff note,
-  then embedding search fused with BM25 over the plans' stored text, so a
-  missing embedder only weakens it) and up to six rulebook excerpts
-  (credit transfer in general, then the note, searched in the rule
-  documents alone), gives the model the attachments, the full text of up
-  to five plans and the excerpts labelled `R1`..., and asks for one JSON
-  assessment under a strict schema. The answer is checked before it is
-  kept: unknown plan codes are dropped, pages outside a document cleared
-  and rule points citing no given excerpt dropped (document, URL and page
-  come from the excerpt); DSV credits, level, name, version and modules
-  come from the archive, and credits / level match is decided in code.
-  Version 2 assessments carry `rules`, drawn as "What SU's rules say". It describes overlap (full, partial, none) and what is missing,
-  never a decision: no recommended verdict, credit amount or modules to
-  grant, and no advisory banner, since the staff using it decide. The
-  stored field is still called `verdict`. The message
-  text is a plain rendering (what follow-ups and exports read); the
-  structure is in `case_assessments` and drawn as cards by
+- One pipeline, one call. Every turn in a credit transfer chat is
+  answered by `strategy::credit_transfer` (`run_strategy` dispatches on
+  the workspace kind, before the strategy name): it reads the turn's
+  corpus once, makes one model call, and the reply is either a written
+  answer or a comparison. There is no per-turn router and no second
+  search; the comparison is a reply format the model may choose, not a
+  mode.
+  - Retrieval: the attached syllabuses (full text, `[Page N]` markers),
+    candidate DSV plans (codes named in the staff note, then embedding
+    search fused with BM25 over the plans' stored text, so a missing
+    embedder only weakens it, up to five), and up to six rulebook
+    excerpts (credit transfer in general, then the note, searched in the
+    rule documents alone). No plan search when no file is attached. The
+    plan candidates' full text and archive facts go in the prompt.
+  - The call is schema-bound (`credit_transfer_reply`): `respond_with`
+    is `answer` or `comparison`, and the unused field carries its empty
+    shape. The conversation history comes before the corpus, so a
+    follow-up reads the earlier comparison's rendering (including its
+    outcome table).
+  - A comparison is checked before it is kept: unknown plan codes are
+    dropped, pages outside a document cleared and rule points citing no
+    given excerpt dropped (document, URL and page come from the
+    excerpt); DSV credits, level, name, version and modules come from the
+    archive, and credits / level match is decided in code.
+  - A written answer streams as one token event after the call. A
+    comparison streams as its thinking trace only; the cards come from
+    the stored structure, which the client refetches when the stream
+    closes.
+- The comparison describes overlap (full, partial, none) and what is
+  missing, never a decision: no recommended verdict, credit amount or
+  modules to grant, and no advisory banner, since the staff using it
+  decide. The stored field is still called `verdict`. The message text is
+  a plain rendering (`render_markdown`; what follow-ups and exports
+  read); the structure is in `case_assessments` and drawn as cards by
   `components/credit-transfer/assessment-view.tsx`, with page citations
-  into the SU plan PDF and the uploaded file. Search and comparison
-  stream as the turn's thinking trace.
-- Other turns are ordinary chat with the staff persona
-  (`common::PromptFrame`). The 231 plans outnumber the rule documents, so
-  in one shared top-N search the rules rarely made it in: every turn now
-  adds up to `strategy::RULEBOOK_CHUNKS` rule excerpts searched on their
-  own (`GenerationContext::with_rulebook`, a `DocScope::Within` Qdrant
-  filter), the tool-use research phase gets a `search_rules` tool, and
-  the excerpts get their own prompt section (by document id,
-  `rulebook_documents`). The assessment's plan search excludes them so
-  they never take a candidate's slot.
+  into the SU plan PDF and the uploaded file. `has_unassessed_attachments`
+  (files newer than the newest comparison) drives the composer's
+  "Assess" action.
 - "Export as PDF" prints the chat; `index.css` grows its scroll
   containers in print media and the chrome is `print:hidden`.
 - `scripts/seed-dev.sh` seeds a credit transfer workspace, three fixture

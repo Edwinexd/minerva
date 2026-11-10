@@ -311,7 +311,6 @@ pub async fn run(
         workspace_id: ctx.workspace_id,
         min_score: ctx.min_score,
         orphaned_doc_ids,
-        rulebook_documents: &ctx.rulebook_documents,
     };
 
     let catalog = tools::assemble_catalog(catalog_flags);
@@ -1270,7 +1269,6 @@ mod stream_integration_tests {
             history: Vec::<MessageRow>::new(),
             carryover: None,
             workspace_kind: minerva_core::models::WorkspaceKind::Course,
-            attachments: Vec::new(),
             rulebook_documents: Vec::new(),
             user_content: "Hello".to_string(),
             is_first_message: true,

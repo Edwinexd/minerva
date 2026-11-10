@@ -122,7 +122,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &ctx.reranker_model,
         &ctx.qdrant,
         &collection_name,
-        &ctx.retrieval_query(),
+        &ctx.user_content,
         ctx.max_chunks,
         ctx.min_score,
         &ctx.embedding_provider,
@@ -130,9 +130,6 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         &orphaned_doc_ids,
     )
     .await;
-    let initial_chunks_raw = ctx
-        .with_rulebook(&http_client, initial_chunks_raw, &orphaned_doc_ids)
-        .await;
     // Adversarial filter is part of the KG bundle (defence in depth on
     // top of per-doc kind classification). Skip when KG is gated off.
     let mut initial_chunks = if ctx.kg_enabled {

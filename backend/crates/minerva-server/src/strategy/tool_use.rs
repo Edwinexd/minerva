@@ -128,23 +128,9 @@ pub async fn run(
         .unwrap_or_default();
 
     // 1. Seed retrieval (identical to simple/parallel/flare's preamble).
-    let raw_chunks = common::rag_lookup(
-        &http_client,
-        &ctx.openai_api_key,
-        &ctx.fastembed,
-        &ctx.reranker,
-        ctx.reranking_enabled,
-        &ctx.reranker_model,
-        &ctx.qdrant,
-        &collection_name,
-        &ctx.user_content,
-        ctx.max_chunks,
-        ctx.min_score,
-        &ctx.embedding_provider,
-        &ctx.embedding_model,
-        &orphaned,
-    )
-    .await;
+    // Seed retrieval: the shared index for a course, nothing for a
+    // credit transfer workspace (its corpus is the context).
+    let raw_chunks = common::seed_chunks(&ctx, &http_client, &collection_name, &orphaned).await;
 
     // Figures matching the question, offered beside the reply and
     // described in the writeup prompt.

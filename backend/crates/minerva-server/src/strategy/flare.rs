@@ -113,23 +113,10 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         minerva_db::queries::documents::orphaned_doc_ids(&ctx.db, ctx.workspace_id)
             .await
             .unwrap_or_default();
-    let initial_chunks_raw = common::rag_lookup(
-        &http_client,
-        &ctx.openai_api_key,
-        &ctx.fastembed,
-        &ctx.reranker,
-        ctx.reranking_enabled,
-        &ctx.reranker_model,
-        &ctx.qdrant,
-        &collection_name,
-        &ctx.user_content,
-        ctx.max_chunks,
-        ctx.min_score,
-        &ctx.embedding_provider,
-        &ctx.embedding_model,
-        &orphaned_doc_ids,
-    )
-    .await;
+    // Seed retrieval: the shared index for a course, nothing for a
+    // credit transfer workspace (its corpus is the context).
+    let initial_chunks_raw =
+        common::seed_chunks(&ctx, &http_client, &collection_name, &orphaned_doc_ids).await;
     // Adversarial filter is part of the KG bundle (defence in depth on
     // top of per-doc kind classification). Skip when KG is gated off.
     let mut initial_chunks = if ctx.kg_enabled {

@@ -1867,6 +1867,7 @@ pub(super) async fn run_chat_message(
         carryover: conv.carryover_summary.clone(),
         workspace_kind,
         rulebook_documents,
+        corpus: None,
         user_content,
         is_first_message,
         daily_token_budget,
@@ -1881,6 +1882,18 @@ pub(super) async fn run_chat_message(
         tool_use_enabled: course.tool_use_enabled,
         viewer_is_teacher,
     };
+
+    // A credit transfer workspace reads its plan and rule corpus once per
+    // turn, before the stream opens, so the prompt, the reply and the check
+    // of that reply all see the same text.
+    let mut ctx = ctx;
+    if workspace_kind == minerva_core::models::WorkspaceKind::CreditTransfer {
+        ctx.corpus = Some(
+            strategy::credit_transfer::prepare(&ctx)
+                .await
+                .map_err(AppError::Internal)?,
+        );
+    }
 
     tokio::spawn(async move {
         strategy::run_strategy(&strategy_name, ctx, tx).await;

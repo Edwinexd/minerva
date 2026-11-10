@@ -48,6 +48,25 @@ pub fn build_writeup_system_prompt(
     // were always vague.
     let base = common::build_system_prompt(course_name, custom_prompt, &[], frame);
 
+    // A credit transfer workspace has no numbered excerpts to cite: the
+    // reply format and the citations into plans and files are already in
+    // its persona. It does get the research findings, since those come
+    // from the workspace's tools.
+    if frame.corpus.is_some() {
+        return format!(
+            "{base}\n\n## What the tools found (your own prior notes)\n\
+            You already gathered context for this turn with the workspace's tools. \n\
+            Treat the bullets below as established facts and answer with them; do \n\
+            not re-derive them.\n\n{tool_log}{transcript}",
+            tool_log = tool_log,
+            transcript = if research_transcript.trim().is_empty() {
+                String::new()
+            } else {
+                format!("\n\n{}", research_transcript.trim())
+            },
+        );
+    }
+
     // Numbered chunk view: `[#N] <filename>` heading per chunk, then
     // the chunk body. The IDs are what the model cites against
     // inline.
@@ -154,15 +173,14 @@ pub async fn run(
     let messages = compose_messages(&system, ctx);
 
     let mut full_text = String::new();
-    common::stream_chat_to_client(
+    common::complete_reply(
+        ctx,
         &ctx.provider,
         &ctx.model,
         ctx.temperature,
         &messages,
-        false,
         tx,
         &mut full_text,
-        &ctx.fallback_routes,
         usage,
     )
     .await

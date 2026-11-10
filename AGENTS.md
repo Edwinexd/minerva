@@ -554,34 +554,45 @@ teacher checks read the same view.
   full and never into the shared index. The owner can open the file again
   (`.../attachments/{id}/file`, text served as `text/plain` with a sandbox
   CSP, never as HTML).
-- One pipeline, one call. Every turn in a credit transfer chat is
-  answered by `strategy::credit_transfer` (`run_strategy` dispatches on
-  the workspace kind, before the strategy name): it reads the turn's
-  corpus once, makes one model call, and the reply is either a written
-  answer or a comparison. There is no per-turn router and no second
-  search; the comparison is a reply format the model may choose, not a
-  mode.
-  - Retrieval: the attached syllabuses (full text, `[Page N]` markers),
-    candidate DSV plans (codes named in the staff note, then embedding
-    search fused with BM25 over the plans' stored text, so a missing
-    embedder only weakens it, up to five), and up to six rulebook
-    excerpts (credit transfer in general, then the note, searched in the
-    rule documents alone). No plan search when no file is attached. The
-    plan candidates' full text and archive facts go in the prompt.
-  - The call is schema-bound (`credit_transfer_reply`): `respond_with`
-    is `answer` or `comparison`, and the unused field carries its empty
-    shape. The conversation history comes before the corpus, so a
-    follow-up reads the earlier comparison's rendering (including its
-    outcome table).
+- One pipeline. A credit transfer turn runs the workspace's configured
+  strategy like any other chat (`strategy::run_strategy`); what differs is
+  its input and its reply format, both read off
+  `GenerationContext::corpus` (a `credit_transfer::Corpus`, prepared in
+  `routes::chat::run_chat_message` from `credit_transfer::prepare`):
+  - Retrieval is the corpus, not the shared index:
+    `common::seed_chunks` returns nothing for that kind. The corpus is the
+    attached syllabuses (full text, `[Page N]` markers), candidate DSV
+    plans (codes named in the staff note, then embedding search fused with
+    BM25 over the plans' stored text, so a missing embedder only weakens
+    it, up to five) with their archive facts and full text, and up to six
+    rulebook excerpts (credit transfer in general, then the note, searched
+    in the rule documents alone). No plan search when no file is attached.
+  - The prompt builder returns `credit_transfer::system_prompt` when the
+    frame carries a corpus: the staff persona, the two reply formats, the
+    owner's instructions, the carryover, then attachments, plans and
+    labelled rule excerpts. It is conversation-stable, so it sits in the
+    cache-friendly prefix and the turn's message carries only the note.
+  - The reply is one schema-bound call (`common::complete_reply`, name
+    `credit_transfer_reply`): `respond_with` is `answer` or `comparison`,
+    and the unused field carries its empty shape. A course streams its
+    answer instead; a schema-bound reply cannot be built from a
+    half-streamed one, and the cards are drawn from the stored structure.
+    A written answer is sent to the client as one token event before the
+    turn closes.
+  - `common::finalize` reads the envelope into the message text plus a
+    checked comparison, which it stores in `case_assessments` (and names a
+    chat by its external course when the comparison opens it). So every
+    strategy that can answer that kind posts it the same way.
+  - Tools stay available: `tool_use_enabled` runs the research phase over
+    the workspace's documents and rules, and the writeup gets the corpus
+    prompt plus the findings. FLARE's restart loop is the exception and is
+    skipped for this kind: it steers extra retrieval by decoding logprobs
+    from a prose answer as it streams.
   - A comparison is checked before it is kept: unknown plan codes are
     dropped, pages outside a document cleared and rule points citing no
-    given excerpt dropped (document, URL and page come from the
-    excerpt); DSV credits, level, name, version and modules come from the
-    archive, and credits / level match is decided in code.
-  - A written answer streams as one token event after the call. A
-    comparison streams as its thinking trace only; the cards come from
-    the stored structure, which the client refetches when the stream
-    closes.
+    given excerpt dropped (document, URL and page come from the excerpt);
+    DSV credits, level, name, version and modules come from the archive,
+    and credits / level match is decided in code.
 - The comparison describes overlap (full, partial, none) and what is
   missing, never a decision: no recommended verdict, credit amount or
   modules to grant, and no advisory banner, since the staff using it

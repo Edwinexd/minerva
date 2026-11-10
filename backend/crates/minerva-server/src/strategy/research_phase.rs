@@ -718,6 +718,21 @@ fn build_research_system_prompt(ctx: &GenerationContext, chunks: &[RagChunk]) ->
         chunks,
         ctx.prompt_frame(),
     );
+    if ctx.corpus.is_some() {
+        return format!(
+            "{base}\n\n## Research phase (you are the FIRST of two agents)\n\
+            You are the RESEARCH agent in a two-step pipeline. A separate WRITEUP \n\
+            agent composes the reply the staff member sees, using what you gather \n\
+            here. They will never read this phase.\n\
+            \n\
+            Call tools (`keyword_search`, `semantic_search`, `list_documents`, \n\
+            `get_document_chunks`) for anything the plans and rule excerpts in your \n\
+            instructions do not already settle, then emit a SHORT bulleted handoff: \n\
+            at most 5 bullets, one fact each, no prose.\n\
+            \n\
+            Never write the staff-facing reply here.",
+        );
+    }
     format!(
         "{base}\n\n## Research phase (you are the FIRST of two agents)\n\
         You are the RESEARCH agent in a two-step pipeline. A separate WRITEUP \
@@ -1270,6 +1285,7 @@ mod stream_integration_tests {
             carryover: None,
             workspace_kind: minerva_core::models::WorkspaceKind::Course,
             rulebook_documents: Vec::new(),
+            corpus: None,
             user_content: "Hello".to_string(),
             is_first_message: true,
             daily_token_budget: 0,

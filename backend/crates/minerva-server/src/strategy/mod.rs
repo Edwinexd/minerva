@@ -249,6 +249,11 @@ pub struct GenerationContext {
     /// Workspace kind, which picks the system-prompt persona (see
     /// `common::PromptFrame`).
     pub workspace_kind: minerva_core::models::WorkspaceKind,
+    /// A credit transfer workspace's corpus: its attached syllabuses, the
+    /// DSV plans that may correspond to them and SU's rule excerpts, read
+    /// once by `routes::chat` and shared by the prompt, the reply and the
+    /// check of that reply. `None` in every other kind.
+    pub corpus: Option<credit_transfer::Corpus>,
     /// Ids of the workspace's documents mirrored from SU's rulebook; empty
     /// outside credit transfer workspaces. The credit transfer search skips
     /// them so plans never take a rule excerpt's slot.
@@ -357,6 +362,7 @@ impl GenerationContext {
     pub fn prompt_frame(&self) -> common::PromptFrame<'_> {
         common::PromptFrame {
             carryover: self.carryover.as_deref(),
+            corpus: self.corpus.as_ref(),
         }
     }
 }
@@ -370,22 +376,20 @@ impl GenerationContext {
 /// when FALSE they behave as they always have; when TRUE they split
 /// into a research+writeup pair (see `research_phase`, `writeup`).
 ///
-/// A credit transfer workspace ignores both: its staff chat answers
-/// every turn itself (`credit_transfer::run`), comparing courses or
-/// talking, from one retrieval and one model call. The course
-/// strategies answer with course material and none of its plans or
-/// rules, so a turn routed there could not use them.
+/// A credit transfer workspace runs the same strategies; what changes is
+/// the input (`GenerationContext::corpus` replaces the shared-index seed)
+/// and the reply format (one schema-bound call, see
+/// `common::complete_reply`). FLARE is the exception: it steers additional
+/// retrieval by decoding logprobs from a prose answer as it streams, which
+/// a schema-bound reply does not produce, so that kind takes the
+/// single-pass path (`simple`) rather than the restart loop.
 pub async fn run_strategy(
     strategy: &str,
     ctx: GenerationContext,
     tx: mpsc::Sender<Result<Event, AppError>>,
 ) {
-    if ctx.workspace_kind == minerva_core::models::WorkspaceKind::CreditTransfer {
-        credit_transfer::run(ctx, tx).await;
-        return;
-    }
     match strategy {
-        "flare" => flare::run(ctx, tx).await,
+        "flare" if ctx.corpus.is_none() => flare::run(ctx, tx).await,
         _ => simple::run(ctx, tx).await,
     }
 }

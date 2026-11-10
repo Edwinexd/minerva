@@ -36,25 +36,9 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         .await
         .unwrap_or_default();
 
-    // RAG lookup (blocks before streaming starts). Orphaned chunks
-    // are filtered inside.
-    let raw_chunks = common::rag_lookup(
-        &http_client,
-        &ctx.openai_api_key,
-        &ctx.fastembed,
-        &ctx.reranker,
-        ctx.reranking_enabled,
-        &ctx.reranker_model,
-        &ctx.qdrant,
-        &collection_name,
-        &ctx.user_content,
-        ctx.max_chunks,
-        ctx.min_score,
-        &ctx.embedding_provider,
-        &ctx.embedding_model,
-        &orphaned,
-    )
-    .await;
+    // Seed retrieval: the shared index for a course, nothing for a
+    // credit transfer workspace (its corpus is the context).
+    let raw_chunks = common::seed_chunks(&ctx, &http_client, &collection_name, &orphaned).await;
 
     // Kind-aware partition: assignment_brief / lab_brief / exam matches
     // become `signals` (the model gets a refusal addendum but never the
@@ -191,15 +175,14 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
 
     let mut full_text = String::new();
     let mut usage = super::TurnUsage::default();
-    if let Err(e) = common::stream_chat_to_client(
+    if let Err(e) = common::complete_reply(
+        &ctx,
         &ctx.provider,
         &ctx.model,
         ctx.temperature,
         &messages,
-        false,
         &tx,
         &mut full_text,
-        &ctx.fallback_routes,
         &mut usage,
     )
     .await

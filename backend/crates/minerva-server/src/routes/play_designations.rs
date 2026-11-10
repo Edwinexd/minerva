@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::routes::guards::require_workspace_owner;
+use crate::routes::guards::{require_workspace_teacher, TeacherScope};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -87,7 +87,7 @@ async fn list_play_designations(
     Extension(user): Extension<User>,
     Path(course_id): Path<Uuid>,
 ) -> Result<Json<Vec<PlayDesignationResponse>>, AppError> {
-    require_workspace_owner(&state, course_id, &user).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let rows = minerva_db::queries::play_designations::list_by_course(&state.db, course_id).await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
@@ -98,7 +98,7 @@ async fn create_play_designation(
     Path(course_id): Path<Uuid>,
     Json(body): Json<CreatePlayDesignationRequest>,
 ) -> Result<Json<PlayDesignationResponse>, AppError> {
-    require_workspace_owner(&state, course_id, &user).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
 
     let designation = body.designation.trim().to_string();
     if designation.is_empty() || designation.len() > 64 {
@@ -136,7 +136,7 @@ async fn delete_play_designation(
     Extension(user): Extension<User>,
     Path((course_id, designation_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_workspace_owner(&state, course_id, &user).await?;
+    require_workspace_teacher(&state, course_id, &user, TeacherScope::Strict).await?;
     let deleted =
         minerva_db::queries::play_designations::delete(&state.db, designation_id, course_id)
             .await?;

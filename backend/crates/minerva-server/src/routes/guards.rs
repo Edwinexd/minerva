@@ -107,8 +107,8 @@ pub(crate) async fn is_teacher_of(
 }
 
 /// Authorize the caller as course owner or admin, and hand back the course
-/// row. Course membership grants nothing here; this is the guard for
-/// course-configuration surfaces (keys, signed URLs, settings).
+/// row. Course membership grants nothing here; teachers manage everything
+/// else in a course, but only the owner archives it.
 pub(crate) async fn require_workspace_owner(
     state: &AppState,
     workspace_id: Uuid,

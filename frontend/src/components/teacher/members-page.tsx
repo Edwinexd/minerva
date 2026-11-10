@@ -4,6 +4,7 @@ import {
   courseMembersQuery,
   courseQuery,
   courseRoleSuggestionsQuery,
+  userQuery,
 } from "@/lib/queries"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -35,11 +36,17 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
   const queryClient = useQueryClient()
   const [eppn, setEppn] = useState("")
   const [role, setRole] = useState("student")
+  const { data: user } = useQuery(userQuery)
   const canMutate = course?.my_role !== "ta"
-  // Approve/decline is backend-gated to owner+admin; a course teacher who
-  // isn't the owner still sees the suggestion list but the buttons would
-  // 403. Hide them to avoid the confusing dead-click.
   const canResolveSuggestions = course?.my_role === "teacher"
+  // Only the owner and admins may remove the owner or another teacher;
+  // the backend refuses it for everyone else.
+  const managesTeachers =
+    user?.role === "admin" || (!!user && user.id === course?.owner_id)
+  const canRemove = (m: { user_id: string; role: string }) =>
+    canMutate &&
+    m.user_id !== course?.owner_id &&
+    (managesTeachers || m.role !== "teacher")
 
   const invalidate = () => {
     queryClient.invalidateQueries({
@@ -226,7 +233,7 @@ export function MembersPage({ useParams }: { useParams: () => { courseId: string
                   <Badge variant="outline">
                     {!isCourse && m.role === "student" ? t("members.roleUser") : m.role}
                   </Badge>
-                  {canMutate && (
+                  {canRemove(m) && (
                     <Button
                       variant="ghost"
                       size="sm"

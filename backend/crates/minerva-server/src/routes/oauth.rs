@@ -99,6 +99,34 @@ fn is_loopback(url: &reqwest::Url) -> bool {
     matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
 }
 
+/// Does a requested redirect URI match one the client registered? Exact,
+/// except that a loopback URI matches on any port (RFC 8252 section 7.3):
+/// native clients bind an ephemeral port per login and register the URI
+/// without one, as Claude Code's metadata document does.
+fn redirect_uri_registered(registered: &[String], requested: &str) -> bool {
+    if !redirect_uri_allowed(requested) {
+        return false;
+    }
+    if registered.iter().any(|r| r == requested) {
+        return true;
+    }
+    let Ok(mut requested) = reqwest::Url::parse(requested) else {
+        return false;
+    };
+    if requested.scheme() != "http" || !is_loopback(&requested) {
+        return false;
+    }
+    requested.set_port(None).expect("http URL has a host");
+    registered.iter().any(|r| {
+        reqwest::Url::parse(r).is_ok_and(|mut r| {
+            r.scheme() == "http" && is_loopback(&r) && {
+                r.set_port(None).expect("http URL has a host");
+                r == requested
+            }
+        })
+    })
+}
+
 // ── Discovery ───────────────────────────────────────────────────────────
 
 /// Mounted at the site root, outside `/api`.
@@ -346,11 +374,10 @@ async fn authorize(
         Ok(c) => c,
         Err(e) => return authorize_error_page(&e),
     };
-    // Only an exact match against the registered URIs is trusted.
     let Some(redirect_uri) = q
         .redirect_uri
         .as_deref()
-        .filter(|u| client.redirect_uris.iter().any(|r| r == u) && redirect_uri_allowed(u))
+        .filter(|u| redirect_uri_registered(&client.redirect_uris, u))
     else {
         return authorize_error_page("redirect_uri is not registered for this client");
     };
@@ -852,6 +879,47 @@ mod tests {
         assert!(!redirect_uri_allowed("http://evil.example/cb"));
         assert!(!redirect_uri_allowed("https://x.example/cb#frag"));
         assert!(!redirect_uri_allowed("javascript:alert(1)"));
+    }
+
+    #[test]
+    fn loopback_redirect_uris_match_on_any_port() {
+        let registered = vec![
+            "http://localhost/callback".to_string(),
+            "http://127.0.0.1/callback".to_string(),
+            "https://assistant.example/cb".to_string(),
+        ];
+        assert!(redirect_uri_registered(
+            &registered,
+            "http://localhost:54883/callback"
+        ));
+        assert!(redirect_uri_registered(
+            &registered,
+            "http://localhost/callback"
+        ));
+        assert!(redirect_uri_registered(
+            &registered,
+            "http://127.0.0.1:9000/callback"
+        ));
+        assert!(redirect_uri_registered(
+            &registered,
+            "https://assistant.example/cb"
+        ));
+        assert!(!redirect_uri_registered(
+            &registered,
+            "http://localhost:54883/other"
+        ));
+        assert!(!redirect_uri_registered(
+            &registered,
+            "http://[::1]:54883/callback"
+        ));
+        assert!(!redirect_uri_registered(
+            &registered,
+            "https://assistant.example:8443/cb"
+        ));
+        assert!(!redirect_uri_registered(
+            &registered,
+            "http://evil.example:80/callback"
+        ));
     }
 
     #[test]

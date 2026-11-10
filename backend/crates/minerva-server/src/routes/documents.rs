@@ -9,7 +9,7 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::routes::guards::{require_workspace_owner, require_workspace_teacher, TeacherScope};
+use crate::routes::guards::{require_workspace_teacher, TeacherScope};
 use crate::state::AppState;
 
 /// Hard ceiling on `axum::DefaultBodyLimit::max(...)` for single-doc
@@ -222,7 +222,7 @@ async fn upload_document(
     Path(workspace_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<DocumentResponse>, AppError> {
-    require_workspace_owner(&state, workspace_id, &user).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::Strict).await?;
     // Teacher-facing upload accepts an optional `source_ref` multipart
     // field. When set, the doc is tagged with `source_system = "manual"`
     // (UI uploads, as opposed to the integration `"moodle"` /
@@ -320,7 +320,7 @@ async fn upload_mbz(
     Path(workspace_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<MbzImportResponse>, AppError> {
-    require_workspace_owner(&state, workspace_id, &user).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::Strict).await?;
     let field = multipart
         .next_field()
         .await
@@ -446,7 +446,7 @@ async fn patch_document(
     Path((workspace_id, doc_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<PatchDocumentBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_workspace_owner(&state, workspace_id, &user).await?;
+    require_workspace_teacher(&state, workspace_id, &user, TeacherScope::Strict).await?;
     // Scope doc_id to this course: the DB helper filters by id only, so
     // without this check a course owner could modify documents in other
     // courses by putting a foreign doc_id in the path.
@@ -497,7 +497,8 @@ async fn delete_document(
     Extension(user): Extension<User>,
     Path((workspace_id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let course = require_workspace_owner(&state, workspace_id, &user).await?;
+    let course =
+        require_workspace_teacher(&state, workspace_id, &user, TeacherScope::Strict).await?;
     // Scope doc_id to this course: the DB delete filters by id only, so
     // without this check a course owner could delete documents in other
     // courses by putting a foreign doc_id in the path.

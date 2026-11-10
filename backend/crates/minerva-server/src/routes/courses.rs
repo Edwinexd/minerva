@@ -12,7 +12,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::routes::guards::{require_workspace_owner, require_workspace_teacher, TeacherScope};
+use crate::routes::guards::{require_workspace_teacher, TeacherScope};
 use crate::state::AppState;
 
 /// Route layer for everything under `/courses/{course_id}`: those
@@ -109,7 +109,7 @@ async fn approve_role_suggestion(
     Extension(user): Extension<User>,
     Path((id, suggestion_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_workspace_owner(&state, id, &user).await?;
+    require_workspace_teacher(&state, id, &user, TeacherScope::Strict).await?;
 
     let suggestion =
         minerva_db::queries::role_suggestions::find_pending_by_id(&state.db, suggestion_id)
@@ -138,7 +138,7 @@ async fn decline_role_suggestion(
     Extension(user): Extension<User>,
     Path((id, suggestion_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_workspace_owner(&state, id, &user).await?;
+    require_workspace_teacher(&state, id, &user, TeacherScope::Strict).await?;
 
     let suggestion =
         minerva_db::queries::role_suggestions::find_pending_by_id(&state.db, suggestion_id)

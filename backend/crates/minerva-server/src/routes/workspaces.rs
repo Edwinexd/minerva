@@ -863,7 +863,9 @@ async fn update_workspace(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateWorkspaceRequest>,
 ) -> Result<Json<WorkspaceResponse>, AppError> {
-    let existing = require_workspace_owner(&state, id, &user).await?;
+    // Teachers are trusted with the whole course; assistants only read
+    // it, as the settings page does.
+    let existing = require_workspace_teacher(&state, id, &user, TeacherScope::Strict).await?;
 
     let fields = WorkspaceUpdateFields {
         name: body.name,
@@ -967,7 +969,7 @@ async fn add_member(
     Path(id): Path<Uuid>,
     Json(body): Json<AddMemberRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_workspace_owner(&state, id, &user).await?;
+    let workspace = require_workspace_teacher(&state, id, &user, TeacherScope::Strict).await?;
 
     // Find or create the user by eppn. EPPN is treated case-insensitively
     // to avoid creating duplicate accounts for `alice@su.se` vs `alice@SU.SE`.
@@ -981,6 +983,9 @@ async fn add_member(
     )
     .await?;
     let target_id = target.id;
+    // Adding an existing member rewrites their role, so it is a change to
+    // that member like a removal is.
+    require_may_change_member(&state, &workspace, &user, target_id).await?;
 
     let role = body.role.as_deref().unwrap_or("student");
     minerva_db::queries::workspaces::add_member(&state.db, id, target_id, role).await?;
@@ -995,10 +1000,31 @@ async fn remove_member(
     Extension(user): Extension<User>,
     Path((id, user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_workspace_owner(&state, id, &user).await?;
+    let workspace = require_workspace_teacher(&state, id, &user, TeacherScope::Strict).await?;
+    require_may_change_member(&state, &workspace, &user, user_id).await?;
 
     let removed = minerva_db::queries::workspaces::remove_member(&state.db, id, user_id).await?;
     Ok(Json(serde_json::json!({ "removed": removed })))
+}
+
+/// Teachers manage the members of their course, but only the owner and
+/// admins may remove or re-role the owner or another teacher.
+async fn require_may_change_member(
+    state: &AppState,
+    workspace: &minerva_db::queries::workspaces::WorkspaceRow,
+    user: &User,
+    target_id: Uuid,
+) -> Result<(), AppError> {
+    if user.role.is_admin() || workspace.owner_id == user.id {
+        return Ok(());
+    }
+    let target_role =
+        minerva_db::queries::workspaces::get_member_role(&state.db, workspace.id, target_id)
+            .await?;
+    if target_id == workspace.owner_id || target_role.as_deref() == Some("teacher") {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

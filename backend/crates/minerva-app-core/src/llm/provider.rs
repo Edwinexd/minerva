@@ -108,6 +108,7 @@ pub const PROVIDER_OPENAI: &str = "openai";
 pub const PROVIDER_ANTHROPIC: &str = "anthropic";
 pub const PROVIDER_GROQ: &str = "groq";
 pub const PROVIDER_GEMINI: &str = "gemini";
+pub const PROVIDER_MISTRAL: &str = "mistral";
 
 /// Catalog identity for a processing variant. The upstream model id remains
 /// unchanged; prices, enabled state and usage belong to the catalog entry.
@@ -133,6 +134,29 @@ pub fn apply_model_variant(body: &mut Value, provider_id: &str) {
         }
         .to_string(),
     );
+}
+
+/// Rewrite an OpenAI-shaped chat-completions body into what `provider_id`
+/// accepts. Every OpenAI-compatible request passes through here (in
+/// `openai_chat_request`), so call sites build one body shape for all
+/// providers.
+///
+/// Mistral validates its request with `additionalProperties: false`, so
+/// any field outside its schema is a 422 rather than ignored. It has no
+/// `stream_options` (streamed chunks carry `usage` without asking) and
+/// caps output with `max_tokens` only.
+pub fn adapt_body(body: &mut Value, provider_id: &str) {
+    apply_model_variant(body, provider_id);
+    if provider_id != PROVIDER_MISTRAL {
+        return;
+    }
+    let Some(obj) = body.as_object_mut() else {
+        return;
+    };
+    obj.remove("stream_options");
+    if let Some(cap) = obj.remove("max_completion_tokens") {
+        obj.entry("max_tokens").or_insert(cap);
+    }
 }
 
 /// Name of the single forced tool the Anthropic provider uses to emulate
@@ -207,10 +231,8 @@ pub async fn util_request(
 ) -> Option<Result<(String, ChatUsage), String>> {
     let provider = util.provider.as_ref()?;
     if let Some((url, key)) = provider.openai_endpoint() {
-        let mut body = body.clone();
-        apply_model_variant(&mut body, provider.id());
         let result = async {
-            let resp = super::openai_chat_request(http, url, key, &body).await?;
+            let resp = super::openai_chat_request(http, provider.id(), url, key, body).await?;
             let payload: Value = resp.json().await.map_err(|e| e.to_string())?;
             if let Some(err) = payload.get("error") {
                 return Err(err
@@ -552,7 +574,6 @@ impl OpenAiCompatibleProvider {
                 body[k.as_str()] = v.clone();
             }
         }
-        apply_model_variant(&mut body, &self.id);
         body
     }
 }
@@ -579,8 +600,14 @@ impl ChatProvider for OpenAiCompatibleProvider {
         let mut req = req;
         req.stream = false;
         let body = self.build_body(&req);
-        let response =
-            super::openai_chat_request(&self.client, &self.chat_url, &self.api_key, &body).await?;
+        let response = super::openai_chat_request(
+            &self.client,
+            &self.id,
+            &self.chat_url,
+            &self.api_key,
+            &body,
+        )
+        .await?;
         let payload: Value = response
             .json()
             .await
@@ -635,8 +662,14 @@ impl ChatProvider for OpenAiCompatibleProvider {
         let mut req = req;
         req.stream = true;
         let body = self.build_body(&req);
-        let response =
-            super::openai_chat_request(&self.client, &self.chat_url, &self.api_key, &body).await?;
+        let response = super::openai_chat_request(
+            &self.client,
+            &self.id,
+            &self.chat_url,
+            &self.api_key,
+            &body,
+        )
+        .await?;
 
         let mut framer = SseFramer::new(response.bytes_stream());
         let mut usage = ChatUsage::default();
@@ -997,7 +1030,7 @@ impl LlmRegistry {
         // included here via Google's OpenAI-compatible endpoint, which
         // serves `/chat/completions` + `/models` and supports
         // `response_format` json_schema, so it needs no separate impl.
-        let openai_compatible: [(&str, &str, String); 4] = [
+        let openai_compatible: [(&str, &str, String); 5] = [
             (
                 PROVIDER_CEREBRAS,
                 "https://api.cerebras.ai/v1",
@@ -1017,6 +1050,11 @@ impl LlmRegistry {
                 PROVIDER_GEMINI,
                 "https://generativelanguage.googleapis.com/v1beta/openai",
                 config.gemini_api_key.clone(),
+            ),
+            (
+                PROVIDER_MISTRAL,
+                "https://api.mistral.ai/v1",
+                config.mistral_api_key.clone(),
             ),
         ];
 
@@ -1099,6 +1137,38 @@ mod tests {
         let mut body = serde_json::json!({"model":"vision"});
         apply_model_variant(&mut body, PROVIDER_GROQ);
         assert!(body.get("service_tier").is_none());
+    }
+
+    #[test]
+    fn mistral_body_drops_fields_outside_its_schema() {
+        let mut body = serde_json::json!({
+            "model": "mistral-medium-latest",
+            "stream": true,
+            "stream_options": {"include_usage": true},
+            "max_completion_tokens": 64,
+            "reasoning_effort": "low",
+        });
+        adapt_body(&mut body, PROVIDER_MISTRAL);
+        assert!(body.get("stream_options").is_none());
+        assert!(body.get("max_completion_tokens").is_none());
+        assert_eq!(body["max_tokens"], 64);
+        assert_eq!(body["reasoning_effort"], "low");
+
+        let mut both = serde_json::json!({"max_tokens": 8, "max_completion_tokens": 64});
+        adapt_body(&mut both, PROVIDER_MISTRAL);
+        assert_eq!(both, serde_json::json!({"max_tokens": 8}));
+    }
+
+    #[test]
+    fn other_providers_keep_openai_fields() {
+        let original = serde_json::json!({
+            "model": "gpt-oss-120b",
+            "stream_options": {"include_usage": true},
+            "max_completion_tokens": 64,
+        });
+        let mut body = original.clone();
+        adapt_body(&mut body, PROVIDER_CEREBRAS);
+        assert_eq!(body, original);
     }
 
     /// Feed the framer fixed chunks, collecting every line it yields.

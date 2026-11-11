@@ -348,7 +348,7 @@ async fn complete(
         .ok_or("Unsupported image provider transport")?;
     let flex = provider.id() == llm::provider::PROVIDER_OPENAI
         && body["model"].as_str().is_some_and(|m| m.ends_with("@flex"));
-    llm::provider::apply_model_variant(&mut body, provider.id());
+    llm::provider::adapt_body(&mut body, provider.id());
     for attempt in 0..2 {
         let response = http
             .post(url)

@@ -45,6 +45,7 @@ locals {
       MINERVA_ADMINS: "${var.minerva_admins}"
       CEREBRAS_API_KEY: "${var.cerebras_api_key}"
       OPENAI_API_KEY: "${var.openai_api_key}"
+      MISTRAL_API_KEY: "${var.mistral_api_key}"
       MINERVA_SERVICE_API_KEY: "${var.minerva_service_api_key}"
     ---
     # existing SU account on Olympus for the visual extraction scheduler loop.

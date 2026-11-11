@@ -78,6 +78,13 @@ variable "openai_api_key" {
   sensitive   = true
 }
 
+variable "mistral_api_key" {
+  description = "Mistral API key; empty leaves the mistral LLM provider off"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "minerva_service_api_key" {
   description = "Global service API key for automated pipelines (e.g. transcript fetcher)"
   type        = string

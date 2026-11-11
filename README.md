@@ -49,7 +49,7 @@ Regenerate with `docs/screenshots/regenerate.mjs` (see [docs/screenshots/README.
 | Frontend runtime | Node 26 (Alpine) in Docker |
 | Database | PostgreSQL 16 |
 | Vector DB | Qdrant (per-course versioned collections) |
-| LLM | Admin-managed `chat_models` catalog (per-model provider + USD rates). Providers register from env keys: Cerebras (default; `gpt-oss-120b` across the stack ; classifiers, Aegis, rewrites, writeup), OpenAI, Anthropic, Groq, Gemini, or any OpenAI-compatible endpoint via `MINERVA_LLM_BASE_URL__<PROVIDER>` |
+| LLM | Admin-managed `chat_models` catalog (per-model provider + USD rates). Providers register from env keys: Cerebras (default; `gpt-oss-120b` across the stack ; classifiers, Aegis, rewrites, writeup), OpenAI, Anthropic, Groq, Gemini, Mistral, or any OpenAI-compatible endpoint via `MINERVA_LLM_BASE_URL__<PROVIDER>` |
 | Embeddings | OpenAI or local fastembed (memory-budgeted LRU cache, HuggingFace cache persisted on `/data0` in prod) |
 | Edge | Apache 2 with `mod_shib` + `mod_lua` |
 
@@ -83,7 +83,7 @@ For the k3s production layout used at DSV, see `k8s/`.
 | `MINERVA_DOCS_PATH` | Document storage path |
 | `CEREBRAS_API_KEY` | Inference key; required (the default chat + utility models are Cerebras-hosted) |
 | `OPENAI_API_KEY` | OpenAI chat models and OpenAI embeddings (optional with fastembed) |
-| `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` | Optional; a provider is registered only when its key is set |
+| `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY` | Optional; a provider is registered only when its key is set |
 | `MINERVA_LLM_BASE_URL__<PROVIDER>` | Overrides a provider's base URL (self-hosted or proxied endpoints) |
 | `MINERVA_EMBEDDER_URL`, `MINERVA_RERANKER_URL` | gRPC endpoints of the model servers |
 | `MINERVA_BASE_URL` | Public base URL for LTI tool URLs |

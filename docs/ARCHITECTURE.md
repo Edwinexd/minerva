@@ -22,11 +22,17 @@ relationships; single-headed arrows are push-only.
 ## LLM providers
 
 No vendor is hard-coded. `LlmRegistry` is built once at startup and registers a
-provider only when its API key is present: `cerebras`, `openai`, `groq` and
-`gemini` share one OpenAI-compatible implementation, `anthropic` goes through
-the Messages API. Each provider's base URL is overridable with
+provider only when its API key is present: `cerebras`, `openai`, `groq`,
+`gemini` and `mistral` share one OpenAI-compatible implementation, `anthropic`
+goes through the Messages API. Each provider's base URL is overridable with
 `MINERVA_LLM_BASE_URL__<PROVIDER>`, which is how a self-hosted or proxied
 endpoint slots in.
+
+Call sites build one OpenAI-shaped body. `openai_chat_request` passes it
+through `provider::adapt_body` for the provider it targets, which is where
+dialect differences live: OpenAI's Flex variant becomes `service_tier`, and
+Mistral, which rejects any field outside its schema, loses `stream_options`
+and gets `max_tokens` in place of `max_completion_tokens`.
 
 Which provider a call reaches is a property of the *model*, not of the call
 site. The admin-managed `chat_models` catalog maps every model id to its

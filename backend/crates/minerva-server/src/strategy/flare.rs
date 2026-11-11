@@ -237,6 +237,7 @@ pub async fn run(ctx: GenerationContext, tx: mpsc::Sender<Result<Event, AppError
         temperature: ctx.temperature,
         history: &ctx.history,
         frame: ctx.prompt_frame(),
+        chat_provider_id: ctx.provider.id(),
         chat_base_url: &ctx.chat_base_url,
         chat_api_key: &ctx.chat_api_key,
         max_chunks: ctx.max_chunks,
@@ -415,6 +416,9 @@ struct RunLoopConfig<'a> {
     /// `GenerationContext::prompt_frame`; forwarded so the
     /// system prompt rebuilt on every loop iteration keeps the recap.
     frame: common::PromptFrame<'a>,
+    /// Registry id of the provider behind `chat_base_url`, which picks
+    /// the request dialect in `common::openai_chat_request`.
+    chat_provider_id: &'a str,
     chat_base_url: &'a str,
     chat_api_key: &'a str,
     max_chunks: i32,
@@ -641,6 +645,7 @@ where
         // Stream with logprobs, checking confidence per sentence
         let result = stream_with_logprobs(
             http_client,
+            cfg.chat_provider_id,
             cfg.chat_base_url,
             cfg.chat_api_key,
             cfg.model,
@@ -810,12 +815,12 @@ enum StreamOutcome {
 /// Buffers tokens into sentences and records the first low-confidence sentence
 /// (if any) for use as a retrieval query by the caller.
 ///
-/// `base_url` is the Cerebras chat-completions endpoint; production code
-/// passes `common::CEREBRAS_CHAT_COMPLETIONS_URL` via `ctx.chat_base_url`,
-/// integration tests pass a wiremock server URL.
+/// `base_url` is the chat-completions endpoint of `provider_id`; production
+/// code passes `ctx.chat_base_url`, integration tests a wiremock server URL.
 #[allow(clippy::too_many_arguments)]
 async fn stream_with_logprobs(
     client: &reqwest::Client,
+    provider_id: &str,
     base_url: &str,
     api_key: &str,
     model: &str,
@@ -835,7 +840,8 @@ async fn stream_with_logprobs(
         "stream_options": { "include_usage": true },
     });
 
-    let response = common::openai_chat_request(client, base_url, api_key, &body).await?;
+    let response =
+        common::openai_chat_request(client, provider_id, base_url, api_key, &body).await?;
 
     let mut stream = response.bytes_stream();
     // Raw TCP frames may split multi-byte UTF-8 codepoints; accumulate bytes
@@ -1783,6 +1789,7 @@ mod stream_integration_tests {
         let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
         let result = stream_with_logprobs(
             &client,
+            "cerebras",
             &url,
             "test-key",
             "test-model",
@@ -1837,6 +1844,7 @@ mod stream_integration_tests {
         let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
         let result = stream_with_logprobs(
             &client,
+            "cerebras",
             &url,
             "test-key",
             "test-model",
@@ -1895,6 +1903,7 @@ mod stream_integration_tests {
         let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
         let result = stream_with_logprobs(
             &client,
+            "cerebras",
             &url,
             "test-key",
             "test-model",
@@ -1976,6 +1985,7 @@ mod stream_integration_tests {
         let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
         let result = stream_with_logprobs(
             &client,
+            "cerebras",
             &url,
             "test-key",
             "test-model",
@@ -2042,6 +2052,7 @@ mod stream_integration_tests {
         let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
         let result = stream_with_logprobs(
             &client,
+            "cerebras",
             &url,
             "test-key",
             "test-model",
@@ -2088,6 +2099,7 @@ mod stream_integration_tests {
         let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
         let result = stream_with_logprobs(
             &client,
+            "cerebras",
             &url,
             "test-key",
             "test-model",
@@ -2129,6 +2141,7 @@ mod stream_integration_tests {
         let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
         let err = stream_with_logprobs(
             &client,
+            "cerebras",
             &url,
             "test-key",
             "test-model",
@@ -2167,6 +2180,7 @@ mod stream_integration_tests {
         let messages = vec![serde_json::json!({ "role": "user", "content": "hi" })];
         let err = stream_with_logprobs(
             &client,
+            "cerebras",
             &url,
             "test-key",
             "test-model",
@@ -2361,6 +2375,7 @@ mod loop_regression_tests {
             temperature: 0.7,
             history: &history,
             frame: common::PromptFrame::course(),
+            chat_provider_id: "cerebras",
             chat_base_url: &chat_base_url,
             chat_api_key: &chat_api_key,
             max_chunks: 8,
@@ -2429,6 +2444,7 @@ mod loop_regression_tests {
             temperature: 0.7,
             history: &history,
             frame: common::PromptFrame::course(),
+            chat_provider_id: "cerebras",
             chat_base_url: &chat_base_url,
             chat_api_key: &chat_api_key,
             max_chunks: 8,
@@ -2497,6 +2513,7 @@ mod loop_regression_tests {
             temperature: 0.7,
             history: &history,
             frame: common::PromptFrame::course(),
+            chat_provider_id: "cerebras",
             chat_base_url: &chat_base_url,
             chat_api_key: &chat_api_key,
             max_chunks: 8,
@@ -2582,6 +2599,7 @@ mod loop_regression_tests {
             temperature: 0.7,
             history: &history,
             frame: common::PromptFrame::course(),
+            chat_provider_id: "cerebras",
             chat_base_url: &chat_base_url,
             chat_api_key: &chat_api_key,
             max_chunks: 8,
@@ -2663,6 +2681,7 @@ mod loop_regression_tests {
             temperature: 0.7,
             history: &history,
             frame: common::PromptFrame::course(),
+            chat_provider_id: "cerebras",
             chat_base_url: &chat_base_url,
             chat_api_key: &chat_api_key,
             max_chunks: 8,
@@ -2739,6 +2758,7 @@ mod loop_regression_tests {
             temperature: 0.7,
             history: &history,
             frame: common::PromptFrame::course(),
+            chat_provider_id: "cerebras",
             chat_base_url: &chat_base_url,
             chat_api_key: &chat_api_key,
             max_chunks: 100, // plenty of room
@@ -2871,6 +2891,7 @@ mod loop_regression_tests {
             temperature: 0.7,
             history: &history,
             frame: common::PromptFrame::course(),
+            chat_provider_id: "cerebras",
             chat_base_url: &chat_base_url,
             chat_api_key: &chat_api_key,
             max_chunks: 8,
@@ -2961,6 +2982,7 @@ mod loop_regression_tests {
             temperature: 0.7,
             history: &history,
             frame: common::PromptFrame::course(),
+            chat_provider_id: "cerebras",
             chat_base_url: &chat_base_url,
             chat_api_key: &chat_api_key,
             max_chunks: 8,

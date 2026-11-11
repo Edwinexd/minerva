@@ -90,6 +90,12 @@ spec:
                 secretKeyRef:
                   name: minerva-secrets
                   key: OPENAI_API_KEY
+            - name: MISTRAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minerva-secrets
+                  key: MISTRAL_API_KEY
+                  optional: true
             - name: MINERVA_SERVICE_API_KEY
               valueFrom:
                 secretKeyRef:

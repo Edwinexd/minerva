@@ -82,23 +82,20 @@ pub fn payload_int(
 /// `Bearer` auth and retry on 5XX / network errors. Provider-agnostic:
 /// any OpenAI-compatible endpoint (Cerebras, OpenAI, Groq, Gemini's
 /// OpenAI-compat endpoint, a self-hosted proxy, ...) works by passing
-/// its URL + key. Returns the successful response or the last error.
+/// its URL + key. `body` is OpenAI-shaped; `provider::adapt_body`
+/// rewrites it for `provider_id` here, so raw research / FLARE calls and
+/// the provider abstraction send the same dialect. Returns the successful
+/// response or the last error.
 pub async fn openai_chat_request(
     client: &reqwest::Client,
+    provider_id: &str,
     url: &str,
     api_key: &str,
     body: &serde_json::Value,
 ) -> Result<Response, String> {
-    // Raw research/FLARE calls share this transport with the provider
-    // abstraction. Catalog-only Flex ids must never reach the upstream API.
-    let mut variant_body;
-    let body = if body["model"].as_str().is_some_and(|m| m.ends_with("@flex")) {
-        variant_body = body.clone();
-        provider::apply_model_variant(&mut variant_body, provider::PROVIDER_OPENAI);
-        &variant_body
-    } else {
-        body
-    };
+    let mut adapted = body.clone();
+    provider::adapt_body(&mut adapted, provider_id);
+    let body = &adapted;
     let mut last_err = String::new();
 
     for attempt in 0..=MAX_RETRIES {

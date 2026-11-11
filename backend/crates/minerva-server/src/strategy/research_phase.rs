@@ -859,6 +859,7 @@ async fn stream_research_turn(
     let mut served_by = (ctx.model.clone(), ctx.provider.id().to_string());
     let response = match common::openai_chat_request(
         http_client,
+        ctx.provider.id(),
         &ctx.chat_base_url,
         &ctx.chat_api_key,
         &body,
@@ -886,7 +887,9 @@ async fn stream_research_turn(
                     error = %primary_error,
                     "research request failed; trying fallback route"
                 );
-                match common::openai_chat_request(http_client, url, key, &body).await {
+                match common::openai_chat_request(http_client, route.provider.id(), url, key, &body)
+                    .await
+                {
                     Ok(response) => {
                         selected = Some(response);
                         served_by = (route.model.clone(), route.provider.id().to_string());

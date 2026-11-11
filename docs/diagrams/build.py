@@ -233,7 +233,7 @@ def system_overview() -> graphviz.Digraph:
         # `provider` column of the model it names in the `chat_models`
         # catalog, and a provider is only registered when its key is set.
         _box(c, "llm", "LLM registry",
-             subtitle="Cerebras / OpenAI / Anthropic<BR/>Groq / Gemini")
+             subtitle="Cerebras / OpenAI / Anthropic<BR/>Groq / Gemini / Mistral")
         _box(c, "oai", "OpenAI", subtitle="embeddings")
 
     with g.subgraph(name="cluster_ext") as c:

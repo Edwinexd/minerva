@@ -223,6 +223,20 @@ def anonymize(text: str, names: list[str]) -> str:
     return COURSE_CODE.sub("XX000X", text)
 
 
+def anonymize_pages(pages: list[str], names: list[str], outcomes: list[dict]) -> list[str]:
+    """`anonymize` line by line, keeping line positions. Outcome lines keep
+    the course name (an outcome can name its own subject) and lose only
+    codes."""
+    keep = {ln for o in outcomes for ln in o["lines"]}
+    return [
+        "\n".join(
+            anonymize(line, [] if (p, i) in keep else names)
+            for i, line in enumerate(page.split("\n"))
+        )
+        for p, page in enumerate(pages)
+    ]
+
+
 # load-plans
 
 
@@ -306,10 +320,12 @@ def build(args) -> None:
             "note": args.note,
         }
 
+        anon = anonymize_pages(sv, names, outcomes)
+
         def write(variant: str, pages: list[str], **extra) -> None:
             nonlocal count
             case_id = f"{plan['code']}-{variant}"
-            text = anonymize(mark_pages(pages), names)
+            text = mark_pages(pages)
             d = out / case_id
             d.mkdir(exist_ok=True)
             (d / "syllabus.txt").write_text(text, encoding="utf-8")
@@ -319,17 +335,23 @@ def build(args) -> None:
             )
             count += 1
 
-        write("self", sv, expected_verdict="full", dropped=[])
+        write("self", anon, expected_verdict="full", dropped=[])
 
-        if entry["en"] and len(find_outcomes(entry["en"], "en")) >= 2:
-            write("self_en", entry["en"], expected_verdict="full", dropped=[])
+        en_outcomes = find_outcomes(entry["en"], "en") if entry["en"] else []
+        if len(en_outcomes) >= 2:
+            write(
+                "self_en",
+                anonymize_pages(entry["en"], names, en_outcomes),
+                expected_verdict="full",
+                dropped=[],
+            )
 
         n_drop = max(1, min(len(outcomes) - 1, round(len(outcomes) * DROP_FRACTION)))
         dropped = rng.sample(range(len(outcomes)), n_drop)
         lines = {ln for i in dropped for ln in outcomes[i]["lines"]}
         write(
             "drop",
-            edit_pages(sv, lines),
+            edit_pages(anon, lines),
             expected_verdict="partial",
             dropped=[outcomes[i]["text"] for i in sorted(dropped)],
         )
@@ -341,10 +363,13 @@ def build(args) -> None:
         ] or [e for e in loaded if e is not entry]
         if others:
             donor = others[k % len(others)]
-            decoys = [o["text"] for o in donor["outcomes"][:DECOY_OUTCOMES]]
+            decoys = [
+                COURSE_CODE.sub("XX000X", o["text"])
+                for o in donor["outcomes"][:DECOY_OUTCOMES]
+            ]
             write(
                 "decoy",
-                edit_pages(sv, set(), outcomes[-1]["lines"][-1], decoys),
+                edit_pages(anon, set(), outcomes[-1]["lines"][-1], decoys),
                 expected_verdict="full",
                 dropped=[],
                 decoy_from=donor["plan"]["code"],
@@ -481,6 +506,7 @@ def score_row(row: dict, case: dict, syllabus: str) -> dict:
         "variant": case["variant"],
         "target": target,
         "failed": bool(row.get("error")) or not row.get("content"),
+        "served_by_model": row.get("model") == (row.get("workspace") or {}).get("model"),
         "comparison": a is not None,
         "in_seed": target in seeded,
         "in_corpus": target in seeded or target in added,
@@ -572,6 +598,7 @@ def score(args) -> None:
     metrics = [
         ("turns", lambda g: str(len(g))),
         ("failed", lambda g: rate(g, "failed")),
+        ("served by the workspace's model", lambda g: rate(g, "served_by_model")),
         ("chose comparison", lambda g: rate(g, "comparison")),
         ("target in opening search", lambda g: rate(g, "in_seed")),
         ("target in plans after research", lambda g: rate(g, "in_corpus")),

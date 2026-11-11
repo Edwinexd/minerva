@@ -610,6 +610,22 @@ teacher checks read the same view.
     a seeded one. The writeup gets the corpus prompt plus the findings. FLARE's restart loop is the exception and is
     skipped for this kind: it steers extra retrieval by decoding logprobs
     from a prose answer as it streams.
+  - Research rounds served by OpenAI go to the Responses API
+    (`strategy::responses`), not chat completions: OpenAI's reasoning
+    models (`gpt-6-luna` and the like) refuse function tools there unless
+    reasoning is off. Requests are stateless (`store: false`); each round's
+    encrypted reasoning rides on its assistant history entry and is
+    replayed next round, and is stripped before any chat-completions
+    fallback. A round that fails before showing anything (a refused
+    request, flex capacity) falls through to the next route. Those models
+    also refuse any `temperature` but the default, so `adapt_body` drops
+    it for them (`is_openai_reasoning_model`). Both used to fall back to
+    gpt-oss silently; the writeup's route failures are now logged too.
+  - The reply call (`complete_reply`) gives each route 180s, retries
+    included (`REPLY_ROUTE_TIMEOUT`), and treats an empty reply as a
+    failed route. Luna once took 15 minutes to return nothing after a
+    research phase that hit the tool-call cap, with the corpus at its
+    largest; the slowest normal turn took 88s.
   - A comparison is checked before it is kept: unknown plan codes are
     dropped, pages outside a document cleared and rule points citing no
     given excerpt dropped (document, URL and page come from the excerpt);
@@ -658,7 +674,8 @@ read the stored assessment and tool events) N times per case into JSONL,
 search (the `plan_search` tool event) and in the plans after research,
 compared, ranked first; verdict and coverage labels against the
 expected; whether each quoted outcome is on the page it cites, in the
-plan and in the file; tokens and seconds; and, over repeats, how often
+plan and in the file; whether the workspace's model served the turn
+(not a fallback route); tokens and seconds; and, over repeats, how often
 the verdict and the compared plans agree. Past staff decisions are meant
 to join these as cases once DSV admin provides them.
 
@@ -667,6 +684,25 @@ plans (`scripts/eval_credit_transfer_codes.txt`) through the service API
 the nightly Daisy sync uses; the dev scheduler then downloads, parses and
 indexes them (about 10 PDFs a minute). Output goes to `eval-runs/`
 (gitignored). Python deps are in `requirements.txt`.
+
+Baseline, Nov 2026 (`gpt-6-luna`, tool use on, 20 random plans, 71 cases
+run twice, 144 turns, local archive of 132 plans):
+
+- The plan was in the opening search 73% of the time and among the plans
+  after research 97%: the research loop is what finds it. Compared and
+  ranked first 138/144; verdict as expected 137/140; coverage
+  covered-or-not right 99%; page citations right 623/630 in the DSV plan
+  and 546/560 in the external file. A removed outcome
+  came back gap 74%, partly 25%, covered once.
+- About 74k tokens, 54s, 6.7 `search_plans` calls and 3.5 added plans per
+  turn. Verdicts agreed across repeats 95% of the time, but only 24 of 71
+  cases compared the same set of plans both times: the best match is
+  stable, the other candidates are not.
+- Known model errors: ML012D (a broad supplementary course) topped
+  several `search_plans` results and was never pulled with `get_plan`;
+  extra outcomes in the external file sometimes lowered a full overlap to
+  partial; and luna quoted DSV outcomes absent from the plan it was given
+  (ML761N), which nothing in `validate` catches yet.
 
 ## MCP Server
 

@@ -17,6 +17,7 @@ package (we vendor a few icons from its bundled resources).
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
 import mimetypes
 import re
@@ -184,6 +185,7 @@ def system_overview() -> graphviz.Digraph:
         _box(c, "embed", "Iframe embed")
         _box(c, "moodle", "Moodle plugin", subtitle="local_minerva")
         _box(c, "lti", "LTI 1.3 platform")
+        _box(c, "mcp", "MCP clients", subtitle="staff AI assistants, OAuth 2.1")
 
     # Actions hold the SU login, so everything that logs in to Play runs
     # there and reports back through the service API.
@@ -193,6 +195,8 @@ def system_overview() -> graphviz.Digraph:
              subtitle="hourly: designations + VTT")
         _box(c, "gha_ve", "visual-extraction.yml", icon="github",
              subtitle="every 20 min: signed sources")
+        _box(c, "gha_daisy", "daisy-sync.yml", icon="github",
+             subtitle="daily: offerings, schedules,<BR/>course plan list")
 
     with g.subgraph(name="cluster_edge") as c:
         c.attr(label="Apache edge", **CLUSTER_BASE)
@@ -208,7 +212,7 @@ def system_overview() -> graphviz.Digraph:
         _box(c, "worker", "minerva-worker", icon="rust",
              subtitle="ingest + KG linker")
         _box(c, "cron", "minerva-scheduler", icon="rust",
-             subtitle="Canvas / NRPS / visual extraction")
+             subtitle="Canvas / NRPS / visual extraction<BR/>plan + rulebook mirrors")
         _box(c, "fetcher", "minerva-fetcher", icon="rust",
              subtitle="Play source probe + download")
 
@@ -240,6 +244,11 @@ def system_overview() -> graphviz.Digraph:
         c.attr(label="External content", **CLUSTER_BASE)
         _box(c, "canvas", "Canvas LMS", subtitle="REST sync")
         _box(c, "play", "play.dsv.su.se", subtitle="lecture video + VTT")
+        _box(c, "daisy", "Daisy", subtitle="offerings, rosters, iCal")
+        _box(c, "planarkiv", "SU plan archive",
+             subtitle="utbildning.su.se planarkiv")
+        _box(c, "regelboken", "Regelboken",
+             subtitle="SU rulebook, education section")
 
     with g.subgraph(name="cluster_olympus") as c:
         c.attr(label="Olympus (DSV Slurm, L40S GPUs)", **CLUSTER_BASE)
@@ -251,6 +260,7 @@ def system_overview() -> graphviz.Digraph:
     g.edge("embed", "api")
     g.edge("moodle", "api")
     g.edge("lti", "api")
+    g.edge("mcp", "api", label="/mcp (read-only)")
     g.edge("shib", "api")
     g.edge("lua", "api")
 
@@ -287,6 +297,16 @@ def system_overview() -> graphviz.Digraph:
     g.edge("cron", "qd", label="figure vectors")
     g.edge("cron", "llm", dir="both", label="crop descriptions (separate loop)")
 
+    # Credit transfer sources. Daisy (behind the SU login) names the plans
+    # each offering follows; the scheduler fetches the public PDFs and
+    # rulebook pages itself and mirrors them into credit transfer
+    # workspaces as ordinary documents.
+    g.edge("gha_daisy", "daisy", dir="both", label="pull")
+    g.edge("gha_daisy", "planarkiv", label="plan list")
+    g.edge("gha_daisy", "api", label="service API")
+    g.edge("cron", "planarkiv", label="plan PDFs (weekly)")
+    g.edge("cron", "regelboken", label="pages + PDFs (daily)")
+
     # Play is only reached from Actions (login) and the fetcher (signed
     # URLs Actions handed over); both report to Minerva, never to each other.
     g.edge("gha_tr", "play", dir="both", label="pull")
@@ -314,6 +334,10 @@ def ingest_pipeline() -> graphviz.Digraph:
         _box(c, "ms", "Moodle / Canvas sync")
         _box(c, "mbz", "MBZ import")
         _box(c, "play_url", "play.dsv URL drop")
+        _box(c, "schedule", "Daisy schedule events",
+             subtitle="one document per UID")
+        _box(c, "mirror", "plan + rulebook mirrors",
+             subtitle="credit transfer workspaces")
 
     _box(g, "queue", "documents", icon="postgres", subtitle="status = pending")
 
@@ -349,7 +373,7 @@ def ingest_pipeline() -> graphviz.Digraph:
         _box(c, "linker_db", "linker_decisions", icon="postgres", subtitle="kg_state")
         _box(c, "ready", "status = ready", shape="stadium")
 
-    for s in ("upload", "ms", "mbz", "play_url"):
+    for s in ("upload", "ms", "mbz", "play_url", "schedule", "mirror"):
         g.edge(s, "queue")
     g.edge("queue", "gate")
 
@@ -360,6 +384,9 @@ def ingest_pipeline() -> graphviz.Digraph:
 
     g.edge("extract", "classify")
     g.edge("classify", "chunk")
+    # Schedule events and mirrored plans / rule documents arrive with
+    # their kind locked to `syllabus`, so the LLM classifier is skipped.
+    g.edge("extract", "chunk", label="kind locked:\nsyllabus", style="dashed")
     g.edge("chunk", "embed")
     g.edge("embed", "qd")
     g.edge("embed", "kg")
@@ -423,6 +450,8 @@ def chat_pipeline() -> graphviz.Digraph:
              subtitle="part_of_unit / applied_in")
         _box(c, "figsearch", "figure search",
              subtitle="crop descriptions + CLIP,<BR/>selected figures inline")
+        _box(c, "ct_corpus", "credit transfer corpus",
+             subtitle="attachments + plans + rule excerpts<BR/>replaces the seed (own figure)")
         c.edge("retrieve", "kg")
         c.edge("retrieve", "figsearch")
 
@@ -452,7 +481,7 @@ def chat_pipeline() -> graphviz.Digraph:
 
     with g.subgraph(name="cluster_book") as c:
         c.attr(label="Bookkeeping", **CLUSTER_BASE)
-        _box(c, "log", "conversation_flags +\ncourse_token_usage", icon="postgres")
+        _box(c, "log", "conversation_flags +\nworkspace_token_usage", icon="postgres")
         _box(c, "caps", "daily caps",
              shape="diamond", subtitle="student + owner", bold=False)
         _box(c, "over", "HTTP 429 next turn", shape="stadium")
@@ -472,6 +501,8 @@ def chat_pipeline() -> graphviz.Digraph:
     # optional research phase when `tool_use_enabled` is on, otherwise the
     # research box is a pass-through to prompt assembly.
     g.edge("strat", "retrieve", label="simple / FLARE-init")
+    g.edge("strat", "ct_corpus", label="credit transfer\nworkspace", style="dashed")
+    g.edge("ct_corpus", "research", style="dashed")
 
     g.edge("kg", "research")
     g.edge("figsearch", "research", label="up to 3 figures")
@@ -586,6 +617,121 @@ def visual_extraction() -> graphviz.Digraph:
     return g
 
 
+# --- 5. Credit transfer ------------------------------------------------------
+def credit_transfer() -> graphviz.Digraph:
+    g = _new_graph("credit_transfer", rankdir="TB", ranksep="0.6")
+
+    # Mirrors: what every credit transfer workspace is answered from. The
+    # plan archive and the rulebook are public, so the scheduler reads
+    # them itself; only the plan list needs Daisy (and the SU login).
+    with g.subgraph(name="cluster_sources") as c:
+        c.attr(label="Sources", **CLUSTER_BASE)
+        _box(c, "daisy", "daisy-sync.yml", icon="github",
+             subtitle="daily: plans each offering follows")
+        _box(c, "planarkiv", "SU plan archive",
+             subtitle="planarkiv PDFs, no ETag")
+        _box(c, "regelboken", "Regelboken",
+             subtitle="index + pages (no ETag),<BR/>immutable PDF URLs")
+
+    with g.subgraph(name="cluster_sched") as c:
+        c.attr(label="minerva-scheduler", **CLUSTER_BASE)
+        _box(c, "plans_tick", "syllabus_archive::run_tick", icon="rust",
+             subtitle="download, re-hash weekly,<BR/>pdftotext: [Page N], level, modules")
+        _box(c, "rules_tick", "rulebook::run_tick", icon="rust",
+             subtitle="daily read; page or its PDFs<BR/>(70% word 4-gram coverage)")
+
+    with g.subgraph(name="cluster_archive") as c:
+        c.attr(label="Archive (shared by every workspace)", **CLUSTER_BASE)
+        _box(c, "plans_db", "syllabus_plans / versions", icon="postgres",
+             subtitle="facts + full text,<BR/>PDFs by sha256")
+        _box(c, "rules_db", "rulebook_*", icon="postgres",
+             subtitle="sections, entries, pages, files")
+
+    with g.subgraph(name="cluster_ws") as c:
+        c.attr(label="Each credit transfer workspace", **CLUSTER_BASE)
+        _box(c, "docs", "mirrored documents", icon="postgres",
+             subtitle="syllabus_archive / su_rulebook,<BR/>kind locked: syllabus")
+        _box(c, "qd", "Qdrant", icon="qdrant",
+             subtitle="workspace collection")
+
+    _box(g, "ingest", "minerva-worker", icon="rust", subtitle="chunk + embed")
+
+    g.edge("daisy", "plans_db", label="PUT syllabus-plans/{code}")
+    g.edge("planarkiv", "plans_tick", label="PDF")
+    g.edge("plans_tick", "plans_db", dir="both")
+    g.edge("regelboken", "rules_tick", label="HTML + PDF")
+    g.edge("rules_tick", "rules_db", dir="both")
+    g.edge("plans_tick", "docs", label="current plans")
+    g.edge("rules_tick", "docs", label="chosen documents")
+    g.edge("docs", "ingest")
+    g.edge("ingest", "qd")
+
+    # One chat turn. Staff attach the external syllabus; the turn runs the
+    # workspace's ordinary strategy, with the corpus in place of the
+    # shared-index seed and a schema-bound reply in place of a stream.
+    with g.subgraph(name="cluster_input") as c:
+        c.attr(label="Staff turn", **CLUSTER_BASE)
+        _box(c, "retention", "case_retention::sweep", icon="rust",
+             subtitle="scheduler, hourly: deletes chats<BR/>past case_retention_days")
+        _box(c, "note", "staff note", shape="stadium")
+        _box(c, "attach", "external syllabus", icon="postgres",
+             subtitle="conversation_attachments,<BR/>text extracted at upload,<BR/>never in the shared index")
+
+    with g.subgraph(name="cluster_prepare") as c:
+        c.attr(label="credit_transfer::prepare (once per turn)", **CLUSTER_BASE)
+        _box(c, "candidates", "candidate plans (up to 5)",
+             subtitle="codes named in the note, then<BR/>embedding + BM25 fused by rank;<BR/>only with a file attached")
+        _box(c, "rules", "rule excerpts (up to 6)",
+             subtitle="rulebook_lookup: rule documents only,<BR/>credit transfer in general + the note")
+        _box(c, "corpus", "Corpus",
+             subtitle="attachments, plans (facts + text),<BR/>labelled excerpts R1..")
+        c.edge("candidates", "corpus")
+        c.edge("rules", "corpus")
+
+    with g.subgraph(name="cluster_strategy") as c:
+        c.attr(label="Workspace strategy (strategy::run_strategy)", **CLUSTER_BASE)
+        _box(c, "prompt", "credit_transfer::system_prompt",
+             subtitle="persona, two formats, corpus;<BR/>cache-stable prefix")
+        _box(c, "research", "research phase", shape="diamond", bold=False,
+             subtitle="tool_use_enabled: document + rule tools,<BR/>search_plans, get_plan (corpus up to 10)")
+        _box(c, "reply", "credit_transfer_reply",
+             subtitle="one schema-bound call:<BR/>answer | comparison<BR/>(FLARE restarts skipped)")
+        c.edge("prompt", "research")
+        c.edge("research", "reply", label="writeup reads\nthe grown corpus")
+
+    with g.subgraph(name="cluster_finalize") as c:
+        c.attr(label="common::finalize", **CLUSTER_BASE)
+        _box(c, "check", "check the comparison", shape="diamond", bold=False,
+             subtitle="drop unknown codes and uncited rule points,<BR/>clear out-of-range pages; credits, level,<BR/>modules from the archive; matches in code")
+        _box(c, "stored", "case_assessments", icon="postgres",
+             subtitle="overlap, gaps, rule points;<BR/>no verdict to grant")
+        _box(c, "message", "message text",
+             subtitle="render_markdown / written answer")
+        c.edge("check", "stored")
+        c.edge("check", "message")
+
+    _box(g, "cards", "assessment cards", icon="react",
+         subtitle="page citations into the SU plan<BR/>and the uploaded file; PDF export",
+         shape="stadium")
+
+    g.edge("attach", "candidates")
+    g.edge("note", "candidates", label="codes")
+    g.edge("note", "rules")
+    g.edge("attach", "corpus")
+    g.edge("qd", "candidates", label="plan vectors", style="dashed")
+    g.edge("plans_db", "candidates", label="BM25 text", style="dashed")
+    g.edge("qd", "rules", style="dashed")
+    g.edge("plans_db", "corpus", label="facts + full text", style="dashed")
+    g.edge("rules_db", "rules", label="source URL", style="dashed")
+    g.edge("corpus", "prompt")
+    g.edge("reply", "check", label="comparison")
+    g.edge("reply", "message", label="answer")
+    g.edge("stored", "cards")
+    g.edge("retention", "attach", label="delete", color=GUARD, style="dashed")
+
+    return g
+
+
 # --- driver ------------------------------------------------------------------
 HREF_RE = re.compile(r'(xlink:href|href)="([^"]+\.(?:png|jpg|jpeg|svg))"')
 
@@ -606,10 +752,22 @@ def _inline_images(svg_path: Path) -> None:
     svg_path.write_text(new)
 
 
+# scripts/check-architecture-coverage.py compares this stamp with the
+# current build.py, so an SVG not re-rendered after an edit fails pre-commit.
+SOURCE_DIGEST = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def _stamp(svg_path: Path) -> None:
+    text = svg_path.read_text().rstrip("\n")
+    svg_path.write_text(f"{text}\n<!-- build.py sha256: {SOURCE_DIGEST} -->\n")
+
+
 def _render(g: graphviz.Digraph, name: str) -> None:
     target = OUT / name
     g.render(filename=str(target), format="svg", cleanup=True)
-    _inline_images(target.with_suffix(".svg"))
+    svg = target.with_suffix(".svg")
+    _inline_images(svg)
+    _stamp(svg)
 
 
 if __name__ == "__main__":
@@ -619,4 +777,5 @@ if __name__ == "__main__":
     _render(ingest_pipeline(), "ingest-pipeline")
     _render(chat_pipeline(), "chat-pipeline")
     _render(visual_extraction(), "visual-extraction")
+    _render(credit_transfer(), "credit-transfer")
     print("done")

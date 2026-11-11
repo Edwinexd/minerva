@@ -19,6 +19,31 @@ LMS, iframe, and service-account routes carry their own bearer-token or
 HMAC-signed-token middleware. Double-headed arrows indicate read/write
 relationships; single-headed arrows are push-only.
 
+`/mcp` is the read-only MCP server for staff AI assistants. It is exempt
+from Shibboleth in Apache because Minerva is its own OAuth 2.1
+authorization server (PKCE S256, tokens bound to `{base}/mcp`); only
+`/api/oauth/authorize` goes through Shibboleth, and hands off to the SPA
+consent page.
+
+Work that needs the SU login runs in GitHub Actions and reports through
+`/api/service/` with `MINERVA_SERVICE_API_KEY`: `transcripts.yml` and
+`visual-extraction.yml` for Play, `daisy-sync.yml` for Daisy offerings,
+staff rosters, iCal schedules and the course plans each offering
+follows. Public sources (the SU plan archive's PDFs, Regelboken) are read
+by the scheduler directly.
+
+## Workspaces
+
+A course is one kind of workspace (class-table inheritance, migration
+`20261104000002_workspaces.sql`). `workspaces` holds what every kind
+shares (name, owner, model and retrieval config, caps, `kind`); subtype
+tables (`courses`, `credit_transfer_workspaces`) carry the rest, each
+with a composite FK on `(workspace_id, kind)` so a workspace cannot hold
+the wrong subtype row. Documents, conversations, members, usage, the KG
+and figures key on `workspace_id`; LMS, Daisy, Play and join-link tables
+stay on `course_id`. Membership is read from the `workspace_access` view:
+explicit members plus access a subtype grants by role (credit transfer).
+
 ## LLM providers
 
 No vendor is hard-coded. `LlmRegistry` is built once at startup and registers a
@@ -41,7 +66,7 @@ both rates are known. Courses name a chat model; classification, KG linking and
 the guards use the catalog's utility default.
 
 That mapping is also what makes spend computable. Both ledgers (`usage_daily`
-for student chat, `course_token_usage` for pipeline work) store tokens plus the
+for student chat, `workspace_token_usage` for pipeline work) store tokens plus the
 model that produced them, never a currency amount; cost is derived on read as
 tokens x the model's current rate. A re-price therefore moves enforcement and
 every dashboard at once without rewriting history, and a model that has left the
@@ -333,6 +358,83 @@ cached descriptions; changing the underlying model or description prompt
 version re-describes crops and resets their indexing state. This cache
 version is independent of the Olympus `PIPELINE_VERSION`.
 
+## Credit transfer workspaces
+
+A staff tool for credit transfer (tillgodoräknande) applications: compare
+an external course with DSV's plans and with what SU's rules say about it.
+It is a workspace kind, so it reuses ingest, retrieval, the chat
+strategies, caps and usage; what it adds is a corpus of its own, a
+schema-bound reply and a checked comparison.
+
+![Credit transfer](diagrams/credit-transfer.svg)
+
+**Course plan archive.** The nightly Daisy workflow lists every plan an
+offering follows (`dsv_wrapper.SyllabusClient`, keyed by Ladok code) and
+PUTs it to `/api/service/syllabus-plans/{code}` (`syllabus_plans`,
+`syllabus_versions`, `syllabus_plan_offerings`).
+`syllabus_archive::run_tick` in the scheduler downloads each PDF to
+`{docs_path}/syllabi/{sha256}.pdf` and downloads it again weekly: the
+archive sends no ETag, so a revision under an unchanged URL is only
+visible by hash. `pdftotext -layout` then gives the text with `[Page N]`
+markers, the level code and the module table (`syllabus_facts`), stored
+on the version. The current version of every plan still given is
+mirrored into each credit transfer workspace as an ordinary document
+(`source_system = syllabus_archive`); a new version replaces its
+document, a dropped plan is orphaned.
+
+**Regelboken.** `rulebook::run_tick` reads the education section of SU's
+rulebook daily (index, then one page per governing document). Download
+URLs are immutable, so each PDF is fetched once, to
+`{docs_path}/rulebook/{sha256}.pdf`. A page whose files carry 70% of its
+word 4-grams is mirrored as its files only, otherwise as its own text
+plus the files it does not restate (`rulebook_page::select`). Mirrored
+documents use `source_system = su_rulebook`. An index that parses to
+nothing is an error, never an empty section.
+
+Both mirrors lock the document kind to `syllabus`, so ingest skips the
+classifier, and both go through the normal worker into the workspace's
+Qdrant collection. Those vectors are the plan search's embedding index
+and the rule search's only index; card facts and full plan text come from
+the archive tables.
+
+**A turn.** Staff attach the external syllabus (`conversation_attachments`,
+text extracted at upload, never added to the shared index) and write a
+note. `credit_transfer::prepare` builds the corpus once per turn:
+
+- the attachments in full;
+- up to five candidate plans, only when a file is attached: codes named
+  in the note first, then embedding search fused by reciprocal rank with
+  BM25 over the archive text, so a missing embedder only weakens it;
+- up to six rule excerpts from `rulebook_lookup`, which searches the rule
+  documents alone (the plans would otherwise fill every slot), once for
+  credit transfer in general and once for the note.
+
+The corpus replaces `seed_chunks` (which returns nothing for this kind),
+and `credit_transfer::system_prompt` places it in the cache-stable prompt
+prefix. The workspace's own strategy runs as usual; with
+`tool_use_enabled` the research phase adds `search_plans` and `get_plan`,
+which grow the turn's corpus (up to ten plans) and rebuild the prompt
+each round, so a plan found there is compared like a seeded one. FLARE's
+restart loop is skipped: it steers retrieval from logprobs of a streamed
+prose answer. The reply is one schema-bound call
+(`credit_transfer_reply`): `respond_with` is `answer` or `comparison`.
+
+`common::finalize` checks a comparison before keeping it: unknown plan
+codes are dropped, pages outside a document cleared, rule points citing
+no given excerpt dropped; DSV credits, level, name, version and modules
+come from the archive, and whether credits and level match is decided in
+code. The structure goes to `case_assessments` and is drawn as cards;
+the message text is a plain rendering for follow-ups and exports. A
+comparison describes overlap and gaps, never a decision to grant.
+
+**Access and retention.** Any user at or above the workspace's
+`access_min_role` can use it without being added; the role is checked on
+every request. Chats are private to their author (no teacher review).
+`case_retention::sweep` deletes chats and their files once untouched for
+`case_retention_days` (default 90), since external syllabuses often carry
+an applicant's personal data. The same plans are exposed read-only over
+MCP (`get_plan`).
+
 ## Chat / RAG pipeline
 
 ![Chat pipeline](diagrams/chat-pipeline.svg)
@@ -394,7 +496,7 @@ Classifiers run on the catalog's utility default (seeded `gpt-oss-120b`) at
 `reasoning_effort: low` (the previous cheaper `llama3.1-8b` path was deprecated
 by Cerebras; everything in the classifier stack collapsed onto gpt-oss as a
 result, and low effort keeps the latency profile roughly where it was). Token
-spend lands in `course_token_usage` under per-feature categories so the daily
+spend lands in `workspace_token_usage` under per-feature categories so the daily
 USD caps (per-student-per-course + per-owner aggregate) cover Aegis, the
 extraction guard, and the writeup phase as cleanly as they cover the main chat
 reply. The owner-side view of that spend is the teacher portal's AI usage tab

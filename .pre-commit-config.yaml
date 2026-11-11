@@ -44,6 +44,19 @@ repos:
         pass_filenames: false
         files: ^k8s/base/observability/(dashboards/.*\.json|kustomization\.yaml)$
 
+      - id: architecture-coverage
+        name: architecture docs cover the code
+        # Every binary, workspace kind, scheduler loop, mirrored
+        # source_system, LLM provider and workflow must be named in
+        # docs/ARCHITECTURE.md or docs/diagrams/build.py, and every SVG
+        # must carry the current build.py hash. Runs on every commit: a
+        # new component is usually a code-only change, which is exactly
+        # when the docs get forgotten.
+        entry: python3 scripts/check-architecture-coverage.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: ban-emdashes
         name: ban emdashes
         # Uses perl for portability: BSD grep on macOS has no -P, and `bash -c '...' "$@"`

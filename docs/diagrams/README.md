@@ -14,5 +14,10 @@ venv/bin/python docs/diagrams/build.py
 ```
 
 The script writes `system-overview.svg`, `ingest-pipeline.svg`,
-`chat-pipeline.svg`, and `visual-extraction.svg` into this directory, inlining any referenced raster
+`chat-pipeline.svg`, `visual-extraction.svg`, and `credit-transfer.svg`
+into this directory, inlining any referenced raster
 assets as base64 so the SVGs are self-contained when served from GitHub.
+
+Each SVG ends with a `build.py sha256` comment; the `architecture-coverage`
+pre-commit hook fails when it no longer matches `build.py`, so commit every
+re-rendered SVG, even one whose figure did not change.
